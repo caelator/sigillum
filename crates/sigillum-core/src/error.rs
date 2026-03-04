@@ -1,0 +1,25 @@
+use thiserror::Error;
+
+#[derive(Debug, Error)]
+pub enum VaultError {
+    #[error("vault is locked")]
+    Locked,
+
+    #[error("key not found: {0}")]
+    NotFound(String),
+
+    #[error("encryption failed: {0}")]
+    Encryption(String),
+
+    #[error("decryption failed: {0}")]
+    Decryption(String),
+
+    #[error("io error: {0}")]
+    Io(#[from] std::io::Error),
+
+    #[error("serialization error: {0}")]
+    Serialization(#[from] serde_json::Error),
+
+    #[error("{0}")]
+    Other(String),
+}

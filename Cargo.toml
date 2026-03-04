@@ -1,0 +1,51 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/sigillum",
+    "crates/sigillum-core",
+    "crates/sigillum-client",
+    "crates/sigillum-daemon",
+    "crates/sigillum-fido2",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/caelator/sigillum"
+authors = ["Caelator"]
+rust-version = "1.85"
+
+[workspace.dependencies]
+# Core
+sigillum-core = { path = "crates/sigillum-core", version = "0.1.0", default-features = false }
+sigillum-client = { path = "crates/sigillum-client", version = "0.1.0" }
+sigillum-daemon = { path = "crates/sigillum-daemon", version = "0.1.0" }
+sigillum-fido2 = { path = "crates/sigillum-fido2", version = "0.1.0" }
+
+# Crypto
+aes-gcm = "0.10"
+argon2 = "0.5"
+rand = "0.8"
+sha2 = "0.10"
+hmac = "0.12"
+zeroize = { version = "1.8", features = ["derive"] }
+secrecy = "0.8"
+
+# Async
+tokio = { version = "1", features = ["full"] }
+
+# Web
+axum = "0.8"
+tower-http = { version = "0.6", features = ["cors", "fs"] }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Filesystem
+dirs = "5"
+
+# Error handling
+thiserror = "2"

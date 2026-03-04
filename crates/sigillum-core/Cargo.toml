@@ -1,0 +1,28 @@
+[package]
+name = "sigillum-core"
+description = "Core traits and file-backed implementation for Sigillum secret management"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+keywords = ["vault", "secrets", "encryption", "aes-gcm"]
+categories = ["cryptography"]
+
+[dependencies]
+aes-gcm = { workspace = true, optional = true }
+argon2 = { workspace = true, optional = true }
+rand = { workspace = true, optional = true }
+sha2 = { workspace = true, optional = true }
+hmac = { workspace = true, optional = true }
+zeroize = { workspace = true }
+secrecy = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+dirs = { workspace = true, optional = true }
+thiserror = { workspace = true }
+
+[features]
+default = ["file-backend"]
+file-backend = ["aes-gcm", "argon2", "rand", "sha2", "hmac", "dirs"]

@@ -1,0 +1,18 @@
+[package]
+name = "sigillum"
+description = "Secure secret management with hardware-backed encryption"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+keywords = ["vault", "secrets", "encryption", "security", "fido2"]
+categories = ["cryptography", "authentication"]
+
+[dependencies]
+sigillum-core = { workspace = true, features = ["file-backend"] }
+
+[features]
+default = ["file-backend"]
+file-backend = []
