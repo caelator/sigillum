@@ -1,0 +1,14 @@
+[package]
+name = "sigillum-server"
+description = "Sigillum vault server library for custom deployments"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+keywords = ["vault", "server", "security", "secrets"]
+categories = ["cryptography", "web-programming"]
+
+[dependencies]
+sigillum-core = { workspace = true }

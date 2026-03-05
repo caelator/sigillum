@@ -1,0 +1,14 @@
+[package]
+name = "sigillum-cli"
+description = "Command-line interface for Sigillum vault management"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+keywords = ["vault", "secrets", "cli", "security"]
+categories = ["command-line-utilities", "cryptography"]
+
+[dependencies]
+sigillum-core = { workspace = true }

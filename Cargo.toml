@@ -6,6 +6,9 @@ members = [
     "crates/sigillum-client",
     "crates/sigillum-daemon",
     "crates/sigillum-fido2",
+    "crates/sigillum-cli",
+    "crates/sigillum-sdk",
+    "crates/sigillum-server",
 ]
 
 [workspace.package]
