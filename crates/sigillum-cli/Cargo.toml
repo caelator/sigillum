@@ -10,5 +10,15 @@ rust-version.workspace = true
 keywords = ["vault", "secrets", "cli", "security"]
 categories = ["command-line-utilities", "cryptography"]
 
+[[bin]]
+name = "sigillum"
+path = "src/main.rs"
+
 [dependencies]
-sigillum-core = { workspace = true }
+sigillum-core = { workspace = true, features = ["file-backend"] }
+sigillum-daemon = { workspace = true }
+secrecy = { workspace = true }
+argon2 = { workspace = true }
+rand = { workspace = true }
+zeroize = { workspace = true }
+tokio = { workspace = true }
