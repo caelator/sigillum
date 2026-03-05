@@ -50,6 +50,15 @@ pub enum Fido2Error {
     #[error("CTAP1 device — requires CTAP2 with hmac-secret extension")]
     Ctap1Device,
 
+    #[error("duplicate threshold: {threshold} already assigned to another compartment")]
+    DuplicateThreshold { threshold: usize },
+
+    #[error("no compartment configured for threshold {threshold}")]
+    NoCompartmentForThreshold { threshold: usize },
+
+    #[error("compartment not found: {id}")]
+    CompartmentNotFound { id: usize },
+
     #[error("{0}")]
     Other(String),
 }

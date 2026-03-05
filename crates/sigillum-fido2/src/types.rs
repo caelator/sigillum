@@ -4,6 +4,13 @@ use serde::Serialize;
 #[derive(Debug, Clone, Serialize)]
 #[serde(tag = "type")]
 pub enum QuorumEvent {
+    #[serde(rename = "compartment_selected")]
+    CompartmentSelected {
+        compartment_id: usize,
+        compartment_label: String,
+        threshold: usize,
+    },
+
     #[serde(rename = "round_start")]
     RoundStart { round: usize, total: usize },
 
@@ -29,8 +36,16 @@ pub enum QuorumEvent {
 pub struct Fido2Status {
     pub enabled: bool,
     pub key_count: usize,
-    pub quorum_threshold: usize,
-    pub unlock_method: String,
+    pub compartments: Vec<CompartmentInfo>,
+}
+
+/// Info about a configured compartment.
+#[derive(Debug, Clone, Serialize)]
+pub struct CompartmentInfo {
+    pub id: usize,
+    pub label: String,
+    pub threshold: usize,
+    pub has_passphrase: bool,
 }
 
 /// Public info about a registered key (no secrets exposed).
@@ -39,4 +54,5 @@ pub struct KeyInfo {
     pub label: String,
     pub credential_id_short: String,
     pub registered_at: String,
+    pub compartment_ids: Vec<usize>,
 }

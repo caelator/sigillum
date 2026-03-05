@@ -1,42 +1,49 @@
+use std::collections::HashMap;
 use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
 use crate::error::Fido2Error;
 
-const DEFAULT_QUORUM: usize = 1;
-
-/// Persisted FIDO2 configuration: registered keys + quorum settings.
+/// A single compartment definition: threshold determines which credential
+/// combination unlocks this compartment.
 #[derive(Serialize, Deserialize, Clone, Debug)]
-pub struct Fido2Config {
-    pub quorum_threshold: usize,
-    /// "passphrase" | "fido2" | "both"
-    pub unlock_method: String,
-    /// "direct" (Argon2id output IS the master key) or "wrapped" (Argon2id wraps a random key).
-    /// Only relevant when unlock_method includes passphrase.
+pub struct CompartmentDef {
+    pub id: usize,
+    pub label: String,
+    /// Number of FIDO2 key taps required to unlock this compartment.
+    pub threshold: usize,
+    /// "direct" | "wrapped" | null — only relevant when passphrase is configured.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub passphrase_mode: Option<String>,
+}
+
+/// Persisted FIDO2 configuration: compartments, registered keys, per-compartment shards.
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct Fido2Config {
+    pub compartments: Vec<CompartmentDef>,
+    pub total_shares: usize,
     pub keys: Vec<RegisteredKey>,
 }
 
 /// A single registered FIDO2 hardware key.
+/// Each key holds encrypted shards for ALL compartments.
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct RegisteredKey {
     pub label: String,
     pub credential_id_hex: String,
     pub public_key_der_hex: String,
     pub public_key_pem: String,
-    /// Hex-encoded: `nonce(12) || AES-256-GCM(hmac_secret, shard)`
-    pub encrypted_shard_hex: String,
+    /// compartment_id (as string key) → hex-encoded `nonce(12) || AES-256-GCM(hmac_secret, shard)`
+    pub shards: HashMap<String, String>,
     pub registered_at: String,
 }
 
 impl Default for Fido2Config {
     fn default() -> Self {
         Self {
-            quorum_threshold: DEFAULT_QUORUM,
-            unlock_method: "passphrase".into(),
-            passphrase_mode: None,
+            compartments: Vec::new(),
+            total_shares: 0,
             keys: Vec::new(),
         }
     }
@@ -44,7 +51,35 @@ impl Default for Fido2Config {
 
 impl Fido2Config {
     pub fn is_fido2_enabled(&self) -> bool {
-        !self.keys.is_empty()
+        !self.keys.is_empty() && !self.compartments.is_empty()
+    }
+
+    /// Find compartment by threshold value.
+    pub fn resolve_compartment(&self, threshold: usize) -> Option<&CompartmentDef> {
+        self.compartments.iter().find(|c| c.threshold == threshold)
+    }
+
+    /// Find compartment by id.
+    pub fn compartment_by_id(&self, id: usize) -> Option<&CompartmentDef> {
+        self.compartments.iter().find(|c| c.id == id)
+    }
+
+    /// Validate that all thresholds are unique.
+    pub fn validate_thresholds(&self) -> Result<(), Fido2Error> {
+        let mut seen = std::collections::HashSet::new();
+        for c in &self.compartments {
+            if !seen.insert(c.threshold) {
+                return Err(Fido2Error::DuplicateThreshold {
+                    threshold: c.threshold,
+                });
+            }
+        }
+        Ok(())
+    }
+
+    /// Next available compartment id.
+    pub fn next_compartment_id(&self) -> usize {
+        self.compartments.iter().map(|c| c.id).max().map_or(0, |m| m + 1)
     }
 }
 
@@ -85,16 +120,32 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let path = dir.path().join("fido2_keys.json");
 
+        let mut shards = HashMap::new();
+        shards.insert("0".to_string(), "eeff00".to_string());
+        shards.insert("1".to_string(), "aabb11".to_string());
+
         let config = Fido2Config {
-            quorum_threshold: 2,
-            unlock_method: "fido2".into(),
-            passphrase_mode: None,
+            compartments: vec![
+                CompartmentDef {
+                    id: 0,
+                    label: "hot".into(),
+                    threshold: 1,
+                    passphrase_mode: Some("wrapped".into()),
+                },
+                CompartmentDef {
+                    id: 1,
+                    label: "cold".into(),
+                    threshold: 2,
+                    passphrase_mode: None,
+                },
+            ],
+            total_shares: 5,
             keys: vec![RegisteredKey {
                 label: "test-key".into(),
                 credential_id_hex: "aabb".into(),
                 public_key_der_hex: "ccdd".into(),
                 public_key_pem: "pem".into(),
-                encrypted_shard_hex: "eeff".into(),
+                shards,
                 registered_at: "2026-03-05".into(),
             }],
         };
@@ -102,10 +153,16 @@ mod tests {
         save_config(&path, &config).unwrap();
         let loaded = load_config(&path);
 
-        assert_eq!(loaded.quorum_threshold, 2);
-        assert_eq!(loaded.unlock_method, "fido2");
+        assert_eq!(loaded.compartments.len(), 2);
+        assert_eq!(loaded.compartments[0].label, "hot");
+        assert_eq!(loaded.compartments[0].threshold, 1);
+        assert_eq!(loaded.compartments[1].label, "cold");
+        assert_eq!(loaded.compartments[1].threshold, 2);
+        assert_eq!(loaded.total_shares, 5);
         assert_eq!(loaded.keys.len(), 1);
         assert_eq!(loaded.keys[0].label, "test-key");
+        assert_eq!(loaded.keys[0].shards.len(), 2);
+        assert_eq!(loaded.keys[0].shards["0"], "eeff00");
     }
 
     #[test]
@@ -113,8 +170,55 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let path = dir.path().join("nonexistent.json");
         let config = load_config(&path);
-        assert_eq!(config.quorum_threshold, 1);
+        assert!(config.compartments.is_empty());
         assert!(config.keys.is_empty());
-        assert_eq!(config.unlock_method, "passphrase");
+        assert_eq!(config.total_shares, 0);
+    }
+
+    #[test]
+    fn resolve_compartment_by_threshold() {
+        let config = Fido2Config {
+            compartments: vec![
+                CompartmentDef { id: 0, label: "hot".into(), threshold: 1, passphrase_mode: None },
+                CompartmentDef { id: 1, label: "cold".into(), threshold: 2, passphrase_mode: None },
+                CompartmentDef { id: 2, label: "legacy".into(), threshold: 3, passphrase_mode: None },
+            ],
+            total_shares: 5,
+            keys: Vec::new(),
+        };
+
+        assert_eq!(config.resolve_compartment(1).unwrap().label, "hot");
+        assert_eq!(config.resolve_compartment(2).unwrap().label, "cold");
+        assert_eq!(config.resolve_compartment(3).unwrap().label, "legacy");
+        assert!(config.resolve_compartment(4).is_none());
+    }
+
+    #[test]
+    fn validate_duplicate_thresholds() {
+        let config = Fido2Config {
+            compartments: vec![
+                CompartmentDef { id: 0, label: "a".into(), threshold: 2, passphrase_mode: None },
+                CompartmentDef { id: 1, label: "b".into(), threshold: 2, passphrase_mode: None },
+            ],
+            total_shares: 3,
+            keys: Vec::new(),
+        };
+        assert!(config.validate_thresholds().is_err());
+    }
+
+    #[test]
+    fn next_compartment_id() {
+        let config = Fido2Config {
+            compartments: vec![
+                CompartmentDef { id: 0, label: "a".into(), threshold: 1, passphrase_mode: None },
+                CompartmentDef { id: 2, label: "b".into(), threshold: 2, passphrase_mode: None },
+            ],
+            total_shares: 3,
+            keys: Vec::new(),
+        };
+        assert_eq!(config.next_compartment_id(), 3);
+
+        let empty = Fido2Config::default();
+        assert_eq!(empty.next_compartment_id(), 0);
     }
 }

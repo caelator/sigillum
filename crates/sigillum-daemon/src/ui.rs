@@ -46,6 +46,16 @@ pub const INDEX_HTML: &str = r##"<!DOCTYPE html>
     letter-spacing: 0.05em;
   }
   .logo span { color: var(--accent); }
+  .header-right { display: flex; align-items: center; gap: 12px; }
+  .compartment-badge {
+    padding: 6px 14px;
+    border-radius: 20px;
+    font-size: 12px;
+    font-weight: 600;
+    background: rgba(124,111,240,0.15);
+    color: var(--accent);
+    letter-spacing: 0.04em;
+  }
   .status-badge {
     padding: 6px 14px;
     border-radius: 20px;
@@ -106,7 +116,7 @@ pub const INDEX_HTML: &str = r##"<!DOCTYPE html>
     gap: 10px;
     margin-bottom: 12px;
   }
-  input[type="text"], input[type="password"], input[type="number"] {
+  input[type="text"], input[type="password"], input[type="number"], select {
     flex: 1;
     padding: 10px 14px;
     background: var(--bg);
@@ -118,7 +128,7 @@ pub const INDEX_HTML: &str = r##"<!DOCTYPE html>
     outline: none;
     transition: border-color 0.15s;
   }
-  input:focus { border-color: var(--accent); }
+  input:focus, select:focus { border-color: var(--accent); }
   button {
     padding: 10px 20px;
     border: none;
@@ -190,13 +200,8 @@ pub const INDEX_HTML: &str = r##"<!DOCTYPE html>
     width: 100%;
   }
   footer a { color: var(--accent); text-decoration: none; }
-  /* Setup wizard */
-  .wizard-step {
-    display: none;
-  }
-  .wizard-step.active {
-    display: block;
-  }
+  .wizard-step { display: none; }
+  .wizard-step.active { display: block; }
   .wizard-step p {
     color: var(--text-dim);
     font-size: 13px;
@@ -226,22 +231,15 @@ pub const INDEX_HTML: &str = r##"<!DOCTYPE html>
     font-size: 12px;
     color: var(--text-dim);
   }
-  .method-btn.recommended {
-    border-color: var(--accent);
-  }
+  .method-btn.recommended { border-color: var(--accent); }
   .method-btn.recommended .method-title::after {
     content: ' (recommended)';
     color: var(--accent);
     font-weight: 400;
     font-size: 12px;
   }
-  .pulse {
-    animation: pulse 1.5s infinite;
-  }
-  @keyframes pulse {
-    0%, 100% { opacity: 1; }
-    50% { opacity: 0.5; }
-  }
+  .pulse { animation: pulse 1.5s infinite; }
+  @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
   .info-box {
     padding: 12px 16px;
     background: rgba(124,111,240,0.08);
@@ -272,13 +270,28 @@ pub const INDEX_HTML: &str = r##"<!DOCTYPE html>
     color: var(--accent);
     background: rgba(124,111,240,0.08);
   }
+  .compartment-hint {
+    padding: 8px 14px;
+    margin-bottom: 6px;
+    background: var(--bg);
+    border-radius: var(--radius);
+    font-size: 12px;
+    color: var(--text-dim);
+    display: flex;
+    justify-content: space-between;
+  }
+  .compartment-hint .hint-label { color: var(--text); font-weight: 500; }
+  .compartment-hint .hint-threshold { color: var(--accent); font-family: var(--mono); }
 </style>
 </head>
 <body>
 
 <header>
   <div class="logo"><span>SIGILLUM</span> VAULT</div>
-  <div id="statusBadge" class="status-badge status-locked">checking...</div>
+  <div class="header-right">
+    <div id="compartmentBadge" class="compartment-badge hidden"></div>
+    <div id="statusBadge" class="status-badge status-locked">checking...</div>
+  </div>
 </header>
 
 <main>
@@ -299,8 +312,8 @@ pub const INDEX_HTML: &str = r##"<!DOCTYPE html>
         <div class="label">FIDO2 Keys</div>
       </div>
       <div class="stat">
-        <div class="value" id="unlockMethod">-</div>
-        <div class="label">Unlock Method</div>
+        <div class="value" id="compartmentCount">-</div>
+        <div class="label">Compartments</div>
       </div>
     </div>
   </div>
@@ -317,22 +330,27 @@ pub const INDEX_HTML: &str = r##"<!DOCTYPE html>
         <input type="password" id="passphrase" placeholder="Passphrase">
         <button class="btn-primary" onclick="unlock()">Unlock</button>
       </div>
+      <p style="color:var(--text-dim);font-size:12px;margin-top:4px;">
+        Different passphrases unlock different compartments.
+      </p>
     </div>
     <div id="unlockFido2" class="hidden">
+      <div id="fido2Hints" style="margin-bottom:10px;"></div>
       <div class="form-row">
         <input type="password" id="fido2Pin" placeholder="FIDO2 PIN">
-        <button class="btn-primary" onclick="fido2Unlock()">Unlock with Key</button>
+        <select id="fido2TapCount" style="flex:none;width:140px;"></select>
+        <button class="btn-primary" onclick="fido2Unlock()">Unlock</button>
       </div>
-      <p style="color:var(--text-dim);font-size:12px;margin-top:8px;">
-        Enter your PIN, click unlock, then touch your hardware key.
+      <p style="color:var(--text-dim);font-size:12px;margin-top:4px;">
+        Select the tap count, enter PIN, click unlock, then touch your key(s).
       </p>
     </div>
     <div id="lockForm" class="hidden">
-      <button class="btn-danger" onclick="lock()">Lock Vault</button>
+      <button class="btn-danger" onclick="lock()">Lock All Compartments</button>
     </div>
   </div>
 
-  <!-- Setup Wizard (only if no vault) -->
+  <!-- Setup Wizard -->
   <div class="card hidden" id="setupCard">
     <h2>Setup Wizard</h2>
 
@@ -341,11 +359,11 @@ pub const INDEX_HTML: &str = r##"<!DOCTYPE html>
       <p>No vault found. Choose how to protect your secrets:</p>
       <button class="method-btn recommended" onclick="wizChooseMethod('fido2')" id="wizFido2Btn">
         <div class="method-title">Hardware Key (FIDO2)</div>
-        <div class="method-desc">Use a YubiKey or similar CTAP2 device. Highest security.</div>
+        <div class="method-desc">Use YubiKeys with threshold compartments. Highest security.</div>
       </button>
       <button class="method-btn" onclick="wizChooseMethod('passphrase')">
         <div class="method-title">Passphrase Only</div>
-        <div class="method-desc">Protect vault with a passphrase. Standard security.</div>
+        <div class="method-desc">Create compartments with different passphrases.</div>
       </button>
       <div id="wizNoDevice" class="info-box hidden">
         No FIDO2 device detected. Insert your hardware key and click "Detect" or choose passphrase.
@@ -355,11 +373,14 @@ pub const INDEX_HTML: &str = r##"<!DOCTYPE html>
       </div>
     </div>
 
-    <!-- Step 2a: Passphrase setup -->
+    <!-- Step 2a: Passphrase compartment setup -->
     <div class="wizard-step" id="wizStepPassphrase">
-      <p>Choose a strong passphrase (minimum 8 characters).</p>
+      <p>Create a compartment with a passphrase. You can add more compartments later.</p>
       <div class="form-row">
-        <input type="password" id="wizPassphrase" placeholder="Passphrase">
+        <input type="text" id="wizPLabel" placeholder="Compartment name (e.g. default)" value="default">
+      </div>
+      <div class="form-row">
+        <input type="password" id="wizPassphrase" placeholder="Passphrase (min 8 chars)">
       </div>
       <div class="form-row">
         <input type="password" id="wizPassphraseConfirm" placeholder="Confirm passphrase">
@@ -367,9 +388,46 @@ pub const INDEX_HTML: &str = r##"<!DOCTYPE html>
       </div>
     </div>
 
-    <!-- Step 2b: FIDO2 PIN + label -->
+    <!-- Step 2b: FIDO2 compartment presets -->
+    <div class="wizard-step" id="wizStepCompartments">
+      <p>Define compartments. Each has a unique tap-count threshold.</p>
+      <div id="wizCompList">
+        <div class="compartment-hint">
+          <span class="hint-label">Hot (daily)</span>
+          <span class="hint-threshold">Tap 1 key</span>
+        </div>
+        <div class="compartment-hint">
+          <span class="hint-label">Cold (long-term)</span>
+          <span class="hint-threshold">Tap 2 keys</span>
+        </div>
+        <div class="compartment-hint">
+          <span class="hint-label">Legacy (estate)</span>
+          <span class="hint-threshold">Tap 3 keys</span>
+        </div>
+      </div>
+      <div style="margin-top:12px;">
+        <button class="btn-primary" onclick="wizProceedFido2()">Continue with these compartments</button>
+        <button class="btn-ghost" style="margin-left:8px;" onclick="wizCustomCompartments()">Customize</button>
+      </div>
+    </div>
+
+    <!-- Step 2c: Custom compartments -->
+    <div class="wizard-step" id="wizStepCustomComps">
+      <p>Add compartments with custom labels and thresholds.</p>
+      <div id="wizCustomCompList"></div>
+      <div class="form-row">
+        <input type="text" id="wizCustomLabel" placeholder="Label">
+        <input type="number" id="wizCustomThreshold" placeholder="Threshold" min="1" style="width:90px;flex:none;">
+        <button class="btn-ghost" onclick="wizAddCustomComp()">Add</button>
+      </div>
+      <div style="margin-top:12px;">
+        <button class="btn-primary" id="wizCustomContinue" onclick="wizProceedFido2()" disabled>Continue</button>
+      </div>
+    </div>
+
+    <!-- Step 3: FIDO2 PIN + label -->
     <div class="wizard-step" id="wizStepFido2Pin">
-      <p>Enter your FIDO2 device PIN and a label for this key.</p>
+      <p>Register your first FIDO2 hardware key.</p>
       <div class="form-row">
         <input type="password" id="wizFido2Pin" placeholder="FIDO2 PIN">
       </div>
@@ -377,29 +435,16 @@ pub const INDEX_HTML: &str = r##"<!DOCTYPE html>
         <input type="text" id="wizFido2Label" placeholder="Key label (e.g. yubikey-primary)">
         <button class="btn-primary" onclick="wizRegisterKey()">Register Key</button>
       </div>
+      <p>Optional: set a backup passphrase for all compartments.</p>
+      <div class="form-row">
+        <input type="password" id="wizBackupPass" placeholder="Backup passphrase (optional)">
+      </div>
     </div>
 
-    <!-- Step 3: Touch prompt -->
+    <!-- Step 4: Touch -->
     <div class="wizard-step" id="wizStepTouch">
       <div class="info-box pulse" style="text-align:center;font-size:16px;padding:24px;">
         Touch your FIDO2 key now...
-      </div>
-    </div>
-
-    <!-- Step 4: Success -->
-    <div class="wizard-step" id="wizStepSuccess">
-      <div style="text-align:center;padding:16px 0;">
-        <div style="font-size:32px;margin-bottom:12px;color:var(--success);">&#10003;</div>
-        <div style="font-size:16px;font-weight:600;" id="wizSuccessMsg">Vault created!</div>
-        <p style="margin-top:8px;" id="wizSuccessDetail"></p>
-      </div>
-      <div style="margin-top:16px;">
-        <p>Optional: Set a passphrase as backup unlock method?</p>
-        <div class="form-row" style="margin-top:8px;">
-          <input type="password" id="wizFallbackPassphrase" placeholder="Backup passphrase (optional)">
-          <button class="btn-ghost" onclick="wizSetFallback()">Set</button>
-          <button class="btn-ghost" onclick="wizFinish()">Skip</button>
-        </div>
       </div>
     </div>
 
@@ -407,8 +452,22 @@ pub const INDEX_HTML: &str = r##"<!DOCTYPE html>
     <div class="wizard-step" id="wizStepDone">
       <div style="text-align:center;padding:24px 0;">
         <div style="font-size:32px;margin-bottom:12px;color:var(--success);">&#10003;</div>
-        <div style="font-size:16px;font-weight:600;">Setup Complete</div>
-        <p style="margin-top:8px;">Your vault is ready. The page will refresh momentarily.</p>
+        <div style="font-size:16px;font-weight:600;" id="wizDoneMsg">Setup Complete</div>
+        <p style="margin-top:8px;" id="wizDoneDetail">Your vault is ready.</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- Compartment Management Card -->
+  <div class="card hidden" id="compartmentCard">
+    <h2>Compartments</h2>
+    <div id="compartmentList"></div>
+    <div style="margin-top:14px;border-top:1px solid var(--border);padding-top:14px;">
+      <p style="color:var(--text-dim);font-size:12px;margin-bottom:8px;">Add a new compartment:</p>
+      <div class="form-row">
+        <input type="text" id="compAddLabel" placeholder="Label">
+        <input type="number" id="compAddThreshold" placeholder="Threshold" min="1" style="width:90px;flex:none;">
+        <button class="btn-ghost" onclick="addCompartment()">Add</button>
       </div>
     </div>
   </div>
@@ -428,7 +487,7 @@ pub const INDEX_HTML: &str = r##"<!DOCTYPE html>
   <div class="card" id="secretsCard">
     <h2>Tier 2 &mdash; Encrypted Secrets</h2>
     <div id="secretsLocked" class="hidden" style="color:var(--text-dim);font-size:13px;">
-      Vault is locked. Unlock to manage secrets.
+      Vault is locked. Unlock a compartment to manage secrets.
     </div>
     <div id="secretsUnlocked">
       <div class="form-row">
@@ -439,6 +498,23 @@ pub const INDEX_HTML: &str = r##"<!DOCTYPE html>
       <ul class="key-list" id="secretList"></ul>
     </div>
   </div>
+
+  <!-- FIDO2 Management Card -->
+  <div class="card hidden" id="fido2Card">
+    <h2>FIDO2 Hardware Keys</h2>
+    <div id="fido2DeviceStatus" class="info-box">Checking for devices...</div>
+    <div id="fido2RegisterSection">
+      <p style="color:var(--text-dim);font-size:13px;margin-bottom:10px;">
+        Register a FIDO2 hardware key. All compartments must be unlocked first.
+      </p>
+      <div class="form-row">
+        <input type="password" id="fido2RegPin" placeholder="FIDO2 PIN">
+        <input type="text" id="fido2RegLabel" placeholder="Key label">
+        <button class="btn-primary" onclick="fido2Register()">Register Key</button>
+      </div>
+    </div>
+    <div id="fido2KeyListSection" style="margin-top:14px;"></div>
+  </div>
 </main>
 
 <footer>
@@ -448,6 +524,13 @@ pub const INDEX_HTML: &str = r##"<!DOCTYPE html>
 
 <script>
 const API = '';
+let currentStatus = null;
+let wizCompartments = [
+  { label: 'hot', threshold: 1 },
+  { label: 'cold', threshold: 2 },
+  { label: 'legacy', threshold: 3 },
+];
+let customCompartments = [];
 
 async function api(method, path, body) {
   const opts = { method, headers: { 'Content-Type': 'application/json' } };
@@ -464,53 +547,67 @@ function toast(msg, type = 'success') {
   setTimeout(() => el.remove(), 3000);
 }
 
-let currentStatus = null;
-
 async function refresh() {
   const s = await api('GET', '/api/status');
   currentStatus = s;
   const badge = document.getElementById('statusBadge');
+  const compBadge = document.getElementById('compartmentBadge');
   const authCard = document.getElementById('authCard');
   const setupCard = document.getElementById('setupCard');
+  const compartmentCard = document.getElementById('compartmentCard');
   const secretsLocked = document.getElementById('secretsLocked');
   const secretsUnlocked = document.getElementById('secretsUnlocked');
 
-  document.getElementById('apiKeyCount').textContent = s.api_key_count;
-
-  // FIDO2 info
   const fido = s.fido2 || {};
-  document.getElementById('fido2KeyCount').textContent = fido.key_count || 0;
-  document.getElementById('unlockMethod').textContent = fido.unlock_method || 'passphrase';
+  const active = s.active_compartment;
+  const hasCompartments = fido.compartments && fido.compartments.length > 0;
 
-  if (!s.vault_exists) {
+  document.getElementById('fido2KeyCount').textContent = fido.key_count || 0;
+  document.getElementById('compartmentCount').textContent =
+    (fido.compartments || []).length;
+
+  if (!s.any_vault_exists && !hasCompartments) {
     badge.className = 'status-badge status-no-vault';
     badge.textContent = 'NO VAULT';
+    compBadge.classList.add('hidden');
     setupCard.classList.remove('hidden');
     authCard.classList.add('hidden');
+    compartmentCard.classList.add('hidden');
     secretsLocked.classList.remove('hidden');
     secretsUnlocked.classList.add('hidden');
+    document.getElementById('apiKeyCount').textContent = '-';
     document.getElementById('secretCount').textContent = '-';
-
-    // Check for FIDO2 device presence
     wizDetectDevice();
     return;
   }
 
   setupCard.classList.add('hidden');
   authCard.classList.remove('hidden');
+  compartmentCard.classList.remove('hidden');
 
-  // Show unlock tabs if FIDO2 is enabled
+  // Show unlock tabs if FIDO2 keys exist
   const unlockTabs = document.getElementById('unlockTabs');
-  const method = fido.unlock_method || 'passphrase';
-  if (method === 'fido2' || method === 'both') {
+  const hasFido = fido.key_count > 0;
+  const hasPassphrase = (fido.compartments || []).some(c => c.has_passphrase);
+  if (hasFido && hasPassphrase) {
+    unlockTabs.classList.remove('hidden');
+  } else if (hasFido) {
     unlockTabs.classList.remove('hidden');
   } else {
     unlockTabs.classList.add('hidden');
   }
 
-  if (s.unlocked) {
+  // Build FIDO2 unlock hints and tap count selector
+  buildFido2Hints(fido.compartments || []);
+
+  if (active) {
     badge.className = 'status-badge status-unlocked';
     badge.textContent = 'UNLOCKED';
+    compBadge.textContent = active.compartment_label || ('Compartment ' + active.compartment_id);
+    compBadge.classList.remove('hidden');
+    document.getElementById('apiKeyCount').textContent = active.api_key_count || 0;
+    document.getElementById('secretCount').textContent =
+      active.secret_count != null ? active.secret_count : '(locked)';
     document.getElementById('unlockPassphrase').classList.add('hidden');
     document.getElementById('unlockFido2').classList.add('hidden');
     document.getElementById('unlockTabs').classList.add('hidden');
@@ -518,19 +615,19 @@ async function refresh() {
     document.getElementById('authTitle').textContent = 'Vault Unlocked';
     secretsLocked.classList.add('hidden');
     secretsUnlocked.classList.remove('hidden');
-    document.getElementById('secretCount').textContent = s.secret_count;
     await loadSecrets();
   } else {
     badge.className = 'status-badge status-locked';
     badge.textContent = 'LOCKED';
+    compBadge.classList.add('hidden');
+    document.getElementById('apiKeyCount').textContent = '-';
+    document.getElementById('secretCount').textContent = '(locked)';
     document.getElementById('lockForm').classList.add('hidden');
     document.getElementById('authTitle').textContent = 'Unlock Vault';
     secretsLocked.classList.remove('hidden');
     secretsUnlocked.classList.add('hidden');
-    document.getElementById('secretCount').textContent = '(locked)';
 
-    // Show appropriate unlock method
-    if (method === 'fido2') {
+    if (hasFido && !hasPassphrase) {
       switchUnlockTab('fido2');
     } else {
       switchUnlockTab('passphrase');
@@ -538,6 +635,129 @@ async function refresh() {
   }
 
   await loadApiKeys();
+  await loadFido2();
+  await loadCompartments();
+}
+
+function buildFido2Hints(compartments) {
+  const hints = document.getElementById('fido2Hints');
+  const select = document.getElementById('fido2TapCount');
+  hints.innerHTML = '';
+  select.innerHTML = '';
+  compartments.forEach(c => {
+    hints.innerHTML += '<div class="compartment-hint">' +
+      '<span class="hint-label">' + esc(c.label) + '</span>' +
+      '<span class="hint-threshold">Tap ' + c.threshold + ' key' + (c.threshold > 1 ? 's' : '') + '</span></div>';
+    const opt = document.createElement('option');
+    opt.value = c.threshold;
+    opt.textContent = c.threshold + ' tap' + (c.threshold > 1 ? 's' : '') + ' = ' + c.label;
+    select.appendChild(opt);
+  });
+}
+
+async function loadCompartments() {
+  try {
+    const r = await api('GET', '/api/compartment/list');
+    const el = document.getElementById('compartmentList');
+    const comps = r.compartments || [];
+    if (comps.length === 0) {
+      el.innerHTML = '<p style="color:var(--text-dim);font-size:13px;">No compartments defined.</p>';
+      return;
+    }
+    let html = '<ul class="key-list">';
+    comps.forEach(c => {
+      const active = c.is_active ? ' <span style="color:var(--success);">(active)</span>' : '';
+      const exists = c.vault_exists ? '' : ' <span style="color:var(--warning);">(not initialized)</span>';
+      html += '<li><span>' + esc(c.label) + ' <span style="color:var(--text-dim);font-size:11px;">' +
+        'threshold=' + c.threshold + exists + active + '</span></span>' +
+        '<div class="key-actions"><button class="btn-danger" onclick="removeCompartment(' + c.id + ')">Remove</button></div></li>';
+    });
+    html += '</ul>';
+    el.innerHTML = html;
+  } catch(e) {}
+}
+
+async function addCompartment() {
+  const label = document.getElementById('compAddLabel').value;
+  const threshold = parseInt(document.getElementById('compAddThreshold').value);
+  if (!label) { toast('Label required', 'error'); return; }
+  if (!threshold || threshold < 1) { toast('Valid threshold required', 'error'); return; }
+  const r = await api('POST', '/api/compartment/add', { label, threshold });
+  if (r.error) { toast(r.error, 'error'); return; }
+  document.getElementById('compAddLabel').value = '';
+  document.getElementById('compAddThreshold').value = '';
+  toast('Compartment "' + label + '" added');
+  refresh();
+}
+
+async function removeCompartment(id) {
+  if (!confirm('Remove compartment ' + id + '?')) return;
+  const r = await api('POST', '/api/compartment/remove', { id });
+  if (r.error) { toast(r.error, 'error'); return; }
+  toast('Compartment removed');
+  refresh();
+}
+
+async function loadFido2() {
+  const fido2Card = document.getElementById('fido2Card');
+  if (!currentStatus || !currentStatus.any_vault_exists) {
+    fido2Card.classList.add('hidden');
+    return;
+  }
+  fido2Card.classList.remove('hidden');
+
+  try {
+    const detect = await api('GET', '/api/fido2/detect');
+    const devEl = document.getElementById('fido2DeviceStatus');
+    if (detect.device_present) {
+      devEl.innerHTML = '<span style="color:var(--success);">' + detect.device_count +
+        ' FIDO2 device(s) connected</span>';
+    } else {
+      devEl.innerHTML = '<span style="color:var(--warning);">No FIDO2 device detected.</span>';
+    }
+  } catch(e) {}
+
+  try {
+    const keys = await api('GET', '/api/fido2/list');
+    const listEl = document.getElementById('fido2KeyListSection');
+    if (keys.keys && keys.keys.length > 0) {
+      let html = '<ul class="key-list">';
+      keys.keys.forEach(k => {
+        html += '<li><span>' + esc(k.label) + ' <span style="color:var(--text-dim);font-size:11px;">(' +
+          esc(k.credential_id_short) + '...) ' + esc(k.registered_at) + '</span></span>' +
+          '<div class="key-actions"><button class="btn-danger" onclick="fido2RemoveKey(\'' +
+          esc(k.label) + '\')">Remove</button></div></li>';
+      });
+      html += '</ul>';
+      listEl.innerHTML = html;
+    } else {
+      listEl.innerHTML = '<p style="color:var(--text-dim);font-size:13px;">No hardware keys registered.</p>';
+    }
+  } catch(e) {}
+}
+
+async function fido2Register() {
+  const pin = document.getElementById('fido2RegPin').value;
+  const label = document.getElementById('fido2RegLabel').value;
+  if (!pin) { toast('PIN required', 'error'); return; }
+  if (!label) { toast('Label required', 'error'); return; }
+  toast('Touch your FIDO2 key now...');
+  const r = await api('POST', '/api/fido2/register', { pin, label });
+  if (r.error) { toast(r.error, 'error'); return; }
+  document.getElementById('fido2RegPin').value = '';
+  document.getElementById('fido2RegLabel').value = '';
+  toast('Key "' + label + '" registered');
+  refresh();
+}
+
+async function fido2RemoveKey(label) {
+  if (!confirm('Remove FIDO2 key "' + label + '"?')) return;
+  const pin = prompt('Enter FIDO2 PIN:');
+  if (!pin) return;
+  const r = await api('POST', '/api/fido2/remove', { label, pin });
+  if (r.error) { toast(r.error, 'error'); return; }
+  toast('Key removed');
+  refresh();
 }
 
 function switchUnlockTab(tab) {
@@ -559,24 +779,26 @@ async function unlock() {
   const r = await api('POST', '/api/unlock', { passphrase: p });
   if (r.error) { toast(r.error, 'error'); return; }
   document.getElementById('passphrase').value = '';
-  toast('Vault unlocked');
+  toast('Unlocked: ' + (r.compartment_label || 'vault'));
   refresh();
 }
 
 async function fido2Unlock() {
   const pin = document.getElementById('fido2Pin').value;
-  if (!pin) { toast('PIN is required', 'error'); return; }
+  const tapCount = parseInt(document.getElementById('fido2TapCount').value);
+  if (!pin) { toast('PIN required', 'error'); return; }
+  if (!tapCount) { toast('Select tap count', 'error'); return; }
   toast('Touch your hardware key now...');
-  const r = await api('POST', '/api/fido2/unlock', { pins: [pin] });
+  const r = await api('POST', '/api/fido2/unlock', { pins: [pin], tap_count: tapCount });
   if (r.error) { toast(r.error, 'error'); return; }
   document.getElementById('fido2Pin').value = '';
-  toast('Vault unlocked (FIDO2)');
+  toast('Unlocked: ' + (r.compartment_label || 'vault'));
   refresh();
 }
 
 async function lock() {
   await api('POST', '/api/lock');
-  toast('Vault locked');
+  toast('All compartments locked');
   refresh();
 }
 
@@ -606,67 +828,96 @@ async function wizDetectDevice() {
 
 function wizChooseMethod(method) {
   if (method === 'fido2') {
-    wizShowStep('wizStepFido2Pin');
+    wizShowStep('wizStepCompartments');
   } else {
     wizShowStep('wizStepPassphrase');
   }
 }
 
 async function wizInitPassphrase() {
+  const label = document.getElementById('wizPLabel').value || 'default';
   const p = document.getElementById('wizPassphrase').value;
   const pc = document.getElementById('wizPassphraseConfirm').value;
-  if (p.length < 8) { toast('Passphrase must be at least 8 characters', 'error'); return; }
+  if (p.length < 8) { toast('Min 8 characters', 'error'); return; }
   if (p !== pc) { toast('Passphrases do not match', 'error'); return; }
-  const r = await api('POST', '/api/init', { passphrase: p });
-  if (r.error) { toast(r.error, 'error'); return; }
-  toast('Vault initialized and unlocked');
+
+  // Add compartment, then init
+  const addR = await api('POST', '/api/compartment/add', { label, threshold: 1, passphrase_mode: 'wrapped' });
+  if (addR.error) { toast(addR.error, 'error'); return; }
+  const initR = await api('POST', '/api/compartment/init', { id: addR.id, passphrase: p });
+  if (initR.error) { toast(initR.error, 'error'); return; }
+
+  document.getElementById('wizDoneMsg').textContent = 'Vault Created';
+  document.getElementById('wizDoneDetail').textContent =
+    'Compartment "' + label + '" initialized. You are unlocked.';
   wizShowStep('wizStepDone');
   setTimeout(refresh, 1500);
+}
+
+function wizProceedFido2() {
+  let comps = wizCompartments;
+  if (customCompartments.length > 0) comps = customCompartments;
+  if (comps.length === 0) { toast('Add at least one compartment', 'error'); return; }
+  wizCompartments = comps;
+  wizShowStep('wizStepFido2Pin');
+}
+
+function wizCustomCompartments() {
+  customCompartments = [];
+  document.getElementById('wizCustomCompList').innerHTML = '';
+  wizShowStep('wizStepCustomComps');
+}
+
+function wizAddCustomComp() {
+  const label = document.getElementById('wizCustomLabel').value;
+  const threshold = parseInt(document.getElementById('wizCustomThreshold').value);
+  if (!label || !threshold) { toast('Label and threshold required', 'error'); return; }
+  if (customCompartments.some(c => c.threshold === threshold)) {
+    toast('Threshold ' + threshold + ' already used', 'error'); return;
+  }
+  customCompartments.push({ label, threshold });
+  document.getElementById('wizCustomLabel').value = '';
+  document.getElementById('wizCustomThreshold').value = '';
+  let html = '';
+  customCompartments.forEach(c => {
+    html += '<div class="compartment-hint"><span class="hint-label">' +
+      esc(c.label) + '</span><span class="hint-threshold">Tap ' +
+      c.threshold + ' key' + (c.threshold > 1 ? 's' : '') + '</span></div>';
+  });
+  document.getElementById('wizCustomCompList').innerHTML = html;
+  document.getElementById('wizCustomContinue').disabled = false;
 }
 
 async function wizRegisterKey() {
   const pin = document.getElementById('wizFido2Pin').value;
   const label = document.getElementById('wizFido2Label').value;
-  if (!pin) { toast('PIN is required', 'error'); return; }
-  if (!label) { toast('Label is required', 'error'); return; }
+  const passphrase = document.getElementById('wizBackupPass').value || null;
+  if (!pin) { toast('PIN required', 'error'); return; }
+  if (!label) { toast('Label required', 'error'); return; }
 
   wizShowStep('wizStepTouch');
 
-  const r = await api('POST', '/api/fido2/setup', { pin, label });
+  const body = {
+    pin,
+    label,
+    compartments: wizCompartments.map(c => ({
+      label: c.label,
+      threshold: c.threshold,
+      passphrase_mode: null,
+    })),
+    passphrase: passphrase && passphrase.length >= 8 ? passphrase : null,
+  };
+
+  const r = await api('POST', '/api/fido2/setup', body);
   if (r.error) {
     toast(r.error, 'error');
     wizShowStep('wizStepFido2Pin');
     return;
   }
 
-  document.getElementById('wizSuccessMsg').textContent = 'FIDO2 key registered!';
-  document.getElementById('wizSuccessDetail').textContent =
-    'Key "' + label + '" registered. Vault created and unlocked.';
-  wizShowStep('wizStepSuccess');
-}
-
-async function wizSetFallback() {
-  const p = document.getElementById('wizFallbackPassphrase').value;
-  if (p.length < 8) { toast('Passphrase must be at least 8 characters', 'error'); return; }
-
-  // We need to init the passphrase wrapped key via the API
-  // For now, use the existing init endpoint concept — but the vault already exists.
-  // The setup endpoint already handled passphrase if provided.
-  // Re-call setup with passphrase isn't ideal. Let's just tell user to use CLI for now.
-  // Actually, let's re-do the setup call but the vault already exists.
-  // The proper way is to wrap the master key with the passphrase.
-  // Since the vault is unlocked and we have the master key in daemon memory,
-  // we can re-init the passphrase salt. But we need a dedicated endpoint.
-  // For simplicity, let's save via a POST to /api/init with the passphrase
-  // and handle the "already exists" case. Actually this won't work.
-
-  // Simplest: tell the user this was set during setup.
-  // The fido2/setup endpoint accepts a passphrase parameter.
-  toast('Use "sigillum setup" CLI to add passphrase fallback to existing FIDO2 vault.', 'error');
-  wizFinish();
-}
-
-function wizFinish() {
+  document.getElementById('wizDoneMsg').textContent = 'Setup Complete';
+  document.getElementById('wizDoneDetail').textContent =
+    r.compartments + ' compartment(s) created, key "' + label + '" registered.';
   wizShowStep('wizStepDone');
   setTimeout(refresh, 1500);
 }
@@ -674,33 +925,37 @@ function wizFinish() {
 // ── API Keys & Secrets ────────────────────────────────────────
 
 async function loadApiKeys() {
-  const r = await api('GET', '/api/api-keys');
-  const list = document.getElementById('apiKeyList');
-  list.innerHTML = '';
-  (r.keys || []).forEach(k => {
-    const li = document.createElement('li');
-    li.innerHTML = '<span>' + esc(k) + '</span>' +
-      '<div class="key-actions">' +
-      '<button class="btn-ghost" onclick="revealApiKey(\'' + esc(k) + '\', this)">Reveal</button>' +
-      '<button class="btn-danger" onclick="deleteApiKey(\'' + esc(k) + '\')">Delete</button>' +
-      '</div>';
-    list.appendChild(li);
-  });
+  try {
+    const r = await api('GET', '/api/api-keys');
+    if (r.error) return;
+    const list = document.getElementById('apiKeyList');
+    list.innerHTML = '';
+    (r.keys || []).forEach(k => {
+      const li = document.createElement('li');
+      li.innerHTML = '<span>' + esc(k) + '</span>' +
+        '<div class="key-actions">' +
+        '<button class="btn-ghost" onclick="revealApiKey(\'' + esc(k) + '\', this)">Reveal</button>' +
+        '<button class="btn-danger" onclick="deleteApiKey(\'' + esc(k) + '\')">Delete</button></div>';
+      list.appendChild(li);
+    });
+  } catch(e) {}
 }
 
 async function loadSecrets() {
-  const r = await api('GET', '/api/secrets');
-  const list = document.getElementById('secretList');
-  list.innerHTML = '';
-  (r.keys || []).forEach(k => {
-    const li = document.createElement('li');
-    li.innerHTML = '<span>' + esc(k) + '</span>' +
-      '<div class="key-actions">' +
-      '<button class="btn-ghost" onclick="revealSecret(\'' + esc(k) + '\', this)">Reveal</button>' +
-      '<button class="btn-danger" onclick="deleteSecret(\'' + esc(k) + '\')">Delete</button>' +
-      '</div>';
-    list.appendChild(li);
-  });
+  try {
+    const r = await api('GET', '/api/secrets');
+    if (r.error) return;
+    const list = document.getElementById('secretList');
+    list.innerHTML = '';
+    (r.keys || []).forEach(k => {
+      const li = document.createElement('li');
+      li.innerHTML = '<span>' + esc(k) + '</span>' +
+        '<div class="key-actions">' +
+        '<button class="btn-ghost" onclick="revealSecret(\'' + esc(k) + '\', this)">Reveal</button>' +
+        '<button class="btn-danger" onclick="deleteSecret(\'' + esc(k) + '\')">Delete</button></div>';
+      list.appendChild(li);
+    });
+  } catch(e) {}
 }
 
 async function setApiKey() {
@@ -757,7 +1012,7 @@ async function deleteApiKey(key) {
   if (!confirm('Delete API key "' + key + '"?')) return;
   const r = await api('POST', '/api/api-keys/delete', { key });
   if (r.error) { toast(r.error, 'error'); return; }
-  toast('API key deleted');
+  toast('Deleted');
   refresh();
 }
 
@@ -765,7 +1020,7 @@ async function deleteSecret(key) {
   if (!confirm('Delete secret "' + key + '"?')) return;
   const r = await api('POST', '/api/secrets/delete', { key });
   if (r.error) { toast(r.error, 'error'); return; }
-  toast('Secret deleted');
+  toast('Deleted');
   refresh();
 }
 
@@ -775,7 +1030,6 @@ function esc(s) {
   return d.innerHTML;
 }
 
-// Enter key support
 document.addEventListener('keydown', e => {
   if (e.key !== 'Enter') return;
   if (e.target.id === 'passphrase') unlock();

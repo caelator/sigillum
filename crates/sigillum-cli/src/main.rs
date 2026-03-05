@@ -1,4 +1,5 @@
 use std::io::{self, Write};
+use std::path::PathBuf;
 use std::process;
 
 use argon2::Argon2;
@@ -7,6 +8,7 @@ use rand::RngCore;
 use secrecy::ExposeSecret;
 use sigillum_core::{FileVault, SecretStore, VaultConfig, VaultLifecycle};
 use sigillum_fido2::Fido2Manager;
+use sigillum_fido2::config::CompartmentDef;
 use zeroize::Zeroizing;
 
 fn main() {
@@ -17,22 +19,20 @@ fn main() {
         process::exit(1);
     }
 
-    let vault = FileVault::new(VaultConfig::default());
-
     match args[1].as_str() {
-        "init" => cmd_init(&vault),
-        "setup" => cmd_setup(&vault),
-        "status" => cmd_status(&vault),
-        "unlock" => cmd_unlock(&vault),
-        "lock" => cmd_lock(&vault),
-        "set" => cmd_set(&vault, &args[2..]),
-        "get" => cmd_get(&vault, &args[2..]),
-        "delete" => cmd_delete(&vault, &args[2..]),
-        "list" => cmd_list(&vault),
-        "set-api" => cmd_set_api(&vault, &args[2..]),
-        "get-api" => cmd_get_api(&vault, &args[2..]),
-        "delete-api" => cmd_delete_api(&vault, &args[2..]),
-        "fido2" => cmd_fido2(&vault, &args[2..]),
+        "setup" => cmd_setup(),
+        "status" => cmd_status(),
+        "unlock" => cmd_unlock(),
+        "lock" => cmd_lock(),
+        "set" => cmd_set(&args[2..]),
+        "get" => cmd_get(&args[2..]),
+        "delete" => cmd_delete(&args[2..]),
+        "list" => cmd_list(),
+        "set-api" => cmd_set_api(&args[2..]),
+        "get-api" => cmd_get_api(&args[2..]),
+        "delete-api" => cmd_delete_api(&args[2..]),
+        "fido2" => cmd_fido2(&args[2..]),
+        "compartment" => cmd_compartment(&args[2..]),
         "daemon" => cmd_daemon(&args[2..]),
         "help" | "--help" | "-h" => print_usage(),
         "version" | "--version" | "-V" => println!("sigillum {}", env!("CARGO_PKG_VERSION")),
@@ -54,27 +54,31 @@ USAGE:
 
 COMMANDS:
     setup             First-time setup wizard (FIDO2 or passphrase)
-    init              Initialize a new vault with passphrase only
     status            Show vault status
-    unlock            Unlock vault (auto-detects FIDO2 or passphrase)
-    lock              Lock vault (zeroize master key from memory)
+    unlock            Unlock vault (auto-detects method)
+    lock              Lock all compartments
 
     set <KEY>         Store a Tier 2 secret (encrypted, requires unlock)
     get <KEY>         Retrieve a Tier 2 secret
     delete <KEY>      Delete a Tier 2 secret
     list              List all keys (both tiers)
 
-    set-api <KEY>     Store a Tier 1 API key (plaintext, no unlock needed)
+    set-api <KEY>     Store a Tier 1 API key (plaintext)
     get-api <KEY>     Retrieve a Tier 1 API key
     delete-api <KEY>  Delete a Tier 1 API key
+
+    compartment <CMD> Compartment management:
+      list                   List compartments
+      add --label <L> --threshold <T>   Add compartment
+      remove --id <N>        Remove compartment
+      init --id <N>          Initialize compartment with passphrase
 
     fido2 <CMD>       FIDO2 hardware key management:
       register --label <L>   Register a new hardware key
       list                   List registered keys
       remove --label <L>     Remove a hardware key
-      set-quorum <N>         Set quorum threshold
       status                 Show FIDO2 status
-      unlock                 Unlock via FIDO2 quorum
+      unlock --taps <N>      Unlock a compartment via FIDO2
 
     daemon [--port N] Start HTTP daemon (default: localhost:9743)
 
@@ -83,19 +87,20 @@ COMMANDS:
     );
 }
 
-// ── Commands ──────────────────────────────────────────────────────
+// ── Setup ────────────────────────────────────────────────────────
 
-fn cmd_setup(vault: &FileVault) {
-    if vault.vault_exists() {
-        eprintln!("Vault already exists at ~/.sigillum/");
-        eprintln!("Use 'sigillum fido2 register' to add keys to an existing vault.");
+fn cmd_setup() {
+    let mgr = fido2_manager();
+    let config = mgr.load_config_raw();
+
+    if !config.compartments.is_empty() || any_vault_exists(&config) {
+        eprintln!("Vault already configured. Use 'sigillum compartment' to manage compartments.");
         process::exit(1);
     }
 
     println!("=== SIGILLUM SETUP WIZARD ===");
     println!();
 
-    // Check for FIDO2 device
     let device_count = sigillum_fido2::hid::detect_devices();
     if device_count > 0 {
         println!("Detected {device_count} FIDO2 device(s).");
@@ -107,37 +112,124 @@ fn cmd_setup(vault: &FileVault) {
         io::stderr().flush().unwrap();
         let mut choice = String::new();
         io::stdin().read_line(&mut choice).unwrap();
-        let choice = choice.trim();
 
-        if choice == "2" {
-            setup_passphrase(vault);
+        if choice.trim() == "2" {
+            setup_passphrase();
         } else {
-            setup_fido2(vault);
+            setup_fido2();
         }
     } else {
         println!("No FIDO2 device detected. Setting up with passphrase.");
-        println!("(Insert a FIDO2 key and re-run 'sigillum setup' for hardware key unlock.)");
         println!();
-        setup_passphrase(vault);
+        setup_passphrase();
     }
 }
 
-fn setup_passphrase(vault: &FileVault) {
-    let passphrase = prompt_passphrase_confirm();
-    let (master_key, salt) = derive_key_from_passphrase(&passphrase);
+fn setup_passphrase() {
+    let mgr = fido2_manager();
 
+    eprint!("Compartment label [default]: ");
+    io::stderr().flush().unwrap();
+    let mut label = String::new();
+    io::stdin().read_line(&mut label).unwrap();
+    let label = label.trim();
+    let label = if label.is_empty() { "default" } else { label };
+
+    let passphrase = prompt_passphrase_confirm();
+
+    // Add compartment
+    let def = CompartmentDef {
+        id: 0,
+        label: label.to_string(),
+        threshold: 1,
+        passphrase_mode: Some("wrapped".into()),
+    };
+    mgr.add_compartment(def).unwrap_or_else(|e| {
+        eprintln!("Failed to add compartment: {e}");
+        process::exit(1);
+    });
+
+    // Generate random master key
+    let mut master_key = [0u8; 32];
+    OsRng.fill_bytes(&mut master_key);
+
+    // Initialize vault
+    let vault = vault_for_compartment(0);
     if let Err(e) = vault.initialize(&master_key) {
         eprintln!("Failed to initialize vault: {e}");
         process::exit(1);
     }
 
-    save_salt(&salt);
+    // Wrap master key with passphrase
+    let (wrap_key, salt) = derive_key_from_passphrase(&passphrase);
+    save_salt(&salt, &compartment_salt_path(0));
+    save_wrapped_master_key(&master_key, &wrap_key, &compartment_wrapped_key_path(0));
+
+    zeroize::Zeroize::zeroize(&mut master_key);
+
     println!();
-    println!("Vault initialized with passphrase at ~/.sigillum/");
+    println!("Vault initialized. Compartment \"{label}\" created.");
     println!("Remember your passphrase — it cannot be recovered.");
 }
 
-fn setup_fido2(vault: &FileVault) {
+fn setup_fido2() {
+    let mgr = fido2_manager();
+
+    println!();
+    println!("Define compartments (each needs a unique tap-count threshold):");
+    println!("  Default presets: hot=1, cold=2, legacy=3");
+    eprint!("Use default presets? [Y/n]: ");
+    io::stderr().flush().unwrap();
+    let mut answer = String::new();
+    io::stdin().read_line(&mut answer).unwrap();
+
+    let compartments: Vec<(String, usize)> = if answer.trim().eq_ignore_ascii_case("n") {
+        let mut comps = Vec::new();
+        loop {
+            eprint!("Compartment label (empty to finish): ");
+            io::stderr().flush().unwrap();
+            let mut label = String::new();
+            io::stdin().read_line(&mut label).unwrap();
+            let label = label.trim().to_string();
+            if label.is_empty() { break; }
+
+            eprint!("Threshold (tap count): ");
+            io::stderr().flush().unwrap();
+            let mut t = String::new();
+            io::stdin().read_line(&mut t).unwrap();
+            let threshold: usize = t.trim().parse().unwrap_or_else(|_| {
+                eprintln!("Invalid threshold");
+                process::exit(1);
+            });
+            comps.push((label, threshold));
+        }
+        if comps.is_empty() {
+            eprintln!("At least one compartment required.");
+            process::exit(1);
+        }
+        comps
+    } else {
+        vec![
+            ("hot".into(), 1),
+            ("cold".into(), 2),
+            ("legacy".into(), 3),
+        ]
+    };
+
+    // Register compartments
+    for (i, (label, threshold)) in compartments.iter().enumerate() {
+        let def = CompartmentDef {
+            id: i,
+            label: label.clone(),
+            threshold: *threshold,
+            passphrase_mode: None,
+        };
+        mgr.add_compartment(def).unwrap_or_else(|e| {
+            eprintln!("Failed to add compartment: {e}");
+            process::exit(1);
+        });
+    }
+
     let pin = prompt_pin();
     eprint!("Key label (e.g. 'yubikey-primary'): ");
     io::stderr().flush().unwrap();
@@ -153,27 +245,39 @@ fn setup_fido2(vault: &FileVault) {
     println!();
     println!("Touch your FIDO2 key now...");
 
-    let mgr = fido2_manager();
-    match mgr.register_key(&pin, label, None) {
+    match mgr.register_key(&pin, label, &[]) {
         Ok(result) => {
-            // Initialize vault with the generated master key
-            if let Err(e) = vault.initialize(&result.master_key) {
-                eprintln!("Failed to initialize vault: {e}");
-                process::exit(1);
+            // Initialize each compartment vault
+            for (comp_id, mk) in &result.compartment_keys {
+                let vault = vault_for_compartment(*comp_id);
+                if let Err(e) = vault.initialize(mk) {
+                    eprintln!("Failed to initialize compartment {comp_id}: {e}");
+                    process::exit(1);
+                }
             }
 
             println!();
             println!("FIDO2 key '{label}' registered.");
-            println!("Vault initialized at ~/.sigillum/");
-            println!();
+            println!("{} compartment(s) created and initialized.", compartments.len());
 
-            // Ask about passphrase fallback
-            eprint!("Set a passphrase as backup? [y/N]: ");
+            // Ask about passphrase backup
+            eprint!("Set a backup passphrase for all compartments? [y/N]: ");
             io::stderr().flush().unwrap();
             let mut answer = String::new();
             io::stdin().read_line(&mut answer).unwrap();
             if answer.trim().eq_ignore_ascii_case("y") {
-                setup_passphrase_fallback(vault, &result.master_key);
+                let passphrase = prompt_passphrase_confirm();
+                for (comp_id, mk) in &result.compartment_keys {
+                    let (wrap_key, salt) = derive_key_from_passphrase(&passphrase);
+                    save_salt(&salt, &compartment_salt_path(*comp_id));
+                    save_wrapped_master_key(mk, &wrap_key, &compartment_wrapped_key_path(*comp_id));
+                }
+                let mut cfg = mgr.load_config_raw();
+                for c in &mut cfg.compartments {
+                    c.passphrase_mode = Some("wrapped".into());
+                }
+                let _ = mgr.save_config_raw(&cfg);
+                println!("Passphrase backup configured for all compartments.");
             }
 
             // Ask about additional keys
@@ -182,9 +286,7 @@ fn setup_fido2(vault: &FileVault) {
                 io::stderr().flush().unwrap();
                 let mut answer = String::new();
                 io::stdin().read_line(&mut answer).unwrap();
-                if !answer.trim().eq_ignore_ascii_case("y") {
-                    break;
-                }
+                if !answer.trim().eq_ignore_ascii_case("y") { break; }
 
                 let pin = prompt_pin();
                 eprint!("Key label: ");
@@ -193,28 +295,15 @@ fn setup_fido2(vault: &FileVault) {
                 io::stdin().read_line(&mut next_label).unwrap();
                 let next_label = next_label.trim();
 
+                // Need master keys for all compartments
+                let mk_refs: Vec<(usize, &[u8; 32])> = result.compartment_keys.iter()
+                    .map(|(id, mk)| (*id, &**mk))
+                    .collect();
+
                 println!("Touch your FIDO2 key now...");
-                match mgr.register_key(&pin, next_label, Some(&result.master_key)) {
+                match mgr.register_key(&pin, next_label, &mk_refs) {
                     Ok(r) => println!("Key '{next_label}' registered ({} total).", r.total_keys),
                     Err(e) => eprintln!("Failed: {e}"),
-                }
-            }
-
-            // Quorum threshold
-            let status = mgr.status();
-            if status.key_count > 1 {
-                println!();
-                println!("{} keys registered. Current quorum threshold: 1", status.key_count);
-                eprint!("Set quorum threshold (1-{}): ", status.key_count);
-                io::stderr().flush().unwrap();
-                let mut threshold_str = String::new();
-                io::stdin().read_line(&mut threshold_str).unwrap();
-                if let Ok(t) = threshold_str.trim().parse::<usize>() {
-                    if let Err(e) = mgr.set_quorum(t) {
-                        eprintln!("Failed to set quorum: {e}");
-                    } else {
-                        println!("Quorum set to {t}-of-{}.", status.key_count);
-                    }
                 }
             }
 
@@ -228,175 +317,132 @@ fn setup_fido2(vault: &FileVault) {
     }
 }
 
-fn setup_passphrase_fallback(_vault: &FileVault, master_key: &[u8; 32]) {
-    let passphrase = prompt_passphrase_confirm();
-    let (wrap_key, salt) = derive_key_from_passphrase(&passphrase);
+// ── Status ──────────────────────────────────────────────────────
 
-    // Wrap the master key with the passphrase-derived key
-    save_wrapped_master_key(master_key, &wrap_key);
-    save_salt(&salt);
-
-    // Update FIDO2 config to record "both" mode
-    let mgr = fido2_manager();
-    let mut config = mgr.load_config_raw();
-    config.unlock_method = "both".into();
-    config.passphrase_mode = Some("wrapped".into());
-    let _ = mgr.save_config_raw(&config);
-
-    println!("Passphrase fallback configured.");
-}
-
-fn cmd_init(vault: &FileVault) {
-    if vault.vault_exists() {
-        eprintln!("Vault already exists at ~/.sigillum/vault.enc");
-        eprintln!("To reinitialize, delete the existing vault first.");
-        process::exit(1);
-    }
-
-    let passphrase = prompt_passphrase_confirm();
-    let (master_key, salt) = derive_key_from_passphrase(&passphrase);
-
-    if let Err(e) = vault.initialize(&master_key) {
-        eprintln!("Failed to initialize vault: {e}");
-        process::exit(1);
-    }
-
-    save_salt(&salt);
-    println!("Vault initialized at ~/.sigillum/");
-    println!("Remember your passphrase — it cannot be recovered.");
-}
-
-fn cmd_status(vault: &FileVault) {
-    let exists = vault.vault_exists();
-    let unlocked = vault.is_unlocked();
-    let api_keys = vault.list_api_keys();
-
-    println!("=== SIGILLUM VAULT STATUS ===");
-    println!("Vault exists:    {exists}");
-    println!("Vault unlocked:  {unlocked}");
-    println!("Tier 1 keys:     {}", api_keys.len());
-
-    if unlocked {
-        let secrets = vault.list_secrets();
-        println!("Tier 2 secrets:  {}", secrets.len());
-    } else {
-        println!("Tier 2 secrets:  (locked)");
-    }
-
-    // FIDO2 status
+fn cmd_status() {
     let mgr = fido2_manager();
     let fido_status = mgr.status();
-    println!();
+
+    println!("=== SIGILLUM VAULT STATUS ===");
     println!("FIDO2 enabled:   {}", fido_status.enabled);
     println!("FIDO2 keys:      {}", fido_status.key_count);
-    println!("Quorum:          {}", fido_status.quorum_threshold);
-    println!("Unlock method:   {}", fido_status.unlock_method);
+    println!("Compartments:    {}", fido_status.compartments.len());
+
+    for c in &fido_status.compartments {
+        let vault = vault_for_compartment(c.id);
+        let exists = vault.vault_exists();
+        let unlocked = vault.is_unlocked();
+        println!(
+            "  [{id}] {label}: threshold={t}, exists={exists}, unlocked={unlocked}, passphrase={p}",
+            id = c.id,
+            label = c.label,
+            t = c.threshold,
+            p = c.has_passphrase,
+        );
+    }
+
+    let device_count = sigillum_fido2::hid::detect_devices();
+    println!("Devices present: {device_count}");
 }
 
-fn cmd_unlock(vault: &FileVault) {
-    if vault.is_unlocked() {
-        println!("Vault is already unlocked.");
-        return;
-    }
+// ── Unlock ──────────────────────────────────────────────────────
 
-    if !vault.vault_exists() {
-        eprintln!("No vault found. Run 'sigillum setup' first.");
-        process::exit(1);
-    }
-
-    // Auto-detect unlock method
+fn cmd_unlock() {
     let mgr = fido2_manager();
-    let method = mgr.unlock_method();
+    let config = mgr.load_config_raw();
 
-    match method.as_str() {
-        "fido2" => unlock_fido2(vault, &mgr),
-        "both" => {
-            // Check if FIDO2 device is present
-            if sigillum_fido2::hid::is_device_present() {
-                println!("FIDO2 device detected. Use hardware key or passphrase?");
-                println!("  1) Hardware key");
-                println!("  2) Passphrase");
-                eprint!("Choice [1]: ");
-                io::stderr().flush().unwrap();
-                let mut choice = String::new();
-                io::stdin().read_line(&mut choice).unwrap();
-                if choice.trim() == "2" {
-                    unlock_passphrase_wrapped(vault);
-                } else {
-                    unlock_fido2(vault, &mgr);
-                }
-            } else {
-                println!("No FIDO2 device detected. Using passphrase.");
-                unlock_passphrase_wrapped(vault);
-            }
-        }
-        _ => unlock_passphrase_direct(vault),
+    if config.compartments.is_empty() {
+        eprintln!("No compartments configured. Run 'sigillum setup' first.");
+        process::exit(1);
     }
-}
 
-fn unlock_passphrase_direct(vault: &FileVault) {
-    let passphrase = prompt_passphrase();
-    let salt = match std::fs::read(salt_path()) {
-        Ok(s) if s.len() == 32 => s,
-        _ => {
-            eprintln!("Cannot read salt file. Vault may be corrupted.");
-            process::exit(1);
+    let has_fido = !config.keys.is_empty();
+    let has_passphrase = config.compartments.iter().any(|c| c.passphrase_mode.is_some());
+
+    if has_fido && has_passphrase {
+        if sigillum_fido2::hid::is_device_present() {
+            println!("Choose unlock method:");
+            println!("  1) Hardware key (FIDO2)");
+            println!("  2) Passphrase");
+            eprint!("Choice [1]: ");
+            io::stderr().flush().unwrap();
+            let mut choice = String::new();
+            io::stdin().read_line(&mut choice).unwrap();
+            if choice.trim() == "2" {
+                unlock_passphrase(&config);
+            } else {
+                unlock_fido2(&mgr, &config);
+            }
+        } else {
+            println!("No FIDO2 device detected. Using passphrase.");
+            unlock_passphrase(&config);
         }
-    };
-
-    let master_key = derive_key_with_salt(&passphrase, &salt);
-    vault.load_master_key(master_key);
-
-    if vault.verify_master_key() {
-        println!("Vault unlocked.");
+    } else if has_fido {
+        unlock_fido2(&mgr, &config);
+    } else if has_passphrase {
+        unlock_passphrase(&config);
     } else {
-        vault.zeroize_master_key();
-        eprintln!("Wrong passphrase.");
+        eprintln!("No unlock method configured.");
         process::exit(1);
     }
 }
 
-fn unlock_passphrase_wrapped(vault: &FileVault) {
+fn unlock_passphrase(config: &sigillum_fido2::config::Fido2Config) {
     let passphrase = prompt_passphrase();
-    let salt = match std::fs::read(salt_path()) {
-        Ok(s) if s.len() == 32 => s,
-        _ => {
-            eprintln!("Cannot read salt file. Vault may be corrupted.");
-            process::exit(1);
-        }
-    };
 
-    let wrap_key = derive_key_with_salt(&passphrase, &salt);
-    match load_wrapped_master_key(&wrap_key) {
-        Some(master_key) => {
+    for comp in &config.compartments {
+        if comp.passphrase_mode.as_deref() != Some("wrapped") { continue; }
+
+        let salt = match std::fs::read(compartment_salt_path(comp.id)) {
+            Ok(s) if s.len() == 32 => s,
+            _ => continue,
+        };
+
+        let wrap_key = derive_key_with_salt(&passphrase, &salt);
+        if let Some(master_key) = load_wrapped_master_key(&wrap_key, &compartment_wrapped_key_path(comp.id)) {
+            let vault = vault_for_compartment(comp.id);
             vault.load_master_key(master_key);
             if vault.verify_master_key() {
-                println!("Vault unlocked (passphrase).");
-            } else {
-                vault.zeroize_master_key();
-                eprintln!("Decrypted key does not match vault. Vault may be corrupted.");
-                process::exit(1);
+                println!("Unlocked compartment \"{}\" (id={}).", comp.label, comp.id);
+                return;
             }
-        }
-        None => {
-            eprintln!("Wrong passphrase or corrupted wrapped key file.");
-            process::exit(1);
+            vault.zeroize_master_key();
         }
     }
+
+    eprintln!("No compartment matched this passphrase.");
+    process::exit(1);
 }
 
-fn unlock_fido2(vault: &FileVault, mgr: &Fido2Manager) {
+fn unlock_fido2(mgr: &Fido2Manager, config: &sigillum_fido2::config::Fido2Config) {
+    println!("Available compartments:");
+    for c in &config.compartments {
+        println!("  Tap {} key{} = \"{}\"", c.threshold, if c.threshold > 1 { "s" } else { "" }, c.label);
+    }
+    eprint!("Tap count: ");
+    io::stderr().flush().unwrap();
+    let mut taps_str = String::new();
+    io::stdin().read_line(&mut taps_str).unwrap();
+    let taps: usize = taps_str.trim().parse().unwrap_or_else(|_| {
+        eprintln!("Invalid tap count");
+        process::exit(1);
+    });
+
     let pin = prompt_pin();
     println!("Touch your FIDO2 key now...");
 
-    match mgr.authenticate_quorum(&[pin], None) {
-        Ok(master_key) => {
+    match mgr.authenticate_compartment(&[pin], taps, None) {
+        Ok((comp_id, master_key)) => {
+            let vault = vault_for_compartment(comp_id);
             vault.load_master_key(*master_key);
             if vault.verify_master_key() {
-                println!("Vault unlocked (FIDO2).");
+                let label = config.compartment_by_id(comp_id)
+                    .map(|c| c.label.as_str())
+                    .unwrap_or("unknown");
+                println!("Unlocked compartment \"{}\" (id={}).", label, comp_id);
             } else {
                 vault.zeroize_master_key();
-                eprintln!("FIDO2 key does not match vault. Keys may have changed.");
+                eprintln!("FIDO2 key does not match compartment vault.");
                 process::exit(1);
             }
         }
@@ -407,18 +453,34 @@ fn unlock_fido2(vault: &FileVault, mgr: &Fido2Manager) {
     }
 }
 
-fn cmd_lock(vault: &FileVault) {
-    vault.zeroize_master_key();
-    println!("Vault locked. Master key zeroized.");
+fn cmd_lock() {
+    let mgr = fido2_manager();
+    let config = mgr.load_config_raw();
+    for c in &config.compartments {
+        let vault = vault_for_compartment(c.id);
+        vault.zeroize_master_key();
+    }
+    println!("All compartments locked. Master keys zeroized.");
 }
 
-fn cmd_set(vault: &FileVault, args: &[String]) {
-    let key = require_arg(args, "set", "<KEY>");
-    if !vault.is_unlocked() {
-        eprintln!("Vault is locked. Run 'sigillum unlock' first.");
-        process::exit(1);
-    }
+// ── Secrets (operate on first unlocked compartment) ──────────────
 
+fn find_unlocked_vault() -> (usize, FileVault) {
+    let mgr = fido2_manager();
+    let config = mgr.load_config_raw();
+    for c in &config.compartments {
+        let vault = vault_for_compartment(c.id);
+        if vault.is_unlocked() {
+            return (c.id, vault);
+        }
+    }
+    eprintln!("No compartment is unlocked. Run 'sigillum unlock' first.");
+    process::exit(1);
+}
+
+fn cmd_set(args: &[String]) {
+    let key = require_arg(args, "set", "<KEY>");
+    let (_, vault) = find_unlocked_vault();
     let value = prompt_secret("Value: ");
     if let Err(e) = vault.set_secret(&key, &value) {
         eprintln!("Failed: {e}");
@@ -427,13 +489,9 @@ fn cmd_set(vault: &FileVault, args: &[String]) {
     println!("Secret '{key}' stored (Tier 2, encrypted).");
 }
 
-fn cmd_get(vault: &FileVault, args: &[String]) {
+fn cmd_get(args: &[String]) {
     let key = require_arg(args, "get", "<KEY>");
-    if !vault.is_unlocked() {
-        eprintln!("Vault is locked. Run 'sigillum unlock' first.");
-        process::exit(1);
-    }
-
+    let (_, vault) = find_unlocked_vault();
     match vault.get_secret(&key) {
         Some(val) => println!("{}", val.expose_secret()),
         None => {
@@ -443,13 +501,9 @@ fn cmd_get(vault: &FileVault, args: &[String]) {
     }
 }
 
-fn cmd_delete(vault: &FileVault, args: &[String]) {
+fn cmd_delete(args: &[String]) {
     let key = require_arg(args, "delete", "<KEY>");
-    if !vault.is_unlocked() {
-        eprintln!("Vault is locked. Run 'sigillum unlock' first.");
-        process::exit(1);
-    }
-
+    let (_, vault) = find_unlocked_vault();
     if let Err(e) = vault.delete_secret(&key) {
         eprintln!("Failed: {e}");
         process::exit(1);
@@ -457,43 +511,46 @@ fn cmd_delete(vault: &FileVault, args: &[String]) {
     println!("Secret '{key}' deleted.");
 }
 
-fn cmd_list(vault: &FileVault) {
-    let api_keys = vault.list_api_keys();
-    if !api_keys.is_empty() {
-        println!("=== Tier 1 (API Keys) ===");
-        for k in &api_keys {
-            println!("  {k}");
+fn cmd_list() {
+    let mgr = fido2_manager();
+    let config = mgr.load_config_raw();
+    let mut found_any = false;
+    for c in &config.compartments {
+        let vault = vault_for_compartment(c.id);
+        let api_keys = vault.list_api_keys();
+        if !api_keys.is_empty() {
+            println!("=== [{}: {}] Tier 1 (API Keys) ===", c.id, c.label);
+            for k in &api_keys { println!("  {k}"); }
+            found_any = true;
         }
-    }
-
-    if vault.is_unlocked() {
-        let secrets = vault.list_secrets();
-        if !secrets.is_empty() {
-            println!("=== Tier 2 (Encrypted Secrets) ===");
-            for k in &secrets {
-                println!("  {k}");
+        if vault.is_unlocked() {
+            let secrets = vault.list_secrets();
+            if !secrets.is_empty() {
+                println!("=== [{}: {}] Tier 2 (Encrypted Secrets) ===", c.id, c.label);
+                for k in &secrets { println!("  {k}"); }
+                found_any = true;
             }
         }
-        if api_keys.is_empty() && secrets.is_empty() {
-            println!("Vault is empty.");
-        }
-    } else {
-        println!("(Tier 2 secrets hidden — vault is locked)");
+    }
+    if !found_any {
+        println!("No keys found (unlock a compartment to see Tier 2 secrets).");
     }
 }
 
-fn cmd_set_api(vault: &FileVault, args: &[String]) {
+fn cmd_set_api(args: &[String]) {
     let key = require_arg(args, "set-api", "<KEY>");
+    let (_, vault) = find_unlocked_vault();
     let value = prompt_secret("Value: ");
     if let Err(e) = vault.set_api_key(&key, &value) {
         eprintln!("Failed: {e}");
         process::exit(1);
     }
-    println!("API key '{key}' stored (Tier 1, plaintext).");
+    println!("API key '{key}' stored (Tier 1).");
 }
 
-fn cmd_get_api(vault: &FileVault, args: &[String]) {
+fn cmd_get_api(args: &[String]) {
     let key = require_arg(args, "get-api", "<KEY>");
+    let (_, vault) = find_unlocked_vault();
     match vault.get_api_key(&key) {
         Some(val) => println!("{}", val.expose_secret()),
         None => {
@@ -503,8 +560,9 @@ fn cmd_get_api(vault: &FileVault, args: &[String]) {
     }
 }
 
-fn cmd_delete_api(vault: &FileVault, args: &[String]) {
+fn cmd_delete_api(args: &[String]) {
     let key = require_arg(args, "delete-api", "<KEY>");
+    let (_, vault) = find_unlocked_vault();
     if let Err(e) = vault.delete_api_key(&key) {
         eprintln!("Failed: {e}");
         process::exit(1);
@@ -512,23 +570,162 @@ fn cmd_delete_api(vault: &FileVault, args: &[String]) {
     println!("API key '{key}' deleted.");
 }
 
-// ── FIDO2 subcommands ────────────────────────────────────────────
+// ── Compartment subcommands ─────────────────────────────────────
 
-fn cmd_fido2(vault: &FileVault, args: &[String]) {
+fn cmd_compartment(args: &[String]) {
     if args.is_empty() {
-        eprintln!("Usage: sigillum fido2 <register|list|remove|set-quorum|status|unlock>");
+        eprintln!("Usage: sigillum compartment <list|add|remove|init>");
+        process::exit(1);
+    }
+
+    match args[0].as_str() {
+        "list" => compartment_list(),
+        "add" => compartment_add(&args[1..]),
+        "remove" => compartment_remove(&args[1..]),
+        "init" => compartment_init(&args[1..]),
+        other => {
+            eprintln!("Unknown compartment command: {other}");
+            process::exit(1);
+        }
+    }
+}
+
+fn compartment_list() {
+    let mgr = fido2_manager();
+    let config = mgr.load_config_raw();
+    if config.compartments.is_empty() {
+        println!("No compartments defined. Run 'sigillum setup' first.");
+        return;
+    }
+    println!("=== Compartments ===");
+    for c in &config.compartments {
+        let vault = vault_for_compartment(c.id);
+        let exists = vault.vault_exists();
+        let unlocked = vault.is_unlocked();
+        println!(
+            "  [{id}] {label}: threshold={t}, initialized={exists}, unlocked={unlocked}",
+            id = c.id, label = c.label, t = c.threshold,
+        );
+    }
+}
+
+fn compartment_add(args: &[String]) {
+    let label = parse_flag(args, "--label").unwrap_or_else(|| {
+        eprintln!("Usage: sigillum compartment add --label <L> --threshold <T>");
+        process::exit(1);
+    });
+    let threshold: usize = parse_flag(args, "--threshold")
+        .and_then(|s| s.parse().ok())
+        .unwrap_or_else(|| {
+            eprintln!("Usage: sigillum compartment add --label <L> --threshold <T>");
+            process::exit(1);
+        });
+
+    let mgr = fido2_manager();
+    let config = mgr.load_config_raw();
+    let id = config.next_compartment_id();
+
+    let def = CompartmentDef {
+        id,
+        label: label.clone(),
+        threshold,
+        passphrase_mode: None,
+    };
+
+    match mgr.add_compartment(def) {
+        Ok(()) => println!("Compartment \"{label}\" added (id={id}, threshold={threshold})."),
+        Err(e) => {
+            eprintln!("Failed: {e}");
+            process::exit(1);
+        }
+    }
+}
+
+fn compartment_remove(args: &[String]) {
+    let id: usize = parse_flag(args, "--id")
+        .and_then(|s| s.parse().ok())
+        .unwrap_or_else(|| {
+            eprintln!("Usage: sigillum compartment remove --id <N>");
+            process::exit(1);
+        });
+
+    let mgr = fido2_manager();
+    match mgr.remove_compartment(id) {
+        Ok(()) => println!("Compartment {id} removed."),
+        Err(e) => {
+            eprintln!("Failed: {e}");
+            process::exit(1);
+        }
+    }
+}
+
+fn compartment_init(args: &[String]) {
+    let id: usize = parse_flag(args, "--id")
+        .and_then(|s| s.parse().ok())
+        .unwrap_or_else(|| {
+            eprintln!("Usage: sigillum compartment init --id <N>");
+            process::exit(1);
+        });
+
+    let mgr = fido2_manager();
+    let config = mgr.load_config_raw();
+    let comp = config.compartment_by_id(id).unwrap_or_else(|| {
+        eprintln!("Compartment {id} not found.");
+        process::exit(1);
+    });
+
+    let vault = vault_for_compartment(id);
+    if vault.vault_exists() {
+        eprintln!("Compartment {id} already initialized.");
+        process::exit(1);
+    }
+
+    let passphrase = prompt_passphrase_confirm();
+
+    let mut master_key = [0u8; 32];
+    OsRng.fill_bytes(&mut master_key);
+
+    if let Err(e) = vault.initialize(&master_key) {
+        eprintln!("Failed: {e}");
+        process::exit(1);
+    }
+
+    let (wrap_key, salt) = derive_key_from_passphrase(&passphrase);
+    save_salt(&salt, &compartment_salt_path(id));
+    save_wrapped_master_key(&master_key, &wrap_key, &compartment_wrapped_key_path(id));
+
+    // Update passphrase_mode
+    if comp.passphrase_mode.is_none() {
+        let mut cfg = mgr.load_config_raw();
+        if let Some(c) = cfg.compartments.iter_mut().find(|c| c.id == id) {
+            c.passphrase_mode = Some("wrapped".into());
+        }
+        let _ = mgr.save_config_raw(&cfg);
+    }
+
+    zeroize::Zeroize::zeroize(&mut master_key);
+    println!("Compartment {} initialized.", comp.label);
+}
+
+// ── FIDO2 subcommands ───────────────────────────────────────────
+
+fn cmd_fido2(args: &[String]) {
+    if args.is_empty() {
+        eprintln!("Usage: sigillum fido2 <register|list|remove|status|unlock>");
         process::exit(1);
     }
 
     let mgr = fido2_manager();
 
     match args[0].as_str() {
-        "register" => fido2_register(vault, &mgr, &args[1..]),
+        "register" => fido2_register(&mgr, &args[1..]),
         "list" => fido2_list(&mgr),
-        "remove" => fido2_remove(vault, &mgr, &args[1..]),
-        "set-quorum" => fido2_set_quorum(&mgr, &args[1..]),
+        "remove" => fido2_remove(&mgr, &args[1..]),
         "status" => fido2_status(&mgr),
-        "unlock" => unlock_fido2(vault, &mgr),
+        "unlock" => {
+            let config = mgr.load_config_raw();
+            unlock_fido2(&mgr, &config);
+        }
         other => {
             eprintln!("Unknown fido2 command: {other}");
             process::exit(1);
@@ -536,38 +733,42 @@ fn cmd_fido2(vault: &FileVault, args: &[String]) {
     }
 }
 
-fn fido2_register(vault: &FileVault, mgr: &Fido2Manager, args: &[String]) {
+fn fido2_register(mgr: &Fido2Manager, args: &[String]) {
     let label = parse_label_arg(args, "register");
+    let config = mgr.load_config_raw();
 
-    if !vault.vault_exists() {
-        eprintln!("No vault found. Run 'sigillum setup' first.");
+    if config.compartments.is_empty() {
+        eprintln!("No compartments defined. Run 'sigillum setup' first.");
         process::exit(1);
     }
 
-    // Need master key for Nth key registration
-    let existing_mk = if mgr.is_enabled() {
+    // Need master keys for all compartments
+    let mut master_keys: Vec<(usize, Zeroizing<[u8; 32]>)> = Vec::new();
+    for c in &config.compartments {
+        let vault = vault_for_compartment(c.id);
         if !vault.is_unlocked() {
-            eprintln!("Vault must be unlocked to add another FIDO2 key.");
+            eprintln!("All compartments must be unlocked to register a new key.");
+            eprintln!("Compartment {} ({}) is locked.", c.id, c.label);
             process::exit(1);
         }
-        vault.extract_master_key()
-    } else {
-        // First FIDO2 key on an existing passphrase vault
-        if !vault.is_unlocked() {
-            eprintln!("Vault must be unlocked to register first FIDO2 key.");
-            process::exit(1);
+        match vault.extract_master_key() {
+            Some(mk) => master_keys.push((c.id, mk)),
+            None => {
+                eprintln!("Cannot extract master key from compartment {}.", c.id);
+                process::exit(1);
+            }
         }
-        vault.extract_master_key()
-    };
+    }
 
     let pin = prompt_pin();
     println!("Touch your FIDO2 key now...");
 
-    let mk_ref = existing_mk.as_ref().map(|k| &**k);
-    match mgr.register_key(&pin, &label, mk_ref) {
-        Ok(result) => {
-            println!("Key '{label}' registered ({} total).", result.total_keys);
-        }
+    let mk_refs: Vec<(usize, &[u8; 32])> = master_keys.iter()
+        .map(|(id, mk)| (*id, &**mk))
+        .collect();
+
+    match mgr.register_key(&pin, &label, &mk_refs) {
+        Ok(result) => println!("Key '{label}' registered ({} total).", result.total_keys),
         Err(e) => {
             eprintln!("Registration failed: {e}");
             process::exit(1);
@@ -581,55 +782,47 @@ fn fido2_list(mgr: &Fido2Manager) {
         println!("No FIDO2 keys registered.");
         return;
     }
-
     println!("=== Registered FIDO2 Keys ===");
     for k in &keys {
-        println!("  {} ({}...) — {}", k.label, k.credential_id_short, k.registered_at);
+        println!(
+            "  {} ({}...) — {} — compartments: {:?}",
+            k.label, k.credential_id_short, k.registered_at, k.compartment_ids,
+        );
     }
-    println!();
-    println!("Quorum threshold: {}", mgr.quorum_threshold());
 }
 
-fn fido2_remove(vault: &FileVault, mgr: &Fido2Manager, args: &[String]) {
+fn fido2_remove(mgr: &Fido2Manager, args: &[String]) {
     let label = parse_label_arg(args, "remove");
 
-    if !vault.is_unlocked() {
-        eprintln!("Vault must be unlocked to remove a key.");
-        process::exit(1);
+    // Need master keys for all compartments
+    let config = mgr.load_config_raw();
+    let mut master_keys: Vec<(usize, Zeroizing<[u8; 32]>)> = Vec::new();
+    for c in &config.compartments {
+        let vault = vault_for_compartment(c.id);
+        if !vault.is_unlocked() {
+            eprintln!("All compartments must be unlocked to remove a key.");
+            process::exit(1);
+        }
+        match vault.extract_master_key() {
+            Some(mk) => master_keys.push((c.id, mk)),
+            None => {
+                eprintln!("Cannot extract master key from compartment {}.", c.id);
+                process::exit(1);
+            }
+        }
     }
-
-    let master_key = vault.extract_master_key().unwrap_or_else(|| {
-        eprintln!("Cannot extract master key.");
-        process::exit(1);
-    });
 
     let pin = prompt_pin();
     println!("Tap remaining keys to re-encrypt shards...");
 
-    match mgr.remove_key(&label, &master_key, &pin) {
+    let mk_refs: Vec<(usize, &[u8; 32])> = master_keys.iter()
+        .map(|(id, mk)| (*id, &**mk))
+        .collect();
+
+    match mgr.remove_key(&label, &mk_refs, &pin) {
         Ok(()) => println!("Key '{label}' removed."),
         Err(e) => {
             eprintln!("Removal failed: {e}");
-            process::exit(1);
-        }
-    }
-}
-
-fn fido2_set_quorum(mgr: &Fido2Manager, args: &[String]) {
-    if args.is_empty() {
-        eprintln!("Usage: sigillum fido2 set-quorum <N>");
-        process::exit(1);
-    }
-
-    let threshold: usize = args[0].parse().unwrap_or_else(|_| {
-        eprintln!("Invalid threshold: {}", args[0]);
-        process::exit(1);
-    });
-
-    match mgr.set_quorum(threshold) {
-        Ok(()) => println!("Quorum threshold set to {threshold}."),
-        Err(e) => {
-            eprintln!("Failed: {e}");
             process::exit(1);
         }
     }
@@ -642,10 +835,14 @@ fn fido2_status(mgr: &Fido2Manager) {
     println!("=== FIDO2 STATUS ===");
     println!("Enabled:         {}", s.enabled);
     println!("Registered keys: {}", s.key_count);
-    println!("Quorum:          {}", s.quorum_threshold);
-    println!("Unlock method:   {}", s.unlock_method);
+    println!("Compartments:    {}", s.compartments.len());
+    for c in &s.compartments {
+        println!("  [{id}] {label}: threshold={t}", id = c.id, label = c.label, t = c.threshold);
+    }
     println!("Devices present: {device_count}");
 }
+
+// ── Daemon ──────────────────────────────────────────────────────
 
 fn cmd_daemon(args: &[String]) {
     let mut port: u16 = 9743;
@@ -672,36 +869,68 @@ fn cmd_daemon(args: &[String]) {
     }
 
     let addr: std::net::SocketAddr = ([127, 0, 0, 1], port).into();
-    let config = VaultConfig::default();
+    let base_dir = base_dir();
 
     let rt = tokio::runtime::Runtime::new().unwrap_or_else(|e| {
         eprintln!("Failed to start async runtime: {e}");
         process::exit(1);
     });
 
-    if let Err(e) = rt.block_on(sigillum_daemon::run(addr, config)) {
+    if let Err(e) = rt.block_on(sigillum_daemon::run(addr, base_dir)) {
         eprintln!("Daemon error: {e}");
         process::exit(1);
     }
 }
 
-// ── Helpers ───────────────────────────────────────────────────────
+// ── Helpers ─────────────────────────────────────────────────────
+
+fn base_dir() -> PathBuf {
+    dirs::home_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join(".sigillum")
+}
 
 fn fido2_manager() -> Fido2Manager {
-    let config_path = VaultConfig::default().base_dir.join("fido2_keys.json");
-    Fido2Manager::new(config_path)
+    Fido2Manager::new(base_dir().join("fido2_keys.json"))
+}
+
+fn vault_for_compartment(id: usize) -> FileVault {
+    let dir = base_dir().join("compartments").join(id.to_string());
+    FileVault::new(VaultConfig {
+        base_dir: dir,
+        tier1_file: "api_keys.json".into(),
+        tier2_file: "vault.enc".into(),
+    })
+}
+
+fn compartment_salt_path(id: usize) -> PathBuf {
+    base_dir().join("compartments").join(id.to_string()).join("passphrase.salt")
+}
+
+fn compartment_wrapped_key_path(id: usize) -> PathBuf {
+    base_dir().join("compartments").join(id.to_string()).join("passphrase_wrapped_key.enc")
+}
+
+fn any_vault_exists(config: &sigillum_fido2::config::Fido2Config) -> bool {
+    config.compartments.iter().any(|c| vault_for_compartment(c.id).vault_exists())
 }
 
 fn parse_label_arg(args: &[String], cmd: &str) -> String {
+    parse_flag(args, "--label").unwrap_or_else(|| {
+        eprintln!("Usage: sigillum fido2 {cmd} --label <LABEL>");
+        process::exit(1);
+    })
+}
+
+fn parse_flag(args: &[String], flag: &str) -> Option<String> {
     let mut i = 0;
     while i < args.len() {
-        if (args[i] == "--label" || args[i] == "-l") && i + 1 < args.len() {
-            return args[i + 1].clone();
+        if args[i] == flag && i + 1 < args.len() {
+            return Some(args[i + 1].clone());
         }
         i += 1;
     }
-    eprintln!("Usage: sigillum fido2 {cmd} --label <LABEL>");
-    process::exit(1);
+    None
 }
 
 fn require_arg(args: &[String], cmd: &str, placeholder: &str) -> String {
@@ -748,31 +977,22 @@ fn prompt_passphrase_confirm() -> Zeroizing<String> {
     p1
 }
 
-fn salt_path() -> std::path::PathBuf {
-    VaultConfig::default().base_dir.join("passphrase.salt")
-}
-
-fn wrapped_key_path() -> std::path::PathBuf {
-    VaultConfig::default().base_dir.join("passphrase_wrapped_key.enc")
-}
-
-fn save_salt(salt: &[u8; 32]) {
-    let salt_path = salt_path();
-    if let Some(dir) = salt_path.parent() {
+fn save_salt(salt: &[u8; 32], path: &std::path::Path) {
+    if let Some(dir) = path.parent() {
         let _ = std::fs::create_dir_all(dir);
     }
-    if let Err(e) = std::fs::write(&salt_path, salt) {
+    if let Err(e) = std::fs::write(path, salt) {
         eprintln!("Failed to save salt: {e}");
         process::exit(1);
     }
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        let _ = std::fs::set_permissions(&salt_path, std::fs::Permissions::from_mode(0o600));
+        let _ = std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600));
     }
 }
 
-fn save_wrapped_master_key(master_key: &[u8; 32], wrap_key: &[u8; 32]) {
+fn save_wrapped_master_key(master_key: &[u8; 32], wrap_key: &[u8; 32], path: &std::path::Path) {
     use aes_gcm::aead::Aead;
     use aes_gcm::{Aes256Gcm, KeyInit, Nonce};
 
@@ -788,37 +1008,32 @@ fn save_wrapped_master_key(master_key: &[u8; 32], wrap_key: &[u8; 32]) {
     output.extend_from_slice(&nonce_bytes);
     output.extend_from_slice(&ciphertext);
 
-    let path = wrapped_key_path();
     if let Some(dir) = path.parent() {
         let _ = std::fs::create_dir_all(dir);
     }
-    if let Err(e) = std::fs::write(&path, &output) {
+    if let Err(e) = std::fs::write(path, &output) {
         eprintln!("Failed to save wrapped key: {e}");
         process::exit(1);
     }
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600));
+        let _ = std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600));
     }
 }
 
-fn load_wrapped_master_key(wrap_key: &[u8; 32]) -> Option<[u8; 32]> {
+fn load_wrapped_master_key(wrap_key: &[u8; 32], path: &std::path::Path) -> Option<[u8; 32]> {
     use aes_gcm::aead::Aead;
     use aes_gcm::{Aes256Gcm, KeyInit, Nonce};
 
-    let data = std::fs::read(wrapped_key_path()).ok()?;
-    if data.len() < 12 {
-        return None;
-    }
+    let data = std::fs::read(path).ok()?;
+    if data.len() < 12 { return None; }
     let (nonce_bytes, ciphertext) = data.split_at(12);
     let cipher = Aes256Gcm::new_from_slice(wrap_key).ok()?;
     let plaintext = cipher
         .decrypt(Nonce::from_slice(nonce_bytes), ciphertext)
         .ok()?;
-    if plaintext.len() < 32 {
-        return None;
-    }
+    if plaintext.len() < 32 { return None; }
     let mut key = [0u8; 32];
     key.copy_from_slice(&plaintext[..32]);
     Some(key)
@@ -836,7 +1051,7 @@ fn derive_key_with_salt(passphrase: &str, salt: &[u8]) -> [u8; 32] {
     let argon2 = Argon2::new(
         argon2::Algorithm::Argon2id,
         argon2::Version::V0x13,
-        argon2::Params::new(65536, 3, 1, Some(32)).unwrap(), // 64MB, 3 iterations, 1 thread
+        argon2::Params::new(65536, 3, 1, Some(32)).unwrap(),
     );
     argon2
         .hash_password_into(passphrase.as_bytes(), salt, &mut key)

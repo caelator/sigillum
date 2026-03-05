@@ -30,6 +30,14 @@ fn sec_headers(mut resp: Response) -> Response {
     resp
 }
 
+fn err(status: StatusCode, msg: &str) -> Response {
+    sec_headers((status, Json(json!({ "error": msg }))).into_response())
+}
+
+fn ok_json(val: serde_json::Value) -> Response {
+    sec_headers(Json(val).into_response())
+}
+
 // ── Request bodies ───────────────────────────────────────────────
 
 #[derive(Deserialize)]
@@ -52,7 +60,15 @@ struct PassphraseBody {
 struct Fido2SetupBody {
     pin: String,
     label: String,
+    compartments: Vec<CompartmentDefBody>,
     passphrase: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct CompartmentDefBody {
+    label: String,
+    threshold: usize,
+    passphrase_mode: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -64,6 +80,7 @@ struct Fido2RegisterBody {
 #[derive(Deserialize)]
 struct Fido2UnlockBody {
     pins: Vec<String>,
+    tap_count: usize,
 }
 
 #[derive(Deserialize)]
@@ -73,8 +90,21 @@ struct Fido2RemoveBody {
 }
 
 #[derive(Deserialize)]
-struct Fido2QuorumBody {
+struct CompartmentAddBody {
+    label: String,
     threshold: usize,
+    passphrase_mode: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct CompartmentRemoveBody {
+    id: usize,
+}
+
+#[derive(Deserialize)]
+struct CompartmentInitBody {
+    id: usize,
+    passphrase: String,
 }
 
 // ── Router ───────────────────────────────────────────────────────
@@ -88,13 +118,17 @@ pub fn api_router() -> Router<Arc<AppState>> {
         // Lifecycle
         .route("/api/unlock", post(post_unlock))
         .route("/api/lock", post(post_lock))
-        .route("/api/init", post(post_init))
-        // Tier 1 — API keys
+        // Compartments
+        .route("/api/compartment/list", get(compartment_list))
+        .route("/api/compartment/add", post(compartment_add))
+        .route("/api/compartment/remove", post(compartment_remove))
+        .route("/api/compartment/init", post(compartment_init))
+        // Tier 1 — API keys (operate on active compartment)
         .route("/api/api-keys", get(list_api_keys))
         .route("/api/api-keys/get", post(get_api_key))
         .route("/api/api-keys/set", post(set_api_key))
         .route("/api/api-keys/delete", post(delete_api_key))
-        // Tier 2 — Encrypted secrets
+        // Tier 2 — Encrypted secrets (operate on active compartment)
         .route("/api/secrets", get(list_secrets))
         .route("/api/secrets/get", post(get_secret))
         .route("/api/secrets/set", post(set_secret))
@@ -107,7 +141,6 @@ pub fn api_router() -> Router<Arc<AppState>> {
         .route("/api/fido2/register", post(fido2_register))
         .route("/api/fido2/unlock", post(fido2_unlock))
         .route("/api/fido2/remove", post(fido2_remove))
-        .route("/api/fido2/set-quorum", post(fido2_set_quorum))
 }
 
 // ── Web UI ───────────────────────────────────────────────────────
@@ -119,239 +152,239 @@ async fn serve_ui() -> Html<&'static str> {
 // ── Status ───────────────────────────────────────────────────────
 
 async fn get_status(State(state): State<Arc<AppState>>) -> Response {
-    let vault = &state.vault;
-    let exists = vault.vault_exists();
-    let unlocked = vault.is_unlocked();
-    let api_key_count = vault.list_api_keys().len();
-    let secret_count = if unlocked {
-        Some(vault.list_secrets().len())
-    } else {
-        None
-    };
-
     let fido_status = state.fido2.status();
+    let active_id = state.active_compartment_id();
+    let any_exists = state.any_vault_exists();
 
-    sec_headers(
-        Json(json!({
-            "vault_exists": exists,
-            "unlocked": unlocked,
-            "api_key_count": api_key_count,
-            "secret_count": secret_count,
-            "fido2": {
-                "enabled": fido_status.enabled,
-                "key_count": fido_status.key_count,
-                "quorum_threshold": fido_status.quorum_threshold,
-                "unlock_method": fido_status.unlock_method,
-            }
-        }))
-        .into_response(),
-    )
+    let active_info = active_id.and_then(|id| {
+        state.with_vault(id, |v| {
+            json!({
+                "compartment_id": id,
+                "unlocked": v.is_unlocked(),
+                "api_key_count": v.list_api_keys().len(),
+                "secret_count": if v.is_unlocked() { Some(v.list_secrets().len()) } else { None },
+            })
+        })
+    });
+
+    ok_json(json!({
+        "any_vault_exists": any_exists,
+        "active_compartment": active_info,
+        "fido2": fido_status,
+    }))
 }
 
 // ── Lifecycle ────────────────────────────────────────────────────
-
-async fn post_init(
-    State(state): State<Arc<AppState>>,
-    Json(body): Json<PassphraseBody>,
-) -> Response {
-    let vault = &state.vault;
-
-    if vault.vault_exists() {
-        return sec_headers(
-            (
-                StatusCode::CONFLICT,
-                Json(json!({ "error": "Vault already exists. Delete it first to reinitialize." })),
-            )
-                .into_response(),
-        );
-    }
-
-    if body.passphrase.len() < 8 {
-        return sec_headers(
-            (
-                StatusCode::BAD_REQUEST,
-                Json(json!({ "error": "Passphrase must be at least 8 characters." })),
-            )
-                .into_response(),
-        );
-    }
-
-    let (master_key, salt) = derive_key_from_passphrase(&body.passphrase);
-
-    if let Err(e) = vault.initialize(&master_key) {
-        return sec_headers(
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({ "error": format!("Failed to initialize vault: {e}") })),
-            )
-                .into_response(),
-        );
-    }
-
-    // Save salt
-    let salt_path = state.salt_path();
-    if let Some(dir) = salt_path.parent() {
-        let _ = std::fs::create_dir_all(dir);
-    }
-    if let Err(e) = std::fs::write(salt_path, &salt) {
-        return sec_headers(
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({ "error": format!("Failed to save salt: {e}") })),
-            )
-                .into_response(),
-        );
-    }
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let _ = std::fs::set_permissions(salt_path, std::fs::Permissions::from_mode(0o600));
-    }
-
-    // Auto-unlock after init
-    vault.load_master_key(master_key);
-
-    sec_headers(
-        Json(json!({
-            "status": "initialized",
-            "message": "Vault created and unlocked. Remember your passphrase."
-        }))
-        .into_response(),
-    )
-}
 
 async fn post_unlock(
     State(state): State<Arc<AppState>>,
     Json(body): Json<PassphraseBody>,
 ) -> Response {
-    let vault = &state.vault;
-
-    if vault.is_unlocked() {
-        return sec_headers(Json(json!({ "status": "already_unlocked" })).into_response());
+    if state.active_compartment_id().is_some() {
+        return ok_json(json!({ "status": "already_unlocked" }));
     }
 
-    if !vault.vault_exists() {
-        return sec_headers(
-            (
-                StatusCode::NOT_FOUND,
-                Json(json!({ "error": "No vault found. POST /api/init first." })),
-            )
-                .into_response(),
-        );
+    if body.passphrase.is_empty() {
+        return err(StatusCode::BAD_REQUEST, "Passphrase required.");
     }
 
-    // Check if this is a "wrapped" passphrase mode
-    let fido_config = state.fido2.load_config_raw();
-    let is_wrapped = fido_config.passphrase_mode.as_deref() == Some("wrapped");
+    // Probe each compartment's wrapped key
+    let config = state.fido2.load_config_raw();
+    for comp in &config.compartments {
+        if comp.passphrase_mode.as_deref() != Some("wrapped") {
+            continue;
+        }
 
-    if is_wrapped {
-        let salt = match std::fs::read(state.salt_path()) {
+        let salt_path = state.salt_path(comp.id);
+        let wrapped_path = state.wrapped_key_path(comp.id);
+
+        let salt = match std::fs::read(&salt_path) {
             Ok(s) if s.len() == 32 => s,
-            _ => {
-                return sec_headers(
-                    (
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        Json(json!({ "error": "Cannot read salt file." })),
-                    )
-                        .into_response(),
-                );
-            }
+            _ => continue,
         };
+
         let wrap_key = derive_key_with_salt(&body.passphrase, &salt);
-        match load_wrapped_master_key(&wrap_key, state.wrapped_key_path()) {
-            Some(master_key) => {
-                vault.load_master_key(master_key);
-                if vault.verify_master_key() {
-                    return sec_headers(
-                        Json(json!({ "status": "unlocked", "method": "passphrase_wrapped" }))
-                            .into_response(),
-                    );
+        if let Some(master_key) = load_wrapped_master_key(&wrap_key, &wrapped_path) {
+            state.ensure_vault(comp.id);
+            let verified = state.with_vault(comp.id, |v| {
+                v.load_master_key(master_key);
+                let ok = v.verify_master_key();
+                if !ok {
+                    v.zeroize_master_key();
                 }
-                vault.zeroize_master_key();
-                return sec_headers(
-                    (
-                        StatusCode::UNAUTHORIZED,
-                        Json(json!({ "error": "Wrong passphrase." })),
-                    )
-                        .into_response(),
-                );
-            }
-            None => {
-                return sec_headers(
-                    (
-                        StatusCode::UNAUTHORIZED,
-                        Json(json!({ "error": "Wrong passphrase or corrupted wrapped key." })),
-                    )
-                        .into_response(),
-                );
+                ok
+            });
+
+            if verified == Some(true) {
+                state.set_active(Some(comp.id));
+                return ok_json(json!({
+                    "status": "unlocked",
+                    "method": "passphrase",
+                    "compartment_id": comp.id,
+                    "compartment_label": comp.label,
+                }));
             }
         }
     }
 
-    // Direct mode (legacy)
-    let salt = match std::fs::read(state.salt_path()) {
-        Ok(s) if s.len() == 32 => s,
-        _ => {
-            return sec_headers(
-                (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(json!({ "error": "Cannot read salt file. Vault may be corrupted." })),
-                )
-                    .into_response(),
-            );
-        }
-    };
-
-    let master_key = derive_key_with_salt(&body.passphrase, &salt);
-    vault.load_master_key(master_key);
-
-    if vault.verify_master_key() {
-        sec_headers(Json(json!({ "status": "unlocked", "method": "passphrase" })).into_response())
-    } else {
-        vault.zeroize_master_key();
-        sec_headers(
-            (
-                StatusCode::UNAUTHORIZED,
-                Json(json!({ "error": "Wrong passphrase." })),
-            )
-                .into_response(),
-        )
-    }
+    err(StatusCode::UNAUTHORIZED, "No compartment matched this passphrase.")
 }
 
 async fn post_lock(State(state): State<Arc<AppState>>) -> Response {
-    state.vault.zeroize_master_key();
-    sec_headers(
-        Json(json!({
-            "status": "locked",
-            "message": "Master key zeroized."
-        }))
-        .into_response(),
-    )
+    state.lock_all();
+    ok_json(json!({
+        "status": "locked",
+        "message": "All compartments locked. Master keys zeroized."
+    }))
 }
 
-// ── Tier 1: API Keys ────────────────────────────────────────────
+// ── Compartments ────────────────────────────────────────────────
+
+async fn compartment_list(State(state): State<Arc<AppState>>) -> Response {
+    let config = state.fido2.load_config_raw();
+    let active = state.active_compartment_id();
+
+    let compartments: Vec<_> = config.compartments.iter().map(|c| {
+        let exists = state.with_vault(c.id, |v| v.vault_exists()).unwrap_or(false);
+        json!({
+            "id": c.id,
+            "label": c.label,
+            "threshold": c.threshold,
+            "passphrase_mode": c.passphrase_mode,
+            "vault_exists": exists,
+            "is_active": active == Some(c.id),
+        })
+    }).collect();
+
+    ok_json(json!({ "compartments": compartments }))
+}
+
+async fn compartment_add(
+    State(state): State<Arc<AppState>>,
+    Json(body): Json<CompartmentAddBody>,
+) -> Response {
+    if body.label.is_empty() {
+        return err(StatusCode::BAD_REQUEST, "label is required");
+    }
+    if body.threshold == 0 {
+        return err(StatusCode::BAD_REQUEST, "threshold must be >= 1");
+    }
+
+    let config = state.fido2.load_config_raw();
+    let id = config.next_compartment_id();
+
+    let def = sigillum_fido2::config::CompartmentDef {
+        id,
+        label: body.label.clone(),
+        threshold: body.threshold,
+        passphrase_mode: body.passphrase_mode.clone(),
+    };
+
+    match state.fido2.add_compartment(def) {
+        Ok(()) => {
+            state.ensure_vault(id);
+            ok_json(json!({
+                "status": "added",
+                "id": id,
+                "label": body.label,
+                "threshold": body.threshold,
+            }))
+        }
+        Err(e) => err(StatusCode::BAD_REQUEST, &e.to_string()),
+    }
+}
+
+async fn compartment_remove(
+    State(state): State<Arc<AppState>>,
+    Json(body): Json<CompartmentRemoveBody>,
+) -> Response {
+    match state.fido2.remove_compartment(body.id) {
+        Ok(()) => ok_json(json!({ "status": "removed", "id": body.id })),
+        Err(e) => err(StatusCode::BAD_REQUEST, &e.to_string()),
+    }
+}
+
+async fn compartment_init(
+    State(state): State<Arc<AppState>>,
+    Json(body): Json<CompartmentInitBody>,
+) -> Response {
+    if body.passphrase.len() < 8 {
+        return err(StatusCode::BAD_REQUEST, "Passphrase must be at least 8 characters.");
+    }
+
+    let config = state.fido2.load_config_raw();
+    let comp = match config.compartment_by_id(body.id) {
+        Some(c) => c.clone(),
+        None => return err(StatusCode::NOT_FOUND, &format!("Compartment {} not found", body.id)),
+    };
+
+    state.ensure_vault(body.id);
+
+    let already = state.with_vault(body.id, |v| v.vault_exists()).unwrap_or(false);
+    if already {
+        return err(StatusCode::CONFLICT, "Compartment vault already initialized.");
+    }
+
+    // Generate random master key, wrap with passphrase
+    use rand::RngCore;
+    let mut master_key = [0u8; 32];
+    rand::rngs::OsRng.fill_bytes(&mut master_key);
+
+    let (wrap_key, salt) = derive_key_from_passphrase(&body.passphrase);
+
+    // Initialize vault
+    let init_result = state.with_vault(body.id, |v| v.initialize(&master_key));
+    match init_result {
+        Some(Ok(())) => {}
+        Some(Err(e)) => return err(StatusCode::INTERNAL_SERVER_ERROR, &format!("Init failed: {e}")),
+        None => return err(StatusCode::INTERNAL_SERVER_ERROR, "Vault not found"),
+    }
+
+    // Save salt and wrapped key
+    let salt_path = state.salt_path(body.id);
+    let wrapped_path = state.wrapped_key_path(body.id);
+    save_salt(&salt, &salt_path);
+    save_wrapped_master_key(&master_key, &wrap_key, &wrapped_path);
+
+    // Update compartment passphrase_mode if needed
+    if comp.passphrase_mode.is_none() {
+        let mut cfg = state.fido2.load_config_raw();
+        if let Some(c) = cfg.compartments.iter_mut().find(|c| c.id == body.id) {
+            c.passphrase_mode = Some("wrapped".into());
+        }
+        let _ = state.fido2.save_config_raw(&cfg);
+    }
+
+    // Auto-unlock
+    state.unlock_compartment(body.id, master_key);
+
+    // Zeroize local copy
+    zeroize::Zeroize::zeroize(&mut master_key);
+
+    ok_json(json!({
+        "status": "initialized",
+        "compartment_id": body.id,
+        "compartment_label": comp.label,
+    }))
+}
+
+// ── Tier 1: API Keys (active compartment) ──────────────────────
 
 async fn list_api_keys(State(state): State<Arc<AppState>>) -> Response {
-    let keys = state.vault.list_api_keys();
-    sec_headers(Json(json!({ "keys": keys })).into_response())
+    match state.with_active_vault(|v| v.list_api_keys()) {
+        Some(keys) => ok_json(json!({ "keys": keys })),
+        None => err(StatusCode::FORBIDDEN, "No active compartment."),
+    }
 }
 
 async fn get_api_key(
     State(state): State<Arc<AppState>>,
     Json(body): Json<KeyOnly>,
 ) -> Response {
-    match state.vault.get_api_key(&body.key) {
-        Some(val) => sec_headers(
-            Json(json!({ "key": body.key, "value": val.expose_secret() })).into_response(),
-        ),
-        None => sec_headers(
-            (
-                StatusCode::NOT_FOUND,
-                Json(json!({ "error": format!("API key '{}' not found", body.key) })),
-            )
-                .into_response(),
-        ),
+    match state.with_active_vault(|v| v.get_api_key(&body.key).map(|s| s.expose_secret().to_string())) {
+        Some(Some(val)) => ok_json(json!({ "key": body.key, "value": val })),
+        Some(None) => err(StatusCode::NOT_FOUND, &format!("API key '{}' not found", body.key)),
+        None => err(StatusCode::FORBIDDEN, "No active compartment."),
     }
 }
 
@@ -360,29 +393,14 @@ async fn set_api_key(
     Json(body): Json<KeyValue>,
 ) -> Response {
     let value = match &body.value {
-        Some(v) if !v.is_empty() => v,
-        _ => {
-            return sec_headers(
-                (
-                    StatusCode::BAD_REQUEST,
-                    Json(json!({ "error": "value is required" })),
-                )
-                    .into_response(),
-            );
-        }
+        Some(v) if !v.is_empty() => v.clone(),
+        _ => return err(StatusCode::BAD_REQUEST, "value is required"),
     };
 
-    match state.vault.set_api_key(&body.key, value) {
-        Ok(()) => sec_headers(
-            Json(json!({ "status": "ok", "key": body.key, "tier": 1 })).into_response(),
-        ),
-        Err(e) => sec_headers(
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({ "error": e.to_string() })),
-            )
-                .into_response(),
-        ),
+    match state.with_active_vault(|v| v.set_api_key(&body.key, &value)) {
+        Some(Ok(())) => ok_json(json!({ "status": "ok", "key": body.key, "tier": 1 })),
+        Some(Err(e)) => err(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()),
+        None => err(StatusCode::FORBIDDEN, "No active compartment."),
     }
 }
 
@@ -390,61 +408,41 @@ async fn delete_api_key(
     State(state): State<Arc<AppState>>,
     Json(body): Json<KeyOnly>,
 ) -> Response {
-    match state.vault.delete_api_key(&body.key) {
-        Ok(()) => sec_headers(
-            Json(json!({ "status": "deleted", "key": body.key })).into_response(),
-        ),
-        Err(e) => sec_headers(
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({ "error": e.to_string() })),
-            )
-                .into_response(),
-        ),
+    match state.with_active_vault(|v| v.delete_api_key(&body.key)) {
+        Some(Ok(())) => ok_json(json!({ "status": "deleted", "key": body.key })),
+        Some(Err(e)) => err(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()),
+        None => err(StatusCode::FORBIDDEN, "No active compartment."),
     }
 }
 
-// ── Tier 2: Encrypted Secrets ───────────────────────────────────
+// ── Tier 2: Encrypted Secrets (active compartment) ─────────────
 
 async fn list_secrets(State(state): State<Arc<AppState>>) -> Response {
-    if !state.vault.is_unlocked() {
-        return sec_headers(
-            (
-                StatusCode::FORBIDDEN,
-                Json(json!({ "error": "Vault is locked." })),
-            )
-                .into_response(),
-        );
+    match state.with_active_vault(|v| {
+        if !v.is_unlocked() { return Err("locked"); }
+        Ok(v.list_secrets())
+    }) {
+        Some(Ok(keys)) => ok_json(json!({ "keys": keys })),
+        Some(Err(_)) => err(StatusCode::FORBIDDEN, "Vault is locked."),
+        None => err(StatusCode::FORBIDDEN, "No active compartment."),
     }
-    let keys = state.vault.list_secrets();
-    sec_headers(Json(json!({ "keys": keys })).into_response())
 }
 
 async fn get_secret(
     State(state): State<Arc<AppState>>,
     Json(body): Json<KeyOnly>,
 ) -> Response {
-    if !state.vault.is_unlocked() {
-        return sec_headers(
-            (
-                StatusCode::FORBIDDEN,
-                Json(json!({ "error": "Vault is locked." })),
-            )
-                .into_response(),
-        );
-    }
-
-    match state.vault.get_secret(&body.key) {
-        Some(val) => sec_headers(
-            Json(json!({ "key": body.key, "value": val.expose_secret() })).into_response(),
-        ),
-        None => sec_headers(
-            (
-                StatusCode::NOT_FOUND,
-                Json(json!({ "error": format!("Secret '{}' not found", body.key) })),
-            )
-                .into_response(),
-        ),
+    match state.with_active_vault(|v| {
+        if !v.is_unlocked() { return Err("locked"); }
+        match v.get_secret(&body.key) {
+            Some(val) => Ok(val.expose_secret().to_string()),
+            None => Err("not_found"),
+        }
+    }) {
+        Some(Ok(val)) => ok_json(json!({ "key": body.key, "value": val })),
+        Some(Err("locked")) => err(StatusCode::FORBIDDEN, "Vault is locked."),
+        Some(Err(_)) => err(StatusCode::NOT_FOUND, &format!("Secret '{}' not found", body.key)),
+        None => err(StatusCode::FORBIDDEN, "No active compartment."),
     }
 }
 
@@ -452,40 +450,19 @@ async fn set_secret(
     State(state): State<Arc<AppState>>,
     Json(body): Json<KeyValue>,
 ) -> Response {
-    if !state.vault.is_unlocked() {
-        return sec_headers(
-            (
-                StatusCode::FORBIDDEN,
-                Json(json!({ "error": "Vault is locked." })),
-            )
-                .into_response(),
-        );
-    }
-
     let value = match &body.value {
-        Some(v) if !v.is_empty() => v,
-        _ => {
-            return sec_headers(
-                (
-                    StatusCode::BAD_REQUEST,
-                    Json(json!({ "error": "value is required" })),
-                )
-                    .into_response(),
-            );
-        }
+        Some(v) if !v.is_empty() => v.clone(),
+        _ => return err(StatusCode::BAD_REQUEST, "value is required"),
     };
 
-    match state.vault.set_secret(&body.key, value) {
-        Ok(()) => sec_headers(
-            Json(json!({ "status": "ok", "key": body.key, "tier": 2 })).into_response(),
-        ),
-        Err(e) => sec_headers(
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({ "error": e.to_string() })),
-            )
-                .into_response(),
-        ),
+    match state.with_active_vault(|v| {
+        if !v.is_unlocked() { return Err("locked".to_string()); }
+        v.set_secret(&body.key, &value).map_err(|e| e.to_string())
+    }) {
+        Some(Ok(())) => ok_json(json!({ "status": "ok", "key": body.key, "tier": 2 })),
+        Some(Err(ref e)) if e == "locked" => err(StatusCode::FORBIDDEN, "Vault is locked."),
+        Some(Err(e)) => err(StatusCode::INTERNAL_SERVER_ERROR, &e),
+        None => err(StatusCode::FORBIDDEN, "No active compartment."),
     }
 }
 
@@ -493,27 +470,14 @@ async fn delete_secret(
     State(state): State<Arc<AppState>>,
     Json(body): Json<KeyOnly>,
 ) -> Response {
-    if !state.vault.is_unlocked() {
-        return sec_headers(
-            (
-                StatusCode::FORBIDDEN,
-                Json(json!({ "error": "Vault is locked." })),
-            )
-                .into_response(),
-        );
-    }
-
-    match state.vault.delete_secret(&body.key) {
-        Ok(()) => sec_headers(
-            Json(json!({ "status": "deleted", "key": body.key })).into_response(),
-        ),
-        Err(e) => sec_headers(
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({ "error": e.to_string() })),
-            )
-                .into_response(),
-        ),
+    match state.with_active_vault(|v| {
+        if !v.is_unlocked() { return Err("locked".to_string()); }
+        v.delete_secret(&body.key).map_err(|e| e.to_string())
+    }) {
+        Some(Ok(())) => ok_json(json!({ "status": "deleted", "key": body.key })),
+        Some(Err(ref e)) if e == "locked" => err(StatusCode::FORBIDDEN, "Vault is locked."),
+        Some(Err(e)) => err(StatusCode::INTERNAL_SERVER_ERROR, &e),
+        None => err(StatusCode::FORBIDDEN, "No active compartment."),
     }
 }
 
@@ -521,99 +485,93 @@ async fn delete_secret(
 
 async fn fido2_status(State(state): State<Arc<AppState>>) -> Response {
     let s = state.fido2.status();
-    sec_headers(Json(json!(s)).into_response())
+    ok_json(json!(s))
 }
 
 async fn fido2_detect() -> Response {
     let count = sigillum_fido2::hid::detect_devices();
-    sec_headers(
-        Json(json!({
-            "device_present": count > 0,
-            "device_count": count,
-        }))
-        .into_response(),
-    )
+    ok_json(json!({
+        "device_present": count > 0,
+        "device_count": count,
+    }))
 }
 
 async fn fido2_list(State(state): State<Arc<AppState>>) -> Response {
     let keys = state.fido2.list_keys();
-    sec_headers(Json(json!({ "keys": keys })).into_response())
+    ok_json(json!({ "keys": keys }))
 }
 
 async fn fido2_setup(
     State(state): State<Arc<AppState>>,
     Json(body): Json<Fido2SetupBody>,
 ) -> Response {
-    let vault = &state.vault;
-
-    if vault.vault_exists() {
-        return sec_headers(
-            (
-                StatusCode::CONFLICT,
-                Json(json!({ "error": "Vault already exists. Use /api/fido2/register to add keys." })),
-            )
-                .into_response(),
-        );
+    if state.any_vault_exists() {
+        return err(StatusCode::CONFLICT, "Vaults already exist. Use /api/fido2/register to add keys.");
     }
 
     if body.label.is_empty() {
-        return sec_headers(
-            (
-                StatusCode::BAD_REQUEST,
-                Json(json!({ "error": "label is required" })),
-            )
-                .into_response(),
-        );
+        return err(StatusCode::BAD_REQUEST, "label is required");
+    }
+    if body.compartments.is_empty() {
+        return err(StatusCode::BAD_REQUEST, "at least one compartment required");
     }
 
-    // Register first FIDO2 key
-    match state.fido2.register_key(&body.pin, &body.label, None) {
+    // Create compartment definitions
+    for (i, comp) in body.compartments.iter().enumerate() {
+        let def = sigillum_fido2::config::CompartmentDef {
+            id: i,
+            label: comp.label.clone(),
+            threshold: comp.threshold,
+            passphrase_mode: comp.passphrase_mode.clone(),
+        };
+        if let Err(e) = state.fido2.add_compartment(def) {
+            return err(StatusCode::BAD_REQUEST, &format!("Compartment error: {e}"));
+        }
+    }
+
+    // Register first FIDO2 key (no existing master keys — will generate them)
+    match state.fido2.register_key(&body.pin, &body.label, &[]) {
         Ok(result) => {
-            // Initialize vault with generated master key
-            if let Err(e) = vault.initialize(&result.master_key) {
-                return sec_headers(
-                    (
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        Json(json!({ "error": format!("Failed to initialize vault: {e}") })),
-                    )
-                        .into_response(),
-                );
-            }
-
-            // Auto-unlock
-            vault.load_master_key(*result.master_key);
-
-            // Optionally set passphrase fallback
-            if let Some(ref passphrase) = body.passphrase {
-                if passphrase.len() >= 8 {
-                    let (wrap_key, salt) = derive_key_from_passphrase(passphrase);
-                    save_salt(&salt, state.salt_path());
-                    save_wrapped_master_key(&result.master_key, &wrap_key, state.wrapped_key_path());
-
-                    let mut config = state.fido2.load_config_raw();
-                    config.unlock_method = "both".into();
-                    config.passphrase_mode = Some("wrapped".into());
-                    let _ = state.fido2.save_config_raw(&config);
+            // Initialize each compartment vault with its generated master key
+            for (comp_id, mk) in &result.compartment_keys {
+                state.ensure_vault(*comp_id);
+                let init_result = state.with_vault(*comp_id, |v| v.initialize(mk));
+                if let Some(Err(e)) = init_result {
+                    return err(StatusCode::INTERNAL_SERVER_ERROR, &format!("Failed to init compartment {comp_id}: {e}"));
                 }
             }
 
-            sec_headers(
-                Json(json!({
-                    "status": "setup_complete",
-                    "is_first_key": result.is_first_key,
-                    "total_keys": result.total_keys,
-                    "unlocked": true,
-                }))
-                .into_response(),
-            )
+            // Set up passphrase fallback if provided
+            if let Some(ref passphrase) = body.passphrase {
+                if passphrase.len() >= 8 {
+                    for (comp_id, mk) in &result.compartment_keys {
+                        let (wrap_key, salt) = derive_key_from_passphrase(passphrase);
+                        save_salt(&salt, &state.salt_path(*comp_id));
+                        save_wrapped_master_key(mk, &wrap_key, &state.wrapped_key_path(*comp_id));
+                    }
+                    // Update compartments to have wrapped passphrase mode
+                    let mut cfg = state.fido2.load_config_raw();
+                    for c in &mut cfg.compartments {
+                        c.passphrase_mode = Some("wrapped".into());
+                    }
+                    let _ = state.fido2.save_config_raw(&cfg);
+                }
+            }
+
+            // Auto-unlock first compartment
+            if let Some((comp_id, mk)) = result.compartment_keys.first() {
+                state.unlock_compartment(*comp_id, **mk);
+            }
+
+            ok_json(json!({
+                "status": "setup_complete",
+                "is_first_key": result.is_first_key,
+                "total_keys": result.total_keys,
+                "compartments": body.compartments.len(),
+                "unlocked": true,
+            }))
         }
-        Err(e) => sec_headers(
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({ "error": format!("FIDO2 setup failed: {e}") })),
-            )
-                .into_response(),
-        ),
+        Err(e) => err(StatusCode::INTERNAL_SERVER_ERROR, &format!("FIDO2 setup failed: {e}")),
     }
 }
 
@@ -621,47 +579,27 @@ async fn fido2_register(
     State(state): State<Arc<AppState>>,
     Json(body): Json<Fido2RegisterBody>,
 ) -> Response {
-    let vault = &state.vault;
-
-    if !vault.vault_exists() {
-        return sec_headers(
-            (
-                StatusCode::NOT_FOUND,
-                Json(json!({ "error": "No vault found. Use /api/fido2/setup first." })),
-            )
-                .into_response(),
-        );
+    if !state.any_vault_exists() {
+        return err(StatusCode::NOT_FOUND, "No vaults found. Use /api/fido2/setup first.");
     }
 
-    if !vault.is_unlocked() {
-        return sec_headers(
-            (
-                StatusCode::FORBIDDEN,
-                Json(json!({ "error": "Vault must be unlocked to register a key." })),
-            )
-                .into_response(),
-        );
+    // All compartments must be unlocked to re-encrypt shards
+    let master_keys = state.extract_all_master_keys();
+    if master_keys.is_empty() {
+        return err(StatusCode::FORBIDDEN, "At least one compartment must be unlocked.");
     }
 
-    let existing_mk = vault.extract_master_key();
-    let mk_ref = existing_mk.as_ref().map(|k| &**k);
+    let mk_refs: Vec<(usize, &[u8; 32])> = master_keys.iter()
+        .map(|(id, mk)| (*id, &**mk))
+        .collect();
 
-    match state.fido2.register_key(&body.pin, &body.label, mk_ref) {
-        Ok(result) => sec_headers(
-            Json(json!({
-                "status": "registered",
-                "label": body.label,
-                "total_keys": result.total_keys,
-            }))
-            .into_response(),
-        ),
-        Err(e) => sec_headers(
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({ "error": format!("Registration failed: {e}") })),
-            )
-                .into_response(),
-        ),
+    match state.fido2.register_key(&body.pin, &body.label, &mk_refs) {
+        Ok(result) => ok_json(json!({
+            "status": "registered",
+            "label": body.label,
+            "total_keys": result.total_keys,
+        })),
+        Err(e) => err(StatusCode::INTERNAL_SERVER_ERROR, &format!("Registration failed: {e}")),
     }
 }
 
@@ -669,57 +607,47 @@ async fn fido2_unlock(
     State(state): State<Arc<AppState>>,
     Json(body): Json<Fido2UnlockBody>,
 ) -> Response {
-    let vault = &state.vault;
-
-    if vault.is_unlocked() {
-        return sec_headers(Json(json!({ "status": "already_unlocked" })).into_response());
-    }
-
-    if !vault.vault_exists() {
-        return sec_headers(
-            (
-                StatusCode::NOT_FOUND,
-                Json(json!({ "error": "No vault found." })),
-            )
-                .into_response(),
-        );
+    if state.active_compartment_id().is_some() {
+        return ok_json(json!({ "status": "already_unlocked" }));
     }
 
     if body.pins.is_empty() {
-        return sec_headers(
-            (
-                StatusCode::BAD_REQUEST,
-                Json(json!({ "error": "At least one PIN required." })),
-            )
-                .into_response(),
-        );
+        return err(StatusCode::BAD_REQUEST, "At least one PIN required.");
+    }
+    if body.tap_count == 0 {
+        return err(StatusCode::BAD_REQUEST, "tap_count must be >= 1.");
     }
 
-    match state.fido2.authenticate_quorum(&body.pins, None) {
-        Ok(master_key) => {
-            vault.load_master_key(*master_key);
-            if vault.verify_master_key() {
-                sec_headers(
-                    Json(json!({ "status": "unlocked", "method": "fido2" })).into_response(),
-                )
+    match state.fido2.authenticate_compartment(&body.pins, body.tap_count, None) {
+        Ok((comp_id, master_key)) => {
+            state.ensure_vault(comp_id);
+            let verified = state.with_vault(comp_id, |v| {
+                v.load_master_key(*master_key);
+                let ok = v.verify_master_key();
+                if !ok {
+                    v.zeroize_master_key();
+                }
+                ok
+            });
+
+            if verified == Some(true) {
+                state.set_active(Some(comp_id));
+                let config = state.fido2.load_config_raw();
+                let label = config.compartment_by_id(comp_id)
+                    .map(|c| c.label.clone())
+                    .unwrap_or_default();
+
+                ok_json(json!({
+                    "status": "unlocked",
+                    "method": "fido2",
+                    "compartment_id": comp_id,
+                    "compartment_label": label,
+                }))
             } else {
-                vault.zeroize_master_key();
-                sec_headers(
-                    (
-                        StatusCode::UNAUTHORIZED,
-                        Json(json!({ "error": "FIDO2 key does not match vault." })),
-                    )
-                        .into_response(),
-                )
+                err(StatusCode::UNAUTHORIZED, "FIDO2 key does not match compartment vault.")
             }
         }
-        Err(e) => sec_headers(
-            (
-                StatusCode::UNAUTHORIZED,
-                Json(json!({ "error": format!("FIDO2 unlock failed: {e}") })),
-            )
-                .into_response(),
-        ),
+        Err(e) => err(StatusCode::UNAUTHORIZED, &format!("FIDO2 unlock failed: {e}")),
     }
 }
 
@@ -727,60 +655,18 @@ async fn fido2_remove(
     State(state): State<Arc<AppState>>,
     Json(body): Json<Fido2RemoveBody>,
 ) -> Response {
-    let vault = &state.vault;
-
-    if !vault.is_unlocked() {
-        return sec_headers(
-            (
-                StatusCode::FORBIDDEN,
-                Json(json!({ "error": "Vault must be unlocked." })),
-            )
-                .into_response(),
-        );
+    let master_keys = state.extract_all_master_keys();
+    if master_keys.is_empty() {
+        return err(StatusCode::FORBIDDEN, "At least one compartment must be unlocked.");
     }
 
-    let master_key = match vault.extract_master_key() {
-        Some(mk) => mk,
-        None => {
-            return sec_headers(
-                (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(json!({ "error": "Cannot extract master key." })),
-                )
-                    .into_response(),
-            );
-        }
-    };
+    let mk_refs: Vec<(usize, &[u8; 32])> = master_keys.iter()
+        .map(|(id, mk)| (*id, &**mk))
+        .collect();
 
-    match state.fido2.remove_key(&body.label, &master_key, &body.pin) {
-        Ok(()) => sec_headers(
-            Json(json!({ "status": "removed", "label": body.label })).into_response(),
-        ),
-        Err(e) => sec_headers(
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({ "error": format!("Removal failed: {e}") })),
-            )
-                .into_response(),
-        ),
-    }
-}
-
-async fn fido2_set_quorum(
-    State(state): State<Arc<AppState>>,
-    Json(body): Json<Fido2QuorumBody>,
-) -> Response {
-    match state.fido2.set_quorum(body.threshold) {
-        Ok(()) => sec_headers(
-            Json(json!({ "status": "ok", "threshold": body.threshold })).into_response(),
-        ),
-        Err(e) => sec_headers(
-            (
-                StatusCode::BAD_REQUEST,
-                Json(json!({ "error": format!("{e}") })),
-            )
-                .into_response(),
-        ),
+    match state.fido2.remove_key(&body.label, &mk_refs, &body.pin) {
+        Ok(()) => ok_json(json!({ "status": "removed", "label": body.label })),
+        Err(e) => err(StatusCode::INTERNAL_SERVER_ERROR, &format!("Removal failed: {e}")),
     }
 }
 

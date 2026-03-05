@@ -25,3 +25,4 @@ aes-gcm = { workspace = true }
 rand = { workspace = true }
 zeroize = { workspace = true }
 tokio = { workspace = true }
+dirs = { workspace = true }

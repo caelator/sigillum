@@ -29,6 +29,9 @@ pub enum VaultError {
     #[error("quorum not met: need {required}, have {provided}")]
     QuorumNotMet { required: usize, provided: usize },
 
+    #[error("compartment not found: {id}")]
+    CompartmentNotFound { id: usize },
+
     #[error("{0}")]
     Other(String),
 }
