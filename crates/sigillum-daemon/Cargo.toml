@@ -12,7 +12,9 @@ categories = ["cryptography", "web-programming"]
 
 [dependencies]
 sigillum-core = { workspace = true, features = ["file-backend"] }
+sigillum-fido2 = { workspace = true }
 axum = { workspace = true }
+aes-gcm = { workspace = true }
 tower-http = { workspace = true }
 tokio = { workspace = true }
 serde = { workspace = true }

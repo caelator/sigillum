@@ -1,4 +1,5 @@
 use secrecy::SecretString;
+use zeroize::Zeroizing;
 
 use crate::VaultError;
 
@@ -37,4 +38,8 @@ pub trait VaultLifecycle: SecretStore {
     fn load_master_key(&self, key: [u8; 32]);
     fn zeroize_master_key(&self);
     fn initialize(&self, master_key: &[u8; 32]) -> Result<(), VaultError>;
+
+    /// Extract a copy of the master key (for FIDO2 re-splitting on Nth key registration).
+    /// Returns `None` if locked.
+    fn extract_master_key(&self) -> Option<Zeroizing<[u8; 32]>>;
 }

@@ -283,6 +283,10 @@ impl VaultLifecycle for FileVault {
         let store: HashMap<String, String> = HashMap::new();
         self.save_store(master_key, &store)
     }
+
+    fn extract_master_key(&self) -> Option<Zeroizing<[u8; 32]>> {
+        self.with_master_key(|mk| Zeroizing::new(*mk))
+    }
 }
 
 #[cfg(test)]

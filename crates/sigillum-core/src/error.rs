@@ -20,6 +20,15 @@ pub enum VaultError {
     #[error("serialization error: {0}")]
     Serialization(#[from] serde_json::Error),
 
+    #[error("fido2: {0}")]
+    Fido2(String),
+
+    #[error("vault not initialized")]
+    NotInitialized,
+
+    #[error("quorum not met: need {required}, have {provided}")]
+    QuorumNotMet { required: usize, provided: usize },
+
     #[error("{0}")]
     Other(String),
 }

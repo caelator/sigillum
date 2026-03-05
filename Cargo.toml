@@ -47,6 +47,13 @@ reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 
+# FIDO2 / Shamir
+ctap-hid-fido2 = "3"
+sharks = "0.5"
+hex = "0.4"
+chrono = "0.4"
+rpassword = "7"
+
 # Filesystem
 dirs = "5"
 

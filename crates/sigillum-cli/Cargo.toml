@@ -17,8 +17,11 @@ path = "src/main.rs"
 [dependencies]
 sigillum-core = { workspace = true, features = ["file-backend"] }
 sigillum-daemon = { workspace = true }
+sigillum-fido2 = { workspace = true }
 secrecy = { workspace = true }
+rpassword = { workspace = true }
 argon2 = { workspace = true }
+aes-gcm = { workspace = true }
 rand = { workspace = true }
 zeroize = { workspace = true }
 tokio = { workspace = true }
