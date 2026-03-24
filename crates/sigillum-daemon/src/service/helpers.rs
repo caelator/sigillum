@@ -6,7 +6,7 @@
 
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use sigillum_core::EthereumStealthError;
+use sigillum_core::{EthereumStealthError, EthereumXpubError};
 
 use super::{ServiceError, ServiceResult};
 
@@ -72,6 +72,18 @@ pub(crate) fn map_wallet_error(error: EthereumStealthError) -> ServiceError {
             ServiceError::unauthorized(error.to_string())
         }
         EthereumStealthError::Signing(_) => ServiceError::internal(error.to_string()),
+    }
+}
+
+/// Map an `EthereumXpubError` into the appropriate HTTP-level `ServiceError`.
+pub(crate) fn map_xpub_error(error: EthereumXpubError) -> ServiceError {
+    match error {
+        EthereumXpubError::InvalidProjectAccount
+        | EthereumXpubError::InvalidReceiveIndex
+        | EthereumXpubError::InvalidReceiveBranchXpub => {
+            ServiceError::bad_request(error.to_string())
+        }
+        EthereumXpubError::InvalidKeyMaterial => ServiceError::internal(error.to_string()),
     }
 }
 

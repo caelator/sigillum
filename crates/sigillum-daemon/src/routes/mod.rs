@@ -303,10 +303,30 @@ fn profile_routes() -> AppRouter {
             "/api/profiles/eth-stealth/delete",
             post(profiles::eth_stealth_wallet_profiles_delete),
         )
+        .route(
+            "/api/profiles/eth-xpub",
+            get(profiles::eth_xpub_wallet_profiles_list),
+        )
+        .route(
+            "/api/profiles/eth-xpub/upsert",
+            post(profiles::eth_xpub_wallet_profiles_upsert),
+        )
+        .route(
+            "/api/profiles/eth-xpub/delete",
+            post(profiles::eth_xpub_wallet_profiles_delete),
+        )
 }
 
 fn wallet_routes() -> AppRouter {
     Router::new()
+        .route(
+            "/api/wallets/eth-xpub/export",
+            post(wallets::eth_xpub_export),
+        )
+        .route(
+            "/api/wallets/eth-xpub/derive",
+            post(wallets::eth_xpub_derive),
+        )
         .route(
             "/api/wallets/eth-stealth/export",
             post(wallets::eth_stealth_export),

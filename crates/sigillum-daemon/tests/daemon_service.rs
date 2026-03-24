@@ -694,6 +694,128 @@ async fn evm_provider_routes_and_stealth_send_flow_work_with_internal_auth_resol
 }
 
 #[tokio::test]
+async fn xpub_profiles_export_and_derive_receive_addresses() {
+    let dir = TempDir::new().unwrap();
+    let (addr, handle) = spawn_daemon(dir.path().to_path_buf()).await;
+    let client = reqwest::Client::new();
+
+    let init = post_json(
+        &client,
+        addr,
+        "/api/compartment/init",
+        json!({
+            "id": 0,
+            "label": "default",
+            "threshold": 1,
+            "passphrase": "correct horse battery staple",
+        }),
+        None,
+    )
+    .await;
+    let init_json: serde_json::Value = init.json().await.unwrap();
+    let token = init_json["session_token"].as_str().unwrap().to_string();
+
+    let provider = post_json(
+        &client,
+        addr,
+        "/api/profiles/evm/upsert",
+        json!({
+            "name": "mainnet",
+            "rpc_url": "http://127.0.0.1:8545/",
+            "chain_id": 1,
+        }),
+        Some(&token),
+    )
+    .await;
+    assert_eq!(provider.status(), StatusCode::OK);
+
+    let xpub_profile = post_json(
+        &client,
+        addr,
+        "/api/profiles/eth-xpub/upsert",
+        json!({
+            "name": "treasury-receive",
+            "project_account": 7,
+            "provider_profile": "mainnet",
+            "default_destination_address": "0x1111111111111111111111111111111111111111",
+        }),
+        Some(&token),
+    )
+    .await;
+    assert_eq!(xpub_profile.status(), StatusCode::OK);
+    let xpub_profile_json: serde_json::Value = xpub_profile.json().await.unwrap();
+    assert_eq!(xpub_profile_json["profile"]["project_account"], 7);
+
+    let list = get(&client, addr, "/api/profiles/eth-xpub", Some(&token)).await;
+    assert_eq!(list.status(), StatusCode::OK);
+    let list_json: serde_json::Value = list.json().await.unwrap();
+    assert_eq!(list_json["profiles"][0]["name"], "treasury-receive");
+
+    let export = post_json(
+        &client,
+        addr,
+        "/api/wallets/eth-xpub/export",
+        json!({ "wallet_profile": "treasury-receive" }),
+        Some(&token),
+    )
+    .await;
+    assert_eq!(export.status(), StatusCode::OK);
+    let export_json: serde_json::Value = export.json().await.unwrap();
+    let receive_xpub = export_json["receive_xpub"].as_str().unwrap().to_string();
+    assert_eq!(export_json["wallet_profile"], "treasury-receive");
+    assert_eq!(export_json["project_account"], 7);
+    assert_eq!(export_json["account_path"], "m/44'/60'/7'");
+    assert_eq!(export_json["receive_path"], "m/44'/60'/7'/0");
+    assert!(receive_xpub.starts_with("xpub"));
+
+    let derive_zero = post_json(
+        &client,
+        addr,
+        "/api/wallets/eth-xpub/derive",
+        json!({
+            "xpub": receive_xpub,
+            "index": 0,
+        }),
+        None,
+    )
+    .await;
+    assert_eq!(derive_zero.status(), StatusCode::OK);
+    let derive_zero_json: serde_json::Value = derive_zero.json().await.unwrap();
+    let address_zero = derive_zero_json["address"].as_str().unwrap().to_string();
+    assert_eq!(derive_zero_json["index"], 0);
+    assert!(address_zero.starts_with("0x"));
+    assert_eq!(address_zero.len(), 42);
+
+    let derive_one = post_json(
+        &client,
+        addr,
+        "/api/wallets/eth-xpub/derive",
+        json!({
+            "xpub": export_json["receive_xpub"],
+            "index": 1,
+        }),
+        None,
+    )
+    .await;
+    assert_eq!(derive_one.status(), StatusCode::OK);
+    let derive_one_json: serde_json::Value = derive_one.json().await.unwrap();
+    assert_ne!(derive_one_json["address"], address_zero);
+
+    let audit = get(&client, addr, "/api/audit?limit=20", Some(&token)).await;
+    assert_eq!(audit.status(), StatusCode::OK);
+    let audit_json: serde_json::Value = audit.json().await.unwrap();
+    assert!(
+        audit_json["events"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|event| event["kind"] == "wallet.eth_xpub.export")
+    );
+
+    handle.abort();
+}
+
+#[tokio::test]
 async fn profile_backed_send_and_queue_flow_persist_internal_configuration() {
     let dir = TempDir::new().unwrap();
     let (addr, handle) = spawn_daemon(dir.path().to_path_buf()).await;

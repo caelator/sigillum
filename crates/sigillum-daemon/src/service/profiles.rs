@@ -8,8 +8,10 @@ use sigillum_api::{
     EthStealthSendResponse, EthStealthSendTransferRequest, EthStealthSendWithProfileRequest,
     EthStealthWalletProfile, EthStealthWalletProfileListResponse,
     EthStealthWalletProfileMutationResponse, EthStealthWalletProfileUpsertRequest,
-    EvmProfileDeleteRequest, EvmProviderProfile, EvmProviderProfileListResponse,
-    EvmProviderProfileMutationResponse, EvmProviderProfileUpsertRequest,
+    EthXpubWalletProfile, EthXpubWalletProfileListResponse, EthXpubWalletProfileMutationResponse,
+    EthXpubWalletProfileUpsertRequest, EvmProfileDeleteRequest, EvmProviderProfile,
+    EvmProviderProfileListResponse, EvmProviderProfileMutationResponse,
+    EvmProviderProfileUpsertRequest,
 };
 
 use crate::audit_log::AuditEventSpec;
@@ -102,6 +104,10 @@ impl SigillumService {
             .eth_stealth_wallets
             .iter()
             .any(|profile| profile.provider_profile == body.name)
+            || registry
+                .eth_xpub_wallets
+                .iter()
+                .any(|profile| profile.provider_profile == body.name)
         {
             return Err(ServiceError::conflict(
                 "Provider profile is still referenced by a wallet profile.",
@@ -230,6 +236,106 @@ impl SigillumService {
         })
     }
 
+    pub(crate) fn list_eth_xpub_wallet_profiles(
+        &self,
+        token: Option<&str>,
+    ) -> ServiceResult<EthXpubWalletProfileListResponse> {
+        let _ = self.require_session(token)?;
+        let registry = crate::profiles::load_profiles(&self.state.base_dir).map_err(|error| {
+            ServiceError::internal(format!("Failed to load profile registry: {error}"))
+        })?;
+        Ok(EthXpubWalletProfileListResponse {
+            profiles: registry.eth_xpub_wallets,
+        })
+    }
+
+    pub(crate) async fn upsert_eth_xpub_wallet_profile(
+        &self,
+        token: Option<&str>,
+        body: EthXpubWalletProfileUpsertRequest,
+    ) -> ServiceResult<EthXpubWalletProfileMutationResponse> {
+        let token = self.require_session(token)?;
+        validate_profile_name(&body.name)?;
+        let compartment_id = body
+            .compartment_id
+            .or_else(|| self.state.active_compartment_id_for(token))
+            .ok_or_else(|| ServiceError::forbidden("No active compartment."))?;
+
+        let _guard = self.state.operation_guard().await;
+        let mut registry =
+            crate::profiles::load_profiles(&self.state.base_dir).map_err(|error| {
+                ServiceError::internal(format!("Failed to load profile registry: {error}"))
+            })?;
+        if !registry
+            .evm_providers
+            .iter()
+            .any(|profile| profile.name == body.provider_profile)
+        {
+            return Err(ServiceError::not_found("Provider profile not found."));
+        }
+
+        let profile = EthXpubWalletProfile {
+            name: body.name,
+            project_account: body.project_account,
+            provider_profile: body.provider_profile,
+            compartment_id,
+            chain_id: body.chain_id,
+            default_destination_address: body.default_destination_address,
+        };
+
+        upsert_named(&mut registry.eth_xpub_wallets, profile.clone(), |item| {
+            &item.name
+        });
+        crate::profiles::save_profiles(&self.state.base_dir, &registry).map_err(|error| {
+            ServiceError::internal(format!("Failed to save profile registry: {error}"))
+        })?;
+
+        self.record_audit(
+            self.state.active_compartment_id_for(token),
+            AuditEventSpec::ProfilesEthXpubWalletUpsert {
+                name: profile.name.clone(),
+                provider_profile: profile.provider_profile.clone(),
+            },
+        )?;
+
+        Ok(EthXpubWalletProfileMutationResponse {
+            status: "ok".into(),
+            profile,
+        })
+    }
+
+    pub(crate) async fn delete_eth_xpub_wallet_profile(
+        &self,
+        token: Option<&str>,
+        body: EvmProfileDeleteRequest,
+    ) -> ServiceResult<EthXpubWalletProfileMutationResponse> {
+        let token = self.require_session(token)?;
+        let _guard = self.state.operation_guard().await;
+        let mut registry =
+            crate::profiles::load_profiles(&self.state.base_dir).map_err(|error| {
+                ServiceError::internal(format!("Failed to load profile registry: {error}"))
+            })?;
+        let profile = remove_named(&mut registry.eth_xpub_wallets, &body.name, |item| {
+            &item.name
+        })
+        .ok_or_else(|| ServiceError::not_found("Wallet profile not found."))?;
+        crate::profiles::save_profiles(&self.state.base_dir, &registry).map_err(|error| {
+            ServiceError::internal(format!("Failed to save profile registry: {error}"))
+        })?;
+
+        self.record_audit(
+            self.state.active_compartment_id_for(token),
+            AuditEventSpec::ProfilesEthXpubWalletDelete {
+                name: profile.name.clone(),
+            },
+        )?;
+
+        Ok(EthXpubWalletProfileMutationResponse {
+            status: "deleted".into(),
+            profile,
+        })
+    }
+
     pub(crate) async fn eth_stealth_send_with_profile(
         &self,
         token: Option<&str>,
@@ -330,6 +436,16 @@ impl SigillumService {
         })?;
         resolve_wallet_profile_in_registry(&registry, name)
     }
+
+    pub(super) fn resolve_xpub_wallet_profile(
+        &self,
+        name: &str,
+    ) -> ServiceResult<(EvmProviderProfile, EthXpubWalletProfile)> {
+        let registry = crate::profiles::load_profiles(&self.state.base_dir).map_err(|error| {
+            ServiceError::internal(format!("Failed to load profile registry: {error}"))
+        })?;
+        resolve_xpub_wallet_profile_in_registry(&registry, name)
+    }
 }
 
 pub(super) fn resolve_wallet_profile_in_registry(
@@ -338,6 +454,25 @@ pub(super) fn resolve_wallet_profile_in_registry(
 ) -> ServiceResult<(EvmProviderProfile, EthStealthWalletProfile)> {
     let wallet = registry
         .eth_stealth_wallets
+        .iter()
+        .find(|profile| profile.name == name)
+        .cloned()
+        .ok_or_else(|| ServiceError::not_found("Wallet profile not found."))?;
+    let provider = registry
+        .evm_providers
+        .iter()
+        .find(|profile| profile.name == wallet.provider_profile)
+        .cloned()
+        .ok_or_else(|| ServiceError::not_found("Provider profile not found."))?;
+    Ok((provider, wallet))
+}
+
+pub(super) fn resolve_xpub_wallet_profile_in_registry(
+    registry: &crate::profiles::ProfileRegistry,
+    name: &str,
+) -> ServiceResult<(EvmProviderProfile, EthXpubWalletProfile)> {
+    let wallet = registry
+        .eth_xpub_wallets
         .iter()
         .find(|profile| profile.name == name)
         .cloned()

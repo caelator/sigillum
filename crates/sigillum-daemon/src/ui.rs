@@ -683,9 +683,12 @@ const INDEX_HTML_SHELL_BEFORE_SCRIPT: &str = r##"<!DOCTYPE html>
   }
   #sectionNav,
   #statusCard,
+  #guideCard,
+  #nextStepCard,
   #authCard,
   #setupCard,
   #profilesCard,
+  #xpubCard,
   #depositsCard,
   #queueCard,
   #maintenanceCard,
@@ -724,6 +727,96 @@ const INDEX_HTML_SHELL_BEFORE_SCRIPT: &str = r##"<!DOCTYPE html>
     width: 100%;
     height: 1px;
     background: linear-gradient(90deg, rgba(79,209,197,0.28), rgba(255,191,105,0.18), transparent);
+  }
+  .section-hidden {
+    display: none !important;
+  }
+  .section-nav {
+    position: sticky;
+    top: 16px;
+    z-index: 5;
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 10px;
+    margin-bottom: 0;
+    padding: 12px;
+    background: rgba(9, 16, 26, 0.86);
+    border: 1px solid var(--border);
+    border-radius: 20px;
+    backdrop-filter: blur(16px);
+    box-shadow: 0 18px 40px rgba(0, 0, 0, 0.2);
+  }
+  .workspace-tab {
+    width: 100%;
+    padding: 12px 14px;
+    border: 1px solid transparent;
+    border-radius: 16px;
+    background: rgba(255,255,255,0.03);
+    color: var(--text-dim);
+    text-align: left;
+  }
+  .workspace-tab strong,
+  .workspace-tab span {
+    display: block;
+  }
+  .workspace-tab strong {
+    font-size: 13px;
+    font-weight: 700;
+    letter-spacing: 0.03em;
+    color: var(--text);
+  }
+  .workspace-tab span {
+    margin-top: 4px;
+    font-size: 12px;
+    line-height: 1.45;
+    color: var(--text-dim);
+  }
+  .workspace-tab:hover,
+  .workspace-tab:focus-visible {
+    border-color: var(--border-strong);
+    background: rgba(255,255,255,0.06);
+    outline: none;
+  }
+  .workspace-tab.active {
+    border-color: rgba(79, 209, 197, 0.36);
+    background:
+      linear-gradient(180deg, rgba(79,209,197,0.15) 0%, rgba(255,191,105,0.08) 100%),
+      rgba(255,255,255,0.04);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.05);
+  }
+  .guide-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 14px;
+    margin-top: 16px;
+  }
+  .guide-block {
+    padding: 16px 18px;
+    border-radius: 18px;
+    border: 1px solid var(--border);
+    background: var(--surface-soft);
+  }
+  .guide-block-title {
+    margin-bottom: 8px;
+    font-size: 13px;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--accent);
+  }
+  .guide-block p {
+    font-size: 13px;
+    line-height: 1.6;
+    color: var(--text-dim);
+  }
+  .guide-list {
+    margin: 0;
+    padding-left: 18px;
+    color: var(--text-dim);
+  }
+  .guide-list li {
+    margin-top: 8px;
+    line-height: 1.55;
   }
   .card h2 {
     margin-bottom: 10px;
@@ -2166,6 +2259,7 @@ const INDEX_HTML_SHELL_BEFORE_SCRIPT: &str = r##"<!DOCTYPE html>
     }
     .hero-context,
     .checklist-list,
+    .guide-grid,
     .next-step-grid,
     .hero-stats,
     .stats {
@@ -2205,8 +2299,8 @@ const INDEX_HTML_SHELL_BEFORE_SCRIPT: &str = r##"<!DOCTYPE html>
       scroll-behavior: auto !important;
     }
     button:hover,
-    .section-nav a:hover,
-    .section-nav a:focus-visible {
+    .workspace-tab:hover,
+    .workspace-tab:focus-visible {
       transform: none;
     }
   }
@@ -2233,7 +2327,7 @@ const INDEX_HTML_SHELL_BEFORE_SCRIPT: &str = r##"<!DOCTYPE html>
   <nav id="sectionNav" class="section-nav hidden" aria-label="Visible sections"></nav>
 
   <!-- Status Card -->
-  <div class="card" id="statusCard" data-nav-label="Overview">
+  <div class="card" id="statusCard" data-nav-label="Overview" data-workspace-section="overview">
     <div class="hero-shell">
       <div class="hero-copy">
         <div class="eyebrow" id="statusEyebrow">Local vault daemon</div>
@@ -2270,7 +2364,7 @@ const INDEX_HTML_SHELL_BEFORE_SCRIPT: &str = r##"<!DOCTYPE html>
   </div>
 
   <!-- Unlock / Lock Card -->
-  <div class="card" id="authCard" data-nav-label="Access">
+  <div class="card" id="authCard" data-nav-label="Access" data-workspace-section="access">
     <div class="eyebrow">Access</div>
     <h2 id="authTitle">Unlock this local session</h2>
     <p class="helper-text" id="authLead">Unlock with the passphrase or hardware-key threshold you configured during setup. The resulting session token stays only in this browser tab.</p>
@@ -2320,7 +2414,7 @@ const INDEX_HTML_SHELL_BEFORE_SCRIPT: &str = r##"<!DOCTYPE html>
   </div>
 
   <!-- Setup Wizard -->
-  <div class="card hidden" id="setupCard" data-nav-label="Setup">
+  <div class="card hidden" id="setupCard" data-nav-label="Setup" data-workspace-section="access">
     <div class="wizard-header">
       <div>
         <div class="eyebrow">Setup assistant</div>
@@ -2487,7 +2581,7 @@ const INDEX_HTML_SHELL_BEFORE_SCRIPT: &str = r##"<!DOCTYPE html>
     <p class="card-note">Resetting removes the local Sigillum data directory on this machine. Restoring replaces it with the contents of the selected encrypted snapshot.</p>
   </div>
 
-  <div class="card hidden" id="nextStepCard">
+  <div class="card hidden" id="nextStepCard" data-workspace-section="overview">
     <div class="eyebrow">Recommended next move</div>
     <h2 id="nextStepTitle">Finish the essentials before deeper operator work</h2>
     <p class="helper-text" id="nextStepSummary">Sigillum will keep this guidance updated as the workspace becomes more complete.</p>
@@ -2499,8 +2593,60 @@ const INDEX_HTML_SHELL_BEFORE_SCRIPT: &str = r##"<!DOCTYPE html>
     <div class="card-note" id="nextStepNote">This card suggests the next highest-leverage action while leaving the rest of the operator surface available below.</div>
   </div>
 
+  <div class="card hidden" id="guideCard" data-workspace-section="overview">
+    <div class="eyebrow">Operator guide</div>
+    <h2>What Sigillum does today</h2>
+    <p class="helper-text">
+      Sigillum is currently a local vault plus an Ethereum operator console. Use the workspace modes above as distinct jobs, not as a single scrolling checklist.
+    </p>
+    <div class="guide-grid">
+      <div class="guide-block">
+        <div class="guide-block-title">1. Access</div>
+        <p>Set up or unlock the local vault, then verify your recovery path before you do anything sensitive.</p>
+      </div>
+      <div class="guide-block">
+        <div class="guide-block-title">2. Vault</div>
+        <p>Store connection keys and encrypted secrets, organize compartments, and move values between compartments when needed.</p>
+      </div>
+      <div class="guide-block">
+        <div class="guide-block-title">3. Wallets</div>
+        <p>Save provider profiles, then choose a wallet family: stealth wallets for tracked deposits and queue work, or xpub receive wallets for public receive-tree export and address previews.</p>
+      </div>
+      <div class="guide-block">
+        <div class="guide-block-title">4. Operations</div>
+        <p>Run tracked deposits, queue processing, and maintenance. These operator workflows are currently implemented for stealth wallets.</p>
+      </div>
+      <div class="guide-block">
+        <div class="guide-block-title">5. Recovery</div>
+        <p>Manage hardware keys, export encrypted snapshots, inspect the audit trail, and verify daemon health from one place.</p>
+      </div>
+    </div>
+    <div class="section-divider"></div>
+    <div class="section-title">Shipped now vs later roadmap</div>
+    <div class="guide-grid">
+      <div class="guide-block">
+        <div class="guide-block-title">Available now</div>
+        <ul class="guide-list">
+          <li>Local passphrase and FIDO2 vault workflows</li>
+          <li>Flat connection-key and encrypted-secret storage</li>
+          <li>EVM provider profiles and stealth wallet profiles</li>
+          <li>Initial xpub receive-branch export and public address preview</li>
+          <li>Stealth deposits, queue processing, maintenance, snapshots, audit, and diagnostics</li>
+        </ul>
+      </div>
+      <div class="guide-block">
+        <div class="guide-block-title">Not implemented yet</div>
+        <ul class="guide-list">
+          <li>Xpub discovery, hidden sponsor or treasury branches, and xpub sweeping automation</li>
+          <li>Hierarchical secret or wallet tree browsing</li>
+          <li>Remote multi-host control and aggregated remote audit workflows</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
   <!-- Compartment Management Card (only when unlocked) -->
-  <div class="card hidden" id="compartmentCard" data-nav-label="Compartments">
+  <div class="card hidden" id="compartmentCard" data-nav-label="Compartments" data-workspace-section="vault">
     <div class="eyebrow">Vault</div>
     <h2>Unlocked compartments</h2>
     <p class="helper-text">These are the compartments currently available in this browser session. Switching changes which compartment new operations target.</p>
@@ -2508,7 +2654,7 @@ const INDEX_HTML_SHELL_BEFORE_SCRIPT: &str = r##"<!DOCTYPE html>
   </div>
 
   <!-- Push-Down Card (only when all compartments unlocked) -->
-  <div class="card hidden" id="pushCard" data-nav-label="Push">
+  <div class="card hidden" id="pushCard" data-nav-label="Push" data-workspace-section="vault">
     <div class="eyebrow">Vault</div>
     <h2>Move a secret between compartments</h2>
     <p class="text-meta-sm" style="margin-bottom:12px;">
@@ -2532,7 +2678,7 @@ const INDEX_HTML_SHELL_BEFORE_SCRIPT: &str = r##"<!DOCTYPE html>
   </div>
 
   <!-- API Keys Card -->
-  <div class="card" id="apiKeysCard" data-nav-label="API Keys">
+  <div class="card" id="apiKeysCard" data-nav-label="API Keys" data-workspace-section="vault">
     <div class="eyebrow">Vault</div>
     <h2>Connection keys</h2>
     <p class="helper-text">Store RPC tokens and similar operational keys that Sigillum needs to use directly during daemon workflows.</p>
@@ -2545,7 +2691,7 @@ const INDEX_HTML_SHELL_BEFORE_SCRIPT: &str = r##"<!DOCTYPE html>
   </div>
 
   <!-- Secrets Card -->
-  <div class="card" id="secretsCard" data-nav-label="Secrets">
+  <div class="card" id="secretsCard" data-nav-label="Secrets" data-workspace-section="vault">
     <div class="eyebrow">Vault</div>
     <h2>Encrypted secrets</h2>
     <p class="helper-text">Store values that should stay encrypted at rest and require an unlocked compartment to view or modify.</p>
@@ -2563,13 +2709,12 @@ const INDEX_HTML_SHELL_BEFORE_SCRIPT: &str = r##"<!DOCTYPE html>
   </div>
 
   <!-- Profiles Card -->
-  <div class="card hidden" id="profilesCard" data-nav-label="Profiles">
-    <div class="eyebrow">Operations</div>
-    <h2>Profiles</h2>
+  <div class="card hidden" id="profilesCard" data-nav-label="Profiles" data-workspace-section="wallets">
+    <div class="eyebrow">Wallets</div>
+    <h2>Providers and stealth wallets</h2>
     <p class="helper-text">
-      Provider profiles hold RPC and fee policy. Wallet profiles bind Sigillum wallet labels to
-      provider profiles so deposits, sweeps, queue jobs, and maintenance can run without re-entering
-      the same configuration.
+      Start by saving reusable provider settings, then bind stealth wallet labels to those providers.
+      Stealth wallets power tracked deposits, sweeps, queue jobs, and maintenance today.
     </p>
 
     <div class="section-title">EVM Provider Profiles</div>
@@ -2613,8 +2758,53 @@ const INDEX_HTML_SHELL_BEFORE_SCRIPT: &str = r##"<!DOCTYPE html>
     <div id="walletProfileList"></div>
   </div>
 
+  <div class="card hidden" id="xpubCard" data-nav-label="Xpub Wallets" data-workspace-section="wallets">
+    <div class="eyebrow">Wallets</div>
+    <h2>Xpub receive wallets</h2>
+    <p class="helper-text">
+      This initial xpub slice exports a public receive branch from a saved profile and previews derived receive addresses. It does not yet implement discovery, treasury branches, or sweeping automation.
+    </p>
+
+    <div class="section-title">Xpub Receive Profiles</div>
+    <div class="form-row">
+      <input type="text" id="xpubProfileName" placeholder="Profile name">
+      <input type="number" id="xpubProjectAccount" placeholder="Project account" value="0" class="input-mid">
+      <select id="xpubProviderProfile"></select>
+    </div>
+    <div class="form-row">
+      <input type="number" id="xpubCompartmentId" placeholder="Compartment (optional)" class="input-wider">
+      <input type="number" id="xpubChainId" placeholder="Chain ID (optional)" class="input-mid">
+      <input type="text" id="xpubDefaultDestination" placeholder="Default destination address (optional)">
+    </div>
+    <div class="form-row">
+      <button class="btn-primary" data-action="upsertXpubWalletProfile">Save Xpub Profile</button>
+    </div>
+    <div id="xpubWalletProfileList"></div>
+
+    <div class="section-divider"></div>
+
+    <div class="section-title">Export Receive Branch</div>
+    <p class="helper-text">Choose a saved xpub wallet profile to export its public receive branch. The exported xpub can derive receive addresses without touching private key material.</p>
+    <div class="form-row">
+      <select id="xpubPreviewProfile"></select>
+      <button class="btn-primary" data-action="exportSelectedXpubWallet">Export Xpub</button>
+    </div>
+    <div id="xpubExportResult" class="result-box hidden"></div>
+
+    <div class="section-divider"></div>
+
+    <div class="section-title">Preview Receive Addresses</div>
+    <p class="helper-text">Paste or reuse an exported receive-branch xpub, then derive a receive address at a specific index.</p>
+    <div class="form-row">
+      <input type="text" id="xpubReceiveXpub" placeholder="Receive-branch xpub">
+      <input type="number" id="xpubPreviewIndex" placeholder="Index" value="0" class="input-mid">
+      <button class="btn-ghost" data-action="previewXpubReceiveAddress">Derive Address</button>
+    </div>
+    <div id="xpubPreviewResult" class="result-box hidden"></div>
+  </div>
+
   <!-- Deposits Card -->
-  <div class="card hidden" id="depositsCard" data-nav-label="Deposits">
+  <div class="card hidden" id="depositsCard" data-nav-label="Deposits" data-workspace-section="operations">
     <div class="eyebrow">Operations</div>
     <h2>Deposits</h2>
     <p class="helper-text">
@@ -2674,7 +2864,7 @@ const INDEX_HTML_SHELL_BEFORE_SCRIPT: &str = r##"<!DOCTYPE html>
   </div>
 
   <!-- Queue Card -->
-  <div class="card hidden" id="queueCard" data-nav-label="Queue">
+  <div class="card hidden" id="queueCard" data-nav-label="Queue" data-workspace-section="operations">
     <div class="eyebrow">Operations</div>
     <h2>Queue</h2>
     <p class="helper-text">
@@ -2691,7 +2881,7 @@ const INDEX_HTML_SHELL_BEFORE_SCRIPT: &str = r##"<!DOCTYPE html>
   </div>
 
   <!-- Maintenance Card -->
-  <div class="card hidden" id="maintenanceCard" data-nav-label="Maintenance">
+  <div class="card hidden" id="maintenanceCard" data-nav-label="Maintenance" data-workspace-section="operations">
     <div class="eyebrow">Operations</div>
     <h2>Maintenance</h2>
     <p class="helper-text">
@@ -2712,7 +2902,7 @@ const INDEX_HTML_SHELL_BEFORE_SCRIPT: &str = r##"<!DOCTYPE html>
   </div>
 
   <!-- FIDO2 Management Card -->
-  <div class="card hidden" id="fido2Card" data-nav-label="FIDO2">
+  <div class="card hidden" id="fido2Card" data-nav-label="FIDO2" data-workspace-section="recovery">
     <div class="eyebrow">Recovery & Access</div>
     <h2>Hardware keys</h2>
     <div id="fido2DeviceStatus" class="info-box">Checking for devices...</div>
@@ -2748,7 +2938,7 @@ const INDEX_HTML_SHELL_BEFORE_SCRIPT: &str = r##"<!DOCTYPE html>
   </div>
 
   <!-- Snapshot Backup Card -->
-  <div class="card hidden" id="backupCard" data-nav-label="Snapshots">
+  <div class="card hidden" id="backupCard" data-nav-label="Snapshots" data-workspace-section="recovery">
     <div class="eyebrow">Recovery & Access</div>
     <h2>Encrypted snapshots</h2>
     <p class="text-meta" style="margin-bottom:12px;">
@@ -2775,7 +2965,7 @@ const INDEX_HTML_SHELL_BEFORE_SCRIPT: &str = r##"<!DOCTYPE html>
   </div>
 
   <!-- Audit Card -->
-  <div class="card hidden" id="auditCard" data-nav-label="Audit">
+  <div class="card hidden" id="auditCard" data-nav-label="Audit" data-workspace-section="recovery">
     <div class="eyebrow">Recovery & Access</div>
     <h2>Audit trail</h2>
     <p class="helper-text">Recent local audit events from this daemon process and its persisted audit log.</p>
@@ -2783,7 +2973,7 @@ const INDEX_HTML_SHELL_BEFORE_SCRIPT: &str = r##"<!DOCTYPE html>
   </div>
 
   <!-- Diagnostics Card -->
-  <div class="card hidden" id="diagCard" data-nav-label="Diagnostics">
+  <div class="card hidden" id="diagCard" data-nav-label="Diagnostics" data-workspace-section="recovery">
     <div class="eyebrow">Recovery & Access</div>
     <h2>Diagnostics</h2>
     <p class="helper-text">Low-level daemon health, queue, audit, and runtime policy details for debugging and operations.</p>
@@ -2806,11 +2996,13 @@ const SESSION_TOKEN_KEY = 'sigillumSessionToken';
 const REFRESH_INTERVAL_MS = 5000;
 const OPERATOR_CARD_IDS = [
   'nextStepCard',
+  'guideCard',
   'compartmentCard',
   'pushCard',
   'apiKeysCard',
   'secretsCard',
   'profilesCard',
+  'xpubCard',
   'depositsCard',
   'queueCard',
   'maintenanceCard',
@@ -2819,8 +3011,42 @@ const OPERATOR_CARD_IDS = [
   'auditCard',
   'diagCard',
 ];
+const WORKSPACE_SECTION_KEY = 'sigillumWorkspaceSection';
+const WORKSPACE_SECTIONS = [
+  {
+    id: 'overview',
+    label: 'Overview',
+    summary: 'Product framing, current status, and the highest-leverage next move.',
+  },
+  {
+    id: 'access',
+    label: 'Access',
+    summary: 'Setup, unlock, session controls, and machine-level recovery.',
+  },
+  {
+    id: 'vault',
+    label: 'Vault',
+    summary: 'Compartments, connection keys, encrypted secrets, and secret movement.',
+  },
+  {
+    id: 'wallets',
+    label: 'Wallets',
+    summary: 'Providers, stealth wallets, and xpub receive-wallet setup.',
+  },
+  {
+    id: 'operations',
+    label: 'Operations',
+    summary: 'Deposits, queue execution, and local maintenance cycles.',
+  },
+  {
+    id: 'recovery',
+    label: 'Recovery',
+    summary: 'Hardware keys, snapshots, audit trail, and diagnostics.',
+  },
+];
 let currentStatus = null;
 let currentUiMode = 'loading';
+let activeWorkspaceSection = 'overview';
 let wizCompartments = [];
 let customCompartments = [];
 let wizRequiredKeyCount = 1;
@@ -2830,10 +3056,10 @@ let lastRefreshAt = null;
 let refreshPromise = null;
 let refreshQueued = false;
 let refreshTimer = null;
-let sectionNavObserver = null;
 let lastFidoDetect = null;
 let lastProviderProfiles = [];
 let lastWalletProfiles = [];
+let lastXpubWalletProfiles = [];
 let lastApiKeys = [];
 let lastSecretKeys = [];
 let lastDeposits = [];
@@ -2842,6 +3068,11 @@ let lastFidoKeys = [];
 let nextStepPrimaryTarget = null;
 let nextStepSecondaryTarget = null;
 let volatileSessionToken = null;
+
+try {
+  activeWorkspaceSection =
+    window.sessionStorage.getItem(WORKSPACE_SECTION_KEY) || 'overview';
+} catch (_) {}
 
 const WIZARD_CHROME = {
   wizStep0: {
@@ -3036,16 +3267,107 @@ function resetVaultCounts() {
   setText('compartmentCount', '-');
 }
 
-function setActiveSectionNavLink(id) {
-  document.querySelectorAll('#sectionNav a').forEach(link => {
-    link.classList.toggle('active', link.getAttribute('href') === '#' + id);
+function visibleWorkspaceCards() {
+  return Array.from(document.querySelectorAll('main .card[data-workspace-section]'))
+    .filter(card => !card.classList.contains('hidden'));
+}
+
+function availableWorkspaceSections() {
+  const visibleSections = new Set(
+    visibleWorkspaceCards()
+      .map(card => card.dataset.workspaceSection)
+      .filter(Boolean)
+  );
+  return WORKSPACE_SECTIONS.filter(section => visibleSections.has(section.id));
+}
+
+function firstVisibleCardInSection(sectionId) {
+  return visibleWorkspaceCards().find(
+    card => card.dataset.workspaceSection === sectionId
+  );
+}
+
+function storeWorkspaceSection(sectionId) {
+  try {
+    window.sessionStorage.setItem(WORKSPACE_SECTION_KEY, sectionId);
+  } catch (_) {}
+}
+
+function ensureActiveWorkspaceSection() {
+  const sections = availableWorkspaceSections();
+  if (!sections.length) {
+    activeWorkspaceSection = 'overview';
+    return;
+  }
+  if (!sections.some(section => section.id === activeWorkspaceSection)) {
+    activeWorkspaceSection = sections[0].id;
+    storeWorkspaceSection(activeWorkspaceSection);
+  }
+}
+
+function syncWorkspaceSections() {
+  ensureActiveWorkspaceSection();
+  const targetSection = activeWorkspaceSection;
+  document.querySelectorAll('main .card[data-workspace-section]').forEach(card => {
+    card.classList.toggle(
+      'section-hidden',
+      Boolean(targetSection) && card.dataset.workspaceSection !== targetSection
+    );
   });
+}
+
+function syncSectionNav() {
+  const nav = document.getElementById('sectionNav');
+  const main = document.querySelector('main');
+  if (!nav) return;
+
+  const sections = availableWorkspaceSections();
+  if (sections.length <= 1) {
+    nav.classList.add('hidden');
+    nav.innerHTML = '';
+    if (main) main.classList.remove('has-nav');
+    syncWorkspaceSections();
+    return;
+  }
+
+  ensureActiveWorkspaceSection();
+  nav.innerHTML = sections.map(section =>
+    '<button type="button" class="workspace-tab' +
+      (section.id === activeWorkspaceSection ? ' active' : '') +
+      '" data-action="selectWorkspaceSection" data-arg0="' + escAttr(section.id) + '">' +
+      '<strong>' + esc(section.label) + '</strong>' +
+      '<span>' + esc(section.summary) + '</span>' +
+    '</button>'
+  ).join('');
+  nav.classList.remove('hidden');
+  if (main) main.classList.add('has-nav');
+  syncWorkspaceSections();
+}
+
+function selectWorkspaceSection(sectionId) {
+  activeWorkspaceSection = sectionId;
+  storeWorkspaceSection(sectionId);
+  syncSectionNav();
+  const firstCard = firstVisibleCardInSection(sectionId);
+  if (firstCard) {
+    firstCard.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
 }
 
 function jumpToCard(id) {
   const el = document.getElementById(id);
   if (!el || el.classList.contains('hidden')) return;
-  el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  const targetSection = el.dataset.workspaceSection;
+  if (targetSection && targetSection !== activeWorkspaceSection) {
+    activeWorkspaceSection = targetSection;
+    storeWorkspaceSection(targetSection);
+    syncSectionNav();
+  }
+  requestAnimationFrame(() => {
+    if (!el.classList.contains('hidden') && !el.classList.contains('section-hidden')) {
+      el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+  });
 }
 
 function heroPrimaryAction() {
@@ -3222,6 +3544,8 @@ function updateNextStepCard() {
     setHidden('nextStepCard', true);
     return;
   }
+  const hasStealthWalletProfiles = lastWalletProfiles.length > 0;
+  const hasXpubWalletProfiles = lastXpubWalletProfiles.length > 0;
 
   let nextStep = {
     title: 'Choose the next concrete operation',
@@ -3265,19 +3589,33 @@ function updateNextStepCard() {
       secondaryTarget: 'apiKeysCard',
       note: 'If your provider needs an auth token, store that connection key first and then reference it from the provider profile.',
     };
-  } else if (lastWalletProfiles.length === 0) {
+  } else if (!hasStealthWalletProfiles && !hasXpubWalletProfiles) {
     nextStep = {
-      title: 'Create a wallet profile',
-      summary: 'You already have provider settings. The next step is binding a Sigillum wallet label to that provider so deposits and sweeps know where to operate.',
+      title: 'Choose a wallet family',
+      summary: 'Provider settings are ready. Next choose whether you want a stealth operator wallet for deposits and queue work, or an xpub receive wallet for public receive-tree export and address previews.',
       items: [
-        { title: 'Wallet profile', body: 'Map a wallet label, provider profile, optional compartment, and optional default destination.' },
-        { title: 'What it unlocks', body: 'Wallet profiles are the bridge into tracked deposits, sweep queues, and maintenance cycles.' },
+        { title: 'Stealth wallet', body: 'Use this when you want tracked deposits, sweep queues, and maintenance workflows today.' },
+        { title: 'Xpub receive wallet', body: 'Use this when you want a public receive branch and deterministic receive-address previews without exposing private key material.' },
       ],
-      primaryLabel: 'Create wallet profile',
+      primaryLabel: 'Open wallets',
       primaryTarget: 'profilesCard',
-      secondaryLabel: 'Open deposits',
-      secondaryTarget: 'depositsCard',
-      note: 'Once a wallet profile exists, the deposit card becomes the fastest end-to-end test path.',
+      secondaryLabel: 'Read operator guide',
+      secondaryTarget: 'guideCard',
+      note: 'Stealth is the current end-to-end operator path. Xpub is now available for receive-branch export and preview, but not yet for discovery or sweeping.',
+    };
+  } else if (!hasStealthWalletProfiles && hasXpubWalletProfiles) {
+    nextStep = {
+      title: 'Add a stealth wallet for live operator flows',
+      summary: 'Your xpub receive profile is ready for public address derivation, but tracked deposits, sweep queues, and maintenance still run on stealth wallets today.',
+      items: [
+        { title: 'Keep xpub for receive trees', body: 'Use the xpub card to export receive branches and preview deposit addresses by index.' },
+        { title: 'Add stealth for operations', body: 'Use the stealth wallet card when you want deposits, queue jobs, and maintenance cycles to run locally.' },
+      ],
+      primaryLabel: 'Open wallets',
+      primaryTarget: 'profilesCard',
+      secondaryLabel: 'Open xpub tools',
+      secondaryTarget: 'xpubCard',
+      note: 'This keeps the current product honest: xpub is live for receive-branch export, while stealth remains the operational wallet family.',
     };
   } else if (lastFidoKeys.length === 1) {
     nextStep = {
@@ -3375,7 +3713,7 @@ function updateHeroState(mode, active, unlocked) {
   const activeLabel = active ? (active.compartment_label || ('Compartment ' + active.compartment_id)) : 'No active compartment';
   setText('statusEyebrow', 'Unlocked workspace');
   setText('statusTitle', 'Local vault workspace');
-  setText('statusSummary', 'The vault is unlocked. Use the cards below for protected values, profiles, deposits, queue work, recovery, and diagnostics from one local control plane.');
+  setText('statusSummary', 'The vault is unlocked. Use the workspace modes above to move between overview, access, vault, wallets, operations, and recovery without losing your place in one long page.');
   setText('heroModeValue', activeLabel);
   setText('heroModeDetail', unlocked.length > 1
     ? 'Multiple compartments are unlocked. Use the switcher in Access to choose which compartment new operations should target.'
@@ -3384,72 +3722,9 @@ function updateHeroState(mode, active, unlocked) {
   secondary.textContent = 'Open profiles';
   setTrustedHtml('statusContext', renderHeroContext([
     { title: 'Protected values', body: 'Use Encrypted Secrets for sensitive data and Connection Keys for values the daemon needs during operator workflows.' },
-    { title: 'Reusable operations', body: 'Profiles connect provider settings to wallet identities so deposits, sweeps, and queue jobs can run without re-entering the same config.' },
-    { title: 'Operator loop', body: 'Deposits, queue, maintenance, snapshots, audit, and diagnostics stay grouped below once the vault is available.' },
+    { title: 'Wallet families', body: 'Stealth wallets drive deposits and queue workflows today, while xpub receive wallets export public receive branches and preview deterministic addresses.' },
+    { title: 'Operator loop', body: 'Deposits, queue, maintenance, snapshots, audit, and diagnostics now live in dedicated workspace modes instead of one scrolling operator page.' },
   ]));
-}
-
-function observeVisibleSections(cards) {
-  if (sectionNavObserver) {
-    sectionNavObserver.disconnect();
-    sectionNavObserver = null;
-  }
-
-  if (!cards.length) return;
-
-  sectionNavObserver = new IntersectionObserver(entries => {
-    const visibleEntry = entries
-      .filter(entry => entry.isIntersecting)
-      .sort((left, right) =>
-        right.intersectionRatio - left.intersectionRatio ||
-        left.boundingClientRect.top - right.boundingClientRect.top
-      )[0];
-    if (visibleEntry) setActiveSectionNavLink(visibleEntry.target.id);
-  }, {
-    rootMargin: '-18% 0px -62% 0px',
-    threshold: [0.15, 0.35, 0.6],
-  });
-
-  cards.forEach(card => sectionNavObserver.observe(card));
-  setActiveSectionNavLink(cards[0].id);
-}
-
-function syncSectionNav() {
-  const nav = document.getElementById('sectionNav');
-  const main = document.querySelector('main');
-  if (!nav) return;
-
-  if (currentUiMode !== 'unlocked') {
-    if (sectionNavObserver) {
-      sectionNavObserver.disconnect();
-      sectionNavObserver = null;
-    }
-    nav.classList.add('hidden');
-    nav.innerHTML = '';
-    if (main) main.classList.remove('has-nav');
-    return;
-  }
-
-  const visibleCards = Array.from(document.querySelectorAll('main .card[data-nav-label]'))
-    .filter(card => !card.classList.contains('hidden'));
-
-  if (visibleCards.length < 2) {
-    if (sectionNavObserver) {
-      sectionNavObserver.disconnect();
-      sectionNavObserver = null;
-    }
-    nav.classList.add('hidden');
-    nav.innerHTML = '';
-    if (main) main.classList.remove('has-nav');
-    return;
-  }
-
-  nav.innerHTML = visibleCards.map(card =>
-    '<a href="#' + escAttr(card.id) + '">' + esc(card.dataset.navLabel || card.id) + '</a>'
-  ).join('');
-  nav.classList.remove('hidden');
-  if (main) main.classList.add('has-nav');
-  observeVisibleSections(visibleCards);
 }
 
 function renderCompartmentSwitcher(unlocked, active) {
@@ -3544,7 +3819,9 @@ function applyUnlockedUi(active, unlocked) {
   setHidden('pushCard', unlocked.length < 2);
   if (unlocked.length >= 2) buildPushSelectors(unlocked);
 
+  setHidden('guideCard', false);
   setHidden('profilesCard', false);
+  setHidden('xpubCard', false);
   setHidden('depositsCard', false);
   setHidden('queueCard', false);
   setHidden('maintenanceCard', false);
@@ -3912,24 +4189,58 @@ function renderWalletProfiles(profiles) {
   });
 }
 
+function renderXpubWalletProfiles(profiles) {
+  renderEntityList('xpubWalletProfileList', profiles, 'No xpub wallet profiles yet. Save one above when you want a public receive tree without exposing private key material.', profile => {
+    const accountPath = "m/44'/60'/" + profile.project_account + "'";
+    const receivePath = accountPath + '/0';
+    return '<li><div class="entity-main">' +
+      '<div class="entity-title">' + esc(profile.name) + '</div>' +
+      '<div class="entity-meta">' +
+      'projectAccount=' + esc(String(profile.project_account)) +
+      ' · provider=' + esc(profile.provider_profile) + '<br>' +
+      'accountPath=' + esc(accountPath) +
+      ' · receivePath=' + esc(receivePath) + '<br>' +
+      'compartment=' + esc(String(profile.compartment_id)) +
+      ' · chain=' + esc(profile.chain_id != null ? String(profile.chain_id) : '-') +
+      ' · defaultDestination=' + esc(profile.default_destination_address || '-') +
+      '</div></div>' +
+      '<div class="entity-actions">' +
+      '<button class="btn-ghost" data-action="exportXpubWalletProfile" data-arg0="' + escAttr(profile.name) + '">Export Xpub</button>' +
+      '<button class="btn-danger" data-action="deleteXpubWalletProfile" data-arg0="' + escAttr(profile.name) + '">Delete</button>' +
+      '</div></li>';
+  });
+}
+
 async function loadProfiles() {
   try {
-    const [providerResp, walletResp] = await Promise.all([
+    const [providerResp, walletResp, xpubResp] = await Promise.all([
       api('GET', '/api/profiles/evm'),
       api('GET', '/api/profiles/eth-stealth'),
+      api('GET', '/api/profiles/eth-xpub'),
     ]);
-    if (providerResp.error || walletResp.error) return;
+    if (providerResp.error || walletResp.error || xpubResp.error) return;
 
     const providers = providerResp.profiles || [];
     const wallets = walletResp.profiles || [];
+    const xpubWallets = xpubResp.profiles || [];
     lastProviderProfiles = providers;
     lastWalletProfiles = wallets;
+    lastXpubWalletProfiles = xpubWallets;
 
     renderProviderProfiles(providers);
     renderWalletProfiles(wallets);
+    renderXpubWalletProfiles(xpubWallets);
 
     setSelectOptions(
       'walletProviderProfile',
+      providers.map(profile => ({
+        value: profile.name,
+        label: profile.name + ' · chain ' + profile.chain_id,
+      })),
+      providers.length ? 'Select provider profile' : 'No provider profiles available'
+    );
+    setSelectOptions(
+      'xpubProviderProfile',
       providers.map(profile => ({
         value: profile.name,
         label: profile.name + ' · chain ' + profile.chain_id,
@@ -3950,6 +4261,14 @@ async function loadProfiles() {
       'depositErc20WalletProfile',
       walletOptions,
       wallets.length ? 'Select wallet profile' : 'No wallet profiles available'
+    );
+    setSelectOptions(
+      'xpubPreviewProfile',
+      xpubWallets.map(profile => ({
+        value: profile.name,
+        label: profile.name + ' · account ' + profile.project_account,
+      })),
+      xpubWallets.length ? 'Select xpub profile' : 'No xpub profiles available'
     );
   } catch (e) {}
 }
@@ -4023,6 +4342,103 @@ async function deleteWalletProfile(name) {
   if (r.error) { toast(r.error, 'error'); return; }
   toast('Wallet profile deleted');
   refresh();
+}
+
+async function upsertXpubWalletProfile() {
+  const name = textValue('xpubProfileName');
+  const providerProfile = textValue('xpubProviderProfile');
+  const projectAccount = parseInt(textValue('xpubProjectAccount'), 10);
+  if (!name || !providerProfile || !Number.isInteger(projectAccount) || projectAccount < 0) {
+    toast('Profile name, provider profile, and a non-negative project account are required', 'error');
+    return;
+  }
+
+  const r = await api('POST', '/api/profiles/eth-xpub/upsert', {
+    name,
+    project_account: projectAccount,
+    provider_profile: providerProfile,
+    compartment_id: optionalNumberValue('xpubCompartmentId'),
+    chain_id: optionalNumberValue('xpubChainId'),
+    default_destination_address: optionalTextValue('xpubDefaultDestination'),
+  });
+  if (r.error) { toast(r.error, 'error'); return; }
+
+  clearFields([
+    'xpubProfileName',
+    'xpubCompartmentId',
+    'xpubChainId',
+    'xpubDefaultDestination',
+  ]);
+  document.getElementById('xpubProjectAccount').value = '0';
+  toast('Xpub wallet profile saved');
+  refresh();
+}
+
+async function deleteXpubWalletProfile(name) {
+  if (!confirm('Delete xpub wallet profile "' + name + '"?')) return;
+  const r = await api('POST', '/api/profiles/eth-xpub/delete', { name });
+  if (r.error) { toast(r.error, 'error'); return; }
+  toast('Xpub wallet profile deleted');
+  refresh();
+}
+
+async function exportSelectedXpubWallet() {
+  const walletProfile = textValue('xpubPreviewProfile');
+  if (!walletProfile) {
+    toast('Choose an xpub wallet profile first', 'error');
+    return;
+  }
+  await exportXpubWalletProfile(walletProfile);
+}
+
+async function exportXpubWalletProfile(walletProfile) {
+  const r = await api('POST', '/api/wallets/eth-xpub/export', {
+    wallet_profile: walletProfile,
+  });
+  if (r.error) { toast(r.error, 'error'); return; }
+
+  const exportedXpub = r.receive_xpub || '';
+  document.getElementById('xpubPreviewProfile').value = walletProfile;
+  document.getElementById('xpubReceiveXpub').value = exportedXpub;
+
+  showResultBox(
+    'xpubExportResult',
+    '<strong>' + esc(walletProfile) + '</strong><br>' +
+      'accountPath=' + esc(r.account_path || '-') + '<br>' +
+      'receivePath=' + esc(r.receive_path || '-') + '<br>' +
+      'xpub=' + esc(exportedXpub) + '<br>' +
+      '<div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap;">' +
+        '<button class="btn-ghost" data-action="copyText" data-arg0="' + escAttr(exportedXpub) + '" data-arg1="Receive branch xpub">Copy Xpub</button>' +
+      '</div>'
+  );
+
+  await previewXpubReceiveAddress();
+}
+
+async function previewXpubReceiveAddress() {
+  const xpub = textValue('xpubReceiveXpub');
+  const index = parseInt(textValue('xpubPreviewIndex'), 10);
+  if (!xpub) {
+    toast('Export or paste a receive-branch xpub first', 'error');
+    return;
+  }
+  if (!Number.isInteger(index) || index < 0) {
+    toast('Receive index must be a non-negative number', 'error');
+    return;
+  }
+
+  const r = await api('POST', '/api/wallets/eth-xpub/derive', { xpub, index });
+  if (r.error) { toast(r.error, 'error'); return; }
+
+  showResultBox(
+    'xpubPreviewResult',
+    '<strong>Receive index ' + esc(String(r.index)) + '</strong><br>' +
+      'path=' + esc('receive/' + r.index) + '<br>' +
+      'address=' + esc(r.address) + '<br>' +
+      '<div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap;">' +
+        '<button class="btn-ghost" data-action="copyText" data-arg0="' + escAttr(r.address) + '" data-arg1="Receive address">Copy Address</button>' +
+      '</div>'
+  );
 }
 
 async function exportWalletMeta(wallet, shortName) {
@@ -5067,6 +5483,9 @@ function formatAuditEvent(event) {
     'secret.set': 'Stored encrypted secret',
     'secret.delete': 'Deleted encrypted secret',
     'secret.push': 'Pushed secret between compartments',
+    'profiles.eth_xpub_wallet.upsert': 'Saved xpub wallet profile',
+    'profiles.eth_xpub_wallet.delete': 'Deleted xpub wallet profile',
+    'wallet.eth_xpub.export': 'Exported xpub receive branch',
     'fido2.setup': 'Completed FIDO2 setup',
     'fido2.register': 'Registered FIDO2 key',
     'fido2.register_poison': 'Registered poison FIDO2 key',
@@ -5077,6 +5496,8 @@ function formatAuditEvent(event) {
   let suffix = '';
   if (details.label) suffix = ' - ' + details.label;
   else if (details.key) suffix = ' - ' + details.key;
+  else if (details.name) suffix = ' - ' + details.name;
+  else if (details.wallet_profile) suffix = ' - ' + details.wallet_profile;
   else if (details.compartment_count) suffix = ' - ' + details.compartment_count + ' compartments';
   else if (details.count) suffix = ' - ' + details.count + ' compartments';
   else if (details.file_count) suffix = ' - ' + details.file_count + ' files';

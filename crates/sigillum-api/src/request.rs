@@ -439,6 +439,33 @@ pub struct EthStealthWalletProfileUpsertRequest {
     pub default_destination_address: Option<String>,
 }
 
+/// Create or update an xpub receive-wallet profile.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct EthXpubWalletProfileUpsertRequest {
+    pub name: String,
+    pub project_account: u32,
+    pub provider_profile: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub compartment_id: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub chain_id: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub default_destination_address: Option<String>,
+}
+
+/// Export the receive-branch xpub for a saved xpub wallet profile.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct EthXpubExportRequest {
+    pub wallet_profile: String,
+}
+
+/// Derive a public receive address from an exported receive-branch xpub.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct EthXpubDeriveRequest {
+    pub xpub: String,
+    pub index: u32,
+}
+
 /// Send a native ETH transfer using a saved wallet profile.
 ///
 /// This is the ergonomic variant of [`EthStealthSendTransferRequest`] — the
@@ -997,6 +1024,36 @@ mod tests {
             max_fee_per_gas_hex: None,
             native_gas_limit: None,
             erc20_gas_limit: None,
+        };
+        roundtrip_test(req);
+    }
+
+    #[test]
+    fn test_eth_xpub_wallet_profile_upsert_request_roundtrip() {
+        let req = EthXpubWalletProfileUpsertRequest {
+            name: "treasury_receive".to_string(),
+            project_account: 7,
+            provider_profile: "mainnet".to_string(),
+            compartment_id: Some(2),
+            chain_id: Some(1),
+            default_destination_address: Some("0xdestination".to_string()),
+        };
+        roundtrip_test(req);
+    }
+
+    #[test]
+    fn test_eth_xpub_export_request_roundtrip() {
+        let req = EthXpubExportRequest {
+            wallet_profile: "treasury_receive".to_string(),
+        };
+        roundtrip_test(req);
+    }
+
+    #[test]
+    fn test_eth_xpub_derive_request_roundtrip() {
+        let req = EthXpubDeriveRequest {
+            xpub: "xpub661MyMwAqRbcFexample".to_string(),
+            index: 12,
         };
         roundtrip_test(req);
     }

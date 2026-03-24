@@ -185,6 +185,13 @@ pub(crate) enum AuditEventSpec {
     },
     #[serde(rename = "profiles.eth_stealth_wallet.delete")]
     ProfilesEthStealthWalletDelete { name: String },
+    #[serde(rename = "profiles.eth_xpub_wallet.upsert")]
+    ProfilesEthXpubWalletUpsert {
+        name: String,
+        provider_profile: String,
+    },
+    #[serde(rename = "profiles.eth_xpub_wallet.delete")]
+    ProfilesEthXpubWalletDelete { name: String },
     #[serde(rename = "snapshot.export")]
     SnapshotExport {
         file_count: usize,
@@ -233,6 +240,11 @@ pub(crate) enum AuditEventSpec {
     EvmBroadcast { transaction_hash_hex: String },
     #[serde(rename = "wallet.eth_stealth.export")]
     WalletEthStealthExport { wallet: String, short_name: String },
+    #[serde(rename = "wallet.eth_xpub.export")]
+    WalletEthXpubExport {
+        wallet_profile: String,
+        project_account: u32,
+    },
     #[serde(rename = "wallet.eth_stealth.check")]
     WalletEthStealthCheck { wallet: String, matches: bool },
     #[serde(rename = "wallet.eth_stealth.sign")]
@@ -324,6 +336,8 @@ impl AuditEventSpec {
             Self::ProfilesEvmProviderDelete { .. } => "profiles.evm_provider.delete",
             Self::ProfilesEthStealthWalletUpsert { .. } => "profiles.eth_stealth_wallet.upsert",
             Self::ProfilesEthStealthWalletDelete { .. } => "profiles.eth_stealth_wallet.delete",
+            Self::ProfilesEthXpubWalletUpsert { .. } => "profiles.eth_xpub_wallet.upsert",
+            Self::ProfilesEthXpubWalletDelete { .. } => "profiles.eth_xpub_wallet.delete",
             Self::SnapshotExport { .. } => "snapshot.export",
             Self::SnapshotRestore { .. } => "snapshot.restore",
             Self::Fido2Setup { .. } => "fido2.setup",
@@ -337,6 +351,7 @@ impl AuditEventSpec {
             Self::TransitHmac { .. } => "transit.hmac",
             Self::EvmBroadcast { .. } => "evm.broadcast",
             Self::WalletEthStealthExport { .. } => "wallet.eth_stealth.export",
+            Self::WalletEthXpubExport { .. } => "wallet.eth_xpub.export",
             Self::WalletEthStealthCheck { .. } => "wallet.eth_stealth.check",
             Self::WalletEthStealthSign { .. } => "wallet.eth_stealth.sign",
             Self::WalletEthStealthSignTransfer { .. } => "wallet.eth_stealth.sign_transfer",
@@ -405,6 +420,11 @@ impl AuditEventSpec {
                 provider_profile,
             } => json!({ "name": name, "provider_profile": provider_profile }),
             Self::ProfilesEthStealthWalletDelete { name } => json!({ "name": name }),
+            Self::ProfilesEthXpubWalletUpsert {
+                name,
+                provider_profile,
+            } => json!({ "name": name, "provider_profile": provider_profile }),
+            Self::ProfilesEthXpubWalletDelete { name } => json!({ "name": name }),
             Self::SnapshotExport {
                 file_count,
                 total_bytes,
@@ -465,6 +485,13 @@ impl AuditEventSpec {
             Self::WalletEthStealthExport { wallet, short_name } => {
                 json!({ "wallet": wallet, "short_name": short_name })
             }
+            Self::WalletEthXpubExport {
+                wallet_profile,
+                project_account,
+            } => json!({
+                "wallet_profile": wallet_profile,
+                "project_account": project_account,
+            }),
             Self::WalletEthStealthCheck { wallet, matches } => {
                 json!({ "wallet": wallet, "matches": matches })
             }
@@ -668,6 +695,19 @@ impl AuditEventSpec {
                 let details = parse_legacy_details::<NamedAuditDetails>(path, &kind, details)?;
                 Ok(Self::ProfilesEthStealthWalletDelete { name: details.name })
             }
+            "profiles.eth_xpub_wallet.upsert" => {
+                let details = parse_legacy_details::<ProfilesEthXpubWalletUpsertDetails>(
+                    path, &kind, details,
+                )?;
+                Ok(Self::ProfilesEthXpubWalletUpsert {
+                    name: details.name,
+                    provider_profile: details.provider_profile,
+                })
+            }
+            "profiles.eth_xpub_wallet.delete" => {
+                let details = parse_legacy_details::<NamedAuditDetails>(path, &kind, details)?;
+                Ok(Self::ProfilesEthXpubWalletDelete { name: details.name })
+            }
             "snapshot.export" => {
                 let details = parse_legacy_details::<SnapshotAuditDetails>(path, &kind, details)?;
                 Ok(Self::SnapshotExport {
@@ -760,6 +800,14 @@ impl AuditEventSpec {
                 Ok(Self::WalletEthStealthExport {
                     wallet: details.wallet,
                     short_name: details.short_name,
+                })
+            }
+            "wallet.eth_xpub.export" => {
+                let details =
+                    parse_legacy_details::<WalletXpubExportDetails>(path, &kind, details)?;
+                Ok(Self::WalletEthXpubExport {
+                    wallet_profile: details.wallet_profile,
+                    project_account: details.project_account,
                 })
             }
             "wallet.eth_stealth.check" => {
@@ -1024,6 +1072,12 @@ struct ProfilesEthStealthWalletUpsertDetails {
 }
 
 #[derive(Clone, Debug, Deserialize)]
+struct ProfilesEthXpubWalletUpsertDetails {
+    name: String,
+    provider_profile: String,
+}
+
+#[derive(Clone, Debug, Deserialize)]
 struct SnapshotAuditDetails {
     file_count: usize,
     total_bytes: usize,
@@ -1091,6 +1145,12 @@ struct EvmBroadcastDetails {
 struct WalletExportDetails {
     wallet: String,
     short_name: String,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+struct WalletXpubExportDetails {
+    wallet_profile: String,
+    project_account: u32,
 }
 
 #[derive(Clone, Debug, Deserialize)]

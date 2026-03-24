@@ -481,6 +481,45 @@ pub struct EthStealthWalletProfileMutationResponse {
     pub profile: EthStealthWalletProfile,
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct EthXpubWalletProfile {
+    pub name: String,
+    pub project_account: u32,
+    pub provider_profile: String,
+    #[serde(default)]
+    pub compartment_id: usize,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub chain_id: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub default_destination_address: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct EthXpubWalletProfileListResponse {
+    pub profiles: Vec<EthXpubWalletProfile>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct EthXpubWalletProfileMutationResponse {
+    pub status: String,
+    pub profile: EthXpubWalletProfile,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct EthXpubExportResponse {
+    pub wallet_profile: String,
+    pub project_account: u32,
+    pub account_path: String,
+    pub receive_path: String,
+    pub receive_xpub: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct EthXpubAddressResponse {
+    pub index: u32,
+    pub address: String,
+}
+
 // ── Deposits ────────────────────────────────────
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -1114,6 +1153,65 @@ mod tests {
                     default_destination_address: Some("0xdest2".to_string()),
                 },
             ],
+        };
+        roundtrip_test(resp);
+    }
+
+    #[test]
+    fn test_eth_xpub_wallet_profile_roundtrip() {
+        let profile = EthXpubWalletProfile {
+            name: "receive_tree".to_string(),
+            project_account: 9,
+            provider_profile: "mainnet".to_string(),
+            compartment_id: 1,
+            chain_id: Some(1),
+            default_destination_address: Some("0xdest".to_string()),
+        };
+        roundtrip_test(profile);
+    }
+
+    #[test]
+    fn test_eth_xpub_wallet_profile_list_response_roundtrip() {
+        let resp = EthXpubWalletProfileListResponse {
+            profiles: vec![
+                EthXpubWalletProfile {
+                    name: "receive_tree".to_string(),
+                    project_account: 0,
+                    provider_profile: "mainnet".to_string(),
+                    compartment_id: 1,
+                    chain_id: Some(1),
+                    default_destination_address: None,
+                },
+                EthXpubWalletProfile {
+                    name: "project_b".to_string(),
+                    project_account: 15,
+                    provider_profile: "testnet".to_string(),
+                    compartment_id: 2,
+                    chain_id: Some(5),
+                    default_destination_address: Some("0xdest2".to_string()),
+                },
+            ],
+        };
+        roundtrip_test(resp);
+    }
+
+    #[test]
+    fn test_eth_xpub_export_response_roundtrip() {
+        let resp = EthXpubExportResponse {
+            wallet_profile: "receive_tree".to_string(),
+            project_account: 9,
+            account_path: "m/44'/60'/9'".to_string(),
+            receive_path: "m/44'/60'/9'/0".to_string(),
+            receive_xpub: "xpub661MyMwAqRbcFexample".to_string(),
+        };
+        roundtrip_test(resp);
+    }
+
+    #[test]
+    fn test_eth_xpub_address_response_roundtrip() {
+        let resp = EthXpubAddressResponse {
+            index: 4,
+            address: "0x1111111111111111111111111111111111111111".to_string(),
         };
         roundtrip_test(resp);
     }

@@ -9,12 +9,38 @@ use axum::response::Response;
 use sigillum_api::{
     EthStealthCheckRequest, EthStealthExportRequest, EthStealthGenerateRequest,
     EthStealthSignErc20TransferRequest, EthStealthSignRequest, EthStealthSignTransferRequest,
+    EthXpubDeriveRequest, EthXpubExportRequest,
 };
 
 use crate::AppState;
 use crate::service::SigillumService;
 
 use super::{bearer_token, service_response, validated};
+
+pub(crate) async fn eth_xpub_export(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Json(body): Json<EthXpubExportRequest>,
+) -> Response {
+    let body = match validated(Json(body)) {
+        Ok(b) => b,
+        Err(resp) => return resp,
+    };
+    let service = SigillumService::new(state);
+    service_response(service.eth_xpub_export(bearer_token(&headers).as_deref(), body))
+}
+
+pub(crate) async fn eth_xpub_derive(
+    State(state): State<Arc<AppState>>,
+    Json(body): Json<EthXpubDeriveRequest>,
+) -> Response {
+    let body = match validated(Json(body)) {
+        Ok(b) => b,
+        Err(resp) => return resp,
+    };
+    let service = SigillumService::new(state);
+    service_response(service.eth_xpub_derive(body))
+}
 
 pub(crate) async fn eth_stealth_export(
     State(state): State<Arc<AppState>>,

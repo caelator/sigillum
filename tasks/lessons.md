@@ -13,3 +13,4 @@
 - Multi-key FIDO flows cannot bind to the first HID device in enumeration order; resolve existing authenticators by credential across attached devices and fail with explicit target-key guidance when a new-key step is still ambiguous.
 - Sigillum UI passes should bias toward minimalist surfaces, intuitive task flow, and depth from layering and contrast; if a redesign feels loud or self-conscious, strip it back before shipping.
 - Treat Sigillum's north star as local-on-your-computer software, not an eventual internet-facing or remote-service product; audits and readiness reviews must judge it against that local-only boundary.
+- Navigation that only scrolls a long operator page is not enough for Sigillum; major workflows need distinct, self-explanatory sections with clear purpose, usage guidance, and visible "what do I do next?" affordances so operators can understand the system they built without reading code.

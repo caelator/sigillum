@@ -43,7 +43,8 @@ use sigillum_api::request::{
     EthStealthGenerateRequest, EthStealthSendErc20TransferRequest,
     EthStealthSendErc20WithProfileRequest, EthStealthSendTransferRequest,
     EthStealthSendWithProfileRequest, EthStealthSignErc20TransferRequest, EthStealthSignRequest,
-    EthStealthSignTransferRequest, EthStealthWalletProfileUpsertRequest, EvmProfileDeleteRequest,
+    EthStealthSignTransferRequest, EthStealthWalletProfileUpsertRequest, EthXpubDeriveRequest,
+    EthXpubExportRequest, EthXpubWalletProfileUpsertRequest, EvmProfileDeleteRequest,
     EvmProviderProfileUpsertRequest, EvmRpcBalanceRequest, EvmRpcBroadcastRequest,
     EvmRpcErc20BalanceRequest, EvmRpcNonceRequest, Fido2RegisterRequest, Fido2RemoveRequest,
     Fido2SetupRequest, Fido2UnlockRequest, KeyOnlyRequest, KeyValueRequest, MaintenanceRunRequest,
@@ -60,15 +61,17 @@ pub use sigillum_api::response::{
     EthStealthDepositMutationResponse, EthStealthDepositRefreshResponse,
     EthStealthGenerateResponse, EthStealthMetaAddressResponse, EthStealthSendResponse,
     EthStealthSignResponse, EthStealthWalletProfile, EthStealthWalletProfileListResponse,
-    EthStealthWalletProfileMutationResponse, EvmProviderProfile, EvmProviderProfileListResponse,
-    EvmProviderProfileMutationResponse, EvmRpcBalanceResponse, EvmRpcBroadcastResponse,
-    EvmRpcErc20BalanceResponse, EvmRpcNonceResponse, Fido2DetectResponse, Fido2KeyInfo,
-    Fido2ListResponse, Fido2RegisterResponse, Fido2RemoveResponse, Fido2SetupResponse,
-    Fido2StatusResponse, GenericStatusResponse, KeyListResponse, KeyValueResponse,
-    MaintenanceRunResponse, QueueEnqueueResponse, QueueJob, QueueJobListResponse,
-    QueueProcessResponse, SessionRevokeResponse, SnapshotExportResponse, SnapshotRestoreResponse,
-    StatusResponse, SwitchCompartmentResponse, TransitDecryptResponse, TransitEncryptResponse,
-    TransitHmacResponse, UnlockResponse, UnlockedCompartment,
+    EthStealthWalletProfileMutationResponse, EthXpubAddressResponse, EthXpubExportResponse,
+    EthXpubWalletProfile, EthXpubWalletProfileListResponse, EthXpubWalletProfileMutationResponse,
+    EvmProviderProfile, EvmProviderProfileListResponse, EvmProviderProfileMutationResponse,
+    EvmRpcBalanceResponse, EvmRpcBroadcastResponse, EvmRpcErc20BalanceResponse,
+    EvmRpcNonceResponse, Fido2DetectResponse, Fido2KeyInfo, Fido2ListResponse,
+    Fido2RegisterResponse, Fido2RemoveResponse, Fido2SetupResponse, Fido2StatusResponse,
+    GenericStatusResponse, KeyListResponse, KeyValueResponse, MaintenanceRunResponse,
+    QueueEnqueueResponse, QueueJob, QueueJobListResponse, QueueProcessResponse,
+    SessionRevokeResponse, SnapshotExportResponse, SnapshotRestoreResponse, StatusResponse,
+    SwitchCompartmentResponse, TransitDecryptResponse, TransitEncryptResponse, TransitHmacResponse,
+    UnlockResponse, UnlockedCompartment,
 };
 use sigillum_core::SnapshotSummary;
 use thiserror::Error;
@@ -419,6 +422,32 @@ impl SigillumClient {
         self.send(builder).await
     }
 
+    pub async fn export_eth_xpub_receive_branch(
+        &self,
+        wallet_profile: &str,
+    ) -> Result<EthXpubExportResponse, ClientError> {
+        let builder = self
+            .request(Method::POST, "/api/wallets/eth-xpub/export")
+            .json(&EthXpubExportRequest {
+                wallet_profile: wallet_profile.to_string(),
+            });
+        self.send(builder).await
+    }
+
+    pub async fn derive_eth_xpub_receive_address(
+        &self,
+        xpub: &str,
+        index: u32,
+    ) -> Result<EthXpubAddressResponse, ClientError> {
+        let builder = self
+            .request(Method::POST, "/api/wallets/eth-xpub/derive")
+            .json(&EthXpubDeriveRequest {
+                xpub: xpub.to_string(),
+                index,
+            });
+        self.send(builder).await
+    }
+
     pub async fn check_eth_stealth_address(
         &self,
         wallet: &str,
@@ -583,6 +612,16 @@ impl SigillumClient {
             .profiles)
     }
 
+    pub async fn list_eth_xpub_wallet_profiles(
+        &self,
+    ) -> Result<Vec<EthXpubWalletProfile>, ClientError> {
+        let builder = self.request(Method::GET, "/api/profiles/eth-xpub");
+        Ok(self
+            .send::<EthXpubWalletProfileListResponse>(builder)
+            .await?
+            .profiles)
+    }
+
     pub async fn upsert_eth_stealth_wallet_profile(
         &self,
         request: EthStealthWalletProfileUpsertRequest,
@@ -599,6 +638,26 @@ impl SigillumClient {
     ) -> Result<EthStealthWalletProfileMutationResponse, ClientError> {
         let builder = self
             .request(Method::POST, "/api/profiles/eth-stealth/delete")
+            .json(&EvmProfileDeleteRequest { name: name.into() });
+        self.send(builder).await
+    }
+
+    pub async fn upsert_eth_xpub_wallet_profile(
+        &self,
+        request: EthXpubWalletProfileUpsertRequest,
+    ) -> Result<EthXpubWalletProfileMutationResponse, ClientError> {
+        let builder = self
+            .request(Method::POST, "/api/profiles/eth-xpub/upsert")
+            .json(&request);
+        self.send(builder).await
+    }
+
+    pub async fn delete_eth_xpub_wallet_profile(
+        &self,
+        name: &str,
+    ) -> Result<EthXpubWalletProfileMutationResponse, ClientError> {
+        let builder = self
+            .request(Method::POST, "/api/profiles/eth-xpub/delete")
             .json(&EvmProfileDeleteRequest { name: name.into() });
         self.send(builder).await
     }

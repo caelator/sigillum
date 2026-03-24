@@ -32,6 +32,7 @@
 
 mod error;
 mod ethereum_stealth;
+mod ethereum_xpub;
 mod traits;
 
 pub use error::VaultError;
@@ -43,6 +44,12 @@ pub use ethereum_stealth::{
     derive_sigillum_ethereum_stealth_wallet, generate_ethereum_stealth_address,
     sign_ethereum_stealth_digest, sign_ethereum_stealth_erc20_transfer,
     sign_ethereum_stealth_native_transfer,
+};
+pub use ethereum_xpub::{
+    ETHEREUM_XPUB_COIN_TYPE, ETHEREUM_XPUB_CONTROL_BRANCH, ETHEREUM_XPUB_PURPOSE,
+    ETHEREUM_XPUB_RECEIVE_BRANCH, EthereumXpubError, EthereumXpubReceiveAddress,
+    EthereumXpubReceiveExport, derive_ethereum_address_from_xpub,
+    derive_sigillum_ethereum_xpub_receive_address, derive_sigillum_ethereum_xpub_receive_branch,
 };
 pub use traits::{SecretStore, VaultLifecycle};
 

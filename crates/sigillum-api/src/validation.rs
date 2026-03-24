@@ -52,6 +52,7 @@ const MAX_RPC_URL: usize = 2048;
 const MAX_PIN: usize = 64;
 const MAX_ADDRESS: usize = 128;
 const MAX_META_ADDRESS: usize = 256;
+const MAX_XPUB: usize = 512;
 const MAX_SNAPSHOT_HEX: usize = 10_000_000;
 const MAX_NOTE: usize = 1024;
 const MAX_ID: usize = 256;
@@ -402,6 +403,33 @@ impl Validate for crate::request::EthStealthWalletProfileUpsertRequest {
             &self.default_destination_address,
             MAX_ADDRESS,
         )?;
+        Ok(())
+    }
+}
+
+impl Validate for crate::request::EthXpubWalletProfileUpsertRequest {
+    fn validate(&self) -> Result<(), String> {
+        check_len("name", &self.name, MAX_LABEL)?;
+        check_len("provider_profile", &self.provider_profile, MAX_LABEL)?;
+        check_optional_len(
+            "default_destination_address",
+            &self.default_destination_address,
+            MAX_ADDRESS,
+        )?;
+        Ok(())
+    }
+}
+
+impl Validate for crate::request::EthXpubExportRequest {
+    fn validate(&self) -> Result<(), String> {
+        check_len("wallet_profile", &self.wallet_profile, MAX_LABEL)?;
+        Ok(())
+    }
+}
+
+impl Validate for crate::request::EthXpubDeriveRequest {
+    fn validate(&self) -> Result<(), String> {
+        check_len("xpub", &self.xpub, MAX_XPUB)?;
         Ok(())
     }
 }

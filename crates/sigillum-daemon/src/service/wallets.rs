@@ -7,11 +7,13 @@ use sigillum_api::{
     EthSignedTransactionResponse, EthStealthCheckRequest, EthStealthCheckResponse,
     EthStealthExportRequest, EthStealthGenerateRequest, EthStealthGenerateResponse,
     EthStealthMetaAddressResponse, EthStealthSignErc20TransferRequest, EthStealthSignRequest,
-    EthStealthSignResponse, EthStealthSignTransferRequest,
+    EthStealthSignResponse, EthStealthSignTransferRequest, EthXpubAddressResponse,
+    EthXpubDeriveRequest, EthXpubExportRequest, EthXpubExportResponse,
 };
 use sigillum_core::{
     EthereumEip1559Erc20Transfer, EthereumEip1559Transfer, VaultLifecycle,
-    check_ethereum_stealth_address, decode_quantity_hex, derive_sigillum_ethereum_stealth_wallet,
+    check_ethereum_stealth_address, decode_quantity_hex, derive_ethereum_address_from_xpub,
+    derive_sigillum_ethereum_stealth_wallet, derive_sigillum_ethereum_xpub_receive_branch,
     generate_ethereum_stealth_address, sign_ethereum_stealth_digest,
     sign_ethereum_stealth_erc20_transfer, sign_ethereum_stealth_native_transfer,
 };
@@ -19,10 +21,59 @@ use zeroize::Zeroizing;
 
 use crate::audit_log::AuditEventSpec;
 
-use super::helpers::{decode_fixed_hex, decode_optional_view_tag, map_wallet_error};
+use super::helpers::{
+    decode_fixed_hex, decode_optional_view_tag, map_wallet_error, map_xpub_error,
+};
 use super::{ServiceError, ServiceResult, SigillumService};
 
 impl SigillumService {
+    pub(crate) fn eth_xpub_export(
+        &self,
+        token: Option<&str>,
+        body: EthXpubExportRequest,
+    ) -> ServiceResult<EthXpubExportResponse> {
+        let _ = self.require_session(token)?;
+        let (_provider, profile) = self.resolve_xpub_wallet_profile(&body.wallet_profile)?;
+        let export = self.with_vault(profile.compartment_id, |vault| {
+            let master_key = vault
+                .extract_master_key()
+                .ok_or_else(|| ServiceError::forbidden("Vault is locked."))?;
+            derive_sigillum_ethereum_xpub_receive_branch(
+                master_key.as_ref(),
+                profile.project_account,
+            )
+            .map_err(map_xpub_error)
+        })?;
+
+        self.record_audit(
+            Some(profile.compartment_id),
+            AuditEventSpec::WalletEthXpubExport {
+                wallet_profile: profile.name.clone(),
+                project_account: profile.project_account,
+            },
+        )?;
+
+        Ok(EthXpubExportResponse {
+            wallet_profile: profile.name,
+            project_account: export.project_account,
+            account_path: export.account_path,
+            receive_path: export.receive_path,
+            receive_xpub: export.receive_xpub,
+        })
+    }
+
+    pub(crate) fn eth_xpub_derive(
+        &self,
+        body: EthXpubDeriveRequest,
+    ) -> ServiceResult<EthXpubAddressResponse> {
+        let derived =
+            derive_ethereum_address_from_xpub(&body.xpub, body.index).map_err(map_xpub_error)?;
+        Ok(EthXpubAddressResponse {
+            index: derived.index,
+            address: derived.address,
+        })
+    }
+
     pub(crate) fn eth_stealth_export(
         &self,
         token: Option<&str>,

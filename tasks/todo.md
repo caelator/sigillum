@@ -1,10 +1,24 @@
+# UX + Xpub Vertical Slice 2026-03-24
+
+- [x] Reframe the embedded daemon UI into distinct, task-oriented operator modes instead of anchor-scroll cards
+- [x] Add explicit in-product guidance that explains what Sigillum is, what is currently supported, and how to run the main local workflows
+- [x] Implement an initial `eth-xpub` wallet family slice across core derivation, daemon/API/client contracts, profile storage, and embedded UI
+- [x] Verify the redesigned UI and new xpub slice with targeted tests plus a real local daemon smoke pass
+
+# Local Deployment Verification 2026-03-24
+
+- [x] Confirm the local-only deployment target and capture the daemon/UI startup path for this verification pass
+- [x] Start the local Sigillum daemon with an isolated local data directory and verify it is serving on loopback
+- [x] Exercise a local health/UI smoke path and collect evidence from HTTP responses and process logs
+- [x] Run targeted verification commands that support the local deployment confidence level and record the results
+
 # Release Integration 2026-03-24
 
 - [x] Rebuild context for the remaining dirty worktree and confirm the intended release story against Sigillum's local-only north star
 - [x] Audit the expanded daemon, client, API, gateway, and wallet/deposit changes for integration gaps or scope leaks
 - [x] Fix the remaining implementation, test, and documentation issues with the smallest reasonable blast radius
 - [x] Run the release verification gates and capture evidence before marking the change done
-- [ ] Commit, push, merge to `main`, and leave the workspace clean
+- [x] Commit, push, merge to `main`, and leave the workspace clean
 
 # UI/UX Rebuild
 
