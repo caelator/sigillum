@@ -1,14 +1,45 @@
+//! Two-tier file-backed vault with plaintext and encrypted storage.
+//!
+//! This module implements a two-tier secret storage system:
+//! - **Tier 1**: API keys stored as plaintext JSON in `api_keys.json`.
+//! - **Tier 2**: Secrets encrypted with AES-256-GCM under a master key held in memory in `vault.enc`.
+//!
+//! ## Design Rationale
+//!
+//! The two-tier design reflects different threat models: API keys may be acceptable to store
+//! in plaintext for convenience, while long-lived secrets require encryption. The master key
+//! is stored in memory wrapped in `Mutex<Option<Zeroizing<[u8;32]>>>` and is `None` when locked,
+//! preventing any Tier 2 operations until unlocked.
+//!
+//! ## Key Invariants
+//!
+//! - **Atomic writes**: All file mutations go through `atomic_write()` to prevent partial writes
+//!   and data loss on crash.
+//! - **Serialized updates**: A `write_lock` Mutex serializes all read-modify-write operations,
+//!   preventing concurrent writes that could lose data.
+//! - **Secure key storage**: The master key uses `Zeroizing<[u8;32]>` to ensure memory is
+//!   wiped on drop. The key is never exposed outside the Mutex.
+//! - **Locked state**: When the master key is `None`, all Tier 2 operations return
+//!   `Err(VaultError::Locked)` to enforce explicit unlock before access.
+//!
+//! ## Directory Permissions
+//!
+//! On Unix systems, the vault directory is created with mode `0o700` (readable/writable/executable
+//! by owner only) to restrict access to the current user.
+
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Mutex;
 
 use aes_gcm::aead::Aead;
 use aes_gcm::{Aes256Gcm, KeyInit, Nonce};
-use rand::rngs::OsRng;
 use rand::RngCore;
+use rand::rngs::OsRng;
 use secrecy::SecretString;
+use zeroize::Zeroize;
 use zeroize::Zeroizing;
 
+use crate::utils::atomic_write;
 use crate::{SecretStore, VaultError, VaultLifecycle};
 
 /// Configuration for the file-backed vault.
@@ -39,16 +70,23 @@ impl Default for VaultConfig {
 /// Master key is held in a `Mutex<Option<Zeroizing<[u8; 32]>>>`.
 /// When `None`, the vault is locked and Tier 2 operations return
 /// `None` or `Err(VaultError::Locked)`.
+///
+/// All read-modify-write operations on vault files are serialized through
+/// `write_lock` to prevent concurrent-write data loss (B3).
 pub struct FileVault {
     config: VaultConfig,
     master_key: Mutex<Option<Zeroizing<[u8; 32]>>>,
+    /// Serializes all file write operations to prevent read-modify-write races.
+    write_lock: Mutex<()>,
 }
 
 impl FileVault {
+    /// Create a new file vault with the given configuration.
     pub fn new(config: VaultConfig) -> Self {
         Self {
             config,
             master_key: Mutex::new(None),
+            write_lock: Mutex::new(()),
         }
     }
 
@@ -65,12 +103,13 @@ impl FileVault {
     /// Verify that the currently loaded master key can decrypt the vault.
     /// Returns `true` if decryption succeeds, `false` otherwise.
     pub fn verify_master_key(&self) -> bool {
-        self.with_master_key(|mk| self.load_store(mk).is_some())
+        self.with_master_key(|mk| self.load_store(mk).is_ok())
             .unwrap_or(false)
     }
 
     /// Execute a closure with a reference to the master key.
     /// The key never leaves the Mutex. Returns `None` if locked.
+    #[must_use]
     pub fn with_master_key<F, T>(&self, f: F) -> Option<T>
     where
         F: FnOnce(&[u8; 32]) -> T,
@@ -94,31 +133,22 @@ impl FileVault {
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
-            let _ = std::fs::set_permissions(
+            std::fs::set_permissions(
                 &self.config.base_dir,
                 std::fs::Permissions::from_mode(0o700),
-            );
+            )?;
         }
         Ok(())
     }
 
-    fn set_file_perms(&self, path: &std::path::Path) {
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            let _ = std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600));
-        }
-        #[cfg(not(unix))]
-        let _ = path;
-    }
-
     // ── Tier 1: plaintext JSON ────────────────────────────────────
 
-    fn load_api_store(&self) -> HashMap<String, String> {
+    fn load_api_store(&self) -> Result<HashMap<String, String>, VaultError> {
         let path = self.tier1_path();
         match std::fs::read_to_string(&path) {
-            Ok(content) => serde_json::from_str(&content).unwrap_or_default(),
-            Err(_) => HashMap::new(),
+            Ok(content) => Ok(serde_json::from_str(&content)?),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(HashMap::new()),
+            Err(e) => Err(VaultError::Io(e)),
         }
     }
 
@@ -126,23 +156,33 @@ impl FileVault {
         self.ensure_dir()?;
         let path = self.tier1_path();
         let json = serde_json::to_string_pretty(store)?;
-        std::fs::write(&path, &json)?;
-        self.set_file_perms(&path);
+        atomic_write(&path, json.as_bytes())?;
         Ok(())
     }
 
     // ── Tier 2: AES-256-GCM encrypted ────────────────────────────
 
-    fn load_store(&self, master_key: &[u8; 32]) -> Option<HashMap<String, String>> {
-        let data = std::fs::read(self.tier2_path()).ok()?;
+    fn load_store(&self, master_key: &[u8; 32]) -> Result<HashMap<String, String>, VaultError> {
+        let data = match std::fs::read(self.tier2_path()) {
+            Ok(data) => data,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                return Err(VaultError::NotInitialized);
+            }
+            Err(e) => return Err(VaultError::Io(e)),
+        };
         if data.len() < 12 {
-            return None;
+            return Err(VaultError::Decryption("ciphertext too short".into()));
         }
         let (nonce_bytes, ciphertext) = data.split_at(12);
-        let cipher = Aes256Gcm::new_from_slice(master_key).ok()?;
+        let cipher = Aes256Gcm::new_from_slice(master_key)
+            .map_err(|e| VaultError::Encryption(e.to_string()))?;
         let nonce = Nonce::from_slice(nonce_bytes);
-        let plaintext = cipher.decrypt(nonce, ciphertext).ok()?;
-        serde_json::from_slice(&plaintext).ok()
+        let mut plaintext = cipher
+            .decrypt(nonce, ciphertext)
+            .map_err(|_| VaultError::Decryption("failed to decrypt vault".into()))?;
+        let store = serde_json::from_slice(&plaintext).map_err(VaultError::Serialization);
+        plaintext.zeroize();
+        store
     }
 
     fn save_store(
@@ -151,7 +191,7 @@ impl FileVault {
         store: &HashMap<String, String>,
     ) -> Result<(), VaultError> {
         self.ensure_dir()?;
-        let plaintext = serde_json::to_vec(store)?;
+        let mut plaintext = serde_json::to_vec(store)?;
         let cipher = Aes256Gcm::new_from_slice(master_key)
             .map_err(|e| VaultError::Encryption(e.to_string()))?;
 
@@ -162,14 +202,14 @@ impl FileVault {
         let ciphertext = cipher
             .encrypt(nonce, plaintext.as_ref())
             .map_err(|e| VaultError::Encryption(e.to_string()))?;
+        plaintext.zeroize();
 
         let mut output = Vec::with_capacity(12 + ciphertext.len());
         output.extend_from_slice(&nonce_bytes);
         output.extend_from_slice(&ciphertext);
 
         let path = self.tier2_path();
-        std::fs::write(&path, &output)?;
-        self.set_file_perms(&path);
+        atomic_write(&path, &output)?;
         Ok(())
     }
 }
@@ -177,44 +217,49 @@ impl FileVault {
 impl SecretStore for FileVault {
     // ── Tier 1 ────────────────────────────────────────────────────
 
-    fn get_api_key(&self, key: &str) -> Option<SecretString> {
-        self.load_api_store()
+    fn read_api_key(&self, key: &str) -> Result<Option<SecretString>, VaultError> {
+        Ok(self
+            .load_api_store()?
             .get(key)
-            .map(|v| SecretString::from(v.clone()))
+            .map(|v| SecretString::from(v.clone())))
     }
 
     fn set_api_key(&self, key: &str, value: &str) -> Result<(), VaultError> {
-        let mut store = self.load_api_store();
+        let _wl = self.write_lock.lock().unwrap_or_else(|e| e.into_inner());
+        let mut store = self.load_api_store()?;
         store.insert(key.to_string(), value.to_string());
         self.save_api_store(&store)
     }
 
     fn delete_api_key(&self, key: &str) -> Result<(), VaultError> {
-        let mut store = self.load_api_store();
+        let _wl = self.write_lock.lock().unwrap_or_else(|e| e.into_inner());
+        let mut store = self.load_api_store()?;
         store.remove(key);
         self.save_api_store(&store)
     }
 
-    fn list_api_keys(&self) -> Vec<String> {
-        let mut keys: Vec<String> = self.load_api_store().keys().cloned().collect();
+    fn read_api_keys(&self) -> Result<Vec<String>, VaultError> {
+        let mut keys: Vec<String> = self.load_api_store()?.keys().cloned().collect();
         keys.sort();
-        keys
+        Ok(keys)
     }
 
     // ── Tier 2 ────────────────────────────────────────────────────
 
-    fn get_secret(&self, key: &str) -> Option<SecretString> {
+    fn read_secret(&self, key: &str) -> Result<Option<SecretString>, VaultError> {
         self.with_master_key(|mk| {
-            self.load_store(mk)?
+            Ok(self
+                .load_store(mk)?
                 .get(key)
-                .map(|v| SecretString::from(v.clone()))
+                .map(|v| SecretString::from(v.clone())))
         })
-        .flatten()
+        .unwrap_or(Err(VaultError::Locked))
     }
 
     fn set_secret(&self, key: &str, value: &str) -> Result<(), VaultError> {
+        let _wl = self.write_lock.lock().unwrap_or_else(|e| e.into_inner());
         self.with_master_key(|mk| {
-            let mut store = self.load_store(mk).unwrap_or_default();
+            let mut store = self.load_store(mk)?;
             store.insert(key.to_string(), value.to_string());
             self.save_store(mk, &store)
         })
@@ -222,42 +267,34 @@ impl SecretStore for FileVault {
     }
 
     fn delete_secret(&self, key: &str) -> Result<(), VaultError> {
+        let _wl = self.write_lock.lock().unwrap_or_else(|e| e.into_inner());
         self.with_master_key(|mk| {
-            let mut store = self.load_store(mk).unwrap_or_default();
+            let mut store = self.load_store(mk)?;
             store.remove(key);
             self.save_store(mk, &store)
         })
         .unwrap_or(Err(VaultError::Locked))
     }
 
-    fn list_secrets(&self) -> Vec<String> {
+    fn read_secrets(&self) -> Result<Vec<String>, VaultError> {
         self.with_master_key(|mk| {
-            let mut keys: Vec<String> = self
-                .load_store(mk)
-                .unwrap_or_default()
-                .keys()
-                .cloned()
-                .collect();
+            let mut keys: Vec<String> = self.load_store(mk)?.keys().cloned().collect();
             keys.sort();
-            keys
+            Ok(keys)
         })
-        .unwrap_or_default()
+        .unwrap_or(Err(VaultError::Locked))
     }
 
     // ── Common ────────────────────────────────────────────────────
 
-    fn has_key(&self, key: &str) -> bool {
+    fn contains_key(&self, key: &str) -> Result<bool, VaultError> {
         // Check Tier 1 first (no unlock needed)
-        if self.load_api_store().contains_key(key) {
-            return true;
+        if self.load_api_store()?.contains_key(key) {
+            return Ok(true);
         }
         // Then Tier 2 (requires unlock)
-        self.with_master_key(|mk| {
-            self.load_store(mk)
-                .map(|s| s.contains_key(key))
-                .unwrap_or(false)
-        })
-        .unwrap_or(false)
+        self.with_master_key(|mk| Ok(self.load_store(mk)?.contains_key(key)))
+            .unwrap_or(Ok(false))
     }
 
     fn is_unlocked(&self) -> bool {
@@ -353,12 +390,50 @@ mod tests {
         assert_eq!(vault.get_api_key("k").unwrap().expose_secret(), "new");
     }
 
+    #[test]
+    fn tier1_malformed_store_blocks_write_and_preserves_data() {
+        let (vault, dir) = test_vault();
+        let path = dir.path().join("api_keys.json");
+        std::fs::write(&path, "{not json").unwrap();
+
+        assert!(matches!(
+            vault.set_api_key("k", "v"),
+            Err(VaultError::Serialization(_))
+        ));
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "{not json");
+    }
+
+    #[test]
+    fn tier1_malformed_store_surfaces_on_read() {
+        let (vault, dir) = test_vault();
+        let path = dir.path().join("api_keys.json");
+        std::fs::write(&path, "{not json").unwrap();
+
+        assert!(matches!(
+            vault.read_api_keys(),
+            Err(VaultError::Serialization(_))
+        ));
+        assert!(matches!(
+            vault.read_api_key("missing"),
+            Err(VaultError::Serialization(_))
+        ));
+        assert!(matches!(
+            vault.contains_key("missing"),
+            Err(VaultError::Serialization(_))
+        ));
+    }
+
     // ── Tier 2 tests ──────────────────────────────────────────────
 
     #[test]
     fn tier2_locked_returns_none() {
         let (vault, _dir) = test_vault();
         assert!(vault.get_secret("anything").is_none());
+        assert!(matches!(
+            vault.read_secret("anything"),
+            Err(VaultError::Locked)
+        ));
+        assert!(matches!(vault.read_secrets(), Err(VaultError::Locked)));
     }
 
     #[test]
@@ -488,5 +563,57 @@ mod tests {
         // Try with wrong key
         vault.load_master_key(key2);
         assert!(vault.get_secret("s").is_none());
+        assert!(matches!(
+            vault.read_secret("s"),
+            Err(VaultError::Decryption(_))
+        ));
+    }
+
+    #[test]
+    fn wrong_key_cannot_overwrite_existing_store() {
+        let (vault, _dir) = test_vault();
+        let key1 = test_key();
+        let key2 = test_key();
+
+        vault.initialize(&key1).unwrap();
+        vault.load_master_key(key1);
+        vault.set_secret("s", "secret").unwrap();
+        vault.zeroize_master_key();
+
+        vault.load_master_key(key2);
+        assert!(matches!(
+            vault.set_secret("new", "value"),
+            Err(VaultError::Decryption(_))
+        ));
+        vault.zeroize_master_key();
+
+        vault.load_master_key(key1);
+        assert_eq!(vault.get_secret("s").unwrap().expose_secret(), "secret");
+        assert!(vault.get_secret("new").is_none());
+    }
+
+    #[test]
+    fn corrupted_tier2_store_surfaces_on_read() {
+        let (vault, dir) = test_vault();
+        let key = test_key();
+
+        vault.initialize(&key).unwrap();
+        vault.load_master_key(key);
+        vault.set_secret("s", "secret").unwrap();
+
+        std::fs::write(dir.path().join("vault.enc"), b"bad").unwrap();
+
+        assert!(matches!(
+            vault.read_secret("s"),
+            Err(VaultError::Decryption(_))
+        ));
+        assert!(matches!(
+            vault.read_secrets(),
+            Err(VaultError::Decryption(_))
+        ));
+        assert!(matches!(
+            vault.contains_key("s"),
+            Err(VaultError::Decryption(_))
+        ));
     }
 }

@@ -1,331 +1,143 @@
 # Architecture
 
-## Overview
+## Current Shape
 
-Sigillum is a layered system. Each layer has a single responsibility and communicates through well-defined trait boundaries.
+Sigillum is currently a local Rust workspace with one strong implementation path:
 
-```
-┌─────────────────────────────────────────────────────────┐
-│                    Your Application                      │
-│                                                         │
-│  Uses: &dyn SecretStore                                 │
-│  Doesn't know: where secrets live, how they're encrypted │
-└──────────────────────────┬──────────────────────────────┘
-                           │
-              ┌────────────┼────────────┐
-              │            │            │
-              ▼            ▼            ▼
-         ┌─────────┐ ┌──────────┐ ┌──────────┐
-         │FileVault│ │RemoteVault│ │ YourImpl │
-         │ (local) │ │ (daemon) │ │ (custom) │
-         └────┬────┘ └─────┬────┘ └──────────┘
-              │            │
-              ▼            ▼
-         ~/.sigillum/   HTTP/Unix Socket
-         (files)        to sigillum-daemon
-```
+- `sigillum-core` provides the traits, errors, file-backed vault, and passphrase helpers.
+- `sigillum-fido2` handles local FIDO2/HID registration and shard recovery.
+- `sigillum-daemon` exposes a local Axum API plus an embedded browser UI.
+- `sigillum-api` defines the shared transport DTOs consumed by the daemon and async client.
+- `sigillum-client` is an async adapter for that local daemon API.
+- `sigillum-cli` provides setup, unlock, daemon launch, and local management commands.
+- `sigillum-gateway` is a local-sidecar payment preview surface that talks to the daemon over local HTTP.
 
-## Crate Dependency Graph
+`sigillum-sdk` and `sigillum-server` still exist in the workspace, but the repo's
+product direction remains local-on-your-computer rather than hosted or internet-facing.
 
-```
-sigillum-core (foundation)
-    │
-    ├── sigillum (meta-crate, re-exports core)
-    │
-    ├── sigillum-fido2 (hardware key unlock)
-    │
-    ├── sigillum-client (remote vault SDK)
-    │       └── reqwest, tokio
-    │
-    ├── sigillum-daemon (HTTP server + web UI)
-    │       └── axum, tower-http, tokio
-    │
-    ├── sigillum-cli (terminal interface)
-    │
-    ├── sigillum-sdk (embeddable SDK)
-    │
-    └── sigillum-server (server library)
+## Dependency Direction
+
+```text
+sigillum-core
+├── sigillum
+├── sigillum-client
+├── sigillum-fido2
+├── sigillum-daemon
+├── sigillum-cli
+└── sigillum-gateway
 ```
 
-All arrows point downward. No circular dependencies. `sigillum-core` is the only crate that every other crate depends on.
+The important boundary is still `sigillum-core`: the rest of the workspace should depend on its traits and error model rather than on transport details.
 
-## Core Traits
+## Core Interfaces
 
-### SecretStore
+Two traits define the local vault boundary:
 
-The primary interface all consumers use. Object-safe and thread-safe.
+- `SecretStore` for Tier 1 and Tier 2 reads and writes
+- `VaultLifecycle` for initialization, loading a master key, and zeroizing it
 
-```rust
-pub trait SecretStore: Send + Sync {
-    fn get_api_key(&self, key: &str) -> Option<SecretString>;
-    fn set_api_key(&self, key: &str, value: &str) -> Result<(), VaultError>;
-    fn delete_api_key(&self, key: &str) -> Result<(), VaultError>;
-    fn list_api_keys(&self) -> Vec<String>;
+That split is the main architectural seam worth preserving as the project grows.
 
-    fn get_secret(&self, key: &str) -> Option<SecretString>;
-    fn set_secret(&self, key: &str, value: &str) -> Result<(), VaultError>;
-    fn delete_secret(&self, key: &str) -> Result<(), VaultError>;
-    fn list_secrets(&self) -> Vec<String>;
+## Storage Model
 
-    fn has_key(&self, key: &str) -> bool;
-    fn is_unlocked(&self) -> bool;
-}
+Sigillum uses a two-tier secret model:
+
+- Tier 1 stores API keys in plaintext JSON for local automation.
+- Tier 2 stores secrets in an AES-256-GCM encrypted blob that requires an in-memory master key.
+
+Standalone `FileVault` defaults to:
+
+```text
+~/.sigillum/
+├── api_keys.json
+└── vault.enc
 ```
 
-**Design decisions:**
-- `Option<SecretString>` for reads: missing keys are not errors, they're absence.
-- `Result<(), VaultError>` for writes: mutations can fail (locked, IO, encryption).
-- `Vec<String>` for lists: key names are not secret; values are never returned in bulk.
-- No generic methods: the trait must be object-safe for `dyn SecretStore`.
+FIDO2 and multi-compartment flows use:
 
-### VaultLifecycle
-
-Separated from `SecretStore` because 90% of consumers only need read/write. Only the unlock manager (CLI, daemon, FIDO2 module) needs lifecycle control.
-
-```rust
-pub trait VaultLifecycle: SecretStore {
-    fn load_master_key(&self, key: [u8; 32]);
-    fn zeroize_master_key(&self);
-    fn initialize(&self, master_key: &[u8; 32]) -> Result<(), VaultError>;
-}
+```text
+~/.sigillum/
+├── .initialized
+├── fido2_keys.json
+└── compartments/
+    ├── 0/
+    │   ├── api_keys.json
+    │   ├── vault.enc
+    │   ├── meta.enc
+    │   ├── passphrase.salt
+    │   └── passphrase_wrapped_key.enc
+    └── ...
 ```
 
-This separation means you can hand application code `&dyn SecretStore` and it physically cannot call `zeroize_master_key()`.
+`meta.enc` is compartment metadata encrypted with that compartment's master key. `fido2_keys.json` stores registered key material and shard blobs, but not plaintext compartment definitions.
 
-## Two-Tier Secret System
+## Unlock Flows
 
-### Tier 1: API Keys (Plaintext)
+Today there are two real unlock paths:
 
-- Stored in `api_keys.json` (JSON file, `0o600` permissions)
-- No encryption, no unlock required
-- **Use case**: CI pipelines, headless servers, automation
+- Passphrase: Argon2-derived wrapping key decrypts a stored master key for one or more compartments.
+- Local FIDO2: HID access recovers enough encrypted shards to reconstruct one or more compartment master keys.
 
-### Tier 2: Secrets (Encrypted)
+Both flows end by loading compartment master keys into local process memory.
 
-- Stored in `vault.enc` (AES-256-GCM ciphertext)
-- Requires master key in memory to read/write
-- Master key loaded via FIDO2 hardware tap or passphrase
-- **Use case**: Database passwords, private keys, signing secrets
+## Daemon Model
 
-### Why two tiers?
+The daemon is a local service, not a distributed secrets platform.
 
-A vault that requires hardware unlock for every operation is unusable in CI/CD. A vault that stores everything in plaintext isn't a vault. The two-tier model lets you choose per-secret.
-
-## File Layout
-
-```
-~/.sigillum/                  (configurable base_dir)
-├── api_keys.json             Tier 1 store
-├── vault.enc                 Tier 2 store (encrypted)
-├── vault_index.json          Key name index (best-effort cache)
-└── titan_keys.json           FIDO2 credentials + encrypted shards
+```text
+Browser UI / local HTTP client
+            |
+            v
+      sigillum-daemon
+            |
+            v
+   unlocked compartment vaults
+            |
+            v
+      ~/.sigillum/...
 ```
 
-### vault.enc Format
+Current daemon behavior:
 
-```
-┌──────────────┬──────────────┬──────────────────────────┐
-│ Nonce (12B)  │ Ciphertext   │ Auth Tag (16B)           │
-└──────────────┴──────────────┴──────────────────────────┘
-```
+- runs on `localhost`
+- serves an embedded HTML/JS UI
+- issues bearer session tokens for session-gated access over local HTTP
+- tracks active compartment per session
+- keeps unlock state process-global inside the local daemon
+- supports per-session logout without forcing a global lock
+- keeps unlocked master keys in daemon memory until locked
+- can export and restore passphrase-encrypted whole-tree snapshots
+- keeps a local append-only audit log for state-changing operations
+- journals destructive operations so pending work is visible after interruption
+- records those pending operations as typed, schema-versioned journal documents rather than free-form JSON payloads
+- records audit history as typed, schema-versioned line documents while keeping the public audit API stable for clients and the embedded UI
+- exposes authenticated daemon diagnostics for operational visibility
+- loads a startup-time runtime policy so queue limits, refresh limits, retry timing, and provider observation concurrency live behind one explicit seam instead of scattered literals
+- persists non-vault operator state behind schema-versioned JSON documents so storage evolution can add explicit migrations instead of implicit file-shape drift
+- composes the HTTP route surface from domain routers so endpoint wiring stays aligned with lifecycle, storage, wallet, deposit, queue, and FIDO2 service boundaries
+- renders the embedded operator UI from explicit shell/script template sections so CSP nonce handling stays declarative, operator navigation follows visible cards, and polling remains visibility-aware instead of interval-driven
+- exposes transit-style encrypt/decrypt/HMAC operations derived from the active compartment master key
+- centralizes daemon business rules behind an application-service layer instead of spreading them across route handlers
+- stores provider profiles and stealth wallet profiles for internal EVM integration, with explicit compartment binding so queued work does not depend on the session's currently active compartment
+- tracks stealth deposit records and refreshes them against configured providers
+- queues direct sends and sweep jobs, including deferred jobs that need more balance or gas
+- exposes a maintenance cycle that refreshes deposits, auto-enqueues sweeps, and processes queue work
+- keeps the gateway surface local-sidecar-only rather than treating it as an internet-facing service boundary
 
-- Nonce: 12 bytes from `OsRng` (fresh per write)
-- Ciphertext: `serde_json::to_string(HashMap<String, String>)` encrypted with AES-256-GCM
-- Auth tag: 16-byte GCM authentication tag (integrity + authenticity)
+What it intentionally does not do:
 
-## Encryption Flow
+- remote SDK/client abstraction
+- polished remote multi-host client/server story
+- multi-host coordination
+- SSE streams
+- remote audit aggregation pipeline
+- deep on-chain indexing beyond provider RPC balance checks
 
-### Encrypt (set_secret)
+## Architectural Priorities
 
-```
-plaintext map ──► serde_json::to_vec()
-                       │
-                       ▼
-               ┌───────────────┐
-               │  AES-256-GCM  │◄── master_key [u8; 32]
-               │   encrypt()   │◄── random nonce [u8; 12]
-               └───────┬───────┘
-                       │
-                       ▼
-               nonce || ciphertext || tag
-                       │
-                       ▼
-               write to vault.enc (atomic)
-```
+The next clean architecture step is not adding more crates. It is tightening invariants around the existing local system:
 
-### Decrypt (get_secret)
-
-```
-read vault.enc
-       │
-       ▼
-parse nonce (first 12 bytes)
-       │
-       ▼
-┌───────────────┐
-│  AES-256-GCM  │◄── master_key [u8; 32]
-│   decrypt()   │◄── nonce
-└───────┬───────┘
-       │
-       ▼
-serde_json::from_slice() ──► HashMap<String, String>
-       │
-       ▼
-lookup key ──► SecretString
-```
-
-## Master Key Lifecycle
-
-```
-                    SEALED
-                      │
-                      │ initialize() — first-time setup
-                      ▼
-                    LOCKED
-                      │
-                      │ load_master_key([u8; 32])
-                      │ (from FIDO2 Shamir, passphrase Argon2id, or direct)
-                      ▼
-                   UNLOCKED
-                      │
-                      │ All Tier 2 operations succeed
-                      │
-                      │ zeroize_master_key()
-                      ▼
-                    LOCKED
-```
-
-The master key is held in:
-```rust
-static MASTER_KEY: Mutex<Option<Zeroizing<[u8; 32]>>>
-```
-
-- `None` = locked. All Tier 2 reads return `None`, writes return `Err(VaultError::Locked)`.
-- `Some(key)` = unlocked. `Zeroizing` overwrites the key bytes when dropped.
-- The key is accessed via closure (`with_master_key(|k| ...)`) so it never escapes the Mutex guard.
-
-## Daemon Architecture
-
-The daemon wraps `FileVault` in an HTTP server. It is the **key custodian** — the master key lives in this single process.
-
-```
-┌─────────────────────────────────────────────┐
-│                sigillum-daemon               │
-│                                             │
-│  ┌─────────┐  ┌──────────┐  ┌───────────┐  │
-│  │  Axum   │  │ FileVault│  │  Audit    │  │
-│  │ Router  │──│ (core)   │──│  Logger   │  │
-│  └────┬────┘  └──────────┘  └───────────┘  │
-│       │                                     │
-│  ┌────┴────────────────────────────────┐    │
-│  │            Routes                   │    │
-│  │  /api/vault/*    Secret CRUD        │    │
-│  │  /api/fido/*     FIDO2 unlock       │    │
-│  │  /api/auth/*     Session management │    │
-│  │  /api/backup/*   Export/import      │    │
-│  │  /api/status     Health + metrics   │    │
-│  │  /api/stream     SSE event stream   │    │
-│  │  /*              Static web UI      │    │
-│  └─────────────────────────────────────┘    │
-│                                             │
-│  ┌─────────────────────────────────────┐    │
-│  │         Middleware Stack             │    │
-│  │  CORS · Security Headers · Auth     │    │
-│  │  Audit Logging · Rate Limiting      │    │
-│  └─────────────────────────────────────┘    │
-└─────────────────────────────────────────────┘
-         │                    │
-    Unix Socket          TCP/TLS
-    (local mode)        (network mode)
-```
-
-### Transport Modes
-
-| Mode | Binding | Auth | Use Case |
-|------|---------|------|----------|
-| Local | Unix socket (`/run/sigillum.sock`) | File permissions (uid/gid) | Single machine, highest security |
-| Network | TCP with TLS | mTLS client certs or HMAC bearer tokens | Multi-machine, remote clients |
-
-### Session Flow
-
-1. Client requests challenge: `GET /api/auth/challenge`
-2. Client proves identity (wallet signature, FIDO2, or shared secret)
-3. Server issues HMAC-signed session token
-4. Client includes token in subsequent requests
-5. Middleware validates token on every protected route
-
-## Client SDK
-
-`sigillum-client` implements `SecretStore` over HTTP. From the consumer's perspective, it's identical to `FileVault`.
-
-```rust
-// Local mode
-let vault: Box<dyn SecretStore> = Box::new(FileVault::new(config));
-
-// Remote mode — same trait, same methods
-let vault: Box<dyn SecretStore> = Box::new(RemoteVault::connect(url)?);
-
-// Consumer code doesn't change
-let secret = vault.get_secret("db_password");
-```
-
-### Connection Strategy
-
-```
-RemoteVault::connect()
-       │
-       ├── Try Unix socket (/run/sigillum.sock)
-       │       └── Success? Use it (fastest, most secure)
-       │
-       ├── Try localhost:9743
-       │       └── Success? Use it (local daemon)
-       │
-       └── Try configured URL
-               └── Success? Use it (remote daemon)
-               └── Failure? Return error
-```
-
-## Extending Sigillum
-
-### Custom Backend
-
-Implement `SecretStore` to create a vault backed by anything:
-
-```rust
-use sigillum_core::{SecretStore, VaultError};
-use secrecy::SecretString;
-
-struct PostgresVault { /* ... */ }
-
-impl SecretStore for PostgresVault {
-    fn get_secret(&self, key: &str) -> Option<SecretString> {
-        // SELECT value FROM secrets WHERE key = $1
-    }
-    // ... remaining methods
-}
-```
-
-### Custom Unlock Mechanism
-
-Implement `VaultLifecycle` to add new unlock methods:
-
-```rust
-use sigillum_core::VaultLifecycle;
-
-struct BiometricUnlock { /* ... */ }
-
-impl BiometricUnlock {
-    fn unlock(&self, vault: &dyn VaultLifecycle) {
-        let key = self.scan_fingerprint_derive_key();
-        vault.load_master_key(key);
-    }
-}
-```
-
-## Design Principles
-
-1. **Trait-first**: Consumers depend on traits, never concrete types. Swapping `FileVault` for `RemoteVault` requires zero code changes.
-2. **Secrets are opaque**: `SecretString` has no `Display` or `Debug`. You must call `.expose_secret()` explicitly — no accidental leaks.
-3. **Fail closed**: If the vault is locked, Tier 2 reads return `None` (not an error, not a default value). The caller decides what absence means.
-4. **Audit by default**: The daemon logs every operation. You can't forget to add logging — it's structural.
-5. **Hardware over passwords**: FIDO2 keys are phishing-resistant, theft-resistant (quorum), and user-friendly (tap, don't type).
+1. Keep corruption handling strict and fail closed.
+2. Turn the current pending-operation journal into full recovery for restore/init/remove flows.
+3. Keep operational policy centralized and observable so limit changes happen through one documented policy layer rather than through scattered ad hoc constants.
+4. Build richer chain/indexing and policy automation on top of the shared `sigillum-api` contract instead of route-local JSON drift.

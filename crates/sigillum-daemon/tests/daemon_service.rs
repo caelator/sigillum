@@ -1,0 +1,1207 @@
+use std::net::SocketAddr;
+use std::path::PathBuf;
+use std::time::Duration;
+
+use axum::extract::State;
+use axum::http::{HeaderMap, header};
+use axum::routing::post;
+use axum::{Json, Router};
+use reqwest::StatusCode;
+use serde_json::json;
+use tempfile::TempDir;
+
+async fn spawn_daemon(base_dir: PathBuf) -> (SocketAddr, tokio::task::JoinHandle<()>) {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let (app, _state) = sigillum_daemon::build_router(base_dir, addr.port());
+    let handle = tokio::spawn(async move {
+        axum::serve(listener, app).await.unwrap();
+    });
+    (addr, handle)
+}
+
+#[derive(Clone)]
+struct RpcState;
+
+async fn spawn_mock_evm_provider() -> (SocketAddr, tokio::task::JoinHandle<()>) {
+    fn rpc_response(request: &serde_json::Value) -> serde_json::Value {
+        let method = request["method"].as_str().unwrap_or_default();
+        let result = match method {
+            "eth_getTransactionCount" => json!("0x7"),
+            "eth_getBalance" => json!("0xde0b6b3a7640000"),
+            "eth_call" => json!("0x0f4240"),
+            "eth_sendRawTransaction" => json!(format!("0x{}", "11".repeat(32))),
+            other => json!({ "unsupported": other }),
+        };
+
+        json!({
+            "jsonrpc": "2.0",
+            "id": request.get("id").cloned().unwrap_or(json!(1)),
+            "result": result,
+        })
+    }
+
+    async fn rpc_handler(
+        State(_state): State<RpcState>,
+        headers: HeaderMap,
+        Json(body): Json<serde_json::Value>,
+    ) -> (StatusCode, Json<serde_json::Value>) {
+        let auth = headers
+            .get(header::AUTHORIZATION)
+            .and_then(|value| value.to_str().ok())
+            .unwrap_or("");
+        if auth != "Bearer rpc-test-token" {
+            return (
+                StatusCode::UNAUTHORIZED,
+                Json(json!({ "error": "missing provider auth" })),
+            );
+        }
+
+        let payload = if let Some(requests) = body.as_array() {
+            serde_json::Value::Array(requests.iter().map(rpc_response).collect())
+        } else {
+            rpc_response(&body)
+        };
+
+        (StatusCode::OK, Json(payload))
+    }
+
+    let app = Router::new()
+        .route("/", post(rpc_handler))
+        .with_state(RpcState);
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let handle = tokio::spawn(async move {
+        axum::serve(listener, app).await.unwrap();
+    });
+    (addr, handle)
+}
+
+async fn post_json(
+    client: &reqwest::Client,
+    addr: SocketAddr,
+    path: &str,
+    body: serde_json::Value,
+    token: Option<&str>,
+) -> reqwest::Response {
+    let mut req = client.post(format!("http://{addr}{path}")).json(&body);
+    if let Some(token) = token {
+        req = req.bearer_auth(token);
+    }
+    req.send().await.unwrap()
+}
+
+async fn get(
+    client: &reqwest::Client,
+    addr: SocketAddr,
+    path: &str,
+    token: Option<&str>,
+) -> reqwest::Response {
+    let mut req = client.get(format!("http://{addr}{path}"));
+    if let Some(token) = token {
+        req = req.bearer_auth(token);
+    }
+    req.send().await.unwrap()
+}
+
+#[tokio::test]
+async fn failed_restore_preserves_existing_session_and_data() {
+    let dir = TempDir::new().unwrap();
+    let (addr, handle) = spawn_daemon(dir.path().to_path_buf()).await;
+    let client = reqwest::Client::new();
+
+    let init = post_json(
+        &client,
+        addr,
+        "/api/compartment/init",
+        json!({
+            "id": 0,
+            "label": "default",
+            "threshold": 1,
+            "passphrase": "correct horse battery staple",
+        }),
+        None,
+    )
+    .await;
+    assert_eq!(init.status(), StatusCode::OK);
+    let init_json: serde_json::Value = init.json().await.unwrap();
+    let token = init_json["session_token"].as_str().unwrap().to_string();
+
+    let set_key = post_json(
+        &client,
+        addr,
+        "/api/api-keys/set",
+        json!({ "key": "github", "value": "ghp_test" }),
+        Some(&token),
+    )
+    .await;
+    assert_eq!(set_key.status(), StatusCode::OK);
+
+    let export = post_json(
+        &client,
+        addr,
+        "/api/backup/export",
+        json!({ "passphrase": "snapshot passphrase" }),
+        Some(&token),
+    )
+    .await;
+    assert_eq!(export.status(), StatusCode::OK);
+    let export_json: serde_json::Value = export.json().await.unwrap();
+    let snapshot_hex = export_json["snapshot_hex"].as_str().unwrap();
+
+    let restore = post_json(
+        &client,
+        addr,
+        "/api/backup/restore",
+        json!({
+            "passphrase": "wrong snapshot passphrase",
+            "snapshot_hex": snapshot_hex,
+        }),
+        Some(&token),
+    )
+    .await;
+    assert_eq!(restore.status(), StatusCode::UNAUTHORIZED);
+
+    let status = get(&client, addr, "/api/status", Some(&token)).await;
+    assert_eq!(status.status(), StatusCode::OK);
+    let status_json: serde_json::Value = status.json().await.unwrap();
+    assert_eq!(status_json["locked"], false);
+
+    let api_keys = get(&client, addr, "/api/api-keys", Some(&token)).await;
+    assert_eq!(api_keys.status(), StatusCode::OK);
+    let api_keys_json: serde_json::Value = api_keys.json().await.unwrap();
+    assert_eq!(api_keys_json["keys"], json!(["github"]));
+
+    handle.abort();
+}
+
+#[tokio::test]
+async fn successful_restore_clears_session_and_restores_data_on_disk() {
+    let dir = TempDir::new().unwrap();
+    let (addr, handle) = spawn_daemon(dir.path().to_path_buf()).await;
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(15))
+        .build()
+        .unwrap();
+
+    let init = post_json(
+        &client,
+        addr,
+        "/api/compartment/init",
+        json!({
+            "id": 0,
+            "label": "default",
+            "threshold": 1,
+            "passphrase": "correct horse battery staple",
+        }),
+        None,
+    )
+    .await;
+    let init_json: serde_json::Value = init.json().await.unwrap();
+    let token = init_json["session_token"].as_str().unwrap().to_string();
+
+    let set_key = post_json(
+        &client,
+        addr,
+        "/api/api-keys/set",
+        json!({ "key": "github", "value": "ghp_test" }),
+        Some(&token),
+    )
+    .await;
+    assert_eq!(set_key.status(), StatusCode::OK);
+
+    let export = post_json(
+        &client,
+        addr,
+        "/api/backup/export",
+        json!({ "passphrase": "snapshot passphrase" }),
+        Some(&token),
+    )
+    .await;
+    let export_json: serde_json::Value = export.json().await.unwrap();
+    let snapshot_hex = export_json["snapshot_hex"].as_str().unwrap();
+
+    let delete_key = post_json(
+        &client,
+        addr,
+        "/api/api-keys/delete",
+        json!({ "key": "github" }),
+        Some(&token),
+    )
+    .await;
+    assert_eq!(delete_key.status(), StatusCode::OK);
+
+    let restore = post_json(
+        &client,
+        addr,
+        "/api/backup/restore",
+        json!({
+            "passphrase": "snapshot passphrase",
+            "snapshot_hex": snapshot_hex,
+        }),
+        Some(&token),
+    )
+    .await;
+    assert_eq!(restore.status(), StatusCode::OK);
+
+    let old_token_keys = get(&client, addr, "/api/api-keys", Some(&token)).await;
+    assert_eq!(old_token_keys.status(), StatusCode::UNAUTHORIZED);
+
+    let relock_status = get(&client, addr, "/api/status", None).await;
+    let relock_json: serde_json::Value = relock_status.json().await.unwrap();
+    assert_eq!(relock_json["locked"], true);
+
+    let restored_api_keys = std::fs::read_to_string(
+        dir.path()
+            .join("compartments")
+            .join("0")
+            .join("api_keys.json"),
+    )
+    .unwrap();
+    let restored_api_keys: serde_json::Value = serde_json::from_str(&restored_api_keys).unwrap();
+    assert_eq!(restored_api_keys, json!({ "github": "ghp_test" }));
+
+    handle.abort();
+}
+
+#[tokio::test]
+async fn session_revoke_invalidates_only_the_current_token() {
+    let dir = TempDir::new().unwrap();
+    let (addr, handle) = spawn_daemon(dir.path().to_path_buf()).await;
+    let client = reqwest::Client::new();
+
+    let init = post_json(
+        &client,
+        addr,
+        "/api/compartment/init",
+        json!({
+            "id": 0,
+            "label": "default",
+            "threshold": 1,
+            "passphrase": "correct horse battery staple",
+        }),
+        None,
+    )
+    .await;
+    assert_eq!(init.status(), StatusCode::OK);
+    let init_json: serde_json::Value = init.json().await.unwrap();
+    let token = init_json["session_token"].as_str().unwrap().to_string();
+
+    let revoke = post_json(
+        &client,
+        addr,
+        "/api/session/revoke",
+        json!({}),
+        Some(&token),
+    )
+    .await;
+    assert_eq!(revoke.status(), StatusCode::OK);
+
+    let api_keys = get(&client, addr, "/api/api-keys", Some(&token)).await;
+    assert_eq!(api_keys.status(), StatusCode::UNAUTHORIZED);
+
+    let status = get(&client, addr, "/api/status", None).await;
+    assert_eq!(status.status(), StatusCode::OK);
+    let status_json: serde_json::Value = status.json().await.unwrap();
+    assert_eq!(status_json["locked"], true);
+
+    handle.abort();
+}
+
+#[tokio::test]
+async fn malformed_tier1_store_surfaces_as_server_error() {
+    let dir = TempDir::new().unwrap();
+    let (addr, handle) = spawn_daemon(dir.path().to_path_buf()).await;
+    let client = reqwest::Client::new();
+
+    let init = post_json(
+        &client,
+        addr,
+        "/api/compartment/init",
+        json!({
+            "id": 0,
+            "label": "default",
+            "threshold": 1,
+            "passphrase": "correct horse battery staple",
+        }),
+        None,
+    )
+    .await;
+    assert_eq!(init.status(), StatusCode::OK);
+    let init_json: serde_json::Value = init.json().await.unwrap();
+    let token = init_json["session_token"].as_str().unwrap().to_string();
+
+    std::fs::write(
+        dir.path()
+            .join("compartments")
+            .join("0")
+            .join("api_keys.json"),
+        "{not json",
+    )
+    .unwrap();
+
+    let api_keys = get(&client, addr, "/api/api-keys", Some(&token)).await;
+    assert_eq!(api_keys.status(), StatusCode::INTERNAL_SERVER_ERROR);
+
+    let status = get(&client, addr, "/api/status", Some(&token)).await;
+    assert_eq!(status.status(), StatusCode::INTERNAL_SERVER_ERROR);
+
+    handle.abort();
+}
+
+#[tokio::test]
+async fn eth_stealth_routes_roundtrip_from_meta_export_to_local_signing() {
+    let dir = TempDir::new().unwrap();
+    let (addr, handle) = spawn_daemon(dir.path().to_path_buf()).await;
+    let client = reqwest::Client::new();
+
+    let init = post_json(
+        &client,
+        addr,
+        "/api/compartment/init",
+        json!({
+            "id": 0,
+            "label": "default",
+            "threshold": 1,
+            "passphrase": "correct horse battery staple",
+        }),
+        None,
+    )
+    .await;
+    assert_eq!(init.status(), StatusCode::OK);
+    let init_json: serde_json::Value = init.json().await.unwrap();
+    let token = init_json["session_token"].as_str().unwrap().to_string();
+
+    let export = post_json(
+        &client,
+        addr,
+        "/api/wallets/eth-stealth/export",
+        json!({
+            "wallet": "payments",
+            "short_name": "eth",
+        }),
+        Some(&token),
+    )
+    .await;
+    assert_eq!(export.status(), StatusCode::OK);
+    let export_json: serde_json::Value = export.json().await.unwrap();
+    let stealth_meta_address = export_json["stealth_meta_address"].as_str().unwrap();
+    assert!(stealth_meta_address.starts_with("st:eth:0x"));
+
+    let generate = post_json(
+        &client,
+        addr,
+        "/api/wallets/eth-stealth/generate",
+        json!({
+            "stealth_meta_address": stealth_meta_address,
+            "ephemeral_private_key_hex": hex::encode([3u8; 32]),
+        }),
+        None,
+    )
+    .await;
+    assert_eq!(generate.status(), StatusCode::OK);
+    let generate_json: serde_json::Value = generate.json().await.unwrap();
+    let stealth_address = generate_json["stealth_address"].as_str().unwrap();
+    let ephemeral_public_key_hex = generate_json["ephemeral_public_key_hex"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let view_tag_hex = generate_json["view_tag_hex"].as_str().unwrap().to_string();
+    assert!(stealth_address.starts_with("0x"));
+
+    let check = post_json(
+        &client,
+        addr,
+        "/api/wallets/eth-stealth/check",
+        json!({
+            "wallet": "payments",
+            "stealth_address": stealth_address,
+            "ephemeral_public_key_hex": ephemeral_public_key_hex,
+            "view_tag_hex": view_tag_hex,
+        }),
+        Some(&token),
+    )
+    .await;
+    assert_eq!(check.status(), StatusCode::OK);
+    let check_json: serde_json::Value = check.json().await.unwrap();
+    assert_eq!(check_json["matches"], true);
+
+    let sign = post_json(
+        &client,
+        addr,
+        "/api/wallets/eth-stealth/sign",
+        json!({
+            "wallet": "payments",
+            "stealth_address": stealth_address,
+            "ephemeral_public_key_hex": generate_json["ephemeral_public_key_hex"],
+            "view_tag_hex": generate_json["view_tag_hex"],
+            "digest_hex": hex::encode([9u8; 32]),
+        }),
+        Some(&token),
+    )
+    .await;
+    assert_eq!(sign.status(), StatusCode::OK);
+    let sign_json: serde_json::Value = sign.json().await.unwrap();
+    assert_eq!(sign_json["stealth_address"], stealth_address);
+    assert_eq!(
+        hex::decode(sign_json["signature_hex"].as_str().unwrap())
+            .unwrap()
+            .len(),
+        65
+    );
+
+    let sign_transfer = post_json(
+        &client,
+        addr,
+        "/api/wallets/eth-stealth/sign-transfer",
+        json!({
+            "wallet": "payments",
+            "stealth_address": stealth_address,
+            "ephemeral_public_key_hex": generate_json["ephemeral_public_key_hex"],
+            "view_tag_hex": generate_json["view_tag_hex"],
+            "chain_id": 1,
+            "nonce": 7,
+            "max_priority_fee_per_gas_hex": "0x59682f00",
+            "max_fee_per_gas_hex": "0x77359400",
+            "gas_limit": 21000,
+            "destination_address": "0x1111111111111111111111111111111111111111",
+            "value_wei_hex": "0xde0b6b3a7640000",
+        }),
+        Some(&token),
+    )
+    .await;
+    assert_eq!(sign_transfer.status(), StatusCode::OK);
+    let sign_transfer_json: serde_json::Value = sign_transfer.json().await.unwrap();
+    assert_eq!(sign_transfer_json["kind"], "eth-transfer");
+    assert!(
+        sign_transfer_json["raw_transaction_hex"]
+            .as_str()
+            .unwrap()
+            .starts_with("02")
+    );
+
+    let sign_erc20 = post_json(
+        &client,
+        addr,
+        "/api/wallets/eth-stealth/sign-erc20-transfer",
+        json!({
+            "wallet": "payments",
+            "stealth_address": stealth_address,
+            "ephemeral_public_key_hex": generate_json["ephemeral_public_key_hex"],
+            "view_tag_hex": generate_json["view_tag_hex"],
+            "chain_id": 1,
+            "nonce": 8,
+            "max_priority_fee_per_gas_hex": "0x59682f00",
+            "max_fee_per_gas_hex": "0x77359400",
+            "gas_limit": 65000,
+            "token_address": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+            "recipient_address": "0x2222222222222222222222222222222222222222",
+            "amount_hex": "0x0f4240",
+        }),
+        Some(&token),
+    )
+    .await;
+    assert_eq!(sign_erc20.status(), StatusCode::OK);
+    let sign_erc20_json: serde_json::Value = sign_erc20.json().await.unwrap();
+    assert_eq!(sign_erc20_json["kind"], "erc20-transfer");
+    assert!(
+        sign_erc20_json["data_hex"]
+            .as_str()
+            .unwrap()
+            .starts_with("a9059cbb")
+    );
+
+    handle.abort();
+}
+
+#[tokio::test]
+async fn evm_provider_routes_and_stealth_send_flow_work_with_internal_auth_resolution() {
+    let dir = TempDir::new().unwrap();
+    let (addr, handle) = spawn_daemon(dir.path().to_path_buf()).await;
+    let (rpc_addr, rpc_handle) = spawn_mock_evm_provider().await;
+    let client = reqwest::Client::new();
+
+    let init = post_json(
+        &client,
+        addr,
+        "/api/compartment/init",
+        json!({
+            "id": 0,
+            "label": "default",
+            "threshold": 1,
+            "passphrase": "correct horse battery staple",
+        }),
+        None,
+    )
+    .await;
+    assert_eq!(init.status(), StatusCode::OK);
+    let init_json: serde_json::Value = init.json().await.unwrap();
+    let token = init_json["session_token"].as_str().unwrap().to_string();
+
+    let set_provider_token = post_json(
+        &client,
+        addr,
+        "/api/api-keys/set",
+        json!({ "key": "alchemy", "value": "rpc-test-token" }),
+        Some(&token),
+    )
+    .await;
+    assert_eq!(set_provider_token.status(), StatusCode::OK);
+
+    let export = post_json(
+        &client,
+        addr,
+        "/api/wallets/eth-stealth/export",
+        json!({
+            "wallet": "payments",
+            "short_name": "eth",
+        }),
+        Some(&token),
+    )
+    .await;
+    let export_json: serde_json::Value = export.json().await.unwrap();
+
+    let generate = post_json(
+        &client,
+        addr,
+        "/api/wallets/eth-stealth/generate",
+        json!({
+            "stealth_meta_address": export_json["stealth_meta_address"],
+            "ephemeral_private_key_hex": hex::encode([3u8; 32]),
+        }),
+        None,
+    )
+    .await;
+    let generate_json: serde_json::Value = generate.json().await.unwrap();
+    let stealth_address = generate_json["stealth_address"].as_str().unwrap();
+    let provider_url = format!("http://{rpc_addr}/");
+
+    let nonce = post_json(
+        &client,
+        addr,
+        "/api/evm/nonce",
+        json!({
+            "rpc_url": provider_url,
+            "address": stealth_address,
+            "auth_token_key": "alchemy",
+            "block_tag": "pending",
+        }),
+        Some(&token),
+    )
+    .await;
+    assert_eq!(nonce.status(), StatusCode::OK);
+    let nonce_json: serde_json::Value = nonce.json().await.unwrap();
+    assert_eq!(nonce_json["nonce"], 7);
+
+    let balance = post_json(
+        &client,
+        addr,
+        "/api/evm/balance",
+        json!({
+            "rpc_url": format!("http://{rpc_addr}/"),
+            "address": stealth_address,
+            "auth_token_key": "alchemy",
+        }),
+        Some(&token),
+    )
+    .await;
+    assert_eq!(balance.status(), StatusCode::OK);
+    let balance_json: serde_json::Value = balance.json().await.unwrap();
+    assert_eq!(balance_json["balance_wei_hex"], "0xde0b6b3a7640000");
+
+    let erc20_balance = post_json(
+        &client,
+        addr,
+        "/api/evm/erc20-balance",
+        json!({
+            "rpc_url": format!("http://{rpc_addr}/"),
+            "token_address": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+            "owner_address": stealth_address,
+            "auth_token_key": "alchemy",
+        }),
+        Some(&token),
+    )
+    .await;
+    assert_eq!(erc20_balance.status(), StatusCode::OK);
+    let erc20_balance_json: serde_json::Value = erc20_balance.json().await.unwrap();
+    assert_eq!(erc20_balance_json["amount_hex"], "0xf4240");
+
+    let send_native = post_json(
+        &client,
+        addr,
+        "/api/wallets/eth-stealth/send-transfer",
+        json!({
+            "rpc_url": format!("http://{rpc_addr}/"),
+            "wallet": "payments",
+            "stealth_address": stealth_address,
+            "ephemeral_public_key_hex": generate_json["ephemeral_public_key_hex"],
+            "view_tag_hex": generate_json["view_tag_hex"],
+            "chain_id": 1,
+            "destination_address": "0x1111111111111111111111111111111111111111",
+            "value_wei_hex": "0xde0b6b3a7640000",
+            "max_priority_fee_per_gas_hex": "0x59682f00",
+            "max_fee_per_gas_hex": "0x77359400",
+            "auth_token_key": "alchemy",
+            "broadcast": true
+        }),
+        Some(&token),
+    )
+    .await;
+    assert_eq!(send_native.status(), StatusCode::OK);
+    let send_native_json: serde_json::Value = send_native.json().await.unwrap();
+    assert_eq!(send_native_json["nonce"], 7);
+    assert_eq!(send_native_json["broadcast"], true);
+    assert_eq!(
+        send_native_json["broadcast_transaction_hash_hex"],
+        json!("11".repeat(32))
+    );
+
+    let send_erc20 = post_json(
+        &client,
+        addr,
+        "/api/wallets/eth-stealth/send-erc20-transfer",
+        json!({
+            "rpc_url": format!("http://{rpc_addr}/"),
+            "wallet": "payments",
+            "stealth_address": stealth_address,
+            "ephemeral_public_key_hex": generate_json["ephemeral_public_key_hex"],
+            "view_tag_hex": generate_json["view_tag_hex"],
+            "chain_id": 1,
+            "token_address": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+            "recipient_address": "0x2222222222222222222222222222222222222222",
+            "amount_hex": "0x0f4240",
+            "max_priority_fee_per_gas_hex": "0x59682f00",
+            "max_fee_per_gas_hex": "0x77359400",
+            "auth_token_key": "alchemy",
+            "broadcast": false
+        }),
+        Some(&token),
+    )
+    .await;
+    assert_eq!(send_erc20.status(), StatusCode::OK);
+    let send_erc20_json: serde_json::Value = send_erc20.json().await.unwrap();
+    assert_eq!(send_erc20_json["nonce"], 7);
+    assert_eq!(send_erc20_json["broadcast"], false);
+    assert!(
+        send_erc20_json["data_hex"]
+            .as_str()
+            .unwrap()
+            .starts_with("a9059cbb")
+    );
+
+    handle.abort();
+    rpc_handle.abort();
+}
+
+#[tokio::test]
+async fn profile_backed_send_and_queue_flow_persist_internal_configuration() {
+    let dir = TempDir::new().unwrap();
+    let (addr, handle) = spawn_daemon(dir.path().to_path_buf()).await;
+    let (rpc_addr, rpc_handle) = spawn_mock_evm_provider().await;
+    let client = reqwest::Client::new();
+
+    let init = post_json(
+        &client,
+        addr,
+        "/api/compartment/init",
+        json!({
+            "id": 0,
+            "label": "default",
+            "threshold": 1,
+            "passphrase": "correct horse battery staple",
+        }),
+        None,
+    )
+    .await;
+    let init_json: serde_json::Value = init.json().await.unwrap();
+    let token = init_json["session_token"].as_str().unwrap().to_string();
+
+    post_json(
+        &client,
+        addr,
+        "/api/api-keys/set",
+        json!({ "key": "alchemy", "value": "rpc-test-token" }),
+        Some(&token),
+    )
+    .await;
+
+    let provider_profile = post_json(
+        &client,
+        addr,
+        "/api/profiles/evm/upsert",
+        json!({
+            "name": "mainnet",
+            "rpc_url": format!("http://{rpc_addr}/"),
+            "auth_token_key": "alchemy",
+            "chain_id": 1,
+            "max_priority_fee_per_gas_hex": "0x59682f00",
+            "max_fee_per_gas_hex": "0x77359400",
+            "native_gas_limit": 21000,
+            "erc20_gas_limit": 65000,
+        }),
+        Some(&token),
+    )
+    .await;
+    assert_eq!(provider_profile.status(), StatusCode::OK);
+
+    let wallet_profile = post_json(
+        &client,
+        addr,
+        "/api/profiles/eth-stealth/upsert",
+        json!({
+            "name": "payments-mainnet",
+            "wallet": "payments",
+            "short_name": "eth",
+            "provider_profile": "mainnet",
+            "default_destination_address": "0x1111111111111111111111111111111111111111",
+        }),
+        Some(&token),
+    )
+    .await;
+    assert_eq!(wallet_profile.status(), StatusCode::OK);
+
+    let providers = get(&client, addr, "/api/profiles/evm", Some(&token)).await;
+    let providers_json: serde_json::Value = providers.json().await.unwrap();
+    assert_eq!(providers_json["profiles"][0]["name"], "mainnet");
+
+    let wallets = get(&client, addr, "/api/profiles/eth-stealth", Some(&token)).await;
+    let wallets_json: serde_json::Value = wallets.json().await.unwrap();
+    assert_eq!(wallets_json["profiles"][0]["name"], "payments-mainnet");
+
+    let export = post_json(
+        &client,
+        addr,
+        "/api/wallets/eth-stealth/export",
+        json!({
+            "wallet": "payments",
+            "short_name": "eth",
+        }),
+        Some(&token),
+    )
+    .await;
+    let export_json: serde_json::Value = export.json().await.unwrap();
+
+    let generate = post_json(
+        &client,
+        addr,
+        "/api/wallets/eth-stealth/generate",
+        json!({
+            "stealth_meta_address": export_json["stealth_meta_address"],
+            "ephemeral_private_key_hex": hex::encode([7u8; 32]),
+        }),
+        None,
+    )
+    .await;
+    let generate_json: serde_json::Value = generate.json().await.unwrap();
+
+    let send = post_json(
+        &client,
+        addr,
+        "/api/wallets/eth-stealth/send-with-profile",
+        json!({
+            "wallet_profile": "payments-mainnet",
+            "stealth_address": generate_json["stealth_address"],
+            "ephemeral_public_key_hex": generate_json["ephemeral_public_key_hex"],
+            "view_tag_hex": generate_json["view_tag_hex"],
+            "value_wei_hex": "0xde0b6b3a7640000",
+            "broadcast": false
+        }),
+        Some(&token),
+    )
+    .await;
+    assert_eq!(send.status(), StatusCode::OK);
+    let send_json: serde_json::Value = send.json().await.unwrap();
+    assert_eq!(send_json["kind"], "eth-transfer");
+    assert_eq!(
+        send_json["to_address"],
+        "0x1111111111111111111111111111111111111111"
+    );
+
+    let enqueue = post_json(
+        &client,
+        addr,
+        "/api/queue/enqueue/eth-stealth-transfer",
+        json!({
+            "wallet_profile": "payments-mainnet",
+            "stealth_address": generate_json["stealth_address"],
+            "ephemeral_public_key_hex": generate_json["ephemeral_public_key_hex"],
+            "view_tag_hex": generate_json["view_tag_hex"],
+            "value_wei_hex": "0xde0b6b3a7640000"
+        }),
+        Some(&token),
+    )
+    .await;
+    assert_eq!(enqueue.status(), StatusCode::OK);
+    let enqueue_json: serde_json::Value = enqueue.json().await.unwrap();
+    let job_id = enqueue_json["job"]["id"].as_str().unwrap().to_string();
+
+    let list_before = get(&client, addr, "/api/queue/jobs", Some(&token)).await;
+    let list_before_json: serde_json::Value = list_before.json().await.unwrap();
+    assert_eq!(list_before_json["jobs"][0]["state"], "queued");
+
+    let process = post_json(
+        &client,
+        addr,
+        "/api/queue/process",
+        json!({ "id": job_id }),
+        Some(&token),
+    )
+    .await;
+    assert_eq!(process.status(), StatusCode::OK);
+    let process_json: serde_json::Value = process.json().await.unwrap();
+    assert_eq!(process_json["succeeded"], 1);
+    assert_eq!(process_json["jobs"][0]["state"], "sent");
+
+    let list_after = get(&client, addr, "/api/queue/jobs", Some(&token)).await;
+    let list_after_json: serde_json::Value = list_after.json().await.unwrap();
+    assert_eq!(list_after_json["jobs"][0]["state"], "sent");
+    assert_eq!(
+        list_after_json["jobs"][0]["broadcast_transaction_hash_hex"],
+        json!("11".repeat(32))
+    );
+
+    handle.abort();
+    rpc_handle.abort();
+}
+
+#[tokio::test]
+async fn profile_bound_wallet_and_provider_work_after_session_switches_compartments() {
+    let dir = TempDir::new().unwrap();
+    let (addr, handle) = spawn_daemon(dir.path().to_path_buf()).await;
+    let (rpc_addr, rpc_handle) = spawn_mock_evm_provider().await;
+    let client = reqwest::Client::new();
+
+    let init = post_json(
+        &client,
+        addr,
+        "/api/compartment/init",
+        json!({
+            "id": 0,
+            "label": "default",
+            "threshold": 1,
+            "passphrase": "correct horse battery staple",
+        }),
+        None,
+    )
+    .await;
+    let init_json: serde_json::Value = init.json().await.unwrap();
+    let token = init_json["session_token"].as_str().unwrap().to_string();
+
+    post_json(
+        &client,
+        addr,
+        "/api/api-keys/set",
+        json!({ "key": "alchemy", "value": "rpc-test-token" }),
+        Some(&token),
+    )
+    .await;
+
+    post_json(
+        &client,
+        addr,
+        "/api/profiles/evm/upsert",
+        json!({
+            "name": "mainnet",
+            "rpc_url": format!("http://{rpc_addr}/"),
+            "auth_token_key": "alchemy",
+            "chain_id": 1,
+            "max_priority_fee_per_gas_hex": "0x59682f00",
+            "max_fee_per_gas_hex": "0x77359400",
+            "native_gas_limit": 21000,
+            "erc20_gas_limit": 65000
+        }),
+        Some(&token),
+    )
+    .await;
+
+    post_json(
+        &client,
+        addr,
+        "/api/profiles/eth-stealth/upsert",
+        json!({
+            "name": "payments-mainnet",
+            "wallet": "payments",
+            "short_name": "eth",
+            "provider_profile": "mainnet",
+            "default_destination_address": "0x1111111111111111111111111111111111111111"
+        }),
+        Some(&token),
+    )
+    .await;
+
+    let export = post_json(
+        &client,
+        addr,
+        "/api/wallets/eth-stealth/export",
+        json!({
+            "wallet": "payments",
+            "short_name": "eth"
+        }),
+        Some(&token),
+    )
+    .await;
+    let export_json: serde_json::Value = export.json().await.unwrap();
+
+    let generate = post_json(
+        &client,
+        addr,
+        "/api/wallets/eth-stealth/generate",
+        json!({
+            "stealth_meta_address": export_json["stealth_meta_address"],
+            "ephemeral_private_key_hex": hex::encode([5u8; 32]),
+        }),
+        None,
+    )
+    .await;
+    let generate_json: serde_json::Value = generate.json().await.unwrap();
+
+    let add = post_json(
+        &client,
+        addr,
+        "/api/compartment/add",
+        json!({
+            "label": "secure",
+            "threshold": 2,
+            "passphrase_mode": "wrapped"
+        }),
+        Some(&token),
+    )
+    .await;
+    assert_eq!(add.status(), StatusCode::OK);
+    let add_json: serde_json::Value = add.json().await.unwrap();
+    assert_eq!(add_json["id"], 1);
+
+    let switch = post_json(
+        &client,
+        addr,
+        "/api/compartment/switch",
+        json!({ "id": 1 }),
+        Some(&token),
+    )
+    .await;
+    assert_eq!(switch.status(), StatusCode::OK);
+
+    let send = post_json(
+        &client,
+        addr,
+        "/api/wallets/eth-stealth/send-with-profile",
+        json!({
+            "wallet_profile": "payments-mainnet",
+            "stealth_address": generate_json["stealth_address"],
+            "ephemeral_public_key_hex": generate_json["ephemeral_public_key_hex"],
+            "view_tag_hex": generate_json["view_tag_hex"],
+            "value_wei_hex": "0xde0b6b3a7640000",
+            "broadcast": false
+        }),
+        Some(&token),
+    )
+    .await;
+    assert_eq!(send.status(), StatusCode::OK);
+    let send_json: serde_json::Value = send.json().await.unwrap();
+    assert_eq!(send_json["kind"], "eth-transfer");
+    assert_eq!(
+        send_json["to_address"],
+        "0x1111111111111111111111111111111111111111"
+    );
+
+    handle.abort();
+    rpc_handle.abort();
+}
+
+#[tokio::test]
+async fn deposit_registry_refresh_and_sweep_flow_roundtrip() {
+    let dir = TempDir::new().unwrap();
+    let (addr, handle) = spawn_daemon(dir.path().to_path_buf()).await;
+    let (rpc_addr, rpc_handle) = spawn_mock_evm_provider().await;
+    let client = reqwest::Client::new();
+
+    let init = post_json(
+        &client,
+        addr,
+        "/api/compartment/init",
+        json!({
+            "id": 0,
+            "label": "default",
+            "threshold": 1,
+            "passphrase": "correct horse battery staple",
+        }),
+        None,
+    )
+    .await;
+    let init_json: serde_json::Value = init.json().await.unwrap();
+    let token = init_json["session_token"].as_str().unwrap().to_string();
+
+    post_json(
+        &client,
+        addr,
+        "/api/api-keys/set",
+        json!({ "key": "alchemy", "value": "rpc-test-token" }),
+        Some(&token),
+    )
+    .await;
+
+    post_json(
+        &client,
+        addr,
+        "/api/profiles/evm/upsert",
+        json!({
+            "name": "mainnet",
+            "rpc_url": format!("http://{rpc_addr}/"),
+            "auth_token_key": "alchemy",
+            "chain_id": 1,
+            "max_priority_fee_per_gas_hex": "0x59682f00",
+            "max_fee_per_gas_hex": "0x77359400",
+            "native_gas_limit": 21000,
+            "erc20_gas_limit": 65000,
+        }),
+        Some(&token),
+    )
+    .await;
+
+    post_json(
+        &client,
+        addr,
+        "/api/profiles/eth-stealth/upsert",
+        json!({
+            "name": "payments-mainnet",
+            "wallet": "payments",
+            "short_name": "eth",
+            "provider_profile": "mainnet",
+            "default_destination_address": "0x1111111111111111111111111111111111111111",
+        }),
+        Some(&token),
+    )
+    .await;
+
+    let native_deposit = post_json(
+        &client,
+        addr,
+        "/api/deposits/eth-stealth/create-native",
+        json!({
+            "wallet_profile": "payments-mainnet",
+            "expected_value_wei_hex": "0x1",
+            "auto_queue_sweep": true,
+            "min_sweep_value_wei_hex": "0x1",
+            "note": "invoice-42"
+        }),
+        Some(&token),
+    )
+    .await;
+    assert_eq!(native_deposit.status(), StatusCode::OK);
+    let native_deposit_json: serde_json::Value = native_deposit.json().await.unwrap();
+    let native_id = native_deposit_json["deposit"]["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    let refresh = post_json(
+        &client,
+        addr,
+        "/api/deposits/eth-stealth/refresh",
+        json!({ "auto_enqueue": true }),
+        Some(&token),
+    )
+    .await;
+    assert_eq!(refresh.status(), StatusCode::OK);
+    let refresh_json: serde_json::Value = refresh.json().await.unwrap();
+    assert_eq!(refresh_json["detected"], 1);
+    assert_eq!(refresh_json["queued"], 1);
+    let sweep_job_id = refresh_json["deposits"][0]["queue_job_id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    let process = post_json(
+        &client,
+        addr,
+        "/api/queue/process",
+        json!({ "id": sweep_job_id }),
+        Some(&token),
+    )
+    .await;
+    assert_eq!(process.status(), StatusCode::OK);
+    let process_json: serde_json::Value = process.json().await.unwrap();
+    assert_eq!(process_json["succeeded"], 1);
+    assert_eq!(process_json["jobs"][0]["state"], "sent");
+
+    let refresh_after = post_json(
+        &client,
+        addr,
+        "/api/deposits/eth-stealth/refresh",
+        json!({ "id": native_id, "auto_enqueue": false }),
+        Some(&token),
+    )
+    .await;
+    assert_eq!(refresh_after.status(), StatusCode::OK);
+    let refresh_after_json: serde_json::Value = refresh_after.json().await.unwrap();
+    assert_eq!(refresh_after_json["deposits"][0]["status"], "sweep_sent");
+    assert_eq!(
+        refresh_after_json["deposits"][0]["broadcast_transaction_hash_hex"],
+        json!("11".repeat(32))
+    );
+
+    let erc20_deposit = post_json(
+        &client,
+        addr,
+        "/api/deposits/eth-stealth/create-erc20",
+        json!({
+            "wallet_profile": "payments-mainnet",
+            "token_address": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+            "expected_amount_hex": "0xf4240",
+            "auto_queue_sweep": false,
+            "min_sweep_amount_hex": "0xf4240"
+        }),
+        Some(&token),
+    )
+    .await;
+    assert_eq!(erc20_deposit.status(), StatusCode::OK);
+    let erc20_json: serde_json::Value = erc20_deposit.json().await.unwrap();
+    let erc20_id = erc20_json["deposit"]["id"].as_str().unwrap().to_string();
+
+    let manual_enqueue = post_json(
+        &client,
+        addr,
+        "/api/deposits/eth-stealth/enqueue-sweep",
+        json!({ "id": erc20_id }),
+        Some(&token),
+    )
+    .await;
+    assert_eq!(manual_enqueue.status(), StatusCode::OK);
+    let manual_enqueue_json: serde_json::Value = manual_enqueue.json().await.unwrap();
+    assert_eq!(
+        manual_enqueue_json["job"]["kind"],
+        "eth_stealth_erc20_sweep"
+    );
+
+    let maintenance = post_json(
+        &client,
+        addr,
+        "/api/maintenance/run",
+        json!({
+            "deposit_refresh_limit": 10,
+            "queue_process_limit": 10,
+            "auto_enqueue": false
+        }),
+        Some(&token),
+    )
+    .await;
+    assert_eq!(maintenance.status(), StatusCode::OK);
+    let maintenance_json: serde_json::Value = maintenance.json().await.unwrap();
+    assert_eq!(maintenance_json["status"], "ok");
+    assert_eq!(maintenance_json["processed"], 1);
+    assert_eq!(maintenance_json["succeeded"], 1);
+
+    let diagnostics = get(&client, addr, "/api/diagnostics", Some(&token)).await;
+    assert_eq!(diagnostics.status(), StatusCode::OK);
+    let diagnostics_json: serde_json::Value = diagnostics.json().await.unwrap();
+    assert_eq!(diagnostics_json["queue_job_count"], 2);
+    assert_eq!(diagnostics_json["eth_stealth_deposit_count"], 2);
+
+    let deposits = get(&client, addr, "/api/deposits/eth-stealth", Some(&token)).await;
+    assert_eq!(deposits.status(), StatusCode::OK);
+    let deposits_json: serde_json::Value = deposits.json().await.unwrap();
+    assert_eq!(deposits_json["deposits"].as_array().unwrap().len(), 2);
+
+    handle.abort();
+    rpc_handle.abort();
+}

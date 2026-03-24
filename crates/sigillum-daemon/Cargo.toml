@@ -11,16 +11,31 @@ keywords = ["vault", "daemon", "server", "web-ui"]
 categories = ["cryptography", "web-programming"]
 
 [dependencies]
+sigillum-api = { workspace = true }
 sigillum-core = { workspace = true, features = ["file-backend"] }
 sigillum-fido2 = { workspace = true }
 axum = { workspace = true }
 aes-gcm = { workspace = true }
+hmac = { workspace = true }
+sha2 = { workspace = true }
+k256 = { workspace = true }
+sha3 = { workspace = true }
 tower-http = { workspace = true }
 tokio = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+reqwest = { workspace = true }
 secrecy = { workspace = true }
 thiserror = { workspace = true }
 argon2 = { workspace = true }
 zeroize = { workspace = true }
 rand = { workspace = true }
+subtle = { workspace = true }
+hex = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+
+[dev-dependencies]
+tempfile = "3.10"
+reqwest = { workspace = true }
+tower = { version = "0.5", features = ["util"] }

@@ -1,75 +1,98 @@
 <p align="center">
   <h1 align="center">Sigillum</h1>
   <p align="center">
-    <strong>Hardware-backed secret management for the paranoid.</strong>
-  </p>
-  <p align="center">
-    <a href="https://crates.io/crates/sigillum"><img src="https://img.shields.io/crates/v/sigillum.svg" alt="crates.io"></a>
-    <a href="https://docs.rs/sigillum"><img src="https://docs.rs/sigillum/badge.svg" alt="docs.rs"></a>
-    <a href="https://github.com/caelator/sigillum/actions"><img src="https://github.com/caelator/sigillum/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
-    <a href="LICENSE-MIT"><img src="https://img.shields.io/badge/license-MIT%2FApache--2.0-blue.svg" alt="License"></a>
+    <strong>Local, hardware-aware secret management in Rust.</strong>
   </p>
 </p>
 
----
+Sigillum is a Rust workspace for managing secrets with a two-tier model:
 
-Sigillum is a two-tier encrypted vault with FIDO2 hardware key unlock, a daemon mode with web UI, and a client SDK for remote access. It manages secrets the way they should be managed: encrypted at rest, unlocked by hardware you physically hold, and accessible only through audited channels.
+- Tier 1 API keys are stored in plaintext JSON for local automation.
+- Tier 2 secrets are AES-256-GCM encrypted and require an in-memory master key.
+- The master key can be loaded from a passphrase-derived wrapper or from FIDO2-backed shard recovery.
+- A local daemon exposes an embedded web UI and HTTP API for single-machine use.
+- A local-sidecar gateway provides a preview/payment surface that talks to the same local daemon.
 
-## Why Sigillum?
+This repository is strongest today as a local vault plus local daemon, with an
+optional local-sidecar gateway for payment previews. It is intended to stay a
+local-on-your-computer system rather than evolve into an internet-facing remote
+secret-management platform.
 
-Most secret managers fall into two camps: cloud-hosted services you don't control, or local tools that only work for one app. Sigillum is neither.
+## Current Scope
 
-- **Hardware-first**: Master key is reconstructed from FIDO2 security keys via Shamir's Secret Sharing. No master password to phish.
-- **Two-tier design**: API keys (Tier 1) are stored in plaintext JSON for CI/headless use. Secrets (Tier 2) are AES-256-GCM encrypted and require hardware unlock.
-- **Daemon mode**: Unlock once, serve many. The daemon holds the master key in memory so connected applications never touch key material.
-- **Project-agnostic**: Sigillum doesn't know or care what you're building. It stores secrets and gives them back through a clean trait interface.
+Implemented and working in this repository:
+
+- `sigillum-core`: core traits, errors, file-backed vault, Argon2 helpers, wrapped-key helpers
+- `sigillum-api`: shared daemon request/response contract used by the daemon and async client
+- `sigillum-fido2`: FIDO2 registration/unlock support and Shamir-based shard handling
+- `sigillum-daemon`: local Axum daemon with embedded UI, compartment switching, passphrase/FIDO2 unlock, snapshot import/export, local audit feed, transit-style crypto endpoints, Ethereum stealth wallet helpers, provider-backed deposit monitoring, and sweep orchestration
+- `sigillum-client`: async client for the local daemon API, including session handling and snapshots
+- `sigillum-cli`: setup flows, local management commands, snapshot commands,
+  daemon launcher, and daemon-backed JSON operator commands
+- `sigillum-gateway`: local-sidecar payment preview surface with project API keys, payment intent creation, and webhook delivery
+- `sigillum-sdk`: integration surface that combines core types with the async daemon client
+- `sigillum-server`: thin facade over the daemon crate for server-side embedding
+- `sigillum`: meta-crate that re-exports the file-backed core
+
+Still missing as a polished product surface:
+
+- more local operator polish around the daemon, gateway sidecar, and desktop workflow
 
 ## Architecture
 
-```
+```text
 sigillum/
-├── sigillum-core      Core traits (SecretStore, VaultLifecycle) + file-backed vault
-├── sigillum-daemon    Axum HTTP server with web UI, SSE, audit logging
-├── sigillum-client    Remote vault SDK (implements SecretStore over HTTP)
-├── sigillum-fido2     FIDO2 hardware key integration + Shamir SSS
-├── sigillum-cli       Command-line interface
-├── sigillum-sdk       Embeddable SDK for third-party integration
-└── sigillum-server    Server library for custom deployments
+├── crates/sigillum-core      Traits + file-backed vault
+├── crates/sigillum-api       Shared daemon transport types
+├── crates/sigillum-client    Async local-daemon client
+├── crates/sigillum-fido2     FIDO2 + Shamir support
+├── crates/sigillum-daemon    Local Axum daemon + embedded web UI
+├── crates/sigillum-cli       CLI and setup flows
+├── crates/sigillum-gateway   Local-sidecar payment preview surface
+├── crates/sigillum-sdk       Combined client/core integration surface
+├── crates/sigillum-server    Server-facing daemon facade
+└── crates/sigillum           Meta-crate
 ```
 
-### How it works
+The core trait split is intentional:
 
+- `SecretStore` is the consumer-facing interface for reading and writing secrets.
+- `VaultLifecycle` handles initialization, loading a master key, and zeroizing it.
+
+See `crates/sigillum-core/src/traits.rs`.
+
+## Storage Model
+
+### Tier 1
+
+- Plaintext JSON
+- No unlock required
+- Intended for local automation and low-sensitivity tokens
+
+### Tier 2
+
+- AES-256-GCM encrypted JSON blob
+- Requires the master key to be loaded in memory
+- Intended for higher-sensitivity secrets
+
+The default standalone file layout for `FileVault` is:
+
+```text
+~/.sigillum/
+├── api_keys.json
+└── vault.enc
 ```
-                    ┌─────────────┐
-                    │  Your App   │
-                    │  (any lang) │
-                    └──────┬──────┘
-                           │ SecretStore trait
-                           │ (local or remote)
-                    ┌──────▼──────┐
-                    │   Sigillum  │
-                    │   Daemon    │◄──── Web UI (browser)
-                    │   (Axum)   │
-                    └──────┬──────┘
-                           │ master key in memory
-                    ┌──────▼──────┐
-                    │  FileVault  │
-                    │ AES-256-GCM │
-                    └──────┬──────┘
-                           │
-              ┌────────────┼────────────┐
-              ▼            ▼            ▼
-        api_keys.json  vault.enc   titan_keys.json
-        (Tier 1)       (Tier 2)    (FIDO2 shards)
-```
 
-**Tier 1** (plaintext): API keys that don't need hardware unlock. Stored in `api_keys.json` with `0o600` permissions. Suitable for CI, automation, and headless environments.
+The daemon/FIDO2 flows use a compartment layout under `~/.sigillum/compartments/`.
 
-**Tier 2** (encrypted): Secrets protected by AES-256-GCM. The encryption key is derived from your FIDO2 hardware keys via Shamir's Secret Sharing. You physically tap a key to unlock.
+The daemon's non-vault state files (`profiles.json`, `deposits.json`, and
+`queue.json`) are written atomically, mirrored to `.bak` sidecars, and restored
+from backup if the live file is missing or corrupted. Broken live files are
+quarantined next to the restored state for inspection.
 
 ## Quick Start
 
-### As a library (embedded)
+### As a library
 
 ```toml
 [dependencies]
@@ -77,249 +100,172 @@ sigillum = "0.1"
 ```
 
 ```rust
-use sigillum::{FileVault, VaultConfig, SecretStore};
+use sigillum::{FileVault, SecretStore, VaultConfig};
 
-// Create a vault with default config (~/.sigillum/)
 let vault = FileVault::new(VaultConfig::default());
 
-// Tier 1: no unlock needed
-vault.set_api_key("github_token", "ghp_...")?;
-let token = vault.get_api_key("github_token");
+vault.set_api_key("github", "ghp_...")?;
 
-// Tier 2: requires unlock first
-// (see FIDO2 section below)
-vault.set_secret("database_password", "hunter2")?;
-let password = vault.get_secret("database_password");
+// Tier 2 requires the vault to be initialized and unlocked first.
 ```
 
-### As a daemon (remote)
+### As a local daemon
 
 ```bash
-# Start the daemon
-sigillum daemon --port 9743
-
-# Unlock via web UI at http://localhost:9743
-# Or via CLI:
-sigillum unlock
+cargo run -p sigillum-cli -- daemon --port 9743
 ```
 
-```rust
-use sigillum_client::RemoteVault;
-use sigillum_core::SecretStore;
+Then open `http://localhost:9743`.
 
-// Connect to running daemon
-let vault = RemoteVault::connect("http://localhost:9743")?;
+The daemon is meant to stay local on one machine. It is session-gated and
+compartment-aware, and it is not intended to become a remote multi-tenant
+service. Today that means unlock state is process-global inside the daemon, while active-
+compartment selection is tracked per session token through bearer session-token
+auth over local HTTP.
 
-// Same trait, same methods — transport is invisible
-let token = vault.get_api_key("github_token");
-```
+For scriptable daemon operations, the CLI now exposes JSON-oriented commands
+under `sigillum api`, including session unlock, compartment switching, provider
+and wallet profile management, deposit management, queue inspection, and
+maintenance runs. These commands default to `http://127.0.0.1:9743`, accept
+`--url`, and use `--session` or `SIGILLUM_SESSION_TOKEN` for authenticated
+calls.
 
-### Custom config
+The `sigillum-gateway` crate is a companion local-sidecar surface for payment
+preview and webhook flow testing. It is designed to sit beside the local daemon
+and should not be treated as an internet-facing boundary for this project.
+When the gateway needs authenticated daemon operations, provide a pre-
+established local daemon session token through `SIGILLUM_DAEMON_SESSION_TOKEN`
+or `SIGILLUM_SESSION_TOKEN`.
 
-```rust
-use sigillum::{FileVault, VaultConfig};
-use std::path::PathBuf;
-
-let vault = FileVault::new(VaultConfig {
-    base_dir: PathBuf::from("/etc/myapp/secrets"),
-    tier1_file: "api_keys.json".into(),
-    tier2_file: "vault.enc".into(),
-});
-```
-
-## Traits
-
-Sigillum's design is trait-based. Consumers depend on the trait, not the implementation.
-
-### `SecretStore`
-
-The primary interface. All vault operations go through this.
-
-```rust
-pub trait SecretStore: Send + Sync {
-    // Tier 1 (plaintext, no unlock required)
-    fn get_api_key(&self, key: &str) -> Option<SecretString>;
-    fn set_api_key(&self, key: &str, value: &str) -> Result<(), VaultError>;
-    fn delete_api_key(&self, key: &str) -> Result<(), VaultError>;
-    fn list_api_keys(&self) -> Vec<String>;
-
-    // Tier 2 (encrypted, requires unlock)
-    fn get_secret(&self, key: &str) -> Option<SecretString>;
-    fn set_secret(&self, key: &str, value: &str) -> Result<(), VaultError>;
-    fn delete_secret(&self, key: &str) -> Result<(), VaultError>;
-    fn list_secrets(&self) -> Vec<String>;
-
-    // Common
-    fn has_key(&self, key: &str) -> bool;
-    fn is_unlocked(&self) -> bool;
-}
-```
-
-- Object-safe: usable as `&dyn SecretStore` or `Box<dyn SecretStore>`
-- `Send + Sync`: safe to share across threads via `Arc`
-- Returns `SecretString` (from the `secrecy` crate): values are zeroized on drop
-
-### `VaultLifecycle`
-
-Lifecycle management, separated from data access. Only the unlock manager (CLI, daemon, FIDO2 module) needs this.
-
-```rust
-pub trait VaultLifecycle: SecretStore {
-    fn load_master_key(&self, key: [u8; 32]);
-    fn zeroize_master_key(&self);
-    fn initialize(&self, master_key: &[u8; 32]) -> Result<(), VaultError>;
-}
-```
-
-## Cryptography
-
-| Primitive | Purpose | Implementation |
-|-----------|---------|----------------|
-| AES-256-GCM | Tier 2 encryption at rest | `aes-gcm` 0.10 (RustCrypto) |
-| Argon2id | Passphrase-to-key derivation | `argon2` 0.5 (64MB, 3 iterations) |
-| FIDO2/CTAP2 | Hardware key authentication | `ctap-hid-fido2` (via `sigillum-fido2`) |
-| Shamir SSS | Master key quorum splitting | `sharks` (M-of-N threshold) |
-| Zeroizing | Automatic key material cleanup | `zeroize` 1.8 (overwrite on drop) |
-| SecretString | Prevent accidental secret exposure | `secrecy` 0.8 (no Display/Debug) |
-| Random nonce | Per-encryption unique IV | `rand` 0.8 (OsRng, 12-byte nonce) |
-
-All cryptographic operations use audited [RustCrypto](https://github.com/RustCrypto) crates.
-
-## FIDO2 Hardware Key Unlock
-
-Sigillum supports FIDO2 security keys (YubiKey, Google Titan, SoloKey, etc.) for vault unlock via Shamir's Secret Sharing:
-
-1. **Registration**: The master key is split into N shards. Each shard is encrypted with a FIDO2 key's `hmac-secret` extension output.
-2. **Unlock**: Tap M-of-N registered keys. Each key decrypts its shard. Shards are recombined to reconstruct the master key.
-3. **In-memory only**: The reconstructed key lives in a `Mutex<Option<Zeroizing<[u8; 32]>>>`. It never touches disk.
-
-```
-User taps FIDO2 key
-       │
-       ▼
-Decrypt shard via hmac-secret
-       │
-       ▼
-Repeat for M keys (quorum)
-       │
-       ▼
-Shamir reconstruction → [u8; 32]
-       │
-       ▼
-load_master_key() → Mutex holds key
-       │
-       ▼
-All Tier 2 operations now succeed
-       │
-       ▼
-zeroize_master_key() → key overwritten
-```
-
-## Daemon Web UI
-
-The daemon (`sigillum-daemon`) serves an HTTP API and web interface:
-
-**Dashboard**: Vault status, key counts, connected clients, last backup timestamp.
-
-**Unlock**: Passphrase input or FIDO2 WebAuthn prompt in the browser.
-
-**Secrets Browser**: List, add, edit, delete secrets across both tiers. Values hidden by default with explicit reveal.
-
-**Backup/Restore**: Export encrypted snapshots (passphrase or FIDO2 dual-mode). Import with diff preview.
-
-**Audit Log**: Every `get`, `set`, `delete` operation logged with client identity and timestamp.
-
-## Backup & Restore
-
-Encrypted vault snapshots with dual-mode protection:
+### First-time setup
 
 ```bash
-# Export (passphrase-protected)
-sigillum backup --output vault.sigillum
-
-# Export (FIDO2-protected, requires tap)
-sigillum backup --fido2 --output vault.sigillum
-
-# Import with diff preview
-sigillum restore --input vault.sigillum
+cargo run -p sigillum-cli -- setup
 ```
 
-Backup format: `MAGIC || VERSION || MODE || TIMESTAMP || [Envelopes] || [Encrypted Payload]`
+Or use the browser UI when the daemon starts with an uninitialized data directory.
 
-## Crate Map
+## Cryptography and Key Handling
 
-| Crate | Purpose | When to use |
-|-------|---------|-------------|
-| [`sigillum`](https://crates.io/crates/sigillum) | Meta-crate, re-exports core | Default dependency for most users |
-| [`sigillum-core`](https://crates.io/crates/sigillum-core) | Traits + FileVault | Building a custom vault backend |
-| [`sigillum-client`](https://crates.io/crates/sigillum-client) | Remote vault SDK | Connecting to a running daemon |
-| [`sigillum-daemon`](https://crates.io/crates/sigillum-daemon) | HTTP server + web UI | Running Sigillum as a service |
-| [`sigillum-fido2`](https://crates.io/crates/sigillum-fido2) | Hardware key + Shamir | Adding FIDO2 unlock to your deployment |
-| [`sigillum-cli`](https://crates.io/crates/sigillum-cli) | Command-line interface | Managing vault from terminal |
-| [`sigillum-sdk`](https://crates.io/crates/sigillum-sdk) | Embeddable SDK | Integrating vault into any application |
-| [`sigillum-server`](https://crates.io/crates/sigillum-server) | Server library | Custom deployment architectures |
+Sigillum currently uses:
 
-## Security Model
+- `aes-gcm` for Tier 2 encryption
+- `argon2` for passphrase-derived wrapping keys
+- `zeroize` and `secrecy` for safer key and secret handling
+- `ctap-hid-fido2` for USB HID FIDO2 operations
 
-- **Secrets never leave `SecretString`**: The `secrecy` crate prevents accidental logging, serialization, or display of secret values.
-- **Master key never leaves the process**: Held in `Mutex<Option<Zeroizing<[u8; 32]>>>`, automatically overwritten on drop.
-- **No master password**: FIDO2 hardware keys eliminate the weakest link in most secret managers.
-- **Quorum-based unlock**: Shamir's Secret Sharing means no single key is sufficient (configurable M-of-N).
-- **Audit everything**: Every secret access is logged with client identity, timestamp, and operation type.
-- **Tier separation**: API keys (Tier 1) are available without unlock for CI/automation. High-value secrets (Tier 2) require hardware.
+FIDO2 support is based on protecting randomly generated vault master keys with encrypted shard material. The hardware keys protect shard recovery; they do not directly derive the vault master key.
 
-See [SECURITY.md](SECURITY.md) for the full security policy and vulnerability reporting.
+## Ethereum Stealth Flow
 
-## Configuration
+Sigillum now supports a local-first Ethereum stealth custody flow:
 
-Default configuration directory: `~/.sigillum/`
+1. Export a wallet-scoped stealth meta-address from an unlocked compartment.
+2. Let an external service or Sigillum itself derive one-time deposit addresses from that public meta-address.
+3. Keep spend authority local by using Sigillum to verify announcements, monitor balances through provider profiles, and sign or broadcast full EIP-1559 transfer payloads.
 
-```
-~/.sigillum/
-├── api_keys.json       Tier 1 keys (plaintext, 0o600)
-├── vault.enc           Tier 2 secrets (AES-256-GCM)
-├── vault_index.json    Best-effort key name index
-└── titan_keys.json     FIDO2 credential IDs + encrypted shards
-```
+The daemon routes are:
 
-All paths are configurable via `VaultConfig`.
+- `POST /api/wallets/eth-stealth/export`
+- `POST /api/wallets/eth-stealth/generate`
+- `POST /api/wallets/eth-stealth/check`
+- `POST /api/wallets/eth-stealth/sign`
+- `POST /api/wallets/eth-stealth/sign-transfer`
+- `POST /api/wallets/eth-stealth/sign-erc20-transfer`
+- `POST /api/wallets/eth-stealth/send-transfer`
+- `POST /api/wallets/eth-stealth/send-erc20-transfer`
+- `POST /api/wallets/eth-stealth/send-with-profile`
+- `POST /api/wallets/eth-stealth/send-erc20-with-profile`
 
-## Building
+On top of that, the daemon now includes:
 
-```bash
-git clone https://github.com/caelator/sigillum.git
-cd sigillum
-cargo build --release
-```
+- EVM provider helpers for nonce, balance, ERC-20 balance, and raw-transaction broadcast
+- persistent EVM provider and stealth wallet profiles, each bound to an explicit unlocked compartment
+- persistent stealth deposit records for native ETH and ERC-20 flows
+- persistent queue jobs for direct sends and sweep jobs
+- atomic sidecar-backed persistence for profile, deposit, and queue state with
+  automatic restore/quarantine behavior
+- a maintenance cycle that refreshes deposits, auto-enqueues sweeps, and drains queued work
 
-### Feature Flags
+This means the current boundary is no longer “sign only.” Sigillum can now keep provider credentials internal, monitor deposit balances, sign locally, and optionally broadcast without exposing private wallet material to upstream web services.
 
-| Feature | Default | Description |
-|---------|---------|-------------|
-| `file-backend` | Yes | File-based vault (AES-256-GCM, Argon2id) |
-| `fido2` | No | FIDO2 hardware key support (pulls USB HID deps) |
+## Web UI
+
+The embedded UI currently supports:
+
+- status view
+- first-time passphrase or FIDO2 setup
+- lock/unlock and session logout
+- compartment switching
+- Tier 1 and Tier 2 secret management
+- FIDO2 key listing, registration, and removal
+- passphrase-encrypted snapshot export and restore
+- recent local audit events
+- authenticated daemon diagnostics
+- shared daemon/client transport schema via `sigillum-api`
+- persistent pending-operation journal for destructive daemon flows
+- transit-style encrypt/decrypt/HMAC operations derived from the active compartment keyspace
+- ERC-5564-style Ethereum stealth meta-address export, deposit derivation, local announcement checks, and local digest signing
+- local EIP-1559 native ETH and ERC-20 transfer signing from derived stealth keys
+- EVM provider profile management
+- stealth wallet profile management
+- stealth deposit creation, refresh, sweep enqueue, and registry browsing
+- queue inspection and batch processing
+- maintenance runs for deposit refresh plus queue draining
+- push/copy between unlocked compartments
+
+It intentionally does not provide:
+
+- SSE streams
+- remote client administration
+- connected-client monitoring
+
+## Feature Flags
+
+Actual feature flags in this workspace today:
+
+- `sigillum-core/file-backend`
+- `sigillum-fido2/hid`
+
+Example:
 
 ```toml
-# Minimal (traits only, no file backend)
 sigillum-core = { version = "0.1", default-features = false }
-
-# With FIDO2
-sigillum = { version = "0.1", features = ["fido2"] }
+sigillum-fido2 = { version = "0.1", default-features = false }
 ```
 
-## Minimum Supported Rust Version
+## Development
 
-Sigillum requires **Rust 1.85** or later (Edition 2024).
+Build:
+
+```bash
+cargo build
+```
+
+Test:
+
+```bash
+cargo test --workspace
+```
+
+Format:
+
+```bash
+cargo fmt --all
+```
+
+## Status
+
+Sigillum now has a shared daemon/client API contract, a service-layer split
+inside the daemon, and a coherent local wallet/deposit/sweep control plane for
+Ethereum stealth custody. The next architectural work is deeper crash recovery,
+richer chain indexing, broader policy automation, and finishing the local-sidecar
+gateway polish, not another round of ad hoc transport or route growth and not a
+shift toward internet deployment.
 
 ## License
 
 Licensed under either of:
 
-- Apache License, Version 2.0 ([LICENSE-APACHE-2.0](LICENSE-APACHE-2.0))
-- MIT License ([LICENSE-MIT](LICENSE-MIT))
-
-at your option.
-
-## Contributing
-
-See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
+- [LICENSE-APACHE-2.0](LICENSE-APACHE-2.0)
+- [LICENSE-MIT](LICENSE-MIT)

@@ -1,222 +1,94 @@
-# FIDO2 Hardware Key Integration
+# FIDO2
 
-## Overview
+## What Exists Today
 
-Sigillum uses FIDO2 security keys to protect the vault master key via Shamir's Secret Sharing. This eliminates master passwords entirely — the vault unlocks when you physically tap a hardware key.
+Sigillum supports local FIDO2/HID-based protection of compartment master keys.
 
-## Supported Hardware
+The current implementation is designed around:
 
-Any FIDO2-compliant key with the `hmac-secret` extension:
+- local USB security keys
+- the `hmac-secret` extension
+- encrypted shard storage in `fido2_keys.json`
+- compartment metadata stored separately as encrypted `meta.enc`
 
-- **YubiKey 5 series** (NFC, USB-A, USB-C)
-- **Google Titan Security Key**
-- **SoloKey v2**
-- **Feitian BioPass**
-- **Nitrokey FIDO2**
-- **Trezor Model T** (FIDO2 mode)
+This is a local unlock flow. It is not a browser WebAuthn flow and not a remote authentication service.
 
-The key must support CTAP2 with the `hmac-secret` extension. Most modern FIDO2 keys do.
+## High-Level Model
 
-## How It Works
+When you register a key, Sigillum:
 
-### Key Registration
+1. creates or uses compartment master keys
+2. splits or associates recovery material for those compartments
+3. encrypts shard blobs for storage
+4. records registered-key metadata in `fido2_keys.json`
 
-When you register a FIDO2 key, Sigillum:
+When you unlock with FIDO2, Sigillum:
 
-1. Generates a new FIDO2 credential on the key (resident or non-resident)
-2. Retrieves the `hmac-secret` output for a fixed salt
-3. Uses that output as an encryption key for a Shamir shard
-4. Stores the encrypted shard + credential ID in `titan_keys.json`
+1. talks to locally attached hardware keys over HID
+2. asks for enough taps to satisfy the requested threshold(s)
+3. reconstructs the needed compartment master keys
+4. loads those keys into local memory
 
-```
-┌──────────┐     ┌─────────────┐     ┌─────────────────┐
-│ FIDO2 Key│────►│ hmac-secret │────►│ Encrypt shard   │
-│   tap    │     │   output    │     │ with hmac output │
-└──────────┘     └─────────────┘     └────────┬────────┘
-                                              │
-                                              ▼
-                                     titan_keys.json
-                                     (credential ID +
-                                      encrypted shard)
-```
+The result is one or more unlocked local compartments.
 
-### Master Key Splitting
+## Storage
 
-The master key is split using Shamir's Secret Sharing into N shares with a threshold of M:
+The FIDO2 config file is:
 
-```
-Master Key [u8; 32]
-       │
-       ▼
-   Shamir split
-   (M-of-N threshold)
-       │
-       ├── Shard 1 ──► encrypted with Key A's hmac-secret
-       ├── Shard 2 ──► encrypted with Key B's hmac-secret
-       └── Shard 3 ──► encrypted with Key C's hmac-secret
+```text
+~/.sigillum/fido2_keys.json
 ```
 
-Default: 2-of-3 (register 3 keys, any 2 can unlock).
+Per-compartment encrypted metadata lives under:
 
-### Vault Unlock
-
-1. User taps Key A → Sigillum decrypts Shard 1
-2. User taps Key B → Sigillum decrypts Shard 2
-3. Shamir reconstruction: Shard 1 + Shard 2 → Master Key
-4. `vault.load_master_key(master_key)` → vault is unlocked
-
-```
-Tap Key A ──► hmac-secret output ──► decrypt Shard 1
-Tap Key B ──► hmac-secret output ──► decrypt Shard 2
-                                          │
-                                          ▼
-                                    Shamir reconstruct
-                                          │
-                                          ▼
-                                    Master Key [u8; 32]
-                                          │
-                                          ▼
-                                    load_master_key()
+```text
+~/.sigillum/compartments/<id>/meta.enc
 ```
 
-## Setup Guide
+Optional passphrase wrapping data lives alongside each compartment when configured:
 
-### Register Your First Key
-
-```bash
-# Register a FIDO2 key with a label
-sigillum fido2 register --label "Primary-YubiKey"
-
-# When prompted, tap your key
-# The vault master key is generated and split automatically
+```text
+~/.sigillum/compartments/<id>/passphrase.salt
+~/.sigillum/compartments/<id>/passphrase_wrapped_key.enc
 ```
 
-### Register Additional Keys
+## CLI Surface
 
-```bash
-# Add more keys to increase redundancy
-sigillum fido2 register --label "Backup-Titan"
-sigillum fido2 register --label "Emergency-Solo"
+The implemented CLI surface includes:
 
-# Set quorum (how many keys needed to unlock)
-sigillum fido2 set-quorum 2
-```
-
-### Unlock the Vault
-
-```bash
+```text
+sigillum setup
 sigillum unlock
-
-# Output:
-# Quorum: 2 of 3 keys required
-# Tap key 1 of 2... [tap]
-# ✓ Primary-YubiKey
-# Tap key 2 of 2... [tap]
-# ✓ Backup-Titan
-# Vault unlocked.
-```
-
-### Lock the Vault
-
-```bash
-sigillum lock
-# Master key zeroized from memory.
-```
-
-### List Registered Keys
-
-```bash
+sigillum fido2 status
 sigillum fido2 list
-
-# Registered FIDO2 Keys:
-#   - Primary-YubiKey  (ID: 71dd6181...) [2026-02-28]
-#   - Backup-Titan     (ID: 5e3c562f...) [2026-02-28]
-#   - Emergency-Solo   (ID: a39f2b1c...) [2026-03-01]
-#
-# Quorum: 2 of 3
+sigillum fido2 register --label <LABEL>
+sigillum fido2 remove --label <LABEL>
+sigillum fido2 unlock
 ```
 
-### Remove a Key
+Exact behavior is still local-first and compartment-oriented. The daemon UI exposes the same general capabilities through local HTTP routes.
 
-```bash
-sigillum fido2 remove --label "Emergency-Solo"
-# Warning: Removing this key reduces your total from 3 to 2.
-# With quorum 2, you will have no redundancy.
-# Proceed? [y/N]
-```
+## Passphrase Interaction
 
-## Web UI Integration
+Sigillum can also store a passphrase-wrapped version of a compartment master key. In the current product, that serves as a local fallback unlock path.
 
-In daemon mode, FIDO2 unlock works through the browser via WebAuthn:
+That passphrase support is:
 
-1. Open `http://localhost:9743`
-2. Click "Unlock Vault"
-3. Browser prompts for security key (WebAuthn `navigator.credentials.get()`)
-4. Tap key → daemon receives assertion → decrypts shard
-5. Repeat for quorum
-6. Vault unlocked for all connected clients
+- a local recovery and unlock mechanism
+- not a vault snapshot feature
+- not a remote recovery service
 
-The daemon proxies the FIDO2 protocol: the browser handles USB communication via WebAuthn, and the daemon handles shard management.
+## Constraints
 
-## Quorum Strategies
+The current implementation should be understood with these limits:
 
-| Strategy | Keys | Quorum | Use Case |
-|----------|------|--------|----------|
-| Single key | 1 | 1 | Personal workstation, low-value secrets |
-| Redundant pair | 2 | 1 | Convenience with backup |
-| Two-of-three | 3 | 2 | Standard security (recommended) |
-| Three-of-five | 5 | 3 | High-value infrastructure |
-| Geographic split | 3+ | 2+ | Keys in different physical locations |
+- unlock happens through local HID access, not browser WebAuthn
+- key state and unlocked compartments are local to the running process
+- losing access to all valid recovery methods can permanently block access to Tier 2 data
+- poison-key and deniability behavior exist in code, but they should be treated as advanced local features rather than polished product workflows
 
-## Recovery
+## Operational Advice
 
-### Lost a key (below quorum)
-
-If you still have enough keys to meet quorum:
-
-```bash
-# Unlock with remaining keys
-sigillum unlock
-
-# Re-register new keys
-sigillum fido2 register --label "Replacement-Key"
-```
-
-The master key is re-split with the new set of keys.
-
-### Lost too many keys (cannot meet quorum)
-
-If you have a passphrase backup:
-
-```bash
-sigillum restore --input backup.sigillum
-# Enter passphrase: ********
-# Vault restored. Register new FIDO2 keys.
-```
-
-If you have no backup and cannot meet quorum, **the vault is permanently locked**. This is by design — there is no backdoor.
-
-## Passphrase Fallback
-
-For environments where hardware keys aren't available (remote SSH, VMs):
-
-```bash
-# Set up passphrase as additional unlock method
-sigillum passphrase set
-
-# Unlock with passphrase instead of hardware key
-sigillum unlock --passphrase
-# Enter passphrase: ********
-# Deriving key (Argon2id, 64MB, 3 iterations)...
-# Vault unlocked.
-```
-
-The passphrase is processed through Argon2id (64MB memory, 3 iterations, 1 thread) to derive a 256-bit key. This key decrypts a separate Shamir shard stored for passphrase-based unlock.
-
-## Security Considerations
-
-- **Physical presence**: FIDO2 keys require physical tap. Remote attackers cannot unlock.
-- **Phishing resistance**: FIDO2 credentials are origin-bound. A phishing site cannot request your vault credential.
-- **Key compromise**: A single stolen key is useless if quorum > 1. The attacker needs M keys.
-- **hmac-secret determinism**: The hmac-secret output is deterministic for a given credential + salt. This means the same key always produces the same shard decryption key — no state to synchronize.
-- **No key extraction**: FIDO2 private keys cannot be exported from the hardware. Cloning a key requires physical access to the silicon.
+- register more than one real key if the protected data matters
+- test both your FIDO2 and passphrase unlock paths on the machine you actually use
+- use the daemon when you want persistent local unlock state across multiple management actions

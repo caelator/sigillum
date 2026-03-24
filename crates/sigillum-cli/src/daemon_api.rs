@@ -1,0 +1,563 @@
+//! CLI bridge to the Sigillum daemon's HTTP API.
+//!
+//! Translates `sigillum api <COMMAND>` invocations into REST calls via
+//! [`SigillumClient`], providing a scriptable, non-interactive interface
+//! suitable for shell pipelines, CI, and automated key ceremonies.
+//!
+//! ## Design
+//!
+//! Every subcommand follows the same pattern: parse flags from `args`,
+//! construct the typed request, call [`run_api_command`] which builds a
+//! one-shot Tokio runtime and prints pretty-printed JSON to stdout.
+//! Errors go to stderr and exit non-zero.
+//!
+//! Session tokens are resolved in priority order:
+//! 1. `--session <TOKEN>` flag
+//! 2. `SIGILLUM_SESSION_TOKEN` environment variable
+//!
+//! Sensitive inputs (passphrases, PINs) support three delivery modes:
+//! `--*-env VAR` (read from environment), `--*-stdin` (read from stdin),
+//! or interactive terminal prompt via `rpassword`.
+
+use std::future::Future;
+use std::io::{self, Read};
+use std::process;
+
+use serde::Serialize;
+use sigillum_api::request::{
+    EthStealthDepositCreateErc20Request, EthStealthDepositCreateNativeRequest,
+    EthStealthDepositDeleteRequest, EthStealthDepositEnqueueSweepRequest,
+    EthStealthDepositRefreshRequest, EthStealthWalletProfileUpsertRequest,
+    EvmProviderProfileUpsertRequest, EvmProviderRef, Fido2UnlockRequest, MaintenanceRunRequest,
+    QueueProcessRequest,
+};
+use sigillum_client::{ClientError, SigillumClient};
+
+/// Dispatch a `sigillum api <COMMAND>` invocation.
+pub fn cmd_api(args: &[String]) {
+    if args.is_empty() {
+        print_api_usage();
+        process::exit(1);
+    }
+
+    match args[0].as_str() {
+        "status" => run_api_command(args, false, |client| async move { client.status().await }),
+        "unlock" => {
+            let passphrase = read_passphrase(args);
+            run_api_command(args, false, move |client| async move {
+                client.unlock_with_passphrase(&passphrase).await
+            });
+        }
+        "unlock-fido2" => {
+            let tap_count = require_usize_flag(
+                args,
+                "--taps",
+                "sigillum api unlock-fido2 --taps <N> [--pin-env VAR|--pin-stdin]",
+            );
+            let pin = read_pin(args);
+            run_api_command(args, false, move |client| async move {
+                client
+                    .fido2_unlock(Fido2UnlockRequest {
+                        pins: vec![pin],
+                        tap_count,
+                    })
+                    .await
+            });
+        }
+        "lock" => run_api_command(args, true, |client| async move { client.lock().await }),
+        "revoke-session" => {
+            run_api_command(
+                args,
+                true,
+                |client| async move { client.revoke_session().await },
+            )
+        }
+        "switch" => {
+            let id = require_usize_flag(args, "--id", "sigillum api switch --id <N>");
+            run_api_command(args, true, move |client| async move {
+                client.switch_compartment(id).await
+            });
+        }
+        "diagnostics" => run_api_command(
+            args,
+            true,
+            |client| async move { client.diagnostics().await },
+        ),
+        "profiles" => cmd_api_profiles(args),
+        "deposits" => cmd_api_deposits(args),
+        "queue" => cmd_api_queue(args),
+        "maintenance" => cmd_api_maintenance(args),
+        "help" | "--help" | "-h" => print_api_usage(),
+        other => {
+            eprintln!("Unknown api command: {other}");
+            print_api_usage();
+            process::exit(1);
+        }
+    }
+}
+
+/// Dispatch `sigillum api profiles <evm|stealth> <list|upsert|delete>`.
+fn cmd_api_profiles(args: &[String]) {
+    if args.len() < 3 {
+        eprintln!("Usage: sigillum api profiles <evm|stealth> <list|upsert|delete> [...]");
+        process::exit(1);
+    }
+
+    match (args[1].as_str(), args[2].as_str()) {
+        ("evm", "list") => run_api_command(args, true, |client| async move {
+            client.list_evm_provider_profiles().await
+        }),
+        ("evm", "upsert") => {
+            let request = EvmProviderProfileUpsertRequest {
+                name: require_flag(
+                    args,
+                    "--name",
+                    "sigillum api profiles evm upsert --name <NAME> --rpc-url <URL> --chain-id <N>",
+                ),
+                provider: EvmProviderRef {
+                    rpc_url: require_flag(
+                        args,
+                        "--rpc-url",
+                        "sigillum api profiles evm upsert --name <NAME> --rpc-url <URL> --chain-id <N>",
+                    ),
+                    auth_token_key: parse_flag(args, "--auth-token-key"),
+                    compartment_id: parse_usize_flag(args, "--compartment-id"),
+                },
+                chain_id: require_u64_flag(
+                    args,
+                    "--chain-id",
+                    "sigillum api profiles evm upsert --name <NAME> --rpc-url <URL> --chain-id <N>",
+                ),
+                max_priority_fee_per_gas_hex: parse_flag(args, "--max-priority-fee-per-gas-hex"),
+                max_fee_per_gas_hex: parse_flag(args, "--max-fee-per-gas-hex"),
+                native_gas_limit: parse_u64_flag(args, "--native-gas-limit"),
+                erc20_gas_limit: parse_u64_flag(args, "--erc20-gas-limit"),
+            };
+            run_api_command(args, true, move |client| async move {
+                client.upsert_evm_provider_profile(request).await
+            });
+        }
+        ("evm", "delete") => {
+            let name = require_flag(
+                args,
+                "--name",
+                "sigillum api profiles evm delete --name <NAME>",
+            );
+            run_api_command(args, true, move |client| async move {
+                client.delete_evm_provider_profile(&name).await
+            });
+        }
+        ("stealth", "list") => run_api_command(args, true, |client| async move {
+            client.list_eth_stealth_wallet_profiles().await
+        }),
+        ("stealth", "upsert") => {
+            let request = EthStealthWalletProfileUpsertRequest {
+                name: require_flag(
+                    args,
+                    "--name",
+                    "sigillum api profiles stealth upsert --name <NAME> --wallet <WALLET> --provider-profile <PROFILE>",
+                ),
+                wallet: require_flag(
+                    args,
+                    "--wallet",
+                    "sigillum api profiles stealth upsert --name <NAME> --wallet <WALLET> --provider-profile <PROFILE>",
+                ),
+                short_name: parse_flag(args, "--short-name"),
+                provider_profile: require_flag(
+                    args,
+                    "--provider-profile",
+                    "sigillum api profiles stealth upsert --name <NAME> --wallet <WALLET> --provider-profile <PROFILE>",
+                ),
+                compartment_id: parse_usize_flag(args, "--compartment-id"),
+                chain_id: parse_u64_flag(args, "--chain-id"),
+                default_destination_address: parse_flag(args, "--default-destination-address"),
+            };
+            run_api_command(args, true, move |client| async move {
+                client.upsert_eth_stealth_wallet_profile(request).await
+            });
+        }
+        ("stealth", "delete") => {
+            let name = require_flag(
+                args,
+                "--name",
+                "sigillum api profiles stealth delete --name <NAME>",
+            );
+            run_api_command(args, true, move |client| async move {
+                client.delete_eth_stealth_wallet_profile(&name).await
+            });
+        }
+        _ => {
+            eprintln!("Usage: sigillum api profiles <evm|stealth> <list|upsert|delete> [...]");
+            process::exit(1);
+        }
+    }
+}
+
+/// Dispatch `sigillum api deposits <list|create-native|create-erc20|refresh|enqueue-sweep|delete>`.
+fn cmd_api_deposits(args: &[String]) {
+    if args.len() < 2 {
+        eprintln!(
+            "Usage: sigillum api deposits <list|create-native|create-erc20|refresh|enqueue-sweep|delete> [...]"
+        );
+        process::exit(1);
+    }
+
+    match args[1].as_str() {
+        "list" => run_api_command(args, true, |client| async move {
+            client.list_eth_stealth_deposits().await
+        }),
+        "create-native" => {
+            let request = EthStealthDepositCreateNativeRequest {
+                wallet_profile: require_flag(
+                    args,
+                    "--wallet-profile",
+                    "sigillum api deposits create-native --wallet-profile <NAME>",
+                ),
+                expected_value_wei_hex: parse_flag(args, "--expected-value-wei-hex"),
+                auto_queue_sweep: flag_option(args, "--auto-queue-sweep"),
+                sweep_destination_address: parse_flag(args, "--sweep-destination-address"),
+                min_sweep_value_wei_hex: parse_flag(args, "--min-sweep-value-wei-hex"),
+                note: parse_flag(args, "--note"),
+                ephemeral_private_key_hex: parse_flag(args, "--ephemeral-private-key-hex"),
+            };
+            run_api_command(args, true, move |client| async move {
+                client.create_eth_stealth_native_deposit(request).await
+            });
+        }
+        "create-erc20" => {
+            let request = EthStealthDepositCreateErc20Request {
+                wallet_profile: require_flag(
+                    args,
+                    "--wallet-profile",
+                    "sigillum api deposits create-erc20 --wallet-profile <NAME> --token-address <ADDR>",
+                ),
+                token_address: require_flag(
+                    args,
+                    "--token-address",
+                    "sigillum api deposits create-erc20 --wallet-profile <NAME> --token-address <ADDR>",
+                ),
+                expected_amount_hex: parse_flag(args, "--expected-amount-hex"),
+                auto_queue_sweep: flag_option(args, "--auto-queue-sweep"),
+                sweep_destination_address: parse_flag(args, "--sweep-destination-address"),
+                min_sweep_amount_hex: parse_flag(args, "--min-sweep-amount-hex"),
+                note: parse_flag(args, "--note"),
+                ephemeral_private_key_hex: parse_flag(args, "--ephemeral-private-key-hex"),
+            };
+            run_api_command(args, true, move |client| async move {
+                client.create_eth_stealth_erc20_deposit(request).await
+            });
+        }
+        "refresh" => {
+            let request = EthStealthDepositRefreshRequest {
+                id: parse_flag(args, "--id"),
+                limit: parse_usize_flag(args, "--limit"),
+                auto_enqueue: bool_switch(args, "--auto-enqueue", "--no-auto-enqueue"),
+            };
+            run_api_command(args, true, move |client| async move {
+                client.refresh_eth_stealth_deposits(request).await
+            });
+        }
+        "enqueue-sweep" => {
+            let request = EthStealthDepositEnqueueSweepRequest {
+                id: require_flag(
+                    args,
+                    "--id",
+                    "sigillum api deposits enqueue-sweep --id <ID>",
+                ),
+                force: flag_option(args, "--force"),
+            };
+            run_api_command(args, true, move |client| async move {
+                client.enqueue_eth_stealth_deposit_sweep(request).await
+            });
+        }
+        "delete" => {
+            let request = EthStealthDepositDeleteRequest {
+                id: require_flag(args, "--id", "sigillum api deposits delete --id <ID>"),
+            };
+            run_api_command(args, true, move |client| async move {
+                client.delete_eth_stealth_deposit(request).await
+            });
+        }
+        _ => {
+            eprintln!(
+                "Usage: sigillum api deposits <list|create-native|create-erc20|refresh|enqueue-sweep|delete> [...]"
+            );
+            process::exit(1);
+        }
+    }
+}
+
+/// Dispatch `sigillum api queue <list|process>`.
+fn cmd_api_queue(args: &[String]) {
+    if args.len() < 2 {
+        eprintln!("Usage: sigillum api queue <list|process> [...]");
+        process::exit(1);
+    }
+
+    match args[1].as_str() {
+        "list" => run_api_command(args, true, |client| async move {
+            client.list_queue_jobs().await
+        }),
+        "process" => {
+            let request = QueueProcessRequest {
+                id: parse_flag(args, "--id"),
+                limit: parse_usize_flag(args, "--limit"),
+            };
+            run_api_command(args, true, move |client| async move {
+                client.process_queue(request).await
+            });
+        }
+        _ => {
+            eprintln!("Usage: sigillum api queue <list|process> [...]");
+            process::exit(1);
+        }
+    }
+}
+
+/// Dispatch `sigillum api maintenance run [...]`.
+fn cmd_api_maintenance(args: &[String]) {
+    if args.len() < 2 || args[1].as_str() != "run" {
+        eprintln!(
+            "Usage: sigillum api maintenance run [--deposit-refresh-limit N] [--queue-process-limit N] [--auto-enqueue|--no-auto-enqueue]"
+        );
+        process::exit(1);
+    }
+
+    let request = MaintenanceRunRequest {
+        deposit_refresh_limit: parse_usize_flag(args, "--deposit-refresh-limit"),
+        queue_process_limit: parse_usize_flag(args, "--queue-process-limit"),
+        auto_enqueue: bool_switch(args, "--auto-enqueue", "--no-auto-enqueue"),
+    };
+    run_api_command(args, true, move |client| async move {
+        client.run_maintenance(request).await
+    });
+}
+
+// ── Runtime and client construction ─────────────────────────────
+
+/// Execute an API call within a one-shot Tokio runtime.
+///
+/// Builds a [`SigillumClient`], optionally attaches a session token,
+/// runs the async closure, and prints the JSON result to stdout.
+/// Exits non-zero on any error.
+fn run_api_command<T, F, Fut>(args: &[String], require_session: bool, f: F)
+where
+    T: Serialize,
+    F: FnOnce(SigillumClient) -> Fut,
+    Fut: Future<Output = Result<T, ClientError>>,
+{
+    let client = build_client(args, require_session);
+    let runtime = tokio::runtime::Runtime::new().unwrap_or_else(|error| {
+        eprintln!("Failed to start async runtime: {error}");
+        process::exit(1);
+    });
+    let response = match runtime.block_on(f(client)) {
+        Ok(response) => response,
+        Err(error) => report_client_error(error),
+    };
+    print_json(&response);
+}
+
+/// Construct a [`SigillumClient`] with optional session-token attachment.
+fn build_client(args: &[String], require_session: bool) -> SigillumClient {
+    let client = SigillumClient::new(daemon_base_url(args));
+    if require_session {
+        let session = parse_flag(args, "--session")
+            .or_else(|| std::env::var("SIGILLUM_SESSION_TOKEN").ok())
+            .unwrap_or_else(|| {
+                eprintln!(
+                    "This command requires a daemon session token. Use --session <TOKEN> or set SIGILLUM_SESSION_TOKEN."
+                );
+                process::exit(1);
+            });
+        client.set_session_token(session);
+    }
+    client
+}
+
+/// Resolve the daemon base URL from `--url` flag or `SIGILLUM_BASE_URL` env.
+fn daemon_base_url(args: &[String]) -> String {
+    parse_flag(args, "--url")
+        .or_else(|| std::env::var("SIGILLUM_BASE_URL").ok())
+        .unwrap_or_else(|| "http://127.0.0.1:9743".into())
+}
+
+// ── Sensitive input handling ─────────────────────────────────────
+
+fn read_passphrase(args: &[String]) -> String {
+    read_sensitive_input(
+        args,
+        "--passphrase-env",
+        "--passphrase-stdin",
+        "Daemon passphrase: ",
+    )
+}
+
+fn read_pin(args: &[String]) -> String {
+    read_sensitive_input(args, "--pin-env", "--pin-stdin", "FIDO2 PIN: ")
+}
+
+/// Read a sensitive value using one of three delivery modes (in priority order):
+/// 1. Environment variable (`env_flag`): `--*-env VAR`
+/// 2. Standard input (`stdin_flag`): `--*-stdin`
+/// 3. Interactive terminal prompt (`prompt_label`)
+fn read_sensitive_input(
+    args: &[String],
+    env_flag: &str,
+    stdin_flag: &str,
+    prompt_label: &str,
+) -> String {
+    if let Some(env_key) = parse_flag(args, env_flag) {
+        return std::env::var(&env_key).unwrap_or_else(|_| {
+            eprintln!("Environment variable {env_key} is not set.");
+            process::exit(1);
+        });
+    }
+    if has_flag(args, stdin_flag) {
+        let name = prompt_label.trim_end_matches([':', ' ']);
+        return read_stdin_secret(name);
+    }
+    rpassword::prompt_password(prompt_label).unwrap_or_else(|error| {
+        eprintln!("Failed to read {prompt_label} {error}");
+        process::exit(1);
+    })
+}
+
+fn read_stdin_secret(name: &str) -> String {
+    let mut buf = String::new();
+    io::stdin()
+        .read_to_string(&mut buf)
+        .unwrap_or_else(|error| {
+            eprintln!("Failed to read {name} from stdin: {error}");
+            process::exit(1);
+        });
+    let value = buf.trim().to_string();
+    if value.is_empty() {
+        eprintln!("Expected non-empty {name} on stdin.");
+        process::exit(1);
+    }
+    value
+}
+
+// ── Output and error handling ────────────────────────────────────
+
+fn print_json<T: Serialize>(value: &T) {
+    let body = serde_json::to_string_pretty(value).unwrap_or_else(|error| {
+        eprintln!("Failed to encode JSON output: {error}");
+        process::exit(1);
+    });
+    println!("{body}");
+}
+
+fn report_client_error(error: ClientError) -> ! {
+    eprintln!("{error}");
+    process::exit(1);
+}
+
+// ── Flag parsing ────────────────────────────────────────────────
+
+/// Find a `--flag <value>` pair in `args`, returning the value if present.
+fn parse_flag(args: &[String], flag: &str) -> Option<String> {
+    let mut i = 0;
+    while i < args.len() {
+        if args[i] == flag && i + 1 < args.len() {
+            return Some(args[i + 1].clone());
+        }
+        i += 1;
+    }
+    None
+}
+
+fn has_flag(args: &[String], flag: &str) -> bool {
+    args.iter().any(|arg| arg == flag)
+}
+
+fn flag_option(args: &[String], flag: &str) -> Option<bool> {
+    if has_flag(args, flag) {
+        Some(true)
+    } else {
+        None
+    }
+}
+
+fn bool_switch(args: &[String], positive: &str, negative: &str) -> Option<bool> {
+    if has_flag(args, positive) {
+        Some(true)
+    } else if has_flag(args, negative) {
+        Some(false)
+    } else {
+        None
+    }
+}
+
+fn require_flag(args: &[String], flag: &str, usage: &str) -> String {
+    parse_flag(args, flag).unwrap_or_else(|| {
+        eprintln!("Usage: {usage}");
+        process::exit(1);
+    })
+}
+
+fn parse_usize_flag(args: &[String], flag: &str) -> Option<usize> {
+    parse_flag(args, flag).map(|value| parse_usize_value(&value, flag))
+}
+
+fn require_usize_flag(args: &[String], flag: &str, usage: &str) -> usize {
+    parse_flag(args, flag)
+        .map(|value| parse_usize_value(&value, flag))
+        .unwrap_or_else(|| {
+            eprintln!("Usage: {usage}");
+            process::exit(1);
+        })
+}
+
+fn parse_u64_flag(args: &[String], flag: &str) -> Option<u64> {
+    parse_flag(args, flag).map(|value| parse_u64_value(&value, flag))
+}
+
+fn require_u64_flag(args: &[String], flag: &str, usage: &str) -> u64 {
+    parse_flag(args, flag)
+        .map(|value| parse_u64_value(&value, flag))
+        .unwrap_or_else(|| {
+            eprintln!("Usage: {usage}");
+            process::exit(1);
+        })
+}
+
+fn parse_usize_value(value: &str, flag: &str) -> usize {
+    value.parse::<usize>().unwrap_or_else(|_| {
+        eprintln!("Invalid value for {flag}: {value}");
+        process::exit(1);
+    })
+}
+
+fn parse_u64_value(value: &str, flag: &str) -> u64 {
+    value.parse::<u64>().unwrap_or_else(|_| {
+        eprintln!("Invalid value for {flag}: {value}");
+        process::exit(1);
+    })
+}
+
+fn print_api_usage() {
+    eprintln!(
+        "\
+sigillum api <COMMAND>
+
+COMMANDS:
+  status
+  unlock [--passphrase-env VAR|--passphrase-stdin]
+  unlock-fido2 --taps <N> [--pin-env VAR|--pin-stdin]
+  lock
+  revoke-session
+  switch --id <N>
+  diagnostics
+  profiles evm <list|upsert|delete> [...]
+  profiles stealth <list|upsert|delete> [...]
+  deposits <list|create-native|create-erc20|refresh|enqueue-sweep|delete> [...]
+  queue <list|process> [...]
+  maintenance run [...]
+
+GLOBAL FLAGS:
+  --url <BASE_URL>        Override daemon URL (default: SIGILLUM_BASE_URL or http://127.0.0.1:9743)
+  --session <TOKEN>       Override daemon session token (default: SIGILLUM_SESSION_TOKEN)"
+    );
+}

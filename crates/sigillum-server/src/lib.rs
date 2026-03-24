@@ -1,5 +1,5 @@
 //! # Sigillum Server
 //!
-//! Server library for custom Sigillum vault deployments.
+//! Thin server-facing facade over the local daemon implementation.
 
-pub use sigillum_core::*;
+pub use sigillum_daemon::{AppState, build_router, run};

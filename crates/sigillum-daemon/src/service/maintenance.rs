@@ -1,0 +1,87 @@
+//! Maintenance and cleanup tasks for deposits and queue processing.
+//!
+//! Provides batch operations for refreshing deposit balances and processing
+//! queued jobs as a single atomic maintenance transaction.
+
+use sigillum_api::{MaintenanceRunRequest, MaintenanceRunResponse, QueueProcessRequest};
+
+use crate::audit_log::AuditEventSpec;
+
+use super::{ServiceResult, SigillumService};
+
+impl SigillumService {
+    pub(crate) async fn run_maintenance(
+        &self,
+        token: Option<&str>,
+        body: MaintenanceRunRequest,
+    ) -> ServiceResult<MaintenanceRunResponse> {
+        let token = self.require_session(token)?;
+        let _guard = self.state.operation_guard().await;
+        let mut deposits =
+            crate::deposits::load_deposits(&self.state.base_dir).map_err(|error| {
+                super::ServiceError::internal(format!("Failed to load deposits: {error}"))
+            })?;
+        let mut queue = crate::queue_store::load_queue(&self.state.base_dir).map_err(|error| {
+            super::ServiceError::internal(format!("Failed to load queue: {error}"))
+        })?;
+
+        let refresh = self
+            .refresh_eth_stealth_deposits_state(
+                token,
+                &mut deposits,
+                &mut queue,
+                sigillum_api::EthStealthDepositRefreshRequest {
+                    id: None,
+                    limit: body.deposit_refresh_limit,
+                    auto_enqueue: body.auto_enqueue,
+                },
+            )
+            .await?;
+        let processed = self
+            .process_queue_state(
+                token,
+                &mut queue,
+                QueueProcessRequest {
+                    id: None,
+                    limit: body.queue_process_limit,
+                },
+            )
+            .await?;
+        let _ = super::deposits::sync_eth_stealth_deposits_with_queue(&mut deposits, &queue);
+
+        crate::queue_store::save_queue(&self.state.base_dir, &queue).map_err(|error| {
+            super::ServiceError::internal(format!("Failed to save queue: {error}"))
+        })?;
+        crate::deposits::save_deposits(&self.state.base_dir, &deposits).map_err(|error| {
+            super::ServiceError::internal(format!("Failed to save deposits: {error}"))
+        })?;
+
+        self.record_audit(
+            None,
+            AuditEventSpec::MaintenanceRun {
+                refreshed: refresh.processed,
+                detected: refresh.detected,
+                queued: refresh.queued,
+                processed: processed.processed,
+                succeeded: processed.succeeded,
+                blocked: processed.blocked,
+                retrying: processed.retrying,
+                failed: processed.failed,
+            },
+        )?;
+
+        Ok(MaintenanceRunResponse {
+            status: "ok".into(),
+            refreshed: refresh.processed,
+            detected: refresh.detected,
+            queued: refresh.queued,
+            processed: processed.processed,
+            succeeded: processed.succeeded,
+            blocked: processed.blocked,
+            retrying: processed.retrying,
+            failed: processed.failed,
+            deposits: deposits.eth_stealth,
+            jobs: processed.jobs,
+        })
+    }
+}

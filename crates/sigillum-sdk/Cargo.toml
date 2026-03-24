@@ -11,4 +11,6 @@ keywords = ["vault", "secrets", "sdk", "ffi"]
 categories = ["cryptography", "api-bindings"]
 
 [dependencies]
+sigillum-api = { workspace = true }
 sigillum-core = { workspace = true }
+sigillum-client = { workspace = true }

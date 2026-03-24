@@ -22,17 +22,23 @@ You will receive an acknowledgment within 48 hours. We aim to release a patch wi
 
 ## Security Design
 
+Sigillum's current security story is explicitly **local-first and single-host**.
+The daemon and optional gateway sidecar are intended to remain inside one
+machine's trust boundary; this document does not claim a hardened
+internet-facing or multi-tenant deployment model because that is outside the
+project's intended scope.
+
 ### Threat Model
 
 Sigillum protects against:
 
 | Threat | Mitigation |
 |--------|------------|
-| Disk compromise (stolen laptop, server breach) | Tier 2 secrets encrypted with AES-256-GCM. Master key not on disk. |
+| Disk compromise (stolen laptop, server breach) | Tier 2 secrets are encrypted with AES-256-GCM. Unwrapped compartment keys are kept in memory only and are not stored on disk. |
 | Memory dump / core dump | Master key held in `Zeroizing<[u8; 32]>` — overwritten on drop. `SecretString` prevents heap scanning for values. |
-| Phishing for master password | No master password. FIDO2 hardware keys are phishing-resistant by design (origin-bound). |
+| Phishing for unlock material | FIDO2 unlock remains phishing-resistant at the credential layer. Passphrase unlock exists as a local fallback path and should be treated like any other secret. |
 | Single key compromise | Shamir's Secret Sharing requires M-of-N keys. One stolen key is useless alone. |
-| Unauthorized API access (daemon mode) | HMAC session tokens, mTLS client certs, or Unix socket permissions. |
+| Unauthorized API access (daemon mode) | Bearer session tokens over local HTTP, with the gateway remaining a local-sidecar preview surface in this phase. |
 | Accidental secret logging | `SecretString` has no `Display` or `Debug` impl. Secrets cannot be printed without explicit `expose_secret()`. |
 | Timing attacks on key comparison | Constant-time comparison via `subtle` crate (transitive dependency of RustCrypto). |
 | Replay attacks on backup files | Each backup includes a unique timestamp and random nonce. |
@@ -73,7 +79,13 @@ No OpenSSL. No C bindings for crypto. Pure Rust.
 |------|-------------|----------|
 | `api_keys.json` | `0o600` | Tier 1 plaintext keys |
 | `vault.enc` | `0o600` | Tier 2 AES-256-GCM ciphertext |
-| `titan_keys.json` | `0o600` | FIDO2 credential IDs + encrypted Shamir shards |
-| `vault_index.json` | `0o600` | Key name index (no secret values) |
+| `fido2_keys.json` | `0o600` | FIDO2 credential IDs + encrypted Shamir shards |
+| `profiles.json` | `0o600` | Daemon operator profiles and wallet/provider bindings |
+| `deposits.json` | `0o600` | Daemon deposit registry |
+| `queue.json` | `0o600` | Daemon queue state |
 
-All files are created with restrictive permissions. The vault never writes secrets to temporary files.
+All files are created with restrictive permissions.
+
+Durable atomic replace operations may use same-directory temporary files before
+rename. Those files are created with restrictive permissions, `fsync`'d before
+rename, and the parent directory is synchronized when the platform supports it.

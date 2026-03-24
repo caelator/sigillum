@@ -11,8 +11,8 @@ keywords = ["vault", "secrets", "encryption", "security", "fido2"]
 categories = ["cryptography", "authentication"]
 
 [dependencies]
-sigillum-core = { workspace = true, features = ["file-backend"] }
+sigillum-core = { workspace = true }
 
 [features]
 default = ["file-backend"]
-file-backend = []
+file-backend = ["sigillum-core/file-backend"]

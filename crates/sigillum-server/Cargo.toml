@@ -11,4 +11,4 @@ keywords = ["vault", "server", "security", "secrets"]
 categories = ["cryptography", "web-programming"]
 
 [dependencies]
-sigillum-core = { workspace = true }
+sigillum-daemon = { workspace = true }

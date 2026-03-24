@@ -1,0 +1,17 @@
+[package]
+name = "sigillum-api"
+description = "Shared transport types for the Sigillum daemon API"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+keywords = ["vault", "api", "dto", "transport"]
+categories = ["cryptography", "data-structures"]
+
+[dependencies]
+sigillum-core = { workspace = true, features = ["file-backend"] }
+serde = { workspace = true }
+serde_json = { workspace = true }
+hex = { workspace = true }
