@@ -32,9 +32,18 @@ impl SigillumService {
         token: Option<&str>,
         body: EthXpubExportRequest,
     ) -> ServiceResult<EthXpubExportResponse> {
-        let _ = self.require_session(token)?;
+        let token = self.require_session(token)?;
         let (_provider, profile) = self.resolve_xpub_wallet_profile(&body.wallet_profile)?;
-        let export = self.with_vault(profile.compartment_id, |vault| {
+        let active_compartment_id = self
+            .state
+            .active_compartment_id_for(token)
+            .ok_or_else(|| ServiceError::forbidden("No active compartment."))?;
+        if active_compartment_id != profile.compartment_id {
+            return Err(ServiceError::forbidden(
+                "Wallet profile is not in the active compartment.",
+            ));
+        }
+        let export = self.with_active_vault(token, |vault, _| {
             let master_key = vault
                 .extract_master_key()
                 .ok_or_else(|| ServiceError::forbidden("Vault is locked."))?;
@@ -367,12 +376,14 @@ mod tests {
     use sigillum_api::{
         EthStealthCheckRequest, EthStealthExportRequest, EthStealthGenerateRequest,
         EthStealthSignErc20TransferRequest, EthStealthSignRequest, EthStealthSignTransferRequest,
+        EthXpubExportRequest, EthXpubWalletProfile, EvmProviderProfile,
     };
     use sigillum_fido2::config::CompartmentMeta;
     use tempfile::TempDir;
 
     use super::*;
     use crate::AppState;
+    use crate::profiles::{ProfileRegistry, save_profiles};
 
     fn meta(id: usize, threshold: usize, label: &str) -> CompartmentMeta {
         CompartmentMeta {
@@ -490,5 +501,106 @@ mod tests {
             .unwrap();
         assert_eq!(signed_erc20.kind, "erc20-transfer");
         assert!(signed_erc20.data_hex.starts_with("a9059cbb"));
+    }
+
+    #[test]
+    fn xpub_export_requires_active_compartment_match() {
+        let dir = TempDir::new().unwrap();
+        let state = Arc::new(AppState::new(dir.path().to_path_buf()));
+        state.unlock_compartment(0, [7u8; 32], meta(0, 1, "default"));
+        state.unlock_compartment(1, [8u8; 32], meta(1, 2, "secure"));
+        let session = state.create_session(Some(0));
+        let service = SigillumService::new(state);
+
+        save_profiles(
+            dir.path(),
+            &ProfileRegistry {
+                evm_providers: vec![EvmProviderProfile {
+                    name: "mainnet".into(),
+                    rpc_url: "http://127.0.0.1:8545".into(),
+                    auth_token_key: None,
+                    compartment_id: 0,
+                    chain_id: 1,
+                    max_priority_fee_per_gas_hex: None,
+                    max_fee_per_gas_hex: None,
+                    native_gas_limit: None,
+                    erc20_gas_limit: None,
+                }],
+                eth_stealth_wallets: vec![],
+                eth_xpub_wallets: vec![EthXpubWalletProfile {
+                    name: "treasury".into(),
+                    project_account: 7,
+                    provider_profile: "mainnet".into(),
+                    compartment_id: 1,
+                    chain_id: Some(1),
+                    default_destination_address: None,
+                }],
+            },
+        )
+        .unwrap();
+
+        let error = service
+            .eth_xpub_export(
+                Some(&session),
+                EthXpubExportRequest {
+                    wallet_profile: "treasury".into(),
+                },
+            )
+            .unwrap_err();
+        assert_eq!(error.status(), axum::http::StatusCode::FORBIDDEN);
+        assert_eq!(
+            error.message(),
+            "Wallet profile is not in the active compartment."
+        );
+    }
+
+    #[test]
+    fn xpub_export_uses_active_compartment_wallet_profile() {
+        let dir = TempDir::new().unwrap();
+        let state = Arc::new(AppState::new(dir.path().to_path_buf()));
+        state.unlock_compartment(0, [7u8; 32], meta(0, 1, "default"));
+        let session = state.create_session(Some(0));
+        let service = SigillumService::new(state);
+
+        save_profiles(
+            dir.path(),
+            &ProfileRegistry {
+                evm_providers: vec![EvmProviderProfile {
+                    name: "mainnet".into(),
+                    rpc_url: "http://127.0.0.1:8545".into(),
+                    auth_token_key: None,
+                    compartment_id: 0,
+                    chain_id: 1,
+                    max_priority_fee_per_gas_hex: None,
+                    max_fee_per_gas_hex: None,
+                    native_gas_limit: None,
+                    erc20_gas_limit: None,
+                }],
+                eth_stealth_wallets: vec![],
+                eth_xpub_wallets: vec![EthXpubWalletProfile {
+                    name: "treasury".into(),
+                    project_account: 7,
+                    provider_profile: "mainnet".into(),
+                    compartment_id: 0,
+                    chain_id: Some(1),
+                    default_destination_address: None,
+                }],
+            },
+        )
+        .unwrap();
+
+        let export = service
+            .eth_xpub_export(
+                Some(&session),
+                EthXpubExportRequest {
+                    wallet_profile: "treasury".into(),
+                },
+            )
+            .unwrap();
+        assert_eq!(export.wallet_profile, "treasury");
+        assert_eq!(export.project_account, 7);
+        assert_eq!(export.account_path, "m/44'/60'/7'");
+        assert_eq!(export.receive_path, "m/44'/60'/7'/0");
+        assert!(export.receive_xpub.starts_with("xpub"));
     }
 }

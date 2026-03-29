@@ -39,6 +39,11 @@ pub enum Fido2Error {
     IncorrectPin,
 
     #[error(
+        "the hardware key requires its current FIDO2 PIN for this operation. Enter the existing PIN and retry."
+    )]
+    PinRequired,
+
+    #[error(
         "no FIDO2 PIN is configured on the hardware key. Set a PIN on the key first, then retry registration."
     )]
     PinNotSet,

@@ -325,7 +325,7 @@ fn setup_fido2_preset(presets: &[(&str, usize)]) {
     }
     println!();
 
-    let pin = prompt_pin();
+    let pin = prompt_optional_pin();
     eprint!("Key label (e.g. 'yubikey-primary'): ");
     io::stderr().flush().unwrap();
     let mut label = String::new();
@@ -352,7 +352,7 @@ fn setup_fido2_preset(presets: &[(&str, usize)]) {
     println!();
     println!("Touch your FIDO2 key now...");
 
-    match mgr.register_key(&pin, label, &mk_refs, &[]) {
+    match mgr.register_key(pin.as_deref(), label, &mk_refs, &[]) {
         Ok(_result) => {
             // Initialize each compartment vault
             for (meta, mk) in &master_keys {
@@ -433,7 +433,7 @@ fn setup_fido2_preset(presets: &[(&str, usize)]) {
                     break;
                 }
 
-                let pin = prompt_pin();
+                let pin = prompt_optional_pin();
                 eprint!("Key label: ");
                 io::stderr().flush().unwrap();
                 let mut next_label = String::new();
@@ -441,7 +441,7 @@ fn setup_fido2_preset(presets: &[(&str, usize)]) {
                 let next_label = next_label.trim();
 
                 println!("Touch your FIDO2 key now...");
-                match mgr.register_key(&pin, next_label, &mk_refs, &[]) {
+                match mgr.register_key(pin.as_deref(), next_label, &mk_refs, &[]) {
                     Ok(r) => println!("Key '{next_label}' registered ({} total).", r.total_keys),
                     Err(e) => eprintln!("Failed: {e}"),
                 }
@@ -651,10 +651,11 @@ fn unlock_fido2() {
         process::exit(1);
     });
 
-    let pin = prompt_pin();
+    let pin = prompt_optional_pin();
     println!("Touch your FIDO2 key now...");
+    let pins: Vec<String> = pin.into_iter().collect();
 
-    match mgr.authenticate_cascading(&[pin], taps, &base, None) {
+    match mgr.authenticate_cascading(&pins, taps, &base, None) {
         Ok(results) => {
             if results.is_empty() {
                 eprintln!("No compartments could be unlocked.");
@@ -1136,10 +1137,10 @@ fn fido2_register(mgr: &Fido2Manager, args: &[String]) {
             process::exit(0);
         }
 
-        let pin = prompt_pin();
+        let pin = prompt_optional_pin();
         println!("Touch your FIDO2 key now...");
 
-        match mgr.register_key_poison(&pin, &label, &metas) {
+        match mgr.register_key_poison(pin.as_deref(), &label, &metas) {
             Ok(total) => println!("Poison key '{label}' registered ({total} total)."),
             Err(e) => {
                 eprintln!("Registration failed: {e}");
@@ -1157,10 +1158,10 @@ fn fido2_register(mgr: &Fido2Manager, args: &[String]) {
         .map(|(meta, mk)| (meta.clone(), &**mk))
         .collect();
 
-    let pin = prompt_pin();
+    let pin = prompt_optional_pin();
     println!("Touch your FIDO2 key now...");
 
-    match mgr.register_key(&pin, &label, &mk_refs, &skip_labels) {
+    match mgr.register_key(pin.as_deref(), &label, &mk_refs, &skip_labels) {
         Ok(result) => println!("Key '{label}' registered ({} total).", result.total_keys),
         Err(e) => {
             eprintln!("Registration failed: {e}");
@@ -1201,10 +1202,10 @@ fn fido2_remove(mgr: &Fido2Manager, args: &[String]) {
         .map(|(meta, mk)| (meta.clone(), &**mk))
         .collect();
 
-    let pin = prompt_pin();
+    let pin = prompt_optional_pin();
     println!("Tap remaining keys to re-encrypt shards...");
 
-    match mgr.remove_key(&label, &mk_refs, &pin, &skip_labels) {
+    match mgr.remove_key(&label, &mk_refs, pin.as_deref(), &skip_labels) {
         Ok(()) => println!("Key '{label}' removed."),
         Err(e) => {
             eprintln!("Removal failed: {e}");
@@ -1353,11 +1354,14 @@ fn prompt_secret(prompt: &str) -> String {
     })
 }
 
-fn prompt_pin() -> String {
-    rpassword::prompt_password("FIDO2 PIN: ").unwrap_or_else(|e| {
-        eprintln!("Failed to read PIN: {e}");
-        process::exit(1);
-    })
+fn prompt_optional_pin() -> Option<String> {
+    let pin =
+        rpassword::prompt_password("FIDO2 PIN (press Enter if this key does not require one): ")
+            .unwrap_or_else(|e| {
+                eprintln!("Failed to read FIDO2 PIN: {e}");
+                process::exit(1);
+            });
+    if pin.is_empty() { None } else { Some(pin) }
 }
 
 fn prompt_passphrase() -> Zeroizing<String> {

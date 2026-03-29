@@ -15,9 +15,11 @@
 //! 1. `--session <TOKEN>` flag
 //! 2. `SIGILLUM_SESSION_TOKEN` environment variable
 //!
-//! Sensitive inputs (passphrases, PINs) support three delivery modes:
+//! Sensitive passphrases support three delivery modes:
 //! `--*-env VAR` (read from environment), `--*-stdin` (read from stdin),
-//! or interactive terminal prompt via `rpassword`.
+//! or interactive terminal prompt via `rpassword`. Optional FIDO2 PINs are
+//! accepted through `--pin-env` or `--pin-stdin` when a specific key requires
+//! one; otherwise the touch-only path sends no PIN at all.
 
 use std::future::Future;
 use std::io::{self, Read};
@@ -54,13 +56,10 @@ pub fn cmd_api(args: &[String]) {
                 "--taps",
                 "sigillum api unlock-fido2 --taps <N> [--pin-env VAR|--pin-stdin]",
             );
-            let pin = read_pin(args);
+            let pins: Vec<String> = read_optional_pin(args).into_iter().collect();
             run_api_command(args, false, move |client| async move {
                 client
-                    .fido2_unlock(Fido2UnlockRequest {
-                        pins: vec![pin],
-                        tap_count,
-                    })
+                    .fido2_unlock(Fido2UnlockRequest { pins, tap_count })
                     .await
             });
         }
@@ -393,8 +392,8 @@ fn read_passphrase(args: &[String]) -> String {
     )
 }
 
-fn read_pin(args: &[String]) -> String {
-    read_sensitive_input(args, "--pin-env", "--pin-stdin", "FIDO2 PIN: ")
+fn read_optional_pin(args: &[String]) -> Option<String> {
+    read_optional_sensitive_input(args, "--pin-env", "--pin-stdin")
 }
 
 /// Read a sensitive value using one of three delivery modes (in priority order):
@@ -421,6 +420,23 @@ fn read_sensitive_input(
         eprintln!("Failed to read {prompt_label} {error}");
         process::exit(1);
     })
+}
+
+fn read_optional_sensitive_input(
+    args: &[String],
+    env_flag: &str,
+    stdin_flag: &str,
+) -> Option<String> {
+    if let Some(env_key) = parse_flag(args, env_flag) {
+        return Some(std::env::var(&env_key).unwrap_or_else(|_| {
+            eprintln!("Environment variable {env_key} is not set.");
+            process::exit(1);
+        }));
+    }
+    if has_flag(args, stdin_flag) {
+        return Some(read_stdin_secret("FIDO2 PIN"));
+    }
+    None
 }
 
 fn read_stdin_secret(name: &str) -> String {

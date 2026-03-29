@@ -20,10 +20,14 @@ fn classify_ctap_error(operation: &str, err: &str) -> Fido2Error {
         Fido2Error::Ctap1Device
     } else if err.contains("0x2E") || err.contains("NO_CREDENTIALS") {
         Fido2Error::NoMatchingCredential
+    } else if err.contains("0x36") || err.contains("PIN_REQUIRED") {
+        Fido2Error::PinRequired
     } else if err.contains("0x35") || err.contains("PIN_NOT_SET") {
         Fido2Error::PinNotSet
     } else if err.contains("0x34") || err.contains("PIN_AUTH_BLOCKED") {
         Fido2Error::PinAuthBlocked
+    } else if err.contains("0x33") || err.contains("PIN_AUTH_INVALID") {
+        Fido2Error::IncorrectPin
     } else if err.contains("0x32") || err.contains("PIN_BLOCKED") {
         Fido2Error::PinBlocked
     } else if err.contains("0x31") || err.contains("PIN_INVALID") {
@@ -31,6 +35,10 @@ fn classify_ctap_error(operation: &str, err: &str) -> Fido2Error {
     } else {
         Fido2Error::Other(format!("{operation}: {err}"))
     }
+}
+
+fn normalize_pin(pin: Option<&str>) -> Option<&str> {
+    pin.filter(|pin| !pin.is_empty())
 }
 
 /// Execute a blocking FIDO2 operation with timeout and global lock.
@@ -95,14 +103,16 @@ fn get_single_attached_device() -> Result<ctap_hid_fido2::HidParam, Fido2Error> 
 
 fn make_credential_with_device(
     device: &ctap_hid_fido2::FidoKeyHid,
-    pin: &str,
+    pin: Option<&str>,
 ) -> Result<CredentialResult, Fido2Error> {
     use ctap_hid_fido2::{fidokey::MakeCredentialArgsBuilder, verifier};
 
     let challenge = verifier::create_challenge();
-    let args = MakeCredentialArgsBuilder::new(RP_ID, &challenge)
-        .pin(pin)
-        .build();
+    let builder = MakeCredentialArgsBuilder::new(RP_ID, &challenge);
+    let args = match normalize_pin(pin) {
+        Some(pin) => builder.pin(pin).build(),
+        None => builder.without_pin_and_uv().build(),
+    };
 
     let att = device.make_credential_with_args(&args).map_err(|e| {
         let err = format!("{e}");
@@ -124,7 +134,7 @@ fn make_credential_with_device(
 fn get_hmac_secret_with_device(
     device: &ctap_hid_fido2::FidoKeyHid,
     credential_id: &[u8],
-    pin: &str,
+    pin: Option<&str>,
 ) -> Result<[u8; 32], Fido2Error> {
     use ctap_hid_fido2::{
         fidokey::{GetAssertionArgsBuilder, get_assertion::get_assertion_params::Extension},
@@ -135,11 +145,13 @@ fn get_hmac_secret_with_device(
     let salt_hex = hex::encode(application_salt());
     let hmac_ext = Extension::create_hmac_secret_from_string(&salt_hex);
 
-    let args = GetAssertionArgsBuilder::new(RP_ID, &challenge)
-        .pin(pin)
+    let builder = GetAssertionArgsBuilder::new(RP_ID, &challenge)
         .credential_id(credential_id)
-        .extensions(&[hmac_ext])
-        .build();
+        .extensions(&[hmac_ext]);
+    let args = match normalize_pin(pin) {
+        Some(pin) => builder.pin(pin).build(),
+        None => builder.without_pin_and_uv().build(),
+    };
 
     let assertions = device.get_assertion_with_args(&args).map_err(|e| {
         let err = format!("{e}");
@@ -161,7 +173,7 @@ fn get_hmac_secret_with_device(
 
 fn select_registration_device(
     existing_credential_ids: &[Vec<u8>],
-    pin: &str,
+    pin: Option<&str>,
 ) -> Result<ctap_hid_fido2::HidParam, Fido2Error> {
     let devices = ctap_hid_fido2::get_fidokey_devices();
     if devices.is_empty() {
@@ -245,27 +257,27 @@ pub fn set_new_pin(pin: &str) -> Result<(), Fido2Error> {
 
 /// Create a new credential on the FIDO2 device.
 #[must_use = "check the Result for FIDO2 credential creation errors"]
-pub fn make_credential(pin: &str) -> Result<CredentialResult, Fido2Error> {
+pub fn make_credential(pin: Option<&str>) -> Result<CredentialResult, Fido2Error> {
     Ok(make_credential_with_hmac(pin, &[])?.credential)
 }
 
 /// Create a new credential on the chosen device and derive its hmac-secret.
 #[must_use = "check the Result for FIDO2 credential creation errors"]
 pub fn make_credential_with_hmac(
-    pin: &str,
+    pin: Option<&str>,
     existing_credential_ids: &[Vec<u8>],
 ) -> Result<CredentialEnrollmentResult, Fido2Error> {
-    let pin_owned = Zeroizing::new(pin.to_string());
+    let pin_owned = pin.map(|pin| Zeroizing::new(pin.to_string()));
     let existing_credential_ids_owned = existing_credential_ids.to_vec();
 
     with_fido_timeout("make_credential", move || {
+        let pin = pin_owned.as_ref().map(|pin| pin.as_str());
         let device = open_device(&select_registration_device(
             &existing_credential_ids_owned,
-            &pin_owned,
+            pin,
         )?)?;
-        let credential = make_credential_with_device(&device, &pin_owned)?;
-        let hmac_secret =
-            get_hmac_secret_with_device(&device, &credential.credential_id, &pin_owned)?;
+        let credential = make_credential_with_device(&device, pin)?;
+        let hmac_secret = get_hmac_secret_with_device(&device, &credential.credential_id, pin)?;
         Ok(CredentialEnrollmentResult {
             credential,
             hmac_secret,
@@ -276,11 +288,12 @@ pub fn make_credential_with_hmac(
 /// Get the hmac-secret output for a given credential.
 /// The output is deterministic for the same credential + application salt.
 #[must_use = "check the Result for FIDO2 hmac-secret errors"]
-pub fn get_hmac_secret(credential_id: &[u8], pin: &str) -> Result<[u8; 32], Fido2Error> {
+pub fn get_hmac_secret(credential_id: &[u8], pin: Option<&str>) -> Result<[u8; 32], Fido2Error> {
     let cred_id_owned = credential_id.to_vec();
-    let pin_owned = Zeroizing::new(pin.to_string());
+    let pin_owned = pin.map(|pin| Zeroizing::new(pin.to_string()));
 
     with_fido_timeout("get_hmac_secret", move || {
+        let pin = pin_owned.as_ref().map(|pin| pin.as_str());
         let devices = ctap_hid_fido2::get_fidokey_devices();
         if devices.is_empty() {
             return Err(Fido2Error::NoDevice);
@@ -296,7 +309,7 @@ pub fn get_hmac_secret(credential_id: &[u8], pin: &str) -> Result<[u8; 32], Fido
                 }
             };
 
-            match get_hmac_secret_with_device(&device, &cred_id_owned, &pin_owned) {
+            match get_hmac_secret_with_device(&device, &cred_id_owned, pin) {
                 Ok(hmac) => return Ok(hmac),
                 Err(Fido2Error::NoMatchingCredential) => {}
                 Err(error) => {
@@ -330,6 +343,15 @@ mod tests {
             "response_status err = 0x35 CTAP2_ERR_PIN_NOT_SET No PIN has been set.",
         );
         assert!(matches!(error, Fido2Error::PinNotSet));
+    }
+
+    #[test]
+    fn classifies_pin_required_errors() {
+        let error = classify_ctap_error(
+            "get_assertion",
+            "response_status err = 0x36 CTAP2_ERR_PIN_REQUIRED PIN is required for the selected operation.",
+        );
+        assert!(matches!(error, Fido2Error::PinRequired));
     }
 
     #[test]

@@ -1,3 +1,38 @@
+# Daily Bug Scan 2026-03-28
+
+- [x] Check automation memory and repo state before scanning recent history
+- [x] Verify commits since `2026-03-27T14:00:04.569Z` and the 24-hour fallback window
+- [x] Confirm both windows are empty and that the latest reachable commit is `62af2fdcd6e0bd12c86f72f657a006eb19e8aa6c` from `2026-03-24T17:30:23-05:00`
+- [x] Skip fixes because there is no concrete committed diff, failing test, or CI signal in scope
+
+# Daily Bug Scan 2026-03-27 12:20Z
+
+- [x] Check automation memory and repo state before scanning recent history
+- [x] Verify commits since `2026-03-27T12:20:33.830Z` and the 24-hour fallback window
+- [x] Confirm both windows are empty and that the latest reachable commit is `62af2fdcd6e0bd12c86f72f657a006eb19e8aa6c` from `2026-03-24T17:30:23-05:00`
+- [x] Skip fixes because there is no concrete commit, diff, test, or CI evidence in scope
+
+# Daily Bug Scan 2026-03-27
+
+- [x] Check automation memory and repo state before scanning recent history
+- [x] Verify commits since 2026-03-25T14:00:07.082Z and the 24-hour fallback window
+- [x] Confirm both windows are empty and that the latest reachable commit is `62af2fdcd6e0bd12c86f72f657a006eb19e8aa6c` from `2026-03-24T17:30:23-05:00`
+- [x] Skip fixes because there is no concrete commit, diff, test, or CI evidence in scope
+
+# Daily Bug Scan 2026-03-25
+
+- [x] Check automation memory and repo state before scanning recent history
+- [x] Review the only in-scope commit `62af2fdcd6e0bd12c86f72f657a006eb19e8aa6c` from 2026-03-24 17:30:23 -0500
+- [x] Confirm the new `eth_xpub_export` path allowed any valid session token to export a wallet profile from a different unlocked compartment
+- [x] Bind xpub export to the caller's active compartment and add service-level regression coverage
+- [x] Verify with `cargo test -p sigillum-daemon xpub_export_ -- --nocapture` and `cargo test -p sigillum-core ethereum_xpub -- --nocapture`
+
+# FIDO2 Touch-Only Flow 2026-03-24
+
+- [x] Audit the current FIDO2 request, service, HID, CLI, and UI layers for mandatory PIN assumptions
+- [x] Make hardware-key PINs optional end to end so trusted-key touch is sufficient when the authenticator allows it
+- [x] Refresh FIDO2 copy, prompts, and regression coverage to describe PINs as optional and verify the no-PIN path
+
 # UX + Xpub Vertical Slice 2026-03-24
 
 - [x] Reframe the embedded daemon UI into distinct, task-oriented operator modes instead of anchor-scroll cards

@@ -14,3 +14,4 @@
 - Sigillum UI passes should bias toward minimalist surfaces, intuitive task flow, and depth from layering and contrast; if a redesign feels loud or self-conscious, strip it back before shipping.
 - Treat Sigillum's north star as local-on-your-computer software, not an eventual internet-facing or remote-service product; audits and readiness reviews must judge it against that local-only boundary.
 - Navigation that only scrolls a long operator page is not enough for Sigillum; major workflows need distinct, self-explanatory sections with clear purpose, usage guidance, and visible "what do I do next?" affordances so operators can understand the system they built without reading code.
+- Do not force FIDO2 PIN entry when trusted hardware-key possession is already the intended boundary; Sigillum should default to touch-only flows and ask for a current PIN only when a specific authenticator actually requires one.

@@ -153,6 +153,19 @@ impl Fido2Manager {
         save_config(&self.config_path, config)
     }
 
+    fn normalize_pin(pin: Option<&str>) -> Option<&str> {
+        pin.filter(|pin| !pin.is_empty())
+    }
+
+    fn pin_for_round<'a>(pins: &'a [String], round: usize) -> Option<&'a str> {
+        pins.get(round)
+            .and_then(|pin| Self::normalize_pin(Some(pin.as_str())))
+            .or_else(|| {
+                pins.first()
+                    .and_then(|pin| Self::normalize_pin(Some(pin.as_str())))
+            })
+    }
+
     /// Load the raw FIDO2 config for external inspection or mutation.
     ///
     /// The `_raw` suffix distinguishes this from the private `load()` method
@@ -327,12 +340,13 @@ impl Fido2Manager {
     #[cfg(feature = "hid")]
     pub fn register_key(
         &self,
-        pin: &str,
+        pin: Option<&str>,
         label: &str,
         compartment_metas: &[(CompartmentMeta, &[u8; 32])],
         skip_labels: &[String],
     ) -> Result<RegisterResult, Fido2Error> {
         let mut config = self.load()?;
+        let pin = Self::normalize_pin(pin);
 
         if config.keys.iter().any(|k| k.label == label) {
             return Err(Fido2Error::DuplicateKey {
@@ -480,10 +494,11 @@ impl Fido2Manager {
         &self,
         label: &str,
         compartment_metas: &[(CompartmentMeta, &[u8; 32])],
-        pin: &str,
+        pin: Option<&str>,
         skip_labels: &[String],
     ) -> Result<(), Fido2Error> {
         let mut config = self.load()?;
+        let pin = Self::normalize_pin(pin);
 
         let idx = config
             .keys
@@ -577,11 +592,12 @@ impl Fido2Manager {
     #[cfg(feature = "hid")]
     pub fn register_key_poison(
         &self,
-        pin: &str,
+        pin: Option<&str>,
         label: &str,
         compartment_metas: &[CompartmentMeta],
     ) -> Result<usize, Fido2Error> {
         let mut config = self.load()?;
+        let pin = Self::normalize_pin(pin);
 
         if config.keys.is_empty() {
             return Err(Fido2Error::Config(
@@ -652,9 +668,10 @@ impl Fido2Manager {
 
     /// Cascading unlock: tap N keys, discover and unlock all compartments with threshold ≤ N.
     ///
-    /// **Phase 1**: Tap `target_taps` keys in rounds. Each round prompts for a PIN,
-    /// then attempts all registered (non-skipped) keys. The first key that succeeds
-    /// is used for that round. If no key matches, the round fails.
+    /// **Phase 1**: Tap `target_taps` keys in rounds. Each round optionally uses
+    /// the provided current PIN, then attempts all registered (non-skipped) keys.
+    /// The first key that succeeds is used for that round. If no key matches, the
+    /// round fails.
     ///
     /// **Phase 2**: For each tapped key, decrypt all its shard blobs. Dummy shards
     /// fail AEAD validation silently and are ignored. Real shards are grouped by
@@ -704,10 +721,7 @@ impl Fido2Manager {
         let mut used_cred_ids: Vec<String> = Vec::new();
 
         for round in 0..target_taps {
-            let pin = pins
-                .get(round)
-                .or(pins.first())
-                .ok_or_else(|| Fido2Error::Other("no PIN provided".into()))?;
+            let pin = Self::pin_for_round(pins, round);
 
             emit(QuorumEvent::RoundStart {
                 round: round + 1,
@@ -715,6 +729,7 @@ impl Fido2Manager {
             });
 
             let mut matched = false;
+            let mut last_error = None;
             for key in &config.keys {
                 if used_cred_ids.contains(&key.credential_id_hex) {
                     continue;
@@ -740,7 +755,11 @@ impl Fido2Manager {
                         matched = true;
                         break;
                     }
-                    Err(_) => continue,
+                    Err(Fido2Error::NoMatchingCredential) => continue,
+                    Err(error) => {
+                        last_error = Some(error);
+                        continue;
+                    }
                 }
             }
 
@@ -748,7 +767,7 @@ impl Fido2Manager {
                 emit(QuorumEvent::Error {
                     message: "No matching key found for this round".into(),
                 });
-                return Err(Fido2Error::NoMatchingCredential);
+                return Err(last_error.unwrap_or(Fido2Error::NoMatchingCredential));
             }
 
             if round + 1 < target_taps {

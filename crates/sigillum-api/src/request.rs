@@ -107,10 +107,13 @@ pub struct CompartmentDefinition {
 ///
 /// This is the primary setup path for new vaults. The first key registered
 /// becomes the initial Shamir share holder. Compartment thresholds determine
-/// how many distinct key taps are needed to unlock each compartment.
+/// how many distinct key taps are needed to unlock each compartment. `pin` is
+/// optional so touch-only authenticators can be enrolled without forcing a PIN
+/// round-trip; provide it only when the inserted key currently requires one.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Fido2SetupRequest {
-    pub pin: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pin: Option<String>,
     pub label: String,
     pub compartments: Vec<CompartmentDefinition>,
     pub passphrase: Option<String>,
@@ -122,9 +125,12 @@ pub struct Fido2SetupRequest {
 /// produces plausible deniability by appearing to unlock an empty vault.
 /// `skip_keys` lists credential IDs of keys that should not participate
 /// in the re-sharing ceremony (e.g. keys that are physically unavailable).
+/// `pin` is optional and should only be supplied when the inserted key or the
+/// re-sharing ceremony requires the current PIN.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Fido2RegisterRequest {
-    pub pin: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pin: Option<String>,
     pub label: String,
     pub poison: Option<bool>,
     pub skip_keys: Option<Vec<String>>,
@@ -135,18 +141,25 @@ pub struct Fido2RegisterRequest {
 /// `tap_count` specifies how many keys will be tapped in sequence.
 /// Each key's HMAC-secret is used to decrypt its Shamir share; when enough
 /// shares are gathered (meeting a compartment's threshold), that compartment
-/// unlocks. Higher tap counts unlock higher-threshold compartments.
+/// unlocks. Higher tap counts unlock higher-threshold compartments. `pins`
+/// may be empty for touch-only authenticators; otherwise provide one PIN per
+/// round or a single shared PIN for all rounds.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Fido2UnlockRequest {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub pins: Vec<String>,
     pub tap_count: usize,
 }
 
 /// Remove a FIDO2 key from the vault and re-share master keys among remaining keys.
+///
+/// `pin` is optional and should be provided only when the remaining enrolled
+/// keys require their current PIN during the re-sharing ceremony.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Fido2RemoveRequest {
     pub label: String,
-    pub pin: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pin: Option<String>,
     pub skip_keys: Option<Vec<String>>,
 }
 
@@ -716,7 +729,7 @@ mod tests {
     #[test]
     fn test_fido2_setup_request_roundtrip() {
         let req = Fido2SetupRequest {
-            pin: "1234".to_string(),
+            pin: Some("1234".to_string()),
             label: "my_key".to_string(),
             compartments: vec![CompartmentDefinition {
                 label: "vault_1".to_string(),
@@ -724,6 +737,21 @@ mod tests {
                 passphrase_mode: None,
             }],
             passphrase: Some("setup_pass".to_string()),
+        };
+        roundtrip_test(req);
+    }
+
+    #[test]
+    fn test_fido2_setup_request_without_pin_roundtrip() {
+        let req = Fido2SetupRequest {
+            pin: None,
+            label: "touch_only_key".to_string(),
+            compartments: vec![CompartmentDefinition {
+                label: "vault_1".to_string(),
+                threshold: 1,
+                passphrase_mode: None,
+            }],
+            passphrase: None,
         };
         roundtrip_test(req);
     }
@@ -737,10 +765,40 @@ mod tests {
     }
 
     #[test]
+    fn test_fido2_register_request_without_pin_roundtrip() {
+        let req = Fido2RegisterRequest {
+            pin: None,
+            label: "backup_key".to_string(),
+            poison: Some(false),
+            skip_keys: Some(vec!["retired".to_string()]),
+        };
+        roundtrip_test(req);
+    }
+
+    #[test]
     fn test_fido2_unlock_request_roundtrip() {
         let req = Fido2UnlockRequest {
             pins: vec!["1234".to_string(), "5678".to_string()],
             tap_count: 3,
+        };
+        roundtrip_test(req);
+    }
+
+    #[test]
+    fn test_fido2_unlock_request_without_pins_roundtrip() {
+        let req = Fido2UnlockRequest {
+            pins: Vec::new(),
+            tap_count: 2,
+        };
+        roundtrip_test(req);
+    }
+
+    #[test]
+    fn test_fido2_remove_request_without_pin_roundtrip() {
+        let req = Fido2RemoveRequest {
+            label: "backup_key".to_string(),
+            pin: None,
+            skip_keys: Some(vec!["offline".to_string()]),
         };
         roundtrip_test(req);
     }

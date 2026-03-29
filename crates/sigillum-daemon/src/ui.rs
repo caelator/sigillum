@@ -2367,7 +2367,7 @@ const INDEX_HTML_SHELL_BEFORE_SCRIPT: &str = r##"<!DOCTYPE html>
   <div class="card" id="authCard" data-nav-label="Access" data-workspace-section="access">
     <div class="eyebrow">Access</div>
     <h2 id="authTitle">Unlock this local session</h2>
-    <p class="helper-text" id="authLead">Unlock with the passphrase or hardware-key threshold you configured during setup. The resulting session token stays only in this browser tab.</p>
+    <p class="helper-text" id="authLead">Unlock with the passphrase or hardware-key threshold you configured during setup. Hardware-key touches are enough when the authenticator allows it; enter a current PIN only for keys that require one. The resulting session token stays only in this browser tab.</p>
     <!-- Compartment switcher (only visible when multiple unlocked) -->
     <div id="compSwitcher" class="comp-switcher hidden"></div>
     <div id="unlockTabs" class="unlock-tabs hidden">
@@ -2381,10 +2381,10 @@ const INDEX_HTML_SHELL_BEFORE_SCRIPT: &str = r##"<!DOCTYPE html>
         <button class="btn-primary" data-action="unlock">Unlock vault</button>
       </div>
     </div>
-    <!-- Deniable FIDO2 unlock: just PIN + number, no compartment hints -->
+    <!-- Deniable FIDO2 unlock: optional PIN + number, no compartment hints -->
     <div id="unlockFido2" class="hidden">
       <div class="form-row">
-        <input type="password" id="fido2Pin" placeholder="Enter hardware-key PIN">
+        <input type="password" id="fido2Pin" placeholder="Current hardware-key PIN (optional)">
         <input type="number" id="fido2TapCount" min="1" value="1" class="input-narrow" placeholder="Keys">
         <button class="btn-primary" data-action="fido2Unlock">Unlock with hardware key</button>
       </div>
@@ -2503,9 +2503,9 @@ const INDEX_HTML_SHELL_BEFORE_SCRIPT: &str = r##"<!DOCTYPE html>
 
     <!-- Step 3: FIDO2 PIN + label -->
     <div class="wizard-step" id="wizStepFido2Pin">
-      <p>Register the first hardware key for this vault. If the key is brand new, you can set its first FIDO2 PIN here before starting registration.</p>
+      <p>Register the first hardware key for this vault. If the key works with touch alone, you can leave the PIN field empty. If the authenticator already requires a current PIN, enter it here before starting registration.</p>
       <div class="form-row">
-        <input type="password" id="wizFido2Pin" placeholder="Current or newly set FIDO2 PIN">
+        <input type="password" id="wizFido2Pin" placeholder="Current FIDO2 PIN if this key requires one">
       </div>
       <div class="form-row">
         <input type="text" id="wizFido2Label" placeholder="Key label (e.g. yubikey-primary)">
@@ -2515,7 +2515,7 @@ const INDEX_HTML_SHELL_BEFORE_SCRIPT: &str = r##"<!DOCTYPE html>
         <button class="btn-primary" data-action="wizRegisterKey">Register primary hardware key</button>
       </div>
       <div class="info-box" style="margin-top:14px;">
-        Brand-new hardware keys often ship without a FIDO2 PIN. Set one on the inserted key here, then use that same PIN above to finish vault setup.
+        Brand-new hardware keys often ship without a FIDO2 PIN. You can keep using touch-only hardware keys, or set a PIN on the inserted key here if you want that extra gate.
       </div>
       <div class="form-row" style="margin-top:12px;">
         <input type="password" id="wizNewFido2Pin" placeholder="New PIN for this key (min 4 chars)">
@@ -2532,12 +2532,12 @@ const INDEX_HTML_SHELL_BEFORE_SCRIPT: &str = r##"<!DOCTYPE html>
       <p id="wizAdditionalKeysLead">This plan includes higher-threshold compartments, so Sigillum needs more than one enrolled hardware key before every access layer is usable.</p>
       <div class="info-box" id="wizAdditionalKeyStatus">1 of 2 required hardware keys enrolled so far.</div>
       <div class="form-row" style="margin-top:12px;">
-        <input type="password" id="wizAdditionalKeyPin" placeholder="PIN for the inserted backup key">
+        <input type="password" id="wizAdditionalKeyPin" placeholder="Current PIN for the inserted backup key (optional)">
         <input type="text" id="wizAdditionalKeyLabel" placeholder="Backup key label (e.g. yubikey-backup)">
         <button class="btn-primary" data-action="wizRegisterAdditionalKey">Register next hardware key</button>
       </div>
       <div class="info-box" style="margin-top:14px;">
-        Brand-new backup key? Set its first FIDO2 PIN here before registering it.
+        Brand-new backup key? Touch-only works too. Set its first FIDO2 PIN here only if you want that key to require one.
       </div>
       <div class="form-row" style="margin-top:12px;">
         <input type="password" id="wizAdditionalNewPin" placeholder="New PIN for inserted backup key">
@@ -2911,7 +2911,7 @@ const INDEX_HTML_SHELL_BEFORE_SCRIPT: &str = r##"<!DOCTYPE html>
         Register another FIDO2 hardware key. All compartments must be unlocked first so Sigillum can safely reshare the vault material.
       </p>
       <div class="info-box" style="margin-bottom:12px;">
-        Fresh backup keys may not have a FIDO2 PIN yet. Set the PIN on the inserted key here first, then register it below with the same PIN.
+        Fresh backup keys may not have a FIDO2 PIN yet. Touch-only enrollment works when the authenticator allows it. Set a PIN here only if you want the inserted key to require one.
       </div>
       <div class="form-row">
         <input type="password" id="fido2NewPin" placeholder="New PIN for inserted key (min 4 chars)">
@@ -2919,7 +2919,7 @@ const INDEX_HTML_SHELL_BEFORE_SCRIPT: &str = r##"<!DOCTYPE html>
         <button class="btn-ghost" data-action="fido2SetNewPin">Set key PIN</button>
       </div>
       <div class="form-row">
-        <input type="password" id="fido2RegPin" placeholder="FIDO2 PIN">
+        <input type="password" id="fido2RegPin" placeholder="Current FIDO2 PIN if this key requires one">
         <input type="text" id="fido2RegLabel" placeholder="Key label">
         <button class="btn-primary" data-action="fido2Register">Register Key</button>
       </div>
@@ -3118,9 +3118,9 @@ const WIZARD_CHROME = {
   wizStepFido2Pin: {
     pill: 'Step 3 of 3',
     title: 'Register your first hardware key',
-    summary: 'Enter the PIN, give the key a label you will recognize later, then touch the device when prompted.',
+    summary: 'Leave the PIN blank for touch-only authenticators, or enter the current PIN for keys that require one, then give the key a label you will recognize later.',
     checklist: [
-      'Enter the current FIDO2 PIN for the inserted hardware key, or set a new one here first if the key is fresh.',
+      'Leave the PIN field empty for touch-only keys, or enter the current FIDO2 PIN if the inserted key already requires one.',
       'Use a label you will recognize later, such as primary.',
       'Optionally set one fallback passphrase for local recovery if the keys are unavailable.',
     ],
@@ -3131,7 +3131,7 @@ const WIZARD_CHROME = {
     summary: 'Higher-threshold compartments only become usable once enough distinct hardware keys are enrolled.',
     checklist: [
       'Insert the next hardware key you want to trust for this vault.',
-      'Set its first FIDO2 PIN here if it is brand new, then register it with a label you will recognize later.',
+      'Leave the PIN field empty for touch-only keys, or set and enter the current FIDO2 PIN only if you want that backup key to require one.',
       'Finish for now only if you are comfortable leaving the higher-threshold compartments unavailable until you add more keys later.',
     ],
   },
@@ -3432,7 +3432,7 @@ function setUnlockGuidance(mode) {
     const deviceLine = lastFidoDetect && lastFidoDetect.device_present
       ? lastFidoDetect.device_count + ' hardware key(s) detected. '
       : '';
-    el.textContent = deviceLine + 'Set tap count to the number of distinct key touches Sigillum should wait for. For a two-key compartment, enter 2 and touch two enrolled keys in sequence.';
+    el.textContent = deviceLine + 'Set tap count to the number of distinct key touches Sigillum should wait for. Leave the PIN field blank for touch-only authenticators, or enter the current PIN only for keys that require one. For a two-key compartment, enter 2 and touch two enrolled keys in sequence.';
     return;
   }
 
@@ -3444,18 +3444,24 @@ function friendlyFidoError(message) {
   const normalized = raw.toLowerCase();
 
   if (
+    normalized.includes('pin_required') ||
+    normalized.includes('pin is required for the selected operation')
+  ) {
+    return 'This hardware key is configured to require its current FIDO2 PIN. Enter that PIN and retry, or use a touch-only key.';
+  }
+  if (
     normalized.includes('pin_not_set') ||
     normalized.includes('no pin has been set') ||
     normalized.includes('no fido2 pin is configured')
   ) {
-    return 'This hardware key does not have a FIDO2 PIN yet. Use the Set key PIN action on this page, then retry registration.';
+    return 'This hardware key does not have a FIDO2 PIN yet. Leave the PIN field empty to keep using touch-only access, or use Set key PIN first if you want this key to require one.';
   }
   if (
     normalized.includes('pin already set') ||
     normalized.includes('already has a fido2 pin') ||
     normalized.includes('already has a pin configured')
   ) {
-    return 'This hardware key already has a FIDO2 PIN. Use the existing PIN in the registration field below.';
+    return 'This hardware key already has a FIDO2 PIN. Enter the existing PIN when you use this key.';
   }
   if (
     normalized.includes('pin_policy') ||
@@ -3479,7 +3485,7 @@ function friendlyFidoError(message) {
     return 'This hardware key has fully blocked PIN attempts. Recover or reset the key with vendor tooling before trying again.';
   }
   if (normalized.includes('incorrect pin') || normalized.includes('pin_invalid')) {
-    return 'The hardware key rejected that PIN. Re-enter the current PIN carefully and try again.';
+    return 'The hardware key rejected that PIN. Re-enter the current PIN carefully, or use a touch-only key if that is the policy you want.';
   }
   if (
     normalized.includes('cannot tell which one to use') ||
@@ -4781,11 +4787,11 @@ async function fido2Register() {
   const poison = document.getElementById('fido2Poison').checked;
   const skipRaw = document.getElementById('fido2SkipKeys').value.trim();
   const skipKeys = skipRaw ? skipRaw.split(',').map(s => s.trim()).filter(Boolean) : [];
-  if (!pin) { toast('PIN required', 'error'); return; }
   if (!label) { toast('Label required', 'error'); return; }
   if (poison && !confirm('Register "' + label + '" as a POISON key? Including it during unlock will cause silent failure.')) return;
   toast('Touch your FIDO2 key now...');
-  const body = { pin, label };
+  const body = { label };
+  if (pin) body.pin = pin;
   if (poison) body.poison = true;
   if (skipKeys.length > 0) body.skip_keys = skipKeys;
   const r = await api('POST', '/api/fido2/register', body);
@@ -4804,9 +4810,10 @@ async function fido2Register() {
 
 async function fido2RemoveKey(label) {
   if (!confirm('Remove FIDO2 key "' + label + '"?')) return;
-  const pin = await promptPin('Enter FIDO2 PIN to remove key:');
-  if (!pin) return;
-  const r = await api('POST', '/api/fido2/remove', { label, pin });
+  const pin = await promptPin('Enter the current FIDO2 PIN only if the remaining keys require one:');
+  const body = { label };
+  if (pin) body.pin = pin;
+  const r = await api('POST', '/api/fido2/remove', body);
   if (r.error) {
     const message = friendlyFidoError(r.error);
     setInlineInfo('fido2DeviceStatus', message);
@@ -4822,7 +4829,7 @@ function promptPin(msg) {
     const overlay = document.createElement('div');
     overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:200;display:flex;align-items:center;justify-content:center;';
     overlay.innerHTML = '<div class="card pin-modal"><h2>' + esc(msg) + '</h2>' +
-      '<div class="form-row"><input type="password" id="pinModalInput" placeholder="PIN">' +
+      '<div class="form-row"><input type="password" id="pinModalInput" placeholder="Current PIN (leave blank if not required)">' +
       '<button class="btn-primary" id="pinModalOk">OK</button></div></div>';
     document.body.appendChild(overlay);
     const inp = document.getElementById('pinModalInput');
@@ -4886,10 +4893,9 @@ async function unlock() {
 async function fido2Unlock() {
   const pin = document.getElementById('fido2Pin').value;
   const tapCount = parseInt(document.getElementById('fido2TapCount').value);
-  if (!pin) { toast('PIN required', 'error'); return; }
   if (!tapCount || tapCount < 1) { toast('Enter number of keys', 'error'); return; }
   toast('Touch your hardware key now...');
-  const r = await api('POST', '/api/fido2/unlock', { pins: [pin], tap_count: tapCount });
+  const r = await api('POST', '/api/fido2/unlock', { pins: pin ? [pin] : [], tap_count: tapCount });
   if (r.error) {
     if (isAlreadyUnlockedConflict(r.error)) {
       toast('Session already active. Refreshing workspace…');
@@ -5122,13 +5128,11 @@ async function wizRegisterKey() {
   const pin = document.getElementById('wizFido2Pin').value;
   const label = document.getElementById('wizFido2Label').value;
   const passphrase = document.getElementById('wizFallbackPass').value || null;
-  if (!pin) { toast('PIN required', 'error'); return; }
   if (!label) { toast('Label required', 'error'); return; }
 
   wizShowStep('wizStepTouch');
 
   const body = {
-    pin,
     label,
     compartments: wizCompartments.map(c => ({
       label: c.label,
@@ -5137,6 +5141,7 @@ async function wizRegisterKey() {
     })),
     passphrase: passphrase && passphrase.length >= 8 ? passphrase : null,
   };
+  if (pin) body.pin = pin;
 
   const r = await api('POST', '/api/fido2/setup', body);
   if (r.error) {
@@ -5185,11 +5190,12 @@ async function wizSetAdditionalKeyPin() {
 async function wizRegisterAdditionalKey() {
   const pin = document.getElementById('wizAdditionalKeyPin').value;
   const label = document.getElementById('wizAdditionalKeyLabel').value;
-  if (!pin) { toast('PIN required', 'error'); return; }
   if (!label) { toast('Label required', 'error'); return; }
 
   toast('Touch your hardware key now...');
-  const r = await api('POST', '/api/fido2/register', { pin, label });
+  const body = { label };
+  if (pin) body.pin = pin;
+  const r = await api('POST', '/api/fido2/register', body);
   if (r.error) {
     const message = friendlyFidoError(r.error);
     setInlineInfo('wizAdditionalKeyStatus', message);

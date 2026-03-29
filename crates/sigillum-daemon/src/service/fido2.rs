@@ -27,6 +27,11 @@ fn map_other_fido2_message(action: &str, message: &str) -> ServiceError {
             "{action} failed: this hardware key already has a FIDO2 PIN configured. Use the existing PIN instead."
         ));
     }
+    if normalized.contains("PIN_REQUIRED") || normalized.contains("0X36") {
+        return ServiceError::bad_request(format!(
+            "{action} failed: this hardware key is configured to require its current FIDO2 PIN for this step. Enter the existing PIN and retry, or use a touch-only key."
+        ));
+    }
     if normalized.contains("PIN_POLICY") || normalized.contains("0X37") {
         return ServiceError::bad_request(format!(
             "{action} failed: the new FIDO2 PIN does not meet this hardware key's PIN policy. Use at least 4 characters and avoid unsupported patterns."
@@ -81,6 +86,9 @@ fn map_fido2_service_error(action: &str, error: Fido2Error) -> ServiceError {
         Fido2Error::IncorrectPin => ServiceError::bad_request(format!(
             "{action} failed: incorrect FIDO2 PIN. Verify the PIN and retry."
         )),
+        Fido2Error::PinRequired => ServiceError::bad_request(format!(
+            "{action} failed: this hardware key is configured to require its current FIDO2 PIN for this step. Enter the existing PIN and retry, or use a touch-only key."
+        )),
         Fido2Error::PinAlreadySet => ServiceError::conflict(format!(
             "{action} failed: this hardware key already has a FIDO2 PIN configured. Use the existing PIN instead."
         )),
@@ -134,6 +142,13 @@ fn map_fido2_service_error(action: &str, error: Fido2Error) -> ServiceError {
         }
         Fido2Error::Other(message) => map_other_fido2_message(action, &message),
     }
+}
+
+fn optional_pin(pin: Option<&String>) -> Option<&str> {
+    pin.and_then(|pin| {
+        let pin = pin.as_str();
+        (!pin.is_empty()).then_some(pin)
+    })
 }
 
 impl SigillumService {
@@ -244,7 +259,12 @@ impl SigillumService {
         let result = self
             .state
             .fido2
-            .register_key(&body.pin, &body.label, &meta_refs, &[])
+            .register_key(
+                optional_pin(body.pin.as_ref()),
+                &body.label,
+                &meta_refs,
+                &[],
+            )
             .map_err(|error| map_fido2_service_error("FIDO2 setup", error))?;
 
         let real_ids: Vec<usize> = result
@@ -382,7 +402,7 @@ impl SigillumService {
             let total_keys = self
                 .state
                 .fido2
-                .register_key_poison(&body.pin, &body.label, &unlocked)
+                .register_key_poison(optional_pin(body.pin.as_ref()), &body.label, &unlocked)
                 .map_err(|error| map_fido2_service_error("FIDO2 registration", error))?;
             journal.complete().map_err(|error| {
                 ServiceError::internal(format!("Failed to finalize operation: {error}"))
@@ -416,7 +436,12 @@ impl SigillumService {
         let result = self
             .state
             .fido2
-            .register_key(&body.pin, &body.label, &master_key_refs, &skip)
+            .register_key(
+                optional_pin(body.pin.as_ref()),
+                &body.label,
+                &master_key_refs,
+                &skip,
+            )
             .map_err(|error| map_fido2_service_error("FIDO2 registration", error))?;
         journal.complete().map_err(|error| {
             ServiceError::internal(format!("Failed to finalize operation: {error}"))
@@ -453,18 +478,20 @@ impl SigillumService {
             )));
         }
 
-        if body.pins.is_empty() {
-            return Err(ServiceError::bad_request("At least one PIN required."));
-        }
         if body.tap_count == 0 {
             return Err(ServiceError::bad_request("tap_count must be >= 1."));
         }
+        let pins: Vec<String> = body
+            .pins
+            .into_iter()
+            .filter(|pin| !pin.is_empty())
+            .collect();
 
         let _guard = self.state.operation_guard().await;
         let compartment_results = self
             .state
             .fido2
-            .authenticate_cascading(&body.pins, body.tap_count, &self.state.base_dir, None)
+            .authenticate_cascading(&pins, body.tap_count, &self.state.base_dir, None)
             .map_err(|error| {
                 self.state.record_unlock_failure();
                 map_fido2_service_error("FIDO2 unlock", error)
@@ -552,7 +579,12 @@ impl SigillumService {
 
         self.state
             .fido2
-            .remove_key(&body.label, &master_key_refs, &body.pin, &skip)
+            .remove_key(
+                &body.label,
+                &master_key_refs,
+                optional_pin(body.pin.as_ref()),
+                &skip,
+            )
             .map_err(|error| map_fido2_service_error("FIDO2 removal", error))?;
 
         // H7: Invalidate all sessions — credential material has changed.
@@ -588,6 +620,13 @@ mod tests {
         let error = map_fido2_service_error("FIDO2 setup", Fido2Error::PinNotSet);
         assert_eq!(error.status(), StatusCode::BAD_REQUEST);
         assert!(error.message().contains("does not have a FIDO2 PIN"));
+    }
+
+    #[test]
+    fn pin_required_error_is_actionable() {
+        let error = map_fido2_service_error("FIDO2 unlock", Fido2Error::PinRequired);
+        assert_eq!(error.status(), StatusCode::BAD_REQUEST);
+        assert!(error.message().contains("require its current FIDO2 PIN"));
     }
 
     #[test]
@@ -628,6 +667,18 @@ mod tests {
         );
         assert_eq!(error.status(), StatusCode::BAD_REQUEST);
         assert!(error.message().contains("Unplug and reinsert"));
+    }
+
+    #[test]
+    fn raw_pin_required_error_is_normalized() {
+        let error = map_fido2_service_error(
+            "FIDO2 unlock",
+            Fido2Error::Other(
+                "get_assertion: response_status err = 0x36 CTAP2_ERR_PIN_REQUIRED PIN is required for the selected operation.".into(),
+            ),
+        );
+        assert_eq!(error.status(), StatusCode::BAD_REQUEST);
+        assert!(error.message().contains("require its current FIDO2 PIN"));
     }
 
     #[test]

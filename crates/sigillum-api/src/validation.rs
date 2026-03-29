@@ -139,7 +139,7 @@ impl Validate for crate::request::CompartmentDefinition {
 
 impl Validate for crate::request::Fido2SetupRequest {
     fn validate(&self) -> Result<(), String> {
-        check_len("pin", &self.pin, MAX_PIN)?;
+        check_optional_len("pin", &self.pin, MAX_PIN)?;
         check_len("label", &self.label, MAX_LABEL)?;
         check_optional_len("passphrase", &self.passphrase, MAX_PASSPHRASE)?;
         for comp in &self.compartments {
@@ -151,7 +151,7 @@ impl Validate for crate::request::Fido2SetupRequest {
 
 impl Validate for crate::request::Fido2RegisterRequest {
     fn validate(&self) -> Result<(), String> {
-        check_len("pin", &self.pin, MAX_PIN)?;
+        check_optional_len("pin", &self.pin, MAX_PIN)?;
         check_len("label", &self.label, MAX_LABEL)?;
         if let Some(skip_keys) = &self.skip_keys {
             check_vec_items_len("skip_keys", skip_keys, MAX_KEY)?;
@@ -170,7 +170,7 @@ impl Validate for crate::request::Fido2UnlockRequest {
 impl Validate for crate::request::Fido2RemoveRequest {
     fn validate(&self) -> Result<(), String> {
         check_len("label", &self.label, MAX_LABEL)?;
-        check_len("pin", &self.pin, MAX_PIN)?;
+        check_optional_len("pin", &self.pin, MAX_PIN)?;
         if let Some(skip_keys) = &self.skip_keys {
             check_vec_items_len("skip_keys", skip_keys, MAX_KEY)?;
         }
