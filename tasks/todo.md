@@ -1,3 +1,32 @@
+# Daily Bug Scan 2026-04-01
+
+- [x] Check automation memory and repo state before scanning recent history
+- [x] Verify commits since `2026-03-31T14:00:25.004Z` and the 24-hour fallback window
+- [x] Confirm both windows are empty and that the latest reachable commit is `0eba91d480598f37601fc92ae83a7e59bb7a5ddd` from `2026-03-29T08:57:05-05:00`, which was already covered by prior runs
+- [x] Skip fixes because there is no new committed diff, failing test, or CI signal in scope
+
+# Daily Bug Scan 2026-03-31
+
+- [x] Check automation memory and repo state before scanning recent history
+- [x] Verify commits since `2026-03-30T14:00:23.276Z` and the 24-hour fallback window
+- [x] Confirm both windows are empty and that the latest reachable commit is `0eba91d480598f37601fc92ae83a7e59bb7a5ddd` from `2026-03-29T08:57:05-05:00`, which was already covered by the prior run
+- [x] Skip fixes because there is no new committed diff, failing test, or CI signal in scope
+
+# Daily Bug Scan 2026-03-30
+
+- [x] Check automation memory and repo state before scanning recent history
+- [x] Verify commits since `2026-03-29T14:00:11.031Z` and the 24-hour fallback window
+- [x] Confirm both windows are empty and that the latest reachable commit is `0eba91d480598f37601fc92ae83a7e59bb7a5ddd` from `2026-03-29T08:57:05-05:00`, which was already covered by the prior run
+- [x] Skip fixes because there is no new committed diff, failing test, or CI signal in scope
+
+# Daily Bug Scan 2026-03-29
+
+- [x] Check automation memory and repo state before scanning recent history
+- [x] Review the only in-scope commit `0eba91d480598f37601fc92ae83a7e59bb7a5ddd` from `2026-03-29T08:57:05-05:00`
+- [x] Inspect the touched FIDO2 optional-PIN and `eth_xpub_export` paths for concrete regressions
+- [x] Verify the new coverage with `cargo test -p sigillum-api fido2_ -- --nocapture`, `cargo test -p sigillum-daemon xpub_export_ -- --nocapture`, `cargo test -p sigillum-daemon pin_required_error_is_actionable -- --nocapture`, `cargo test -p sigillum-daemon raw_pin_required_error_is_normalized -- --nocapture`, and `cargo test -p sigillum-fido2 classifies_pin_required_errors -- --nocapture`
+- [x] Skip fixes because the in-scope diff has no failing test, CI signal, or reproducible regression in evidence
+
 # Daily Bug Scan 2026-03-28
 
 - [x] Check automation memory and repo state before scanning recent history
