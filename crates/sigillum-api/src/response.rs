@@ -113,6 +113,18 @@ pub struct PushResponse {
     pub key: String,
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SecretResolveValue {
+    pub env_name: String,
+    pub reference: String,
+    pub value: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SecretResolveBatchResponse {
+    pub values: Vec<SecretResolveValue>,
+}
+
 // ── Compartments ────────────────────────────────
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]

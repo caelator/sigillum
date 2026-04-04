@@ -653,6 +653,32 @@ pub struct QueueProcessRequest {
     pub limit: Option<usize>,
 }
 
+/// Resolve a secret reference into plaintext for command execution.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SecretResolveRequest {
+    pub env_name: String,
+    pub reference: String,
+}
+
+/// Resolve multiple secret references in a single authenticated request.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SecretResolveBatchRequest {
+    pub entries: Vec<SecretResolveRequest>,
+}
+
+/// Record the terminal outcome of a `sigillum run` child process.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct RunAuditRequest {
+    pub program: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub args: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub exit_code: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub signal: Option<i32>,
+    pub success: bool,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -695,6 +721,35 @@ mod tests {
     fn test_passphrase_request_roundtrip() {
         let req = PassphraseRequest {
             passphrase: "my_secure_passphrase".to_string(),
+        };
+        roundtrip_test(req);
+    }
+
+    #[test]
+    fn test_secret_resolve_batch_request_roundtrip() {
+        let req = SecretResolveBatchRequest {
+            entries: vec![
+                SecretResolveRequest {
+                    env_name: "DB_PASS".into(),
+                    reference: "prod:db.password".into(),
+                },
+                SecretResolveRequest {
+                    env_name: "API_TOKEN".into(),
+                    reference: "api.token".into(),
+                },
+            ],
+        };
+        roundtrip_test(req);
+    }
+
+    #[test]
+    fn test_run_audit_request_roundtrip() {
+        let req = RunAuditRequest {
+            program: "npm".into(),
+            args: vec!["start".into()],
+            exit_code: Some(0),
+            signal: None,
+            success: true,
         };
         roundtrip_test(req);
     }

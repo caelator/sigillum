@@ -50,8 +50,8 @@ use sigillum_api::request::{
     Fido2SetupRequest, Fido2UnlockRequest, KeyOnlyRequest, KeyValueRequest, MaintenanceRunRequest,
     PassphraseRequest, QueueEthStealthErc20SweepRequest, QueueEthStealthErc20TransferRequest,
     QueueEthStealthNativeSweepRequest, QueueEthStealthTransferRequest, QueueProcessRequest,
-    SnapshotRestoreRequest, StealthPaymentRef, TransitDecryptRequest, TransitEncryptRequest,
-    TransitHmacRequest,
+    RunAuditRequest, SecretResolveBatchRequest, SnapshotRestoreRequest, StealthPaymentRef,
+    TransitDecryptRequest, TransitEncryptRequest, TransitHmacRequest,
 };
 pub use sigillum_api::response::Fido2StatusResponse as DaemonFido2Status;
 pub use sigillum_api::response::{
@@ -69,6 +69,7 @@ pub use sigillum_api::response::{
     Fido2RegisterResponse, Fido2RemoveResponse, Fido2SetupResponse, Fido2StatusResponse,
     GenericStatusResponse, KeyListResponse, KeyValueResponse, MaintenanceRunResponse,
     QueueEnqueueResponse, QueueJob, QueueJobListResponse, QueueProcessResponse,
+    SecretResolveBatchResponse, SecretResolveValue,
     SessionRevokeResponse, SnapshotExportResponse, SnapshotRestoreResponse, StatusResponse,
     SwitchCompartmentResponse, TransitDecryptResponse, TransitEncryptResponse, TransitHmacResponse,
     UnlockResponse, UnlockedCompartment,
@@ -287,6 +288,24 @@ impl SigillumClient {
             });
         let _: GenericStatusResponse = self.send(builder).await?;
         Ok(())
+    }
+
+    pub async fn resolve_secret_batch(
+        &self,
+        request: SecretResolveBatchRequest,
+    ) -> Result<Vec<SecretResolveValue>, ClientError> {
+        let builder = self
+            .request(Method::POST, "/api/secrets/resolve-batch")
+            .json(&request);
+        Ok(self.send::<SecretResolveBatchResponse>(builder).await?.values)
+    }
+
+    pub async fn record_run_audit(
+        &self,
+        request: RunAuditRequest,
+    ) -> Result<GenericStatusResponse, ClientError> {
+        let builder = self.request(Method::POST, "/api/audit/run").json(&request);
+        self.send(builder).await
     }
 
     // ── Backup & restore ─────────────────────────────────────────
@@ -975,6 +994,61 @@ mod tests {
             );
         }
         (StatusCode::OK, Json(json!({ "keys": ["alpha", "beta"] })))
+    }
+
+    async fn resolve_batch_route(
+        headers: HeaderMap,
+        Json(body): Json<serde_json::Value>,
+    ) -> (StatusCode, Json<serde_json::Value>) {
+        let auth = headers
+            .get(header::AUTHORIZATION)
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("");
+        if auth != "Bearer test-token" {
+            return (
+                StatusCode::UNAUTHORIZED,
+                Json(json!({ "error": "missing auth" })),
+            );
+        }
+
+        let values = body["entries"]
+            .as_array()
+            .cloned()
+            .unwrap_or_default()
+            .into_iter()
+            .map(|entry| {
+                json!({
+                    "env_name": entry["env_name"],
+                    "reference": entry["reference"],
+                    "value": format!("resolved:{}", entry["reference"].as_str().unwrap_or_default()),
+                })
+            })
+            .collect::<Vec<_>>();
+
+        (StatusCode::OK, Json(json!({ "values": values })))
+    }
+
+    async fn audit_run_route(
+        headers: HeaderMap,
+        Json(body): Json<serde_json::Value>,
+    ) -> (StatusCode, Json<serde_json::Value>) {
+        let auth = headers
+            .get(header::AUTHORIZATION)
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("");
+        if auth != "Bearer test-token" {
+            return (
+                StatusCode::UNAUTHORIZED,
+                Json(json!({ "error": "missing auth" })),
+            );
+        }
+
+        (
+            StatusCode::OK,
+            Json(json!({
+                "status": if body["success"].as_bool().unwrap_or(false) { "ok" } else { "failed" }
+            })),
+        )
     }
 
     async fn export_snapshot_route(headers: HeaderMap) -> (StatusCode, Json<serde_json::Value>) {
@@ -1949,7 +2023,9 @@ mod tests {
         let app = Router::new()
             .route("/api/unlock", post(unlock))
             .route("/api/api-keys", get(api_keys))
+            .route("/api/secrets/resolve-batch", post(resolve_batch_route))
             .route("/api/audit", get(audit_route))
+            .route("/api/audit/run", post(audit_run_route))
             .route("/api/diagnostics", get(diagnostics_route))
             .route("/api/maintenance/run", post(maintenance_run_route))
             .route("/api/session/revoke", post(revoke_session_route))
@@ -2079,6 +2155,45 @@ mod tests {
         assert_eq!(events.len(), 1);
         assert_eq!(events[0].kind, "secret.set");
         assert_eq!(events[0].compartment_id, Some(0));
+    }
+
+    #[tokio::test]
+    async fn resolve_secret_batch_roundtrips_response_shape() {
+        let addr = spawn_test_server().await;
+        let client = SigillumClient::new(format!("http://{addr}"));
+        client.set_session_token("test-token");
+
+        let values = client
+            .resolve_secret_batch(SecretResolveBatchRequest {
+                entries: vec![sigillum_api::SecretResolveRequest {
+                    env_name: "DB_PASS".into(),
+                    reference: "prod:db.password".into(),
+                }],
+            })
+            .await
+            .unwrap();
+        assert_eq!(values.len(), 1);
+        assert_eq!(values[0].env_name, "DB_PASS");
+        assert_eq!(values[0].value, "resolved:prod:db.password");
+    }
+
+    #[tokio::test]
+    async fn record_run_audit_posts_terminal_status() {
+        let addr = spawn_test_server().await;
+        let client = SigillumClient::new(format!("http://{addr}"));
+        client.set_session_token("test-token");
+
+        let response = client
+            .record_run_audit(RunAuditRequest {
+                program: "npm".into(),
+                args: vec!["start".into()],
+                exit_code: Some(0),
+                signal: None,
+                success: true,
+            })
+            .await
+            .unwrap();
+        assert_eq!(response.status, "ok");
     }
 
     #[tokio::test]

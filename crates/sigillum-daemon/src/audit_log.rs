@@ -141,6 +141,12 @@ pub(crate) enum AuditEventSpec {
     ApiKeyDelete { key: String },
     #[serde(rename = "secret.set")]
     SecretSet { key: String },
+    #[serde(rename = "secret.read")]
+    SecretRead {
+        key: String,
+        env_name: String,
+        tier: u8,
+    },
     #[serde(rename = "secret.delete")]
     SecretDelete { key: String },
     #[serde(rename = "secret.push")]
@@ -312,6 +318,14 @@ pub(crate) enum AuditEventSpec {
         retrying: usize,
         failed: usize,
     },
+    #[serde(rename = "run.complete")]
+    RunComplete {
+        program: String,
+        args: Vec<String>,
+        exit_code: Option<i32>,
+        signal: Option<i32>,
+        success: bool,
+    },
 }
 
 // ── Event Spec Methods ──────────────────────────
@@ -322,6 +336,7 @@ impl AuditEventSpec {
             Self::ApiKeySet { .. } => "api_key.set",
             Self::ApiKeyDelete { .. } => "api_key.delete",
             Self::SecretSet { .. } => "secret.set",
+            Self::SecretRead { .. } => "secret.read",
             Self::SecretDelete { .. } => "secret.delete",
             Self::SecretPush { .. } => "secret.push",
             Self::CompartmentAdd { .. } => "compartment.add",
@@ -367,6 +382,7 @@ impl AuditEventSpec {
             Self::DepositsEthStealthRefresh { .. } => "deposits.eth_stealth.refresh",
             Self::DepositsEthStealthEnqueueSweep { .. } => "deposits.eth_stealth.enqueue_sweep",
             Self::MaintenanceRun { .. } => "maintenance.run",
+            Self::RunComplete { .. } => "run.complete",
         }
     }
 
@@ -375,6 +391,9 @@ impl AuditEventSpec {
             Self::ApiKeySet { key } => json!({ "key": key, "tier": 1 }),
             Self::ApiKeyDelete { key } => json!({ "key": key, "tier": 1 }),
             Self::SecretSet { key } => json!({ "key": key, "tier": 2 }),
+            Self::SecretRead { key, env_name, tier } => {
+                json!({ "key": key, "env_name": env_name, "tier": tier })
+            }
             Self::SecretDelete { key } => json!({ "key": key, "tier": 2 }),
             Self::SecretPush {
                 from_compartment,
@@ -589,6 +608,19 @@ impl AuditEventSpec {
                 "retrying": retrying,
                 "failed": failed,
             }),
+            Self::RunComplete {
+                program,
+                args,
+                exit_code,
+                signal,
+                success,
+            } => json!({
+                "program": program,
+                "args": args,
+                "exit_code": exit_code,
+                "signal": signal,
+                "success": success,
+            }),
         }
     }
 
@@ -609,6 +641,14 @@ impl AuditEventSpec {
             "secret.set" => {
                 let details = parse_legacy_details::<KeyMutationDetails>(path, &kind, details)?;
                 Ok(Self::SecretSet { key: details.key })
+            }
+            "secret.read" => {
+                let details = parse_legacy_details::<SecretReadDetails>(path, &kind, details)?;
+                Ok(Self::SecretRead {
+                    key: details.key,
+                    env_name: details.env_name,
+                    tier: details.tier,
+                })
             }
             "secret.delete" => {
                 let details = parse_legacy_details::<KeyMutationDetails>(path, &kind, details)?;
@@ -910,6 +950,16 @@ impl AuditEventSpec {
                     failed: details.failed,
                 })
             }
+            "run.complete" => {
+                let details = parse_legacy_details::<RunCompleteDetails>(path, &kind, details)?;
+                Ok(Self::RunComplete {
+                    program: details.program,
+                    args: details.args,
+                    exit_code: details.exit_code,
+                    signal: details.signal,
+                    success: details.success,
+                })
+            }
             other => Err(std::io::Error::new(
                 std::io::ErrorKind::InvalidData,
                 format!(
@@ -1014,6 +1064,13 @@ fn invalid_audit_data(path: &Path, kind: &str, error: serde_json::Error) -> std:
 #[derive(Clone, Debug, Deserialize)]
 struct KeyMutationDetails {
     key: String,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+struct SecretReadDetails {
+    key: String,
+    env_name: String,
+    tier: u8,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -1221,6 +1278,16 @@ struct MaintenanceRunDetails {
     blocked: usize,
     retrying: usize,
     failed: usize,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+struct RunCompleteDetails {
+    program: String,
+    #[serde(default)]
+    args: Vec<String>,
+    exit_code: Option<i32>,
+    signal: Option<i32>,
+    success: bool,
 }
 
 // ── Tests ───────────────────────────────────────

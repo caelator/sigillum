@@ -56,6 +56,7 @@ const MAX_XPUB: usize = 512;
 const MAX_SNAPSHOT_HEX: usize = 10_000_000;
 const MAX_NOTE: usize = 1024;
 const MAX_ID: usize = 256;
+const MAX_ENV_NAME: usize = 256;
 
 // ── Validation implementations ──────────────────────────────────────
 
@@ -575,6 +576,46 @@ impl Validate for crate::request::MaintenanceRunRequest {
 impl Validate for crate::request::QueueProcessRequest {
     fn validate(&self) -> Result<(), String> {
         check_optional_len("id", &self.id, MAX_ID)?;
+        Ok(())
+    }
+}
+
+impl Validate for crate::request::SecretResolveRequest {
+    fn validate(&self) -> Result<(), String> {
+        check_len("env_name", &self.env_name, MAX_ENV_NAME)?;
+        check_len("reference", &self.reference, MAX_KEY)?;
+        if self.env_name.is_empty() {
+            return Err("env_name must not be empty".into());
+        }
+        if self.reference.is_empty() {
+            return Err("reference must not be empty".into());
+        }
+        Ok(())
+    }
+}
+
+impl Validate for crate::request::SecretResolveBatchRequest {
+    fn validate(&self) -> Result<(), String> {
+        if self.entries.is_empty() {
+            return Err("entries must not be empty".into());
+        }
+        if self.entries.len() > 256 {
+            return Err("entries exceeds maximum length of 256 items".into());
+        }
+        for entry in &self.entries {
+            entry.validate()?;
+        }
+        Ok(())
+    }
+}
+
+impl Validate for crate::request::RunAuditRequest {
+    fn validate(&self) -> Result<(), String> {
+        check_len("program", &self.program, MAX_LABEL)?;
+        check_vec_items_len("args", &self.args, MAX_KEY)?;
+        if self.program.is_empty() {
+            return Err("program must not be empty".into());
+        }
         Ok(())
     }
 }

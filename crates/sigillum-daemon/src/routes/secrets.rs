@@ -6,7 +6,9 @@ use axum::Json;
 use axum::extract::State;
 use axum::http::HeaderMap;
 use axum::response::Response;
-use sigillum_api::request::{KeyOnlyRequest, KeyValueRequest, SecretsPushRequest};
+use sigillum_api::request::{
+    KeyOnlyRequest, KeyValueRequest, SecretResolveBatchRequest, SecretsPushRequest,
+};
 
 use crate::AppState;
 use crate::service::SigillumService;
@@ -138,4 +140,17 @@ pub(crate) async fn secrets_push(
             .push_secret(bearer_token(&headers).as_deref(), body)
             .await,
     )
+}
+
+pub(crate) async fn resolve_batch(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Json(body): Json<SecretResolveBatchRequest>,
+) -> Response {
+    let body = match validated(Json(body)) {
+        Ok(b) => b,
+        Err(resp) => return resp,
+    };
+    let service = SigillumService::new(state);
+    service_response(service.resolve_secret_batch(bearer_token(&headers).as_deref(), body))
 }

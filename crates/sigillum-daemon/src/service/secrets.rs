@@ -5,8 +5,9 @@
 
 use secrecy::ExposeSecret;
 use sigillum_api::{
-    KeyListResponse, KeyMutationResponse, KeyOnlyRequest, KeyValueRequest, KeyValueResponse,
-    PushResponse, SecretsPushRequest,
+    GenericStatusResponse, KeyListResponse, KeyMutationResponse, KeyOnlyRequest, KeyValueRequest,
+    KeyValueResponse, PushResponse, RunAuditRequest, SecretResolveBatchRequest,
+    SecretResolveBatchResponse, SecretResolveRequest, SecretResolveValue, SecretsPushRequest,
 };
 use sigillum_core::SecretStore;
 
@@ -15,6 +16,61 @@ use crate::audit_log::AuditEventSpec;
 use super::{ServiceError, ServiceResult, SigillumService};
 
 impl SigillumService {
+    fn resolve_secret_ref(
+        &self,
+        token: &str,
+        request: &SecretResolveRequest,
+    ) -> ServiceResult<SecretResolveValue> {
+        let (selector, key) = request
+            .reference
+            .split_once(':')
+            .map_or((None, request.reference.as_str()), |(selector, key)| {
+                (Some(selector), key)
+            });
+
+        if key.is_empty() {
+            return Err(ServiceError::bad_request("secret reference key must not be empty"));
+        }
+
+        let unlocked = self.state.unlocked_compartments();
+        let resolved = match selector {
+            Some(selector) if !selector.is_empty() => {
+                let compartment = selector
+                    .parse::<usize>()
+                    .ok()
+                    .and_then(|id| unlocked.iter().find(|meta| meta.id == id).map(|meta| meta.id))
+                    .or_else(|| {
+                        unlocked
+                            .iter()
+                            .find(|meta| meta.label == selector)
+                            .map(|meta| meta.id)
+                    })
+                    .ok_or_else(|| {
+                        ServiceError::not_found(format!(
+                            "compartment '{selector}' is not unlocked or does not exist"
+                        ))
+                    })?;
+                self.with_vault(compartment, |vault| resolve_secret_value(vault, key))?
+            }
+            _ => self.with_active_vault(token, |vault, _| resolve_secret_value(vault, key))?,
+        };
+
+        self.record_audit(
+            self.state.active_compartment_id_for(token),
+            AuditEventSpec::SecretRead {
+                key: key.to_string(),
+                env_name: request.env_name.clone(),
+                tier: resolved.1,
+            },
+        )?;
+
+        Ok(SecretResolveValue {
+            env_name: request.env_name.clone(),
+            reference: request.reference.clone(),
+            value: resolved.0,
+        })
+    }
+
     pub(crate) fn list_api_keys(&self, token: Option<&str>) -> ServiceResult<KeyListResponse> {
         let token = self.require_session(token)?;
         let keys = self.with_active_vault(token, |vault, _| Ok(vault.read_api_keys()?))?;
@@ -248,4 +304,56 @@ impl SigillumService {
             key: target_key,
         })
     }
+
+    pub(crate) fn resolve_secret_batch(
+        &self,
+        token: Option<&str>,
+        body: SecretResolveBatchRequest,
+    ) -> ServiceResult<SecretResolveBatchResponse> {
+        let token = self.require_session(token)?;
+        let values = body
+            .entries
+            .iter()
+            .map(|entry| self.resolve_secret_ref(token, entry))
+            .collect::<ServiceResult<Vec<_>>>()?;
+        Ok(SecretResolveBatchResponse { values })
+    }
+
+    pub(crate) fn record_run_audit(
+        &self,
+        token: Option<&str>,
+        body: RunAuditRequest,
+    ) -> ServiceResult<GenericStatusResponse> {
+        let token = self.require_session(token)?;
+        let compartment_id = self.state.active_compartment_id_for(token);
+        self.record_audit(
+            compartment_id,
+            AuditEventSpec::RunComplete {
+                program: body.program,
+                args: body.args,
+                exit_code: body.exit_code,
+                signal: body.signal,
+                success: body.success,
+            },
+        )?;
+        Ok(GenericStatusResponse {
+            status: "ok".into(),
+        })
+    }
+}
+
+fn resolve_secret_value(vault: &sigillum_core::FileVault, key: &str) -> ServiceResult<(String, u8)> {
+    if vault.is_unlocked() {
+        if let Some(value) = vault
+            .read_secret(key)?
+            .map(|value| value.expose_secret().to_string())
+        {
+            return Ok((value, 2));
+        }
+    }
+
+    vault
+        .read_api_key(key)?
+        .map(|value| (value.expose_secret().to_string(), 1))
+        .ok_or_else(|| ServiceError::not_found(format!("Secret '{key}' not found")))
 }

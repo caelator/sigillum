@@ -226,6 +226,7 @@ fn system_routes() -> AppRouter {
         .route("/api/diagnostics", get(diagnostics::diagnostics))
         .route("/api/maintenance/run", post(maintenance::run_maintenance))
         .route("/api/audit", get(audit::audit_recent))
+        .route("/api/audit/run", post(audit::audit_run))
         .route("/api/setup/reset", post(backup::setup_reset))
         .route("/api/backup/export", post(backup::backup_export))
         .route("/api/backup/restore", post(backup::backup_restore))
@@ -259,6 +260,7 @@ fn secret_routes() -> AppRouter {
         .route("/api/secrets/get", post(secrets::get_secret))
         .route("/api/secrets/set", post(secrets::set_secret))
         .route("/api/secrets/delete", post(secrets::delete_secret))
+        .route("/api/secrets/resolve-batch", post(secrets::resolve_batch))
         .route("/api/secrets/push", post(secrets::secrets_push))
 }
 

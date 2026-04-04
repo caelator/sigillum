@@ -15,7 +15,9 @@
 //! snapshot restore) demand all compartments be unlocked. The daemon provides
 //! persistent management and Web UI control.
 
+mod cmd;
 mod daemon_api;
+mod exec;
 
 use std::io::{self, Write};
 use std::path::PathBuf;
@@ -51,6 +53,7 @@ fn main() {
         "get" => cmd_get(&args[2..]),
         "delete" => cmd_delete(&args[2..]),
         "list" => cmd_list(),
+        "run" => cmd::run::cmd_run(&args[2..]),
         "set-api" => cmd_set_api(&args[2..]),
         "get-api" => cmd_get_api(&args[2..]),
         "delete-api" => cmd_delete_api(&args[2..]),
@@ -88,6 +91,7 @@ COMMANDS:
     get <KEY>         Retrieve a Tier 2 secret
     delete <KEY>      Delete a Tier 2 secret
     list              List all keys (both tiers)
+    run               Inject resolved secrets into a child process
 
     set-api <KEY>     Store a Tier 1 API key (plaintext)
     get-api <KEY>     Retrieve a Tier 1 API key
