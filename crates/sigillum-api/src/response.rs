@@ -140,6 +140,14 @@ pub struct SecretResolveBatchResponse {
     pub values: Vec<SecretResolveValue>,
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct GenerateStoreResponse {
+    pub status: String,
+    pub key: String,
+    pub value: String,
+    pub kind: String,
+}
+
 // ── Compartments ────────────────────────────────
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]

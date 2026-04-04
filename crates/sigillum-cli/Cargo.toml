@@ -20,6 +20,7 @@ sigillum-client = { workspace = true }
 sigillum-core = { workspace = true, features = ["file-backend"] }
 sigillum-daemon = { workspace = true }
 sigillum-fido2 = { workspace = true }
+sigillum-generator = { workspace = true }
 secrecy = { workspace = true }
 rpassword = { workspace = true }
 rand = { workspace = true }

@@ -1,0 +1,16 @@
+[package]
+name = "sigillum-generator"
+description = "Password, passphrase, and TOTP generation for Sigillum"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+keywords = ["password", "totp", "generator", "security"]
+categories = ["cryptography", "authentication"]
+
+[dependencies]
+rand = { workspace = true }
+data-encoding = { workspace = true }
+

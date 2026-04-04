@@ -56,6 +56,7 @@ fn main() {
         "delete" => cmd_delete(&args[2..]),
         "list" => cmd_list(),
         "audit" => cmd::audit::cmd_audit(&args[2..]),
+        "generate" => cmd::generate::cmd_generate(&args[2..]),
         "run" => cmd::run::cmd_run(&args[2..]),
         "set-api" => cmd_set_api(&args[2..]),
         "get-api" => cmd_get_api(&args[2..]),
@@ -96,6 +97,7 @@ COMMANDS:
     delete <KEY>      Delete a Tier 2 secret
     list              List all keys (both tiers)
     audit             Query audit events through the daemon API
+    generate          Generate passwords, passphrases, or TOTPs
     run               Inject resolved secrets into a child process
 
     set-api <KEY>     Store a Tier 1 API key (plaintext)

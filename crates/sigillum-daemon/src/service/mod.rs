@@ -29,6 +29,7 @@ mod deposits;
 mod error;
 mod evm;
 mod fido2;
+mod generate;
 pub(crate) mod helpers;
 mod lifecycle;
 mod maintenance;

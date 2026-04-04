@@ -37,7 +37,8 @@ use reqwest::Method;
 use secrecy::SecretString;
 use serde::de::DeserializeOwned;
 use sigillum_api::request::{
-    CompartmentSwitchRequest, EthStealthCheckRequest, EthStealthDepositCreateErc20Request,
+    BiometricEnrollRequest, BiometricUnlockRequest, CompartmentSwitchRequest,
+    EthStealthCheckRequest, EthStealthDepositCreateErc20Request,
     EthStealthDepositCreateNativeRequest, EthStealthDepositDeleteRequest,
     EthStealthDepositEnqueueSweepRequest, EthStealthDepositRefreshRequest, EthStealthExportRequest,
     EthStealthGenerateRequest, EthStealthSendErc20TransferRequest,
@@ -47,18 +48,19 @@ use sigillum_api::request::{
     EthXpubExportRequest, EthXpubWalletProfileUpsertRequest, EvmProfileDeleteRequest,
     EvmProviderProfileUpsertRequest, EvmRpcBalanceRequest, EvmRpcBroadcastRequest,
     EvmRpcErc20BalanceRequest, EvmRpcNonceRequest, Fido2RegisterRequest, Fido2RemoveRequest,
-    Fido2SetupRequest, Fido2UnlockRequest, KeyOnlyRequest, KeyValueRequest, MaintenanceRunRequest,
-    PassphraseRequest, QueueEthStealthErc20SweepRequest, QueueEthStealthErc20TransferRequest,
-    QueueEthStealthNativeSweepRequest, QueueEthStealthTransferRequest, QueueProcessRequest,
-    RunAuditRequest, SecretResolveBatchRequest, SnapshotRestoreRequest, StealthPaymentRef,
-    TransitDecryptRequest, TransitEncryptRequest, TransitHmacRequest, BiometricEnrollRequest,
-    BiometricUnlockRequest,
+    Fido2SetupRequest, Fido2UnlockRequest, GenerateStoreRequest, KeyOnlyRequest, KeyValueRequest,
+    MaintenanceRunRequest, PassphraseRequest, QueueEthStealthErc20SweepRequest,
+    QueueEthStealthErc20TransferRequest, QueueEthStealthNativeSweepRequest,
+    QueueEthStealthTransferRequest, QueueProcessRequest, RunAuditRequest,
+    SecretResolveBatchRequest, SnapshotRestoreRequest, StealthPaymentRef, TransitDecryptRequest,
+    TransitEncryptRequest, TransitHmacRequest,
 };
 pub use sigillum_api::response::Fido2StatusResponse as DaemonFido2Status;
 pub use sigillum_api::response::{
-    ActiveCompartment, AuditEvent as DaemonAuditEvent, CompartmentInfo, CompartmentListResponse,
-    DiagnosticsResponse, ErrorResponse, EthSignedTransactionResponse, EthStealthCheckResponse,
-    EthStealthDeposit, EthStealthDepositEnqueueSweepResponse, EthStealthDepositListResponse,
+    ActiveCompartment, AuditEvent as DaemonAuditEvent, BiometricChallengeResponse,
+    BiometricEnrollResponse, CompartmentInfo, CompartmentListResponse, DiagnosticsResponse,
+    ErrorResponse, EthSignedTransactionResponse, EthStealthCheckResponse, EthStealthDeposit,
+    EthStealthDepositEnqueueSweepResponse, EthStealthDepositListResponse,
     EthStealthDepositMutationResponse, EthStealthDepositRefreshResponse,
     EthStealthGenerateResponse, EthStealthMetaAddressResponse, EthStealthSendResponse,
     EthStealthSignResponse, EthStealthWalletProfile, EthStealthWalletProfileListResponse,
@@ -68,12 +70,12 @@ pub use sigillum_api::response::{
     EvmRpcBalanceResponse, EvmRpcBroadcastResponse, EvmRpcErc20BalanceResponse,
     EvmRpcNonceResponse, Fido2DetectResponse, Fido2KeyInfo, Fido2ListResponse,
     Fido2RegisterResponse, Fido2RemoveResponse, Fido2SetupResponse, Fido2StatusResponse,
-    GenericStatusResponse, KeyListResponse, KeyValueResponse, MaintenanceRunResponse,
-    QueueEnqueueResponse, QueueJob, QueueJobListResponse, QueueProcessResponse,
-    SecretResolveBatchResponse, SecretResolveValue, BiometricChallengeResponse,
-    BiometricEnrollResponse, SessionRevokeResponse, SnapshotExportResponse,
-    SnapshotRestoreResponse, StatusResponse, SwitchCompartmentResponse, TransitDecryptResponse,
-    TransitEncryptResponse, TransitHmacResponse, UnlockResponse, UnlockedCompartment,
+    GenerateStoreResponse, GenericStatusResponse, KeyListResponse, KeyValueResponse,
+    MaintenanceRunResponse, QueueEnqueueResponse, QueueJob, QueueJobListResponse,
+    QueueProcessResponse, SecretResolveBatchResponse, SecretResolveValue, SessionRevokeResponse,
+    SnapshotExportResponse, SnapshotRestoreResponse, StatusResponse, SwitchCompartmentResponse,
+    TransitDecryptResponse, TransitEncryptResponse, TransitHmacResponse, UnlockResponse,
+    UnlockedCompartment,
 };
 use sigillum_core::SnapshotSummary;
 use thiserror::Error;
@@ -194,7 +196,10 @@ impl SigillumClient {
         self.send(builder).await
     }
 
-    pub async fn biometric_unlock(&self, payload_hex: String) -> Result<UnlockResponse, ClientError> {
+    pub async fn biometric_unlock(
+        &self,
+        payload_hex: String,
+    ) -> Result<UnlockResponse, ClientError> {
         let builder = self
             .request(Method::POST, "/api/biometric/unlock")
             .json(&BiometricUnlockRequest { payload_hex });
@@ -328,7 +333,10 @@ impl SigillumClient {
         let builder = self
             .request(Method::POST, "/api/secrets/resolve-batch")
             .json(&request);
-        Ok(self.send::<SecretResolveBatchResponse>(builder).await?.values)
+        Ok(self
+            .send::<SecretResolveBatchResponse>(builder)
+            .await?
+            .values)
     }
 
     pub async fn record_run_audit(
@@ -336,6 +344,16 @@ impl SigillumClient {
         request: RunAuditRequest,
     ) -> Result<GenericStatusResponse, ClientError> {
         let builder = self.request(Method::POST, "/api/audit/run").json(&request);
+        self.send(builder).await
+    }
+
+    pub async fn generate_and_store(
+        &self,
+        request: GenerateStoreRequest,
+    ) -> Result<GenerateStoreResponse, ClientError> {
+        let builder = self
+            .request(Method::POST, "/api/generate/store")
+            .json(&request);
         self.send(builder).await
     }
 

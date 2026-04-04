@@ -7,6 +7,7 @@ members = [
     "crates/sigillum-client",
     "crates/sigillum-daemon",
     "crates/sigillum-fido2",
+    "crates/sigillum-generator",
     "crates/sigillum-cli",
     "crates/sigillum-sdk",
     "crates/sigillum-server",
@@ -31,6 +32,7 @@ sigillum-core = { path = "crates/sigillum-core", version = "0.1.0", default-feat
 sigillum-client = { path = "crates/sigillum-client", version = "0.1.0" }
 sigillum-daemon = { path = "crates/sigillum-daemon", version = "0.1.0" }
 sigillum-fido2 = { path = "crates/sigillum-fido2", version = "0.1.0" }
+sigillum-generator = { path = "crates/sigillum-generator", version = "0.1.0" }
 
 # Crypto
 aes-gcm = "0.10"
@@ -59,6 +61,7 @@ url = "2"
 # Serialization
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+data-encoding = "2"
 
 # FIDO2 / Shamir
 ctap-hid-fido2 = "3"

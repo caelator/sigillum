@@ -28,6 +28,7 @@ mod deposits;
 mod diagnostics;
 mod evm;
 mod fido2;
+mod generate;
 mod lifecycle;
 mod maintenance;
 mod profiles;
@@ -205,6 +206,7 @@ fn api_routes() -> AppRouter {
         .merge(system_routes())
         .merge(compartment_routes())
         .merge(secret_routes())
+        .merge(generate_routes())
         .merge(transit_routes())
         .merge(evm_routes())
         .merge(profile_routes())
@@ -274,6 +276,10 @@ fn secret_routes() -> AppRouter {
         .route("/api/secrets/delete", post(secrets::delete_secret))
         .route("/api/secrets/resolve-batch", post(secrets::resolve_batch))
         .route("/api/secrets/push", post(secrets::secrets_push))
+}
+
+fn generate_routes() -> AppRouter {
+    Router::new().route("/api/generate/store", post(generate::generate_store))
 }
 
 fn transit_routes() -> AppRouter {

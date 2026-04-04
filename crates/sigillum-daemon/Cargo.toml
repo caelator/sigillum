@@ -14,6 +14,7 @@ categories = ["cryptography", "web-programming"]
 sigillum-api = { workspace = true }
 sigillum-core = { workspace = true, features = ["file-backend"] }
 sigillum-fido2 = { workspace = true }
+sigillum-generator = { workspace = true }
 axum = { workspace = true }
 aes-gcm = { workspace = true }
 hmac = { workspace = true }

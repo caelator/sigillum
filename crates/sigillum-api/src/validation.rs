@@ -634,3 +634,29 @@ impl Validate for crate::request::RunAuditRequest {
         Ok(())
     }
 }
+
+impl Validate for crate::request::GenerateStoreRequest {
+    fn validate(&self) -> Result<(), String> {
+        check_len("key", &self.key, MAX_KEY)?;
+        if self.key.is_empty() {
+            return Err("key must not be empty".into());
+        }
+        match &self.kind {
+            crate::request::GenerateStoreKind::Password { length, .. } => {
+                if *length == 0 || *length > 1024 {
+                    return Err("password length must be between 1 and 1024".into());
+                }
+            }
+            crate::request::GenerateStoreKind::Passphrase {
+                word_count,
+                separator,
+            } => {
+                if *word_count == 0 || *word_count > 128 {
+                    return Err("word_count must be between 1 and 128".into());
+                }
+                check_len("separator", separator, MAX_LABEL)?;
+            }
+        }
+        Ok(())
+    }
+}
