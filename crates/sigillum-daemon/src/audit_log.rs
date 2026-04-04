@@ -176,6 +176,13 @@ pub(crate) enum AuditEventSpec {
         count: usize,
         tap_count: usize,
     },
+    #[serde(rename = "unlock.biometric")]
+    UnlockBiometric {
+        compartment_id: usize,
+        fingerprint_hex: String,
+    },
+    #[serde(rename = "biometric.enroll")]
+    BiometricEnroll { fingerprint_hex: String },
     #[serde(rename = "lock.all")]
     LockAll,
     #[serde(rename = "session.revoke")]
@@ -345,6 +352,8 @@ impl AuditEventSpec {
             Self::CompartmentSwitch { .. } => "compartment.switch",
             Self::UnlockPassphrase { .. } => "unlock.passphrase",
             Self::UnlockFido2 { .. } => "unlock.fido2",
+            Self::UnlockBiometric { .. } => "unlock.biometric",
+            Self::BiometricEnroll { .. } => "biometric.enroll",
             Self::LockAll => "lock.all",
             Self::SessionRevoke => "session.revoke",
             Self::ProfilesEvmProviderUpsert { .. } => "profiles.evm_provider.upsert",
@@ -429,6 +438,16 @@ impl AuditEventSpec {
                 "count": count,
                 "tap_count": tap_count,
             }),
+            Self::UnlockBiometric {
+                compartment_id,
+                fingerprint_hex,
+            } => json!({
+                "compartment_id": compartment_id,
+                "fingerprint_hex": fingerprint_hex,
+            }),
+            Self::BiometricEnroll { fingerprint_hex } => {
+                json!({ "fingerprint_hex": fingerprint_hex })
+            }
             Self::LockAll | Self::SessionRevoke => json!({}),
             Self::ProfilesEvmProviderUpsert { name, chain_id } => {
                 json!({ "name": name, "chain_id": chain_id })
@@ -721,6 +740,21 @@ impl AuditEventSpec {
                     compartment_ids: details.compartment_ids,
                     count: details.count,
                     tap_count: details.tap_count,
+                })
+            }
+            "unlock.biometric" => {
+                let details =
+                    parse_legacy_details::<UnlockBiometricDetails>(path, &kind, details)?;
+                Ok(Self::UnlockBiometric {
+                    compartment_id: details.compartment_id,
+                    fingerprint_hex: details.fingerprint_hex,
+                })
+            }
+            "biometric.enroll" => {
+                let details =
+                    parse_legacy_details::<BiometricEnrollDetails>(path, &kind, details)?;
+                Ok(Self::BiometricEnroll {
+                    fingerprint_hex: details.fingerprint_hex,
                 })
             }
             "lock.all" => Ok(Self::LockAll),
@@ -1124,6 +1158,17 @@ struct UnlockFido2Details {
     compartment_ids: Vec<usize>,
     count: usize,
     tap_count: usize,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+struct UnlockBiometricDetails {
+    compartment_id: usize,
+    fingerprint_hex: String,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+struct BiometricEnrollDetails {
+    fingerprint_hex: String,
 }
 
 #[derive(Clone, Debug, Deserialize)]

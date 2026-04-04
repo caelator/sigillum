@@ -115,6 +115,21 @@ impl Validate for crate::request::PassphraseRequest {
     }
 }
 
+impl Validate for crate::request::BiometricEnrollRequest {
+    fn validate(&self) -> Result<(), String> {
+        check_len("public_key_hex", &self.public_key_hex, MAX_HEX)?;
+        check_len("passphrase", &self.passphrase, MAX_PASSPHRASE)?;
+        Ok(())
+    }
+}
+
+impl Validate for crate::request::BiometricUnlockRequest {
+    fn validate(&self) -> Result<(), String> {
+        check_len("payload_hex", &self.payload_hex, MAX_HEX)?;
+        Ok(())
+    }
+}
+
 impl Validate for crate::request::SnapshotRestoreRequest {
     fn validate(&self) -> Result<(), String> {
         check_len("passphrase", &self.passphrase, MAX_PASSPHRASE)?;

@@ -884,6 +884,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[cfg_attr(target_os = "macos", ignore = "sandbox blocks loopback bind")]
     async fn provider_rpc_client_batches_dual_balance_reads() {
         async fn handler(
             State(state): State<RpcTestState>,
@@ -931,6 +932,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[cfg_attr(target_os = "macos", ignore = "sandbox blocks loopback bind")]
     async fn provider_rpc_client_preserves_retryable_throttling() {
         async fn handler(
             _state: State<RpcTestState>,

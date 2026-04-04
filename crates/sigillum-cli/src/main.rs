@@ -15,6 +15,7 @@
 //! snapshot restore) demand all compartments be unlocked. The daemon provides
 //! persistent management and Web UI control.
 
+mod biometric;
 mod cmd;
 mod daemon_api;
 mod exec;
@@ -47,8 +48,9 @@ fn main() {
     match args[1].as_str() {
         "setup" => cmd_setup(),
         "status" => cmd_status(),
-        "unlock" => cmd_unlock(),
+        "unlock" => cmd_unlock(&args[2..]),
         "lock" => cmd_lock(),
+        "biometric" => biometric::cmd_biometric(&args[2..]),
         "set" => cmd_set(&args[2..]),
         "get" => cmd_get(&args[2..]),
         "delete" => cmd_delete(&args[2..]),
@@ -87,6 +89,7 @@ COMMANDS:
     status            Show vault status
     unlock            Unlock vault (auto-detects method)
     lock              Lock all compartments
+    biometric         Biometric enrollment helpers
 
     set <KEY>         Store a Tier 2 secret (encrypted, requires unlock)
     get <KEY>         Retrieve a Tier 2 secret
@@ -558,11 +561,16 @@ fn cmd_status() {
 /// Attempts passphrase unlock first (if enabled), then falls back to FIDO2.
 /// Unlocked compartments remain accessible in memory until locked or the
 /// process exits. The daemon provides persistent unlock state.
-fn cmd_unlock() {
+fn cmd_unlock(args: &[String]) {
     let base = base_dir();
     if !base.join(".initialized").exists() {
         eprintln!("No vault configured. Run 'sigillum setup' first.");
         process::exit(1);
+    }
+
+    if args.iter().any(|arg| arg == "--biometric") {
+        biometric::cmd_unlock_biometric(args);
+        return;
     }
 
     let mgr = fido2_manager();

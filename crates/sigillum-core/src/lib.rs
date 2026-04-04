@@ -33,7 +33,9 @@
 mod error;
 mod ethereum_stealth;
 mod ethereum_xpub;
+pub mod payload;
 mod traits;
+pub mod unlock;
 
 pub use error::VaultError;
 pub use ethereum_stealth::{
@@ -52,6 +54,9 @@ pub use ethereum_xpub::{
     derive_sigillum_ethereum_xpub_receive_address, derive_sigillum_ethereum_xpub_receive_branch,
 };
 pub use traits::{SecretStore, VaultLifecycle};
+pub use unlock::provider::{
+    Fido2UnlockProvider, PassphraseUnlockProvider, TouchIdUnlockProvider, UnlockProvider,
+};
 
 #[cfg(feature = "file-backend")]
 pub mod utils;

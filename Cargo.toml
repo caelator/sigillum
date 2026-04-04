@@ -78,3 +78,4 @@ sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio",
 
 # Identifiers
 uuid = { version = "1", features = ["v4", "serde"] }
+libc = "0.2"

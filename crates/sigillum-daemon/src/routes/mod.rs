@@ -22,6 +22,7 @@
 
 mod audit;
 mod backup;
+mod biometric;
 mod compartments;
 mod deposits;
 mod diagnostics;
@@ -211,6 +212,7 @@ fn api_routes() -> AppRouter {
         .merge(deposit_routes())
         .merge(queue_routes())
         .merge(fido2_routes())
+        .merge(biometric_routes())
 }
 
 fn lifecycle_routes() -> AppRouter {
@@ -219,6 +221,16 @@ fn lifecycle_routes() -> AppRouter {
         .route("/api/unlock", post(lifecycle::post_unlock))
         .route("/api/lock", post(lifecycle::post_lock))
         .route("/api/session/revoke", post(lifecycle::post_revoke_session))
+}
+
+fn biometric_routes() -> AppRouter {
+    Router::new()
+        .route(
+            "/api/biometric/challenge",
+            post(biometric::biometric_challenge),
+        )
+        .route("/api/biometric/unlock", post(biometric::biometric_unlock))
+        .route("/api/biometric/enroll", post(biometric::biometric_enroll))
 }
 
 fn system_routes() -> AppRouter {

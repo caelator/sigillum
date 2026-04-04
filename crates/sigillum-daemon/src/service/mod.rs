@@ -38,6 +38,7 @@ mod queue;
 mod recovery;
 mod secrets;
 mod transit;
+pub(crate) mod unlock;
 mod wallets;
 
 use std::sync::Arc;

@@ -20,6 +20,7 @@
 //! The service layer (not the daemon) owns recovery logic and policy initialization.
 //! The daemon's job is to serve HTTP and manage process lifecycle cleanly.
 
+mod api;
 mod audit;
 mod audit_db;
 mod audit_log;

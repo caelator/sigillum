@@ -18,7 +18,7 @@
 //! recovers from mutex poisoning so the daemon remains available even if a thread
 //! panics while holding a lock.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::fmt;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
@@ -109,8 +109,17 @@ const MAX_UNLOCK_ATTEMPTS: u32 = 5;
 /// Base cooldown after exceeding the failed-attempt threshold.
 /// Actual delay doubles with each subsequent failure (exponential backoff).
 const UNLOCK_COOLDOWN_BASE: Duration = Duration::from_secs(5);
+const BIOMETRIC_CHALLENGE_TTL: Duration = Duration::from_secs(60);
+const MAX_BIOMETRIC_CHALLENGES: usize = 64;
 const HTTP_CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 const HTTP_REQUEST_TIMEOUT: Duration = Duration::from_secs(15);
+
+#[derive(Clone, Copy, Debug)]
+struct BiometricChallengeState {
+    id: [u8; 16],
+    nonce: [u8; 32],
+    issued_at: Instant,
+}
 
 #[derive(Clone, Copy, Debug)]
 struct SessionState {
@@ -164,6 +173,7 @@ pub struct AppState {
     unlock_throttle: ResilientMutex<UnlockThrottle>,
     /// Startup-time reconciliation summary for observability.
     startup_recovery: ResilientMutex<StartupRecoverySummary>,
+    biometric_challenges: ResilientMutex<VecDeque<BiometricChallengeState>>,
 }
 
 impl AppState {
@@ -200,6 +210,7 @@ impl AppState {
             operation_lock: AsyncMutex::new(()),
             unlock_throttle: ResilientMutex::new(UnlockThrottle::default()),
             startup_recovery: ResilientMutex::new(StartupRecoverySummary::default()),
+            biometric_challenges: ResilientMutex::new(VecDeque::new()),
         }
     }
 
@@ -279,6 +290,10 @@ impl AppState {
 
     pub fn audit_db_path(&self) -> PathBuf {
         self.base_dir.join("audit.db")
+    }
+
+    pub fn biometric_enrollment_path(&self) -> PathBuf {
+        self.base_dir.join("biometric_enrollment.json")
     }
 
     pub fn begin_operation(
@@ -382,6 +397,43 @@ impl AppState {
         let mut throttle = self.unlock_throttle.lock();
         throttle.consecutive_failures = 0;
         throttle.last_failure = None;
+    }
+
+    pub fn issue_biometric_challenge(&self) -> ([u8; 16], [u8; 32], u64) {
+        let mut id = [0u8; 16];
+        let mut nonce = [0u8; 32];
+        OsRng.fill_bytes(&mut id);
+        OsRng.fill_bytes(&mut nonce);
+        let expires_at_unix = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs()
+            + BIOMETRIC_CHALLENGE_TTL.as_secs();
+
+        let mut challenges = self.biometric_challenges.lock();
+        challenges.retain(|entry| entry.issued_at.elapsed() < BIOMETRIC_CHALLENGE_TTL);
+        while challenges.len() >= MAX_BIOMETRIC_CHALLENGES {
+            challenges.pop_front();
+        }
+        challenges.push_back(BiometricChallengeState {
+            id,
+            nonce,
+            issued_at: Instant::now(),
+        });
+        (id, nonce, expires_at_unix)
+    }
+
+    pub fn consume_biometric_challenge(&self, id: &[u8; 16]) -> Option<[u8; 32]> {
+        let mut challenges = self.biometric_challenges.lock();
+        challenges.retain(|entry| entry.issued_at.elapsed() < BIOMETRIC_CHALLENGE_TTL);
+        let index = challenges.iter().position(|entry| &entry.id == id)?;
+        let entry = challenges.remove(index)?;
+        Some(entry.nonce)
+    }
+
+    #[must_use]
+    pub fn biometric_challenge_count(&self) -> usize {
+        self.biometric_challenges.lock().len()
     }
 
     // ── Session management ──────────────────────────────────────────

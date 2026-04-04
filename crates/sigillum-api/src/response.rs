@@ -80,6 +80,21 @@ pub struct UnlockResponse {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct BiometricChallengeResponse {
+    pub challenge_id_hex: String,
+    pub nonce_hex: String,
+    pub expires_at_unix: u64,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct BiometricEnrollResponse {
+    pub status: String,
+    pub compartment_id: usize,
+    pub fingerprint_hex: String,
+    pub vault_key_hex: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct GenericStatusResponse {
     pub status: String,
 }

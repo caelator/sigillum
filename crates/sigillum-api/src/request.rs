@@ -73,6 +73,19 @@ pub struct PassphraseRequest {
     pub passphrase: String,
 }
 
+/// Register or replace the biometric verifier for the currently unlocked compartment.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct BiometricEnrollRequest {
+    pub public_key_hex: String,
+    pub passphrase: String,
+}
+
+/// Consume a daemon-issued one-time challenge and unlock using a helper-produced payload.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct BiometricUnlockRequest {
+    pub payload_hex: String,
+}
+
 /// Restore a vault from an encrypted snapshot archive.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct SnapshotRestoreRequest {
