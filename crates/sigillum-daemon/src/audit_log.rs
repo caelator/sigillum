@@ -624,6 +624,21 @@ impl AuditEventSpec {
         }
     }
 
+    pub(crate) fn indexed_key(&self) -> Option<&str> {
+        match self {
+            Self::ApiKeySet { key }
+            | Self::ApiKeyDelete { key }
+            | Self::SecretSet { key }
+            | Self::SecretRead { key, .. }
+            | Self::SecretDelete { key }
+            | Self::SecretPush { key, .. }
+            | Self::TransitEncrypt { key, .. }
+            | Self::TransitDecrypt { key, .. }
+            | Self::TransitHmac { key, .. } => Some(key.as_str()),
+            _ => None,
+        }
+    }
+
     fn from_legacy_details(
         path: &Path,
         kind: String,

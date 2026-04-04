@@ -34,6 +34,7 @@ subtle = { workspace = true }
 hex = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
+rusqlite = { path = "../../vendor/rusqlite-0.35.0" }
 
 [dev-dependencies]
 tempfile = "3.10"

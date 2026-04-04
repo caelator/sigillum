@@ -13,6 +13,9 @@ members = [
     "crates/sigillum-gateway",
 ]
 
+[patch.crates-io]
+libsqlite3-sys = { path = "vendor/libsqlite3-sys-0.30.1" }
+
 [workspace.package]
 version = "0.1.0"
 edition = "2024"

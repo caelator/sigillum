@@ -34,6 +34,7 @@ use subtle::ConstantTimeEq;
 use tokio::sync::Mutex as AsyncMutex;
 use zeroize::Zeroizing;
 
+use crate::audit_db::AuditQuery;
 use crate::audit_log::{AuditEventSpec, StoredAuditEvent};
 use crate::operations::{OperationGuard, PendingOperationSpec, list_pending_operations};
 use crate::policy::RuntimePolicy;
@@ -179,6 +180,9 @@ impl AppState {
             .duration_since(UNIX_EPOCH)
             .unwrap_or_default()
             .as_secs();
+        if let Err(error) = crate::audit::migration::migrate_jsonl_to_sqlite(&base_dir) {
+            tracing::warn!(error = %error, "failed to initialize audit database");
+        }
 
         Self {
             fido2,
@@ -271,6 +275,10 @@ impl AppState {
 
     pub fn audit_log_path(&self) -> PathBuf {
         self.base_dir.join("audit.log")
+    }
+
+    pub fn audit_db_path(&self) -> PathBuf {
+        self.base_dir.join("audit.db")
     }
 
     pub fn begin_operation(
@@ -579,16 +587,22 @@ impl AppState {
             compartment_id,
             spec,
         };
-        let path = self.audit_log_path();
-        crate::audit_log::append_audit_event(&path, &event)
+        let path = self.audit_db_path();
+        crate::audit_db::append_event(&path, &event)
     }
 
-    pub fn read_recent_audit_events(
+    pub(crate) fn read_audit_events(
         &self,
-        limit: usize,
+        query: AuditQuery,
     ) -> Result<Vec<AuditEvent>, std::io::Error> {
-        let path = self.audit_log_path();
-        crate::audit_log::read_recent_audit_events(&path, limit)
+        let path = self.audit_db_path();
+        crate::audit_db::query_events(
+            &path,
+            &AuditQuery {
+                tail: self.runtime_policy().audit_limit(Some(query.tail.max(1))),
+                ..query
+            },
+        )
     }
 }
 
@@ -790,7 +804,14 @@ mod tests {
             )
             .unwrap();
 
-        let events = state.read_recent_audit_events(2).unwrap();
+        let events = state
+            .read_audit_events(AuditQuery {
+                tail: 2,
+                kind: None,
+                since: None,
+                key: None,
+            })
+            .unwrap();
         assert_eq!(events.len(), 2);
         assert_eq!(events[0].kind, "snapshot.export");
         assert_eq!(events[1].kind, "secret.set");

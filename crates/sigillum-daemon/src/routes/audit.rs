@@ -16,7 +16,11 @@ use super::{bearer_token, service_response, validated};
 
 #[derive(Deserialize)]
 pub(crate) struct AuditQuery {
+    tail: Option<usize>,
     limit: Option<usize>,
+    kind: Option<String>,
+    since: Option<u64>,
+    key: Option<String>,
 }
 
 pub(crate) async fn audit_recent(
@@ -26,11 +30,17 @@ pub(crate) async fn audit_recent(
 ) -> Response {
     let default_limit = state.runtime_policy().audit_default_limit;
     let service = SigillumService::new(state);
+    let tail = query.tail.or(query.limit).unwrap_or(default_limit);
     service_response(
         service
             .audit_recent(
                 bearer_token(&headers).as_deref(),
-                query.limit.unwrap_or(default_limit),
+                crate::audit_db::AuditQuery {
+                    tail,
+                    kind: query.kind,
+                    since: query.since,
+                    key: query.key,
+                },
             )
             .await,
     )

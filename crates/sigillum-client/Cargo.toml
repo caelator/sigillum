@@ -20,6 +20,7 @@ serde_json = { workspace = true }
 secrecy = { workspace = true }
 thiserror = { workspace = true }
 hex = { workspace = true }
+urlencoding = "2.1"
 
 [dev-dependencies]
 axum = { workspace = true }

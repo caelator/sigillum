@@ -92,13 +92,12 @@ impl SigillumService {
     pub(crate) async fn audit_recent(
         &self,
         token: Option<&str>,
-        limit: usize,
+        query: crate::audit_db::AuditQuery,
     ) -> ServiceResult<AuditResponse> {
         let _ = self.require_session(token)?;
-        let limit = self.state.runtime_policy().audit_limit(Some(limit));
         let events = self
             .state
-            .read_recent_audit_events(limit)
+            .read_audit_events(query)
             .map_err(|error| {
                 ServiceError::internal(format!("Failed to read audit log: {error}"))
             })?;
@@ -125,7 +124,7 @@ impl SigillumService {
             active_session_count: self.state.session_count(),
             default_active_compartment_id: self.state.default_active_compartment_id(),
             max_unlocked_threshold: self.state.max_unlocked_threshold(),
-            audit_log_present: self.state.audit_log_path().exists(),
+            audit_log_present: self.state.audit_db_path().exists(),
             pending_operation_count: self.state.pending_operation_count(),
             queue_job_count: queue.jobs.len(),
             blocked_queue_job_count: queue_counts.blocked,

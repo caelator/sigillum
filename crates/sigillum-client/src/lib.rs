@@ -114,6 +114,14 @@ pub struct SigillumClient {
     session_token: Mutex<Option<String>>,
 }
 
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct AuditEventQuery {
+    pub tail: Option<usize>,
+    pub kind: Option<String>,
+    pub since: Option<u64>,
+    pub key: Option<String>,
+}
+
 const DEFAULT_CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 const DEFAULT_REQUEST_TIMEOUT: Duration = Duration::from_secs(15);
 
@@ -347,7 +355,32 @@ impl SigillumClient {
     // ── Observability ───────────────────────────────────────────
 
     pub async fn audit_events(&self, limit: usize) -> Result<Vec<DaemonAuditEvent>, ClientError> {
-        let builder = self.request(Method::GET, &format!("/api/audit?limit={}", limit.max(1)));
+        self.audit_events_query(AuditEventQuery {
+            tail: Some(limit.max(1)),
+            ..AuditEventQuery::default()
+        })
+        .await
+    }
+
+    pub async fn audit_events_query(
+        &self,
+        query: AuditEventQuery,
+    ) -> Result<Vec<DaemonAuditEvent>, ClientError> {
+        let mut path = format!("/api/audit?tail={}", query.tail.unwrap_or(25).max(1));
+        if let Some(kind) = query.kind {
+            path.push_str("&kind=");
+            path.push_str(&urlencoding::encode(&kind));
+        }
+        if let Some(since) = query.since {
+            path.push_str("&since=");
+            path.push_str(&since.to_string());
+        }
+        if let Some(key) = query.key {
+            path.push_str("&key=");
+            path.push_str(&urlencoding::encode(&key));
+        }
+
+        let builder = self.request(Method::GET, &path);
         Ok(self
             .send::<sigillum_api::response::AuditResponse>(builder)
             .await?
@@ -1105,7 +1138,10 @@ mod tests {
         )
     }
 
-    async fn audit_route(headers: HeaderMap) -> (StatusCode, Json<serde_json::Value>) {
+    async fn audit_route(
+        headers: HeaderMap,
+        query: axum::extract::Query<std::collections::HashMap<String, String>>,
+    ) -> (StatusCode, Json<serde_json::Value>) {
         let auth = headers
             .get(header::AUTHORIZATION)
             .and_then(|v| v.to_str().ok())
@@ -1116,6 +1152,7 @@ mod tests {
                 Json(json!({ "error": "missing auth" })),
             );
         }
+        assert_eq!(query.0.get("tail").map(String::as_str), Some("10"));
         (
             StatusCode::OK,
             Json(json!({
@@ -2151,7 +2188,13 @@ mod tests {
         let client = SigillumClient::new(format!("http://{addr}"));
         client.set_session_token("test-token");
 
-        let events = client.audit_events(10).await.unwrap();
+        let events = client
+            .audit_events_query(AuditEventQuery {
+                tail: Some(10),
+                ..AuditEventQuery::default()
+            })
+            .await
+            .unwrap();
         assert_eq!(events.len(), 1);
         assert_eq!(events[0].kind, "secret.set");
         assert_eq!(events[0].compartment_id, Some(0));

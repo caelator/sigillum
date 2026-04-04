@@ -23,7 +23,8 @@
 
 use std::future::Future;
 use std::io::{self, Read};
-use std::process;
+use std::process::{self, Stdio};
+use std::time::{Duration, Instant};
 
 use serde::Serialize;
 use sigillum_api::request::{
@@ -34,6 +35,11 @@ use sigillum_api::request::{
     QueueProcessRequest,
 };
 use sigillum_client::{ClientError, SigillumClient};
+use url::Url;
+
+const DEFAULT_DAEMON_BASE_URL: &str = "http://127.0.0.1:9743";
+const DAEMON_READY_TIMEOUT: Duration = Duration::from_secs(10);
+const DAEMON_READY_POLL_INTERVAL: Duration = Duration::from_millis(200);
 
 /// Dispatch a `sigillum api <COMMAND>` invocation.
 pub fn cmd_api(args: &[String]) {
@@ -361,24 +367,83 @@ where
 fn build_client(args: &[String], require_session: bool) -> SigillumClient {
     let client = SigillumClient::new(daemon_base_url(args));
     if require_session {
-        let session = parse_flag(args, "--session")
-            .or_else(|| std::env::var("SIGILLUM_SESSION_TOKEN").ok())
-            .unwrap_or_else(|| {
-                eprintln!(
-                    "This command requires a daemon session token. Use --session <TOKEN> or set SIGILLUM_SESSION_TOKEN."
-                );
-                process::exit(1);
-            });
+        let session = require_session_token(args);
         client.set_session_token(session);
     }
     client
 }
 
 /// Resolve the daemon base URL from `--url` flag or `SIGILLUM_BASE_URL` env.
-fn daemon_base_url(args: &[String]) -> String {
+pub(crate) fn daemon_base_url(args: &[String]) -> String {
     parse_flag(args, "--url")
         .or_else(|| std::env::var("SIGILLUM_BASE_URL").ok())
-        .unwrap_or_else(|| "http://127.0.0.1:9743".into())
+        .unwrap_or_else(|| DEFAULT_DAEMON_BASE_URL.into())
+}
+
+pub(crate) fn session_token_from_args(args: &[String]) -> Option<String> {
+    parse_flag(args, "--session").or_else(|| std::env::var("SIGILLUM_SESSION_TOKEN").ok())
+}
+
+pub(crate) fn require_session_token(args: &[String]) -> String {
+    session_token_from_args(args).unwrap_or_else(|| {
+        eprintln!(
+            "This command requires a daemon session token. Use --session <TOKEN> or set SIGILLUM_SESSION_TOKEN."
+        );
+        process::exit(1);
+    })
+}
+
+pub(crate) fn ensure_daemon_ready(base_url: &str) -> Result<(), String> {
+    let runtime = tokio::runtime::Runtime::new().map_err(|error| error.to_string())?;
+    runtime.block_on(async move {
+        if daemon_reachable(base_url).await {
+            return Ok(());
+        }
+
+        let daemon_url = Url::parse(base_url).map_err(|error| error.to_string())?;
+        let host = daemon_url.host_str().unwrap_or_default();
+        if host != "127.0.0.1" && host != "localhost" {
+            return Err(format!(
+                "daemon at {base_url} is unreachable and cannot be auto-started for non-local hosts"
+            ));
+        }
+
+        let port = daemon_url
+            .port_or_known_default()
+            .ok_or_else(|| format!("daemon url {base_url} is missing a port"))?;
+        spawn_daemon_process(port).map_err(|error| error.to_string())?;
+
+        let deadline = Instant::now() + DAEMON_READY_TIMEOUT;
+        while Instant::now() < deadline {
+            if daemon_reachable(base_url).await {
+                return Ok(());
+            }
+            tokio::time::sleep(DAEMON_READY_POLL_INTERVAL).await;
+        }
+
+        Err(format!(
+            "daemon at {base_url} did not become ready within {}s",
+            DAEMON_READY_TIMEOUT.as_secs()
+        ))
+    })
+}
+
+async fn daemon_reachable(base_url: &str) -> bool {
+    SigillumClient::new(base_url.to_string()).status().await.is_ok()
+}
+
+fn spawn_daemon_process(port: u16) -> io::Result<()> {
+    let current_exe = std::env::current_exe()?;
+    let mut command = std::process::Command::new(current_exe);
+    command
+        .arg("daemon")
+        .arg("--port")
+        .arg(port.to_string())
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    let _child = command.spawn()?;
+    Ok(())
 }
 
 // ── Sensitive input handling ─────────────────────────────────────
