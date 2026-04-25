@@ -115,9 +115,15 @@ Current daemon behavior:
 - loads a startup-time runtime policy so queue limits, refresh limits, retry timing, and provider observation concurrency live behind one explicit seam instead of scattered literals
 - persists non-vault operator state behind schema-versioned JSON documents so storage evolution can add explicit migrations instead of implicit file-shape drift
 - composes the HTTP route surface from domain routers so endpoint wiring stays aligned with lifecycle, storage, wallet, deposit, queue, and FIDO2 service boundaries
-- renders the embedded operator UI from explicit shell/script template sections so CSP nonce handling stays declarative, operator navigation follows visible cards, and polling remains visibility-aware instead of interval-driven
+- renders the embedded operator UI from checked-in frontend assets under
+  `crates/sigillum-daemon/ui/src`; the Rust host only assembles HTML/CSS/script
+  assets and injects the CSP nonce, while TypeScript modules provide the
+  migration path away from the former monolithic UI string
 - exposes transit-style encrypt/decrypt/HMAC operations derived from the active compartment master key
 - centralizes daemon business rules behind an application-service layer instead of spreading them across route handlers
+- keeps wallet inventory discovery, risk derivation, and consolidation planning
+  separated inside the daemon service so future asset/protocol adapters have
+  explicit homes rather than accumulating in one inventory module
 - stores provider profiles and stealth wallet profiles for internal EVM integration, with explicit compartment binding so queued work does not depend on the session's currently active compartment
 - tracks stealth deposit records and refreshes them against configured providers
 - queues direct sends and sweep jobs, including deferred jobs that need more balance or gas
@@ -149,3 +155,5 @@ The next clean architecture step is not adding more crates. It is tightening inv
 4. Build richer chain/indexing and policy automation on top of the shared `sigillum-api` contract instead of route-local JSON drift.
 5. Grow that indexing layer into the local wallet inventory and consolidation
    model described in [Comprehensive Wallet Management Roadmap](wallet-management-roadmap.md).
+6. Preserve architecture boundaries with lightweight CI checks for known
+   monoliths, embedded UI asset placement, and daemon UI TypeScript type-checks.

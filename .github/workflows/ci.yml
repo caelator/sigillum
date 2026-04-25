@@ -36,6 +36,15 @@ jobs:
       - name: Run workspace tests
         run: cargo test --workspace --quiet
 
+      - name: Check architecture boundaries
+        run: ./scripts/check-architecture.sh
+
+      - name: Install daemon UI dependencies
+        run: npm --prefix crates/sigillum-daemon/ui ci --ignore-scripts
+
+      - name: Type-check daemon UI
+        run: npm --prefix crates/sigillum-daemon/ui run typecheck
+
       - name: Check formatting
         run: cargo fmt --all --check
 
