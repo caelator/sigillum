@@ -19,6 +19,7 @@
   let modal = null;
   let pollTimer = null;
   let activePaymentId = null;
+  let previousFocus = null;
 
   const SigillumPay = {
     configure(opts) {
@@ -67,6 +68,11 @@
       if (!modal) return;
       modal.remove();
       modal = null;
+      document.removeEventListener("keydown", handleModalKeydown);
+      if (previousFocus && typeof previousFocus.focus === "function") {
+        previousFocus.focus({ preventScroll: true });
+      }
+      previousFocus = null;
     },
   };
 
@@ -78,6 +84,7 @@
   }
 
   function createModalShell() {
+    previousFocus = document.activeElement;
     const overlay = document.createElement("div");
     overlay.className = "sgw-overlay";
     overlay.addEventListener("click", (event) => {
@@ -86,6 +93,9 @@
 
     const card = document.createElement("div");
     card.className = "sgw-modal";
+    card.setAttribute("role", "dialog");
+    card.setAttribute("aria-modal", "true");
+    card.tabIndex = -1;
 
     const close = document.createElement("button");
     close.type = "button";
@@ -96,7 +106,16 @@
 
     card.appendChild(close);
     overlay.appendChild(card);
+    document.addEventListener("keydown", handleModalKeydown);
     return { overlay, card };
+  }
+
+  function handleModalKeydown(event) {
+    if (event.key === "Escape") SigillumPay.close();
+  }
+
+  function focusModal(card) {
+    requestAnimationFrame(() => card.focus({ preventScroll: true }));
   }
 
   function showModal(message, state) {
@@ -118,6 +137,7 @@
     shell.card.appendChild(content);
     document.body.appendChild(shell.overlay);
     modal = shell.overlay;
+    focusModal(shell.card);
   }
 
   function showPaymentDetails(payment, opts) {
@@ -125,7 +145,6 @@
     SigillumPay.close();
 
     const addr = String(payment.stealth_address || "");
-    const shortAddr = addr.length > 14 ? `${addr.slice(0, 8)}...${addr.slice(-6)}` : addr;
     const shell = createModalShell();
     const content = document.createElement("div");
     content.className = "sgw-content sgw-payment";
@@ -134,28 +153,45 @@
     header.className = "sgw-header";
     const icon = document.createElement("div");
     icon.className = "sgw-icon";
-    icon.textContent = "Payment";
+    icon.textContent = "S";
+    const headerText = document.createElement("div");
     const title = document.createElement("h2");
-    title.textContent = "Send Payment";
+    title.textContent = "Sigillum Pay";
+    const subtitle = document.createElement("div");
+    subtitle.className = "sgw-subtitle";
+    subtitle.textContent = "Local sidecar payment";
+    headerText.appendChild(title);
+    headerText.appendChild(subtitle);
     header.appendChild(icon);
-    header.appendChild(title);
+    header.appendChild(headerText);
 
     const amount = document.createElement("div");
     amount.className = "sgw-amount";
-    amount.textContent = `${formatAmount(payment.amount_wei)} ${payment.token_address ? "tokens" : "ETH"}`;
+    const amountValue = document.createElement("div");
+    amountValue.className = "sgw-amount-value";
+    amountValue.textContent = `${formatAmount(payment.amount_wei)} ${payment.token_address ? "units" : "ETH"}`;
+    const amountLabel = document.createElement("div");
+    amountLabel.className = "sgw-amount-label";
+    amountLabel.textContent = payment.token_address ? "Token amount" : "Native amount";
+    amount.appendChild(amountValue);
+    amount.appendChild(amountLabel);
 
-    const chain = document.createElement("div");
-    chain.className = "sgw-chain";
-    chain.textContent = `Chain ID: ${payment.chain_id}`;
+    const details = document.createElement("div");
+    details.className = "sgw-detail-grid";
+    details.appendChild(detailCell("Chain", String(payment.chain_id || "-")));
+    details.appendChild(detailCell("Payment", String(payment.payment_id || "-")));
+    if (payment.token_address) {
+      details.appendChild(detailCell("Token", String(payment.token_address)));
+    }
 
     const addressBox = document.createElement("div");
     addressBox.className = "sgw-address-box";
     const label = document.createElement("label");
-    label.textContent = "Send to this address:";
+    label.textContent = "Destination address";
     const address = document.createElement("div");
     address.className = "sgw-address";
     address.title = addr;
-    address.textContent = shortAddr;
+    address.textContent = addr;
     const copy = document.createElement("button");
     copy.type = "button";
     copy.className = "sgw-copy";
@@ -178,25 +214,41 @@
 
     const status = document.createElement("div");
     status.className = "sgw-status";
+    status.setAttribute("aria-live", "polite");
     setStatus(status, "Waiting for payment...", { pending: true });
 
     const expires = document.createElement("div");
     expires.className = "sgw-expires";
-    expires.textContent = `Expires: ${formatExpiry(payment.expires_at)}`;
+    expires.textContent = `Expires ${formatExpiry(payment.expires_at)}`;
 
     content.appendChild(header);
     content.appendChild(amount);
-    content.appendChild(chain);
+    content.appendChild(details);
     content.appendChild(addressBox);
     content.appendChild(status);
     content.appendChild(expires);
     shell.card.appendChild(content);
     document.body.appendChild(shell.overlay);
     modal = shell.overlay;
+    focusModal(shell.card);
 
     // Start polling for confirmation
     activePaymentId = payment.payment_id;
     void pollPayment(payment.payment_id, status, opts);
+  }
+
+  function detailCell(label, value) {
+    const cell = document.createElement("div");
+    cell.className = "sgw-detail";
+    const labelEl = document.createElement("div");
+    labelEl.className = "sgw-detail-label";
+    labelEl.textContent = label;
+    const valueEl = document.createElement("div");
+    valueEl.className = "sgw-detail-value";
+    valueEl.textContent = value;
+    cell.appendChild(labelEl);
+    cell.appendChild(valueEl);
+    return cell;
   }
 
   function setStatus(statusEl, message, options = {}) {
@@ -268,11 +320,20 @@
   function formatAmount(weiHex) {
     try {
       const wei = BigInt(weiHex);
-      const eth = Number(wei) / 1e18;
-      return eth.toFixed(eth < 0.001 ? 6 : 4);
+      return formatUnits(wei, 18, 6);
     } catch {
       return weiHex;
     }
+  }
+
+  function formatUnits(value, decimals, fractionDigits) {
+    const base = 10n ** BigInt(decimals);
+    const whole = value / base;
+    const fraction = value % base;
+    if (fraction === 0n) return whole.toString();
+    const padded = fraction.toString().padStart(decimals, "0");
+    const visible = padded.slice(0, fractionDigits).replace(/0+$/, "");
+    return visible ? `${whole}.${visible}` : whole.toString();
   }
 
   function ensureStyles() {

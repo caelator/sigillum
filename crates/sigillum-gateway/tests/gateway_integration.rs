@@ -304,8 +304,7 @@ async fn gateway_rate_limits_repeated_requests()
 
     assert!(
         statuses.contains(&reqwest::StatusCode::TOO_MANY_REQUESTS),
-        "expected the gateway to rate limit repeated requests, got {:?}",
-        statuses
+        "expected the gateway to rate limit repeated requests, got {statuses:?}"
     );
     Ok(())
 }

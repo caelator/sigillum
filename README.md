@@ -127,8 +127,12 @@ For scriptable daemon operations, the CLI now exposes JSON-oriented commands
 under `sigillum api`, including session unlock, compartment switching, provider
 and wallet profile management, deposit management, queue inspection, and
 maintenance runs. These commands default to `http://127.0.0.1:9743`, accept
-`--url`, and use `--session` or `SIGILLUM_SESSION_TOKEN` for authenticated
-calls.
+`--url`, `SIGILLUM_BASE_URL`, or `SIGILLUM_DAEMON_URL`, and use `--session` or
+`SIGILLUM_SESSION_TOKEN` for authenticated calls.
+
+Run `sigillum doctor` before treating a machine as ready. It checks the local
+data directory, loopback daemon URL, daemon reachability, session-token state,
+audit database readability, and common Sigillum environment variables.
 
 The `sigillum-gateway` crate is a companion local-sidecar surface for payment
 preview and webhook flow testing. It is designed to sit beside the local daemon
@@ -152,9 +156,13 @@ Sigillum currently uses:
 - `aes-gcm` for Tier 2 encryption
 - `argon2` for passphrase-derived wrapping keys
 - `zeroize` and `secrecy` for safer key and secret handling
+- RustCrypto `hmac` + `sha1` for RFC-compatible TOTP generation
 - `ctap-hid-fido2` for USB HID FIDO2 operations
 
 FIDO2 support is based on protecting randomly generated vault master keys with encrypted shard material. The hardware keys protect shard recovery; they do not directly derive the vault master key.
+
+Generated passphrases use the bundled BIP-39 English word list and default to
+8 words. Use `sigillum generate passphrase --words N` to override that length.
 
 ## Ethereum Stealth Flow
 
@@ -236,6 +244,15 @@ sigillum-fido2 = { version = "0.1", default-features = false }
 
 ## Development
 
+The application release contract is a clean checkout with the committed
+`Cargo.lock` and the pinned Rust toolchain in `rust-toolchain.toml`.
+
+Metadata:
+
+```bash
+cargo metadata --no-deps --format-version 1
+```
+
 Build:
 
 ```bash
@@ -251,7 +268,20 @@ cargo test --workspace
 Format:
 
 ```bash
-cargo fmt --all
+cargo fmt --all --check
+```
+
+Lint:
+
+```bash
+cargo clippy --workspace --all-targets -- -D warnings
+```
+
+Supply-chain checks:
+
+```bash
+cargo audit
+cargo deny check
 ```
 
 ## Status
@@ -259,9 +289,13 @@ cargo fmt --all
 Sigillum now has a shared daemon/client API contract, a service-layer split
 inside the daemon, and a coherent local wallet/deposit/sweep control plane for
 Ethereum stealth custody. The next architectural work is deeper crash recovery,
-richer chain indexing, broader policy automation, and finishing the local-sidecar
-gateway polish, not another round of ad hoc transport or route growth and not a
-shift toward internet deployment.
+richer chain indexing, broader policy automation, and the wallet discovery and
+consolidation roadmap in
+[`docs/wallet-management-roadmap.md`](docs/wallet-management-roadmap.md). That
+roadmap covers seed/xpub gap-limit discovery, old-wallet classification, L1/L2
+holdings, ERC-20s, NFTs, DeFi positions, airdrops/rewards, allowances, and
+reviewable consolidation planning. This is not another round of ad hoc transport
+or route growth and not a shift toward internet deployment.
 
 ## License
 

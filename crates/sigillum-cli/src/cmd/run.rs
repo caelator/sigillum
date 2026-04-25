@@ -9,8 +9,8 @@
 //!              (active compartment if compartment: is omitted)
 
 use std::collections::HashMap;
-use std::process::{Command, Stdio};
 use std::env;
+use std::process::{Command, Stdio};
 
 use crate::daemon_api::{daemon_base_url, ensure_daemon_ready, require_session_token};
 use sigillum_client::SigillumClient;
@@ -19,14 +19,7 @@ use crate::exec::supervisor::ChildSupervisor;
 
 /// Minimum env vars to always preserve when --clear-env is used.
 const SAFE_ENV_VARS: &[&str] = &[
-    "PATH",
-    "HOME",
-    "USER",
-    "LOGNAME",
-    "SHELL",
-    "TMPDIR",
-    "LANG",
-    "LC_ALL",
+    "PATH", "HOME", "USER", "LOGNAME", "SHELL", "TMPDIR", "LANG", "LC_ALL",
 ];
 
 /// Parse --env NAME=ref arguments from the command line.
@@ -49,7 +42,7 @@ fn parse_env_flags(args: &[String]) -> (HashMap<String, String>, Vec<String>) {
             if let Some((name, ref_part)) = rest.split_once('=') {
                 env_vars.insert(name.to_string(), ref_part.to_string());
             } else {
-                eprintln!("error: --env= requires NAME=ref format, got: {}", rest);
+                eprintln!("error: --env= requires NAME=ref format, got: {rest}");
                 std::process::exit(1);
             }
         } else if arg == "--env" && i + 1 < args.len() {
@@ -58,7 +51,10 @@ fn parse_env_flags(args: &[String]) -> (HashMap<String, String>, Vec<String>) {
                 env_vars.insert(name.to_string(), ref_part.to_string());
                 i += 1;
             } else {
-                eprintln!("error: --env requires NAME=ref format, got: {}", args[i + 1]);
+                eprintln!(
+                    "error: --env requires NAME=ref format, got: {}",
+                    args[i + 1]
+                );
                 std::process::exit(1);
             }
         } else if arg == "--clear-env" {
@@ -68,7 +64,7 @@ fn parse_env_flags(args: &[String]) -> (HashMap<String, String>, Vec<String>) {
             positional.extend_from_slice(&args[i..]);
             break;
         } else {
-            eprintln!("error: unknown flag: {}", arg);
+            eprintln!("error: unknown flag: {arg}");
             eprintln!("Usage: sigillum run --env NAME=ref [--] -- command [args...]");
             std::process::exit(1);
         }
@@ -86,10 +82,7 @@ fn has_clear_env(args: &[String]) -> bool {
 /// Build the environment for the child process.
 /// If clear_env is true, start from scratch and only add safe vars + injected secrets.
 /// Otherwise, inherit current env and add injected secrets.
-fn build_child_env(
-    clear_env: bool,
-    injected: HashMap<String, String>,
-) -> HashMap<String, String> {
+fn build_child_env(clear_env: bool, injected: HashMap<String, String>) -> HashMap<String, String> {
     let mut env = if clear_env {
         HashMap::new()
     } else {
@@ -142,13 +135,11 @@ fn resolve_secrets(
 
     let request = sigillum_api::request::SecretResolveBatchRequest { entries };
 
-    let values = runtime.block_on(client.resolve_secret_batch(request))
-        .map_err(|e| format!("failed to resolve secrets: {}", e))?;
+    let values = runtime
+        .block_on(client.resolve_secret_batch(request))
+        .map_err(|e| format!("failed to resolve secrets: {e}"))?;
 
-    Ok(values
-        .into_iter()
-        .map(|v| (v.env_name, v.value))
-        .collect())
+    Ok(values.into_iter().map(|v| (v.env_name, v.value)).collect())
 }
 
 /// Record run completion audit event.
@@ -175,8 +166,9 @@ fn record_audit(
         success,
     };
 
-    runtime.block_on(client.record_run_audit(request))
-        .map_err(|e| format!("failed to record audit: {}", e))?;
+    runtime
+        .block_on(client.record_run_audit(request))
+        .map_err(|e| format!("failed to record audit: {e}"))?;
     Ok(())
 }
 
@@ -196,7 +188,7 @@ pub fn cmd_run(args: &[String]) {
 
     // Ensure daemon is running
     if let Err(e) = ensure_daemon_ready(&base_url) {
-        eprintln!("error: {}", e);
+        eprintln!("error: {e}");
         std::process::exit(1);
     }
 
@@ -204,7 +196,7 @@ pub fn cmd_run(args: &[String]) {
     let resolved = match resolve_secrets(&base_url, &session_token, &env_flags) {
         Ok(v) => v,
         Err(e) => {
-            eprintln!("error: {}", e);
+            eprintln!("error: {e}");
             std::process::exit(1);
         }
     };
@@ -229,17 +221,31 @@ pub fn cmd_run(args: &[String]) {
     let mut supervisor = match ChildSupervisor::spawn(&mut cmd) {
         Ok(s) => s,
         Err(e) => {
-            eprintln!("error: failed to spawn child: {}", e);
+            eprintln!("error: failed to spawn child: {e}");
             std::process::exit(1);
         }
     };
 
     // Wait for child and record audit
-    let (exit_code, signal) = supervisor.wait();
-    let success = exit_code.map_or(false, |c| c == 0);
+    let (exit_code, signal) = match supervisor.wait() {
+        Ok(status) => status,
+        Err(e) => {
+            eprintln!("error: failed to wait for child: {e}");
+            std::process::exit(1);
+        }
+    };
+    let success = exit_code == Some(0);
 
-    if let Err(e) = record_audit(&base_url, &session_token, program, child_args, exit_code, signal, success) {
-        eprintln!("warning: failed to record audit: {}", e);
+    if let Err(e) = record_audit(
+        &base_url,
+        &session_token,
+        program,
+        child_args,
+        exit_code,
+        signal,
+        success,
+    ) {
+        eprintln!("warning: failed to record audit: {e}");
     }
 
     // Exit with child's status

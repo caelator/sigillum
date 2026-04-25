@@ -1,121 +1,67 @@
 <!-- gitnexus:start -->
-# GitNexus — Code Intelligence
+# GitNexus + MemoryPort Standard
 
-This project is indexed by GitNexus as **sigillum** (3021 symbols, 9298 relationships, 264 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
+This repo is managed by the machine-wide GitNexus + MemoryPort standard.
 
-> If any GitNexus tool warns the index is stale, run `npx gitnexus analyze` in terminal first.
+## Tool Roles
 
-## Always Do
+- **GitNexus** is authoritative for code structure, dependency analysis, caller/callee context, execution-flow tracing, and repo indexing.
+- **MemoryPort** is authoritative for durable cross-session memory such as decisions, preferences, runbooks, and sanitized work outcomes.
+- **MemoryPort is not the source of truth for discoverable repo facts.** Use GitNexus and the code itself for those.
 
-- **MUST run impact analysis before editing any symbol.** Before modifying a function, class, or method, run `gitnexus_impact({target: "symbolName", direction: "upstream"})` and report the blast radius (direct callers, affected processes, risk level) to the user.
-- **MUST run `gitnexus_detect_changes()` before committing** to verify your changes only affect expected symbols and execution flows.
-- **MUST warn the user** if impact analysis returns HIGH or CRITICAL risk before proceeding with edits.
-- When exploring unfamiliar code, use `gitnexus_query({query: "concept"})` to find execution flows instead of grepping. It returns process-grouped results ranked by relevance.
-- When you need full context on a specific symbol — callers, callees, which execution flows it participates in — use `gitnexus_context({name: "symbolName"})`.
+## GitNexus Workflow
 
-## When Debugging
+### Session start
 
-1. `gitnexus_query({query: "<error or symptom>"})` — find execution flows related to the issue
-2. `gitnexus_context({name: "<suspect function>"})` — see all callers, callees, and process participation
-3. `READ gitnexus://repo/sigillum/process/{processName}` — trace the full execution flow step by step
-4. For regressions: `gitnexus_detect_changes({scope: "compare", base_ref: "main"})` — see what your branch changed
+- Check `npx gitnexus status` or read `gitnexus://repo/{name}/context` to confirm the index is fresh.
+- If the index is stale, run `gitnexus-analyze-safe <repo_path>`.
 
-## When Refactoring
+### Exploration and debugging
 
-- **Renaming**: MUST use `gitnexus_rename({symbol_name: "old", new_name: "new", dry_run: true})` first. Review the preview — graph edits are safe, text_search edits need manual review. Then run with `dry_run: false`.
-- **Extracting/Splitting**: MUST run `gitnexus_context({name: "target"})` to see all incoming/outgoing refs, then `gitnexus_impact({target: "target", direction: "upstream"})` to find all external callers before moving code.
-- After any refactor: run `gitnexus_detect_changes({scope: "all"})` to verify only expected files changed.
+- Use `gitnexus_query({query: "concept"})` to find relevant execution flows and symbols.
+- Use `gitnexus_context({name: "symbolName"})` for callers, callees, and process participation.
+- Use `gitnexus_impact({target: "symbolName", direction: "upstream"})` before changing any symbol.
+- Use `gitnexus_cypher({query: "MATCH ..."})` only when the built-in tools are not enough.
+- Read `gitnexus://repo/{name}/process/{processName}` when you need the full execution trace.
 
-## Never Do
+### Before editing symbols
 
-- NEVER edit a function, class, or method without first running `gitnexus_impact` on it.
-- NEVER ignore HIGH or CRITICAL risk warnings from impact analysis.
-- NEVER rename symbols with find-and-replace — use `gitnexus_rename` which understands the call graph.
-- NEVER commit changes without running `gitnexus_detect_changes()` to check affected scope.
+- Run `gitnexus_impact` for each function, class, or method you plan to modify.
+- Warn the user before proceeding when GitNexus reports HIGH or CRITICAL risk.
+- Review and update all d=1 upstream dependents that would otherwise break.
 
-## Tools Quick Reference
+### Before commit
 
-| Tool | When to use | Command |
-|------|-------------|---------|
-| `query` | Find code by concept | `gitnexus_query({query: "auth validation"})` |
-| `context` | 360-degree view of one symbol | `gitnexus_context({name: "validateUser"})` |
-| `impact` | Blast radius before editing | `gitnexus_impact({target: "X", direction: "upstream"})` |
-| `detect_changes` | Pre-commit scope check | `gitnexus_detect_changes({scope: "staged"})` |
-| `rename` | Safe multi-file rename | `gitnexus_rename({symbol_name: "old", new_name: "new", dry_run: true})` |
-| `cypher` | Custom graph queries | `gitnexus_cypher({query: "MATCH ..."})` |
+- Review the staged diff directly.
+- Re-run `gitnexus_impact` for materially changed symbols and verify the affected callers and flows still make sense.
+- Do not rely on `detect_changes` or `rename` unless the installed GitNexus surface actually exposes them. The verified machine standard does not.
 
-## Impact Risk Levels
+### After meaningful code changes
 
-| Depth | Meaning | Action |
-|-------|---------|--------|
-| d=1 | WILL BREAK — direct callers/importers | MUST update these |
-| d=2 | LIKELY AFFECTED — indirect deps | Should test |
-| d=3 | MAY NEED TESTING — transitive | Test if critical path |
+- Run `gitnexus-analyze-safe <repo_path>` so the index and generated repo docs stay in sync.
 
-## Resources
+## MemoryPort Workflow
 
-| Resource | Use for |
-|----------|---------|
-| `gitnexus://repo/sigillum/context` | Codebase overview, check index freshness |
-| `gitnexus://repo/sigillum/clusters` | All functional areas |
-| `gitnexus://repo/sigillum/processes` | All execution flows |
-| `gitnexus://repo/sigillum/process/{name}` | Step-by-step execution trace |
+- At the beginning of work, query MemoryPort MCP for relevant prior decisions or project context.
+- After durable outcomes, store a sanitized project-memory note through the MemoryPort MCP store tool.
+- Prefer local retrieval first. Permanent-capable storage is used when a valid MemoryPort `uc_...` API key is configured.
 
-## Self-Check Before Finishing
+## MemoryPort Safety Rules
 
-Before completing any code modification task, verify:
-1. `gitnexus_impact` was run for all modified symbols
-2. No HIGH/CRITICAL risk warnings were ignored
-3. `gitnexus_detect_changes()` confirms changes match expected scope
-4. All d=1 (WILL BREAK) dependents were updated
+- Never store secrets, API keys, tokens, passwords, or raw credentials.
+- Never store unsanitized PHI, regulated medical data, or raw patient/customer/doctor records.
+- Store durable summaries, decisions, preferences, environment notes, and sanitized outcomes instead.
+- If something is sensitive but worth remembering, store only the minimal abstracted summary needed later.
 
-## Keeping the Index Fresh
-
-After committing code changes, the GitNexus index becomes stale. Re-run analyze to update it:
-
-```bash
-npx gitnexus analyze
-```
-
-If the index previously included embeddings, preserve them by adding `--embeddings`:
-
-```bash
-npx gitnexus analyze --embeddings
-```
-
-To check whether embeddings exist, inspect `.gitnexus/meta.json` — the `stats.embeddings` field shows the count (0 means no embeddings). **Running analyze without `--embeddings` will delete any previously generated embeddings.**
-
-> Claude Code users: A PostToolUse hook handles this automatically after `git commit` and `git merge`.
-
-## CLI
+## Skill Paths
 
 | Task | Read this skill file |
-|------|---------------------|
-| Understand architecture / "How does X work?" | `.claude/skills/gitnexus/gitnexus-exploring/SKILL.md` |
-| Blast radius / "What breaks if I change X?" | `.claude/skills/gitnexus/gitnexus-impact-analysis/SKILL.md` |
-| Trace bugs / "Why is X failing?" | `.claude/skills/gitnexus/gitnexus-debugging/SKILL.md` |
-| Rename / extract / split / refactor | `.claude/skills/gitnexus/gitnexus-refactoring/SKILL.md` |
-| Tools, resources, schema reference | `.claude/skills/gitnexus/gitnexus-guide/SKILL.md` |
-| Index, status, clean, wiki CLI commands | `.claude/skills/gitnexus/gitnexus-cli/SKILL.md` |
-| Work in the Service area (368 symbols) | `.claude/skills/generated/service/SKILL.md` |
-| Work in the Routes area (248 symbols) | `.claude/skills/generated/routes/SKILL.md` |
-| Work in the Tests area (159 symbols) | `.claude/skills/generated/tests/SKILL.md` |
-| Work in the Cluster_66 area (64 symbols) | `.claude/skills/generated/cluster-66/SKILL.md` |
-| Work in the Cluster_67 area (50 symbols) | `.claude/skills/generated/cluster-67/SKILL.md` |
-| Work in the Cluster_13 area (34 symbols) | `.claude/skills/generated/cluster-13/SKILL.md` |
-| Work in the Cluster_6 area (33 symbols) | `.claude/skills/generated/cluster-6/SKILL.md` |
-| Work in the Support area (20 symbols) | `.claude/skills/generated/support/SKILL.md` |
-| Work in the Static area (13 symbols) | `.claude/skills/generated/static/SKILL.md` |
-| Work in the Cluster_23 area (13 symbols) | `.claude/skills/generated/cluster-23/SKILL.md` |
-| Work in the Cluster_41 area (11 symbols) | `.claude/skills/generated/cluster-41/SKILL.md` |
-| Work in the Cluster_0 area (9 symbols) | `.claude/skills/generated/cluster-0/SKILL.md` |
-| Work in the Cluster_19 area (9 symbols) | `.claude/skills/generated/cluster-19/SKILL.md` |
-| Work in the Cluster_21 area (9 symbols) | `.claude/skills/generated/cluster-21/SKILL.md` |
-| Work in the Cluster_8 area (8 symbols) | `.claude/skills/generated/cluster-8/SKILL.md` |
-| Work in the Cluster_46 area (8 symbols) | `.claude/skills/generated/cluster-46/SKILL.md` |
-| Work in the Cluster_11 area (7 symbols) | `.claude/skills/generated/cluster-11/SKILL.md` |
-| Work in the Cluster_15 area (7 symbols) | `.claude/skills/generated/cluster-15/SKILL.md` |
-| Work in the Classif area (7 symbols) | `.claude/skills/generated/classif/SKILL.md` |
-| Work in the Cluster_42 area (7 symbols) | `.claude/skills/generated/cluster-42/SKILL.md` |
+|------|----------------------|
+| Understand architecture / "How does X work?" | `.agents/skills/gitnexus/gitnexus-exploring/SKILL.md` |
+| Blast radius / "What breaks if I change X?" | `.agents/skills/gitnexus/gitnexus-impact-analysis/SKILL.md` |
+| Trace bugs / "Why is X failing?" | `.agents/skills/gitnexus/gitnexus-debugging/SKILL.md` |
+| Refactor safely | `.agents/skills/gitnexus/gitnexus-refactoring/SKILL.md` |
+| Tools, resources, schema reference | `.agents/skills/gitnexus/gitnexus-guide/SKILL.md` |
+| Index, status, clean, wiki CLI commands | `.agents/skills/gitnexus/gitnexus-cli/SKILL.md` |
 
 <!-- gitnexus:end -->

@@ -84,9 +84,7 @@ pub async fn create_project(
     )
     .await
     .map_err(|e| match e {
-        GatewayError::Database(sqlx::Error::Database(ref db_err))
-            if db_err.message().contains("UNIQUE") =>
-        {
+        ref error if db::is_unique_constraint(error) => {
             GatewayError::Conflict(format!("project '{}' already exists", body.name))
         }
         other => other,

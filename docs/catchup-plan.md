@@ -202,38 +202,61 @@ Exit criteria:
 - destructive flows are fail-closed and recoverable
 - recovery guarantees are documented and tested
 
-## Phase 3 — Implement `eth-xpub` Project Wallets And Treasury Roles
+## Phase 3 — Implement Wallet Discovery, Inventory, And Consolidation
 
-Objective: add the new HD project-wallet family without lowering the maturity bar
- of the existing system.
+Objective: add the discovery layer needed for Sigillum to become a complete
+self-hosted wallet management system without lowering the maturity bar of the
+existing system. See [Comprehensive Wallet Management Roadmap](wallet-management-roadmap.md)
+for the full product target.
 
 Deliverables:
 
-- Add a new `eth-xpub` wallet family alongside `eth-stealth`.
-- Export only the receive-branch `xpub` at
-  `m/44'/60'/{project_account}'/0/*`.
-- Reserve a hidden sibling control branch under
-  `m/44'/60'/{project_account}'/1/*`:
+- Add a wallet inventory subsystem for discovered wallet groups, derivation
+  paths, addresses, activity windows, signing capability, and confidence.
+- Expand `eth-xpub` and `eth-seed` from visibility profiles into discoverable
+  wallet families.
+- Export only the receive-branch `xpub` at `m/44'/60'/{project_account}'/0/*`
+  for project wallets.
+- Reserve a hidden sibling control branch under `m/44'/60'/{project_account}'/1/*`:
   - `/1/0` sponsor wallet
   - `/1/1` hot wallet
   - `/1/2` treasury wallet
-- Add gap-limit discovery for receive addresses on the public branch.
-- Support native ETH plus allowlisted ERC-20 discovery per project profile.
-- Sweep discovered child addresses into the hidden hot wallet.
+- Add gap-limit discovery for seed and xpub receive addresses, including common
+  Ethereum wallet derivation paths and configurable historical account scans.
+- Support native holdings across configured EVM L1/L2 provider profiles.
+- Discover ERC-20 balances from allowlists, transfer logs, token registries, and
+  positive balance probes.
+- Add NFT inventory for ERC-721 and ERC-1155 assets, with spam and provenance
+  classification before any transfer support.
+- Add allowance and approval discovery for ERC-20 and NFT approvals.
+- Add DeFi position discovery for common lending, staking, LP, vault, bridge,
+  vesting, streaming, and rewards contracts through isolated protocol adapters.
+- Add airdrop and reward discovery with strict claim-risk classification and no
+  blind auto-claim behavior.
+- Add dormant-wallet and stranded-value classification so old/unused wallets
+  with value are surfaced clearly.
+- Add a consolidation planner that produces reviewable execution graphs before
+  any sweep, claim, exit, revoke, swap, or treasury transfer is queued.
+- Sweep discovered child addresses into the hidden hot wallet only after dry-run,
+  simulation, policy checks, and operator review.
 - Use the sponsor wallet for gas top-ups where required.
 - Add treasury policies:
   - hot overflow moves excess to treasury
   - treasury refill restores hot to target when it drops below floor
   - treasury execution is gated by Sigillum quorum authority using compartment
     threshold state
-- Add full API/client/storage/test/doc coverage for the new family before
-  considering it done.
+- Add full API/client/storage/UI/CLI/test/doc coverage before considering the
+  discovery and consolidation family done.
 
 Exit criteria:
 
-- project-scoped xpub wallets are discoverable, sweepable, and operable entirely
-  from Sigillum
-- website only needs exported public material
+- imported seeds, xpub wallets, stealth wallets, and Sigillum-managed wallets
+  are inventoried from Sigillum
+- old/unused wallets with native value, tokens, NFTs, DeFi positions, rewards,
+  airdrops, or risky allowances are visible with confidence and freshness
+- consolidation plans are dry-run, simulated, policy-checked, and auditable
+  before execution
+- project websites only need exported public material
 - treasury policies are test-backed and operationally visible
 
 ## Phase 4 — Remote And Platform Catch-Up
@@ -300,7 +323,12 @@ This is the concrete execution order from here:
 
 - add project-scoped receive `xpub` export
 - add hidden sponsor/hot/treasury control branch support
-- add discovery, sweeping, and treasury policy flows
+- add seed/xpub gap-limit discovery, wallet inventory, EVM L1/L2 asset
+  discovery, and treasury policy flows
+- add ERC-20, NFT, allowance, DeFi, airdrop/reward, dormant-wallet, and
+  stranded-value findings
+- add consolidation planning before expanding sweep execution beyond current
+  stealth flows
 
 ### Batch E — Remote/Platform Decision
 

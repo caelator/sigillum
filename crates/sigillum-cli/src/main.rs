@@ -56,6 +56,7 @@ fn main() {
         "delete" => cmd_delete(&args[2..]),
         "list" => cmd_list(),
         "audit" => cmd::audit::cmd_audit(&args[2..]),
+        "doctor" => cmd::doctor::cmd_doctor(&args[2..]),
         "generate" => cmd::generate::cmd_generate(&args[2..]),
         "run" => cmd::run::cmd_run(&args[2..]),
         "set-api" => cmd_set_api(&args[2..]),
@@ -97,6 +98,7 @@ COMMANDS:
     delete <KEY>      Delete a Tier 2 secret
     list              List all keys (both tiers)
     audit             Query audit events through the daemon API
+    doctor            Check local daemon, data dir, session, audit DB, and env
     generate          Generate passwords, passphrases, or TOTPs
     run               Inject resolved secrets into a child process
 
@@ -1286,10 +1288,14 @@ fn cmd_daemon(args: &[String]) {
 
 // ── Helpers ─────────────────────────────────────────────────────
 
-fn base_dir() -> PathBuf {
-    dirs::home_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join(".sigillum")
+pub(crate) fn base_dir() -> PathBuf {
+    std::env::var_os("SIGILLUM_BASE_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| {
+            dirs::home_dir()
+                .unwrap_or_else(|| PathBuf::from("."))
+                .join(".sigillum")
+        })
 }
 
 fn fido2_manager() -> Fido2Manager {

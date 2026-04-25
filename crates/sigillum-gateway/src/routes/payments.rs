@@ -61,11 +61,7 @@ fn existing_payment_response(existing: &db::row::Payment) -> Value {
 }
 
 fn is_unique_constraint(error: &GatewayError) -> bool {
-    matches!(
-        error,
-        GatewayError::Database(sqlx::Error::Database(db_err))
-            if db_err.message().contains("UNIQUE")
-    )
+    db::is_unique_constraint(error)
 }
 
 async fn rollback_created_deposit(state: &AppState, deposit_id: &str, insert_error: &GatewayError) {

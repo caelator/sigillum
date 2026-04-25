@@ -504,6 +504,25 @@ pub struct EthXpubWalletProfileUpsertRequest {
     pub default_destination_address: Option<String>,
 }
 
+/// Import or update an Ethereum seed-phrase wallet profile.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct EthSeedWalletProfileUpsertRequest {
+    pub name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
+    pub mnemonic: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mnemonic_passphrase: Option<String>,
+    pub project_account: u32,
+    pub provider_profile: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub compartment_id: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub chain_id: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub default_destination_address: Option<String>,
+}
+
 /// Export the receive-branch xpub for a saved xpub wallet profile.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct EthXpubExportRequest {
@@ -515,6 +534,88 @@ pub struct EthXpubExportRequest {
 pub struct EthXpubDeriveRequest {
     pub xpub: String,
     pub index: u32,
+}
+
+// ── Wallet inventory and discovery ─────────────────────────────────
+
+/// Run read-only EVM wallet discovery for imported seed and xpub profiles.
+///
+/// When no wallet filter is provided, all `eth-seed` and `eth-xpub` profiles
+/// are scanned. When no provider filter is provided, every configured EVM
+/// provider profile is scanned so one derived address can be checked across
+/// multiple L1/L2 networks.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct WalletInventoryScanRequest {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub wallet_family: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub wallet_profile: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub provider_profile: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub gap_limit: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_index: Option<u32>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub token_addresses: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub block_tag: Option<String>,
+}
+
+/// Create or update a local chain profile used by discovery and planning.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ChainProfileUpsertRequest {
+    pub name: String,
+    pub chain_family: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub chain_id: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub provider_profile: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub native_symbol: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub explorer_url: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub capabilities: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub enabled: Option<bool>,
+}
+
+/// Delete a local chain profile.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ChainProfileDeleteRequest {
+    pub name: String,
+}
+
+/// Mutate a persisted discovery job by ID.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct DiscoveryJobMutationRequest {
+    pub id: String,
+}
+
+/// Generate a dry-run consolidation plan from the current inventory.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ConsolidationPlanGenerateRequest {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub destination_address: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub wallet_family: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub wallet_profile: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub provider_profile: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub include_watch_only: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub auto_queue_low_risk: Option<bool>,
+}
+
+/// Approve reviewable consolidation plan steps.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ConsolidationPlanApproveRequest {
+    pub plan_id: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub step_ids: Vec<String>,
 }
 
 /// Send a native ETH transfer using a saved wallet profile.
@@ -746,7 +847,7 @@ mod tests {
     ) {
         let json = serde_json::to_string(&value).unwrap();
         let deserialized: T = serde_json::from_str(&json).unwrap();
-        assert_eq!(value, deserialized, "Roundtrip failed for JSON: {}", json);
+        assert_eq!(value, deserialized, "Roundtrip failed for JSON: {json}");
     }
 
     #[test]
@@ -1148,6 +1249,22 @@ mod tests {
     }
 
     #[test]
+    fn test_eth_seed_wallet_profile_upsert_request_roundtrip() {
+        let req = EthSeedWalletProfileUpsertRequest {
+            name: "treasury_seed".to_string(),
+            label: Some("Treasury seed wallet".to_string()),
+            mnemonic: "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about".to_string(),
+            mnemonic_passphrase: Some("optional-passphrase".to_string()),
+            project_account: 0,
+            provider_profile: "mainnet".to_string(),
+            compartment_id: Some(1),
+            chain_id: Some(1),
+            default_destination_address: Some("0xdest".to_string()),
+        };
+        roundtrip_test(req);
+    }
+
+    #[test]
     fn test_eth_stealth_send_erc20_transfer_request_roundtrip() {
         let req = EthStealthSendErc20TransferRequest {
             rpc_url: "https://rpc.example.com".to_string(),
@@ -1237,6 +1354,64 @@ mod tests {
         let req = EthXpubDeriveRequest {
             xpub: "xpub661MyMwAqRbcFexample".to_string(),
             index: 12,
+        };
+        roundtrip_test(req);
+    }
+
+    #[test]
+    fn test_wallet_inventory_scan_request_roundtrip() {
+        let req = WalletInventoryScanRequest {
+            wallet_family: Some("eth-seed".to_string()),
+            wallet_profile: Some("seed-main".to_string()),
+            provider_profile: Some("mainnet".to_string()),
+            gap_limit: Some(20),
+            max_index: Some(200),
+            token_addresses: vec!["0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48".to_string()],
+            block_tag: Some("latest".to_string()),
+        };
+        roundtrip_test(req);
+    }
+
+    #[test]
+    fn test_chain_profile_upsert_request_roundtrip() {
+        let req = ChainProfileUpsertRequest {
+            name: "base".to_string(),
+            chain_family: "evm".to_string(),
+            chain_id: Some(8453),
+            provider_profile: Some("base-mainnet".to_string()),
+            native_symbol: Some("ETH".to_string()),
+            explorer_url: Some("https://basescan.org".to_string()),
+            capabilities: vec!["native".to_string(), "erc20".to_string()],
+            enabled: Some(true),
+        };
+        roundtrip_test(req);
+    }
+
+    #[test]
+    fn test_discovery_job_mutation_request_roundtrip() {
+        roundtrip_test(DiscoveryJobMutationRequest {
+            id: "job_123".to_string(),
+        });
+    }
+
+    #[test]
+    fn test_consolidation_plan_generate_request_roundtrip() {
+        let req = ConsolidationPlanGenerateRequest {
+            destination_address: Some("0xdestination".to_string()),
+            wallet_family: Some("eth-seed".to_string()),
+            wallet_profile: Some("seed-main".to_string()),
+            provider_profile: Some("mainnet".to_string()),
+            include_watch_only: Some(true),
+            auto_queue_low_risk: Some(false),
+        };
+        roundtrip_test(req);
+    }
+
+    #[test]
+    fn test_consolidation_plan_approve_request_roundtrip() {
+        let req = ConsolidationPlanApproveRequest {
+            plan_id: "plan_1".to_string(),
+            step_ids: vec!["step_1".to_string()],
         };
         roundtrip_test(req);
     }

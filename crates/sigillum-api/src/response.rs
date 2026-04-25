@@ -541,6 +541,38 @@ pub struct EthXpubWalletProfileMutationResponse {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct EthSeedWalletProfile {
+    pub name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
+    pub project_account: u32,
+    pub provider_profile: String,
+    #[serde(default)]
+    pub compartment_id: usize,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub chain_id: Option<u64>,
+    pub word_count: usize,
+    pub mnemonic_secret_key: String,
+    pub account_path: String,
+    pub receive_path: String,
+    pub receive_xpub: String,
+    pub first_receive_address: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub default_destination_address: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct EthSeedWalletProfileListResponse {
+    pub profiles: Vec<EthSeedWalletProfile>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct EthSeedWalletProfileMutationResponse {
+    pub status: String,
+    pub profile: EthSeedWalletProfile,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct EthXpubExportResponse {
     pub wallet_profile: String,
     pub project_account: u32,
@@ -553,6 +585,208 @@ pub struct EthXpubExportResponse {
 pub struct EthXpubAddressResponse {
     pub index: u32,
     pub address: String,
+}
+
+// ── Wallet inventory and discovery ─────────────────
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct WalletInventoryAddress {
+    pub id: String,
+    pub wallet_family: String,
+    pub wallet_profile: String,
+    pub provider_profile: String,
+    pub chain_id: u64,
+    pub address: String,
+    pub derivation_path: String,
+    pub address_index: u32,
+    pub activity_state: String,
+    pub native_balance_wei_hex: String,
+    pub transaction_count: u64,
+    pub source: String,
+    pub first_seen_at_unix: u64,
+    pub last_checked_at_unix: u64,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct WalletAssetHolding {
+    pub id: String,
+    pub wallet_family: String,
+    pub wallet_profile: String,
+    pub provider_profile: String,
+    pub chain_id: u64,
+    pub address: String,
+    pub derivation_path: String,
+    pub asset_kind: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub asset_address: Option<String>,
+    pub amount_hex: String,
+    pub source: String,
+    pub status: String,
+    pub first_seen_at_unix: u64,
+    pub last_checked_at_unix: u64,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct WalletDiscoveryJob {
+    pub id: String,
+    pub status: String,
+    pub source: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub wallet_families: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub wallet_profiles: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub provider_profiles: Vec<String>,
+    pub gap_limit: u32,
+    pub max_index: u32,
+    pub addresses_scanned: usize,
+    pub active_addresses: usize,
+    pub holdings_detected: usize,
+    pub started_at_unix: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub completed_at_unix: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_error: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct WalletInventoryListResponse {
+    pub jobs: Vec<WalletDiscoveryJob>,
+    pub addresses: Vec<WalletInventoryAddress>,
+    pub holdings: Vec<WalletAssetHolding>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct WalletInventoryScanResponse {
+    pub job: WalletDiscoveryJob,
+    pub addresses: Vec<WalletInventoryAddress>,
+    pub holdings: Vec<WalletAssetHolding>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ChainProfile {
+    pub name: String,
+    pub chain_family: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub chain_id: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub provider_profile: Option<String>,
+    pub native_symbol: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub explorer_url: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub capabilities: Vec<String>,
+    pub enabled: bool,
+    pub source: String,
+    pub created_at_unix: u64,
+    pub updated_at_unix: u64,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ChainProfileListResponse {
+    pub profiles: Vec<ChainProfile>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ChainProfileMutationResponse {
+    pub status: String,
+    pub profile: ChainProfile,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct DiscoveryJobListResponse {
+    pub jobs: Vec<WalletDiscoveryJob>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct DiscoveryJobMutationResponse {
+    pub status: String,
+    pub job: WalletDiscoveryJob,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct RiskFinding {
+    pub id: String,
+    pub category: String,
+    pub risk_level: String,
+    pub status: String,
+    pub wallet_family: String,
+    pub wallet_profile: String,
+    pub provider_profile: String,
+    pub chain_id: u64,
+    pub address: String,
+    pub subject_type: String,
+    pub subject: String,
+    pub source: String,
+    pub recommendation: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub evidence: Vec<String>,
+    pub first_seen_at_unix: u64,
+    pub last_checked_at_unix: u64,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct RiskFindingListResponse {
+    pub findings: Vec<RiskFinding>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ConsolidationPlanSummary {
+    pub total_steps: usize,
+    pub blocked_steps: usize,
+    pub review_required_steps: usize,
+    pub approved_steps: usize,
+    pub executable_steps: usize,
+    pub value_items: usize,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ConsolidationPlanStep {
+    pub id: String,
+    pub action: String,
+    pub status: String,
+    pub wallet_family: String,
+    pub wallet_profile: String,
+    pub provider_profile: String,
+    pub chain_id: u64,
+    pub address: String,
+    pub derivation_path: String,
+    pub asset_kind: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub asset_address: Option<String>,
+    pub amount_hex: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub destination_address: Option<String>,
+    pub signer_status: String,
+    pub simulation_status: String,
+    pub risk_level: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub blockers: Vec<String>,
+    pub auto_eligible: bool,
+    pub approved: bool,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ConsolidationPlan {
+    pub id: String,
+    pub status: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub destination_address: Option<String>,
+    pub created_at_unix: u64,
+    pub updated_at_unix: u64,
+    pub summary: ConsolidationPlanSummary,
+    pub steps: Vec<ConsolidationPlanStep>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ConsolidationPlanListResponse {
+    pub plans: Vec<ConsolidationPlan>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ConsolidationPlanMutationResponse {
+    pub status: String,
+    pub plan: ConsolidationPlan,
 }
 
 // ── Deposits ────────────────────────────────────
@@ -762,7 +996,7 @@ mod tests {
     ) {
         let json = serde_json::to_string(&value).unwrap();
         let deserialized: T = serde_json::from_str(&json).unwrap();
-        assert_eq!(value, deserialized, "Roundtrip failed for JSON: {}", json);
+        assert_eq!(value, deserialized, "Roundtrip failed for JSON: {json}");
     }
 
     #[test]
@@ -1231,6 +1465,48 @@ mod tests {
     }
 
     #[test]
+    fn test_eth_seed_wallet_profile_roundtrip() {
+        let profile = EthSeedWalletProfile {
+            name: "treasury_seed".to_string(),
+            label: Some("Treasury seed wallet".to_string()),
+            project_account: 0,
+            provider_profile: "mainnet".to_string(),
+            compartment_id: 1,
+            chain_id: Some(1),
+            word_count: 12,
+            mnemonic_secret_key: "wallet.seed.treasury_seed.mnemonic".to_string(),
+            account_path: "m/44'/60'/0'".to_string(),
+            receive_path: "m/44'/60'/0'/0".to_string(),
+            receive_xpub: "xpub661MyMwAqRbcFexample".to_string(),
+            first_receive_address: "0x1111111111111111111111111111111111111111".to_string(),
+            default_destination_address: Some("0xdest".to_string()),
+        };
+        roundtrip_test(profile);
+    }
+
+    #[test]
+    fn test_eth_seed_wallet_profile_list_response_roundtrip() {
+        let resp = EthSeedWalletProfileListResponse {
+            profiles: vec![EthSeedWalletProfile {
+                name: "wallet_12".to_string(),
+                label: None,
+                project_account: 0,
+                provider_profile: "mainnet".to_string(),
+                compartment_id: 1,
+                chain_id: Some(1),
+                word_count: 12,
+                mnemonic_secret_key: "wallet.seed.wallet_12.mnemonic".to_string(),
+                account_path: "m/44'/60'/0'".to_string(),
+                receive_path: "m/44'/60'/0'/0".to_string(),
+                receive_xpub: "xpub661MyMwAqRbcFexample".to_string(),
+                first_receive_address: "0x1111111111111111111111111111111111111111".to_string(),
+                default_destination_address: None,
+            }],
+        };
+        roundtrip_test(resp);
+    }
+
+    #[test]
     fn test_eth_xpub_export_response_roundtrip() {
         let resp = EthXpubExportResponse {
             wallet_profile: "receive_tree".to_string(),
@@ -1249,6 +1525,154 @@ mod tests {
             address: "0x1111111111111111111111111111111111111111".to_string(),
         };
         roundtrip_test(resp);
+    }
+
+    #[test]
+    fn test_wallet_inventory_scan_response_roundtrip() {
+        let address = WalletInventoryAddress {
+            id: "addr_1".to_string(),
+            wallet_family: "eth-seed".to_string(),
+            wallet_profile: "seed-main".to_string(),
+            provider_profile: "mainnet".to_string(),
+            chain_id: 1,
+            address: "0x1111111111111111111111111111111111111111".to_string(),
+            derivation_path: "m/44'/60'/0'/0/0".to_string(),
+            address_index: 0,
+            activity_state: "funded".to_string(),
+            native_balance_wei_hex: "0x1".to_string(),
+            transaction_count: 1,
+            source: "local-rpc".to_string(),
+            first_seen_at_unix: 1,
+            last_checked_at_unix: 2,
+        };
+        let holding = WalletAssetHolding {
+            id: "holding_1".to_string(),
+            wallet_family: "eth-seed".to_string(),
+            wallet_profile: "seed-main".to_string(),
+            provider_profile: "mainnet".to_string(),
+            chain_id: 1,
+            address: address.address.clone(),
+            derivation_path: address.derivation_path.clone(),
+            asset_kind: "native".to_string(),
+            asset_address: None,
+            amount_hex: "0x1".to_string(),
+            source: "local-rpc".to_string(),
+            status: "detected".to_string(),
+            first_seen_at_unix: 1,
+            last_checked_at_unix: 2,
+        };
+        let job = WalletDiscoveryJob {
+            id: "job_1".to_string(),
+            status: "completed".to_string(),
+            source: "local-rpc".to_string(),
+            wallet_families: vec!["eth-seed".to_string()],
+            wallet_profiles: vec!["seed-main".to_string()],
+            provider_profiles: vec!["mainnet".to_string()],
+            gap_limit: 20,
+            max_index: 200,
+            addresses_scanned: 1,
+            active_addresses: 1,
+            holdings_detected: 1,
+            started_at_unix: 1,
+            completed_at_unix: Some(2),
+            last_error: None,
+        };
+        roundtrip_test(WalletInventoryScanResponse {
+            job,
+            addresses: vec![address],
+            holdings: vec![holding],
+        });
+    }
+
+    #[test]
+    fn test_wallet_operations_response_roundtrips() {
+        let chain = ChainProfile {
+            name: "base".to_string(),
+            chain_family: "evm".to_string(),
+            chain_id: Some(8453),
+            provider_profile: Some("base-mainnet".to_string()),
+            native_symbol: "ETH".to_string(),
+            explorer_url: Some("https://basescan.org".to_string()),
+            capabilities: vec!["native".to_string(), "erc20".to_string()],
+            enabled: true,
+            source: "operator".to_string(),
+            created_at_unix: 1,
+            updated_at_unix: 2,
+        };
+        roundtrip_test(ChainProfileListResponse {
+            profiles: vec![chain.clone()],
+        });
+        roundtrip_test(ChainProfileMutationResponse {
+            status: "upserted".to_string(),
+            profile: chain,
+        });
+
+        let finding = RiskFinding {
+            id: "risk_1".to_string(),
+            category: "stranded_value".to_string(),
+            risk_level: "medium".to_string(),
+            status: "open".to_string(),
+            wallet_family: "eth-seed".to_string(),
+            wallet_profile: "seed-main".to_string(),
+            provider_profile: "mainnet".to_string(),
+            chain_id: 1,
+            address: "0x1111111111111111111111111111111111111111".to_string(),
+            subject_type: "erc20".to_string(),
+            subject: "0xtoken".to_string(),
+            source: "local-risk-engine".to_string(),
+            recommendation: "Fund gas before sweeping.".to_string(),
+            evidence: vec!["positive token balance".to_string()],
+            first_seen_at_unix: 1,
+            last_checked_at_unix: 2,
+        };
+        roundtrip_test(RiskFindingListResponse {
+            findings: vec![finding],
+        });
+
+        let step = ConsolidationPlanStep {
+            id: "step_1".to_string(),
+            action: "sweep_erc20".to_string(),
+            status: "blocked".to_string(),
+            wallet_family: "eth-seed".to_string(),
+            wallet_profile: "seed-main".to_string(),
+            provider_profile: "mainnet".to_string(),
+            chain_id: 1,
+            address: "0x1111111111111111111111111111111111111111".to_string(),
+            derivation_path: "m/44'/60'/0'/0/0".to_string(),
+            asset_kind: "erc20".to_string(),
+            asset_address: Some("0xtoken".to_string()),
+            amount_hex: "0x1".to_string(),
+            destination_address: Some("0xdestination".to_string()),
+            signer_status: "signing_not_implemented".to_string(),
+            simulation_status: "not_run".to_string(),
+            risk_level: "blocked".to_string(),
+            blockers: vec!["signing_not_implemented".to_string()],
+            auto_eligible: false,
+            approved: false,
+        };
+        let plan = ConsolidationPlan {
+            id: "plan_1".to_string(),
+            status: "blocked".to_string(),
+            destination_address: Some("0xdestination".to_string()),
+            created_at_unix: 1,
+            updated_at_unix: 2,
+            summary: ConsolidationPlanSummary {
+                total_steps: 1,
+                blocked_steps: 1,
+                review_required_steps: 0,
+                approved_steps: 0,
+                executable_steps: 0,
+                value_items: 1,
+            },
+            steps: vec![step],
+        };
+        roundtrip_test(ConsolidationPlanListResponse {
+            plans: vec![plan.clone()],
+        });
+        roundtrip_test(ConsolidationPlanMutationResponse {
+            status: "generated".to_string(),
+            plan,
+        });
     }
 
     #[test]

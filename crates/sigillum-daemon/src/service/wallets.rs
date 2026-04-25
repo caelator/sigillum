@@ -535,6 +535,7 @@ mod tests {
                     chain_id: Some(1),
                     default_destination_address: None,
                 }],
+                ..Default::default()
             },
         )
         .unwrap();
@@ -585,6 +586,7 @@ mod tests {
                     chain_id: Some(1),
                     default_destination_address: None,
                 }],
+                ..Default::default()
             },
         )
         .unwrap();

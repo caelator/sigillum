@@ -37,8 +37,10 @@ use reqwest::Method;
 use secrecy::SecretString;
 use serde::de::DeserializeOwned;
 use sigillum_api::request::{
-    BiometricEnrollRequest, BiometricUnlockRequest, CompartmentSwitchRequest,
-    EthStealthCheckRequest, EthStealthDepositCreateErc20Request,
+    BiometricEnrollRequest, BiometricUnlockRequest, ChainProfileDeleteRequest,
+    ChainProfileUpsertRequest, CompartmentSwitchRequest, ConsolidationPlanApproveRequest,
+    ConsolidationPlanGenerateRequest, DiscoveryJobMutationRequest,
+    EthSeedWalletProfileUpsertRequest, EthStealthCheckRequest, EthStealthDepositCreateErc20Request,
     EthStealthDepositCreateNativeRequest, EthStealthDepositDeleteRequest,
     EthStealthDepositEnqueueSweepRequest, EthStealthDepositRefreshRequest, EthStealthExportRequest,
     EthStealthGenerateRequest, EthStealthSendErc20TransferRequest,
@@ -53,13 +55,17 @@ use sigillum_api::request::{
     QueueEthStealthErc20TransferRequest, QueueEthStealthNativeSweepRequest,
     QueueEthStealthTransferRequest, QueueProcessRequest, RunAuditRequest,
     SecretResolveBatchRequest, SnapshotRestoreRequest, StealthPaymentRef, TransitDecryptRequest,
-    TransitEncryptRequest, TransitHmacRequest,
+    TransitEncryptRequest, TransitHmacRequest, WalletInventoryScanRequest,
 };
 pub use sigillum_api::response::Fido2StatusResponse as DaemonFido2Status;
 pub use sigillum_api::response::{
     ActiveCompartment, AuditEvent as DaemonAuditEvent, BiometricChallengeResponse,
-    BiometricEnrollResponse, CompartmentInfo, CompartmentListResponse, DiagnosticsResponse,
-    ErrorResponse, EthSignedTransactionResponse, EthStealthCheckResponse, EthStealthDeposit,
+    BiometricEnrollResponse, ChainProfile, ChainProfileListResponse, ChainProfileMutationResponse,
+    CompartmentInfo, CompartmentListResponse, ConsolidationPlan, ConsolidationPlanListResponse,
+    ConsolidationPlanMutationResponse, ConsolidationPlanStep, ConsolidationPlanSummary,
+    DiagnosticsResponse, DiscoveryJobListResponse, DiscoveryJobMutationResponse, ErrorResponse,
+    EthSeedWalletProfile, EthSeedWalletProfileListResponse, EthSeedWalletProfileMutationResponse,
+    EthSignedTransactionResponse, EthStealthCheckResponse, EthStealthDeposit,
     EthStealthDepositEnqueueSweepResponse, EthStealthDepositListResponse,
     EthStealthDepositMutationResponse, EthStealthDepositRefreshResponse,
     EthStealthGenerateResponse, EthStealthMetaAddressResponse, EthStealthSendResponse,
@@ -72,10 +78,12 @@ pub use sigillum_api::response::{
     Fido2RegisterResponse, Fido2RemoveResponse, Fido2SetupResponse, Fido2StatusResponse,
     GenerateStoreResponse, GenericStatusResponse, KeyListResponse, KeyValueResponse,
     MaintenanceRunResponse, QueueEnqueueResponse, QueueJob, QueueJobListResponse,
-    QueueProcessResponse, SecretResolveBatchResponse, SecretResolveValue, SessionRevokeResponse,
-    SnapshotExportResponse, SnapshotRestoreResponse, StatusResponse, SwitchCompartmentResponse,
-    TransitDecryptResponse, TransitEncryptResponse, TransitHmacResponse, UnlockResponse,
-    UnlockedCompartment,
+    QueueProcessResponse, RiskFinding, RiskFindingListResponse, SecretResolveBatchResponse,
+    SecretResolveValue, SessionRevokeResponse, SnapshotExportResponse, SnapshotRestoreResponse,
+    StatusResponse, SwitchCompartmentResponse, TransitDecryptResponse, TransitEncryptResponse,
+    TransitHmacResponse, UnlockResponse, UnlockedCompartment, WalletAssetHolding,
+    WalletDiscoveryJob, WalletInventoryAddress, WalletInventoryListResponse,
+    WalletInventoryScanResponse,
 };
 use sigillum_core::SnapshotSummary;
 use thiserror::Error;
@@ -715,6 +723,16 @@ impl SigillumClient {
             .profiles)
     }
 
+    pub async fn list_eth_seed_wallet_profiles(
+        &self,
+    ) -> Result<Vec<EthSeedWalletProfile>, ClientError> {
+        let builder = self.request(Method::GET, "/api/profiles/eth-seed");
+        Ok(self
+            .send::<EthSeedWalletProfileListResponse>(builder)
+            .await?
+            .profiles)
+    }
+
     pub async fn upsert_eth_stealth_wallet_profile(
         &self,
         request: EthStealthWalletProfileUpsertRequest,
@@ -755,6 +773,26 @@ impl SigillumClient {
         self.send(builder).await
     }
 
+    pub async fn upsert_eth_seed_wallet_profile(
+        &self,
+        request: EthSeedWalletProfileUpsertRequest,
+    ) -> Result<EthSeedWalletProfileMutationResponse, ClientError> {
+        let builder = self
+            .request(Method::POST, "/api/profiles/eth-seed/upsert")
+            .json(&request);
+        self.send(builder).await
+    }
+
+    pub async fn delete_eth_seed_wallet_profile(
+        &self,
+        name: &str,
+    ) -> Result<EthSeedWalletProfileMutationResponse, ClientError> {
+        let builder = self
+            .request(Method::POST, "/api/profiles/eth-seed/delete")
+            .json(&EvmProfileDeleteRequest { name: name.into() });
+        self.send(builder).await
+    }
+
     pub async fn send_eth_stealth_with_profile(
         &self,
         request: EthStealthSendWithProfileRequest,
@@ -774,6 +812,105 @@ impl SigillumClient {
                 Method::POST,
                 "/api/wallets/eth-stealth/send-erc20-with-profile",
             )
+            .json(&request);
+        self.send(builder).await
+    }
+
+    // ── Wallet inventory ────────────────────────────────────────────
+
+    pub async fn list_wallet_inventory(&self) -> Result<WalletInventoryListResponse, ClientError> {
+        let builder = self.request(Method::GET, "/api/inventory/wallets");
+        self.send(builder).await
+    }
+
+    pub async fn scan_evm_wallet_inventory(
+        &self,
+        request: WalletInventoryScanRequest,
+    ) -> Result<WalletInventoryScanResponse, ClientError> {
+        let builder = self
+            .request(Method::POST, "/api/inventory/scan/evm")
+            .json(&request);
+        self.send(builder).await
+    }
+
+    pub async fn list_chain_profiles(&self) -> Result<ChainProfileListResponse, ClientError> {
+        let builder = self.request(Method::GET, "/api/inventory/chains");
+        self.send(builder).await
+    }
+
+    pub async fn upsert_chain_profile(
+        &self,
+        request: ChainProfileUpsertRequest,
+    ) -> Result<ChainProfileMutationResponse, ClientError> {
+        let builder = self
+            .request(Method::POST, "/api/inventory/chains/upsert")
+            .json(&request);
+        self.send(builder).await
+    }
+
+    pub async fn delete_chain_profile(
+        &self,
+        name: &str,
+    ) -> Result<ChainProfileMutationResponse, ClientError> {
+        let builder = self
+            .request(Method::POST, "/api/inventory/chains/delete")
+            .json(&ChainProfileDeleteRequest { name: name.into() });
+        self.send(builder).await
+    }
+
+    pub async fn list_discovery_jobs(&self) -> Result<DiscoveryJobListResponse, ClientError> {
+        let builder = self.request(Method::GET, "/api/discovery/jobs");
+        self.send(builder).await
+    }
+
+    pub async fn cancel_discovery_job(
+        &self,
+        id: &str,
+    ) -> Result<DiscoveryJobMutationResponse, ClientError> {
+        let builder = self
+            .request(Method::POST, "/api/discovery/jobs/cancel")
+            .json(&DiscoveryJobMutationRequest { id: id.into() });
+        self.send(builder).await
+    }
+
+    pub async fn resume_discovery_job(
+        &self,
+        id: &str,
+    ) -> Result<DiscoveryJobMutationResponse, ClientError> {
+        let builder = self
+            .request(Method::POST, "/api/discovery/jobs/resume")
+            .json(&DiscoveryJobMutationRequest { id: id.into() });
+        self.send(builder).await
+    }
+
+    pub async fn list_risk_findings(&self) -> Result<RiskFindingListResponse, ClientError> {
+        let builder = self.request(Method::GET, "/api/risk/findings");
+        self.send(builder).await
+    }
+
+    pub async fn list_consolidation_plans(
+        &self,
+    ) -> Result<ConsolidationPlanListResponse, ClientError> {
+        let builder = self.request(Method::GET, "/api/plans/consolidation");
+        self.send(builder).await
+    }
+
+    pub async fn generate_consolidation_plan(
+        &self,
+        request: ConsolidationPlanGenerateRequest,
+    ) -> Result<ConsolidationPlanMutationResponse, ClientError> {
+        let builder = self
+            .request(Method::POST, "/api/plans/consolidation/generate")
+            .json(&request);
+        self.send(builder).await
+    }
+
+    pub async fn approve_consolidation_plan(
+        &self,
+        request: ConsolidationPlanApproveRequest,
+    ) -> Result<ConsolidationPlanMutationResponse, ClientError> {
+        let builder = self
+            .request(Method::POST, "/api/plans/consolidation/approve")
             .json(&request);
         self.send(builder).await
     }

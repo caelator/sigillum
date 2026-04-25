@@ -24,6 +24,15 @@ fn run(args: &[&str]) -> std::process::Output {
         .expect("Failed to execute sigillum binary")
 }
 
+fn run_with_env(args: &[&str], envs: &[(&str, &std::path::Path)]) -> std::process::Output {
+    let mut command = Command::new(sigillum_bin());
+    command.args(args);
+    for (key, value) in envs {
+        command.env(key, value);
+    }
+    command.output().expect("Failed to execute sigillum binary")
+}
+
 // ── Happy Paths ────────────────────────────────────────────────────
 
 #[test]
@@ -70,6 +79,24 @@ fn status_on_nonexistent_daemon_exits_cleanly() {
         output.status.code().is_some(),
         "should exit cleanly, not crash"
     );
+}
+
+#[test]
+fn doctor_reports_local_readiness_checks() {
+    let tmp = tempfile::tempdir().unwrap();
+    let output = run_with_env(
+        &["doctor", "--url", "http://127.0.0.1:1"],
+        &[("SIGILLUM_BASE_DIR", tmp.path())],
+    );
+    assert!(
+        output.status.code().is_some(),
+        "doctor should exit cleanly, not crash"
+    );
+    let combined = String::from_utf8_lossy(&output.stdout).to_string()
+        + &String::from_utf8_lossy(&output.stderr);
+    assert!(combined.contains("data dir"));
+    assert!(combined.contains("daemon reachability"));
+    assert!(combined.contains("Production boundary"));
 }
 
 // ── Adversarial Paths ──────────────────────────────────────────────

@@ -13,4 +13,6 @@ categories = ["cryptography", "authentication"]
 [dependencies]
 rand = { workspace = true }
 data-encoding = { workspace = true }
-
+hmac = { workspace = true }
+sha1 = { workspace = true }
+bip39 = { workspace = true }

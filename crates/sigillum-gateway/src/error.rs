@@ -23,7 +23,7 @@ pub enum GatewayError {
     Daemon(#[from] sigillum_client::ClientError),
 
     #[error("Database error: {0}")]
-    Database(#[from] sqlx::Error),
+    Database(#[from] rusqlite::Error),
 }
 
 impl IntoResponse for GatewayError {

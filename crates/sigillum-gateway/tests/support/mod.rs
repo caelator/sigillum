@@ -11,6 +11,7 @@ use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use axum::routing::{get, post};
 use axum::{Json, Router};
+use rusqlite::OptionalExtension;
 use serde_json::{Value, json};
 use tempfile::TempDir;
 use tokio::sync::oneshot;
@@ -265,14 +266,12 @@ impl GatewayHarness {
         &self,
         project_id: &str,
     ) -> Result<i64, Box<dyn std::error::Error + Send + Sync>> {
-        let pool = sqlx::sqlite::SqlitePoolOptions::new()
-            .max_connections(1)
-            .connect(&format!("sqlite://{}?mode=rwc", self.db_path.display()))
-            .await?;
-        let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM payments WHERE project_id = ?")
-            .bind(project_id)
-            .fetch_one(&pool)
-            .await?;
+        let connection = rusqlite::Connection::open(&self.db_path)?;
+        let count = connection.query_row(
+            "SELECT COUNT(*) FROM payments WHERE project_id = ?",
+            rusqlite::params![project_id],
+            |row| row.get::<_, i64>(0),
+        )?;
         Ok(count)
     }
 
@@ -281,32 +280,25 @@ impl GatewayHarness {
         project_id: &str,
         key: &str,
     ) -> Result<Option<(String, i64)>, Box<dyn std::error::Error + Send + Sync>> {
-        let pool = sqlx::sqlite::SqlitePoolOptions::new()
-            .max_connections(1)
-            .connect(&format!("sqlite://{}?mode=rwc", self.db_path.display()))
-            .await?;
-        let row = sqlx::query_as::<_, (String, i64)>(
-            "SELECT id, chain_id FROM payments WHERE project_id = ? AND idempotency_key = ?",
-        )
-        .bind(project_id)
-        .bind(key)
-        .fetch_optional(&pool)
-        .await?;
+        let connection = rusqlite::Connection::open(&self.db_path)?;
+        let row = connection
+            .query_row(
+                "SELECT id, chain_id FROM payments WHERE project_id = ? AND idempotency_key = ?",
+                rusqlite::params![project_id, key],
+                |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?)),
+            )
+            .optional()?;
         Ok(row)
     }
 
     pub async fn install_payment_insert_failure_trigger(
         &self,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        let pool = sqlx::sqlite::SqlitePoolOptions::new()
-            .max_connections(1)
-            .connect(&format!("sqlite://{}?mode=rwc", self.db_path.display()))
-            .await?;
-        sqlx::query(
+        let connection = rusqlite::Connection::open(&self.db_path)?;
+        connection.execute(
             "CREATE TRIGGER fail_payment_insert BEFORE INSERT ON payments BEGIN SELECT RAISE(FAIL, 'forced payment insert failure'); END;",
-        )
-        .execute(&pool)
-        .await?;
+            [],
+        )?;
         Ok(())
     }
 }

@@ -176,10 +176,8 @@ pub fn derive_sigillum_ethereum_stealth_wallet(
     let viewing_private_key = derive_wallet_secret_key(master_key, wallet, "view")?;
     let spending_public_key_hex = encode_public_key(&spending_private_key.public_key());
     let viewing_public_key_hex = encode_public_key(&viewing_private_key.public_key());
-    let stealth_meta_address = format!(
-        "st:{}:0x{}{}",
-        short_name, spending_public_key_hex, viewing_public_key_hex
-    );
+    let stealth_meta_address =
+        format!("st:{short_name}:0x{spending_public_key_hex}{viewing_public_key_hex}");
 
     Ok(EthereumStealthWallet {
         meta_address: EthereumStealthMetaAddress {

@@ -4,7 +4,9 @@ use std::process;
 
 use sigillum_api::request::{GenerateStoreKind, GenerateStoreRequest, PasswordCharset};
 use sigillum_client::SigillumClient;
-use sigillum_generator::{generate_passphrase, generate_password, generate_totp};
+use sigillum_generator::{
+    DEFAULT_PASSPHRASE_WORDS, generate_passphrase, generate_password, generate_totp,
+};
 
 use crate::daemon_api::{daemon_base_url, ensure_daemon_ready, require_session_token};
 
@@ -48,7 +50,7 @@ fn cmd_generate_password(args: &[String]) {
 }
 
 fn cmd_generate_passphrase(args: &[String]) {
-    let word_count = parse_usize_flag(args, "--words").unwrap_or(5);
+    let word_count = parse_usize_flag(args, "--words").unwrap_or(DEFAULT_PASSPHRASE_WORDS);
     let separator = parse_flag(args, "--separator").unwrap_or_else(|| "-".into());
     let store_key = parse_flag(args, "--store");
 

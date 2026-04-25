@@ -8,9 +8,7 @@ use sigillum_client::SigillumClient;
 use sigillum_core::payload::biometric::BiometricHelperOutput;
 use zeroize::Zeroize;
 
-use crate::daemon_api::{
-    daemon_base_url, ensure_daemon_ready, require_session_token,
-};
+use crate::daemon_api::{daemon_base_url, ensure_daemon_ready, require_session_token};
 
 const HELPER_BINARY_NAME: &str = "sigillum-auth";
 
@@ -148,8 +146,8 @@ fn locate_helper() -> Result<PathBuf, String> {
         }
     }
 
-    let current_exe =
-        std::env::current_exe().map_err(|error| format!("failed to resolve current executable: {error}"))?;
+    let current_exe = std::env::current_exe()
+        .map_err(|error| format!("failed to resolve current executable: {error}"))?;
     let sibling = current_exe
         .parent()
         .unwrap_or_else(|| std::path::Path::new("."))
@@ -166,19 +164,17 @@ fn locate_helper() -> Result<PathBuf, String> {
 fn decode_fixed_hex<const N: usize>(value: &str, label: &str) -> Result<[u8; N], String> {
     let bytes = hex::decode(value).map_err(|error| format!("invalid {label}: {error}"))?;
     if bytes.len() != N {
-        return Err(format!("invalid {label}: expected {N} bytes, got {}", bytes.len()));
+        return Err(format!(
+            "invalid {label}: expected {N} bytes, got {}",
+            bytes.len()
+        ));
     }
     let mut out = [0u8; N];
     out.copy_from_slice(&bytes);
     Ok(out)
 }
 
-fn read_sensitive_input(
-    args: &[String],
-    env_flag: &str,
-    stdin_flag: &str,
-    prompt: &str,
-) -> String {
+fn read_sensitive_input(args: &[String], env_flag: &str, stdin_flag: &str, prompt: &str) -> String {
     if let Some(var_name) = parse_flag(args, env_flag) {
         return std::env::var(&var_name).unwrap_or_else(|_| {
             eprintln!("Environment variable {var_name} is not set.");
@@ -187,10 +183,12 @@ fn read_sensitive_input(
     }
     if has_flag(args, stdin_flag) {
         let mut value = String::new();
-        io::stdin().read_to_string(&mut value).unwrap_or_else(|error| {
-            eprintln!("Failed to read from stdin: {error}");
-            process::exit(1);
-        });
+        io::stdin()
+            .read_to_string(&mut value)
+            .unwrap_or_else(|error| {
+                eprintln!("Failed to read from stdin: {error}");
+                process::exit(1);
+            });
         return value.trim_end_matches(['\r', '\n']).to_string();
     }
     rpassword::prompt_password(prompt).unwrap_or_else(|error| {

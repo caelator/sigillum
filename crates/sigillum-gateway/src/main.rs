@@ -1,4 +1,4 @@
-//! Sigillum Gateway — web-facing payment API for local custody.
+//! Sigillum Gateway — local-sidecar payment preview and control surface.
 //!
 //! Bridges websites/services with the Sigillum daemon, providing:
 //! - Project/tenant management with API key authentication

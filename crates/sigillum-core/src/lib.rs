@@ -51,7 +51,9 @@ pub use ethereum_xpub::{
     ETHEREUM_XPUB_COIN_TYPE, ETHEREUM_XPUB_CONTROL_BRANCH, ETHEREUM_XPUB_PURPOSE,
     ETHEREUM_XPUB_RECEIVE_BRANCH, EthereumXpubError, EthereumXpubReceiveAddress,
     EthereumXpubReceiveExport, derive_ethereum_address_from_xpub,
+    derive_ethereum_xpub_receive_branch_from_mnemonic,
     derive_sigillum_ethereum_xpub_receive_address, derive_sigillum_ethereum_xpub_receive_branch,
+    ethereum_mnemonic_word_count,
 };
 pub use traits::{SecretStore, VaultLifecycle};
 pub use unlock::provider::{

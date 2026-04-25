@@ -53,10 +53,12 @@ const MAX_PIN: usize = 64;
 const MAX_ADDRESS: usize = 128;
 const MAX_META_ADDRESS: usize = 256;
 const MAX_XPUB: usize = 512;
+const MAX_MNEMONIC: usize = 2048;
 const MAX_SNAPSHOT_HEX: usize = 10_000_000;
 const MAX_NOTE: usize = 1024;
 const MAX_ID: usize = 256;
 const MAX_ENV_NAME: usize = 256;
+const MAX_TOKEN_ADDRESSES: usize = 128;
 
 // ── Validation implementations ──────────────────────────────────────
 
@@ -436,6 +438,26 @@ impl Validate for crate::request::EthXpubWalletProfileUpsertRequest {
     }
 }
 
+impl Validate for crate::request::EthSeedWalletProfileUpsertRequest {
+    fn validate(&self) -> Result<(), String> {
+        check_len("name", &self.name, MAX_LABEL)?;
+        check_optional_len("label", &self.label, MAX_LABEL)?;
+        check_len("mnemonic", &self.mnemonic, MAX_MNEMONIC)?;
+        check_optional_len(
+            "mnemonic_passphrase",
+            &self.mnemonic_passphrase,
+            MAX_PASSPHRASE,
+        )?;
+        check_len("provider_profile", &self.provider_profile, MAX_LABEL)?;
+        check_optional_len(
+            "default_destination_address",
+            &self.default_destination_address,
+            MAX_ADDRESS,
+        )?;
+        Ok(())
+    }
+}
+
 impl Validate for crate::request::EthXpubExportRequest {
     fn validate(&self) -> Result<(), String> {
         check_len("wallet_profile", &self.wallet_profile, MAX_LABEL)?;
@@ -446,6 +468,70 @@ impl Validate for crate::request::EthXpubExportRequest {
 impl Validate for crate::request::EthXpubDeriveRequest {
     fn validate(&self) -> Result<(), String> {
         check_len("xpub", &self.xpub, MAX_XPUB)?;
+        Ok(())
+    }
+}
+
+impl Validate for crate::request::WalletInventoryScanRequest {
+    fn validate(&self) -> Result<(), String> {
+        check_optional_len("wallet_family", &self.wallet_family, MAX_LABEL)?;
+        check_optional_len("wallet_profile", &self.wallet_profile, MAX_LABEL)?;
+        check_optional_len("provider_profile", &self.provider_profile, MAX_LABEL)?;
+        check_optional_len("block_tag", &self.block_tag, MAX_LABEL)?;
+        if self.token_addresses.len() > MAX_TOKEN_ADDRESSES {
+            return Err(format!(
+                "token_addresses exceeds maximum length of {MAX_TOKEN_ADDRESSES} items"
+            ));
+        }
+        check_vec_items_len("token_addresses", &self.token_addresses, MAX_ADDRESS)?;
+        Ok(())
+    }
+}
+
+impl Validate for crate::request::ChainProfileUpsertRequest {
+    fn validate(&self) -> Result<(), String> {
+        check_len("name", &self.name, MAX_LABEL)?;
+        check_len("chain_family", &self.chain_family, MAX_LABEL)?;
+        check_optional_len("provider_profile", &self.provider_profile, MAX_LABEL)?;
+        check_optional_len("native_symbol", &self.native_symbol, MAX_LABEL)?;
+        check_optional_len("explorer_url", &self.explorer_url, MAX_RPC_URL)?;
+        check_vec_items_len("capabilities", &self.capabilities, MAX_LABEL)?;
+        Ok(())
+    }
+}
+
+impl Validate for crate::request::ChainProfileDeleteRequest {
+    fn validate(&self) -> Result<(), String> {
+        check_len("name", &self.name, MAX_LABEL)?;
+        Ok(())
+    }
+}
+
+impl Validate for crate::request::DiscoveryJobMutationRequest {
+    fn validate(&self) -> Result<(), String> {
+        check_len("id", &self.id, MAX_ID)?;
+        Ok(())
+    }
+}
+
+impl Validate for crate::request::ConsolidationPlanGenerateRequest {
+    fn validate(&self) -> Result<(), String> {
+        check_optional_len(
+            "destination_address",
+            &self.destination_address,
+            MAX_ADDRESS,
+        )?;
+        check_optional_len("wallet_family", &self.wallet_family, MAX_LABEL)?;
+        check_optional_len("wallet_profile", &self.wallet_profile, MAX_LABEL)?;
+        check_optional_len("provider_profile", &self.provider_profile, MAX_LABEL)?;
+        Ok(())
+    }
+}
+
+impl Validate for crate::request::ConsolidationPlanApproveRequest {
+    fn validate(&self) -> Result<(), String> {
+        check_len("plan_id", &self.plan_id, MAX_ID)?;
+        check_vec_items_len("step_ids", &self.step_ids, MAX_ID)?;
         Ok(())
     }
 }

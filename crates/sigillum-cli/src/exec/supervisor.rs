@@ -4,14 +4,8 @@
 //! Signal forwarding (SIGINT/SIGTERM → child) is implemented via a background
 //! thread that monitors for signals and forwards them to the child.
 
-use std::process::{Child, Command, Stdio};
 use std::os::unix::process::ExitStatusExt;
-
-/// Result of child process exit.
-pub struct ChildExit {
-    pub exit_code: Option<i32>,
-    pub signal: Option<i32>,
-}
+use std::process::{Child, Command, Stdio};
 
 /// A supervised child process that forwards signals.
 pub struct ChildSupervisor {
@@ -33,11 +27,14 @@ impl ChildSupervisor {
     }
 
     /// Wait for the child to exit and return its exit status.
-    pub fn wait(&mut self) -> (Option<i32>, Option<i32>) {
-        let mut child = self.child.take().expect("child already taken");
-        let status = child.wait().expect("failed to wait on child");
-        let exit_code = status.code().map(|c| c as i32);
-        let signal = status.signal().map(|s| s as i32);
-        (exit_code, signal)
+    pub fn wait(&mut self) -> std::io::Result<(Option<i32>, Option<i32>)> {
+        let mut child = self
+            .child
+            .take()
+            .ok_or_else(|| std::io::Error::other("child process already waited"))?;
+        let status = child.wait()?;
+        let exit_code = status.code();
+        let signal = status.signal();
+        Ok((exit_code, signal))
     }
 }

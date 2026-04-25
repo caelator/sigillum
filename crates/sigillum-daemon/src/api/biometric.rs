@@ -1,5 +1,11 @@
 use std::sync::Arc;
 
+use crate::AppState;
+use crate::audit_log::AuditEventSpec;
+use crate::json_store::{JsonDocument, JsonSchema, load_json_document, save_json_document};
+use crate::service::helpers::decode_hex;
+use crate::service::unlock::PinnedSecretBytes;
+use crate::service::{ServiceError, ServiceResult};
 use k256::ecdsa::signature::Verifier;
 use k256::ecdsa::{Signature, VerifyingKey};
 use serde::{Deserialize, Serialize};
@@ -11,12 +17,6 @@ use sigillum_core::payload::biometric::BiometricUnlockPayload;
 use sigillum_core::{VaultLifecycle, utils::derive_key_with_salt, utils::load_wrapped_master_key};
 use sigillum_fido2::Fido2Manager;
 use sigillum_fido2::config::CompartmentMeta;
-use crate::AppState;
-use crate::audit_log::AuditEventSpec;
-use crate::json_store::{JsonDocument, JsonSchema, load_json_document, save_json_document};
-use crate::service::helpers::decode_hex;
-use crate::service::unlock::PinnedSecretBytes;
-use crate::service::{ServiceError, ServiceResult};
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 struct BiometricEnrollment {
@@ -108,14 +108,13 @@ pub(crate) async fn unlock(
 
     let enrollment = load_enrollment(&state)?;
     let payload_bytes = decode_hex(&body.payload_hex, "payload_hex")?;
-    let payload = BiometricUnlockPayload::decode(&payload_bytes)
-        .map_err(|error| ServiceError::bad_request(format!("Invalid biometric payload: {error}")))?;
+    let payload = BiometricUnlockPayload::decode(&payload_bytes).map_err(|error| {
+        ServiceError::bad_request(format!("Invalid biometric payload: {error}"))
+    })?;
     let nonce = state
         .consume_biometric_challenge(&payload.challenge_id)
         .ok_or_else(|| {
-            ServiceError::unauthorized(
-                "Biometric challenge is missing, expired, or already used.",
-            )
+            ServiceError::unauthorized("Biometric challenge is missing, expired, or already used.")
         })?;
 
     verify_signature(&enrollment, &nonce, &payload.proof)?;
@@ -210,8 +209,12 @@ fn verify_passphrase_for_compartment(
     }
 
     let wrap_key = derive_key_with_salt(passphrase, &salt);
-    let Some(master_key) = load_wrapped_master_key(&wrap_key, &state.wrapped_key_path(compartment_id)) else {
-        return Err(ServiceError::unauthorized("Passphrase confirmation failed."));
+    let Some(master_key) =
+        load_wrapped_master_key(&wrap_key, &state.wrapped_key_path(compartment_id))
+    else {
+        return Err(ServiceError::unauthorized(
+            "Passphrase confirmation failed.",
+        ));
     };
     let verified = state
         .with_vault(compartment_id, |vault| {
@@ -225,14 +228,18 @@ fn verify_passphrase_for_compartment(
         .unwrap_or(false);
 
     if !verified {
-        return Err(ServiceError::unauthorized("Passphrase confirmation failed."));
+        return Err(ServiceError::unauthorized(
+            "Passphrase confirmation failed.",
+        ));
     }
     Ok(())
 }
 
 fn load_enrollment(state: &AppState) -> ServiceResult<BiometricEnrollment> {
     load_json_document::<BiometricEnrollment>(&state.biometric_enrollment_path())
-        .map_err(|error| ServiceError::internal(format!("Failed to read biometric enrollment: {error}")))?
+        .map_err(|error| {
+            ServiceError::internal(format!("Failed to read biometric enrollment: {error}"))
+        })?
         .ok_or_else(|| ServiceError::not_found("No biometric enrollment is configured."))
 }
 
@@ -247,8 +254,9 @@ fn verify_signature(
     let verifying_key = VerifyingKey::from_sec1_bytes(&public_key).map_err(|error| {
         ServiceError::internal(format!("Stored biometric public key is invalid: {error}"))
     })?;
-    let signature = Signature::from_der(proof)
-        .map_err(|error| ServiceError::unauthorized(format!("Biometric proof is invalid: {error}")))?;
+    let signature = Signature::from_der(proof).map_err(|error| {
+        ServiceError::unauthorized(format!("Biometric proof is invalid: {error}"))
+    })?;
     verifying_key
         .verify(nonce, &signature)
         .map_err(|_| ServiceError::unauthorized("Biometric proof verification failed."))
@@ -259,10 +267,9 @@ fn load_meta_for_key(
     compartment_id: usize,
     master_key: &[u8; 32],
 ) -> ServiceResult<CompartmentMeta> {
-    Fido2Manager::load_compartment_meta(&state.base_dir, compartment_id, master_key)
-        .map_err(|error| {
-            ServiceError::internal(format!("Failed to load compartment metadata: {error}"))
-        })
+    Fido2Manager::load_compartment_meta(&state.base_dir, compartment_id, master_key).map_err(
+        |error| ServiceError::internal(format!("Failed to load compartment metadata: {error}")),
+    )
 }
 
 fn enrollment_fingerprint(bytes: &[u8]) -> String {

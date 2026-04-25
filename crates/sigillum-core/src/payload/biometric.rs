@@ -59,8 +59,9 @@ impl BiometricUnlockPayload {
     }
 
     pub fn encode(&self) -> Vec<u8> {
-        let mut out =
-            Vec::with_capacity(1 + CHALLENGE_ID_LEN + 2 + self.proof.len() + 1 + 2 + self.key.len());
+        let mut out = Vec::with_capacity(
+            1 + CHALLENGE_ID_LEN + 2 + self.proof.len() + 1 + 2 + self.key.len(),
+        );
         out.push(self.version);
         out.extend_from_slice(&self.challenge_id);
         out.extend_from_slice(&(self.proof.len() as u16).to_be_bytes());
@@ -107,7 +108,11 @@ impl BiometricUnlockPayload {
 }
 
 impl BiometricHelperOutput {
-    pub fn new(proof: Vec<u8>, key_encoding: u8, key: Vec<u8>) -> Result<Self, BiometricPayloadError> {
+    pub fn new(
+        proof: Vec<u8>,
+        key_encoding: u8,
+        key: Vec<u8>,
+    ) -> Result<Self, BiometricPayloadError> {
         if proof.len() > MAX_PROOF_LEN {
             return Err(BiometricPayloadError::ProofTooLong(proof.len()));
         }
@@ -169,7 +174,12 @@ impl BiometricHelperOutput {
         self,
         challenge_id: [u8; CHALLENGE_ID_LEN],
     ) -> Result<BiometricUnlockPayload, BiometricPayloadError> {
-        BiometricUnlockPayload::new(challenge_id, self.proof, self.key_encoding, self.key.to_vec())
+        BiometricUnlockPayload::new(
+            challenge_id,
+            self.proof,
+            self.key_encoding,
+            self.key.to_vec(),
+        )
     }
 }
 
@@ -205,7 +215,10 @@ impl<'a> Cursor<'a> {
     }
 
     fn read_vec(&mut self, len: usize) -> Result<Vec<u8>, BiometricPayloadError> {
-        let end = self.offset.checked_add(len).ok_or(BiometricPayloadError::Truncated)?;
+        let end = self
+            .offset
+            .checked_add(len)
+            .ok_or(BiometricPayloadError::Truncated)?;
         if end > self.input.len() {
             return Err(BiometricPayloadError::Truncated);
         }
@@ -232,7 +245,8 @@ mod tests {
 
     #[test]
     fn payload_round_trip() {
-        let payload = BiometricUnlockPayload::new([7u8; 16], vec![1, 2, 3], 1, vec![9u8; 32]).unwrap();
+        let payload =
+            BiometricUnlockPayload::new([7u8; 16], vec![1, 2, 3], 1, vec![9u8; 32]).unwrap();
         let decoded = BiometricUnlockPayload::decode(&payload.encode()).unwrap();
         assert_eq!(decoded.version, 1);
         assert_eq!(decoded.challenge_id, [7u8; 16]);

@@ -157,7 +157,7 @@ impl Fido2Manager {
         pin.filter(|pin| !pin.is_empty())
     }
 
-    fn pin_for_round<'a>(pins: &'a [String], round: usize) -> Option<&'a str> {
+    fn pin_for_round(pins: &[String], round: usize) -> Option<&str> {
         pins.get(round)
             .and_then(|pin| Self::normalize_pin(Some(pin.as_str())))
             .or_else(|| {

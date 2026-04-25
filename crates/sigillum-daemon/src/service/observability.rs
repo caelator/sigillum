@@ -95,12 +95,9 @@ impl SigillumService {
         query: crate::audit_db::AuditQuery,
     ) -> ServiceResult<AuditResponse> {
         let _ = self.require_session(token)?;
-        let events = self
-            .state
-            .read_audit_events(query)
-            .map_err(|error| {
-                ServiceError::internal(format!("Failed to read audit log: {error}"))
-            })?;
+        let events = self.state.read_audit_events(query).map_err(|error| {
+            ServiceError::internal(format!("Failed to read audit log: {error}"))
+        })?;
         Ok(AuditResponse { events })
     }
 

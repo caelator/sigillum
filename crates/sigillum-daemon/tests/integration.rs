@@ -38,7 +38,7 @@ async fn get_request(app: &axum::Router, path: &str, token: Option<&str>) -> (St
         .header("content-type", "application/json");
 
     if let Some(token) = token {
-        req = req.header("authorization", format!("Bearer {}", token));
+        req = req.header("authorization", format!("Bearer {token}"));
     }
 
     let req = req.body(Body::empty()).unwrap();
@@ -69,7 +69,7 @@ async fn post_request(
         .header("content-type", "application/json");
 
     if let Some(token) = token {
-        req = req.header("authorization", format!("Bearer {}", token));
+        req = req.header("authorization", format!("Bearer {token}"));
     }
 
     let req = req.body(Body::from(body_bytes)).unwrap();
@@ -146,7 +146,7 @@ async fn test_post_compartment_init_returns_token() {
     )
     .await;
 
-    assert_eq!(status, StatusCode::OK, "init should succeed: {:?}", body);
+    assert_eq!(status, StatusCode::OK, "init should succeed: {body:?}");
     let token = body
         .get("session_token")
         .and_then(|v| v.as_str())
@@ -334,8 +334,7 @@ async fn test_set_and_get_api_key_roundtrip() {
     assert_eq!(
         set_status,
         StatusCode::OK,
-        "set should succeed: {:?}",
-        set_body
+        "set should succeed: {set_body:?}"
     );
 
     // Get the stored API key
@@ -390,8 +389,7 @@ async fn test_post_lock_invalidates_session() {
     assert_eq!(
         lock_status,
         StatusCode::OK,
-        "lock should succeed: {:?}",
-        lock_body
+        "lock should succeed: {lock_body:?}"
     );
 
     // Verify token no longer works

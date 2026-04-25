@@ -816,6 +816,132 @@ async fn xpub_profiles_export_and_derive_receive_addresses() {
 }
 
 #[tokio::test]
+async fn seed_wallet_profiles_import_12_and_24_word_phrases() {
+    let dir = TempDir::new().unwrap();
+    let (addr, handle) = spawn_daemon(dir.path().to_path_buf()).await;
+    let client = reqwest::Client::new();
+
+    let init = post_json(
+        &client,
+        addr,
+        "/api/compartment/init",
+        json!({
+            "id": 0,
+            "label": "default",
+            "threshold": 1,
+            "passphrase": "correct horse battery staple",
+        }),
+        None,
+    )
+    .await;
+    let init_json: serde_json::Value = init.json().await.unwrap();
+    let token = init_json["session_token"].as_str().unwrap().to_string();
+
+    let provider = post_json(
+        &client,
+        addr,
+        "/api/profiles/evm/upsert",
+        json!({
+            "name": "mainnet",
+            "rpc_url": "http://127.0.0.1:8545/",
+            "chain_id": 1,
+        }),
+        Some(&token),
+    )
+    .await;
+    assert_eq!(provider.status(), StatusCode::OK);
+
+    let twelve_word = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
+    let seed_12 = post_json(
+        &client,
+        addr,
+        "/api/profiles/eth-seed/upsert",
+        json!({
+            "name": "seed-12",
+            "label": "Twelve word",
+            "mnemonic": twelve_word,
+            "project_account": 0,
+            "provider_profile": "mainnet",
+        }),
+        Some(&token),
+    )
+    .await;
+    assert_eq!(seed_12.status(), StatusCode::OK);
+    let seed_12_json: serde_json::Value = seed_12.json().await.unwrap();
+    assert_eq!(seed_12_json["profile"]["word_count"], 12);
+    assert_eq!(seed_12_json["profile"]["account_path"], "m/44'/60'/0'");
+    assert!(
+        seed_12_json["profile"]["receive_xpub"]
+            .as_str()
+            .unwrap()
+            .starts_with("xpub")
+    );
+    assert_eq!(
+        seed_12_json["profile"]["first_receive_address"]
+            .as_str()
+            .unwrap()
+            .len(),
+        42
+    );
+
+    let twenty_four_word = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon art";
+    let seed_24 = post_json(
+        &client,
+        addr,
+        "/api/profiles/eth-seed/upsert",
+        json!({
+            "name": "seed-24",
+            "label": "Twenty four word",
+            "mnemonic": twenty_four_word,
+            "mnemonic_passphrase": "optional",
+            "project_account": 1,
+            "provider_profile": "mainnet",
+        }),
+        Some(&token),
+    )
+    .await;
+    assert_eq!(seed_24.status(), StatusCode::OK);
+    let seed_24_json: serde_json::Value = seed_24.json().await.unwrap();
+    assert_eq!(seed_24_json["profile"]["word_count"], 24);
+    assert_eq!(seed_24_json["profile"]["account_path"], "m/44'/60'/1'");
+
+    let list = get(&client, addr, "/api/profiles/eth-seed", Some(&token)).await;
+    assert_eq!(list.status(), StatusCode::OK);
+    let list_json: serde_json::Value = list.json().await.unwrap();
+    let profiles = list_json["profiles"].as_array().unwrap();
+    assert_eq!(profiles.len(), 2);
+    assert_eq!(profiles[0]["name"], "seed-12");
+    assert_eq!(profiles[1]["name"], "seed-24");
+
+    let invalid = post_json(
+        &client,
+        addr,
+        "/api/profiles/eth-seed/upsert",
+        json!({
+            "name": "seed-invalid",
+            "mnemonic": "abandon abandon",
+            "project_account": 0,
+            "provider_profile": "mainnet",
+        }),
+        Some(&token),
+    )
+    .await;
+    assert_eq!(invalid.status(), StatusCode::BAD_REQUEST);
+
+    let delete = post_json(
+        &client,
+        addr,
+        "/api/profiles/eth-seed/delete",
+        json!({ "name": "seed-12" }),
+        Some(&token),
+    )
+    .await;
+    assert_eq!(delete.status(), StatusCode::OK);
+
+    handle.abort();
+}
+
+#[tokio::test]
 async fn profile_backed_send_and_queue_flow_persist_internal_configuration() {
     let dir = TempDir::new().unwrap();
     let (addr, handle) = spawn_daemon(dir.path().to_path_buf()).await;
@@ -1125,6 +1251,104 @@ async fn profile_bound_wallet_and_provider_work_after_session_switches_compartme
         send_json["to_address"],
         "0x1111111111111111111111111111111111111111"
     );
+
+    handle.abort();
+    rpc_handle.abort();
+}
+
+#[tokio::test]
+async fn wallet_inventory_scan_records_seed_profile_native_holdings() {
+    let dir = TempDir::new().unwrap();
+    let (addr, handle) = spawn_daemon(dir.path().to_path_buf()).await;
+    let (rpc_addr, rpc_handle) = spawn_mock_evm_provider().await;
+    let client = reqwest::Client::new();
+
+    let init = post_json(
+        &client,
+        addr,
+        "/api/compartment/init",
+        json!({
+            "id": 0,
+            "label": "default",
+            "threshold": 1,
+            "passphrase": "correct horse battery staple",
+        }),
+        None,
+    )
+    .await;
+    let init_json: serde_json::Value = init.json().await.unwrap();
+    let token = init_json["session_token"].as_str().unwrap().to_string();
+
+    post_json(
+        &client,
+        addr,
+        "/api/api-keys/set",
+        json!({ "key": "alchemy", "value": "rpc-test-token" }),
+        Some(&token),
+    )
+    .await;
+
+    post_json(
+        &client,
+        addr,
+        "/api/profiles/evm/upsert",
+        json!({
+            "name": "mainnet",
+            "rpc_url": format!("http://{rpc_addr}/"),
+            "auth_token_key": "alchemy",
+            "chain_id": 1,
+        }),
+        Some(&token),
+    )
+    .await;
+
+    let seed = post_json(
+        &client,
+        addr,
+        "/api/profiles/eth-seed/upsert",
+        json!({
+            "name": "seed-main",
+            "label": "Seed main",
+            "mnemonic": "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about",
+            "project_account": 0,
+            "provider_profile": "mainnet",
+        }),
+        Some(&token),
+    )
+    .await;
+    assert_eq!(seed.status(), StatusCode::OK);
+
+    let scan = post_json(
+        &client,
+        addr,
+        "/api/inventory/scan/evm",
+        json!({
+            "wallet_family": "eth-seed",
+            "wallet_profile": "seed-main",
+            "provider_profile": "mainnet",
+            "gap_limit": 1,
+            "max_index": 0
+        }),
+        Some(&token),
+    )
+    .await;
+    assert_eq!(scan.status(), StatusCode::OK);
+    let scan_json: serde_json::Value = scan.json().await.unwrap();
+    assert_eq!(scan_json["job"]["status"], "completed");
+    assert_eq!(scan_json["job"]["addresses_scanned"], 1);
+    assert_eq!(scan_json["job"]["active_addresses"], 1);
+    assert_eq!(scan_json["job"]["holdings_detected"], 1);
+    assert_eq!(scan_json["addresses"].as_array().unwrap().len(), 1);
+    assert_eq!(scan_json["holdings"].as_array().unwrap().len(), 1);
+    assert_eq!(scan_json["holdings"][0]["asset_kind"], "native");
+    assert_eq!(scan_json["holdings"][0]["amount_hex"], "0xde0b6b3a7640000");
+
+    let list = get(&client, addr, "/api/inventory/wallets", Some(&token)).await;
+    assert_eq!(list.status(), StatusCode::OK);
+    let list_json: serde_json::Value = list.json().await.unwrap();
+    assert_eq!(list_json["jobs"].as_array().unwrap().len(), 1);
+    assert_eq!(list_json["addresses"].as_array().unwrap().len(), 1);
+    assert_eq!(list_json["holdings"].as_array().unwrap().len(), 1);
 
     handle.abort();
     rpc_handle.abort();

@@ -4,10 +4,10 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU32};
 
 use sigillum_client::SigillumClient;
-use sqlx::SqlitePool;
 
 use crate::auth::ProjectCache;
 use crate::config::GatewayConfig;
+use crate::db::SqlitePool;
 
 /// Shared state threaded through all handlers via Axum's `State` extractor.
 #[derive(Clone)]

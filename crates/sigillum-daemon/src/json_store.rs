@@ -135,6 +135,7 @@ where
     encode_json_document_with(value, true)
 }
 
+#[allow(dead_code)]
 pub(crate) fn encode_json_document_compact<T>(value: &T) -> Result<Vec<u8>, std::io::Error>
 where
     T: JsonDocument,

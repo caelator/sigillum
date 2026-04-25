@@ -1,6 +1,6 @@
 [package]
 name = "sigillum-gateway"
-description = "Web-facing payment gateway for Sigillum — bridges websites with local custody"
+description = "Local-sidecar payment preview and control surface for Sigillum custody"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -26,7 +26,7 @@ tokio = { workspace = true }
 reqwest = { workspace = true }
 
 # Data
-sqlx = { workspace = true }
+rusqlite = { workspace = true }
 uuid = { workspace = true }
 
 # Serialization

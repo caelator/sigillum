@@ -2304,6 +2304,527 @@ const INDEX_HTML_SHELL_BEFORE_SCRIPT: &str = r##"<!DOCTYPE html>
       transform: none;
     }
   }
+
+  /* World-class local operator polish. This final layer intentionally settles
+     the earlier exploratory styles into one restrained, production console:
+     dense, scannable, accessible, and calm under repeated daily use. */
+  :root {
+    color-scheme: dark;
+    --bg: #101114;
+    --bg-deep: #0a0b0d;
+    --surface: #17191d;
+    --surface-strong: #202329;
+    --surface-soft: #121419;
+    --surface-quiet: #1b1e23;
+    --border: #30343b;
+    --border-strong: #444a54;
+    --text: #f5f7fa;
+    --text-dim: #a8b0ba;
+    --text-soft: #727b86;
+    --accent: #5bd6a2;
+    --accent-hover: #83e2ba;
+    --accent-strong: #effff7;
+    --accent-soft: rgba(91, 214, 162, 0.14);
+    --accent-alt: #78a6ff;
+    --accent-alt-soft: rgba(120, 166, 255, 0.14);
+    --danger: #ff8f80;
+    --success: #6fdaa8;
+    --warning: #f0c264;
+    --radius: 8px;
+    --radius-sm: 6px;
+    --radius-lg: 8px;
+    --font: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    --font-body: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    --mono: "SF Mono", "Cascadia Code", ui-monospace, Menlo, Consolas, monospace;
+  }
+  * {
+    letter-spacing: 0 !important;
+  }
+  .hidden {
+    display: none !important;
+  }
+  html {
+    scroll-padding-top: 96px;
+  }
+  body {
+    align-items: stretch;
+    background:
+      linear-gradient(180deg, rgba(255,255,255,0.035), transparent 180px),
+      linear-gradient(180deg, var(--bg) 0%, var(--bg-deep) 100%) !important;
+    color: var(--text);
+    font-family: var(--font-body);
+  }
+  body::before,
+  body::after,
+  .card::before,
+  .card::after,
+  #statusCard::after,
+  #nextStepCard::after {
+    content: none !important;
+  }
+  header {
+    position: sticky;
+    top: 0;
+    z-index: 50;
+    width: 100%;
+    max-width: none;
+    margin: 0;
+    padding: 14px clamp(18px, 3vw, 36px);
+    gap: 18px;
+    background: rgba(13, 14, 17, 0.92);
+    border-bottom: 1px solid var(--border);
+    box-shadow: 0 10px 28px rgba(0,0,0,0.22);
+    backdrop-filter: blur(16px);
+  }
+  .brand-lockup {
+    align-items: center;
+    gap: 14px;
+    min-width: 0;
+  }
+  .brand-mark {
+    width: 42px;
+    height: 42px;
+    border-radius: 8px;
+    border: 1px solid rgba(255,255,255,0.18);
+    background: linear-gradient(180deg, #f8fafc 0%, #dce4ec 100%);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.7), 0 14px 26px rgba(0,0,0,0.24);
+    color: #101114;
+    font-size: 18px;
+    font-weight: 800;
+  }
+  .logo {
+    color: var(--text);
+    font-family: var(--font);
+    font-size: 24px !important;
+    font-weight: 720;
+    line-height: 1.1;
+  }
+  .logo span {
+    color: var(--text);
+  }
+  .logo-sub {
+    max-width: 760px;
+    margin-top: 4px;
+    color: var(--text-dim);
+    font-size: 13px;
+    line-height: 1.45;
+  }
+  .header-right {
+    gap: 8px;
+    justify-content: flex-end;
+  }
+  .refresh-meta,
+  .compartment-badge,
+  .status-badge {
+    min-height: 36px;
+    padding: 0 12px;
+    border: 1px solid var(--border);
+    background: var(--surface-soft);
+    color: var(--text-dim);
+    box-shadow: none;
+    font-family: var(--mono);
+    font-size: 11px;
+    text-transform: uppercase;
+  }
+  main {
+    width: min(1280px, calc(100% - 40px));
+    max-width: none;
+    margin: 0 auto;
+    padding: 22px 0 56px;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 16px;
+  }
+  .section-nav {
+    position: sticky;
+    top: 82px;
+    z-index: 30;
+    display: grid;
+    grid-template-columns: repeat(6, minmax(0, 1fr));
+    gap: 6px;
+    padding: 6px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: rgba(16, 17, 20, 0.92);
+    box-shadow: 0 14px 30px rgba(0,0,0,0.22);
+    backdrop-filter: blur(14px);
+  }
+  .workspace-tab {
+    min-height: 66px;
+    width: 100%;
+    padding: 10px 12px;
+    border-radius: 6px;
+    border: 1px solid transparent;
+    background: transparent;
+    color: var(--text-dim);
+    text-align: left;
+    box-shadow: none;
+  }
+  .workspace-tab strong {
+    display: block;
+    color: var(--text);
+    font-size: 14px;
+    font-weight: 760;
+    line-height: 1.25;
+  }
+  .workspace-tab span {
+    display: none;
+  }
+  .workspace-tab:hover,
+  .workspace-tab:focus-visible {
+    border-color: var(--border-strong);
+    background: var(--surface-quiet);
+    transform: none;
+  }
+  .workspace-tab.active {
+    border-color: rgba(255,255,255,0.16);
+    background: linear-gradient(180deg, #f4f7fb 0%, #dbe4ed 100%);
+    color: #101114;
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.7);
+  }
+  .workspace-tab.active strong,
+  .workspace-tab.active span {
+    color: #101114;
+  }
+  .card {
+    padding: 24px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: linear-gradient(180deg, var(--surface-strong) 0%, var(--surface) 100%);
+    box-shadow: 0 18px 42px rgba(0,0,0,0.24);
+    scroll-margin-top: 162px;
+    outline: none;
+  }
+  .card:focus-visible {
+    box-shadow: 0 0 0 3px rgba(91,214,162,0.18), 0 18px 42px rgba(0,0,0,0.24);
+  }
+  .eyebrow,
+  .section-title {
+    margin-bottom: 10px;
+    color: var(--accent);
+    font-family: var(--mono);
+    font-size: 11px;
+    font-weight: 760;
+    text-transform: uppercase;
+  }
+  .card h2,
+  .pin-modal h2 {
+    margin-bottom: 10px;
+    color: var(--text);
+    font-size: 26px !important;
+    font-weight: 760;
+    line-height: 1.15;
+  }
+  .hero-shell {
+    display: grid;
+    grid-template-columns: minmax(0, 1.15fr) minmax(320px, 0.85fr);
+    gap: 22px;
+    align-items: start;
+  }
+  .hero-copy h1 {
+    max-width: 15ch;
+    margin-bottom: 14px;
+    color: var(--text);
+    font-size: 46px !important;
+    font-weight: 760;
+    line-height: 1.02;
+  }
+  .hero-summary {
+    max-width: 66ch;
+    color: var(--text-dim);
+    font-size: 16px;
+    line-height: 1.6;
+  }
+  .hero-actions,
+  .card-actions,
+  .form-row,
+  .form-row-center,
+  .unlock-tabs,
+  .comp-switcher {
+    gap: 10px;
+  }
+  .hero-mode,
+  .wizard-summary,
+  .guide-block,
+  .stat,
+  .info-box,
+  .result-box,
+  .method-btn,
+  .wiz-comp-row,
+  .checklist-item,
+  .next-step-item,
+  .entity-list,
+  .key-list,
+  .secret-value,
+  .checkbox-row,
+  .checkbox-label,
+  .toast {
+    border-radius: 8px !important;
+  }
+  .hero-mode,
+  .wizard-summary,
+  .guide-block,
+  .stat,
+  .info-box,
+  .result-box,
+  .checklist-item,
+  .next-step-item {
+    border: 1px solid var(--border);
+    background: var(--surface-soft);
+    box-shadow: none;
+  }
+  .hero-mode-value {
+    color: var(--text);
+    font-size: 28px !important;
+    font-weight: 760;
+    line-height: 1.1;
+  }
+  .hero-context .context-row {
+    display: grid;
+    grid-template-columns: minmax(70px, max-content) minmax(0, 1fr);
+    gap: 14px;
+    align-items: start;
+  }
+  .hero-context .context-row strong {
+    min-width: 0;
+  }
+  .hero-mode-detail,
+  .helper-text,
+  .text-meta,
+  .text-meta-sm,
+  .card-note,
+  .guide-block p,
+  .guide-list,
+  .next-step-item span,
+  .checklist-item div:last-child {
+    color: var(--text-dim);
+    font-size: 14px;
+    line-height: 1.58;
+  }
+  .stats,
+  .hero-stats,
+  .guide-grid,
+  .checklist-list,
+  .next-step-grid {
+    gap: 10px;
+  }
+  .stat {
+    min-height: 92px;
+    padding: 14px;
+  }
+  .stat .value {
+    color: var(--text);
+    font-size: 28px !important;
+    line-height: 1.1;
+  }
+  .stat .label {
+    color: var(--text-soft);
+    font-family: var(--mono);
+    font-size: 11px;
+    text-transform: uppercase;
+  }
+  input[type="text"],
+  input[type="password"],
+  input[type="number"],
+  input[type="file"],
+  select,
+  textarea {
+    min-height: 46px;
+    border-radius: 8px;
+    border-color: var(--border);
+    background: #0d0f12;
+    color: var(--text);
+    font-size: 14px;
+    box-shadow: none;
+  }
+  textarea {
+    min-height: 104px;
+    resize: vertical;
+    line-height: 1.55;
+  }
+  input:focus,
+  select:focus,
+  textarea:focus {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px rgba(91,214,162,0.14);
+  }
+  button {
+    min-height: 46px;
+    border-radius: 8px;
+    box-shadow: none;
+    font-size: 14px;
+    font-weight: 700;
+  }
+  button:hover {
+    transform: none;
+  }
+  button:disabled {
+    cursor: not-allowed;
+    opacity: 0.58;
+    transform: none;
+  }
+  button.is-busy {
+    position: relative;
+    color: transparent !important;
+  }
+  button.is-busy::after {
+    content: "";
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    width: 16px;
+    height: 16px;
+    margin: -8px 0 0 -8px;
+    border: 2px solid var(--text-dim);
+    border-right-color: transparent;
+    border-radius: 999px;
+    animation: busySpin 0.75s linear infinite;
+  }
+  @keyframes busySpin {
+    to { transform: rotate(360deg); }
+  }
+  .btn-primary {
+    border-color: rgba(255,255,255,0.18);
+    background: linear-gradient(180deg, #f5f8fb 0%, #d8e2ec 100%);
+    color: #101114;
+  }
+  .btn-primary:hover {
+    background: linear-gradient(180deg, #ffffff 0%, #e3ebf3 100%);
+  }
+  .btn-ghost {
+    border-color: var(--border);
+    background: var(--surface-quiet);
+    color: var(--text);
+  }
+  .btn-success {
+    border-color: rgba(111,218,168,0.28);
+    background: rgba(111,218,168,0.12);
+    color: var(--accent-strong);
+  }
+  .btn-danger {
+    border-color: rgba(255,143,128,0.28);
+    background: rgba(255,143,128,0.11);
+    color: #ffe3df;
+  }
+  .unlock-tab,
+  .comp-switcher button {
+    min-height: 40px;
+    border-radius: 8px;
+  }
+  .unlock-tab.active,
+  .comp-switcher button.active {
+    background: var(--accent-soft);
+    border-color: rgba(91,214,162,0.34);
+    color: var(--accent-strong);
+  }
+  .entity-list,
+  .key-list {
+    border-color: var(--border);
+    background: var(--surface-soft);
+  }
+  .entity-list li,
+  .key-list li {
+    padding: 16px;
+    border-bottom: 1px solid var(--border);
+  }
+  .entity-title,
+  .key-list li > span:first-child {
+    color: var(--text);
+    font-size: 13px;
+    line-height: 1.5;
+  }
+  .entity-meta {
+    color: var(--text-dim);
+    font-size: 12px;
+    line-height: 1.6;
+  }
+  .pill,
+  .checklist-mark,
+  .refresh-meta,
+  .compartment-badge,
+  .status-badge {
+    border-radius: 999px !important;
+  }
+  .pill-good {
+    background: rgba(111,218,168,0.12);
+    color: var(--success);
+    border-color: rgba(111,218,168,0.24);
+  }
+  .pill-warn {
+    background: rgba(240,194,100,0.13);
+    color: var(--warning);
+    border-color: rgba(240,194,100,0.24);
+  }
+  .pill-danger {
+    background: rgba(255,143,128,0.13);
+    color: var(--danger);
+    border-color: rgba(255,143,128,0.24);
+  }
+  .secret-value {
+    border-color: rgba(120,166,255,0.22);
+    background: rgba(120,166,255,0.08);
+    color: #dbe7ff;
+  }
+  .toast {
+    border-color: var(--border-strong);
+    background: rgba(20,22,26,0.96);
+  }
+  footer {
+    width: min(1280px, calc(100% - 40px));
+    margin: 0 auto;
+    padding: 0 0 34px;
+    color: var(--text-soft);
+    font-size: 11px;
+    text-transform: uppercase;
+  }
+  @media (max-width: 1080px) {
+    .section-nav {
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+    .hero-shell,
+    .wizard-header {
+      grid-template-columns: minmax(0, 1fr);
+    }
+  }
+  @media (max-width: 760px) {
+    header {
+      align-items: stretch;
+      padding: 14px;
+    }
+    main,
+    footer {
+      width: min(100%, calc(100% - 24px));
+    }
+    .section-nav {
+      top: 118px;
+      grid-template-columns: minmax(0, 1fr);
+      max-height: 44vh;
+      overflow: auto;
+    }
+    .workspace-tab {
+      min-height: 44px;
+      padding: 9px 10px;
+    }
+    .hero-context .context-row {
+      grid-template-columns: minmax(0, 1fr);
+      gap: 6px;
+    }
+    .card {
+      padding: 18px;
+      scroll-margin-top: 176px;
+    }
+    .hero-copy h1 {
+      font-size: 34px !important;
+    }
+    .card h2,
+    .pin-modal h2 {
+      font-size: 22px !important;
+    }
+    .hero-mode-value,
+    .stat .value {
+      font-size: 24px !important;
+    }
+  }
 </style>
 </head>
 <body>
@@ -2783,6 +3304,30 @@ const INDEX_HTML_SHELL_BEFORE_SCRIPT: &str = r##"<!DOCTYPE html>
 
     <div class="section-divider"></div>
 
+    <div class="section-title">Seed Phrase Wallets</div>
+    <p class="helper-text">Import 12-word or 24-word BIP-39 Ethereum wallets for local receive-tree visibility. The phrase is stored as an encrypted vault secret; the profile list keeps only public receive metadata.</p>
+    <div class="form-row">
+      <input type="text" id="seedProfileName" placeholder="Profile name">
+      <input type="text" id="seedProfileLabel" placeholder="Display label (optional)">
+      <input type="number" id="seedProjectAccount" placeholder="Account" value="0" class="input-mid">
+    </div>
+    <div class="form-row">
+      <select id="seedProviderProfile"></select>
+      <input type="number" id="seedCompartmentId" placeholder="Compartment (optional)" class="input-wider">
+      <input type="number" id="seedChainId" placeholder="Chain ID (optional)" class="input-mid">
+    </div>
+    <div class="form-row">
+      <textarea id="seedMnemonic" placeholder="Seed phrase (12 or 24 words)"></textarea>
+    </div>
+    <div class="form-row">
+      <input type="password" id="seedMnemonicPassphrase" placeholder="BIP-39 passphrase (optional)">
+      <input type="text" id="seedDefaultDestination" placeholder="Default destination address (optional)">
+      <button class="btn-primary" data-action="upsertSeedWalletProfile">Import Seed Wallet</button>
+    </div>
+    <div id="seedWalletProfileList"></div>
+
+    <div class="section-divider"></div>
+
     <div class="section-title">Export Receive Branch</div>
     <p class="helper-text">Choose a saved xpub wallet profile to export its public receive branch. The exported xpub can derive receive addresses without touching private key material.</p>
     <div class="form-row">
@@ -2801,6 +3346,55 @@ const INDEX_HTML_SHELL_BEFORE_SCRIPT: &str = r##"<!DOCTYPE html>
       <button class="btn-ghost" data-action="previewXpubReceiveAddress">Derive Address</button>
     </div>
     <div id="xpubPreviewResult" class="result-box hidden"></div>
+  </div>
+
+  <!-- Wallet Operations Card -->
+  <div class="card hidden" id="inventoryCard" data-nav-label="Inventory" data-workspace-section="operations">
+    <div class="eyebrow">Operations</div>
+    <h2>Wallet inventory</h2>
+    <p class="helper-text">
+      Run read-only discovery, inspect stranded value and risk findings, and generate dry-run consolidation plans before any queue work is allowed.
+    </p>
+
+    <div class="section-title">Chain Profiles</div>
+    <div class="form-row">
+      <input type="text" id="chainProfileName" placeholder="Chain profile name">
+      <input type="text" id="chainProfileFamily" placeholder="Family (evm, bitcoin, solana)">
+      <input type="number" id="chainProfileId" placeholder="Chain ID (optional)" class="input-mid">
+    </div>
+    <div class="form-row">
+      <input type="text" id="chainProfileProvider" placeholder="Provider profile (optional)">
+      <input type="text" id="chainProfileNativeSymbol" placeholder="Native symbol (optional)">
+      <button class="btn-primary" data-action="upsertChainProfile">Save Chain</button>
+    </div>
+    <div id="chainProfileList"></div>
+
+    <div class="section-divider"></div>
+    <div class="section-title">EVM Discovery</div>
+    <div class="form-row">
+      <input type="text" id="inventoryWalletFamily" placeholder="Wallet family (optional)">
+      <input type="text" id="inventoryWalletProfile" placeholder="Wallet profile (optional)">
+      <input type="text" id="inventoryProviderProfile" placeholder="Provider profile (optional)">
+    </div>
+    <div class="form-row">
+      <input type="number" id="inventoryGapLimit" placeholder="Gap limit" value="20" class="input-mid">
+      <input type="number" id="inventoryMaxIndex" placeholder="Max index" value="200" class="input-mid">
+      <input type="text" id="inventoryTokenAddress" placeholder="ERC-20 token address (optional)">
+      <button class="btn-primary" data-action="scanInventoryEvm">Scan EVM</button>
+    </div>
+    <div id="inventoryJobList"></div>
+    <div id="inventoryAddressList"></div>
+    <div id="inventoryHoldingList"></div>
+
+    <div class="section-divider"></div>
+    <div class="section-title">Risk And Plans</div>
+    <div class="form-row">
+      <input type="text" id="planDestinationAddress" placeholder="Consolidation destination address">
+      <button class="btn-ghost" data-action="loadRiskFindings">Refresh Risks</button>
+      <button class="btn-primary" data-action="generateConsolidationPlan">Generate Plan</button>
+    </div>
+    <div id="riskFindingList"></div>
+    <div id="consolidationPlanList"></div>
   </div>
 
   <!-- Deposits Card -->
@@ -3003,6 +3597,7 @@ const OPERATOR_CARD_IDS = [
   'secretsCard',
   'profilesCard',
   'xpubCard',
+  'inventoryCard',
   'depositsCard',
   'queueCard',
   'maintenanceCard',
@@ -3060,6 +3655,7 @@ let lastFidoDetect = null;
 let lastProviderProfiles = [];
 let lastWalletProfiles = [];
 let lastXpubWalletProfiles = [];
+let lastSeedWalletProfiles = [];
 let lastApiKeys = [];
 let lastSecretKeys = [];
 let lastDeposits = [];
@@ -3287,6 +3883,12 @@ function firstVisibleCardInSection(sectionId) {
   );
 }
 
+function focusCard(card) {
+  if (!card) return;
+  if (!card.hasAttribute('tabindex')) card.setAttribute('tabindex', '-1');
+  card.focus({ preventScroll: true });
+}
+
 function storeWorkspaceSection(sectionId) {
   try {
     window.sessionStorage.setItem(WORKSPACE_SECTION_KEY, sectionId);
@@ -3351,6 +3953,7 @@ function selectWorkspaceSection(sectionId) {
   const firstCard = firstVisibleCardInSection(sectionId);
   if (firstCard) {
     firstCard.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    focusCard(firstCard);
   }
 }
 
@@ -3366,6 +3969,7 @@ function jumpToCard(id) {
   requestAnimationFrame(() => {
     if (!el.classList.contains('hidden') && !el.classList.contains('section-hidden')) {
       el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      focusCard(el);
     }
   });
 }
@@ -3552,6 +4156,7 @@ function updateNextStepCard() {
   }
   const hasStealthWalletProfiles = lastWalletProfiles.length > 0;
   const hasXpubWalletProfiles = lastXpubWalletProfiles.length > 0;
+  const hasSeedWalletProfiles = lastSeedWalletProfiles.length > 0;
 
   let nextStep = {
     title: 'Choose the next concrete operation',
@@ -3595,13 +4200,13 @@ function updateNextStepCard() {
       secondaryTarget: 'apiKeysCard',
       note: 'If your provider needs an auth token, store that connection key first and then reference it from the provider profile.',
     };
-  } else if (!hasStealthWalletProfiles && !hasXpubWalletProfiles) {
+  } else if (!hasStealthWalletProfiles && !hasXpubWalletProfiles && !hasSeedWalletProfiles) {
     nextStep = {
       title: 'Choose a wallet family',
-      summary: 'Provider settings are ready. Next choose whether you want a stealth operator wallet for deposits and queue work, or an xpub receive wallet for public receive-tree export and address previews.',
+      summary: 'Provider settings are ready. Next choose whether you want a stealth operator wallet, an xpub receive wallet, or an imported seed wallet for public receive-tree visibility.',
       items: [
         { title: 'Stealth wallet', body: 'Use this when you want tracked deposits, sweep queues, and maintenance workflows today.' },
-        { title: 'Xpub receive wallet', body: 'Use this when you want a public receive branch and deterministic receive-address previews without exposing private key material.' },
+        { title: 'Seed or xpub receive wallet', body: 'Use this when you want deterministic receive-address previews and multiple wallet profiles visible in one place.' },
       ],
       primaryLabel: 'Open wallets',
       primaryTarget: 'profilesCard',
@@ -3609,19 +4214,19 @@ function updateNextStepCard() {
       secondaryTarget: 'guideCard',
       note: 'Stealth is the current end-to-end operator path. Xpub is now available for receive-branch export and preview, but not yet for discovery or sweeping.',
     };
-  } else if (!hasStealthWalletProfiles && hasXpubWalletProfiles) {
+  } else if (!hasStealthWalletProfiles && (hasXpubWalletProfiles || hasSeedWalletProfiles)) {
     nextStep = {
       title: 'Add a stealth wallet for live operator flows',
-      summary: 'Your xpub receive profile is ready for public address derivation, but tracked deposits, sweep queues, and maintenance still run on stealth wallets today.',
+      summary: 'Your receive wallet profile is ready for address visibility, but tracked deposits, sweep queues, and maintenance still run on stealth wallets today.',
       items: [
-        { title: 'Keep xpub for receive trees', body: 'Use the xpub card to export receive branches and preview deposit addresses by index.' },
+        { title: 'Keep receive wallets for visibility', body: 'Use the xpub card to export receive branches and preview deposit addresses by index.' },
         { title: 'Add stealth for operations', body: 'Use the stealth wallet card when you want deposits, queue jobs, and maintenance cycles to run locally.' },
       ],
       primaryLabel: 'Open wallets',
       primaryTarget: 'profilesCard',
       secondaryLabel: 'Open xpub tools',
       secondaryTarget: 'xpubCard',
-      note: 'This keeps the current product honest: xpub is live for receive-branch export, while stealth remains the operational wallet family.',
+      note: 'This keeps the current product honest: receive wallets are live for visibility, while stealth remains the operational wallet family.',
     };
   } else if (lastFidoKeys.length === 1) {
     nextStep = {
@@ -3828,6 +4433,7 @@ function applyUnlockedUi(active, unlocked) {
   setHidden('guideCard', false);
   setHidden('profilesCard', false);
   setHidden('xpubCard', false);
+  setHidden('inventoryCard', false);
   setHidden('depositsCard', false);
   setHidden('queueCard', false);
   setHidden('maintenanceCard', false);
@@ -3894,6 +4500,7 @@ async function runRefreshCycle() {
     loadSecrets(),
     loadApiKeys(),
     loadProfiles(),
+    loadInventoryOperations(),
     loadDepositRegistry(),
     loadQueueJobs(),
     loadFido2(),
@@ -4217,25 +4824,53 @@ function renderXpubWalletProfiles(profiles) {
   });
 }
 
+function renderSeedWalletProfiles(profiles) {
+  renderEntityList('seedWalletProfileList', profiles, 'No imported seed wallets yet. Import a 12-word or 24-word phrase to add another receive wallet profile.', profile => {
+    const label = profile.label ? ' · label=' + profile.label : '';
+    return '<li><div class="entity-main">' +
+      '<div class="entity-title">' + esc(profile.name) + '</div>' +
+      '<div class="entity-meta">' +
+      'words=' + esc(String(profile.word_count)) +
+      ' · account=' + esc(String(profile.project_account)) +
+      ' · provider=' + esc(profile.provider_profile) + esc(label) + '<br>' +
+      'accountPath=' + esc(profile.account_path || '-') +
+      ' · receivePath=' + esc(profile.receive_path || '-') + '<br>' +
+      'firstAddress=' + esc(profile.first_receive_address || '-') + '<br>' +
+      'compartment=' + esc(String(profile.compartment_id)) +
+      ' · chain=' + esc(profile.chain_id != null ? String(profile.chain_id) : '-') +
+      ' · defaultDestination=' + esc(profile.default_destination_address || '-') +
+      '</div></div>' +
+      '<div class="entity-actions">' +
+      '<button class="btn-ghost" data-action="copyText" data-arg0="' + escAttr(profile.receive_xpub || '') + '" data-arg1="Seed wallet receive xpub">Copy Xpub</button>' +
+      '<button class="btn-ghost" data-action="copyText" data-arg0="' + escAttr(profile.first_receive_address || '') + '" data-arg1="First receive address">Copy Address</button>' +
+      '<button class="btn-danger" data-action="deleteSeedWalletProfile" data-arg0="' + escAttr(profile.name) + '">Delete</button>' +
+      '</div></li>';
+  });
+}
+
 async function loadProfiles() {
   try {
-    const [providerResp, walletResp, xpubResp] = await Promise.all([
+    const [providerResp, walletResp, xpubResp, seedResp] = await Promise.all([
       api('GET', '/api/profiles/evm'),
       api('GET', '/api/profiles/eth-stealth'),
       api('GET', '/api/profiles/eth-xpub'),
+      api('GET', '/api/profiles/eth-seed'),
     ]);
-    if (providerResp.error || walletResp.error || xpubResp.error) return;
+    if (providerResp.error || walletResp.error || xpubResp.error || seedResp.error) return;
 
     const providers = providerResp.profiles || [];
     const wallets = walletResp.profiles || [];
     const xpubWallets = xpubResp.profiles || [];
+    const seedWallets = seedResp.profiles || [];
     lastProviderProfiles = providers;
     lastWalletProfiles = wallets;
     lastXpubWalletProfiles = xpubWallets;
+    lastSeedWalletProfiles = seedWallets;
 
     renderProviderProfiles(providers);
     renderWalletProfiles(wallets);
     renderXpubWalletProfiles(xpubWallets);
+    renderSeedWalletProfiles(seedWallets);
 
     setSelectOptions(
       'walletProviderProfile',
@@ -4247,6 +4882,14 @@ async function loadProfiles() {
     );
     setSelectOptions(
       'xpubProviderProfile',
+      providers.map(profile => ({
+        value: profile.name,
+        label: profile.name + ' · chain ' + profile.chain_id,
+      })),
+      providers.length ? 'Select provider profile' : 'No provider profiles available'
+    );
+    setSelectOptions(
+      'seedProviderProfile',
       providers.map(profile => ({
         value: profile.name,
         label: profile.name + ' · chain ' + profile.chain_id,
@@ -4388,6 +5031,56 @@ async function deleteXpubWalletProfile(name) {
   refresh();
 }
 
+async function upsertSeedWalletProfile() {
+  const name = textValue('seedProfileName');
+  const mnemonic = textValue('seedMnemonic');
+  const providerProfile = textValue('seedProviderProfile');
+  const projectAccount = parseInt(textValue('seedProjectAccount'), 10);
+  const wordCount = mnemonic ? mnemonic.split(/\s+/).filter(Boolean).length : 0;
+  if (!name || !mnemonic || !providerProfile || !Number.isInteger(projectAccount) || projectAccount < 0) {
+    toast('Profile name, seed phrase, provider profile, and a non-negative account are required', 'error');
+    return;
+  }
+  if (wordCount !== 12 && wordCount !== 24) {
+    toast('Seed phrase must contain exactly 12 or 24 words', 'error');
+    return;
+  }
+
+  const r = await api('POST', '/api/profiles/eth-seed/upsert', {
+    name,
+    label: optionalTextValue('seedProfileLabel'),
+    mnemonic,
+    mnemonic_passphrase: optionalTextValue('seedMnemonicPassphrase'),
+    project_account: projectAccount,
+    provider_profile: providerProfile,
+    compartment_id: optionalNumberValue('seedCompartmentId'),
+    chain_id: optionalNumberValue('seedChainId'),
+    default_destination_address: optionalTextValue('seedDefaultDestination'),
+  });
+  if (r.error) { toast(r.error, 'error'); return; }
+
+  clearFields([
+    'seedProfileName',
+    'seedProfileLabel',
+    'seedMnemonic',
+    'seedMnemonicPassphrase',
+    'seedCompartmentId',
+    'seedChainId',
+    'seedDefaultDestination',
+  ]);
+  document.getElementById('seedProjectAccount').value = '0';
+  toast('Seed wallet profile imported');
+  refresh();
+}
+
+async function deleteSeedWalletProfile(name) {
+  if (!confirm('Delete seed wallet profile "' + name + '"?')) return;
+  const r = await api('POST', '/api/profiles/eth-seed/delete', { name });
+  if (r.error) { toast(r.error, 'error'); return; }
+  toast('Seed wallet profile deleted');
+  refresh();
+}
+
 async function exportSelectedXpubWallet() {
   const walletProfile = textValue('xpubPreviewProfile');
   if (!walletProfile) {
@@ -4454,6 +5147,205 @@ async function exportWalletMeta(wallet, shortName) {
   });
   if (r.error) { toast(r.error, 'error'); return; }
   await copyText(r.stealth_meta_address, 'Stealth meta-address');
+}
+
+function renderChainProfiles(profiles) {
+  renderEntityList('chainProfileList', profiles, 'No chain profiles yet. Save one to describe discovery/indexing capabilities for a network.', profile => {
+    return '<li><div class="entity-main">' +
+      '<div class="entity-title">' + esc(profile.name) + ' ' + statusPill(profile.enabled ? 'enabled' : 'disabled') + '</div>' +
+      '<div class="entity-meta">' +
+      'family=' + esc(profile.chain_family) +
+      ' · chainId=' + esc(String(profile.chain_id || '-')) +
+      ' · provider=' + esc(profile.provider_profile || '-') +
+      ' · native=' + esc(profile.native_symbol || '-') + '<br>' +
+      'capabilities=' + esc((profile.capabilities || []).join(', ') || '-') +
+      ' · source=' + esc(profile.source || '-') +
+      '</div></div>' +
+      '<div class="entity-actions">' +
+      '<button class="btn-danger" data-action="deleteChainProfile" data-arg0="' + escAttr(profile.name) + '">Delete</button>' +
+      '</div></li>';
+  });
+}
+
+function renderInventoryState(inventory) {
+  renderEntityList('inventoryJobList', inventory.jobs || [], 'No discovery jobs yet.', job => {
+    return '<li><div class="entity-main">' +
+      '<div class="entity-title">' + esc(job.id) + ' ' + statusPill(job.status) + '</div>' +
+      '<div class="entity-meta">' +
+      'wallets=' + esc((job.wallet_profiles || []).join(', ') || '-') +
+      ' · providers=' + esc((job.provider_profiles || []).join(', ') || '-') + '<br>' +
+      'scanned=' + esc(String(job.addresses_scanned || 0)) +
+      ' · active=' + esc(String(job.active_addresses || 0)) +
+      ' · holdings=' + esc(String(job.holdings_detected || 0)) +
+      '</div></div>' +
+      '<div class="entity-actions">' +
+      '<button class="btn-ghost" data-action="cancelDiscoveryJob" data-arg0="' + escAttr(job.id) + '">Cancel</button>' +
+      '<button class="btn-ghost" data-action="resumeDiscoveryJob" data-arg0="' + escAttr(job.id) + '">Resume</button>' +
+      '</div></li>';
+  });
+  renderEntityList('inventoryAddressList', inventory.addresses || [], 'No discovered addresses yet.', address => {
+    return '<li><div class="entity-main">' +
+      '<div class="entity-title">' + esc(address.address) + ' ' + statusPill(address.activity_state) + '</div>' +
+      '<div class="entity-meta">' +
+      esc(address.wallet_family) + '/' + esc(address.wallet_profile) +
+      ' · chain=' + esc(String(address.chain_id)) +
+      ' · path=' + esc(address.derivation_path) + '<br>' +
+      'native=' + esc(address.native_balance_wei_hex || '0x0') +
+      ' · txCount=' + esc(String(address.transaction_count || 0)) +
+      '</div></div></li>';
+  });
+  renderEntityList('inventoryHoldingList', inventory.holdings || [], 'No positive asset holdings detected yet.', holding => {
+    return '<li><div class="entity-main">' +
+      '<div class="entity-title">' + esc(holding.asset_kind) + ' ' + statusPill(holding.status) + '</div>' +
+      '<div class="entity-meta">' +
+      'address=' + esc(holding.address) +
+      ' · asset=' + esc(holding.asset_address || 'native') +
+      ' · amount=' + esc(holding.amount_hex) + '<br>' +
+      esc(holding.wallet_family) + '/' + esc(holding.wallet_profile) +
+      ' · provider=' + esc(holding.provider_profile) +
+      '</div></div></li>';
+  });
+}
+
+function renderRiskFindings(findings) {
+  renderEntityList('riskFindingList', findings, 'No risk findings from the current inventory.', finding => {
+    return '<li><div class="entity-main">' +
+      '<div class="entity-title">' + esc(finding.category) + ' ' + statusPill(finding.risk_level) + '</div>' +
+      '<div class="entity-meta">' +
+      'subject=' + esc(finding.subject_type) + ':' + esc(finding.subject) +
+      ' · address=' + esc(finding.address) + '<br>' +
+      esc(finding.recommendation || '') +
+      '</div></div></li>';
+  });
+}
+
+function renderConsolidationPlans(plans) {
+  renderEntityList('consolidationPlanList', plans, 'No consolidation plans generated yet.', plan => {
+    const summary = plan.summary || {};
+    const stepLines = (plan.steps || []).slice(0, 8).map(step =>
+      '<div class="entity-meta">' +
+      esc(step.action) + ' ' + statusPill(step.status) +
+      ' · ' + esc(step.asset_kind) +
+      ' · amount=' + esc(step.amount_hex) +
+      ' · blockers=' + esc((step.blockers || []).join(', ') || '-') +
+      '</div>'
+    ).join('');
+    return '<li><div class="entity-main">' +
+      '<div class="entity-title">' + esc(plan.id) + ' ' + statusPill(plan.status) + '</div>' +
+      '<div class="entity-meta">' +
+      'steps=' + esc(String(summary.total_steps || 0)) +
+      ' · blocked=' + esc(String(summary.blocked_steps || 0)) +
+      ' · review=' + esc(String(summary.review_required_steps || 0)) +
+      ' · approved=' + esc(String(summary.approved_steps || 0)) +
+      '</div>' + stepLines + '</div>' +
+      '<div class="entity-actions">' +
+      '<button class="btn-ghost" data-action="approveConsolidationPlan" data-arg0="' + escAttr(plan.id) + '">Approve Reviewable</button>' +
+      '</div></li>';
+  });
+}
+
+async function loadInventoryOperations() {
+  try {
+    const [chains, inventory, risks, plans] = await Promise.all([
+      api('GET', '/api/inventory/chains'),
+      api('GET', '/api/inventory/wallets'),
+      api('GET', '/api/risk/findings'),
+      api('GET', '/api/plans/consolidation'),
+    ]);
+    if (!chains.error) renderChainProfiles(chains.profiles || []);
+    if (!inventory.error) renderInventoryState(inventory);
+    if (!risks.error) renderRiskFindings(risks.findings || []);
+    if (!plans.error) renderConsolidationPlans(plans.plans || []);
+  } catch (e) {}
+}
+
+async function upsertChainProfile() {
+  const name = textValue('chainProfileName');
+  const family = textValue('chainProfileFamily');
+  if (!name || !family) {
+    toast('Chain profile name and family are required', 'error');
+    return;
+  }
+  const r = await api('POST', '/api/inventory/chains/upsert', {
+    name,
+    chain_family: family,
+    chain_id: optionalNumberValue('chainProfileId'),
+    provider_profile: optionalTextValue('chainProfileProvider'),
+    native_symbol: optionalTextValue('chainProfileNativeSymbol'),
+    capabilities: [],
+    enabled: true,
+  });
+  if (r.error) { toast(r.error, 'error'); return; }
+  clearFields(['chainProfileName', 'chainProfileFamily', 'chainProfileId',
+    'chainProfileProvider', 'chainProfileNativeSymbol']);
+  toast('Chain profile saved');
+  loadInventoryOperations();
+}
+
+async function deleteChainProfile(name) {
+  if (!confirm('Delete chain profile "' + name + '"?')) return;
+  const r = await api('POST', '/api/inventory/chains/delete', { name });
+  if (r.error) { toast(r.error, 'error'); return; }
+  toast('Chain profile deleted');
+  loadInventoryOperations();
+}
+
+async function scanInventoryEvm() {
+  const token = optionalTextValue('inventoryTokenAddress');
+  const r = await api('POST', '/api/inventory/scan/evm', {
+    wallet_family: optionalTextValue('inventoryWalletFamily'),
+    wallet_profile: optionalTextValue('inventoryWalletProfile'),
+    provider_profile: optionalTextValue('inventoryProviderProfile'),
+    gap_limit: optionalNumberValue('inventoryGapLimit'),
+    max_index: optionalNumberValue('inventoryMaxIndex'),
+    token_addresses: token ? [token] : [],
+    block_tag: 'latest',
+  });
+  if (r.error) { toast(r.error, 'error'); return; }
+  toast('Inventory scan completed');
+  loadInventoryOperations();
+}
+
+async function cancelDiscoveryJob(id) {
+  const r = await api('POST', '/api/discovery/jobs/cancel', { id });
+  if (r.error) { toast(r.error, 'error'); return; }
+  toast('Discovery job marked canceled');
+  loadInventoryOperations();
+}
+
+async function resumeDiscoveryJob(id) {
+  const r = await api('POST', '/api/discovery/jobs/resume', { id });
+  if (r.error) { toast(r.error, 'error'); return; }
+  toast('Discovery job marked for resume');
+  loadInventoryOperations();
+}
+
+async function loadRiskFindings() {
+  const r = await api('GET', '/api/risk/findings');
+  if (r.error) { toast(r.error, 'error'); return; }
+  renderRiskFindings(r.findings || []);
+  toast('Risk findings refreshed');
+}
+
+async function generateConsolidationPlan() {
+  const r = await api('POST', '/api/plans/consolidation/generate', {
+    destination_address: optionalTextValue('planDestinationAddress'),
+    include_watch_only: true,
+    auto_queue_low_risk: false,
+  });
+  if (r.error) { toast(r.error, 'error'); return; }
+  toast('Dry-run consolidation plan generated');
+  loadInventoryOperations();
+}
+
+async function approveConsolidationPlan(planId) {
+  const r = await api('POST', '/api/plans/consolidation/approve', {
+    plan_id: planId,
+    step_ids: [],
+  });
+  if (r.error) { toast(r.error, 'error'); return; }
+  toast('Reviewable plan steps approved');
+  loadInventoryOperations();
 }
 
 function renderDeposits(deposits) {
@@ -5491,6 +6383,8 @@ function formatAuditEvent(event) {
     'secret.push': 'Pushed secret between compartments',
     'profiles.eth_xpub_wallet.upsert': 'Saved xpub wallet profile',
     'profiles.eth_xpub_wallet.delete': 'Deleted xpub wallet profile',
+    'profiles.eth_seed_wallet.upsert': 'Imported seed wallet profile',
+    'profiles.eth_seed_wallet.delete': 'Deleted seed wallet profile',
     'wallet.eth_xpub.export': 'Exported xpub receive branch',
     'fido2.setup': 'Completed FIDO2 setup',
     'fido2.register': 'Registered FIDO2 key',
@@ -5630,10 +6524,26 @@ function dispatchDataAction(actionEl) {
     console.warn('Unknown UI action:', actionName);
     return;
   }
-  Promise.resolve(action(...collectActionArgs(actionEl))).catch(error => {
-    console.error('UI action failed:', actionName, error);
-    toast('Action failed: ' + actionName, 'error');
-  });
+  const shouldShowBusy =
+    actionEl.tagName === 'BUTTON' &&
+    !actionEl.disabled &&
+    !['selectWorkspaceSection', 'switchUnlockTab', 'togglePoisonWarning'].includes(actionName);
+  if (shouldShowBusy) {
+    actionEl.disabled = true;
+    actionEl.classList.add('is-busy');
+    actionEl.setAttribute('aria-busy', 'true');
+  }
+  Promise.resolve(action(...collectActionArgs(actionEl)))
+    .catch(error => {
+      console.error('UI action failed:', actionName, error);
+      toast('Action failed: ' + actionName, 'error');
+    })
+    .finally(() => {
+      if (!shouldShowBusy || !actionEl.isConnected) return;
+      actionEl.disabled = false;
+      actionEl.classList.remove('is-busy');
+      actionEl.removeAttribute('aria-busy');
+    });
 }
 
 function handleActionEvent(event) {
@@ -5665,6 +6575,30 @@ document.addEventListener('visibilitychange', () => {
 document.addEventListener('click', handleActionEvent);
 window.addEventListener('beforeunload', clearRefreshTimer);
 
+function enhanceUiChrome() {
+  document.querySelectorAll('button:not([type])').forEach(button => {
+    button.type = 'button';
+  });
+  document.querySelectorAll('input[placeholder]:not([aria-label])').forEach(input => {
+    input.setAttribute('aria-label', input.getAttribute('placeholder'));
+  });
+  document.querySelectorAll('select:not([aria-label])').forEach(select => {
+    const label = select.closest('.card')?.querySelector('h2')?.textContent || select.id || 'Select option';
+    select.setAttribute('aria-label', label);
+  });
+  document.querySelectorAll('main .card').forEach(card => {
+    if (!card.hasAttribute('tabindex')) card.setAttribute('tabindex', '-1');
+  });
+  document
+    .querySelectorAll('input[type="text"], input[type="password"], input[type="number"], textarea')
+    .forEach(input => {
+      input.autocomplete = 'off';
+      input.spellcheck = false;
+      input.setAttribute('autocapitalize', 'off');
+    });
+}
+
+enhanceUiChrome();
 void refresh();
 "##;
 

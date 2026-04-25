@@ -1,7 +1,7 @@
 # Sigillum — Production Readiness
 
-**Date:** March 24, 2026  
-**Current Verdict:** The documented local-first single-host baseline is green; internet-facing and remote-platform scope is not the target
+**Date:** April 24, 2026  
+**Current Verdict:** The target is local-first single-host readiness; internet-facing and remote-platform scope is explicitly unsupported
 
 ## Summary
 
@@ -9,13 +9,18 @@ Sigillum now meets its current full-workspace release baseline for the
 documented local-first scope. That baseline covers the local daemon, client,
 core, CLI, and the `sigillum-gateway` sidecar:
 
-- the workspace needs to stay green on build, tests, fmt, clippy, and audit
-- the current 2026-03-24 verification pass completed cleanly across those workspace gates
+- the workspace needs to stay green on metadata, tests, fmt, clippy, audit, and deny
+- clean-clone reproducibility depends on the committed `Cargo.lock`, Rust
+  `1.88.0`, crates.io dependencies, and no local vendored SQLite patch
+- Rust `1.88.0` supersedes the earlier `1.85.0` target because the current
+  RustSec gates require the fixed `time` crate and a `cargo-deny` release that
+  both have Rust `1.88` MSRVs
 - the local daemon uses bearer session-token auth over local HTTP
 - the gateway is part of the workspace release bar, but remains a local-sidecar
   preview surface in this phase
 - the passphrase unlock path, daemon state recovery, and gateway/payment flows
   are all part of the same readiness story
+- `sigillum doctor` is the operator preflight for local host readiness
 
 That does **not** mean the project is aiming toward a remote, multi-tenant, or
 internet-facing deployment. The green bar here is explicitly the single-machine
@@ -40,6 +45,7 @@ The current repository is in good shape for controlled single-machine use:
 - embedded daemon UI actions routed through delegated handlers under a nonce-based CSP
 - webhook delivery that re-resolves and pins HTTPS targets at send time to reduce SSRF drift
 - `sigillum-gateway` as a local-sidecar payment preview surface
+- BIP-39-backed 8-word default passphrase generation and RustCrypto TOTP HMACs
 
 ## What Is Not Yet Product-Complete
 
@@ -64,7 +70,7 @@ The main remaining limits are scope and assurance, not the current local-first b
 Sigillum should only be treated as release-ready for a given scope when all of
 these are true:
 
-1. The workspace is green on build, tests, fmt, clippy, and audit.
+1. The workspace is green on metadata, tests, fmt, clippy, audit, and deny.
 2. The API, daemon route, client surface, and docs all match.
 3. The feature has an operator surface or an explicit API-only decision.
 4. Persistence and restart behavior are explicit and tested.
@@ -91,7 +97,7 @@ The current execution order is:
 The next work should still avoid speculative new product scope first. The right
 immediate move is:
 
-1. keep the full-workspace release gate enforced in CI
+1. keep the full-workspace release gate enforced in CI across Ubuntu and macOS
 2. expand higher-assurance testing around long-running recovery, gateway delivery, and browser/widget behavior
 3. close the remaining CLI/operator gaps for wallet/send flows and polish
 4. keep documentation and audits anchored to the local-on-your-computer boundary

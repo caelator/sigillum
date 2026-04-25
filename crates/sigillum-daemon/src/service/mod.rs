@@ -31,6 +31,7 @@ mod evm;
 mod fido2;
 mod generate;
 pub(crate) mod helpers;
+mod inventory;
 mod lifecycle;
 mod maintenance;
 mod observability;

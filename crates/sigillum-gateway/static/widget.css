@@ -1,15 +1,15 @@
-/* Sigillum Pay Widget — Premium dark-mode payment modal */
+/* Sigillum Pay Widget: dependency-free local sidecar payment dialog. */
 
 .sgw-overlay {
   position: fixed;
   inset: 0;
   z-index: 99999;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: rgba(0, 0, 0, 0.65);
-  backdrop-filter: blur(8px);
-  animation: sgw-fade-in 0.2s ease-out;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: rgba(7, 8, 11, 0.68);
+  backdrop-filter: blur(10px);
+  animation: sgw-fade-in 160ms ease-out;
 }
 
 @keyframes sgw-fade-in {
@@ -17,8 +17,8 @@
   to { opacity: 1; }
 }
 
-@keyframes sgw-slide-up {
-  from { opacity: 0; transform: translateY(20px); }
+@keyframes sgw-rise {
+  from { opacity: 0; transform: translateY(10px); }
   to { opacity: 1; transform: translateY(0); }
 }
 
@@ -28,169 +28,264 @@
 
 .sgw-modal {
   position: relative;
-  width: 380px;
-  max-width: 90vw;
-  background: linear-gradient(145deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 20px;
-  padding: 32px 28px;
-  color: #e0e0e0;
-  font-family: 'Inter', 'SF Pro', -apple-system, BlinkMacSystemFont, sans-serif;
+  width: min(430px, 100%);
+  max-height: min(760px, calc(100vh - 40px));
+  overflow: auto;
+  padding: 22px;
+  border: 1px solid #d8e0ea;
+  border-radius: 8px;
+  background: #f8fafc;
+  color: #111827;
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  box-shadow: 0 28px 80px rgba(0, 0, 0, 0.38);
+  animation: sgw-rise 180ms ease-out;
+}
+
+.sgw-modal:focus {
+  outline: none;
+}
+
+.sgw-modal:focus-visible {
+  outline: none;
   box-shadow:
-    0 24px 80px rgba(0, 0, 0, 0.5),
-    0 0 60px rgba(100, 120, 255, 0.08);
-  animation: sgw-slide-up 0.3s ease-out;
+    0 28px 80px rgba(0, 0, 0, 0.38),
+    0 0 0 2px rgba(37, 99, 235, 0.16);
 }
 
 .sgw-close {
   position: absolute;
-  top: 12px;
-  right: 16px;
-  background: none;
-  border: none;
-  color: #888;
-  font-size: 24px;
-  cursor: pointer;
-  transition: color 0.15s;
+  top: 14px;
+  right: 14px;
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 1px solid #d8e0ea;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #475569;
+  font-size: 16px;
+  font-weight: 700;
   line-height: 1;
+  cursor: pointer;
 }
 
-.sgw-close:hover {
-  color: #fff;
+.sgw-close:hover,
+.sgw-close:focus-visible {
+  color: #111827;
+  border-color: #94a3b8;
+  outline: none;
 }
 
 .sgw-content {
-  text-align: center;
+  display: grid;
+  gap: 16px;
 }
 
 .sgw-header {
-  margin-bottom: 20px;
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding-right: 44px;
 }
 
 .sgw-icon {
-  font-size: 36px;
-  color: #7c83ff;
-  margin-bottom: 8px;
-  filter: drop-shadow(0 0 12px rgba(124, 131, 255, 0.5));
+  width: 42px;
+  height: 42px;
+  flex: none;
+  display: grid;
+  place-items: center;
+  border-radius: 8px;
+  background: #111827;
+  color: #f8fafc;
+  font-size: 16px;
+  font-weight: 800;
 }
 
 .sgw-header h2 {
   margin: 0;
-  font-size: 20px;
-  font-weight: 600;
-  color: #fff;
-  letter-spacing: -0.3px;
+  color: #111827;
+  font-size: 22px;
+  font-weight: 760;
+  line-height: 1.15;
+}
+
+.sgw-subtitle {
+  margin-top: 4px;
+  color: #64748b;
+  font-size: 13px;
+  line-height: 1.4;
 }
 
 .sgw-amount {
-  font-size: 28px;
-  font-weight: 700;
-  color: #fff;
-  margin: 16px 0 4px;
-  letter-spacing: -0.5px;
+  padding: 16px;
+  border: 1px solid #d8e0ea;
+  border-radius: 8px;
+  background: #ffffff;
 }
 
-.sgw-chain {
+.sgw-amount-value {
+  color: #0f172a;
+  font-family: "SF Mono", "Cascadia Code", ui-monospace, Menlo, Consolas, monospace;
+  font-size: 28px;
+  font-weight: 760;
+  line-height: 1.2;
+  word-break: break-word;
+}
+
+.sgw-amount-label {
+  margin-top: 6px;
+  color: #64748b;
   font-size: 12px;
-  color: #888;
-  margin-bottom: 20px;
+  font-weight: 700;
   text-transform: uppercase;
-  letter-spacing: 1px;
+}
+
+.sgw-detail-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.sgw-detail {
+  padding: 10px 12px;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.sgw-detail-label,
+.sgw-address-box label {
+  display: block;
+  margin-bottom: 5px;
+  color: #64748b;
+  font-size: 11px;
+  font-weight: 760;
+  text-transform: uppercase;
+}
+
+.sgw-detail-value {
+  color: #111827;
+  font-family: "SF Mono", "Cascadia Code", ui-monospace, Menlo, Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.45;
+  word-break: break-word;
 }
 
 .sgw-address-box {
-  background: rgba(0, 0, 0, 0.3);
-  border: 1px solid rgba(255, 255, 255, 0.06);
-  border-radius: 12px;
-  padding: 16px;
-  margin: 16px 0;
-}
-
-.sgw-address-box label {
-  display: block;
-  font-size: 11px;
-  color: #888;
-  text-transform: uppercase;
-  letter-spacing: 1px;
-  margin-bottom: 8px;
+  padding: 14px;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  background: #eef6ff;
 }
 
 .sgw-address {
-  font-family: 'JetBrains Mono', 'SF Mono', monospace;
-  font-size: 15px;
-  color: #7c83ff;
+  margin-bottom: 12px;
+  color: #0f172a;
+  font-family: "SF Mono", "Cascadia Code", ui-monospace, Menlo, Consolas, monospace;
+  font-size: 13px;
+  line-height: 1.55;
   word-break: break-all;
-  margin-bottom: 10px;
 }
 
 .sgw-copy {
-  background: rgba(124, 131, 255, 0.15);
-  border: 1px solid rgba(124, 131, 255, 0.3);
-  color: #7c83ff;
-  padding: 6px 16px;
+  min-height: 38px;
+  padding: 0 14px;
+  border: 1px solid #9bb7d4;
   border-radius: 8px;
-  font-size: 12px;
-  font-weight: 600;
+  background: #ffffff;
+  color: #0f3b66;
+  font-size: 13px;
+  font-weight: 760;
   cursor: pointer;
-  transition: all 0.15s;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
 }
 
-.sgw-copy:hover {
-  background: rgba(124, 131, 255, 0.25);
-  border-color: rgba(124, 131, 255, 0.5);
+.sgw-copy:hover,
+.sgw-copy:focus-visible {
+  border-color: #4f86bd;
+  outline: none;
 }
 
 .sgw-status {
+  min-height: 46px;
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 8px;
-  margin: 20px 0 8px;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid #d8e0ea;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #475569;
   font-size: 14px;
-  color: #aaa;
+  font-weight: 650;
+  text-align: center;
 }
 
-.sgw-spinner, .sgw-spinner-sm {
-  border: 2px solid rgba(124, 131, 255, 0.2);
-  border-top-color: #7c83ff;
-  border-radius: 50%;
-  animation: sgw-spin 0.8s linear infinite;
+.sgw-spinner,
+.sgw-spinner-sm {
+  flex: none;
+  border: 2px solid rgba(15, 23, 42, 0.18);
+  border-top-color: #2563eb;
+  border-radius: 999px;
+  animation: sgw-spin 850ms linear infinite;
 }
 
 .sgw-spinner {
-  width: 32px;
-  height: 32px;
-  margin: 16px auto;
+  width: 34px;
+  height: 34px;
+  margin: 10px auto 0;
 }
 
 .sgw-spinner-sm {
   width: 16px;
   height: 16px;
-  flex-shrink: 0;
 }
 
 .sgw-confirmed {
-  color: #4ade80;
-  font-weight: 600;
+  color: #047857;
 }
 
-.sgw-expired {
-  color: #ef4444;
-  font-weight: 500;
+.sgw-expired,
+.sgw-error p {
+  color: #b91c1c;
 }
 
 .sgw-expires {
-  font-size: 11px;
-  color: #666;
-  margin-top: 12px;
+  color: #64748b;
+  font-size: 12px;
+  text-align: center;
 }
 
+.sgw-loading,
+.sgw-error {
+  min-height: 140px;
+  place-items: center;
+  text-align: center;
+}
+
+.sgw-loading p,
 .sgw-error p {
-  color: #ef4444;
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.55;
 }
 
-.sgw-loading p {
-  color: #aaa;
+@media (max-width: 420px) {
+  .sgw-overlay {
+    padding: 10px;
+  }
+
+  .sgw-modal {
+    padding: 18px;
+  }
+
+  .sgw-detail-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .sgw-amount-value {
+    font-size: 23px;
+  }
 }

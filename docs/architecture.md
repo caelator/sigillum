@@ -124,7 +124,7 @@ Current daemon behavior:
 - exposes a maintenance cycle that refreshes deposits, auto-enqueues sweeps, and processes queue work
 - keeps the gateway surface local-sidecar-only rather than treating it as an internet-facing service boundary
 
-What it intentionally does not do:
+What it intentionally does not do today:
 
 - remote SDK/client abstraction
 - polished remote multi-host client/server story
@@ -132,6 +132,12 @@ What it intentionally does not do:
 - SSE streams
 - remote audit aggregation pipeline
 - deep on-chain indexing beyond provider RPC balance checks
+- seed/xpub gap-limit discovery, historical receive-address scanning, or
+  dormant-wallet classification
+- token scraping, NFT inventory, allowance scanning, DeFi position discovery, or
+  airdrop/reward discovery
+- consolidation planning for discovered holdings outside the current stealth
+  deposit sweep flow
 
 ## Architectural Priorities
 
@@ -141,3 +147,5 @@ The next clean architecture step is not adding more crates. It is tightening inv
 2. Turn the current pending-operation journal into full recovery for restore/init/remove flows.
 3. Keep operational policy centralized and observable so limit changes happen through one documented policy layer rather than through scattered ad hoc constants.
 4. Build richer chain/indexing and policy automation on top of the shared `sigillum-api` contract instead of route-local JSON drift.
+5. Grow that indexing layer into the local wallet inventory and consolidation
+   model described in [Comprehensive Wallet Management Roadmap](wallet-management-roadmap.md).

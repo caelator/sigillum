@@ -3,20 +3,35 @@
 //! Manages creation, updating, and deletion of reusable provider and wallet
 //! profiles with chain configuration and fee parameters.
 
+use serde::{Deserialize, Serialize};
 use sigillum_api::{
-    EthStealthSendErc20TransferRequest, EthStealthSendErc20WithProfileRequest,
-    EthStealthSendResponse, EthStealthSendTransferRequest, EthStealthSendWithProfileRequest,
-    EthStealthWalletProfile, EthStealthWalletProfileListResponse,
+    EthSeedWalletProfile, EthSeedWalletProfileListResponse, EthSeedWalletProfileMutationResponse,
+    EthSeedWalletProfileUpsertRequest, EthStealthSendErc20TransferRequest,
+    EthStealthSendErc20WithProfileRequest, EthStealthSendResponse, EthStealthSendTransferRequest,
+    EthStealthSendWithProfileRequest, EthStealthWalletProfile, EthStealthWalletProfileListResponse,
     EthStealthWalletProfileMutationResponse, EthStealthWalletProfileUpsertRequest,
     EthXpubWalletProfile, EthXpubWalletProfileListResponse, EthXpubWalletProfileMutationResponse,
     EthXpubWalletProfileUpsertRequest, EvmProfileDeleteRequest, EvmProviderProfile,
     EvmProviderProfileListResponse, EvmProviderProfileMutationResponse,
     EvmProviderProfileUpsertRequest,
 };
+use sigillum_core::{
+    SecretStore, derive_ethereum_address_from_xpub,
+    derive_ethereum_xpub_receive_branch_from_mnemonic, ethereum_mnemonic_word_count,
+};
+use zeroize::{Zeroize, Zeroizing};
 
 use crate::audit_log::AuditEventSpec;
 
+use super::helpers::map_xpub_error;
 use super::{ServiceError, ServiceResult, SigillumService};
+
+#[derive(Debug, Serialize, Deserialize)]
+struct StoredSeedWalletSecret {
+    mnemonic: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    mnemonic_passphrase: Option<String>,
+}
 
 impl SigillumService {
     pub(crate) fn list_evm_provider_profiles(
@@ -106,6 +121,10 @@ impl SigillumService {
             .any(|profile| profile.provider_profile == body.name)
             || registry
                 .eth_xpub_wallets
+                .iter()
+                .any(|profile| profile.provider_profile == body.name)
+            || registry
+                .eth_seed_wallets
                 .iter()
                 .any(|profile| profile.provider_profile == body.name)
         {
@@ -336,6 +355,167 @@ impl SigillumService {
         })
     }
 
+    pub(crate) fn list_eth_seed_wallet_profiles(
+        &self,
+        token: Option<&str>,
+    ) -> ServiceResult<EthSeedWalletProfileListResponse> {
+        let _ = self.require_session(token)?;
+        let registry = crate::profiles::load_profiles(&self.state.base_dir).map_err(|error| {
+            ServiceError::internal(format!("Failed to load profile registry: {error}"))
+        })?;
+        Ok(EthSeedWalletProfileListResponse {
+            profiles: registry.eth_seed_wallets,
+        })
+    }
+
+    pub(crate) async fn upsert_eth_seed_wallet_profile(
+        &self,
+        token: Option<&str>,
+        mut body: EthSeedWalletProfileUpsertRequest,
+    ) -> ServiceResult<EthSeedWalletProfileMutationResponse> {
+        let token = self.require_session(token)?;
+        validate_profile_name(&body.name)?;
+        let compartment_id = body
+            .compartment_id
+            .or_else(|| self.state.active_compartment_id_for(token))
+            .ok_or_else(|| ServiceError::forbidden("No active compartment."))?;
+
+        let mnemonic = normalize_mnemonic_phrase(&body.mnemonic);
+        body.mnemonic.zeroize();
+        let word_count = ethereum_mnemonic_word_count(&mnemonic).map_err(map_xpub_error)?;
+        if word_count != 12 && word_count != 24 {
+            return Err(ServiceError::bad_request(
+                "Seed phrase must contain exactly 12 or 24 words.",
+            ));
+        }
+
+        let export = derive_ethereum_xpub_receive_branch_from_mnemonic(
+            &mnemonic,
+            body.mnemonic_passphrase.as_deref(),
+            body.project_account,
+        )
+        .map_err(map_xpub_error)?;
+        let first_receive_address = derive_ethereum_address_from_xpub(&export.receive_xpub, 0)
+            .map_err(map_xpub_error)?
+            .address;
+
+        let _guard = self.state.operation_guard().await;
+        let mut registry =
+            crate::profiles::load_profiles(&self.state.base_dir).map_err(|error| {
+                ServiceError::internal(format!("Failed to load profile registry: {error}"))
+            })?;
+        if !registry
+            .evm_providers
+            .iter()
+            .any(|profile| profile.name == body.provider_profile)
+        {
+            return Err(ServiceError::not_found("Provider profile not found."));
+        }
+
+        let mnemonic_secret_key = seed_wallet_secret_key(&body.name);
+        let mut stored_secret = StoredSeedWalletSecret {
+            mnemonic,
+            mnemonic_passphrase: body.mnemonic_passphrase,
+        };
+        let secret_payload =
+            Zeroizing::new(serde_json::to_string(&stored_secret).map_err(|error| {
+                ServiceError::internal(format!("Failed to serialize seed wallet secret: {error}"))
+            })?);
+        stored_secret.mnemonic.zeroize();
+        if let Some(passphrase) = stored_secret.mnemonic_passphrase.as_mut() {
+            passphrase.zeroize();
+        }
+        self.with_vault(compartment_id, |vault| {
+            if !vault.is_unlocked() {
+                return Err(ServiceError::forbidden("Wallet compartment is locked."));
+            }
+            Ok(vault.set_secret(&mnemonic_secret_key, secret_payload.as_str())?)
+        })?;
+
+        let profile = EthSeedWalletProfile {
+            name: body.name,
+            label: body.label,
+            project_account: export.project_account,
+            provider_profile: body.provider_profile,
+            compartment_id,
+            chain_id: body.chain_id,
+            word_count,
+            mnemonic_secret_key,
+            account_path: export.account_path,
+            receive_path: export.receive_path,
+            receive_xpub: export.receive_xpub,
+            first_receive_address,
+            default_destination_address: body.default_destination_address,
+        };
+
+        upsert_named(&mut registry.eth_seed_wallets, profile.clone(), |item| {
+            &item.name
+        });
+        crate::profiles::save_profiles(&self.state.base_dir, &registry).map_err(|error| {
+            ServiceError::internal(format!("Failed to save profile registry: {error}"))
+        })?;
+
+        self.record_audit(
+            Some(profile.compartment_id),
+            AuditEventSpec::ProfilesEthSeedWalletUpsert {
+                name: profile.name.clone(),
+                provider_profile: profile.provider_profile.clone(),
+                word_count: profile.word_count,
+            },
+        )?;
+
+        Ok(EthSeedWalletProfileMutationResponse {
+            status: "ok".into(),
+            profile,
+        })
+    }
+
+    pub(crate) async fn delete_eth_seed_wallet_profile(
+        &self,
+        token: Option<&str>,
+        body: EvmProfileDeleteRequest,
+    ) -> ServiceResult<EthSeedWalletProfileMutationResponse> {
+        let token = self.require_session(token)?;
+        let _guard = self.state.operation_guard().await;
+        let mut registry =
+            crate::profiles::load_profiles(&self.state.base_dir).map_err(|error| {
+                ServiceError::internal(format!("Failed to load profile registry: {error}"))
+            })?;
+        let profile = registry
+            .eth_seed_wallets
+            .iter()
+            .find(|profile| profile.name == body.name)
+            .cloned()
+            .ok_or_else(|| ServiceError::not_found("Seed wallet profile not found."))?;
+
+        self.with_vault(profile.compartment_id, |vault| {
+            if !vault.is_unlocked() {
+                return Err(ServiceError::forbidden("Wallet compartment is locked."));
+            }
+            Ok(vault.delete_secret(&profile.mnemonic_secret_key)?)
+        })?;
+
+        let profile = remove_named(&mut registry.eth_seed_wallets, &body.name, |item| {
+            &item.name
+        })
+        .ok_or_else(|| ServiceError::not_found("Seed wallet profile not found."))?;
+        crate::profiles::save_profiles(&self.state.base_dir, &registry).map_err(|error| {
+            ServiceError::internal(format!("Failed to save profile registry: {error}"))
+        })?;
+
+        self.record_audit(
+            self.state.active_compartment_id_for(token),
+            AuditEventSpec::ProfilesEthSeedWalletDelete {
+                name: profile.name.clone(),
+            },
+        )?;
+
+        Ok(EthSeedWalletProfileMutationResponse {
+            status: "deleted".into(),
+            profile,
+        })
+    }
+
     pub(crate) async fn eth_stealth_send_with_profile(
         &self,
         token: Option<&str>,
@@ -499,6 +679,14 @@ fn validate_profile_name(name: &str) -> ServiceResult<()> {
         ));
     }
     Ok(())
+}
+
+fn normalize_mnemonic_phrase(phrase: &str) -> String {
+    phrase.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+fn seed_wallet_secret_key(name: &str) -> String {
+    format!("wallet.seed.{name}.mnemonic")
 }
 
 fn upsert_named<T, F>(items: &mut Vec<T>, item: T, name: F)

@@ -63,7 +63,7 @@ impl ProjectCache {
     }
 
     /// Get all projects, refreshing from DB if the cache has expired.
-    async fn get_projects(&self, pool: &sqlx::SqlitePool) -> Result<Vec<Project>, GatewayError> {
+    async fn get_projects(&self, pool: &db::SqlitePool) -> Result<Vec<Project>, GatewayError> {
         // Fast path: read lock to check if cache is fresh
         {
             let guard = self.inner.read().await;

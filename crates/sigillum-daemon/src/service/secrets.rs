@@ -29,7 +29,9 @@ impl SigillumService {
             });
 
         if key.is_empty() {
-            return Err(ServiceError::bad_request("secret reference key must not be empty"));
+            return Err(ServiceError::bad_request(
+                "secret reference key must not be empty",
+            ));
         }
 
         let unlocked = self.state.unlocked_compartments();
@@ -38,7 +40,12 @@ impl SigillumService {
                 let compartment = selector
                     .parse::<usize>()
                     .ok()
-                    .and_then(|id| unlocked.iter().find(|meta| meta.id == id).map(|meta| meta.id))
+                    .and_then(|id| {
+                        unlocked
+                            .iter()
+                            .find(|meta| meta.id == id)
+                            .map(|meta| meta.id)
+                    })
                     .or_else(|| {
                         unlocked
                             .iter()
@@ -342,7 +349,10 @@ impl SigillumService {
     }
 }
 
-fn resolve_secret_value(vault: &sigillum_core::FileVault, key: &str) -> ServiceResult<(String, u8)> {
+fn resolve_secret_value(
+    vault: &sigillum_core::FileVault,
+    key: &str,
+) -> ServiceResult<(String, u8)> {
     if vault.is_unlocked() {
         if let Some(value) = vault
             .read_secret(key)?

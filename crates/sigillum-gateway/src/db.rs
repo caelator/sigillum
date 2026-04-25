@@ -1,14 +1,38 @@
-//! SQLite database layer — connection pool, migrations, and typed queries.
+//! SQLite database layer — local connection handle, migrations, and typed queries.
 
-use sqlx::sqlite::{SqlitePool, SqlitePoolOptions};
+use std::path::PathBuf;
+use std::sync::{Arc, Mutex, MutexGuard};
+
+use rusqlite::{Connection, OptionalExtension, params};
 
 use crate::error::GatewayError;
 
+/// Lightweight cloneable database handle for the local sidecar.
+#[derive(Clone)]
+pub struct SqlitePool {
+    inner: Arc<Mutex<Connection>>,
+}
+
+impl SqlitePool {
+    fn new(connection: Connection) -> Self {
+        Self {
+            inner: Arc::new(Mutex::new(connection)),
+        }
+    }
+
+    fn connection(&self) -> MutexGuard<'_, Connection> {
+        self.inner
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+}
+
 /// Row types returned from queries.
 pub mod row {
+    use rusqlite::Row;
     use serde::Serialize;
 
-    #[derive(Debug, Clone, Serialize, sqlx::FromRow)]
+    #[derive(Debug, Clone, Serialize)]
     pub struct Project {
         pub id: String,
         pub name: String,
@@ -20,7 +44,22 @@ pub mod row {
         pub updated_at: String,
     }
 
-    #[derive(Debug, Clone, Serialize, sqlx::FromRow)]
+    impl Project {
+        pub(super) fn from_row(row: &Row<'_>) -> rusqlite::Result<Self> {
+            Ok(Self {
+                id: row.get("id")?,
+                name: row.get("name")?,
+                api_key_hash: row.get("api_key_hash")?,
+                wallet_profile: row.get("wallet_profile")?,
+                webhook_url: row.get("webhook_url")?,
+                webhook_secret: row.get("webhook_secret")?,
+                created_at: row.get("created_at")?,
+                updated_at: row.get("updated_at")?,
+            })
+        }
+    }
+
+    #[derive(Debug, Clone, Serialize)]
     pub struct Payment {
         pub id: String,
         pub project_id: String,
@@ -40,7 +79,30 @@ pub mod row {
         pub swept_at: Option<String>,
     }
 
-    #[derive(Debug, Clone, Serialize, sqlx::FromRow)]
+    impl Payment {
+        pub(super) fn from_row(row: &Row<'_>) -> rusqlite::Result<Self> {
+            Ok(Self {
+                id: row.get("id")?,
+                project_id: row.get("project_id")?,
+                idempotency_key: row.get("idempotency_key")?,
+                amount_wei: row.get("amount_wei")?,
+                chain_id: row.get("chain_id")?,
+                token_address: row.get("token_address")?,
+                stealth_address: row.get("stealth_address")?,
+                ephemeral_pub: row.get("ephemeral_pub")?,
+                view_tag: row.get("view_tag")?,
+                deposit_id: row.get("deposit_id")?,
+                status: row.get("status")?,
+                metadata_json: row.get("metadata_json")?,
+                created_at: row.get("created_at")?,
+                expires_at: row.get("expires_at")?,
+                confirmed_at: row.get("confirmed_at")?,
+                swept_at: row.get("swept_at")?,
+            })
+        }
+    }
+
+    #[derive(Debug, Clone, Serialize)]
     pub struct WebhookDelivery {
         pub id: i64,
         pub payment_id: String,
@@ -51,6 +113,22 @@ pub mod row {
         pub response_body: Option<String>,
         pub created_at: String,
         pub next_retry_at: Option<String>,
+    }
+
+    impl WebhookDelivery {
+        pub(super) fn from_row(row: &Row<'_>) -> rusqlite::Result<Self> {
+            Ok(Self {
+                id: row.get("id")?,
+                payment_id: row.get("payment_id")?,
+                event: row.get("event")?,
+                url: row.get("url")?,
+                status_code: row.get("status_code")?,
+                attempt: row.get("attempt")?,
+                response_body: row.get("response_body")?,
+                created_at: row.get("created_at")?,
+                next_retry_at: row.get("next_retry_at")?,
+            })
+        }
     }
 }
 
@@ -66,21 +144,46 @@ pub struct NewWebhookDelivery<'a> {
 
 /// Open (or create) the SQLite database, enable WAL, and run the schema.
 pub async fn connect(database_url: &str) -> Result<SqlitePool, GatewayError> {
-    let pool = SqlitePoolOptions::new()
-        .max_connections(5)
-        .connect(database_url)
-        .await?;
+    let connection = match sqlite_database_path(database_url) {
+        Some(path) => Connection::open(path)?,
+        None => Connection::open_in_memory()?,
+    };
 
-    // R3: Enable WAL mode for concurrent read/write
-    sqlx::raw_sql("PRAGMA journal_mode=WAL;")
-        .execute(&pool)
-        .await?;
+    connection.execute_batch("PRAGMA journal_mode=WAL;")?;
+    connection.execute_batch(include_str!("../schema.sql"))?;
 
-    // Run schema — idempotent (CREATE TABLE IF NOT EXISTS)
-    let schema = include_str!("../schema.sql");
-    sqlx::raw_sql(schema).execute(&pool).await?;
+    Ok(SqlitePool::new(connection))
+}
 
-    Ok(pool)
+fn sqlite_database_path(database_url: &str) -> Option<PathBuf> {
+    let trimmed = database_url.trim();
+    if trimmed == ":memory:" || trimmed == "sqlite::memory:" {
+        return None;
+    }
+
+    let without_scheme = trimmed
+        .strip_prefix("sqlite://")
+        .or_else(|| trimmed.strip_prefix("sqlite:"))
+        .unwrap_or(trimmed);
+    let path = without_scheme
+        .split_once('?')
+        .map(|(path, _)| path)
+        .unwrap_or(without_scheme);
+
+    Some(PathBuf::from(if path.is_empty() {
+        "gateway.db"
+    } else {
+        path
+    }))
+}
+
+pub fn is_unique_constraint(error: &GatewayError) -> bool {
+    matches!(
+        error,
+        GatewayError::Database(rusqlite::Error::SqliteFailure(code, _))
+            if code.extended_code == rusqlite::ffi::SQLITE_CONSTRAINT_UNIQUE
+                || code.extended_code == rusqlite::ffi::SQLITE_CONSTRAINT_PRIMARYKEY
+    )
 }
 
 // ── Project queries ────────────────────────────────────────────────
@@ -94,17 +197,11 @@ pub async fn insert_project(
     webhook_url: Option<&str>,
     webhook_secret: Option<&str>,
 ) -> Result<(), GatewayError> {
-    sqlx::query(
+    let connection = pool.connection();
+    connection.execute(
         "INSERT INTO projects (id, name, api_key_hash, wallet_profile, webhook_url, webhook_secret) VALUES (?, ?, ?, ?, ?, ?)",
-    )
-    .bind(id)
-    .bind(name)
-    .bind(api_key_hash)
-    .bind(wallet_profile)
-    .bind(webhook_url)
-    .bind(webhook_secret)
-    .execute(pool)
-    .await?;
+        params![id, name, api_key_hash, wallet_profile, webhook_url, webhook_secret],
+    )?;
     Ok(())
 }
 
@@ -112,17 +209,20 @@ pub async fn find_project_by_id(
     pool: &SqlitePool,
     id: &str,
 ) -> Result<Option<row::Project>, GatewayError> {
-    let project = sqlx::query_as::<_, row::Project>("SELECT * FROM projects WHERE id = ?")
-        .bind(id)
-        .fetch_optional(pool)
-        .await?;
+    let connection = pool.connection();
+    let project = connection
+        .query_row("SELECT * FROM projects WHERE id = ?", params![id], |row| {
+            row::Project::from_row(row)
+        })
+        .optional()?;
     Ok(project)
 }
 
 pub async fn list_projects(pool: &SqlitePool) -> Result<Vec<row::Project>, GatewayError> {
-    let projects = sqlx::query_as::<_, row::Project>("SELECT * FROM projects ORDER BY created_at")
-        .fetch_all(pool)
-        .await?;
+    let connection = pool.connection();
+    let mut statement = connection.prepare("SELECT * FROM projects ORDER BY created_at")?;
+    let rows = statement.query_map([], row::Project::from_row)?;
+    let projects = rows.collect::<rusqlite::Result<Vec<_>>>()?;
     Ok(projects)
 }
 
@@ -144,23 +244,24 @@ pub async fn insert_payment(
     metadata_json: &str,
     expires_at: Option<&str>,
 ) -> Result<(), GatewayError> {
-    sqlx::query(
+    let connection = pool.connection();
+    connection.execute(
         "INSERT INTO payments (id, project_id, idempotency_key, amount_wei, chain_id, token_address, stealth_address, ephemeral_pub, view_tag, deposit_id, metadata_json, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-    )
-    .bind(id)
-    .bind(project_id)
-    .bind(idempotency_key)
-    .bind(amount_wei)
-    .bind(chain_id)
-    .bind(token_address)
-    .bind(stealth_address)
-    .bind(ephemeral_pub)
-    .bind(view_tag)
-    .bind(deposit_id)
-    .bind(metadata_json)
-    .bind(expires_at)
-    .execute(pool)
-    .await?;
+        params![
+            id,
+            project_id,
+            idempotency_key,
+            amount_wei,
+            chain_id,
+            token_address,
+            stealth_address,
+            ephemeral_pub,
+            view_tag,
+            deposit_id,
+            metadata_json,
+            expires_at,
+        ],
+    )?;
     Ok(())
 }
 
@@ -168,10 +269,12 @@ pub async fn find_payment_by_id(
     pool: &SqlitePool,
     id: &str,
 ) -> Result<Option<row::Payment>, GatewayError> {
-    let payment = sqlx::query_as::<_, row::Payment>("SELECT * FROM payments WHERE id = ?")
-        .bind(id)
-        .fetch_optional(pool)
-        .await?;
+    let connection = pool.connection();
+    let payment = connection
+        .query_row("SELECT * FROM payments WHERE id = ?", params![id], |row| {
+            row::Payment::from_row(row)
+        })
+        .optional()?;
     Ok(payment)
 }
 
@@ -181,13 +284,14 @@ pub async fn find_payment_by_idempotency_key(
     project_id: &str,
     idempotency_key: &str,
 ) -> Result<Option<row::Payment>, GatewayError> {
-    let payment = sqlx::query_as::<_, row::Payment>(
-        "SELECT * FROM payments WHERE project_id = ? AND idempotency_key = ?",
-    )
-    .bind(project_id)
-    .bind(idempotency_key)
-    .fetch_optional(pool)
-    .await?;
+    let connection = pool.connection();
+    let payment = connection
+        .query_row(
+            "SELECT * FROM payments WHERE project_id = ? AND idempotency_key = ?",
+            params![project_id, idempotency_key],
+            row::Payment::from_row,
+        )
+        .optional()?;
     Ok(payment)
 }
 
@@ -198,35 +302,34 @@ pub async fn list_payments_by_project(
     limit: i64,
     offset: i64,
 ) -> Result<Vec<row::Payment>, GatewayError> {
+    let connection = pool.connection();
     let payments = if let Some(status) = status {
-        sqlx::query_as::<_, row::Payment>(
+        let mut statement = connection.prepare(
             "SELECT * FROM payments WHERE project_id = ? AND status = ? ORDER BY created_at DESC LIMIT ? OFFSET ?",
-        )
-        .bind(project_id)
-        .bind(status)
-        .bind(limit)
-        .bind(offset)
-        .fetch_all(pool)
-        .await?
+        )?;
+        let rows = statement.query_map(params![project_id, status, limit, offset], |row| {
+            row::Payment::from_row(row)
+        })?;
+        rows.collect::<rusqlite::Result<Vec<_>>>()?
     } else {
-        sqlx::query_as::<_, row::Payment>(
+        let mut statement = connection.prepare(
             "SELECT * FROM payments WHERE project_id = ? ORDER BY created_at DESC LIMIT ? OFFSET ?",
-        )
-        .bind(project_id)
-        .bind(limit)
-        .bind(offset)
-        .fetch_all(pool)
-        .await?
+        )?;
+        let rows = statement.query_map(params![project_id, limit, offset], |row| {
+            row::Payment::from_row(row)
+        })?;
+        rows.collect::<rusqlite::Result<Vec<_>>>()?
     };
     Ok(payments)
 }
 
 pub async fn list_pending_payments(pool: &SqlitePool) -> Result<Vec<row::Payment>, GatewayError> {
-    let payments = sqlx::query_as::<_, row::Payment>(
+    let connection = pool.connection();
+    let mut statement = connection.prepare(
         "SELECT * FROM payments WHERE status IN ('pending', 'confirmed', 'sweeping') ORDER BY created_at",
-    )
-    .fetch_all(pool)
-    .await?;
+    )?;
+    let rows = statement.query_map([], row::Payment::from_row)?;
+    let payments = rows.collect::<rusqlite::Result<Vec<_>>>()?;
     Ok(payments)
 }
 
@@ -241,30 +344,26 @@ pub async fn update_payment_status(
         _ => None,
     };
 
+    let connection = pool.connection();
     if let Some(col) = timestamp_col {
         let query = format!("UPDATE payments SET status = ?, {col} = datetime('now') WHERE id = ?");
-        sqlx::query(&query)
-            .bind(status)
-            .bind(id)
-            .execute(pool)
-            .await?;
+        connection.execute(&query, params![status, id])?;
     } else {
-        sqlx::query("UPDATE payments SET status = ? WHERE id = ?")
-            .bind(status)
-            .bind(id)
-            .execute(pool)
-            .await?;
+        connection.execute(
+            "UPDATE payments SET status = ? WHERE id = ?",
+            params![status, id],
+        )?;
     }
     Ok(())
 }
 
 pub async fn expire_old_payments(pool: &SqlitePool) -> Result<u64, GatewayError> {
-    let result = sqlx::query(
+    let connection = pool.connection();
+    let affected = connection.execute(
         "UPDATE payments SET status = 'expired' WHERE status = 'pending' AND expires_at IS NOT NULL AND expires_at < datetime('now')",
-    )
-    .execute(pool)
-    .await?;
-    Ok(result.rows_affected())
+        [],
+    )?;
+    Ok(affected as u64)
 }
 
 // ── Webhook delivery queries ───────────────────────────────────────
@@ -273,38 +372,41 @@ pub async fn insert_webhook_delivery(
     pool: &SqlitePool,
     delivery: NewWebhookDelivery<'_>,
 ) -> Result<(), GatewayError> {
-    sqlx::query(
+    let connection = pool.connection();
+    connection.execute(
         "INSERT INTO webhook_deliveries (payment_id, event, url, attempt, status_code, response_body, next_retry_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
-    )
-    .bind(delivery.payment_id)
-    .bind(delivery.event)
-    .bind(delivery.url)
-    .bind(delivery.attempt)
-    .bind(delivery.status_code)
-    .bind(delivery.response_body)
-    .bind(delivery.next_retry_at)
-    .execute(pool)
-    .await?;
+        params![
+            delivery.payment_id,
+            delivery.event,
+            delivery.url,
+            delivery.attempt,
+            delivery.status_code,
+            delivery.response_body,
+            delivery.next_retry_at,
+        ],
+    )?;
     Ok(())
 }
 
 pub async fn list_pending_webhook_retries(
     pool: &SqlitePool,
 ) -> Result<Vec<row::WebhookDelivery>, GatewayError> {
-    let deliveries = sqlx::query_as::<_, row::WebhookDelivery>(
+    let connection = pool.connection();
+    let mut statement = connection.prepare(
         "SELECT * FROM webhook_deliveries WHERE next_retry_at IS NOT NULL AND next_retry_at <= datetime('now') ORDER BY next_retry_at",
-    )
-    .fetch_all(pool)
-    .await?;
+    )?;
+    let rows = statement.query_map([], row::WebhookDelivery::from_row)?;
+    let deliveries = rows.collect::<rusqlite::Result<Vec<_>>>()?;
     Ok(deliveries)
 }
 
 /// Clear the retry marker on a webhook delivery (either succeeded or exhausted retries).
 pub async fn clear_webhook_retry(pool: &SqlitePool, id: i64) -> Result<(), GatewayError> {
-    sqlx::query("UPDATE webhook_deliveries SET next_retry_at = NULL WHERE id = ?")
-        .bind(id)
-        .execute(pool)
-        .await?;
+    let connection = pool.connection();
+    connection.execute(
+        "UPDATE webhook_deliveries SET next_retry_at = NULL WHERE id = ?",
+        params![id],
+    )?;
     Ok(())
 }
 

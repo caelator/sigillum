@@ -42,6 +42,7 @@ Sigillum protects against:
 | Accidental secret logging | `SecretString` has no `Display` or `Debug` impl. Secrets cannot be printed without explicit `expose_secret()`. |
 | Timing attacks on key comparison | Constant-time comparison via `subtle` crate (transitive dependency of RustCrypto). |
 | Replay attacks on backup files | Each backup includes a unique timestamp and random nonce. |
+| Local state corruption | Versioned JSON state is atomically written, mirrored to `.bak`, restored from backup when safe, and fails closed when both live and backup are corrupt. |
 
 ### What Sigillum does NOT protect against
 
@@ -67,6 +68,7 @@ All cryptographic dependencies are from the [RustCrypto](https://github.com/Rust
 - `aes-gcm` — AES-256-GCM authenticated encryption
 - `argon2` — Argon2id key derivation
 - `sha2` — SHA-256/SHA-512
+- `sha1` — SHA-1 only for standards-compatible TOTP HMACs
 - `hmac` — HMAC-SHA256
 - `zeroize` — Secure memory zeroing
 - `secrecy` — Secret-wrapping types
@@ -83,9 +85,13 @@ No OpenSSL. No C bindings for crypto. Pure Rust.
 | `profiles.json` | `0o600` | Daemon operator profiles and wallet/provider bindings |
 | `deposits.json` | `0o600` | Daemon deposit registry |
 | `queue.json` | `0o600` | Daemon queue state |
+| `audit.db` | `0o600` | Local SQLite audit database |
 
 All files are created with restrictive permissions.
 
 Durable atomic replace operations may use same-directory temporary files before
 rename. Those files are created with restrictive permissions, `fsync`'d before
 rename, and the parent directory is synchronized when the platform supports it.
+
+Run `sigillum doctor` on a target host to check local directory permissions,
+daemon reachability, session-token state, and audit database readability.

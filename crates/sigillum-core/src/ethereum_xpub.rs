@@ -5,6 +5,7 @@
 //! project-wallet style deposit generation.
 
 use bip32::{ChildNumber, Prefix, XPrv, XPub};
+use bip39::{Language, Mnemonic};
 use sha3::{Digest, Keccak256};
 use thiserror::Error;
 
@@ -23,6 +24,8 @@ pub enum EthereumXpubError {
     InvalidReceiveIndex,
     #[error("invalid receive-branch xpub")]
     InvalidReceiveBranchXpub,
+    #[error("invalid BIP-39 seed phrase")]
+    InvalidMnemonic,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -47,18 +50,29 @@ pub fn derive_sigillum_ethereum_xpub_receive_branch(
     Ok(EthereumXpubReceiveExport {
         project_account,
         account_path: format!(
-            "m/{}'/{}'/{}'",
-            ETHEREUM_XPUB_PURPOSE, ETHEREUM_XPUB_COIN_TYPE, project_account
+            "m/{ETHEREUM_XPUB_PURPOSE}'/{ETHEREUM_XPUB_COIN_TYPE}'/{project_account}'"
         ),
         receive_path: format!(
-            "m/{}'/{}'/{}'/{ETHEREUM_XPUB_RECEIVE_BRANCH}",
-            ETHEREUM_XPUB_PURPOSE, ETHEREUM_XPUB_COIN_TYPE, project_account
+            "m/{ETHEREUM_XPUB_PURPOSE}'/{ETHEREUM_XPUB_COIN_TYPE}'/{project_account}'/{ETHEREUM_XPUB_RECEIVE_BRANCH}"
         ),
         receive_xpub: receive_xprv
             .public_key()
             .to_string(Prefix::XPUB)
             .to_string(),
     })
+}
+
+pub fn derive_ethereum_xpub_receive_branch_from_mnemonic(
+    mnemonic_phrase: &str,
+    mnemonic_passphrase: Option<&str>,
+    project_account: u32,
+) -> Result<EthereumXpubReceiveExport, EthereumXpubError> {
+    let seed = mnemonic_seed(mnemonic_phrase, mnemonic_passphrase)?;
+    derive_sigillum_ethereum_xpub_receive_branch(&seed, project_account)
+}
+
+pub fn ethereum_mnemonic_word_count(mnemonic_phrase: &str) -> Result<usize, EthereumXpubError> {
+    Ok(parse_mnemonic(mnemonic_phrase)?.word_count())
 }
 
 pub fn derive_sigillum_ethereum_xpub_receive_address(
@@ -79,6 +93,19 @@ pub fn derive_ethereum_address_from_xpub(
         .map_err(|_| EthereumXpubError::InvalidReceiveBranchXpub)?;
     validate_receive_branch_xpub(&receive_xpub)?;
     derive_receive_address_from_xpub(&receive_xpub, index)
+}
+
+fn mnemonic_seed(
+    mnemonic_phrase: &str,
+    mnemonic_passphrase: Option<&str>,
+) -> Result<[u8; 64], EthereumXpubError> {
+    let mnemonic = parse_mnemonic(mnemonic_phrase)?;
+    Ok(mnemonic.to_seed(mnemonic_passphrase.unwrap_or_default()))
+}
+
+fn parse_mnemonic(mnemonic_phrase: &str) -> Result<Mnemonic, EthereumXpubError> {
+    Mnemonic::parse_in_normalized(Language::English, mnemonic_phrase)
+        .map_err(|_| EthereumXpubError::InvalidMnemonic)
 }
 
 fn derive_receive_branch_xprv(
@@ -186,6 +213,37 @@ mod tests {
         assert_eq!(
             derive_ethereum_address_from_xpub(&account_xpub, 0),
             Err(EthereumXpubError::InvalidReceiveBranchXpub)
+        );
+    }
+
+    #[test]
+    fn mnemonic_seed_phrase_exports_receive_branch() {
+        let twelve_word = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
+        let export =
+            derive_ethereum_xpub_receive_branch_from_mnemonic(twelve_word, None, 0).unwrap();
+
+        assert_eq!(ethereum_mnemonic_word_count(twelve_word).unwrap(), 12);
+        assert_eq!(export.account_path, "m/44'/60'/0'");
+        assert_eq!(export.receive_path, "m/44'/60'/0'/0");
+        assert!(export.receive_xpub.starts_with("xpub"));
+    }
+
+    #[test]
+    fn twenty_four_word_mnemonic_seed_phrase_is_supported() {
+        let twenty_four_word = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon art";
+        let export =
+            derive_ethereum_xpub_receive_branch_from_mnemonic(twenty_four_word, None, 1).unwrap();
+
+        assert_eq!(ethereum_mnemonic_word_count(twenty_four_word).unwrap(), 24);
+        assert_eq!(export.account_path, "m/44'/60'/1'");
+        assert!(export.receive_xpub.starts_with("xpub"));
+    }
+
+    #[test]
+    fn invalid_mnemonic_seed_phrase_is_rejected() {
+        assert_eq!(
+            derive_ethereum_xpub_receive_branch_from_mnemonic("abandon abandon", None, 0),
+            Err(EthereumXpubError::InvalidMnemonic)
         );
     }
 }

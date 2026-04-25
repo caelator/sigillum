@@ -73,7 +73,9 @@ pub(crate) fn query_events(
 
     let mut statement = connection.prepare(&sql).map_err(to_io_error)?;
     let rows = statement
-        .query_map(params_from_iter(params.iter()), |row| row.get::<_, String>(0))
+        .query_map(params_from_iter(params.iter()), |row| {
+            row.get::<_, String>(0)
+        })
         .map_err(to_io_error)?;
 
     let mut events = Vec::new();

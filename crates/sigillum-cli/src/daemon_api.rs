@@ -28,11 +28,12 @@ use std::time::{Duration, Instant};
 
 use serde::Serialize;
 use sigillum_api::request::{
+    ChainProfileUpsertRequest, ConsolidationPlanApproveRequest, ConsolidationPlanGenerateRequest,
     EthStealthDepositCreateErc20Request, EthStealthDepositCreateNativeRequest,
     EthStealthDepositDeleteRequest, EthStealthDepositEnqueueSweepRequest,
     EthStealthDepositRefreshRequest, EthStealthWalletProfileUpsertRequest,
     EvmProviderProfileUpsertRequest, EvmProviderRef, Fido2UnlockRequest, MaintenanceRunRequest,
-    QueueProcessRequest,
+    QueueProcessRequest, WalletInventoryScanRequest,
 };
 use sigillum_client::{ClientError, SigillumClient};
 use url::Url;
@@ -90,6 +91,10 @@ pub fn cmd_api(args: &[String]) {
         ),
         "profiles" => cmd_api_profiles(args),
         "deposits" => cmd_api_deposits(args),
+        "inventory" => cmd_api_inventory(args),
+        "discovery" => cmd_api_discovery(args),
+        "risk" => cmd_api_risk(args),
+        "plans" => cmd_api_plans(args),
         "queue" => cmd_api_queue(args),
         "maintenance" => cmd_api_maintenance(args),
         "help" | "--help" | "-h" => print_api_usage(),
@@ -292,6 +297,199 @@ fn cmd_api_deposits(args: &[String]) {
     }
 }
 
+/// Dispatch `sigillum api inventory <list|scan-evm>`.
+fn cmd_api_inventory(args: &[String]) {
+    if args.len() < 2 {
+        eprintln!("Usage: sigillum api inventory <list|scan-evm> [...]");
+        process::exit(1);
+    }
+
+    match args[1].as_str() {
+        "list" => run_api_command(args, true, |client| async move {
+            client.list_wallet_inventory().await
+        }),
+        "chains" => {
+            if args.len() < 3 {
+                eprintln!("Usage: sigillum api inventory chains <list|upsert|delete> [...]");
+                process::exit(1);
+            }
+            match args[2].as_str() {
+                "list" => run_api_command(args, true, |client| async move {
+                    client.list_chain_profiles().await
+                }),
+                "upsert" => {
+                    let request = ChainProfileUpsertRequest {
+                        name: require_flag(
+                            args,
+                            "--name",
+                            "sigillum api inventory chains upsert --name <NAME> --family <FAMILY>",
+                        ),
+                        chain_family: require_flag(
+                            args,
+                            "--family",
+                            "sigillum api inventory chains upsert --name <NAME> --family <FAMILY>",
+                        ),
+                        chain_id: parse_u64_flag(args, "--chain-id"),
+                        provider_profile: parse_flag(args, "--provider-profile"),
+                        native_symbol: parse_flag(args, "--native-symbol"),
+                        explorer_url: parse_flag(args, "--explorer-url"),
+                        capabilities: parse_multi_flag(args, "--capability"),
+                        enabled: bool_switch(args, "--enabled", "--disabled"),
+                    };
+                    run_api_command(args, true, move |client| async move {
+                        client.upsert_chain_profile(request).await
+                    });
+                }
+                "delete" => {
+                    let name = require_flag(
+                        args,
+                        "--name",
+                        "sigillum api inventory chains delete --name <NAME>",
+                    );
+                    run_api_command(args, true, move |client| async move {
+                        client.delete_chain_profile(&name).await
+                    });
+                }
+                _ => {
+                    eprintln!("Usage: sigillum api inventory chains <list|upsert|delete> [...]");
+                    process::exit(1);
+                }
+            }
+        }
+        "scan-evm" => {
+            let request = WalletInventoryScanRequest {
+                wallet_family: parse_flag(args, "--wallet-family"),
+                wallet_profile: parse_flag(args, "--wallet-profile"),
+                provider_profile: parse_flag(args, "--provider-profile"),
+                gap_limit: parse_u32_flag(args, "--gap-limit"),
+                max_index: parse_u32_flag(args, "--max-index"),
+                token_addresses: parse_multi_flag(args, "--token-address"),
+                block_tag: parse_flag(args, "--block-tag"),
+            };
+            run_api_command(args, true, move |client| async move {
+                client.scan_evm_wallet_inventory(request).await
+            });
+        }
+        _ => {
+            eprintln!("Usage: sigillum api inventory <list|scan-evm> [...]");
+            process::exit(1);
+        }
+    }
+}
+
+/// Dispatch `sigillum api discovery <jobs|scan-evm>`.
+fn cmd_api_discovery(args: &[String]) {
+    if args.len() < 2 {
+        eprintln!("Usage: sigillum api discovery <jobs|scan-evm> [...]");
+        process::exit(1);
+    }
+
+    match args[1].as_str() {
+        "jobs" => {
+            if args.len() < 3 {
+                eprintln!("Usage: sigillum api discovery jobs <list|cancel|resume> [...]");
+                process::exit(1);
+            }
+            match args[2].as_str() {
+                "list" => run_api_command(args, true, |client| async move {
+                    client.list_discovery_jobs().await
+                }),
+                "cancel" => {
+                    let id = require_flag(
+                        args,
+                        "--id",
+                        "sigillum api discovery jobs cancel --id <JOB_ID>",
+                    );
+                    run_api_command(args, true, move |client| async move {
+                        client.cancel_discovery_job(&id).await
+                    });
+                }
+                "resume" => {
+                    let id = require_flag(
+                        args,
+                        "--id",
+                        "sigillum api discovery jobs resume --id <JOB_ID>",
+                    );
+                    run_api_command(args, true, move |client| async move {
+                        client.resume_discovery_job(&id).await
+                    });
+                }
+                _ => {
+                    eprintln!("Usage: sigillum api discovery jobs <list|cancel|resume> [...]");
+                    process::exit(1);
+                }
+            }
+        }
+        "scan-evm" => cmd_api_inventory(
+            &["inventory".into(), args[1].clone()]
+                .into_iter()
+                .chain(args.iter().skip(2).cloned())
+                .collect::<Vec<_>>(),
+        ),
+        _ => {
+            eprintln!("Usage: sigillum api discovery <jobs|scan-evm> [...]");
+            process::exit(1);
+        }
+    }
+}
+
+/// Dispatch `sigillum api risk <list>`.
+fn cmd_api_risk(args: &[String]) {
+    match args.get(1).map(String::as_str) {
+        Some("list") => run_api_command(args, true, |client| async move {
+            client.list_risk_findings().await
+        }),
+        _ => {
+            eprintln!("Usage: sigillum api risk list");
+            process::exit(1);
+        }
+    }
+}
+
+/// Dispatch `sigillum api plans <list|generate|approve>`.
+fn cmd_api_plans(args: &[String]) {
+    if args.len() < 2 {
+        eprintln!("Usage: sigillum api plans <list|generate|approve> [...]");
+        process::exit(1);
+    }
+
+    match args[1].as_str() {
+        "list" => run_api_command(args, true, |client| async move {
+            client.list_consolidation_plans().await
+        }),
+        "generate" => {
+            let request = ConsolidationPlanGenerateRequest {
+                destination_address: parse_flag(args, "--destination-address"),
+                wallet_family: parse_flag(args, "--wallet-family"),
+                wallet_profile: parse_flag(args, "--wallet-profile"),
+                provider_profile: parse_flag(args, "--provider-profile"),
+                include_watch_only: flag_option(args, "--include-watch-only"),
+                auto_queue_low_risk: flag_option(args, "--auto-queue-low-risk"),
+            };
+            run_api_command(args, true, move |client| async move {
+                client.generate_consolidation_plan(request).await
+            });
+        }
+        "approve" => {
+            let request = ConsolidationPlanApproveRequest {
+                plan_id: require_flag(
+                    args,
+                    "--plan-id",
+                    "sigillum api plans approve --plan-id <ID>",
+                ),
+                step_ids: parse_multi_flag(args, "--step-id"),
+            };
+            run_api_command(args, true, move |client| async move {
+                client.approve_consolidation_plan(request).await
+            });
+        }
+        _ => {
+            eprintln!("Usage: sigillum api plans <list|generate|approve> [...]");
+            process::exit(1);
+        }
+    }
+}
+
 /// Dispatch `sigillum api queue <list|process>`.
 fn cmd_api_queue(args: &[String]) {
     if args.len() < 2 {
@@ -377,6 +575,7 @@ fn build_client(args: &[String], require_session: bool) -> SigillumClient {
 pub(crate) fn daemon_base_url(args: &[String]) -> String {
     parse_flag(args, "--url")
         .or_else(|| std::env::var("SIGILLUM_BASE_URL").ok())
+        .or_else(|| std::env::var("SIGILLUM_DAEMON_URL").ok())
         .unwrap_or_else(|| DEFAULT_DAEMON_BASE_URL.into())
 }
 
@@ -429,7 +628,10 @@ pub(crate) fn ensure_daemon_ready(base_url: &str) -> Result<(), String> {
 }
 
 async fn daemon_reachable(base_url: &str) -> bool {
-    SigillumClient::new(base_url.to_string()).status().await.is_ok()
+    SigillumClient::new(base_url.to_string())
+        .status()
+        .await
+        .is_ok()
 }
 
 fn spawn_daemon_process(port: u16) -> io::Result<()> {
@@ -549,6 +751,19 @@ fn parse_flag(args: &[String], flag: &str) -> Option<String> {
     None
 }
 
+fn parse_multi_flag(args: &[String], flag: &str) -> Vec<String> {
+    let mut values = Vec::new();
+    let mut i = 0;
+    while i < args.len() {
+        if args[i] == flag && i + 1 < args.len() {
+            values.push(args[i + 1].clone());
+            i += 1;
+        }
+        i += 1;
+    }
+    values
+}
+
 fn has_flag(args: &[String], flag: &str) -> bool {
     args.iter().any(|arg| arg == flag)
 }
@@ -595,6 +810,10 @@ fn parse_u64_flag(args: &[String], flag: &str) -> Option<u64> {
     parse_flag(args, flag).map(|value| parse_u64_value(&value, flag))
 }
 
+fn parse_u32_flag(args: &[String], flag: &str) -> Option<u32> {
+    parse_flag(args, flag).map(|value| parse_u32_value(&value, flag))
+}
+
 fn require_u64_flag(args: &[String], flag: &str, usage: &str) -> u64 {
     parse_flag(args, flag)
         .map(|value| parse_u64_value(&value, flag))
@@ -618,6 +837,13 @@ fn parse_u64_value(value: &str, flag: &str) -> u64 {
     })
 }
 
+fn parse_u32_value(value: &str, flag: &str) -> u32 {
+    value.parse::<u32>().unwrap_or_else(|_| {
+        eprintln!("Invalid value for {flag}: {value}");
+        process::exit(1);
+    })
+}
+
 fn print_api_usage() {
     eprintln!(
         "\
@@ -634,6 +860,10 @@ COMMANDS:
   profiles evm <list|upsert|delete> [...]
   profiles stealth <list|upsert|delete> [...]
   deposits <list|create-native|create-erc20|refresh|enqueue-sweep|delete> [...]
+  inventory <list|chains|scan-evm> [...]
+  discovery <jobs|scan-evm> [...]
+  risk list
+  plans <list|generate|approve> [...]
   queue <list|process> [...]
   maintenance run [...]
 

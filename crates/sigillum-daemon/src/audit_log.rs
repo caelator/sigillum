@@ -205,6 +205,14 @@ pub(crate) enum AuditEventSpec {
     },
     #[serde(rename = "profiles.eth_xpub_wallet.delete")]
     ProfilesEthXpubWalletDelete { name: String },
+    #[serde(rename = "profiles.eth_seed_wallet.upsert")]
+    ProfilesEthSeedWalletUpsert {
+        name: String,
+        provider_profile: String,
+        word_count: usize,
+    },
+    #[serde(rename = "profiles.eth_seed_wallet.delete")]
+    ProfilesEthSeedWalletDelete { name: String },
     #[serde(rename = "snapshot.export")]
     SnapshotExport {
         file_count: usize,
@@ -325,6 +333,28 @@ pub(crate) enum AuditEventSpec {
         retrying: usize,
         failed: usize,
     },
+    #[serde(rename = "wallet_inventory.scan")]
+    WalletInventoryScan {
+        id: String,
+        wallets: usize,
+        providers: usize,
+        addresses: usize,
+        holdings: usize,
+    },
+    #[serde(rename = "wallet_inventory.chain_profile.upsert")]
+    WalletInventoryChainProfileUpsert { name: String, chain_family: String },
+    #[serde(rename = "wallet_inventory.chain_profile.delete")]
+    WalletInventoryChainProfileDelete { name: String },
+    #[serde(rename = "wallet_inventory.discovery_job.update")]
+    WalletInventoryDiscoveryJobUpdate { id: String, status: String },
+    #[serde(rename = "wallet_consolidation.plan.generate")]
+    WalletConsolidationPlanGenerate {
+        id: String,
+        steps: usize,
+        blocked: usize,
+    },
+    #[serde(rename = "wallet_consolidation.plan.approve")]
+    WalletConsolidationPlanApprove { id: String, approved: usize },
     #[serde(rename = "run.complete")]
     RunComplete {
         program: String,
@@ -362,6 +392,8 @@ impl AuditEventSpec {
             Self::ProfilesEthStealthWalletDelete { .. } => "profiles.eth_stealth_wallet.delete",
             Self::ProfilesEthXpubWalletUpsert { .. } => "profiles.eth_xpub_wallet.upsert",
             Self::ProfilesEthXpubWalletDelete { .. } => "profiles.eth_xpub_wallet.delete",
+            Self::ProfilesEthSeedWalletUpsert { .. } => "profiles.eth_seed_wallet.upsert",
+            Self::ProfilesEthSeedWalletDelete { .. } => "profiles.eth_seed_wallet.delete",
             Self::SnapshotExport { .. } => "snapshot.export",
             Self::SnapshotRestore { .. } => "snapshot.restore",
             Self::Fido2Setup { .. } => "fido2.setup",
@@ -391,6 +423,18 @@ impl AuditEventSpec {
             Self::DepositsEthStealthRefresh { .. } => "deposits.eth_stealth.refresh",
             Self::DepositsEthStealthEnqueueSweep { .. } => "deposits.eth_stealth.enqueue_sweep",
             Self::MaintenanceRun { .. } => "maintenance.run",
+            Self::WalletInventoryScan { .. } => "wallet_inventory.scan",
+            Self::WalletInventoryChainProfileUpsert { .. } => {
+                "wallet_inventory.chain_profile.upsert"
+            }
+            Self::WalletInventoryChainProfileDelete { .. } => {
+                "wallet_inventory.chain_profile.delete"
+            }
+            Self::WalletInventoryDiscoveryJobUpdate { .. } => {
+                "wallet_inventory.discovery_job.update"
+            }
+            Self::WalletConsolidationPlanGenerate { .. } => "wallet_consolidation.plan.generate",
+            Self::WalletConsolidationPlanApprove { .. } => "wallet_consolidation.plan.approve",
             Self::RunComplete { .. } => "run.complete",
         }
     }
@@ -400,7 +444,11 @@ impl AuditEventSpec {
             Self::ApiKeySet { key } => json!({ "key": key, "tier": 1 }),
             Self::ApiKeyDelete { key } => json!({ "key": key, "tier": 1 }),
             Self::SecretSet { key } => json!({ "key": key, "tier": 2 }),
-            Self::SecretRead { key, env_name, tier } => {
+            Self::SecretRead {
+                key,
+                env_name,
+                tier,
+            } => {
                 json!({ "key": key, "env_name": env_name, "tier": tier })
             }
             Self::SecretDelete { key } => json!({ "key": key, "tier": 2 }),
@@ -463,6 +511,16 @@ impl AuditEventSpec {
                 provider_profile,
             } => json!({ "name": name, "provider_profile": provider_profile }),
             Self::ProfilesEthXpubWalletDelete { name } => json!({ "name": name }),
+            Self::ProfilesEthSeedWalletUpsert {
+                name,
+                provider_profile,
+                word_count,
+            } => json!({
+                "name": name,
+                "provider_profile": provider_profile,
+                "word_count": word_count,
+            }),
+            Self::ProfilesEthSeedWalletDelete { name } => json!({ "name": name }),
             Self::SnapshotExport {
                 file_count,
                 total_bytes,
@@ -627,6 +685,32 @@ impl AuditEventSpec {
                 "retrying": retrying,
                 "failed": failed,
             }),
+            Self::WalletInventoryScan {
+                id,
+                wallets,
+                providers,
+                addresses,
+                holdings,
+            } => json!({
+                "id": id,
+                "wallets": wallets,
+                "providers": providers,
+                "addresses": addresses,
+                "holdings": holdings,
+            }),
+            Self::WalletInventoryChainProfileUpsert { name, chain_family } => {
+                json!({ "name": name, "chain_family": chain_family })
+            }
+            Self::WalletInventoryChainProfileDelete { name } => json!({ "name": name }),
+            Self::WalletInventoryDiscoveryJobUpdate { id, status } => {
+                json!({ "id": id, "status": status })
+            }
+            Self::WalletConsolidationPlanGenerate { id, steps, blocked } => {
+                json!({ "id": id, "steps": steps, "blocked": blocked })
+            }
+            Self::WalletConsolidationPlanApprove { id, approved } => {
+                json!({ "id": id, "approved": approved })
+            }
             Self::RunComplete {
                 program,
                 args,
@@ -743,16 +827,14 @@ impl AuditEventSpec {
                 })
             }
             "unlock.biometric" => {
-                let details =
-                    parse_legacy_details::<UnlockBiometricDetails>(path, &kind, details)?;
+                let details = parse_legacy_details::<UnlockBiometricDetails>(path, &kind, details)?;
                 Ok(Self::UnlockBiometric {
                     compartment_id: details.compartment_id,
                     fingerprint_hex: details.fingerprint_hex,
                 })
             }
             "biometric.enroll" => {
-                let details =
-                    parse_legacy_details::<BiometricEnrollDetails>(path, &kind, details)?;
+                let details = parse_legacy_details::<BiometricEnrollDetails>(path, &kind, details)?;
                 Ok(Self::BiometricEnroll {
                     fingerprint_hex: details.fingerprint_hex,
                 })
@@ -796,6 +878,20 @@ impl AuditEventSpec {
             "profiles.eth_xpub_wallet.delete" => {
                 let details = parse_legacy_details::<NamedAuditDetails>(path, &kind, details)?;
                 Ok(Self::ProfilesEthXpubWalletDelete { name: details.name })
+            }
+            "profiles.eth_seed_wallet.upsert" => {
+                let details = parse_legacy_details::<ProfilesEthSeedWalletUpsertDetails>(
+                    path, &kind, details,
+                )?;
+                Ok(Self::ProfilesEthSeedWalletUpsert {
+                    name: details.name,
+                    provider_profile: details.provider_profile,
+                    word_count: details.word_count,
+                })
+            }
+            "profiles.eth_seed_wallet.delete" => {
+                let details = parse_legacy_details::<NamedAuditDetails>(path, &kind, details)?;
+                Ok(Self::ProfilesEthSeedWalletDelete { name: details.name })
             }
             "snapshot.export" => {
                 let details = parse_legacy_details::<SnapshotAuditDetails>(path, &kind, details)?;
@@ -999,6 +1095,60 @@ impl AuditEventSpec {
                     failed: details.failed,
                 })
             }
+            "wallet_inventory.scan" => {
+                let details =
+                    parse_legacy_details::<WalletInventoryScanDetails>(path, &kind, details)?;
+                Ok(Self::WalletInventoryScan {
+                    id: details.id,
+                    wallets: details.wallets,
+                    providers: details.providers,
+                    addresses: details.addresses,
+                    holdings: details.holdings,
+                })
+            }
+            "wallet_inventory.chain_profile.upsert" => {
+                let details = parse_legacy_details::<WalletInventoryChainProfileUpsertDetails>(
+                    path, &kind, details,
+                )?;
+                Ok(Self::WalletInventoryChainProfileUpsert {
+                    name: details.name,
+                    chain_family: details.chain_family,
+                })
+            }
+            "wallet_inventory.chain_profile.delete" => {
+                let details = parse_legacy_details::<WalletInventoryChainProfileDeleteDetails>(
+                    path, &kind, details,
+                )?;
+                Ok(Self::WalletInventoryChainProfileDelete { name: details.name })
+            }
+            "wallet_inventory.discovery_job.update" => {
+                let details = parse_legacy_details::<WalletInventoryDiscoveryJobUpdateDetails>(
+                    path, &kind, details,
+                )?;
+                Ok(Self::WalletInventoryDiscoveryJobUpdate {
+                    id: details.id,
+                    status: details.status,
+                })
+            }
+            "wallet_consolidation.plan.generate" => {
+                let details = parse_legacy_details::<WalletConsolidationPlanGenerateDetails>(
+                    path, &kind, details,
+                )?;
+                Ok(Self::WalletConsolidationPlanGenerate {
+                    id: details.id,
+                    steps: details.steps,
+                    blocked: details.blocked,
+                })
+            }
+            "wallet_consolidation.plan.approve" => {
+                let details = parse_legacy_details::<WalletConsolidationPlanApproveDetails>(
+                    path, &kind, details,
+                )?;
+                Ok(Self::WalletConsolidationPlanApprove {
+                    id: details.id,
+                    approved: details.approved,
+                })
+            }
             "run.complete" => {
                 let details = parse_legacy_details::<RunCompleteDetails>(path, &kind, details)?;
                 Ok(Self::RunComplete {
@@ -1021,6 +1171,7 @@ impl AuditEventSpec {
     }
 }
 
+#[allow(dead_code)]
 pub(crate) fn append_audit_event(
     path: &Path,
     event: &StoredAuditEvent,
@@ -1045,6 +1196,7 @@ pub(crate) fn append_audit_event(
     Ok(())
 }
 
+#[allow(dead_code)]
 pub(crate) fn read_recent_audit_events(
     path: &Path,
     limit: usize,
@@ -1195,6 +1347,13 @@ struct ProfilesEthXpubWalletUpsertDetails {
 }
 
 #[derive(Clone, Debug, Deserialize)]
+struct ProfilesEthSeedWalletUpsertDetails {
+    name: String,
+    provider_profile: String,
+    word_count: usize,
+}
+
+#[derive(Clone, Debug, Deserialize)]
 struct SnapshotAuditDetails {
     file_count: usize,
     total_bytes: usize,
@@ -1338,6 +1497,45 @@ struct MaintenanceRunDetails {
     blocked: usize,
     retrying: usize,
     failed: usize,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+struct WalletInventoryScanDetails {
+    id: String,
+    wallets: usize,
+    providers: usize,
+    addresses: usize,
+    holdings: usize,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+struct WalletInventoryChainProfileUpsertDetails {
+    name: String,
+    chain_family: String,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+struct WalletInventoryChainProfileDeleteDetails {
+    name: String,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+struct WalletInventoryDiscoveryJobUpdateDetails {
+    id: String,
+    status: String,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+struct WalletConsolidationPlanGenerateDetails {
+    id: String,
+    steps: usize,
+    blocked: usize,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+struct WalletConsolidationPlanApproveDetails {
+    id: String,
+    approved: usize,
 }
 
 #[derive(Clone, Debug, Deserialize)]

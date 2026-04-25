@@ -80,9 +80,8 @@ pub(crate) fn map_xpub_error(error: EthereumXpubError) -> ServiceError {
     match error {
         EthereumXpubError::InvalidProjectAccount
         | EthereumXpubError::InvalidReceiveIndex
-        | EthereumXpubError::InvalidReceiveBranchXpub => {
-            ServiceError::bad_request(error.to_string())
-        }
+        | EthereumXpubError::InvalidReceiveBranchXpub
+        | EthereumXpubError::InvalidMnemonic => ServiceError::bad_request(error.to_string()),
         EthereumXpubError::InvalidKeyMaterial => ServiceError::internal(error.to_string()),
     }
 }

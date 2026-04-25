@@ -3,27 +3,21 @@
 use std::fmt;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use bip39::Language;
 use data_encoding::BASE32_NOPAD;
+use hmac::{Hmac, Mac};
 use rand::RngCore;
 use rand::rngs::OsRng;
+use sha1::Sha1;
 
 const LOWER_ALPHA: &str = "abcdefghijklmnopqrstuvwxyz";
 const UPPER_ALPHA: &str = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
 const NUMERIC: &str = "0123456789";
 const SYMBOL: &str = "!@#$%^&*()-_=+[]{}<>?,.";
-const WORDS: &[&str] = &[
-    "anchor", "apricot", "atlas", "badger", "bamboo", "banner", "beacon", "birch", "bistro",
-    "brisk", "cactus", "canvas", "cinder", "cobalt", "comet", "copper", "coral", "cradle", "dawn",
-    "delta", "ember", "falcon", "fable", "fjord", "forest", "frost", "garnet", "glimmer", "harbor",
-    "hazel", "helium", "indigo", "iris", "jade", "jasmine", "jovial", "kernel", "lagoon",
-    "lantern", "lilac", "linen", "lotus", "marble", "meadow", "meteor", "mint", "mosaic", "nebula",
-    "nickel", "north", "novel", "onyx", "opal", "orchid", "otter", "pebble", "pepper", "petal",
-    "photon", "pine", "plume", "poppy", "quartz", "quill", "radar", "raven", "reef", "river",
-    "sable", "saffron", "sage", "scarlet", "shadow", "signal", "silver", "spruce", "starling",
-    "stone", "summit", "teal", "tempo", "thistle", "timber", "topaz", "torrent", "trident",
-    "tulip", "umbra", "valley", "velvet", "violet", "walnut", "warden", "willow", "winter",
-    "yarrow", "zephyr",
-];
+
+pub const DEFAULT_PASSPHRASE_WORDS: usize = 8;
+
+type HmacSha1 = Hmac<Sha1>;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum GeneratorError {
@@ -78,10 +72,11 @@ pub fn generate_passphrase(word_count: usize, separator: &str) -> Result<String,
     }
 
     let mut rng = OsRng;
+    let word_list = Language::English.word_list();
     let mut words = Vec::with_capacity(word_count);
     for _ in 0..word_count {
-        let index = (rng.next_u64() as usize) % WORDS.len();
-        words.push(WORDS[index]);
+        let index = sample_uniform(&mut rng, word_list.len() as u64) as usize;
+        words.push(word_list[index]);
     }
     Ok(words.join(separator))
 }
@@ -132,12 +127,15 @@ fn generate_totp_at(
     let counter = timestamp / period;
     let mut message = [0u8; 8];
     message.copy_from_slice(&counter.to_be_bytes());
-    let hmac = hmac_sha1(&key, &message);
-    let offset = (hmac[19] & 0x0f) as usize;
-    let binary = ((u32::from(hmac[offset]) & 0x7f) << 24)
-        | (u32::from(hmac[offset + 1]) << 16)
-        | (u32::from(hmac[offset + 2]) << 8)
-        | u32::from(hmac[offset + 3]);
+    let mut mac = HmacSha1::new_from_slice(&key)
+        .map_err(|_| GeneratorError::InvalidSecret("failed to initialize TOTP HMAC"))?;
+    mac.update(&message);
+    let digest = mac.finalize().into_bytes();
+    let offset = (digest[19] & 0x0f) as usize;
+    let binary = ((u32::from(digest[offset]) & 0x7f) << 24)
+        | (u32::from(digest[offset + 1]) << 16)
+        | (u32::from(digest[offset + 2]) << 8)
+        | u32::from(digest[offset + 3]);
     let modulo = 10_u32.pow(digits);
     let code = binary % modulo;
     Ok(format!("{code:0width$}", width = digits as usize))
@@ -153,7 +151,8 @@ fn sample_chars(alphabet: &[u8], length: usize) -> Result<String, GeneratorError
     Ok(output)
 }
 
-fn sample_uniform(rng: &mut OsRng, upper_bound: u64) -> u64 {
+fn sample_uniform<R: RngCore + ?Sized>(rng: &mut R, upper_bound: u64) -> u64 {
+    debug_assert!(upper_bound > 0);
     let zone = u64::MAX - (u64::MAX % upper_bound);
     loop {
         let value = rng.next_u64();
@@ -180,107 +179,37 @@ fn concat_const3(a: &str, b: &str, c: &str) -> String {
     s
 }
 
-fn hmac_sha1(key: &[u8], message: &[u8]) -> [u8; 20] {
-    let mut block = [0u8; 64];
-    if key.len() > 64 {
-        block[..20].copy_from_slice(&sha1(key));
-    } else {
-        block[..key.len()].copy_from_slice(key);
-    }
-
-    let mut ipad = [0x36u8; 64];
-    let mut opad = [0x5cu8; 64];
-    for i in 0..64 {
-        ipad[i] ^= block[i];
-        opad[i] ^= block[i];
-    }
-
-    let mut inner = Vec::with_capacity(64 + message.len());
-    inner.extend_from_slice(&ipad);
-    inner.extend_from_slice(message);
-    let inner_hash = sha1(&inner);
-
-    let mut outer = Vec::with_capacity(64 + inner_hash.len());
-    outer.extend_from_slice(&opad);
-    outer.extend_from_slice(&inner_hash);
-    sha1(&outer)
-}
-
-fn sha1(input: &[u8]) -> [u8; 20] {
-    let mut h0: u32 = 0x6745_2301;
-    let mut h1: u32 = 0xefcd_ab89;
-    let mut h2: u32 = 0x98ba_dcfe;
-    let mut h3: u32 = 0x1032_5476;
-    let mut h4: u32 = 0xc3d2_e1f0;
-
-    let bit_len = (input.len() as u64) * 8;
-    let mut data = input.to_vec();
-    data.push(0x80);
-    while (data.len() % 64) != 56 {
-        data.push(0);
-    }
-    data.extend_from_slice(&bit_len.to_be_bytes());
-
-    for chunk in data.chunks_exact(64) {
-        let mut w = [0u32; 80];
-        for (i, word) in w.iter_mut().take(16).enumerate() {
-            let start = i * 4;
-            *word = u32::from_be_bytes([
-                chunk[start],
-                chunk[start + 1],
-                chunk[start + 2],
-                chunk[start + 3],
-            ]);
-        }
-        for i in 16..80 {
-            w[i] = (w[i - 3] ^ w[i - 8] ^ w[i - 14] ^ w[i - 16]).rotate_left(1);
-        }
-
-        let mut a = h0;
-        let mut b = h1;
-        let mut c = h2;
-        let mut d = h3;
-        let mut e = h4;
-
-        for (i, word) in w.iter().enumerate() {
-            let (f, k) = match i {
-                0..=19 => (((b & c) | ((!b) & d)), 0x5a82_7999),
-                20..=39 => (b ^ c ^ d, 0x6ed9_eba1),
-                40..=59 => (((b & c) | (b & d) | (c & d)), 0x8f1b_bcdc),
-                _ => (b ^ c ^ d, 0xca62_c1d6),
-            };
-            let temp = a
-                .rotate_left(5)
-                .wrapping_add(f)
-                .wrapping_add(e)
-                .wrapping_add(k)
-                .wrapping_add(*word);
-            e = d;
-            d = c;
-            c = b.rotate_left(30);
-            b = a;
-            a = temp;
-        }
-
-        h0 = h0.wrapping_add(a);
-        h1 = h1.wrapping_add(b);
-        h2 = h2.wrapping_add(c);
-        h3 = h3.wrapping_add(d);
-        h4 = h4.wrapping_add(e);
-    }
-
-    let mut out = [0u8; 20];
-    out[..4].copy_from_slice(&h0.to_be_bytes());
-    out[4..8].copy_from_slice(&h1.to_be_bytes());
-    out[8..12].copy_from_slice(&h2.to_be_bytes());
-    out[12..16].copy_from_slice(&h3.to_be_bytes());
-    out[16..20].copy_from_slice(&h4.to_be_bytes());
-    out
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rand::Error;
+
+    struct FixedRng {
+        values: Vec<u64>,
+    }
+
+    impl RngCore for FixedRng {
+        fn next_u32(&mut self) -> u32 {
+            self.next_u64() as u32
+        }
+
+        fn next_u64(&mut self) -> u64 {
+            self.values.remove(0)
+        }
+
+        fn fill_bytes(&mut self, dest: &mut [u8]) {
+            for chunk in dest.chunks_mut(8) {
+                let value = self.next_u64().to_be_bytes();
+                let len = chunk.len();
+                chunk.copy_from_slice(&value[..len]);
+            }
+        }
+
+        fn try_fill_bytes(&mut self, dest: &mut [u8]) -> Result<(), Error> {
+            self.fill_bytes(dest);
+            Ok(())
+        }
+    }
 
     #[test]
     fn password_uses_requested_length() {
@@ -295,8 +224,41 @@ mod tests {
     }
 
     #[test]
+    fn passphrase_uses_bundled_2048_word_list() {
+        let word_list = Language::English.word_list();
+        assert_eq!(word_list.len(), 2048);
+
+        let generated = generate_passphrase(12, " ").unwrap();
+        assert!(generated.split(' ').all(|word| word_list.contains(&word)));
+    }
+
+    #[test]
+    fn sample_uniform_rejects_out_of_zone_values() {
+        let mut rng = FixedRng {
+            values: vec![u64::MAX, 7],
+        };
+        assert_eq!(sample_uniform(&mut rng, 10), 7);
+    }
+
+    #[test]
     fn totp_matches_rfc_vector() {
         let code = generate_totp_at("GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ", 59, 30, 8).unwrap();
         assert_eq!(code, "94287082");
+    }
+
+    #[test]
+    fn totp_rejects_invalid_inputs() {
+        assert_eq!(
+            generate_totp("not-base32", 30, 6).unwrap_err(),
+            GeneratorError::InvalidSecret("secret must be valid base32")
+        );
+        assert_eq!(
+            generate_totp("GEZDGNBVGY3TQOJQ", 0, 6).unwrap_err(),
+            GeneratorError::InvalidLength("period must be greater than zero")
+        );
+        assert_eq!(
+            generate_totp("GEZDGNBVGY3TQOJQ", 30, 9).unwrap_err(),
+            GeneratorError::InvalidDigits
+        );
     }
 }

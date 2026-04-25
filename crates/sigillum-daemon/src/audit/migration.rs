@@ -64,6 +64,8 @@ fn migrated_jsonl_path(path: &Path) -> PathBuf {
 
 #[cfg(test)]
 mod tests {
+    use std::io::Write;
+
     use tempfile::TempDir;
 
     use super::*;
@@ -116,5 +118,59 @@ mod tests {
         )
         .unwrap();
         assert_eq!(events.len(), 1);
+    }
+
+    #[test]
+    fn migration_skips_corrupted_legacy_jsonl_lines() {
+        let dir = TempDir::new().unwrap();
+        let legacy = dir.path().join("audit.log");
+
+        append_audit_event(
+            &legacy,
+            &StoredAuditEvent {
+                created_at_unix: 7,
+                compartment_id: Some(0),
+                spec: AuditEventSpec::SecretSet {
+                    key: "db_pass".into(),
+                },
+            },
+        )
+        .unwrap();
+
+        let mut file = std::fs::OpenOptions::new()
+            .append(true)
+            .open(&legacy)
+            .unwrap();
+        writeln!(file, "{{ not valid json").unwrap();
+
+        append_audit_event(
+            &legacy,
+            &StoredAuditEvent {
+                created_at_unix: 9,
+                compartment_id: None,
+                spec: AuditEventSpec::LockAll,
+            },
+        )
+        .unwrap();
+
+        migrate_jsonl_to_sqlite(dir.path()).unwrap();
+
+        let events = query_events(
+            &dir.path().join("audit.db"),
+            &AuditQuery {
+                tail: 10,
+                kind: None,
+                since: None,
+                key: None,
+            },
+        )
+        .unwrap();
+        assert_eq!(events.len(), 2);
+        let kinds = events
+            .iter()
+            .map(|event| event.kind.as_str())
+            .collect::<Vec<_>>();
+        assert!(kinds.contains(&"secret.set"));
+        assert!(kinds.contains(&"lock.all"));
     }
 }

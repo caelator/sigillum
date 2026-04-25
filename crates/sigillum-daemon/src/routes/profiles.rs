@@ -7,9 +7,9 @@ use axum::extract::State;
 use axum::http::HeaderMap;
 use axum::response::Response;
 use sigillum_api::{
-    EthStealthSendErc20WithProfileRequest, EthStealthSendWithProfileRequest,
-    EthStealthWalletProfileUpsertRequest, EthXpubWalletProfileUpsertRequest,
-    EvmProfileDeleteRequest, EvmProviderProfileUpsertRequest,
+    EthSeedWalletProfileUpsertRequest, EthStealthSendErc20WithProfileRequest,
+    EthStealthSendWithProfileRequest, EthStealthWalletProfileUpsertRequest,
+    EthXpubWalletProfileUpsertRequest, EvmProfileDeleteRequest, EvmProviderProfileUpsertRequest,
 };
 
 use crate::AppState;
@@ -139,6 +139,48 @@ pub(crate) async fn eth_xpub_wallet_profiles_delete(
     service_response(
         service
             .delete_eth_xpub_wallet_profile(bearer_token(&headers).as_deref(), body)
+            .await,
+    )
+}
+
+pub(crate) async fn eth_seed_wallet_profiles_list(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+) -> Response {
+    let service = SigillumService::new(state);
+    service_response(service.list_eth_seed_wallet_profiles(bearer_token(&headers).as_deref()))
+}
+
+pub(crate) async fn eth_seed_wallet_profiles_upsert(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Json(body): Json<EthSeedWalletProfileUpsertRequest>,
+) -> Response {
+    let body = match validated(Json(body)) {
+        Ok(b) => b,
+        Err(resp) => return resp,
+    };
+    let service = SigillumService::new(state);
+    service_response(
+        service
+            .upsert_eth_seed_wallet_profile(bearer_token(&headers).as_deref(), body)
+            .await,
+    )
+}
+
+pub(crate) async fn eth_seed_wallet_profiles_delete(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Json(body): Json<EvmProfileDeleteRequest>,
+) -> Response {
+    let body = match validated(Json(body)) {
+        Ok(b) => b,
+        Err(resp) => return resp,
+    };
+    let service = SigillumService::new(state);
+    service_response(
+        service
+            .delete_eth_seed_wallet_profile(bearer_token(&headers).as_deref(), body)
             .await,
     )
 }

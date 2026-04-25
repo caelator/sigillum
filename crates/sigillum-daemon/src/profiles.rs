@@ -7,7 +7,9 @@
 use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
-use sigillum_api::{EthStealthWalletProfile, EthXpubWalletProfile, EvmProviderProfile};
+use sigillum_api::{
+    EthSeedWalletProfile, EthStealthWalletProfile, EthXpubWalletProfile, EvmProviderProfile,
+};
 
 use crate::json_store::{JsonDocument, JsonSchema};
 
@@ -19,6 +21,8 @@ pub struct ProfileRegistry {
     pub eth_stealth_wallets: Vec<EthStealthWalletProfile>,
     #[serde(default)]
     pub eth_xpub_wallets: Vec<EthXpubWalletProfile>,
+    #[serde(default)]
+    pub eth_seed_wallets: Vec<EthSeedWalletProfile>,
 }
 
 impl JsonDocument for ProfileRegistry {
@@ -56,6 +60,7 @@ mod tests {
         assert!(registry.evm_providers.is_empty());
         assert!(registry.eth_stealth_wallets.is_empty());
         assert!(registry.eth_xpub_wallets.is_empty());
+        assert!(registry.eth_seed_wallets.is_empty());
     }
 
     #[test]
@@ -84,6 +89,7 @@ mod tests {
         assert_eq!(loaded.evm_providers[0].chain_id, 1);
         assert!(loaded.eth_stealth_wallets.is_empty());
         assert!(loaded.eth_xpub_wallets.is_empty());
+        assert!(loaded.eth_seed_wallets.is_empty());
     }
 
     #[test]
@@ -129,6 +135,7 @@ mod tests {
         let loaded = load_profiles(dir.path()).unwrap();
         assert_eq!(loaded.evm_providers.len(), 1);
         assert!(loaded.eth_xpub_wallets.is_empty());
+        assert!(loaded.eth_seed_wallets.is_empty());
         assert!(profiles_path(dir.path()).exists());
     }
 
@@ -154,6 +161,21 @@ mod tests {
             chain_id: Some(1),
             default_destination_address: None,
         });
+        registry.eth_seed_wallets.push(EthSeedWalletProfile {
+            name: "seed-main".into(),
+            label: Some("Seed main".into()),
+            project_account: 0,
+            provider_profile: "mainnet".into(),
+            compartment_id: 0,
+            chain_id: Some(1),
+            word_count: 12,
+            mnemonic_secret_key: "wallet.seed.seed-main.mnemonic".into(),
+            account_path: "m/44'/60'/0'".into(),
+            receive_path: "m/44'/60'/0'/0".into(),
+            receive_xpub: "xpub661MyMwAqRbcFexample".into(),
+            first_receive_address: "0x1111111111111111111111111111111111111111".into(),
+            default_destination_address: None,
+        });
 
         save_profiles(dir.path(), &registry).unwrap();
         std::fs::write(profiles_path(dir.path()), b"broken").unwrap();
@@ -161,6 +183,7 @@ mod tests {
         let loaded = load_profiles(dir.path()).unwrap();
         assert_eq!(loaded.eth_stealth_wallets.len(), 1);
         assert_eq!(loaded.eth_xpub_wallets.len(), 1);
+        assert_eq!(loaded.eth_seed_wallets.len(), 1);
 
         let corrupt_files = std::fs::read_dir(dir.path())
             .unwrap()
@@ -189,6 +212,7 @@ mod tests {
         assert!(saved["data"]["evm_providers"].is_array());
         assert!(saved["data"]["eth_stealth_wallets"].is_array());
         assert!(saved["data"]["eth_xpub_wallets"].is_array());
+        assert!(saved["data"]["eth_seed_wallets"].is_array());
     }
 
     #[test]
@@ -202,5 +226,6 @@ mod tests {
         assert!(loaded.evm_providers.is_empty());
         assert!(loaded.eth_stealth_wallets.is_empty());
         assert!(loaded.eth_xpub_wallets.is_empty());
+        assert!(loaded.eth_seed_wallets.is_empty());
     }
 }

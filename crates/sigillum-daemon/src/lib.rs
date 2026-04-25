@@ -25,6 +25,7 @@ mod audit;
 mod audit_db;
 mod audit_log;
 mod deposits;
+mod inventory;
 mod json_store;
 mod operations;
 mod policy;

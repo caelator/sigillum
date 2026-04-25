@@ -29,6 +29,7 @@ mod diagnostics;
 mod evm;
 mod fido2;
 mod generate;
+mod inventory;
 mod lifecycle;
 mod maintenance;
 mod profiles;
@@ -211,6 +212,7 @@ fn api_routes() -> AppRouter {
         .merge(evm_routes())
         .merge(profile_routes())
         .merge(wallet_routes())
+        .merge(inventory_routes())
         .merge(deposit_routes())
         .merge(queue_routes())
         .merge(fido2_routes())
@@ -335,6 +337,18 @@ fn profile_routes() -> AppRouter {
             "/api/profiles/eth-xpub/delete",
             post(profiles::eth_xpub_wallet_profiles_delete),
         )
+        .route(
+            "/api/profiles/eth-seed",
+            get(profiles::eth_seed_wallet_profiles_list),
+        )
+        .route(
+            "/api/profiles/eth-seed/upsert",
+            post(profiles::eth_seed_wallet_profiles_upsert),
+        )
+        .route(
+            "/api/profiles/eth-seed/delete",
+            post(profiles::eth_seed_wallet_profiles_delete),
+        )
 }
 
 fn wallet_routes() -> AppRouter {
@@ -386,6 +400,49 @@ fn wallet_routes() -> AppRouter {
         .route(
             "/api/wallets/eth-stealth/send-erc20-with-profile",
             post(profiles::eth_stealth_send_erc20_with_profile),
+        )
+}
+
+fn inventory_routes() -> AppRouter {
+    Router::new()
+        .route(
+            "/api/inventory/wallets",
+            get(inventory::list_wallet_inventory),
+        )
+        .route("/api/inventory/chains", get(inventory::list_chain_profiles))
+        .route(
+            "/api/inventory/chains/upsert",
+            post(inventory::upsert_chain_profile),
+        )
+        .route(
+            "/api/inventory/chains/delete",
+            post(inventory::delete_chain_profile),
+        )
+        .route(
+            "/api/inventory/scan/evm",
+            post(inventory::scan_wallet_inventory_evm),
+        )
+        .route("/api/discovery/jobs", get(inventory::list_discovery_jobs))
+        .route(
+            "/api/discovery/jobs/cancel",
+            post(inventory::cancel_discovery_job),
+        )
+        .route(
+            "/api/discovery/jobs/resume",
+            post(inventory::resume_discovery_job),
+        )
+        .route("/api/risk/findings", get(inventory::list_risk_findings))
+        .route(
+            "/api/plans/consolidation",
+            get(inventory::list_consolidation_plans),
+        )
+        .route(
+            "/api/plans/consolidation/generate",
+            post(inventory::generate_consolidation_plan),
+        )
+        .route(
+            "/api/plans/consolidation/approve",
+            post(inventory::approve_consolidation_plan),
         )
 }
 
