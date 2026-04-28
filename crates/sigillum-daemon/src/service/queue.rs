@@ -3,7 +3,8 @@
 //! Queues, processes, and tracks Ethereum stealth transfers and deposit
 //! sweeps with deferred execution and retry logic.
 
-use axum::http::StatusCode;
+mod state;
+
 use sigillum_api::{
     EthStealthSendErc20WithProfileRequest, EthStealthSendWithProfileRequest, EvmProviderRef,
     QueueEnqueueResponse, QueueEthStealthErc20SweepRequest, QueueEthStealthErc20TransferRequest,
@@ -14,6 +15,12 @@ use sigillum_api::{
 use sigillum_core::decode_quantity_hex;
 
 use crate::audit_log::{AuditEventSpec, AuditQueueJobKind};
+
+use state::{QueueFailureDisposition, classify_queue_error, queue_job_is_runnable};
+pub(super) use state::{
+    count_queue_states, is_active_or_completed_queue_state, is_active_queue_state, queue_status,
+    recover_queue_job,
+};
 
 use super::helpers::{
     compare_u256, is_zero_u256, map_wallet_error, multiply_u256_u64, now_unix, random_id,
@@ -30,16 +37,6 @@ const QUEUE_STATE_SENT: &str = "sent";
 const QUEUE_STATE_FAILED_TERMINAL: &str = "failed_terminal";
 const QUEUE_STATE_LEGACY_DEFERRED: &str = "deferred";
 const QUEUE_STATE_LEGACY_FAILED: &str = "failed";
-
-// ── Queue State Types ──────────────────────────────────────────────────────
-
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub(super) struct QueueStateCounts {
-    pub blocked: usize,
-    pub retrying: usize,
-    pub failed: usize,
-    pub deferred_legacy: usize,
-}
 
 // ── Queue Operations: Listing & Enqueuing ─────────────────────────────────
 
@@ -417,16 +414,6 @@ enum QueueExecution {
     Blocked(String),
 }
 
-enum QueueFailureDisposition {
-    Retryable {
-        reason: String,
-        retry_after_unix: u64,
-    },
-    FailedTerminal {
-        reason: String,
-    },
-}
-
 impl SigillumService {
     // ── Sweep Processing Implementation ────────────────────────────────────
 
@@ -601,239 +588,5 @@ impl SigillumService {
             )
             .await?;
         Ok(QueueExecution::Sent(sent))
-    }
-}
-
-// ── Queue State Utilities ──────────────────────────────────────────────────
-
-pub(super) fn count_queue_states(queue: &crate::queue_store::QueueState) -> QueueStateCounts {
-    let mut counts = QueueStateCounts::default();
-    for job in &queue.jobs {
-        match job.state.as_str() {
-            QUEUE_STATE_BLOCKED => counts.blocked += 1,
-            QUEUE_STATE_RETRYING => counts.retrying += 1,
-            QUEUE_STATE_FAILED_TERMINAL | QUEUE_STATE_LEGACY_FAILED => counts.failed += 1,
-            QUEUE_STATE_LEGACY_DEFERRED => counts.deferred_legacy += 1,
-            _ => {}
-        }
-    }
-    counts
-}
-
-pub(super) fn is_active_queue_state(state: &str) -> bool {
-    matches!(
-        normalize_queue_state(state),
-        QUEUE_STATE_QUEUED | QUEUE_STATE_BLOCKED | QUEUE_STATE_RETRYING
-    )
-}
-
-pub(super) fn is_active_or_completed_queue_state(state: &str) -> bool {
-    is_active_queue_state(state) || normalize_queue_state(state) == QUEUE_STATE_SENT
-}
-
-pub(super) fn queue_status(state: &str) -> String {
-    match normalize_queue_state(state) {
-        QUEUE_STATE_SENT => "sweep_sent",
-        QUEUE_STATE_FAILED_TERMINAL => "sweep_failed",
-        QUEUE_STATE_BLOCKED => "sweep_blocked",
-        QUEUE_STATE_RETRYING => "sweep_retrying",
-        QUEUE_STATE_QUEUED => "sweep_queued",
-        _ => "funded",
-    }
-    .into()
-}
-
-pub(super) fn normalize_queue_state(state: &str) -> &str {
-    match state {
-        QUEUE_STATE_LEGACY_DEFERRED => QUEUE_STATE_BLOCKED,
-        QUEUE_STATE_LEGACY_FAILED => QUEUE_STATE_FAILED_TERMINAL,
-        other => other,
-    }
-}
-
-pub(super) fn recover_queue_job(job: &mut QueueJob) -> bool {
-    let mut changed = false;
-    let normalized_state = normalize_queue_state(&job.state);
-    if normalized_state != job.state {
-        job.state = normalized_state.into();
-        changed = true;
-    }
-
-    if job.state == QUEUE_STATE_RETRYING {
-        if job.next_attempt_after_unix.is_none() {
-            job.next_attempt_after_unix = Some(now_unix());
-            changed = true;
-        }
-    } else if job.next_attempt_after_unix.take().is_some() {
-        changed = true;
-    }
-
-    changed
-}
-
-// ── Job Runnable Checks & Error Classification ─────────────────────────────
-
-fn queue_job_is_runnable(job: &QueueJob, force_target: bool, now: u64) -> bool {
-    match normalize_queue_state(&job.state) {
-        QUEUE_STATE_QUEUED | QUEUE_STATE_BLOCKED => true,
-        QUEUE_STATE_RETRYING => {
-            force_target || job.next_attempt_after_unix.unwrap_or_default() <= now
-        }
-        _ => false,
-    }
-}
-
-fn classify_queue_error(
-    error: ServiceError,
-    attempts: u32,
-    now: u64,
-    policy: crate::policy::RuntimePolicy,
-) -> QueueFailureDisposition {
-    match error.status() {
-        StatusCode::INTERNAL_SERVER_ERROR | StatusCode::TOO_MANY_REQUESTS => {
-            QueueFailureDisposition::Retryable {
-                reason: error.message().to_string(),
-                retry_after_unix: now + queue_retry_delay_secs(attempts, policy),
-            }
-        }
-        _ => QueueFailureDisposition::FailedTerminal {
-            reason: error.message().to_string(),
-        },
-    }
-}
-
-fn queue_retry_delay_secs(attempts: u32, policy: crate::policy::RuntimePolicy) -> u64 {
-    policy.queue_retry_delay_secs(attempts)
-}
-
-// ── Tests ─────────────────────────────────────────────────────────────────
-
-#[cfg(test)]
-mod tests {
-    use sigillum_api::{QueueJob, QueueJobPayload};
-
-    use super::*;
-
-    fn sample_job(state: &str, next_attempt_after_unix: Option<u64>) -> QueueJob {
-        QueueJob {
-            id: "job-1".into(),
-            state: state.into(),
-            attempts: 0,
-            created_at_unix: 1,
-            updated_at_unix: 1,
-            next_attempt_after_unix,
-            payload: QueueJobPayload::EthStealthTransfer {
-                wallet_profile: "profile".into(),
-                stealth_address: "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".into(),
-                ephemeral_public_key_hex: "03".repeat(33),
-                value_wei_hex: "0x1".into(),
-                destination_address: None,
-                nonce: None,
-                gas_limit: None,
-                view_tag_hex: None,
-            },
-            last_error: None,
-            transaction_hash_hex: None,
-            broadcast_transaction_hash_hex: None,
-        }
-    }
-
-    #[test]
-    fn queue_counts_track_new_and_legacy_states() {
-        let queue = crate::queue_store::QueueState {
-            jobs: vec![
-                sample_job(QUEUE_STATE_BLOCKED, None),
-                sample_job(QUEUE_STATE_RETRYING, Some(30)),
-                sample_job(QUEUE_STATE_FAILED_TERMINAL, None),
-                sample_job(QUEUE_STATE_LEGACY_FAILED, None),
-                sample_job(QUEUE_STATE_LEGACY_DEFERRED, None),
-            ],
-        };
-
-        let counts = count_queue_states(&queue);
-        assert_eq!(counts.blocked, 1);
-        assert_eq!(counts.retrying, 1);
-        assert_eq!(counts.failed, 2);
-        assert_eq!(counts.deferred_legacy, 1);
-    }
-
-    #[test]
-    fn queue_status_normalizes_legacy_states() {
-        assert_eq!(queue_status(QUEUE_STATE_QUEUED), "sweep_queued");
-        assert_eq!(queue_status(QUEUE_STATE_BLOCKED), "sweep_blocked");
-        assert_eq!(queue_status(QUEUE_STATE_RETRYING), "sweep_retrying");
-        assert_eq!(queue_status(QUEUE_STATE_SENT), "sweep_sent");
-        assert_eq!(queue_status(QUEUE_STATE_FAILED_TERMINAL), "sweep_failed");
-        assert_eq!(queue_status(QUEUE_STATE_LEGACY_DEFERRED), "sweep_blocked");
-        assert_eq!(queue_status(QUEUE_STATE_LEGACY_FAILED), "sweep_failed");
-    }
-
-    #[test]
-    fn queue_runnable_rules_respect_retry_deadlines() {
-        let queued = sample_job(QUEUE_STATE_QUEUED, None);
-        let blocked = sample_job(QUEUE_STATE_BLOCKED, None);
-        let retry_due = sample_job(QUEUE_STATE_RETRYING, Some(10));
-        let retry_later = sample_job(QUEUE_STATE_RETRYING, Some(20));
-        let sent = sample_job(QUEUE_STATE_SENT, None);
-
-        assert!(queue_job_is_runnable(&queued, false, 15));
-        assert!(queue_job_is_runnable(&blocked, false, 15));
-        assert!(queue_job_is_runnable(&retry_due, false, 15));
-        assert!(!queue_job_is_runnable(&retry_later, false, 15));
-        assert!(queue_job_is_runnable(&retry_later, true, 15));
-        assert!(!queue_job_is_runnable(&sent, false, 15));
-    }
-
-    #[test]
-    fn retry_delay_uses_bounded_backoff() {
-        let policy = crate::policy::RuntimePolicy::default();
-        assert_eq!(queue_retry_delay_secs(0, policy), 5);
-        assert_eq!(queue_retry_delay_secs(1, policy), 5);
-        assert_eq!(queue_retry_delay_secs(2, policy), 10);
-        assert_eq!(queue_retry_delay_secs(3, policy), 20);
-        assert_eq!(queue_retry_delay_secs(7, policy), 300);
-        assert_eq!(queue_retry_delay_secs(100, policy), 300);
-    }
-
-    #[test]
-    fn queue_error_classification_distinguishes_retryable_failures() {
-        let policy = crate::policy::RuntimePolicy::default();
-        let retryable = classify_queue_error(ServiceError::internal("temporary"), 2, 100, policy);
-        assert!(matches!(
-            retryable,
-            QueueFailureDisposition::Retryable {
-                retry_after_unix: 110,
-                ..
-            }
-        ));
-
-        let throttled =
-            classify_queue_error(ServiceError::too_many_requests("slow down"), 1, 50, policy);
-        assert!(matches!(
-            throttled,
-            QueueFailureDisposition::Retryable {
-                retry_after_unix: 55,
-                ..
-            }
-        ));
-
-        let terminal = classify_queue_error(ServiceError::bad_request("bad input"), 1, 50, policy);
-        assert!(matches!(
-            terminal,
-            QueueFailureDisposition::FailedTerminal { .. }
-        ));
-    }
-
-    #[test]
-    fn recover_queue_job_normalizes_legacy_states_and_retry_schedule() {
-        let mut blocked = sample_job(QUEUE_STATE_LEGACY_DEFERRED, Some(99));
-        assert!(recover_queue_job(&mut blocked));
-        assert_eq!(blocked.state, QUEUE_STATE_BLOCKED);
-        assert_eq!(blocked.next_attempt_after_unix, None);
-
-        let mut retrying = sample_job(QUEUE_STATE_RETRYING, None);
-        assert!(recover_queue_job(&mut retrying));
-        assert_eq!(retrying.state, QUEUE_STATE_RETRYING);
-        assert!(retrying.next_attempt_after_unix.is_some());
     }
 }

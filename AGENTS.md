@@ -13,7 +13,7 @@ This repo is managed by the machine-wide GitNexus + MemoryPort standard.
 
 ### Session start
 
-- Check `npx gitnexus status` or read `gitnexus://repo/{name}/context` to confirm the index is fresh.
+- Check `npx -y gitnexus@1.5.3 status` or read `gitnexus://repo/{name}/context` to confirm the index is fresh.
 - If the index is stale, run `gitnexus-analyze-safe <repo_path>`.
 
 ### Exploration and debugging

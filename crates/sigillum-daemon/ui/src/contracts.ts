@@ -18,6 +18,25 @@ export interface StatusResponse {
   session_token?: string;
 }
 
+export interface UnlockResponse {
+  status: string;
+  method: string;
+  cascading?: boolean | null;
+  session_token: string;
+  unlocked_compartments: ActiveCompartment[];
+  active_compartment_id?: number | null;
+}
+
+export interface LockResponse {
+  status: string;
+  message: string;
+}
+
+export interface SessionRevokeResponse {
+  status: string;
+  requires_reauth: boolean;
+}
+
 export interface ChainProfile {
   name: string;
   chain_family: string;
