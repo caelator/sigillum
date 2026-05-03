@@ -40,7 +40,8 @@ check_max_lines "crates/sigillum-daemon/src/state.rs" 920
 check_max_lines "crates/sigillum-cli/src/main.rs" 1450
 check_max_lines "crates/sigillum-cli/src/daemon_api.rs" 920
 check_max_lines "crates/sigillum-client/src/lib.rs" 1300
-check_max_lines "crates/sigillum-daemon/ui/src/app.js" 3100
+check_max_lines "crates/sigillum-daemon/ui/src/app.js" 2500
+check_max_lines "crates/sigillum-daemon/ui/src/app.ts" 3100
 check_max_lines "crates/sigillum-daemon/ui/src/styles.css" 2800
 
 if grep -Eq 'r#+"' "${ROOT}/crates/sigillum-daemon/src/ui.rs"; then
@@ -49,11 +50,13 @@ if grep -Eq 'r#+"' "${ROOT}/crates/sigillum-daemon/src/ui.rs"; then
 fi
 
 check_required_file "crates/sigillum-daemon/ui/src/app.js"
+check_required_file "crates/sigillum-daemon/ui/src/app.ts"
 check_required_file "crates/sigillum-daemon/ui/src/api.ts"
 check_required_file "crates/sigillum-daemon/ui/src/api/session.ts"
 check_required_file "crates/sigillum-daemon/ui/src/actions/session.ts"
 check_required_file "crates/sigillum-daemon/ui/src/render/dom.ts"
 check_required_file "crates/sigillum-daemon/ui/src/state/status.ts"
+check_required_file "crates/sigillum-daemon/ui/src/state/refresh.ts"
 check_required_file "crates/sigillum-daemon/ui/src/views/inventory.ts"
 check_required_file "crates/sigillum-daemon/ui/src/views/wallets.ts"
 check_required_file "crates/sigillum-daemon/ui/src/views/queue.ts"

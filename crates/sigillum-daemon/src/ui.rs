@@ -1,15 +1,14 @@
 //! Embedded single-page web UI for Sigillum vault management.
 //!
-//! The interface source lives under `crates/sigillum-daemon/ui/src` and is
-//! compiled into the daemon binary with `include_str!`.  The Rust host keeps the
-//! security-sensitive nonce injection small and reviewable while the UI itself
-//! can evolve as typed frontend source.
+//! The interface source lives under `crates/sigillum-daemon/ui/src`. The Rust
+//! host embeds checked-in HTML/CSS plus the Vite-generated `src/app.js` runtime
+//! with `include_str!`, while the authored runtime remains TypeScript.
 //!
 //! ## Architecture
 //!
 //! The shipped daemon remains a single static binary. The frontend source has a
-//! TypeScript/Vite workspace for type-checking and future bundling, but runtime
-//! packaging still embeds the checked-in source assets directly.
+//! TypeScript/Vite workspace for typed modules; Vite writes the bundled runtime
+//! back to the checked-in `src/app.js` asset that Rust embeds.
 //!
 //! ### CSS design system
 //!
@@ -20,8 +19,8 @@
 //!
 //! ### TypeScript architecture
 //!
-//! - **`api(method, path, body)`** — central fetch wrapper that attaches the
-//!   session token and auto-clears it on 401.
+//! - **`api/session.ts`** — session token storage plus the daemon fetch wrapper
+//!   that attaches the bearer token and auto-clears it on 401.
 //! - **`refresh()`** — visibility-aware polling controller that prevents
 //!   overlapping refreshes, tracks sync status, and delegates real work to
 //!   `runRefreshCycle()`.

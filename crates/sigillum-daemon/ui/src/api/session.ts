@@ -37,3 +37,40 @@ export function sessionAuthorizationHeader(): Record<string, string> {
   const token = readSessionToken();
   return token ? { Authorization: `Bearer ${token}` } : {};
 }
+
+export type DaemonMethod = "GET" | "POST" | "DELETE";
+
+export interface DaemonPayload {
+  error?: string;
+  session_token?: string;
+  [key: string]: unknown;
+}
+
+export async function requestWithSession<TPayload extends DaemonPayload = DaemonPayload>(
+  method: DaemonMethod,
+  path: string,
+  body?: unknown,
+): Promise<TPayload> {
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+    ...sessionAuthorizationHeader(),
+  };
+  const response = await fetch(path, {
+    method,
+    headers,
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+
+  let payload: DaemonPayload = {};
+  try {
+    payload = (await response.json()) as DaemonPayload;
+  } catch (_) {}
+
+  if (payload.session_token) {
+    writeSessionToken(payload.session_token);
+  }
+  if (response.status === 401) {
+    clearSessionToken();
+  }
+  return payload as TPayload;
+}

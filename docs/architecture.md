@@ -117,9 +117,9 @@ Current daemon behavior:
 - composes the HTTP route surface from domain routers so endpoint wiring stays aligned with lifecycle, storage, wallet, deposit, queue, and FIDO2 service boundaries
 - renders the embedded operator UI from checked-in frontend assets under
   `crates/sigillum-daemon/ui/src`; the Rust host only assembles HTML/CSS/script
-  assets and injects the CSP nonce, while TypeScript API, session, render,
-  status, action, and domain-view modules provide the migration path away from
-  the former monolithic UI string
+  assets and injects the CSP nonce, while `app.ts` imports TypeScript API,
+  session, render, status, refresh, action, and domain-view modules and Vite
+  writes the checked-in `app.js` runtime that the daemon embeds
 - exposes transit-style encrypt/decrypt/HMAC operations derived from the active compartment master key
 - centralizes daemon business rules behind an application-service layer instead of spreading them across route handlers
 - keeps wallet inventory discovery, risk derivation, and consolidation planning
