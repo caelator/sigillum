@@ -1,0 +1,105 @@
+//! Queue response contracts.
+
+use serde::{Deserialize, Serialize};
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum QueueJobPayload {
+    EthStealthTransfer {
+        wallet_profile: String,
+        stealth_address: String,
+        ephemeral_public_key_hex: String,
+        value_wei_hex: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        destination_address: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        nonce: Option<u64>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        gas_limit: Option<u64>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        view_tag_hex: Option<String>,
+    },
+    EthStealthErc20Transfer {
+        wallet_profile: String,
+        stealth_address: String,
+        ephemeral_public_key_hex: String,
+        token_address: String,
+        recipient_address: String,
+        amount_hex: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        nonce: Option<u64>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        gas_limit: Option<u64>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        view_tag_hex: Option<String>,
+    },
+    EthStealthNativeSweep {
+        wallet_profile: String,
+        stealth_address: String,
+        ephemeral_public_key_hex: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        destination_address: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        min_value_wei_hex: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        gas_limit: Option<u64>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        view_tag_hex: Option<String>,
+    },
+    EthStealthErc20Sweep {
+        wallet_profile: String,
+        stealth_address: String,
+        ephemeral_public_key_hex: String,
+        token_address: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        recipient_address: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        min_amount_hex: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        gas_limit: Option<u64>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        view_tag_hex: Option<String>,
+    },
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct QueueJob {
+    pub id: String,
+    pub state: String,
+    pub attempts: u32,
+    pub created_at_unix: u64,
+    pub updated_at_unix: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub next_attempt_after_unix: Option<u64>,
+    #[serde(flatten)]
+    pub payload: QueueJobPayload,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_error: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub transaction_hash_hex: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub broadcast_transaction_hash_hex: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct QueueJobListResponse {
+    pub jobs: Vec<QueueJob>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct QueueEnqueueResponse {
+    pub status: String,
+    pub job: QueueJob,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct QueueProcessResponse {
+    pub processed: usize,
+    pub succeeded: usize,
+    #[serde(default)]
+    pub blocked: usize,
+    #[serde(default)]
+    pub retrying: usize,
+    pub failed: usize,
+    pub jobs: Vec<QueueJob>,
+}

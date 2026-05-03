@@ -33,10 +33,12 @@ use sigillum_api::request::{
     EthStealthDepositDeleteRequest, EthStealthDepositEnqueueSweepRequest,
     EthStealthDepositRefreshRequest, EthStealthWalletProfileUpsertRequest,
     EvmProviderProfileUpsertRequest, EvmProviderRef, Fido2UnlockRequest, MaintenanceRunRequest,
-    QueueProcessRequest, WalletInventoryScanRequest,
+    WalletInventoryScanRequest,
 };
 use sigillum_client::{ClientError, SigillumClient};
 use url::Url;
+
+mod queue;
 
 const DEFAULT_DAEMON_BASE_URL: &str = "http://127.0.0.1:9743";
 const DAEMON_READY_TIMEOUT: Duration = Duration::from_secs(10);
@@ -95,7 +97,7 @@ pub fn cmd_api(args: &[String]) {
         "discovery" => cmd_api_discovery(args),
         "risk" => cmd_api_risk(args),
         "plans" => cmd_api_plans(args),
-        "queue" => cmd_api_queue(args),
+        "queue" => queue::cmd_api_queue(args),
         "maintenance" => cmd_api_maintenance(args),
         "help" | "--help" | "-h" => print_api_usage(),
         other => {
@@ -485,33 +487,6 @@ fn cmd_api_plans(args: &[String]) {
         }
         _ => {
             eprintln!("Usage: sigillum api plans <list|generate|approve> [...]");
-            process::exit(1);
-        }
-    }
-}
-
-/// Dispatch `sigillum api queue <list|process>`.
-fn cmd_api_queue(args: &[String]) {
-    if args.len() < 2 {
-        eprintln!("Usage: sigillum api queue <list|process> [...]");
-        process::exit(1);
-    }
-
-    match args[1].as_str() {
-        "list" => run_api_command(args, true, |client| async move {
-            client.list_queue_jobs().await
-        }),
-        "process" => {
-            let request = QueueProcessRequest {
-                id: parse_flag(args, "--id"),
-                limit: parse_usize_flag(args, "--limit"),
-            };
-            run_api_command(args, true, move |client| async move {
-                client.process_queue(request).await
-            });
-        }
-        _ => {
-            eprintln!("Usage: sigillum api queue <list|process> [...]");
             process::exit(1);
         }
     }

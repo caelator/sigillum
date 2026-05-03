@@ -44,9 +44,15 @@ check_max_lines "crates/sigillum-daemon/src/service/profiles.rs" 640
 check_max_lines "crates/sigillum-daemon/src/service/profiles/resolution.rs" 120
 check_max_lines "crates/sigillum-daemon/src/service/profiles/sends.rs" 160
 check_max_lines "crates/sigillum-daemon/src/state.rs" 920
+check_max_lines "crates/sigillum-api/src/request.rs" 820
+check_max_lines "crates/sigillum-api/src/request/queue.rs" 120
+check_max_lines "crates/sigillum-api/src/response.rs" 920
+check_max_lines "crates/sigillum-api/src/response/queue.rs" 140
 check_max_lines "crates/sigillum-cli/src/main.rs" 1450
-check_max_lines "crates/sigillum-cli/src/daemon_api.rs" 920
-check_max_lines "crates/sigillum-client/src/lib.rs" 1300
+check_max_lines "crates/sigillum-cli/src/daemon_api.rs" 860
+check_max_lines "crates/sigillum-cli/src/daemon_api/queue.rs" 80
+check_max_lines "crates/sigillum-client/src/lib.rs" 1150
+check_max_lines "crates/sigillum-client/src/queue.rs" 120
 check_max_lines "crates/sigillum-daemon/ui/src/app.js" 2500
 check_max_lines "crates/sigillum-daemon/ui/src/app.ts" 1500
 check_max_lines "crates/sigillum-daemon/ui/src/styles.css" 80
@@ -80,6 +86,10 @@ check_required_file "crates/sigillum-daemon/src/service/queue/payloads.rs"
 check_required_file "crates/sigillum-daemon/src/service/queue/processing.rs"
 check_required_file "crates/sigillum-daemon/src/service/queue/state.rs"
 check_required_file "crates/sigillum-daemon/src/service/queue/sweeps.rs"
+check_required_file "crates/sigillum-api/src/request/queue.rs"
+check_required_file "crates/sigillum-api/src/response/queue.rs"
+check_required_file "crates/sigillum-client/src/queue.rs"
+check_required_file "crates/sigillum-cli/src/daemon_api/queue.rs"
 check_required_file "crates/sigillum-daemon/ui/src/styles.d.ts"
 check_required_file "crates/sigillum-daemon/ui/src/styles/app.css"
 check_required_file "crates/sigillum-daemon/ui/src/styles/00-foundation-tokens.css"
@@ -113,7 +123,10 @@ check_required_file "crates/sigillum-daemon/ui/src/views/setup.ts"
 check_required_file "crates/sigillum-daemon/ui/test/ui-smoke.test.ts"
 
 check_no_inline_tests "crates/sigillum-api/src/request.rs"
+check_no_inline_tests "crates/sigillum-api/src/request/queue.rs"
 check_no_inline_tests "crates/sigillum-api/src/response.rs"
+check_no_inline_tests "crates/sigillum-api/src/response/queue.rs"
 check_no_inline_tests "crates/sigillum-client/src/lib.rs"
+check_no_inline_tests "crates/sigillum-client/src/queue.rs"
 
 echo "architecture checks passed"

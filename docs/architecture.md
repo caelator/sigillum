@@ -142,6 +142,11 @@ Current daemon behavior:
   drain loop and retry transitions, `sweeps` owns native/ERC-20 sweep execution,
   and `state` owns normalization, legacy recovery, retry classification, and
   retry backoff tests
+- keeps queue transport ownership aligned across crates: queue request and
+  response DTOs live under `sigillum-api/src/request/queue.rs` and
+  `sigillum-api/src/response/queue.rs` with top-level re-exports preserved,
+  while the async client and CLI queue bridge live in
+  `sigillum-client/src/queue.rs` and `sigillum-cli/src/daemon_api/queue.rs`
 - keeps EVM provider JSON-RPC transport and provider error classification in
   `service/evm/rpc.rs`, while the parent service module retains the higher
   blast-radius wallet signing, route-facing balance operations, and shared

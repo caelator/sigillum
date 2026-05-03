@@ -51,11 +51,9 @@ use sigillum_api::request::{
     EvmProviderProfileUpsertRequest, EvmRpcBalanceRequest, EvmRpcBroadcastRequest,
     EvmRpcErc20BalanceRequest, EvmRpcNonceRequest, Fido2RegisterRequest, Fido2RemoveRequest,
     Fido2SetupRequest, Fido2UnlockRequest, GenerateStoreRequest, KeyOnlyRequest, KeyValueRequest,
-    MaintenanceRunRequest, PassphraseRequest, QueueEthStealthErc20SweepRequest,
-    QueueEthStealthErc20TransferRequest, QueueEthStealthNativeSweepRequest,
-    QueueEthStealthTransferRequest, QueueProcessRequest, RunAuditRequest,
-    SecretResolveBatchRequest, SnapshotRestoreRequest, StealthPaymentRef, TransitDecryptRequest,
-    TransitEncryptRequest, TransitHmacRequest, WalletInventoryScanRequest,
+    MaintenanceRunRequest, PassphraseRequest, RunAuditRequest, SecretResolveBatchRequest,
+    SnapshotRestoreRequest, StealthPaymentRef, TransitDecryptRequest, TransitEncryptRequest,
+    TransitHmacRequest, WalletInventoryScanRequest,
 };
 pub use sigillum_api::response::Fido2StatusResponse as DaemonFido2Status;
 pub use sigillum_api::response::{
@@ -89,6 +87,8 @@ use sigillum_core::SnapshotSummary;
 use thiserror::Error;
 
 pub use sigillum_core::{SecretStore, VaultError};
+
+mod queue;
 
 // ── Error types ────────────────────────────────────────────────
 
@@ -987,66 +987,6 @@ impl SigillumClient {
         self.send(builder).await
     }
 
-    // ── Queue ──────────────────────────────────────────────────
-
-    pub async fn list_queue_jobs(&self) -> Result<Vec<QueueJob>, ClientError> {
-        let builder = self.request(Method::GET, "/api/queue/jobs");
-        Ok(self.send::<QueueJobListResponse>(builder).await?.jobs)
-    }
-
-    pub async fn enqueue_eth_stealth_transfer(
-        &self,
-        request: QueueEthStealthTransferRequest,
-    ) -> Result<QueueEnqueueResponse, ClientError> {
-        let builder = self
-            .request(Method::POST, "/api/queue/enqueue/eth-stealth-transfer")
-            .json(&request);
-        self.send(builder).await
-    }
-
-    pub async fn enqueue_eth_stealth_erc20_transfer(
-        &self,
-        request: QueueEthStealthErc20TransferRequest,
-    ) -> Result<QueueEnqueueResponse, ClientError> {
-        let builder = self
-            .request(
-                Method::POST,
-                "/api/queue/enqueue/eth-stealth-erc20-transfer",
-            )
-            .json(&request);
-        self.send(builder).await
-    }
-
-    pub async fn enqueue_eth_stealth_native_sweep(
-        &self,
-        request: QueueEthStealthNativeSweepRequest,
-    ) -> Result<QueueEnqueueResponse, ClientError> {
-        let builder = self
-            .request(Method::POST, "/api/queue/enqueue/eth-stealth-native-sweep")
-            .json(&request);
-        self.send(builder).await
-    }
-
-    pub async fn enqueue_eth_stealth_erc20_sweep(
-        &self,
-        request: QueueEthStealthErc20SweepRequest,
-    ) -> Result<QueueEnqueueResponse, ClientError> {
-        let builder = self
-            .request(Method::POST, "/api/queue/enqueue/eth-stealth-erc20-sweep")
-            .json(&request);
-        self.send(builder).await
-    }
-
-    pub async fn process_queue(
-        &self,
-        request: QueueProcessRequest,
-    ) -> Result<QueueProcessResponse, ClientError> {
-        let builder = self
-            .request(Method::POST, "/api/queue/process")
-            .json(&request);
-        self.send(builder).await
-    }
-
     // ── FIDO2 ───────────────────────────────────────────────────────
 
     pub async fn fido2_status(&self) -> Result<Fido2StatusResponse, ClientError> {
@@ -1111,7 +1051,7 @@ impl SigillumClient {
         hex::decode(field).map_err(|error| ClientError::Encoding(error.to_string()))
     }
 
-    fn request(&self, method: Method, path: &str) -> reqwest::RequestBuilder {
+    pub(crate) fn request(&self, method: Method, path: &str) -> reqwest::RequestBuilder {
         let mut builder = self
             .http
             .request(method, format!("{}{}", self.base_url, path));
@@ -1125,7 +1065,7 @@ impl SigillumClient {
     ///
     /// Handles: session-token extraction from responses, 401 token clearing,
     /// empty-body tolerance, and error-response unwrapping.
-    async fn send<T: DeserializeOwned>(
+    pub(crate) async fn send<T: DeserializeOwned>(
         &self,
         builder: reqwest::RequestBuilder,
     ) -> Result<T, ClientError> {
