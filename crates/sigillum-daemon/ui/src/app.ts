@@ -1,5 +1,6 @@
 // @ts-nocheck
 
+import "./styles/app.css";
 import { clearSessionToken, requestWithSession } from "./api/session";
 import { handleActionEvent as handleDispatchedActionEvent } from "./actions/dispatcher";
 import {

@@ -1,21 +1,23 @@
 //! Embedded single-page web UI for Sigillum vault management.
 //!
 //! The interface source lives under `crates/sigillum-daemon/ui/src`. The Rust
-//! host embeds checked-in HTML/CSS plus the Vite-generated `src/app.js` runtime
-//! with `include_str!`, while the authored runtime remains TypeScript.
+//! host embeds checked-in HTML plus the Vite-generated `src/styles.css` and
+//! `src/app.js` assets with `include_str!`, while the authored runtime remains
+//! TypeScript and the authored stylesheet is split under `src/styles/*`.
 //!
 //! ## Architecture
 //!
 //! The shipped daemon remains a single static binary. The frontend source has a
-//! TypeScript/Vite workspace for typed modules; Vite writes the bundled runtime
-//! back to the checked-in `src/app.js` asset that Rust embeds.
+//! TypeScript/Vite workspace for typed modules and CSS modules; Vite writes the
+//! bundled runtime and stylesheet back to the checked-in assets that Rust
+//! embeds.
 //!
 //! ### CSS design system
 //!
-//! All colours, radii, and fonts are declared as CSS custom properties on
-//! `:root`. Every visual component (cards, badges, pills, buttons, entity
-//! lists) references these tokens, ensuring a single place to change the
-//! palette or spacing scale.
+//! Authored styles live under `ui/src/styles/*`. Foundational colours, radii,
+//! and fonts are declared as CSS custom properties on `:root`; component and
+//! workspace modules consume those tokens while preserving the daemon's
+//! embedded, self-contained delivery model.
 //!
 //! ### TypeScript architecture
 //!

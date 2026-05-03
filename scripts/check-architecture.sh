@@ -42,7 +42,21 @@ check_max_lines "crates/sigillum-cli/src/daemon_api.rs" 920
 check_max_lines "crates/sigillum-client/src/lib.rs" 1300
 check_max_lines "crates/sigillum-daemon/ui/src/app.js" 2500
 check_max_lines "crates/sigillum-daemon/ui/src/app.ts" 1500
-check_max_lines "crates/sigillum-daemon/ui/src/styles.css" 2800
+check_max_lines "crates/sigillum-daemon/ui/src/styles.css" 80
+check_max_lines "crates/sigillum-daemon/ui/src/styles/00-foundation-tokens.css" 120
+check_max_lines "crates/sigillum-daemon/ui/src/styles/01-foundation-base-layout.css" 220
+check_max_lines "crates/sigillum-daemon/ui/src/styles/02-foundation-forms.css" 120
+check_max_lines "crates/sigillum-daemon/ui/src/styles/03-foundation-components.css" 450
+check_max_lines "crates/sigillum-daemon/ui/src/styles/10-refresh-workspace.css" 500
+check_max_lines "crates/sigillum-daemon/ui/src/styles/11-refresh-forms.css" 120
+check_max_lines "crates/sigillum-daemon/ui/src/styles/12-refresh-components.css" 260
+check_max_lines "crates/sigillum-daemon/ui/src/styles/13-refresh-responsive.css" 120
+check_max_lines "crates/sigillum-daemon/ui/src/styles/20-console-workspace.css" 650
+check_max_lines "crates/sigillum-daemon/ui/src/styles/21-console-forms.css" 260
+check_max_lines "crates/sigillum-daemon/ui/src/styles/22-console-components.css" 260
+check_max_lines "crates/sigillum-daemon/ui/src/styles/23-console-responsive.css" 160
+check_max_lines "crates/sigillum-daemon/ui/src/styles/30-final-polish.css" 650
+check_max_lines "crates/sigillum-daemon/ui/src/styles/app.css" 80
 
 if grep -Eq 'r#+"' "${ROOT}/crates/sigillum-daemon/src/ui.rs"; then
   echo "architecture check failed: daemon UI host must not embed raw HTML/JS/CSS strings" >&2
@@ -52,6 +66,21 @@ fi
 check_required_file "crates/sigillum-daemon/ui/src/app.js"
 check_required_file "crates/sigillum-daemon/ui/src/app.ts"
 check_required_file "crates/sigillum-daemon/ui/src/api.ts"
+check_required_file "crates/sigillum-daemon/ui/src/styles.d.ts"
+check_required_file "crates/sigillum-daemon/ui/src/styles/app.css"
+check_required_file "crates/sigillum-daemon/ui/src/styles/00-foundation-tokens.css"
+check_required_file "crates/sigillum-daemon/ui/src/styles/01-foundation-base-layout.css"
+check_required_file "crates/sigillum-daemon/ui/src/styles/02-foundation-forms.css"
+check_required_file "crates/sigillum-daemon/ui/src/styles/03-foundation-components.css"
+check_required_file "crates/sigillum-daemon/ui/src/styles/10-refresh-workspace.css"
+check_required_file "crates/sigillum-daemon/ui/src/styles/11-refresh-forms.css"
+check_required_file "crates/sigillum-daemon/ui/src/styles/12-refresh-components.css"
+check_required_file "crates/sigillum-daemon/ui/src/styles/13-refresh-responsive.css"
+check_required_file "crates/sigillum-daemon/ui/src/styles/20-console-workspace.css"
+check_required_file "crates/sigillum-daemon/ui/src/styles/21-console-forms.css"
+check_required_file "crates/sigillum-daemon/ui/src/styles/22-console-components.css"
+check_required_file "crates/sigillum-daemon/ui/src/styles/23-console-responsive.css"
+check_required_file "crates/sigillum-daemon/ui/src/styles/30-final-polish.css"
 check_required_file "crates/sigillum-daemon/ui/src/api/session.ts"
 check_required_file "crates/sigillum-daemon/ui/src/actions/session.ts"
 check_required_file "crates/sigillum-daemon/ui/src/actions/dispatcher.ts"

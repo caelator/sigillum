@@ -119,10 +119,13 @@ Current daemon behavior:
   `crates/sigillum-daemon/ui/src`; the Rust host only assembles HTML/CSS/script
   assets and injects the CSP nonce, while `app.ts` imports TypeScript API,
   session, render, status, refresh, action, shell, and domain-view modules and
-  Vite writes the checked-in `app.js` runtime that the daemon embeds; the UI
-  domain modules now own setup shell states, FIDO2 controls, wallet/profile
-  operations, inventory/risk/plans, and deposit/queue/maintenance rendering
-  with lightweight DOM smoke tests covering those seams
+  Vite writes the checked-in `app.js` runtime and generated `styles.css` that
+  the daemon embeds; authored CSS now lives under `ui/src/styles/*` in ordered
+  token, layout, form, component, workspace, responsive, and polish modules,
+  while the UI domain modules own setup shell states, FIDO2 controls,
+  wallet/profile operations, inventory/risk/plans, and
+  deposit/queue/maintenance rendering with lightweight DOM smoke tests covering
+  those seams
 - exposes transit-style encrypt/decrypt/HMAC operations derived from the active compartment master key
 - centralizes daemon business rules behind an application-service layer instead of spreading them across route handlers
 - keeps wallet inventory discovery, risk derivation, and consolidation planning
@@ -164,4 +167,5 @@ The next clean architecture step is not adding more crates. It is tightening inv
    model described in [Comprehensive Wallet Management Roadmap](wallet-management-roadmap.md).
 6. Preserve architecture boundaries with lightweight CI checks for known
    monoliths, embedded UI asset placement, daemon UI TypeScript type-checks,
-   required typed UI migration modules, and externalized API/client tests.
+   required typed UI and authored CSS modules, and externalized API/client
+   tests.
