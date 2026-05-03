@@ -32,10 +32,17 @@ check_no_inline_tests() {
 
 check_max_lines "crates/sigillum-daemon/src/ui.rs" 120
 check_max_lines "crates/sigillum-daemon/src/audit_log.rs" 1700
-check_max_lines "crates/sigillum-daemon/src/service/evm.rs" 1100
+check_max_lines "crates/sigillum-daemon/src/service/evm.rs" 900
+check_max_lines "crates/sigillum-daemon/src/service/evm/rpc.rs" 340
 check_max_lines "crates/sigillum-daemon/src/service/inventory.rs" 750
-check_max_lines "crates/sigillum-daemon/src/service/queue.rs" 620
-check_max_lines "crates/sigillum-daemon/src/service/profiles.rs" 760
+check_max_lines "crates/sigillum-daemon/src/service/queue.rs" 220
+check_max_lines "crates/sigillum-daemon/src/service/queue/payloads.rs" 140
+check_max_lines "crates/sigillum-daemon/src/service/queue/processing.rs" 320
+check_max_lines "crates/sigillum-daemon/src/service/queue/state.rs" 320
+check_max_lines "crates/sigillum-daemon/src/service/queue/sweeps.rs" 260
+check_max_lines "crates/sigillum-daemon/src/service/profiles.rs" 640
+check_max_lines "crates/sigillum-daemon/src/service/profiles/resolution.rs" 120
+check_max_lines "crates/sigillum-daemon/src/service/profiles/sends.rs" 160
 check_max_lines "crates/sigillum-daemon/src/state.rs" 920
 check_max_lines "crates/sigillum-cli/src/main.rs" 1450
 check_max_lines "crates/sigillum-cli/src/daemon_api.rs" 920
@@ -66,6 +73,13 @@ fi
 check_required_file "crates/sigillum-daemon/ui/src/app.js"
 check_required_file "crates/sigillum-daemon/ui/src/app.ts"
 check_required_file "crates/sigillum-daemon/ui/src/api.ts"
+check_required_file "crates/sigillum-daemon/src/service/evm/rpc.rs"
+check_required_file "crates/sigillum-daemon/src/service/profiles/resolution.rs"
+check_required_file "crates/sigillum-daemon/src/service/profiles/sends.rs"
+check_required_file "crates/sigillum-daemon/src/service/queue/payloads.rs"
+check_required_file "crates/sigillum-daemon/src/service/queue/processing.rs"
+check_required_file "crates/sigillum-daemon/src/service/queue/state.rs"
+check_required_file "crates/sigillum-daemon/src/service/queue/sweeps.rs"
 check_required_file "crates/sigillum-daemon/ui/src/styles.d.ts"
 check_required_file "crates/sigillum-daemon/ui/src/styles/app.css"
 check_required_file "crates/sigillum-daemon/ui/src/styles/00-foundation-tokens.css"

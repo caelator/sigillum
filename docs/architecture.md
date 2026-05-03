@@ -132,11 +132,20 @@ Current daemon behavior:
   separated inside the daemon service so future asset/protocol adapters have
   explicit homes rather than accumulating in one inventory module
 - stores provider profiles and stealth wallet profiles for internal EVM integration, with explicit compartment binding so queued work does not depend on the session's currently active compartment
+- keeps profile-backed send construction and provider/wallet lookup helpers in
+  `service/profiles/sends.rs` and `service/profiles/resolution.rs`, leaving
+  `profiles.rs` centered on profile CRUD and seed/xpub import handling
 - tracks stealth deposit records and refreshes them against configured providers
 - queues direct sends and sweep jobs, including deferred jobs that need more balance or gas
-- keeps queue state normalization, legacy recovery, retry classification, and
-  retry backoff tests in a focused service submodule so the queue service file
-  can remain centered on enqueueing and execution
+- keeps queue ownership split inside `service/queue/*`: the façade owns public
+  enqueue/list methods, `payloads` owns job construction, `processing` owns the
+  drain loop and retry transitions, `sweeps` owns native/ERC-20 sweep execution,
+  and `state` owns normalization, legacy recovery, retry classification, and
+  retry backoff tests
+- keeps EVM provider JSON-RPC transport and provider error classification in
+  `service/evm/rpc.rs`, while the parent service module retains the higher
+  blast-radius wallet signing, route-facing balance operations, and shared
+  address/quantity helpers
 - exposes a maintenance cycle that refreshes deposits, auto-enqueues sweeps, and processes queue work
 - keeps the gateway surface local-sidecar-only rather than treating it as an internet-facing service boundary
 

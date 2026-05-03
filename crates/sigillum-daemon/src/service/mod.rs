@@ -13,9 +13,12 @@
 //! - **compartments** — compartment init, add, remove, switch, listing
 //! - **fido2** — hardware key registration, removal, setup wizard
 //! - **deposits** — stealth deposit creation, refresh, sweep enqueueing
-//! - **queue** — job processing with exponential backoff
-//! - **evm** — on-chain balance observation and transaction construction
-//! - **profiles** — EVM provider and stealth wallet profile management
+//! - **queue** — enqueue façade, payload construction, processing loop, sweep
+//!   execution, and retry/recovery state helpers
+//! - **evm** — on-chain balance observation, transaction construction, and
+//!   provider RPC transport
+//! - **profiles** — EVM provider and wallet profile CRUD, profile-backed send
+//!   resolution, and provider/wallet lookup helpers
 //! - **maintenance** — compound refresh + queue-drain cycles
 //! - **backup / recovery** — encrypted snapshot export/restore
 //! - **transit** — inter-compartment secret push

@@ -6,14 +6,12 @@
 use serde::{Deserialize, Serialize};
 use sigillum_api::{
     EthSeedWalletProfile, EthSeedWalletProfileListResponse, EthSeedWalletProfileMutationResponse,
-    EthSeedWalletProfileUpsertRequest, EthStealthSendErc20TransferRequest,
-    EthStealthSendErc20WithProfileRequest, EthStealthSendResponse, EthStealthSendTransferRequest,
-    EthStealthSendWithProfileRequest, EthStealthWalletProfile, EthStealthWalletProfileListResponse,
-    EthStealthWalletProfileMutationResponse, EthStealthWalletProfileUpsertRequest,
-    EthXpubWalletProfile, EthXpubWalletProfileListResponse, EthXpubWalletProfileMutationResponse,
-    EthXpubWalletProfileUpsertRequest, EvmProfileDeleteRequest, EvmProviderProfile,
-    EvmProviderProfileListResponse, EvmProviderProfileMutationResponse,
-    EvmProviderProfileUpsertRequest,
+    EthSeedWalletProfileUpsertRequest, EthStealthWalletProfile,
+    EthStealthWalletProfileListResponse, EthStealthWalletProfileMutationResponse,
+    EthStealthWalletProfileUpsertRequest, EthXpubWalletProfile, EthXpubWalletProfileListResponse,
+    EthXpubWalletProfileMutationResponse, EthXpubWalletProfileUpsertRequest,
+    EvmProfileDeleteRequest, EvmProviderProfile, EvmProviderProfileListResponse,
+    EvmProviderProfileMutationResponse, EvmProviderProfileUpsertRequest,
 };
 use sigillum_core::{
     SecretStore, derive_ethereum_address_from_xpub,
@@ -25,6 +23,11 @@ use crate::audit_log::AuditEventSpec;
 
 use super::helpers::map_xpub_error;
 use super::{ServiceError, ServiceResult, SigillumService};
+
+mod resolution;
+mod sends;
+
+pub(in crate::service) use resolution::resolve_wallet_profile_in_registry;
 
 #[derive(Debug, Serialize, Deserialize)]
 struct StoredSeedWalletSecret {
@@ -515,155 +518,6 @@ impl SigillumService {
             profile,
         })
     }
-
-    pub(crate) async fn eth_stealth_send_with_profile(
-        &self,
-        token: Option<&str>,
-        body: EthStealthSendWithProfileRequest,
-    ) -> ServiceResult<EthStealthSendResponse> {
-        let _ = self.require_session(token)?;
-        let (provider, wallet) = self.resolve_wallet_profile(&body.wallet_profile)?;
-        let destination_address = body
-            .destination_address
-            .or(wallet.default_destination_address.clone())
-            .ok_or_else(|| {
-                ServiceError::bad_request(
-                    "destination_address is required when the wallet profile has no default.",
-                )
-            })?;
-
-        self.eth_stealth_send_transfer(
-            token,
-            EthStealthSendTransferRequest {
-                rpc_url: provider.rpc_url,
-                wallet: wallet.wallet,
-                stealth: body.stealth.clone(),
-                fees: sigillum_api::Eip1559Fees {
-                    chain_id: wallet.chain_id.unwrap_or(provider.chain_id),
-                    max_priority_fee_per_gas_hex: provider
-                        .max_priority_fee_per_gas_hex
-                        .clone()
-                        .ok_or_else(|| {
-                            ServiceError::bad_request(
-                                "provider profile is missing max_priority_fee_per_gas_hex",
-                            )
-                        })?,
-                    max_fee_per_gas_hex: provider.max_fee_per_gas_hex.clone().ok_or_else(|| {
-                        ServiceError::bad_request("provider profile is missing max_fee_per_gas_hex")
-                    })?,
-                },
-                destination_address,
-                value_wei_hex: body.value_wei_hex,
-                auth_token_key: provider.auth_token_key,
-                provider_compartment_id: Some(provider.compartment_id),
-                wallet_compartment_id: Some(wallet.compartment_id),
-                nonce: body.nonce,
-                gas_limit: body.gas_limit.or(provider.native_gas_limit),
-                broadcast: body.broadcast,
-            },
-        )
-        .await
-    }
-
-    pub(crate) async fn eth_stealth_send_erc20_with_profile(
-        &self,
-        token: Option<&str>,
-        body: EthStealthSendErc20WithProfileRequest,
-    ) -> ServiceResult<EthStealthSendResponse> {
-        let _ = self.require_session(token)?;
-        let (provider, wallet) = self.resolve_wallet_profile(&body.wallet_profile)?;
-
-        self.eth_stealth_send_erc20_transfer(
-            token,
-            EthStealthSendErc20TransferRequest {
-                rpc_url: provider.rpc_url,
-                wallet: wallet.wallet,
-                stealth: body.stealth.clone(),
-                fees: sigillum_api::Eip1559Fees {
-                    chain_id: wallet.chain_id.unwrap_or(provider.chain_id),
-                    max_priority_fee_per_gas_hex: provider
-                        .max_priority_fee_per_gas_hex
-                        .clone()
-                        .ok_or_else(|| {
-                            ServiceError::bad_request(
-                                "provider profile is missing max_priority_fee_per_gas_hex",
-                            )
-                        })?,
-                    max_fee_per_gas_hex: provider.max_fee_per_gas_hex.clone().ok_or_else(|| {
-                        ServiceError::bad_request("provider profile is missing max_fee_per_gas_hex")
-                    })?,
-                },
-                token_address: body.token_address,
-                recipient_address: body.recipient_address,
-                amount_hex: body.amount_hex,
-                auth_token_key: provider.auth_token_key,
-                provider_compartment_id: Some(provider.compartment_id),
-                wallet_compartment_id: Some(wallet.compartment_id),
-                nonce: body.nonce,
-                gas_limit: body.gas_limit.or(provider.erc20_gas_limit),
-                broadcast: body.broadcast,
-            },
-        )
-        .await
-    }
-
-    pub(super) fn resolve_wallet_profile(
-        &self,
-        name: &str,
-    ) -> ServiceResult<(EvmProviderProfile, EthStealthWalletProfile)> {
-        let registry = crate::profiles::load_profiles(&self.state.base_dir).map_err(|error| {
-            ServiceError::internal(format!("Failed to load profile registry: {error}"))
-        })?;
-        resolve_wallet_profile_in_registry(&registry, name)
-    }
-
-    pub(super) fn resolve_xpub_wallet_profile(
-        &self,
-        name: &str,
-    ) -> ServiceResult<(EvmProviderProfile, EthXpubWalletProfile)> {
-        let registry = crate::profiles::load_profiles(&self.state.base_dir).map_err(|error| {
-            ServiceError::internal(format!("Failed to load profile registry: {error}"))
-        })?;
-        resolve_xpub_wallet_profile_in_registry(&registry, name)
-    }
-}
-
-pub(super) fn resolve_wallet_profile_in_registry(
-    registry: &crate::profiles::ProfileRegistry,
-    name: &str,
-) -> ServiceResult<(EvmProviderProfile, EthStealthWalletProfile)> {
-    let wallet = registry
-        .eth_stealth_wallets
-        .iter()
-        .find(|profile| profile.name == name)
-        .cloned()
-        .ok_or_else(|| ServiceError::not_found("Wallet profile not found."))?;
-    let provider = registry
-        .evm_providers
-        .iter()
-        .find(|profile| profile.name == wallet.provider_profile)
-        .cloned()
-        .ok_or_else(|| ServiceError::not_found("Provider profile not found."))?;
-    Ok((provider, wallet))
-}
-
-pub(super) fn resolve_xpub_wallet_profile_in_registry(
-    registry: &crate::profiles::ProfileRegistry,
-    name: &str,
-) -> ServiceResult<(EvmProviderProfile, EthXpubWalletProfile)> {
-    let wallet = registry
-        .eth_xpub_wallets
-        .iter()
-        .find(|profile| profile.name == name)
-        .cloned()
-        .ok_or_else(|| ServiceError::not_found("Wallet profile not found."))?;
-    let provider = registry
-        .evm_providers
-        .iter()
-        .find(|profile| profile.name == wallet.provider_profile)
-        .cloned()
-        .ok_or_else(|| ServiceError::not_found("Provider profile not found."))?;
-    Ok((provider, wallet))
 }
 
 fn validate_profile_name(name: &str) -> ServiceResult<()> {
