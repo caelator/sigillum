@@ -1,6 +1,7 @@
 /target
 node_modules/
 crates/sigillum-daemon/ui/dist/
+crates/sigillum-daemon/ui/.tmp/
 *.swp
 *.swo
 .DS_Store

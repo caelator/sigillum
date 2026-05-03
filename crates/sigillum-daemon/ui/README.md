@@ -8,11 +8,16 @@ self-contained and keeps its per-request CSP nonce injection. The authored
 runtime source is `src/app.ts`; Vite bundles that TypeScript entry and its
 typed modules back into `src/app.js` for Rust to embed.
 
+`src/app.ts` is now the shell/boot surface. Domain rendering and actions live
+under `src/views/*`, dispatching lives under `src/actions/dispatcher.ts`, and
+shared DOM/form/HTML helpers live under `src/render/*`.
+
 Useful commands:
 
 ```sh
 npm install
 npm run typecheck
+npm test
 npm run build
 ```
 

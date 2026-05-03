@@ -118,8 +118,11 @@ Current daemon behavior:
 - renders the embedded operator UI from checked-in frontend assets under
   `crates/sigillum-daemon/ui/src`; the Rust host only assembles HTML/CSS/script
   assets and injects the CSP nonce, while `app.ts` imports TypeScript API,
-  session, render, status, refresh, action, and domain-view modules and Vite
-  writes the checked-in `app.js` runtime that the daemon embeds
+  session, render, status, refresh, action, shell, and domain-view modules and
+  Vite writes the checked-in `app.js` runtime that the daemon embeds; the UI
+  domain modules now own setup shell states, FIDO2 controls, wallet/profile
+  operations, inventory/risk/plans, and deposit/queue/maintenance rendering
+  with lightweight DOM smoke tests covering those seams
 - exposes transit-style encrypt/decrypt/HMAC operations derived from the active compartment master key
 - centralizes daemon business rules behind an application-service layer instead of spreading them across route handlers
 - keeps wallet inventory discovery, risk derivation, and consolidation planning

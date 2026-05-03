@@ -44,3 +44,22 @@ export function setTrustedHtml(element: HTMLElement | null, value: string): void
 export function setTrustedHtmlById(id: string, value: string): void {
   setTrustedHtml(document.getElementById(id), value);
 }
+
+export type InlineInfoTone = "error" | "success" | "warning";
+
+export function setInlineInfoById(
+  id: string,
+  message: string,
+  tone: InlineInfoTone = "error",
+): void {
+  const el = document.getElementById(id);
+  if (!el) return;
+  const color =
+    tone === "success"
+      ? "var(--success)"
+      : tone === "warning"
+        ? "var(--warning)"
+        : "var(--danger)";
+  el.textContent = message;
+  el.style.color = color;
+}

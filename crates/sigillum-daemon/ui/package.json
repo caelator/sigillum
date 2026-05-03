@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "typecheck": "tsc --noEmit",
+    "test": "rm -rf .tmp/ui-tests && tsc -p tsconfig.test.json && printf '{\"type\":\"commonjs\"}' > .tmp/ui-tests/package.json && node --test .tmp/ui-tests/test/*.test.js",
     "build": "vite build"
   },
   "devDependencies": {
