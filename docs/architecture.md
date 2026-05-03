@@ -181,5 +181,5 @@ The next clean architecture step is not adding more crates. It is tightening inv
    model described in [Comprehensive Wallet Management Roadmap](wallet-management-roadmap.md).
 6. Preserve architecture boundaries with lightweight CI checks for known
    monoliths, embedded UI asset placement, daemon UI TypeScript type-checks,
-   required typed UI and authored CSS modules, and externalized API/client
-   tests.
+   required typed UI and authored CSS modules, externalized API/client tests,
+   and the module ownership rules in [Refactor Notes](refactor-notes.md).

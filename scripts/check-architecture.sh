@@ -30,6 +30,26 @@ check_no_inline_tests() {
   fi
 }
 
+check_contains() {
+  local path="$1"
+  local pattern="$2"
+  local message="$3"
+  if ! grep -Eq "${pattern}" "${ROOT}/${path}"; then
+    echo "architecture check failed: ${message}" >&2
+    exit 1
+  fi
+}
+
+check_not_contains() {
+  local path="$1"
+  local pattern="$2"
+  local message="$3"
+  if grep -Eq "${pattern}" "${ROOT}/${path}"; then
+    echo "architecture check failed: ${message}" >&2
+    exit 1
+  fi
+}
+
 check_max_lines "crates/sigillum-daemon/src/ui.rs" 120
 check_max_lines "crates/sigillum-daemon/src/audit_log.rs" 1700
 check_max_lines "crates/sigillum-daemon/src/service/evm.rs" 900
@@ -70,6 +90,7 @@ check_max_lines "crates/sigillum-daemon/ui/src/styles/22-console-components.css"
 check_max_lines "crates/sigillum-daemon/ui/src/styles/23-console-responsive.css" 160
 check_max_lines "crates/sigillum-daemon/ui/src/styles/30-final-polish.css" 650
 check_max_lines "crates/sigillum-daemon/ui/src/styles/app.css" 80
+check_max_lines "docs/refactor-notes.md" 220
 
 if grep -Eq 'r#+"' "${ROOT}/crates/sigillum-daemon/src/ui.rs"; then
   echo "architecture check failed: daemon UI host must not embed raw HTML/JS/CSS strings" >&2
@@ -121,6 +142,7 @@ check_required_file "crates/sigillum-daemon/ui/src/views/operations.ts"
 check_required_file "crates/sigillum-daemon/ui/src/views/shell.ts"
 check_required_file "crates/sigillum-daemon/ui/src/views/setup.ts"
 check_required_file "crates/sigillum-daemon/ui/test/ui-smoke.test.ts"
+check_required_file "docs/refactor-notes.md"
 
 check_no_inline_tests "crates/sigillum-api/src/request.rs"
 check_no_inline_tests "crates/sigillum-api/src/request/queue.rs"
@@ -128,5 +150,19 @@ check_no_inline_tests "crates/sigillum-api/src/response.rs"
 check_no_inline_tests "crates/sigillum-api/src/response/queue.rs"
 check_no_inline_tests "crates/sigillum-client/src/lib.rs"
 check_no_inline_tests "crates/sigillum-client/src/queue.rs"
+
+check_contains "crates/sigillum-api/src/request.rs" '^mod queue;$' "queue request contracts must stay in crates/sigillum-api/src/request/queue.rs"
+check_contains "crates/sigillum-api/src/request.rs" '^pub use queue::\*;$' "queue request contract names must remain re-exported from request.rs"
+check_not_contains "crates/sigillum-api/src/request.rs" '^(pub struct|pub type) Queue' "queue request DTOs must not move back into request.rs"
+check_contains "crates/sigillum-api/src/response.rs" '^mod queue;$' "queue response contracts must stay in crates/sigillum-api/src/response/queue.rs"
+check_contains "crates/sigillum-api/src/response.rs" '^pub use queue::\*;$' "queue response contract names must remain re-exported from response.rs"
+check_not_contains "crates/sigillum-api/src/response.rs" '^(pub struct|pub enum) Queue' "queue response DTOs must not move back into response.rs"
+check_contains "crates/sigillum-client/src/lib.rs" '^mod queue;$' "queue client methods must stay in crates/sigillum-client/src/queue.rs"
+check_not_contains "crates/sigillum-client/src/lib.rs" 'pub async fn (list_queue_jobs|enqueue_eth_stealth_transfer|enqueue_eth_stealth_erc20_transfer|enqueue_eth_stealth_native_sweep|enqueue_eth_stealth_erc20_sweep|process_queue)' "queue client methods must not move back into sigillum-client/src/lib.rs"
+check_contains "crates/sigillum-cli/src/daemon_api.rs" '^mod queue;$' "queue CLI API commands must stay in crates/sigillum-cli/src/daemon_api/queue.rs"
+check_contains "crates/sigillum-cli/src/daemon_api.rs" '"queue"[[:space:]]*=>[[:space:]]*queue::cmd_api_queue\(args\),' "daemon API queue dispatch must route through the queue module"
+check_not_contains "crates/sigillum-cli/src/daemon_api.rs" '^fn cmd_api_queue\(' "queue CLI command handling must not move back into daemon_api.rs"
+check_contains "docs/architecture.md" 'refactor-notes\.md' "architecture docs must link the module ownership notes"
+check_contains "docs/refactor-notes.md" 'Queue Domain Checkpoint' "refactor notes must record the queue domain checkpoint"
 
 echo "architecture checks passed"
