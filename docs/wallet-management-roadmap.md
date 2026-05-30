@@ -8,6 +8,8 @@ it, explain what was found, and only then help consolidate it under explicit
 policy.
 
 This document defines the target shape for that work.
+For the competitive landscape and product positioning behind this roadmap, see
+[Wallet Competitive Landscape And World-Class Strategy](wallet-competitive-landscape.md).
 
 ## Product Goal
 
