@@ -1335,11 +1335,11 @@ async fn wallet_inventory_scan_records_seed_profile_native_holdings() {
     assert_eq!(scan.status(), StatusCode::OK);
     let scan_json: serde_json::Value = scan.json().await.unwrap();
     assert_eq!(scan_json["job"]["status"], "completed");
-    assert_eq!(scan_json["job"]["addresses_scanned"], 1);
-    assert_eq!(scan_json["job"]["active_addresses"], 1);
-    assert_eq!(scan_json["job"]["holdings_detected"], 1);
-    assert_eq!(scan_json["addresses"].as_array().unwrap().len(), 1);
-    assert_eq!(scan_json["holdings"].as_array().unwrap().len(), 1);
+    assert_eq!(scan_json["job"]["addresses_scanned"], 4);
+    assert_eq!(scan_json["job"]["active_addresses"], 4);
+    assert_eq!(scan_json["job"]["holdings_detected"], 4);
+    assert_eq!(scan_json["addresses"].as_array().unwrap().len(), 4);
+    assert_eq!(scan_json["holdings"].as_array().unwrap().len(), 4);
     assert_eq!(scan_json["holdings"][0]["asset_kind"], "native");
     assert_eq!(scan_json["holdings"][0]["amount_hex"], "0xde0b6b3a7640000");
 
@@ -1347,8 +1347,8 @@ async fn wallet_inventory_scan_records_seed_profile_native_holdings() {
     assert_eq!(list.status(), StatusCode::OK);
     let list_json: serde_json::Value = list.json().await.unwrap();
     assert_eq!(list_json["jobs"].as_array().unwrap().len(), 1);
-    assert_eq!(list_json["addresses"].as_array().unwrap().len(), 1);
-    assert_eq!(list_json["holdings"].as_array().unwrap().len(), 1);
+    assert_eq!(list_json["addresses"].as_array().unwrap().len(), 4);
+    assert_eq!(list_json["holdings"].as_array().unwrap().len(), 4);
 
     handle.abort();
     rpc_handle.abort();

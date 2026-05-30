@@ -380,6 +380,21 @@ pub struct EthStealthGenerateResponse {
     pub stealth_address: String,
     pub ephemeral_public_key_hex: String,
     pub view_tag_hex: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub announcement: Option<EthStealthAnnouncementPayload>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct EthStealthAnnouncementPayload {
+    pub announcer_address: String,
+    pub announce_function: String,
+    #[serde(default = "default_ethereum_stealth_scheme_id")]
+    pub scheme_id: u64,
+    pub stealth_address: String,
+    pub ephemeral_public_key_hex: String,
+    pub metadata_hex: String,
+    pub calldata_hex: String,
+    pub value_wei_hex: String,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -559,6 +574,14 @@ pub struct EthSeedWalletProfile {
     pub first_receive_address: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub default_destination_address: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub control_xpub: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sponsor_address: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hot_address: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub treasury_address: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -807,6 +830,8 @@ pub struct EthStealthDeposit {
     pub stealth_address: String,
     pub ephemeral_public_key_hex: String,
     pub view_tag_hex: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub announcement: Option<EthStealthAnnouncementPayload>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub token_address: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]

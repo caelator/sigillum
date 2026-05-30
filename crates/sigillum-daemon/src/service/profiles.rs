@@ -14,7 +14,8 @@ use sigillum_api::{
     EvmProviderProfileMutationResponse, EvmProviderProfileUpsertRequest,
 };
 use sigillum_core::{
-    SecretStore, derive_ethereum_address_from_xpub,
+    SecretStore, derive_ethereum_address_from_control_xpub, derive_ethereum_address_from_xpub,
+    derive_ethereum_xpub_control_branch_from_mnemonic,
     derive_ethereum_xpub_receive_branch_from_mnemonic, ethereum_mnemonic_word_count,
 };
 use zeroize::{Zeroize, Zeroizing};
@@ -402,6 +403,25 @@ impl SigillumService {
             .map_err(map_xpub_error)?
             .address;
 
+        let control_export = derive_ethereum_xpub_control_branch_from_mnemonic(
+            &mnemonic,
+            body.mnemonic_passphrase.as_deref(),
+            body.project_account,
+        )
+        .map_err(map_xpub_error)?;
+        let sponsor_address =
+            derive_ethereum_address_from_control_xpub(&control_export.receive_xpub, 0)
+                .map_err(map_xpub_error)?
+                .address;
+        let hot_address =
+            derive_ethereum_address_from_control_xpub(&control_export.receive_xpub, 1)
+                .map_err(map_xpub_error)?
+                .address;
+        let treasury_address =
+            derive_ethereum_address_from_control_xpub(&control_export.receive_xpub, 2)
+                .map_err(map_xpub_error)?
+                .address;
+
         let _guard = self.state.operation_guard().await;
         let mut registry =
             crate::profiles::load_profiles(&self.state.base_dir).map_err(|error| {
@@ -449,6 +469,10 @@ impl SigillumService {
             receive_xpub: export.receive_xpub,
             first_receive_address,
             default_destination_address: body.default_destination_address,
+            control_xpub: Some(control_export.receive_xpub),
+            sponsor_address: Some(sponsor_address),
+            hot_address: Some(hot_address),
+            treasury_address: Some(treasury_address),
         };
 
         upsert_named(&mut registry.eth_seed_wallets, profile.clone(), |item| {

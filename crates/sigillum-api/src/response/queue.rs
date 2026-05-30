@@ -60,6 +60,40 @@ pub enum QueueJobPayload {
         #[serde(skip_serializing_if = "Option::is_none")]
         view_tag_hex: Option<String>,
     },
+    EthSeedTransfer {
+        wallet_profile: String,
+        address: String,
+        derivation_path: String,
+        value_wei_hex: String,
+        destination_address: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        nonce: Option<u64>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        gas_limit: Option<u64>,
+    },
+    EthSeedNativeSweep {
+        wallet_profile: String,
+        address: String,
+        derivation_path: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        destination_address: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        min_value_wei_hex: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        gas_limit: Option<u64>,
+    },
+    EthSeedErc20Sweep {
+        wallet_profile: String,
+        address: String,
+        derivation_path: String,
+        token_address: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        recipient_address: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        min_amount_hex: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        gas_limit: Option<u64>,
+    },
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]

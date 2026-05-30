@@ -175,6 +175,10 @@ mod tests {
             receive_xpub: "xpub661MyMwAqRbcFexample".into(),
             first_receive_address: "0x1111111111111111111111111111111111111111".into(),
             default_destination_address: None,
+            control_xpub: None,
+            sponsor_address: None,
+            hot_address: None,
+            treasury_address: None,
         });
 
         save_profiles(dir.path(), &registry).unwrap();

@@ -184,6 +184,11 @@ impl SigillumService {
                     )
                     .await
                 }
+                QueueJobPayload::EthSeedTransfer { .. }
+                | QueueJobPayload::EthSeedNativeSweep { .. }
+                | QueueJobPayload::EthSeedErc20Sweep { .. } => Ok(QueueExecution::Blocked(
+                    "seed-wallet queue execution is not enabled yet".into(),
+                )),
             };
 
             match result {

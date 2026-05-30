@@ -64,6 +64,7 @@ pub(crate) fn map_wallet_error(error: EthereumStealthError) -> ServiceError {
         | EthereumStealthError::InvalidKeyMaterial
         | EthereumStealthError::InvalidDigestLength
         | EthereumStealthError::InvalidEthereumAddress
+        | EthereumStealthError::InvalidAnnouncementField(_)
         | EthereumStealthError::InvalidQuantity(_)
         | EthereumStealthError::InvalidFeeConfiguration => {
             ServiceError::bad_request(error.to_string())

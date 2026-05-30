@@ -102,6 +102,9 @@ pub(crate) enum AuditQueueJobKind {
     EthStealthErc20Transfer,
     EthStealthNativeSweep,
     EthStealthErc20Sweep,
+    EthSeedTransfer,
+    EthSeedNativeSweep,
+    EthSeedErc20Sweep,
 }
 
 impl AuditQueueJobKind {
@@ -111,6 +114,9 @@ impl AuditQueueJobKind {
             Self::EthStealthErc20Transfer => "eth_stealth_erc20_transfer",
             Self::EthStealthNativeSweep => "eth_stealth_native_sweep",
             Self::EthStealthErc20Sweep => "eth_stealth_erc20_sweep",
+            Self::EthSeedTransfer => "eth_seed_transfer",
+            Self::EthSeedNativeSweep => "eth_seed_native_sweep",
+            Self::EthSeedErc20Sweep => "eth_seed_erc20_sweep",
         }
     }
 
@@ -126,6 +132,9 @@ impl AuditQueueJobKind {
             sigillum_api::QueueJobPayload::EthStealthErc20Sweep { .. } => {
                 Self::EthStealthErc20Sweep
             }
+            sigillum_api::QueueJobPayload::EthSeedTransfer { .. } => Self::EthSeedTransfer,
+            sigillum_api::QueueJobPayload::EthSeedNativeSweep { .. } => Self::EthSeedNativeSweep,
+            sigillum_api::QueueJobPayload::EthSeedErc20Sweep { .. } => Self::EthSeedErc20Sweep,
         }
     }
 }
@@ -296,6 +305,15 @@ pub(crate) enum AuditEventSpec {
         transaction_hash_hex: String,
         broadcast_transaction_hash_hex: Option<String>,
     },
+    #[serde(rename = "wallet.eth_seed.send_transfer")]
+    WalletEthSeedSendTransfer {
+        wallet: String,
+        to: String,
+        nonce: u64,
+        broadcast: bool,
+        transaction_hash_hex: String,
+        broadcast_transaction_hash_hex: Option<String>,
+    },
     #[serde(rename = "wallet.eth_stealth.send_erc20_transfer")]
     WalletEthStealthSendErc20Transfer {
         wallet: String,
@@ -415,6 +433,7 @@ impl AuditEventSpec {
                 "wallet.eth_stealth.sign_erc20_transfer"
             }
             Self::WalletEthStealthSendTransfer { .. } => "wallet.eth_stealth.send_transfer",
+            Self::WalletEthSeedSendTransfer { .. } => "wallet.eth_seed.send_transfer",
             Self::WalletEthStealthSendErc20Transfer { .. } => {
                 "wallet.eth_stealth.send_erc20_transfer"
             }
@@ -621,6 +640,14 @@ impl AuditEventSpec {
                 broadcast_transaction_hash_hex,
             }
             | Self::WalletEthStealthSendErc20Transfer {
+                wallet,
+                to,
+                nonce,
+                broadcast,
+                transaction_hash_hex,
+                broadcast_transaction_hash_hex,
+            }
+            | Self::WalletEthSeedSendTransfer {
                 wallet,
                 to,
                 nonce,
@@ -1033,6 +1060,18 @@ impl AuditEventSpec {
                 let details =
                     parse_legacy_details::<WalletSendTransactionDetails>(path, &kind, details)?;
                 Ok(Self::WalletEthStealthSendTransfer {
+                    wallet: details.wallet,
+                    to: details.to,
+                    nonce: details.nonce,
+                    broadcast: details.broadcast,
+                    transaction_hash_hex: details.transaction_hash_hex,
+                    broadcast_transaction_hash_hex: details.broadcast_transaction_hash_hex,
+                })
+            }
+            "wallet.eth_seed.send_transfer" => {
+                let details =
+                    parse_legacy_details::<WalletSendTransactionDetails>(path, &kind, details)?;
+                Ok(Self::WalletEthSeedSendTransfer {
                     wallet: details.wallet,
                     to: details.to,
                     nonce: details.nonce,

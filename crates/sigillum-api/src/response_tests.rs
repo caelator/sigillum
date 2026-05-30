@@ -257,6 +257,16 @@ fn test_eth_stealth_generate_response_roundtrip() {
         stealth_address: "0xstealth".to_string(),
         ephemeral_public_key_hex: "0xeph".to_string(),
         view_tag_hex: "0xaa".to_string(),
+        announcement: Some(EthStealthAnnouncementPayload {
+            announcer_address: "0x55649e01b5df198d18d95b5cc5051630cfd45564".to_string(),
+            announce_function: "announce(uint256,address,bytes,bytes)".to_string(),
+            scheme_id: ETHEREUM_STEALTH_SCHEME_ID,
+            stealth_address: "0xstealth".to_string(),
+            ephemeral_public_key_hex: "0xeph".to_string(),
+            metadata_hex: "aa".to_string(),
+            calldata_hex: "0xcalldata".to_string(),
+            value_wei_hex: "0x0".to_string(),
+        }),
     };
     roundtrip_test(resp);
 }
@@ -489,6 +499,10 @@ fn test_eth_seed_wallet_profile_roundtrip() {
         receive_xpub: "xpub661MyMwAqRbcFexample".to_string(),
         first_receive_address: "0x1111111111111111111111111111111111111111".to_string(),
         default_destination_address: Some("0xdest".to_string()),
+        control_xpub: Some("xpub661MyMwAqRbcFcontrol".to_string()),
+        sponsor_address: Some("0x2222222222222222222222222222222222222222".to_string()),
+        hot_address: Some("0x3333333333333333333333333333333333333333".to_string()),
+        treasury_address: Some("0x4444444444444444444444444444444444444444".to_string()),
     };
     roundtrip_test(profile);
 }
@@ -510,6 +524,10 @@ fn test_eth_seed_wallet_profile_list_response_roundtrip() {
             receive_xpub: "xpub661MyMwAqRbcFexample".to_string(),
             first_receive_address: "0x1111111111111111111111111111111111111111".to_string(),
             default_destination_address: None,
+            control_xpub: None,
+            sponsor_address: None,
+            hot_address: None,
+            treasury_address: None,
         }],
     };
     roundtrip_test(resp);
@@ -699,6 +717,16 @@ fn test_eth_stealth_deposit_roundtrip() {
         stealth_address: "0xstealth".to_string(),
         ephemeral_public_key_hex: "0xeph".to_string(),
         view_tag_hex: "0xaa".to_string(),
+        announcement: Some(EthStealthAnnouncementPayload {
+            announcer_address: "0x55649e01b5df198d18d95b5cc5051630cfd45564".to_string(),
+            announce_function: "announce(uint256,address,bytes,bytes)".to_string(),
+            scheme_id: ETHEREUM_STEALTH_SCHEME_ID,
+            stealth_address: "0xstealth".to_string(),
+            ephemeral_public_key_hex: "0xeph".to_string(),
+            metadata_hex: "aa".to_string(),
+            calldata_hex: "0xcalldata".to_string(),
+            value_wei_hex: "0x0".to_string(),
+        }),
         token_address: None,
         expected_amount_hex: None,
         observed_amount_hex: Some("0x100".to_string()),

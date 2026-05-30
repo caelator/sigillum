@@ -35,6 +35,8 @@ use zeroize::Zeroize;
 type HmacSha256 = Hmac<Sha256>;
 
 pub const ETHEREUM_STEALTH_SCHEME_ID: u64 = 1;
+pub const ERC5564_ANNOUNCER_ADDRESS: &str = "0x55649e01b5df198d18d95b5cc5051630cfd45564";
+pub const ERC5564_ANNOUNCE_FUNCTION: &str = "announce(uint256,address,bytes,bytes)";
 
 // ── Error types ──
 
@@ -54,6 +56,8 @@ pub enum EthereumStealthError {
     InvalidEthereumAddress,
     #[error("invalid quantity encoding: {0}")]
     InvalidQuantity(String),
+    #[error("invalid ERC-5564 announcement field: {0}")]
+    InvalidAnnouncementField(String),
     #[error("view tag mismatch")]
     ViewTagMismatch,
     #[error("stealth address does not match derived wallet")]
@@ -84,6 +88,18 @@ pub struct EthereumStealthPayment {
     pub stealth_address: String,
     pub ephemeral_public_key_hex: String,
     pub view_tag_hex: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct EthereumStealthAnnouncement {
+    pub announcer_address: String,
+    pub announce_function: String,
+    pub scheme_id: u64,
+    pub stealth_address: String,
+    pub ephemeral_public_key_hex: String,
+    pub metadata_hex: String,
+    pub calldata_hex: String,
+    pub value_wei_hex: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -234,6 +250,35 @@ pub fn generate_ethereum_stealth_address(
     };
 
     Ok(payment)
+}
+
+/// Build the ERC-5564 announcer contract call for a generated stealth payment.
+///
+/// The singleton announcer emits the canonical `Announcement` event. Per ERC-5564,
+/// metadata is arbitrary bytes but its first byte MUST be the view tag, so Sigillum
+/// keeps the default metadata minimal and stores any asset context in higher-level
+/// deposit records instead of overloading the standard field.
+pub fn build_erc5564_announcement(
+    payment: &EthereumStealthPayment,
+) -> Result<EthereumStealthAnnouncement, EthereumStealthError> {
+    let metadata_hex = erc5564_metadata_from_view_tag(&payment.view_tag_hex)?;
+    let calldata_hex = encode_erc5564_announce_calldata(
+        payment.scheme_id,
+        &payment.stealth_address,
+        &payment.ephemeral_public_key_hex,
+        &metadata_hex,
+    )?;
+
+    Ok(EthereumStealthAnnouncement {
+        announcer_address: ERC5564_ANNOUNCER_ADDRESS.to_string(),
+        announce_function: ERC5564_ANNOUNCE_FUNCTION.to_string(),
+        scheme_id: payment.scheme_id,
+        stealth_address: payment.stealth_address.clone(),
+        ephemeral_public_key_hex: payment.ephemeral_public_key_hex.clone(),
+        metadata_hex,
+        calldata_hex,
+        value_wei_hex: "0x0".to_string(),
+    })
 }
 
 // ── Stealth address verification ──
@@ -502,25 +547,37 @@ fn sign_ethereum_stealth_eip1559_transaction(
     kind: &str,
     to_address: String,
 ) -> Result<EthereumSignedTransaction, EthereumStealthError> {
+    let (stealth_private_key, _hashed_shared_secret) =
+        derive_verified_stealth_key(wallet, stealth_address, ephemeral_public_key_hex, view_tag)?;
+
+    let mut key_bytes = stealth_private_key.to_bytes();
+    let signing_key = SigningKey::from_slice(&key_bytes)
+        .map_err(|error| EthereumStealthError::Signing(error.to_string()))?;
+
+    let result = sign_ethereum_eip1559_transaction(&signing_key, tx, kind, to_address);
+    key_bytes.zeroize();
+    result
+}
+
+pub fn sign_ethereum_eip1559_transaction(
+    signing_key: &SigningKey,
+    tx: UnsignedEip1559Transaction,
+    kind: &str,
+    to_address: String,
+) -> Result<EthereumSignedTransaction, EthereumStealthError> {
     if compare_quantity_be(&tx.max_fee_per_gas, &tx.max_priority_fee_per_gas).is_lt() {
         return Err(EthereumStealthError::InvalidFeeConfiguration);
     }
 
-    let (stealth_private_key, _hashed_shared_secret) =
-        derive_verified_stealth_key(wallet, stealth_address, ephemeral_public_key_hex, view_tag)?;
-
-    let from_address = ethereum_address_from_public_key(&stealth_private_key.public_key());
+    let public_key = k256::PublicKey::from(signing_key.verifying_key());
+    let from_address = ethereum_address_from_public_key(&public_key);
 
     let signing_payload = encode_eip1559_signing_payload(&tx)?;
     let digest = Keccak256::digest(&signing_payload);
-    let mut key_bytes = stealth_private_key.to_bytes();
-    let signing_key = SigningKey::from_slice(&key_bytes)
-        .map_err(|error| EthereumStealthError::Signing(error.to_string()))?;
     let (signature, recovery_id) = signing_key
         .sign_prehash_recoverable(&digest)
         .map_err(|error| EthereumStealthError::Signing(error.to_string()))?;
 
-    key_bytes.zeroize();
     let raw_transaction = encode_eip1559_signed_payload(&tx, &signature, recovery_id)?;
     let transaction_hash = Keccak256::digest(&raw_transaction);
 
@@ -535,6 +592,53 @@ fn sign_ethereum_stealth_eip1559_transaction(
         raw_transaction_hex: hex::encode(raw_transaction),
         transaction_hash_hex: hex::encode(transaction_hash),
     })
+}
+
+pub fn sign_ethereum_native_transfer(
+    signing_key: &SigningKey,
+    transfer: &EthereumEip1559Transfer,
+) -> Result<EthereumSignedTransaction, EthereumStealthError> {
+    let destination_address = normalize_ethereum_address(&transfer.destination_address)?;
+    sign_ethereum_eip1559_transaction(
+        signing_key,
+        UnsignedEip1559Transaction {
+            chain_id: transfer.chain_id,
+            nonce: transfer.nonce,
+            max_priority_fee_per_gas: transfer.max_priority_fee_per_gas,
+            max_fee_per_gas: transfer.max_fee_per_gas,
+            gas_limit: transfer.gas_limit,
+            to_address: destination_address.clone(),
+            value: transfer.value,
+            data: Vec::new(),
+        },
+        "eth-transfer",
+        destination_address,
+    )
+}
+
+pub fn sign_ethereum_erc20_transfer(
+    signing_key: &SigningKey,
+    transfer: &EthereumEip1559Erc20Transfer,
+) -> Result<EthereumSignedTransaction, EthereumStealthError> {
+    let token_address = normalize_ethereum_address(&transfer.token_address)?;
+    let recipient_address = normalize_ethereum_address(&transfer.recipient_address)?;
+    let data = encode_erc20_transfer_data(&recipient_address, &transfer.amount)?;
+
+    sign_ethereum_eip1559_transaction(
+        signing_key,
+        UnsignedEip1559Transaction {
+            chain_id: transfer.chain_id,
+            nonce: transfer.nonce,
+            max_priority_fee_per_gas: transfer.max_priority_fee_per_gas,
+            max_fee_per_gas: transfer.max_fee_per_gas,
+            gas_limit: transfer.gas_limit,
+            to_address: token_address.clone(),
+            value: [0u8; 32],
+            data,
+        },
+        "erc20-transfer",
+        token_address,
+    )
 }
 
 // ── EIP-1559 transaction construction ──
@@ -677,6 +781,89 @@ fn encode_erc20_transfer_data(
     data.extend_from_slice(&recipient);
     data.extend_from_slice(amount);
     Ok(data)
+}
+
+fn erc5564_metadata_from_view_tag(value: &str) -> Result<String, EthereumStealthError> {
+    let bytes = decode_hex_bytes(value, "view_tag")?;
+    if bytes.len() != 1 {
+        return Err(EthereumStealthError::InvalidAnnouncementField(
+            "view_tag must be exactly one byte".into(),
+        ));
+    }
+    Ok(hex::encode(bytes))
+}
+
+fn encode_erc5564_announce_calldata(
+    scheme_id: u64,
+    stealth_address: &str,
+    ephemeral_public_key_hex: &str,
+    metadata_hex: &str,
+) -> Result<String, EthereumStealthError> {
+    let stealth_address = decode_ethereum_address(stealth_address)?;
+    let ephemeral_public_key = decode_hex_bytes(ephemeral_public_key_hex, "ephemeral_public_key")?;
+    let metadata = decode_hex_bytes(metadata_hex, "metadata")?;
+    if metadata.is_empty() {
+        return Err(EthereumStealthError::InvalidAnnouncementField(
+            "metadata must include the view tag as its first byte".into(),
+        ));
+    }
+
+    let ephemeral_offset = 32 * 4;
+    let metadata_offset = ephemeral_offset + abi_dynamic_size(ephemeral_public_key.len());
+    let selector = Keccak256::digest(ERC5564_ANNOUNCE_FUNCTION.as_bytes());
+    let mut calldata = Vec::with_capacity(4 + metadata_offset + abi_dynamic_size(metadata.len()));
+    calldata.extend_from_slice(&selector[..4]);
+    abi_push_u64_word(&mut calldata, scheme_id);
+    abi_push_address_word(&mut calldata, &stealth_address);
+    abi_push_usize_word(&mut calldata, ephemeral_offset);
+    abi_push_usize_word(&mut calldata, metadata_offset);
+    abi_push_dynamic_bytes(&mut calldata, &ephemeral_public_key);
+    abi_push_dynamic_bytes(&mut calldata, &metadata);
+    Ok(hex::encode(calldata))
+}
+
+fn decode_hex_bytes(value: &str, field: &str) -> Result<Vec<u8>, EthereumStealthError> {
+    let raw = value
+        .strip_prefix("0x")
+        .or_else(|| value.strip_prefix("0X"))
+        .unwrap_or(value);
+    if raw.is_empty() || raw.len() % 2 != 0 || !raw.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        return Err(EthereumStealthError::InvalidAnnouncementField(
+            field.to_string(),
+        ));
+    }
+    hex::decode(raw).map_err(|_| EthereumStealthError::InvalidAnnouncementField(field.to_string()))
+}
+
+fn abi_dynamic_size(len: usize) -> usize {
+    32 + len + abi_padding(len)
+}
+
+fn abi_padding(len: usize) -> usize {
+    (32 - (len % 32)) % 32
+}
+
+fn abi_push_u64_word(out: &mut Vec<u8>, value: u64) {
+    let mut word = [0u8; 32];
+    word[24..].copy_from_slice(&value.to_be_bytes());
+    out.extend_from_slice(&word);
+}
+
+fn abi_push_usize_word(out: &mut Vec<u8>, value: usize) {
+    let mut word = [0u8; 32];
+    word[24..].copy_from_slice(&(value as u64).to_be_bytes());
+    out.extend_from_slice(&word);
+}
+
+fn abi_push_address_word(out: &mut Vec<u8>, address: &[u8; 20]) {
+    out.extend_from_slice(&[0u8; 12]);
+    out.extend_from_slice(address);
+}
+
+fn abi_push_dynamic_bytes(out: &mut Vec<u8>, bytes: &[u8]) {
+    abi_push_usize_word(out, bytes.len());
+    out.extend_from_slice(bytes);
+    out.resize(out.len() + abi_padding(bytes.len()), 0);
 }
 
 fn encode_eip1559_signing_payload(
@@ -876,7 +1063,7 @@ struct ParsedMetaAddress {
     viewing_public_key: PublicKey,
 }
 
-struct UnsignedEip1559Transaction {
+pub struct UnsignedEip1559Transaction {
     chain_id: u64,
     nonce: u64,
     max_priority_fee_per_gas: [u8; 32],
@@ -926,6 +1113,27 @@ mod tests {
         .unwrap();
         assert!(check.matches);
         assert_eq!(check.derived_stealth_address, payment.stealth_address);
+    }
+
+    #[test]
+    fn erc5564_announcement_payload_encodes_standard_calldata() {
+        let wallet =
+            derive_sigillum_ethereum_stealth_wallet(&[9u8; 32], "exchange", "eth").unwrap();
+        let payment = generate_ethereum_stealth_address(
+            &wallet.meta_address.stealth_meta_address,
+            Some([3u8; 32]),
+        )
+        .unwrap();
+
+        let announcement = build_erc5564_announcement(&payment).unwrap();
+        let selector = Keccak256::digest(ERC5564_ANNOUNCE_FUNCTION.as_bytes());
+        let calldata = hex::decode(&announcement.calldata_hex).unwrap();
+
+        assert_eq!(announcement.announcer_address, ERC5564_ANNOUNCER_ADDRESS);
+        assert_eq!(announcement.metadata_hex, payment.view_tag_hex);
+        assert_eq!(announcement.value_wei_hex, "0x0");
+        assert_eq!(&calldata[..4], &selector[..4]);
+        assert!(calldata.len() > 4 + (32 * 4));
     }
 
     #[test]

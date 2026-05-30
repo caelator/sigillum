@@ -96,6 +96,23 @@ export function createOperationsActions(deps: OperationsDeps) {
         const queueInfo = deposit.queue_job_id
           ? "job=" + deposit.queue_job_id + " · state=" + (deposit.queue_job_state || "-")
           : "job=-";
+        const announcement = deposit.announcement;
+        const announcementMeta = announcement
+          ? "<br>announcer=" +
+            esc(announcement.announcer_address) +
+            "<br>metadata=" +
+            esc(announcement.metadata_hex) +
+            " · calldata=" +
+            esc(announcement.calldata_hex)
+          : "";
+        const announcementActions = announcement
+          ? '<button class="btn-ghost" data-action="copyText" data-arg0="' +
+            escAttr(announcement.announcer_address) +
+            '" data-arg1="ERC-5564 announcer">Copy Announcer</button>' +
+            '<button class="btn-ghost" data-action="copyText" data-arg0="' +
+            escAttr(announcement.calldata_hex) +
+            '" data-arg1="ERC-5564 calldata">Copy Announce Data</button>'
+          : "";
         return (
           '<li><div class="entity-main">' +
           '<div class="entity-title">' +
@@ -118,6 +135,7 @@ export function createOperationsActions(deps: OperationsDeps) {
           esc(deposit.ephemeral_public_key_hex) +
           " · viewTag=" +
           esc(deposit.view_tag_hex) +
+          announcementMeta +
           "<br>" +
           depositObservedLine(deposit) +
           "<br>" +
@@ -140,6 +158,7 @@ export function createOperationsActions(deps: OperationsDeps) {
           '<button class="btn-ghost" data-action="copyText" data-arg0="' +
           escAttr(deposit.stealth_address) +
           '" data-arg1="Deposit address">Copy Address</button>' +
+          announcementActions +
           '<button class="btn-ghost" data-action="refreshSingleDeposit" data-arg0="' +
           escAttr(deposit.id) +
           '">Refresh</button>' +

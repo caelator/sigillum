@@ -14,7 +14,8 @@ use sigillum_api::{
     WalletInventoryListResponse, WalletInventoryScanRequest, WalletInventoryScanResponse,
 };
 use sigillum_core::{
-    VaultLifecycle, derive_ethereum_address_from_xpub, derive_sigillum_ethereum_xpub_receive_branch,
+    VaultLifecycle, decode_quantity_hex, derive_ethereum_address_from_control_xpub,
+    derive_ethereum_address_from_xpub, derive_sigillum_ethereum_xpub_receive_branch,
 };
 
 use crate::audit_log::AuditEventSpec;
@@ -29,7 +30,7 @@ use support::{
 };
 
 use super::evm::normalize_address;
-use super::helpers::{map_xpub_error, now_unix, random_id};
+use super::helpers::{compare_u256, map_xpub_error, now_unix, random_id};
 use super::{ServiceError, ServiceResult, SigillumService};
 
 const WALLET_FAMILY_ETH_SEED: &str = "eth-seed";
@@ -255,6 +256,8 @@ impl SigillumService {
         let token = self.require_session(token)?;
         let _guard = self.state.operation_guard().await;
         let mut state = load_inventory_state(&self.state.base_dir)?;
+        let registry = crate::profiles::load_profiles(&self.state.base_dir)
+            .map_err(|error| ServiceError::internal(format!("Failed to load profiles: {error}")))?;
         let now = now_unix();
         let destination_address = body.destination_address.and_then(trimmed_optional);
         let mut steps = Vec::new();
@@ -283,9 +286,45 @@ impl SigillumService {
             if signer_status == "watch_only" && body.include_watch_only != Some(true) {
                 continue;
             }
+            let step_destination = if destination_address.is_some() {
+                destination_address.clone()
+            } else if holding.wallet_family == WALLET_FAMILY_ETH_SEED {
+                if let Some(seed_profile) = registry
+                    .eth_seed_wallets
+                    .iter()
+                    .find(|p| p.name == holding.wallet_profile)
+                {
+                    if seed_profile.hot_address.is_some() && seed_profile.treasury_address.is_some()
+                    {
+                        let hot_addr = seed_profile.hot_address.as_ref().unwrap();
+                        let treasury_addr = seed_profile.treasury_address.as_ref().unwrap();
+                        let hot_balance = state
+                            .addresses
+                            .iter()
+                            .find(|addr| {
+                                addr.wallet_profile == holding.wallet_profile
+                                    && addr.address == *hot_addr
+                            })
+                            .and_then(|addr| decode_quantity_hex(&addr.native_balance_wei_hex).ok())
+                            .unwrap_or([0u8; 32]);
+                        let target_refill = decode_quantity_hex("0xde0b6b3a7640000").unwrap(); // 1.0 ETH in wei
+                        if compare_u256(&hot_balance, &target_refill).is_lt() {
+                            Some(hot_addr.clone())
+                        } else {
+                            Some(treasury_addr.clone())
+                        }
+                    } else {
+                        seed_profile.default_destination_address.clone()
+                    }
+                } else {
+                    None
+                }
+            } else {
+                None
+            };
             steps.push(plan_step_for_holding(
                 holding,
-                destination_address.clone(),
+                step_destination,
                 signer_status,
             ));
         }
@@ -487,6 +526,62 @@ impl SigillumService {
                     empty_run += 1;
                 }
                 index += 1;
+            }
+
+            if wallet.family == WALLET_FAMILY_ETH_SEED {
+                if let Some(seed_profile) = registry
+                    .eth_seed_wallets
+                    .iter()
+                    .find(|p| p.name == wallet.profile)
+                {
+                    if let Some(control_xpub) = &seed_profile.control_xpub {
+                        let control_path = format!("m/44'/60'/{}'/1", seed_profile.project_account);
+                        for control_index in 0..=2 {
+                            let derived = derive_ethereum_address_from_control_xpub(
+                                control_xpub,
+                                control_index,
+                            )
+                            .map_err(map_xpub_error)?;
+                            let derivation_path = format!("{control_path}/{control_index}");
+                            for provider in &providers {
+                                let observation = self
+                                    .observe_inventory_address(
+                                        wallet,
+                                        provider,
+                                        &derived.address,
+                                        &derivation_path,
+                                        control_index,
+                                        &block_tag,
+                                        &token_addresses,
+                                        started_at_unix,
+                                    )
+                                    .await?;
+                                job.addresses_scanned += 1;
+                                if observation.address.activity_state != "empty" {
+                                    job.active_addresses += 1;
+                                }
+                                for holding in &observation.holdings {
+                                    if quantity_hex_is_nonzero(&holding.amount_hex) {
+                                        job.holdings_detected += 1;
+                                    }
+                                }
+                                upsert_address(
+                                    &mut inventory.addresses,
+                                    observation.address.clone(),
+                                );
+                                for holding in observation.holdings.iter().cloned() {
+                                    if quantity_hex_is_nonzero(&holding.amount_hex) {
+                                        upsert_holding(&mut inventory.holdings, holding.clone());
+                                        detected_holdings.push(holding);
+                                    } else {
+                                        remove_holding(&mut inventory.holdings, &holding);
+                                    }
+                                }
+                                scanned_addresses.push(observation.address);
+                            }
+                        }
+                    }
+                }
             }
         }
 

@@ -58,6 +58,7 @@ mod tests {
             stealth_address: "0x0000000000000000000000000000000000000001".into(),
             ephemeral_public_key_hex: "0x02".into(),
             view_tag_hex: "0xaa".into(),
+            announcement: None,
             token_address: None,
             expected_amount_hex: None,
             observed_amount_hex: None,

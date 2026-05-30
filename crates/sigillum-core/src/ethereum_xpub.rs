@@ -118,6 +118,107 @@ fn derive_receive_branch_xprv(
         .map_err(|_| EthereumXpubError::InvalidKeyMaterial)
 }
 
+pub fn derive_sigillum_ethereum_xpub_control_branch(
+    master_key: &[u8],
+    project_account: u32,
+) -> Result<EthereumXpubReceiveExport, EthereumXpubError> {
+    let control_xprv = derive_control_branch_xprv(master_key, project_account)?;
+    Ok(EthereumXpubReceiveExport {
+        project_account,
+        account_path: format!(
+            "m/{ETHEREUM_XPUB_PURPOSE}'/{ETHEREUM_XPUB_COIN_TYPE}'/{project_account}'"
+        ),
+        receive_path: format!(
+            "m/{ETHEREUM_XPUB_PURPOSE}'/{ETHEREUM_XPUB_COIN_TYPE}'/{project_account}'/{ETHEREUM_XPUB_CONTROL_BRANCH}"
+        ),
+        receive_xpub: control_xprv
+            .public_key()
+            .to_string(Prefix::XPUB)
+            .to_string(),
+    })
+}
+
+pub fn derive_ethereum_xpub_control_branch_from_mnemonic(
+    mnemonic_phrase: &str,
+    mnemonic_passphrase: Option<&str>,
+    project_account: u32,
+) -> Result<EthereumXpubReceiveExport, EthereumXpubError> {
+    let seed = mnemonic_seed(mnemonic_phrase, mnemonic_passphrase)?;
+    derive_sigillum_ethereum_xpub_control_branch(&seed, project_account)
+}
+
+pub fn derive_ethereum_address_from_control_xpub(
+    control_xpub: &str,
+    index: u32,
+) -> Result<EthereumXpubReceiveAddress, EthereumXpubError> {
+    let control_xpub = control_xpub
+        .parse::<XPub>()
+        .map_err(|_| EthereumXpubError::InvalidReceiveBranchXpub)?;
+    validate_control_branch_xpub(&control_xpub)?;
+    derive_receive_address_from_xpub(&control_xpub, index)
+}
+
+fn validate_control_branch_xpub(control_xpub: &XPub) -> Result<(), EthereumXpubError> {
+    let attrs = control_xpub.attrs();
+    if attrs.depth != 4
+        || attrs.child_number.is_hardened()
+        || attrs.child_number.index() != ETHEREUM_XPUB_CONTROL_BRANCH
+    {
+        return Err(EthereumXpubError::InvalidReceiveBranchXpub);
+    }
+    Ok(())
+}
+
+fn derive_control_branch_xprv(
+    master_key: &[u8],
+    project_account: u32,
+) -> Result<XPrv, EthereumXpubError> {
+    let account_xprv = derive_account_xprv(master_key, project_account)?;
+    account_xprv
+        .derive_child(control_branch_child()?)
+        .map_err(|_| EthereumXpubError::InvalidKeyMaterial)
+}
+
+fn control_branch_child() -> Result<ChildNumber, EthereumXpubError> {
+    ChildNumber::new(ETHEREUM_XPUB_CONTROL_BRANCH, false)
+        .map_err(|_| EthereumXpubError::InvalidKeyMaterial)
+}
+
+pub fn derive_private_key_at_path(
+    seed: &[u8],
+    path: &str,
+) -> Result<k256::ecdsa::SigningKey, EthereumXpubError> {
+    let mut current = XPrv::new(seed).map_err(|_| EthereumXpubError::InvalidKeyMaterial)?;
+    let parts: Vec<&str> = path.split('/').collect();
+    if parts.is_empty() || parts[0] != "m" {
+        return Err(EthereumXpubError::InvalidKeyMaterial);
+    }
+    for part in &parts[1..] {
+        let part = part.trim();
+        if part.is_empty() {
+            continue;
+        }
+        let is_hardened = part.ends_with('\'');
+        let index_str = if is_hardened {
+            &part[..part.len() - 1]
+        } else {
+            part
+        };
+        let index: u32 = index_str
+            .parse()
+            .map_err(|_| EthereumXpubError::InvalidKeyMaterial)?;
+        let child = ChildNumber::new(index, is_hardened)
+            .map_err(|_| EthereumXpubError::InvalidKeyMaterial)?;
+        current = current
+            .derive_child(child)
+            .map_err(|_| EthereumXpubError::InvalidKeyMaterial)?;
+    }
+    let key_bytes = current.private_key().to_bytes();
+    let signing_key = k256::ecdsa::SigningKey::from_slice(&key_bytes)
+        .map_err(|_| EthereumXpubError::InvalidKeyMaterial)?;
+    Ok(signing_key)
+}
+
 fn derive_account_xprv(master_key: &[u8], project_account: u32) -> Result<XPrv, EthereumXpubError> {
     let root_xprv = XPrv::new(master_key).map_err(|_| EthereumXpubError::InvalidKeyMaterial)?;
     let purpose = hardened_child(ETHEREUM_XPUB_PURPOSE)?;
@@ -244,6 +345,26 @@ mod tests {
         assert_eq!(
             derive_ethereum_xpub_receive_branch_from_mnemonic("abandon abandon", None, 0),
             Err(EthereumXpubError::InvalidMnemonic)
+        );
+    }
+
+    #[test]
+    fn control_branch_derivation_roundtrip() {
+        let twelve_word = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
+        let control_export =
+            derive_ethereum_xpub_control_branch_from_mnemonic(twelve_word, None, 0).unwrap();
+        assert_eq!(control_export.receive_path, "m/44'/60'/0'/1");
+        assert!(control_export.receive_xpub.starts_with("xpub"));
+
+        let address_0 =
+            derive_ethereum_address_from_control_xpub(&control_export.receive_xpub, 0).unwrap();
+        assert!(address_0.address.starts_with("0x"));
+
+        let seed = mnemonic_seed(twelve_word, None).unwrap();
+        let pkey = derive_private_key_at_path(&seed, "m/44'/60'/0'/1/0").unwrap();
+        assert_eq!(
+            ethereum_address_from_verifying_key(pkey.verifying_key()),
+            address_0.address
         );
     }
 }

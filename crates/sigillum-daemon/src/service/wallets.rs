@@ -4,18 +4,19 @@
 //! for Ethereum stealth addresses using master key derivation.
 
 use sigillum_api::{
-    EthSignedTransactionResponse, EthStealthCheckRequest, EthStealthCheckResponse,
-    EthStealthExportRequest, EthStealthGenerateRequest, EthStealthGenerateResponse,
-    EthStealthMetaAddressResponse, EthStealthSignErc20TransferRequest, EthStealthSignRequest,
-    EthStealthSignResponse, EthStealthSignTransferRequest, EthXpubAddressResponse,
-    EthXpubDeriveRequest, EthXpubExportRequest, EthXpubExportResponse,
+    EthSignedTransactionResponse, EthStealthAnnouncementPayload, EthStealthCheckRequest,
+    EthStealthCheckResponse, EthStealthExportRequest, EthStealthGenerateRequest,
+    EthStealthGenerateResponse, EthStealthMetaAddressResponse, EthStealthSignErc20TransferRequest,
+    EthStealthSignRequest, EthStealthSignResponse, EthStealthSignTransferRequest,
+    EthXpubAddressResponse, EthXpubDeriveRequest, EthXpubExportRequest, EthXpubExportResponse,
 };
 use sigillum_core::{
     EthereumEip1559Erc20Transfer, EthereumEip1559Transfer, VaultLifecycle,
-    check_ethereum_stealth_address, decode_quantity_hex, derive_ethereum_address_from_xpub,
-    derive_sigillum_ethereum_stealth_wallet, derive_sigillum_ethereum_xpub_receive_branch,
-    generate_ethereum_stealth_address, sign_ethereum_stealth_digest,
-    sign_ethereum_stealth_erc20_transfer, sign_ethereum_stealth_native_transfer,
+    build_erc5564_announcement, check_ethereum_stealth_address, decode_quantity_hex,
+    derive_ethereum_address_from_xpub, derive_sigillum_ethereum_stealth_wallet,
+    derive_sigillum_ethereum_xpub_receive_branch, generate_ethereum_stealth_address,
+    sign_ethereum_stealth_digest, sign_ethereum_stealth_erc20_transfer,
+    sign_ethereum_stealth_native_transfer,
 };
 use zeroize::Zeroizing;
 
@@ -136,6 +137,7 @@ impl SigillumService {
         let payment =
             generate_ethereum_stealth_address(&body.stealth_meta_address, ephemeral_private_key)
                 .map_err(map_wallet_error)?;
+        let announcement = build_erc5564_announcement(&payment).map_err(map_wallet_error)?;
 
         Ok(EthStealthGenerateResponse {
             short_name: payment.short_name,
@@ -144,6 +146,16 @@ impl SigillumService {
             stealth_address: payment.stealth_address,
             ephemeral_public_key_hex: payment.ephemeral_public_key_hex,
             view_tag_hex: payment.view_tag_hex,
+            announcement: Some(EthStealthAnnouncementPayload {
+                announcer_address: announcement.announcer_address,
+                announce_function: announcement.announce_function,
+                scheme_id: announcement.scheme_id,
+                stealth_address: announcement.stealth_address,
+                ephemeral_public_key_hex: announcement.ephemeral_public_key_hex,
+                metadata_hex: announcement.metadata_hex,
+                calldata_hex: announcement.calldata_hex,
+                value_wei_hex: announcement.value_wei_hex,
+            }),
         })
     }
 

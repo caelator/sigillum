@@ -302,6 +302,7 @@ mod tests {
             stealth_address: "0x0000000000000000000000000000000000000001".into(),
             ephemeral_public_key_hex: "03".repeat(33),
             view_tag_hex: "0xaa".into(),
+            announcement: None,
             token_address: None,
             expected_amount_hex: None,
             observed_amount_hex: Some("0x1".into()),

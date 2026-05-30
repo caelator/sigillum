@@ -8,7 +8,7 @@ use super::{WALLET_FAMILY_ETH_SEED, WALLET_FAMILY_ETH_XPUB};
 pub(super) fn signer_status_for_holding(holding: &WalletAssetHolding) -> &'static str {
     match holding.wallet_family.as_str() {
         WALLET_FAMILY_ETH_XPUB => "watch_only",
-        WALLET_FAMILY_ETH_SEED => "signing_not_implemented",
+        WALLET_FAMILY_ETH_SEED => "available",
         _ => "unknown",
     }
 }

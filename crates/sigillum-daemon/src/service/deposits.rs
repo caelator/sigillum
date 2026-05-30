@@ -193,6 +193,7 @@ impl SigillumService {
             stealth_address: payment.stealth_address,
             ephemeral_public_key_hex: payment.ephemeral_public_key_hex,
             view_tag_hex: payment.view_tag_hex,
+            announcement: payment.announcement,
             token_address: blueprint.token_address,
             expected_amount_hex: blueprint.expected_amount_hex,
             observed_amount_hex: None,

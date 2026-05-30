@@ -39,21 +39,24 @@ pub mod unlock;
 
 pub use error::VaultError;
 pub use ethereum_stealth::{
-    ETHEREUM_STEALTH_SCHEME_ID, EthereumEip1559Erc20Transfer, EthereumEip1559Transfer,
-    EthereumSignedTransaction, EthereumStealthCheck, EthereumStealthError,
+    ERC5564_ANNOUNCE_FUNCTION, ERC5564_ANNOUNCER_ADDRESS, ETHEREUM_STEALTH_SCHEME_ID,
+    EthereumEip1559Erc20Transfer, EthereumEip1559Transfer, EthereumSignedTransaction,
+    EthereumStealthAnnouncement, EthereumStealthCheck, EthereumStealthError,
     EthereumStealthMetaAddress, EthereumStealthPayment, EthereumStealthSignature,
-    EthereumStealthWallet, check_ethereum_stealth_address, decode_quantity_hex,
-    derive_sigillum_ethereum_stealth_wallet, generate_ethereum_stealth_address,
-    sign_ethereum_stealth_digest, sign_ethereum_stealth_erc20_transfer,
-    sign_ethereum_stealth_native_transfer,
+    EthereumStealthWallet, build_erc5564_announcement, check_ethereum_stealth_address,
+    decode_quantity_hex, derive_sigillum_ethereum_stealth_wallet,
+    generate_ethereum_stealth_address, sign_ethereum_eip1559_transaction,
+    sign_ethereum_erc20_transfer, sign_ethereum_native_transfer, sign_ethereum_stealth_digest,
+    sign_ethereum_stealth_erc20_transfer, sign_ethereum_stealth_native_transfer,
 };
 pub use ethereum_xpub::{
     ETHEREUM_XPUB_COIN_TYPE, ETHEREUM_XPUB_CONTROL_BRANCH, ETHEREUM_XPUB_PURPOSE,
     ETHEREUM_XPUB_RECEIVE_BRANCH, EthereumXpubError, EthereumXpubReceiveAddress,
-    EthereumXpubReceiveExport, derive_ethereum_address_from_xpub,
-    derive_ethereum_xpub_receive_branch_from_mnemonic,
-    derive_sigillum_ethereum_xpub_receive_address, derive_sigillum_ethereum_xpub_receive_branch,
-    ethereum_mnemonic_word_count,
+    EthereumXpubReceiveExport, derive_ethereum_address_from_control_xpub,
+    derive_ethereum_address_from_xpub, derive_ethereum_xpub_control_branch_from_mnemonic,
+    derive_ethereum_xpub_receive_branch_from_mnemonic, derive_private_key_at_path,
+    derive_sigillum_ethereum_xpub_control_branch, derive_sigillum_ethereum_xpub_receive_address,
+    derive_sigillum_ethereum_xpub_receive_branch, ethereum_mnemonic_word_count,
 };
 pub use traits::{SecretStore, VaultLifecycle};
 pub use unlock::provider::{
