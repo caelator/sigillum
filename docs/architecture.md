@@ -135,7 +135,8 @@ Current daemon behavior:
 - keeps profile-backed send construction and provider/wallet lookup helpers in
   `service/profiles/sends.rs` and `service/profiles/resolution.rs`, leaving
   `profiles.rs` centered on profile CRUD and seed/xpub import handling
-- tracks stealth deposit records and refreshes them against configured providers
+- tracks stealth deposit records, discovers matching ERC-5564 announcements from
+  bounded provider log scans, and refreshes balances against configured providers
 - queues direct sends and sweep jobs, including deferred jobs that need more balance or gas
 - keeps queue ownership split inside `service/queue/*`: the façade owns public
   enqueue/list methods, `payloads` owns job construction, `processing` owns the

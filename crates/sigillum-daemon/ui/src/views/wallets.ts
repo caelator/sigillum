@@ -308,6 +308,11 @@ export function createWalletActions(deps: WalletActionsDeps) {
         wallets.length ? "Select wallet profile" : "No wallet profiles available",
       );
       setSelectOptions(
+        "depositScanWalletProfile",
+        walletOptions,
+        wallets.length ? "Select wallet profile" : "No wallet profiles available",
+      );
+      setSelectOptions(
         "xpubPreviewProfile",
         xpubWallets.map((profile: any) => ({
           value: profile.name,

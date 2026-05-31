@@ -7,9 +7,9 @@ use axum::extract::State;
 use axum::http::HeaderMap;
 use axum::response::Response;
 use sigillum_api::{
-    EthStealthDepositCreateErc20Request, EthStealthDepositCreateNativeRequest,
-    EthStealthDepositDeleteRequest, EthStealthDepositEnqueueSweepRequest,
-    EthStealthDepositRefreshRequest,
+    EthStealthAnnouncementScanRequest, EthStealthDepositCreateErc20Request,
+    EthStealthDepositCreateNativeRequest, EthStealthDepositDeleteRequest,
+    EthStealthDepositEnqueueSweepRequest, EthStealthDepositRefreshRequest,
 };
 
 use crate::AppState;
@@ -55,6 +55,23 @@ pub(crate) async fn create_eth_stealth_erc20_deposit(
     service_response(
         service
             .create_eth_stealth_erc20_deposit(bearer_token(&headers).as_deref(), body)
+            .await,
+    )
+}
+
+pub(crate) async fn scan_eth_stealth_announcements(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Json(body): Json<EthStealthAnnouncementScanRequest>,
+) -> Response {
+    let body = match validated(Json(body)) {
+        Ok(b) => b,
+        Err(resp) => return resp,
+    };
+    let service = SigillumService::new(state);
+    service_response(
+        service
+            .scan_eth_stealth_announcements(bearer_token(&headers).as_deref(), body)
             .await,
     )
 }

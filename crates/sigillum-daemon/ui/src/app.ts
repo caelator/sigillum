@@ -1170,6 +1170,7 @@ const UI_ACTIONS = {
   revealApiKeyButton,
   revealSecretButton,
   runMaintenanceCycle: operationsActions.runMaintenanceCycle,
+  scanEthStealthAnnouncements: operationsActions.scanEthStealthAnnouncements,
   scanInventoryEvm: inventoryActions.scanInventoryEvm,
   selectWorkspaceSection,
   setApiKey,

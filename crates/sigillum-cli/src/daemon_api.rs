@@ -29,15 +29,13 @@ use std::time::{Duration, Instant};
 use serde::Serialize;
 use sigillum_api::request::{
     ChainProfileUpsertRequest, ConsolidationPlanApproveRequest, ConsolidationPlanGenerateRequest,
-    EthStealthDepositCreateErc20Request, EthStealthDepositCreateNativeRequest,
-    EthStealthDepositDeleteRequest, EthStealthDepositEnqueueSweepRequest,
-    EthStealthDepositRefreshRequest, EthStealthWalletProfileUpsertRequest,
-    EvmProviderProfileUpsertRequest, EvmProviderRef, Fido2UnlockRequest, MaintenanceRunRequest,
-    WalletInventoryScanRequest,
+    EthStealthWalletProfileUpsertRequest, EvmProviderProfileUpsertRequest, EvmProviderRef,
+    Fido2UnlockRequest, MaintenanceRunRequest, WalletInventoryScanRequest,
 };
 use sigillum_client::{ClientError, SigillumClient};
 use url::Url;
 
+mod deposits;
 mod queue;
 
 const DEFAULT_DAEMON_BASE_URL: &str = "http://127.0.0.1:9743";
@@ -92,7 +90,7 @@ pub fn cmd_api(args: &[String]) {
             |client| async move { client.diagnostics().await },
         ),
         "profiles" => cmd_api_profiles(args),
-        "deposits" => cmd_api_deposits(args),
+        "deposits" => deposits::cmd_api_deposits(args),
         "inventory" => cmd_api_inventory(args),
         "discovery" => cmd_api_discovery(args),
         "risk" => cmd_api_risk(args),
@@ -200,100 +198,6 @@ fn cmd_api_profiles(args: &[String]) {
         }
         _ => {
             eprintln!("Usage: sigillum api profiles <evm|stealth> <list|upsert|delete> [...]");
-            process::exit(1);
-        }
-    }
-}
-
-/// Dispatch `sigillum api deposits <list|create-native|create-erc20|refresh|enqueue-sweep|delete>`.
-fn cmd_api_deposits(args: &[String]) {
-    if args.len() < 2 {
-        eprintln!(
-            "Usage: sigillum api deposits <list|create-native|create-erc20|refresh|enqueue-sweep|delete> [...]"
-        );
-        process::exit(1);
-    }
-
-    match args[1].as_str() {
-        "list" => run_api_command(args, true, |client| async move {
-            client.list_eth_stealth_deposits().await
-        }),
-        "create-native" => {
-            let request = EthStealthDepositCreateNativeRequest {
-                wallet_profile: require_flag(
-                    args,
-                    "--wallet-profile",
-                    "sigillum api deposits create-native --wallet-profile <NAME>",
-                ),
-                expected_value_wei_hex: parse_flag(args, "--expected-value-wei-hex"),
-                auto_queue_sweep: flag_option(args, "--auto-queue-sweep"),
-                sweep_destination_address: parse_flag(args, "--sweep-destination-address"),
-                min_sweep_value_wei_hex: parse_flag(args, "--min-sweep-value-wei-hex"),
-                note: parse_flag(args, "--note"),
-                ephemeral_private_key_hex: parse_flag(args, "--ephemeral-private-key-hex"),
-            };
-            run_api_command(args, true, move |client| async move {
-                client.create_eth_stealth_native_deposit(request).await
-            });
-        }
-        "create-erc20" => {
-            let request = EthStealthDepositCreateErc20Request {
-                wallet_profile: require_flag(
-                    args,
-                    "--wallet-profile",
-                    "sigillum api deposits create-erc20 --wallet-profile <NAME> --token-address <ADDR>",
-                ),
-                token_address: require_flag(
-                    args,
-                    "--token-address",
-                    "sigillum api deposits create-erc20 --wallet-profile <NAME> --token-address <ADDR>",
-                ),
-                expected_amount_hex: parse_flag(args, "--expected-amount-hex"),
-                auto_queue_sweep: flag_option(args, "--auto-queue-sweep"),
-                sweep_destination_address: parse_flag(args, "--sweep-destination-address"),
-                min_sweep_amount_hex: parse_flag(args, "--min-sweep-amount-hex"),
-                note: parse_flag(args, "--note"),
-                ephemeral_private_key_hex: parse_flag(args, "--ephemeral-private-key-hex"),
-            };
-            run_api_command(args, true, move |client| async move {
-                client.create_eth_stealth_erc20_deposit(request).await
-            });
-        }
-        "refresh" => {
-            let request = EthStealthDepositRefreshRequest {
-                id: parse_flag(args, "--id"),
-                limit: parse_usize_flag(args, "--limit"),
-                auto_enqueue: bool_switch(args, "--auto-enqueue", "--no-auto-enqueue"),
-            };
-            run_api_command(args, true, move |client| async move {
-                client.refresh_eth_stealth_deposits(request).await
-            });
-        }
-        "enqueue-sweep" => {
-            let request = EthStealthDepositEnqueueSweepRequest {
-                id: require_flag(
-                    args,
-                    "--id",
-                    "sigillum api deposits enqueue-sweep --id <ID>",
-                ),
-                force: flag_option(args, "--force"),
-            };
-            run_api_command(args, true, move |client| async move {
-                client.enqueue_eth_stealth_deposit_sweep(request).await
-            });
-        }
-        "delete" => {
-            let request = EthStealthDepositDeleteRequest {
-                id: require_flag(args, "--id", "sigillum api deposits delete --id <ID>"),
-            };
-            run_api_command(args, true, move |client| async move {
-                client.delete_eth_stealth_deposit(request).await
-            });
-        }
-        _ => {
-            eprintln!(
-                "Usage: sigillum api deposits <list|create-native|create-erc20|refresh|enqueue-sweep|delete> [...]"
-            );
             process::exit(1);
         }
     }
@@ -834,7 +738,7 @@ COMMANDS:
   diagnostics
   profiles evm <list|upsert|delete> [...]
   profiles stealth <list|upsert|delete> [...]
-  deposits <list|create-native|create-erc20|refresh|enqueue-sweep|delete> [...]
+  deposits <list|create-native|create-erc20|scan-announcements|refresh|enqueue-sweep|delete> [...]
   inventory <list|chains|scan-evm> [...]
   discovery <jobs|scan-evm> [...]
   risk list

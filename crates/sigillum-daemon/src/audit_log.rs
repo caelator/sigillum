@@ -340,6 +340,14 @@ pub(crate) enum AuditEventSpec {
     },
     #[serde(rename = "deposits.eth_stealth.enqueue_sweep")]
     DepositsEthStealthEnqueueSweep { id: String, job_id: String },
+    #[serde(rename = "deposits.eth_stealth.announcement_scan")]
+    DepositsEthStealthAnnouncementScan {
+        wallet_profile: String,
+        provider_profile: String,
+        scanned: usize,
+        matched: usize,
+        created: usize,
+    },
     #[serde(rename = "maintenance.run")]
     MaintenanceRun {
         refreshed: usize,
@@ -441,6 +449,9 @@ impl AuditEventSpec {
             Self::DepositsEthStealthDelete { .. } => "deposits.eth_stealth.delete",
             Self::DepositsEthStealthRefresh { .. } => "deposits.eth_stealth.refresh",
             Self::DepositsEthStealthEnqueueSweep { .. } => "deposits.eth_stealth.enqueue_sweep",
+            Self::DepositsEthStealthAnnouncementScan { .. } => {
+                "deposits.eth_stealth.announcement_scan"
+            }
             Self::MaintenanceRun { .. } => "maintenance.run",
             Self::WalletInventoryScan { .. } => "wallet_inventory.scan",
             Self::WalletInventoryChainProfileUpsert { .. } => {
@@ -724,6 +735,19 @@ impl AuditEventSpec {
                 "providers": providers,
                 "addresses": addresses,
                 "holdings": holdings,
+            }),
+            Self::DepositsEthStealthAnnouncementScan {
+                wallet_profile,
+                provider_profile,
+                scanned,
+                matched,
+                created,
+            } => json!({
+                "wallet_profile": wallet_profile,
+                "provider_profile": provider_profile,
+                "scanned": scanned,
+                "matched": matched,
+                "created": created,
             }),
             Self::WalletInventoryChainProfileUpsert { name, chain_family } => {
                 json!({ "name": name, "chain_family": chain_family })
@@ -1119,6 +1143,17 @@ impl AuditEventSpec {
                 Ok(Self::DepositsEthStealthEnqueueSweep {
                     id: details.id,
                     job_id: details.job_id,
+                })
+            }
+            "deposits.eth_stealth.announcement_scan" => {
+                let details =
+                    parse_legacy_details::<DepositsAnnouncementScanDetails>(path, &kind, details)?;
+                Ok(Self::DepositsEthStealthAnnouncementScan {
+                    wallet_profile: details.wallet_profile,
+                    provider_profile: details.provider_profile,
+                    scanned: details.scanned,
+                    matched: details.matched,
+                    created: details.created,
                 })
             }
             "maintenance.run" => {
@@ -1527,6 +1562,15 @@ struct DepositEnqueueSweepDetails {
 }
 
 #[derive(Clone, Debug, Deserialize)]
+struct DepositsAnnouncementScanDetails {
+    wallet_profile: String,
+    provider_profile: String,
+    scanned: usize,
+    matched: usize,
+    created: usize,
+}
+
+#[derive(Clone, Debug, Deserialize)]
 struct MaintenanceRunDetails {
     refreshed: usize,
     detected: usize,
@@ -1587,111 +1631,5 @@ struct RunCompleteDetails {
     success: bool,
 }
 
-// ── Tests ───────────────────────────────────────
-
 #[cfg(test)]
-mod tests {
-    use tempfile::TempDir;
-
-    use super::*;
-
-    #[test]
-    fn versioned_audit_event_roundtrips_to_public_shape() {
-        let dir = TempDir::new().unwrap();
-        let path = dir.path().join("audit.log");
-        append_audit_event(
-            &path,
-            &StoredAuditEvent {
-                created_at_unix: 7,
-                compartment_id: Some(0),
-                spec: AuditEventSpec::QueueEnqueue {
-                    id: "job_1".into(),
-                    job_kind: AuditQueueJobKind::EthStealthNativeSweep,
-                },
-            },
-        )
-        .unwrap();
-
-        let events = read_recent_audit_events(&path, 10).unwrap();
-        assert_eq!(events.len(), 1);
-        assert_eq!(events[0].kind, "queue.enqueue");
-        assert_eq!(events[0].details["id"], json!("job_1"));
-        assert_eq!(events[0].details["kind"], json!("eth_stealth_native_sweep"));
-    }
-
-    #[test]
-    fn audit_log_uses_single_line_versioned_documents() {
-        let dir = TempDir::new().unwrap();
-        let path = dir.path().join("audit.log");
-        append_audit_event(
-            &path,
-            &StoredAuditEvent {
-                created_at_unix: 7,
-                compartment_id: None,
-                spec: AuditEventSpec::LockAll,
-            },
-        )
-        .unwrap();
-
-        let raw = std::fs::read_to_string(&path).unwrap();
-        let lines: Vec<&str> = raw.lines().collect();
-        assert_eq!(lines.len(), 1);
-        let saved: Value = serde_json::from_str(lines[0]).unwrap();
-        assert_eq!(saved["schema"], json!("sigillum.audit-event"));
-        assert_eq!(saved["schema_version"], json!(1));
-        assert_eq!(saved["data"]["kind"], json!("lock.all"));
-    }
-
-    #[test]
-    fn legacy_public_audit_events_still_load() {
-        let dir = TempDir::new().unwrap();
-        let path = dir.path().join("audit.log");
-        std::fs::write(
-            &path,
-            format!(
-                "{}\n",
-                serde_json::to_string(&PublicAuditEvent {
-                    created_at_unix: 7,
-                    kind: "fido2.setup".into(),
-                    compartment_id: Some(0),
-                    details: json!({
-                        "label": "primary",
-                        "compartments": 3,
-                        "total_keys": 1,
-                    }),
-                })
-                .unwrap()
-            ),
-        )
-        .unwrap();
-
-        let events = read_recent_audit_events(&path, 10).unwrap();
-        assert_eq!(events.len(), 1);
-        assert_eq!(events[0].kind, "fido2.setup");
-        assert_eq!(events[0].details["compartment_count"], json!(3));
-    }
-
-    #[test]
-    fn unsupported_legacy_event_kind_returns_error() {
-        let dir = TempDir::new().unwrap();
-        let path = dir.path().join("audit.log");
-        std::fs::write(
-            &path,
-            format!(
-                "{}\n",
-                serde_json::to_string(&PublicAuditEvent {
-                    created_at_unix: 7,
-                    kind: "unknown.kind".into(),
-                    compartment_id: None,
-                    details: json!({}),
-                })
-                .unwrap()
-            ),
-        )
-        .unwrap();
-
-        let error = read_recent_audit_events(&path, 10).unwrap_err();
-        assert_eq!(error.kind(), std::io::ErrorKind::InvalidData);
-        assert!(error.to_string().contains("unsupported audit event kind"));
-    }
-}
+mod tests;

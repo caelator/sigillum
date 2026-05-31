@@ -123,9 +123,10 @@ Strengths:
 - ERC-5564 standardizes stealth meta-address handling and announcement events,
   which gives Sigillum a real interoperability target.
 
-Sigillum implication: stealth receive support is already a real differentiator.
-The next jump is announcement-log discovery, stealth inventory, and safe
-consolidation from one-time accounts.
+Sigillum implication: stealth receive support is already a real differentiator,
+and bounded ERC-5564 announcement-log scanning now gives it a recovery path for
+unregistered one-time accounts. The next jump is richer stealth inventory and
+safe consolidation from those accounts.
 
 ## Capability Matrix
 
@@ -133,7 +134,7 @@ consolidation from one-time accounts.
 | --- | --- | --- | --- |
 | Local self-hosting | Strong local daemon, vault, UI, client, CLI, audit, snapshots | Rotki for local portfolio ownership | Keep all wallet operations local by default; external providers are opt-in and provenance-tagged |
 | Consumer dapp UX | Not a browser wallet | MetaMask, Rabby, Phantom, Rainbow | Defer extension parity; add WalletConnect or hardware/Safe flows only when needed for simulation or signing |
-| ERC-5564 stealth receiving | Meta-address export, one-time deposit derivation, local checks, announcement payloads, ETH/ERC-20 signing and sending | ERC-5564, Umbra, Fluidkey | Add announcement-log scanning, recovery of unregistered stealth deposits, and stealth-aware consolidation |
+| ERC-5564 stealth receiving | Meta-address export, one-time deposit derivation, bounded announcement-log scanning, local checks, announcement payloads, ETH/ERC-20 signing and sending | ERC-5564, Umbra, Fluidkey | Add stealth-aware consolidation, richer inventory, and reviewed recovery workflows from one-time accounts |
 | Seed/xpub discovery | Initial EVM scan foundation for seed/xpub profiles with gap-limit style scan over configured providers | MetaMask/Ledger/Trezor account discovery, Bitcoin xpub wallets | Scan common Ethereum derivation paths, historical receive addresses, dormant wallets, and configured L1/L2 chains |
 | Native and token inventory | Native balances and manually supplied ERC-20 token probes | Portfolio/indexing tools | Discover ERC-20s from logs, registries, indexers, allowlists, and positive balance evidence |
 | NFTs | Not implemented | MetaMask Portfolio, Phantom, Zerion, Zapper | ERC-721/ERC-1155 inventory, metadata cache, spam flags, unknown collection policy, reviewed NFT sweeps |

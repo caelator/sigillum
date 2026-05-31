@@ -44,7 +44,7 @@ pub use ethereum_stealth::{
     EthereumStealthAnnouncement, EthereumStealthCheck, EthereumStealthError,
     EthereumStealthMetaAddress, EthereumStealthPayment, EthereumStealthSignature,
     EthereumStealthWallet, build_erc5564_announcement, check_ethereum_stealth_address,
-    decode_quantity_hex, derive_sigillum_ethereum_stealth_wallet,
+    decode_quantity_hex, derive_sigillum_ethereum_stealth_wallet, encode_erc5564_announce_calldata,
     generate_ethereum_stealth_address, sign_ethereum_eip1559_transaction,
     sign_ethereum_erc20_transfer, sign_ethereum_native_transfer, sign_ethereum_stealth_digest,
     sign_ethereum_stealth_erc20_transfer, sign_ethereum_stealth_native_transfer,

@@ -746,6 +746,22 @@ fn test_eth_stealth_deposit_roundtrip() {
 }
 
 #[test]
+fn test_eth_stealth_announcement_scan_response_roundtrip() {
+    roundtrip_test(EthStealthAnnouncementScanResponse {
+        status: "scanned".to_string(),
+        wallet_profile: "wallet1".to_string(),
+        provider_profile: "mainnet".to_string(),
+        from_block: "0x100".to_string(),
+        to_block: "latest".to_string(),
+        scanned: 10,
+        matched: 2,
+        created: 1,
+        existing: 1,
+        deposits: Vec::new(),
+    });
+}
+
+#[test]
 fn test_queue_job_payload_native_transfer_roundtrip() {
     let payload = QueueJobPayload::EthStealthTransfer {
         wallet_profile: "profile".to_string(),

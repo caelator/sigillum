@@ -12,6 +12,11 @@ use super::{
     parse_quantity_u256,
 };
 
+mod logs;
+
+pub(in crate::service) use logs::EvmLogEntry;
+use logs::parse_log_entry;
+
 #[derive(Serialize)]
 struct JsonRpcRequest<'a> {
     jsonrpc: &'static str,
@@ -132,6 +137,31 @@ impl ProviderRpcClient {
         let native_balance = parse_quantity_u256(&batch_result(&mut by_id, 1, "eth_getBalance")?)?;
         let token_balance = parse_quantity_u256(&batch_result(&mut by_id, 2, "eth_call")?)?;
         Ok((native_balance, token_balance))
+    }
+
+    pub(super) async fn get_logs(
+        &self,
+        address: &str,
+        topics: &[String],
+        from_block: &str,
+        to_block: &str,
+    ) -> ServiceResult<Vec<EvmLogEntry>> {
+        let value = self
+            .request(
+                1,
+                "eth_getLogs",
+                json!([{
+                    "address": normalize_address(address)?,
+                    "fromBlock": from_block,
+                    "toBlock": to_block,
+                    "topics": topics,
+                }]),
+            )
+            .await?;
+        let logs = value.as_array().ok_or_else(|| {
+            ServiceError::internal("Invalid provider response: expected log array")
+        })?;
+        logs.iter().map(parse_log_entry).collect()
     }
 
     pub(super) async fn send_raw_transaction(

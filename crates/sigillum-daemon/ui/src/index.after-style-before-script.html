@@ -618,6 +618,29 @@
 
     <div class="section-divider"></div>
 
+    <div class="section-title">Scan ERC-5564 Announcements</div>
+    <div class="form-row">
+      <select id="depositScanWalletProfile"></select>
+      <input type="text" id="depositScanFromBlock" placeholder="From block tag or 0x block">
+      <input type="text" id="depositScanToBlock" placeholder="To block (optional, latest)">
+      <input type="number" id="depositScanLimit" placeholder="Scan limit" value="1000" class="input-mid">
+    </div>
+    <div class="form-row">
+      <input type="text" id="depositScanTokenAddress" placeholder="Token address (optional)">
+      <input type="text" id="depositScanMinSweep" placeholder="Min sweep amount hex (optional)">
+      <input type="text" id="depositScanDestination" placeholder="Sweep destination (optional)">
+    </div>
+    <div class="form-row">
+      <input type="text" id="depositScanNote" placeholder="Note (optional)">
+      <label class="checkbox-row">
+        <input type="checkbox" id="depositScanAutoQueue" checked>
+        Auto queue sweep
+      </label>
+      <button class="btn-primary" data-action="scanEthStealthAnnouncements">Scan Announcements</button>
+    </div>
+
+    <div class="section-divider"></div>
+
     <div class="form-row">
       <input type="number" id="depositRefreshLimit" placeholder="Refresh limit" value="50" class="input-mid">
       <label class="checkbox-row">

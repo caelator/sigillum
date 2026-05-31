@@ -685,6 +685,22 @@ fn test_eth_stealth_deposit_refresh_request_empty() {
 }
 
 #[test]
+fn test_eth_stealth_announcement_scan_request_roundtrip() {
+    let req = EthStealthAnnouncementScanRequest {
+        wallet_profile: "profile2".to_string(),
+        from_block: "0x100".to_string(),
+        to_block: Some("latest".to_string()),
+        token_address: Some("0xtoken".to_string()),
+        limit: Some(250),
+        auto_queue_sweep: Some(false),
+        sweep_destination_address: Some("0xdest".to_string()),
+        min_sweep_amount_hex: Some("0x10".to_string()),
+        note: Some("scan known claim window".to_string()),
+    };
+    roundtrip_test(req);
+}
+
+#[test]
 fn test_eth_stealth_deposit_enqueue_sweep_request_roundtrip() {
     let req = EthStealthDepositEnqueueSweepRequest {
         id: "deposit_789".to_string(),

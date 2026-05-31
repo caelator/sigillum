@@ -723,6 +723,29 @@ pub struct EthStealthDepositRefreshRequest {
     pub auto_enqueue: Option<bool>,
 }
 
+/// Scan bounded ERC-5564 announcement logs for a stealth wallet profile.
+/// `from_block` is required; `token_address` turns matches into ERC-20 deposit
+/// candidates instead of native deposit candidates.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct EthStealthAnnouncementScanRequest {
+    pub wallet_profile: String,
+    pub from_block: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub to_block: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub token_address: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub limit: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub auto_queue_sweep: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sweep_destination_address: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub min_sweep_amount_hex: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub note: Option<String>,
+}
+
 /// Enqueue a sweep job for a specific deposit.
 ///
 /// `force` bypasses the minimum-value threshold check.

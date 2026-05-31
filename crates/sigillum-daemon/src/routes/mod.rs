@@ -461,6 +461,10 @@ fn deposit_routes() -> AppRouter {
             post(deposits::create_eth_stealth_erc20_deposit),
         )
         .route(
+            "/api/deposits/eth-stealth/scan-announcements",
+            post(deposits::scan_eth_stealth_announcements),
+        )
+        .route(
             "/api/deposits/eth-stealth/delete",
             post(deposits::delete_eth_stealth_deposit),
         )

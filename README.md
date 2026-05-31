@@ -184,12 +184,13 @@ The daemon routes are:
 - `POST /api/wallets/eth-stealth/send-erc20-transfer`
 - `POST /api/wallets/eth-stealth/send-with-profile`
 - `POST /api/wallets/eth-stealth/send-erc20-with-profile`
+- `POST /api/deposits/eth-stealth/scan-announcements`
 
 On top of that, the daemon now includes:
 
 - EVM provider helpers for nonce, balance, ERC-20 balance, and raw-transaction broadcast
 - persistent EVM provider and stealth wallet profiles, each bound to an explicit unlocked compartment
-- persistent stealth deposit records for native ETH and ERC-20 flows
+- persistent stealth deposit records for native ETH and ERC-20 flows, including bounded ERC-5564 announcement-log discovery
 - persistent queue jobs for direct sends and sweep jobs
 - atomic sidecar-backed persistence for profile, deposit, and queue state with
   automatic restore/quarantine behavior
@@ -213,7 +214,7 @@ The embedded UI currently supports:
 - shared daemon/client transport schema via `sigillum-api`
 - persistent pending-operation journal for destructive daemon flows
 - transit-style encrypt/decrypt/HMAC operations derived from the active compartment keyspace
-- ERC-5564-style Ethereum stealth meta-address export, deposit derivation, local announcement checks, and local digest signing
+- ERC-5564-style Ethereum stealth meta-address export, deposit derivation, announcement scanning, local announcement checks, and local digest signing
 - local EIP-1559 native ETH and ERC-20 transfer signing from derived stealth keys
 - EVM provider profile management
 - stealth wallet profile management

@@ -25,6 +25,7 @@ use super::{ServiceError, ServiceResult, SigillumService};
 
 mod rpc;
 
+pub(super) use rpc::EvmLogEntry;
 use rpc::ProviderRpcClient;
 
 // ── Type Definitions ──────────────────────────────────────────────────────
@@ -442,6 +443,24 @@ impl SigillumService {
         .await
     }
 
+    pub(super) async fn evm_logs_for_provider(
+        &self,
+        provider_compartment_id: usize,
+        provider: &sigillum_api::EvmProviderProfile,
+        address: &str,
+        topics: &[String],
+        from_block: &str,
+        to_block: &str,
+    ) -> ServiceResult<Vec<EvmLogEntry>> {
+        self.resolve_provider_rpc_client_for_compartment(
+            provider_compartment_id,
+            &provider.rpc_url,
+            provider.auth_token_key.as_deref(),
+        )?
+        .get_logs(address, topics, from_block, to_block)
+        .await
+    }
+
     pub(super) async fn fetch_balance_observations(
         &self,
         plans: Vec<EvmBalanceObservationPlan>,
@@ -638,6 +657,19 @@ fn normalize_hex_blob(value: &str, label: &str) -> ServiceResult<String> {
         .or_else(|| value.strip_prefix("0X"))
         .unwrap_or(value);
     if raw.is_empty() || !raw.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        return Err(ServiceError::bad_request(format!(
+            "Invalid {label} encoding."
+        )));
+    }
+    Ok(format!("0x{}", raw.to_ascii_lowercase()))
+}
+
+fn normalize_hex_blob_allow_empty(value: &str, label: &str) -> ServiceResult<String> {
+    let raw = value
+        .strip_prefix("0x")
+        .or_else(|| value.strip_prefix("0X"))
+        .unwrap_or(value);
+    if !raw.bytes().all(|byte| byte.is_ascii_hexdigit()) {
         return Err(ServiceError::bad_request(format!(
             "Invalid {label} encoding."
         )));

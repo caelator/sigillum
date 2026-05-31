@@ -1,0 +1,88 @@
+use serde::{Deserialize, Serialize};
+
+use super::{EthStealthAnnouncementPayload, QueueJob};
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct EthStealthDeposit {
+    pub id: String,
+    pub status: String,
+    pub asset_kind: String,
+    pub wallet_profile: String,
+    #[serde(default)]
+    pub wallet_compartment_id: usize,
+    #[serde(default)]
+    pub provider_compartment_id: usize,
+    pub wallet: String,
+    pub short_name: String,
+    pub stealth_meta_address: String,
+    pub stealth_address: String,
+    pub ephemeral_public_key_hex: String,
+    pub view_tag_hex: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub announcement: Option<EthStealthAnnouncementPayload>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub token_address: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub expected_amount_hex: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub observed_amount_hex: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub observed_native_balance_wei_hex: Option<String>,
+    pub auto_queue_sweep: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sweep_destination_address: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub min_sweep_amount_hex: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub queue_job_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub queue_job_state: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub note: Option<String>,
+    pub created_at_unix: u64,
+    pub updated_at_unix: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_checked_at_unix: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub broadcast_transaction_hash_hex: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct EthStealthDepositListResponse {
+    pub deposits: Vec<EthStealthDeposit>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct EthStealthDepositMutationResponse {
+    pub status: String,
+    pub deposit: EthStealthDeposit,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct EthStealthDepositRefreshResponse {
+    pub processed: usize,
+    pub detected: usize,
+    pub queued: usize,
+    pub deposits: Vec<EthStealthDeposit>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct EthStealthAnnouncementScanResponse {
+    pub status: String,
+    pub wallet_profile: String,
+    pub provider_profile: String,
+    pub from_block: String,
+    pub to_block: String,
+    pub scanned: usize,
+    pub matched: usize,
+    pub created: usize,
+    pub existing: usize,
+    pub deposits: Vec<EthStealthDeposit>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct EthStealthDepositEnqueueSweepResponse {
+    pub status: String,
+    pub deposit: EthStealthDeposit,
+    pub job: QueueJob,
+}

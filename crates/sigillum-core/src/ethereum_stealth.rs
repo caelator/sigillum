@@ -793,7 +793,7 @@ fn erc5564_metadata_from_view_tag(value: &str) -> Result<String, EthereumStealth
     Ok(hex::encode(bytes))
 }
 
-fn encode_erc5564_announce_calldata(
+pub fn encode_erc5564_announce_calldata(
     scheme_id: u64,
     stealth_address: &str,
     ephemeral_public_key_hex: &str,

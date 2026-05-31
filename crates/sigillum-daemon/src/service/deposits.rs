@@ -18,15 +18,21 @@
 
 use std::collections::HashMap;
 
+use sha3::{Digest, Keccak256};
 use sigillum_api::{
-    EthStealthDeposit, EthStealthDepositCreateErc20Request, EthStealthDepositCreateNativeRequest,
-    EthStealthDepositDeleteRequest, EthStealthDepositEnqueueSweepRequest,
-    EthStealthDepositEnqueueSweepResponse, EthStealthDepositListResponse,
-    EthStealthDepositMutationResponse, EthStealthDepositRefreshRequest,
-    EthStealthDepositRefreshResponse, EthStealthGenerateRequest, EthStealthWalletProfile,
-    EvmProviderProfile, QueueEnqueueResponse, QueueJob, QueueJobPayload,
+    EthStealthAnnouncementPayload, EthStealthAnnouncementScanRequest,
+    EthStealthAnnouncementScanResponse, EthStealthDeposit, EthStealthDepositCreateErc20Request,
+    EthStealthDepositCreateNativeRequest, EthStealthDepositDeleteRequest,
+    EthStealthDepositEnqueueSweepRequest, EthStealthDepositEnqueueSweepResponse,
+    EthStealthDepositListResponse, EthStealthDepositMutationResponse,
+    EthStealthDepositRefreshRequest, EthStealthDepositRefreshResponse, EthStealthGenerateRequest,
+    EthStealthWalletProfile, EvmProviderProfile, QueueEnqueueResponse, QueueJob, QueueJobPayload,
 };
-use sigillum_core::{VaultLifecycle, decode_quantity_hex, derive_sigillum_ethereum_stealth_wallet};
+use sigillum_core::{
+    ERC5564_ANNOUNCE_FUNCTION, ERC5564_ANNOUNCER_ADDRESS, ETHEREUM_STEALTH_SCHEME_ID,
+    EthereumStealthError, VaultLifecycle, check_ethereum_stealth_address, decode_quantity_hex,
+    derive_sigillum_ethereum_stealth_wallet, encode_erc5564_announce_calldata,
+};
 
 use crate::audit_log::{AuditEventSpec, AuditQueueJobKind};
 
@@ -34,6 +40,10 @@ use super::helpers::{
     compare_u256, is_zero_u256, map_wallet_error, multiply_u256_u64, now_unix, random_id,
 };
 use super::{ServiceError, ServiceResult, SigillumService};
+
+const DEFAULT_ANNOUNCEMENT_SCAN_LIMIT: usize = 1_000;
+const MAX_ANNOUNCEMENT_SCAN_LIMIT: usize = 10_000;
+const ERC5564_DISCOVERY_SOURCE: &str = "erc5564-announcement";
 
 // ── Deposit Blueprint & Plans ──────────────────────────────────────────────
 
@@ -54,11 +64,101 @@ struct DepositBlueprint {
     note: Option<String>,
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn abi_word(value: usize) -> String {
+        format!("{value:064x}")
+    }
+
+    fn abi_dynamic_bytes(bytes: &[u8]) -> String {
+        let mut out = abi_word(bytes.len());
+        let mut padded = bytes.to_vec();
+        let padding = (32 - (padded.len() % 32)) % 32;
+        padded.resize(padded.len() + padding, 0);
+        out.push_str(&hex::encode(padded));
+        out
+    }
+
+    fn padded_address_topic(address: &str) -> String {
+        let raw = address.trim_start_matches("0x");
+        format!("0x{raw:0>64}")
+    }
+
+    #[test]
+    fn decodes_standard_erc5564_announcement_log() {
+        let stealth_address = "0x1111111111111111111111111111111111111111";
+        let caller_address = "0x2222222222222222222222222222222222222222";
+        let ephemeral_public_key = vec![0x03; 33];
+        let metadata = vec![0x7f, 0xaa, 0xbb];
+        let first_tail = abi_dynamic_bytes(&ephemeral_public_key);
+        let second_offset = 64 + first_tail.len() / 2;
+        let data = format!(
+            "0x{}{}{}{}",
+            abi_word(64),
+            abi_word(second_offset),
+            first_tail,
+            abi_dynamic_bytes(&metadata),
+        );
+        let log = super::super::evm::EvmLogEntry {
+            address: ERC5564_ANNOUNCER_ADDRESS.into(),
+            topics: vec![
+                erc5564_announcement_topic(),
+                padded_u64_topic(ETHEREUM_STEALTH_SCHEME_ID),
+                padded_address_topic(stealth_address),
+                padded_address_topic(caller_address),
+            ],
+            data,
+            block_number: Some("0xabc".into()),
+            transaction_hash: Some(format!("0x{}", "33".repeat(32))),
+            log_index: Some("0x1".into()),
+        };
+
+        let event = decode_erc5564_announcement_log(&log).unwrap();
+
+        assert_eq!(event.stealth_address, stealth_address);
+        assert_eq!(event.caller_address.as_deref(), Some(caller_address));
+        assert_eq!(
+            event.ephemeral_public_key_hex,
+            hex::encode(ephemeral_public_key)
+        );
+        assert_eq!(event.metadata_hex, hex::encode(metadata));
+        assert_eq!(event.view_tag_hex, "7f");
+        assert_eq!(event.block_number.as_deref(), Some("0xabc"));
+    }
+
+    #[test]
+    fn normalizes_log_block_tags_and_quantities() {
+        assert_eq!(
+            normalize_log_block_tag(" latest ", "from_block").unwrap(),
+            "latest"
+        );
+        assert_eq!(
+            normalize_log_block_tag("0X000abc", "from_block").unwrap(),
+            "0x000abc"
+        );
+        assert!(normalize_log_block_tag("123", "from_block").is_err());
+    }
+}
+
 #[derive(Clone)]
 struct DepositRefreshPlan {
     deposit_index: usize,
     provider: EvmProviderProfile,
     wallet: EthStealthWalletProfile,
+}
+
+#[derive(Clone, Debug)]
+struct Erc5564AnnouncementEvent {
+    stealth_address: String,
+    caller_address: Option<String>,
+    ephemeral_public_key_hex: String,
+    metadata_hex: String,
+    view_tag_hex: String,
+    block_number: Option<String>,
+    transaction_hash: Option<String>,
+    log_index: Option<String>,
 }
 
 // ── Deposit Creation & Deletion ────────────────────────────────────────────
@@ -73,6 +173,165 @@ impl SigillumService {
             .map_err(|error| ServiceError::internal(format!("Failed to load deposits: {error}")))?;
         Ok(EthStealthDepositListResponse {
             deposits: deposits.eth_stealth,
+        })
+    }
+
+    pub(crate) async fn scan_eth_stealth_announcements(
+        &self,
+        token: Option<&str>,
+        body: EthStealthAnnouncementScanRequest,
+    ) -> ServiceResult<EthStealthAnnouncementScanResponse> {
+        let token = self.require_session(token)?;
+        let from_block = normalize_log_block_tag(&body.from_block, "from_block")?;
+        let to_block = body
+            .to_block
+            .as_deref()
+            .map(|value| normalize_log_block_tag(value, "to_block"))
+            .transpose()?
+            .unwrap_or_else(|| "latest".into());
+        let limit = validated_announcement_scan_limit(body.limit)?;
+        let token_address = body
+            .token_address
+            .as_deref()
+            .map(super::evm::normalize_address)
+            .transpose()?;
+        validate_optional_quantity(body.min_sweep_amount_hex.as_deref(), "min_sweep_amount")?;
+        let (provider, wallet) = self.resolve_wallet_profile(&body.wallet_profile)?;
+        let asset_kind = if token_address.is_some() {
+            "erc20"
+        } else {
+            "native"
+        };
+
+        let derived_wallet = self.with_vault(wallet.compartment_id, |vault| {
+            let master_key = vault
+                .extract_master_key()
+                .ok_or_else(|| ServiceError::forbidden("Wallet compartment is locked."))?;
+            derive_sigillum_ethereum_stealth_wallet(
+                master_key.as_ref(),
+                &wallet.wallet,
+                &wallet.short_name,
+            )
+            .map_err(map_wallet_error)
+        })?;
+
+        let topics = vec![
+            erc5564_announcement_topic(),
+            padded_u64_topic(ETHEREUM_STEALTH_SCHEME_ID),
+        ];
+        let logs = self
+            .evm_logs_for_provider(
+                provider.compartment_id,
+                &provider,
+                ERC5564_ANNOUNCER_ADDRESS,
+                &topics,
+                &from_block,
+                &to_block,
+            )
+            .await?;
+
+        let _guard = self.state.operation_guard().await;
+        let mut deposits = crate::deposits::load_deposits(&self.state.base_dir)
+            .map_err(|error| ServiceError::internal(format!("Failed to load deposits: {error}")))?;
+        let now = now_unix();
+        let mut matched = 0usize;
+        let mut created = 0usize;
+        let mut existing = 0usize;
+        let mut response_deposits = Vec::new();
+
+        for log in logs.iter().take(limit) {
+            let event = decode_erc5564_announcement_log(log)?;
+            let view_tag = hex::decode(&event.view_tag_hex)
+                .ok()
+                .and_then(|bytes| bytes.first().copied());
+            let check = match check_ethereum_stealth_address(
+                &derived_wallet,
+                &event.stealth_address,
+                &event.ephemeral_public_key_hex,
+                view_tag,
+            ) {
+                Ok(check) => check,
+                Err(EthereumStealthError::ViewTagMismatch) => continue,
+                Err(error) => return Err(map_wallet_error(error)),
+            };
+            if !check.matches {
+                continue;
+            }
+            matched += 1;
+
+            if let Some(existing_deposit) = deposits.eth_stealth.iter().find(|deposit| {
+                discovered_deposit_matches(deposit, &wallet, &event, asset_kind, &token_address)
+            }) {
+                existing += 1;
+                response_deposits.push(existing_deposit.clone());
+                continue;
+            }
+
+            let deposit = EthStealthDeposit {
+                id: random_id(),
+                status: "pending".into(),
+                asset_kind: asset_kind.into(),
+                wallet_profile: wallet.name.clone(),
+                wallet_compartment_id: wallet.compartment_id,
+                provider_compartment_id: provider.compartment_id,
+                wallet: wallet.wallet.clone(),
+                short_name: wallet.short_name.clone(),
+                stealth_meta_address: derived_wallet.meta_address().stealth_meta_address.clone(),
+                stealth_address: event.stealth_address.clone(),
+                ephemeral_public_key_hex: event.ephemeral_public_key_hex.clone(),
+                view_tag_hex: check.view_tag_hex.clone(),
+                announcement: Some(discovered_announcement_payload(&event)?),
+                token_address: token_address.clone(),
+                expected_amount_hex: None,
+                observed_amount_hex: None,
+                observed_native_balance_wei_hex: None,
+                auto_queue_sweep: body.auto_queue_sweep.unwrap_or(false),
+                sweep_destination_address: body
+                    .sweep_destination_address
+                    .clone()
+                    .or_else(|| wallet.default_destination_address.clone()),
+                min_sweep_amount_hex: body.min_sweep_amount_hex.clone(),
+                queue_job_id: None,
+                queue_job_state: None,
+                note: Some(discovery_note(&event, body.note.as_deref())),
+                created_at_unix: now,
+                updated_at_unix: now,
+                last_checked_at_unix: None,
+                broadcast_transaction_hash_hex: None,
+            };
+            created += 1;
+            response_deposits.push(deposit.clone());
+            deposits.eth_stealth.push(deposit);
+        }
+
+        deposits
+            .eth_stealth
+            .sort_by(|left, right| left.created_at_unix.cmp(&right.created_at_unix));
+        crate::deposits::save_deposits(&self.state.base_dir, &deposits)
+            .map_err(|error| ServiceError::internal(format!("Failed to save deposits: {error}")))?;
+
+        self.record_audit(
+            self.state.active_compartment_id_for(token),
+            AuditEventSpec::DepositsEthStealthAnnouncementScan {
+                wallet_profile: wallet.name.clone(),
+                provider_profile: provider.name.clone(),
+                scanned: logs.len().min(limit),
+                matched,
+                created,
+            },
+        )?;
+
+        Ok(EthStealthAnnouncementScanResponse {
+            status: "scanned".into(),
+            wallet_profile: wallet.name,
+            provider_profile: provider.name,
+            from_block,
+            to_block,
+            scanned: logs.len().min(limit),
+            matched,
+            created,
+            existing,
+            deposits: response_deposits,
         })
     }
 
@@ -646,6 +905,197 @@ fn gas_balance_sufficient_for_erc20(
         None => true,
     };
     Ok(min_amount_ready && compare_u256(native_balance, &gas_cost).is_ge())
+}
+
+fn validated_announcement_scan_limit(limit: Option<usize>) -> ServiceResult<usize> {
+    let limit = limit.unwrap_or(DEFAULT_ANNOUNCEMENT_SCAN_LIMIT);
+    if limit == 0 || limit > MAX_ANNOUNCEMENT_SCAN_LIMIT {
+        return Err(ServiceError::bad_request(format!(
+            "limit must be between 1 and {MAX_ANNOUNCEMENT_SCAN_LIMIT}"
+        )));
+    }
+    Ok(limit)
+}
+
+fn normalize_log_block_tag(value: &str, label: &str) -> ServiceResult<String> {
+    let trimmed = value.trim();
+    if matches!(
+        trimmed,
+        "earliest" | "latest" | "pending" | "safe" | "finalized"
+    ) {
+        return Ok(trimmed.into());
+    }
+    let raw = trimmed
+        .strip_prefix("0x")
+        .or_else(|| trimmed.strip_prefix("0X"))
+        .ok_or_else(|| {
+            ServiceError::bad_request(format!("{label} must be a block tag or 0x quantity"))
+        })?;
+    if raw.is_empty() || !raw.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        return Err(ServiceError::bad_request(format!(
+            "{label} must be a block tag or 0x quantity"
+        )));
+    }
+    Ok(format!("0x{}", raw.to_ascii_lowercase()))
+}
+
+fn erc5564_announcement_topic() -> String {
+    let digest = Keccak256::digest(b"Announcement(uint256,address,address,bytes,bytes)");
+    format!("0x{}", hex::encode(digest))
+}
+
+fn padded_u64_topic(value: u64) -> String {
+    let mut word = [0u8; 32];
+    word[24..].copy_from_slice(&value.to_be_bytes());
+    format!("0x{}", hex::encode(word))
+}
+
+fn decode_erc5564_announcement_log(
+    log: &super::evm::EvmLogEntry,
+) -> ServiceResult<Erc5564AnnouncementEvent> {
+    if log.topics.len() < 3 {
+        return Err(ServiceError::internal(
+            "Provider ERC-5564 announcement log is missing indexed topics",
+        ));
+    }
+    let stealth_address = topic_address(&log.topics[2], "stealth address")?;
+    let caller_address = log
+        .topics
+        .get(3)
+        .map(|topic| topic_address(topic, "caller address"))
+        .transpose()?;
+    let data = decode_prefixed_hex(&log.data, "announcement data")?;
+    let ephemeral_public_key = decode_abi_dynamic_bytes(&data, abi_word_as_usize(&data, 0)?)?;
+    let metadata = decode_abi_dynamic_bytes(&data, abi_word_as_usize(&data, 32)?)?;
+    let view_tag = metadata.first().ok_or_else(|| {
+        ServiceError::internal("Provider ERC-5564 announcement metadata is missing view tag")
+    })?;
+    let view_tag_hex = hex::encode([*view_tag]);
+    Ok(Erc5564AnnouncementEvent {
+        stealth_address,
+        caller_address,
+        ephemeral_public_key_hex: hex::encode(ephemeral_public_key),
+        metadata_hex: hex::encode(metadata),
+        view_tag_hex,
+        block_number: log.block_number.clone(),
+        transaction_hash: log.transaction_hash.clone(),
+        log_index: log.log_index.clone(),
+    })
+}
+
+fn topic_address(topic: &str, label: &str) -> ServiceResult<String> {
+    let bytes = decode_prefixed_hex(topic, label)?;
+    if bytes.len() != 32 {
+        return Err(ServiceError::internal(format!(
+            "Provider ERC-5564 topic has invalid {label} length"
+        )));
+    }
+    Ok(format!("0x{}", hex::encode(&bytes[12..])))
+}
+
+fn decode_prefixed_hex(value: &str, label: &str) -> ServiceResult<Vec<u8>> {
+    let raw = value
+        .strip_prefix("0x")
+        .or_else(|| value.strip_prefix("0X"))
+        .unwrap_or(value);
+    if raw.len() % 2 != 0 || !raw.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        return Err(ServiceError::internal(format!(
+            "Provider ERC-5564 {label} is not valid hex"
+        )));
+    }
+    hex::decode(raw).map_err(|error| {
+        ServiceError::internal(format!("Provider ERC-5564 {label} decode failed: {error}"))
+    })
+}
+
+fn abi_word_as_usize(data: &[u8], offset: usize) -> ServiceResult<usize> {
+    let word = data.get(offset..offset + 32).ok_or_else(|| {
+        ServiceError::internal("Provider ERC-5564 announcement data is truncated")
+    })?;
+    let mut value = 0usize;
+    for byte in word {
+        value = value
+            .checked_mul(256)
+            .ok_or_else(|| ServiceError::internal("Provider ERC-5564 ABI offset is too large"))?;
+        value = value
+            .checked_add(*byte as usize)
+            .ok_or_else(|| ServiceError::internal("Provider ERC-5564 ABI offset is too large"))?;
+    }
+    Ok(value)
+}
+
+fn decode_abi_dynamic_bytes(data: &[u8], offset: usize) -> ServiceResult<Vec<u8>> {
+    let len = abi_word_as_usize(data, offset)?;
+    let start = offset
+        .checked_add(32)
+        .ok_or_else(|| ServiceError::internal("Provider ERC-5564 ABI offset is too large"))?;
+    let end = start
+        .checked_add(len)
+        .ok_or_else(|| ServiceError::internal("Provider ERC-5564 ABI length is too large"))?;
+    let bytes = data.get(start..end).ok_or_else(|| {
+        ServiceError::internal("Provider ERC-5564 announcement bytes are truncated")
+    })?;
+    Ok(bytes.to_vec())
+}
+
+fn discovered_deposit_matches(
+    deposit: &EthStealthDeposit,
+    wallet: &EthStealthWalletProfile,
+    event: &Erc5564AnnouncementEvent,
+    asset_kind: &str,
+    token_address: &Option<String>,
+) -> bool {
+    deposit.wallet_profile == wallet.name
+        && deposit.asset_kind == asset_kind
+        && deposit
+            .stealth_address
+            .eq_ignore_ascii_case(&event.stealth_address)
+        && deposit
+            .ephemeral_public_key_hex
+            .eq_ignore_ascii_case(&event.ephemeral_public_key_hex)
+        && deposit.token_address.as_ref() == token_address.as_ref()
+}
+
+fn discovered_announcement_payload(
+    event: &Erc5564AnnouncementEvent,
+) -> ServiceResult<EthStealthAnnouncementPayload> {
+    let calldata_hex = encode_erc5564_announce_calldata(
+        ETHEREUM_STEALTH_SCHEME_ID,
+        &event.stealth_address,
+        &event.ephemeral_public_key_hex,
+        &event.metadata_hex,
+    )
+    .map_err(map_wallet_error)?;
+    Ok(EthStealthAnnouncementPayload {
+        announcer_address: ERC5564_ANNOUNCER_ADDRESS.into(),
+        announce_function: ERC5564_ANNOUNCE_FUNCTION.into(),
+        scheme_id: ETHEREUM_STEALTH_SCHEME_ID,
+        stealth_address: event.stealth_address.clone(),
+        ephemeral_public_key_hex: event.ephemeral_public_key_hex.clone(),
+        metadata_hex: event.metadata_hex.clone(),
+        calldata_hex,
+        value_wei_hex: "0x0".into(),
+    })
+}
+
+fn discovery_note(event: &Erc5564AnnouncementEvent, operator_note: Option<&str>) -> String {
+    let mut parts = vec![ERC5564_DISCOVERY_SOURCE.to_string()];
+    if let Some(block) = event.block_number.as_deref() {
+        parts.push(format!("block={block}"));
+    }
+    if let Some(tx) = event.transaction_hash.as_deref() {
+        parts.push(format!("tx={tx}"));
+    }
+    if let Some(log_index) = event.log_index.as_deref() {
+        parts.push(format!("log={log_index}"));
+    }
+    if let Some(caller) = event.caller_address.as_deref() {
+        parts.push(format!("caller={caller}"));
+    }
+    if let Some(note) = operator_note.filter(|note| !note.trim().is_empty()) {
+        parts.push(format!("note={}", note.trim()));
+    }
+    parts.join("; ")
 }
 
 // ── Queue Synchronization ─────────────────────────────────────────────────

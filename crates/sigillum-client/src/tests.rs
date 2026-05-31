@@ -850,6 +850,57 @@ async fn deposits_refresh_route(
     )
 }
 
+async fn deposits_scan_announcements_route(
+    headers: HeaderMap,
+    Json(body): Json<serde_json::Value>,
+) -> (StatusCode, Json<serde_json::Value>) {
+    let auth = headers
+        .get(header::AUTHORIZATION)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("");
+    if auth != "Bearer test-token" {
+        return (
+            StatusCode::UNAUTHORIZED,
+            Json(json!({ "error": "missing auth" })),
+        );
+    }
+    (
+        StatusCode::OK,
+        Json(json!({
+            "status": "scanned",
+            "wallet_profile": body["wallet_profile"],
+            "provider_profile": "mainnet",
+            "from_block": body["from_block"],
+            "to_block": body.get("to_block").cloned().unwrap_or(json!("latest")),
+            "scanned": 2,
+            "matched": 1,
+            "created": 1,
+            "existing": 0,
+            "deposits": [{
+                "id": "dep-announced",
+                "status": "pending",
+                "asset_kind": if body.get("token_address").is_some() { "erc20" } else { "native" },
+                "wallet_profile": body["wallet_profile"],
+                "wallet_compartment_id": 0,
+                "provider_compartment_id": 0,
+                "wallet": "payments",
+                "short_name": "eth",
+                "stealth_meta_address": "st:eth:0x1234",
+                "stealth_address": "0xcccccccccccccccccccccccccccccccccccccccc",
+                "ephemeral_public_key_hex": "03".repeat(33),
+                "view_tag_hex": "01",
+                "token_address": body.get("token_address"),
+                "auto_queue_sweep": body.get("auto_queue_sweep").cloned().unwrap_or(json!(false)),
+                "sweep_destination_address": body.get("sweep_destination_address"),
+                "min_sweep_amount_hex": body.get("min_sweep_amount_hex"),
+                "note": "erc5564-announcement; block=0x100",
+                "created_at_unix": 4,
+                "updated_at_unix": 4
+            }]
+        })),
+    )
+}
+
 async fn deposits_delete_route(
     headers: HeaderMap,
     Json(body): Json<serde_json::Value>,
@@ -1118,6 +1169,10 @@ async fn spawn_test_server() -> SocketAddr {
         .route(
             "/api/deposits/eth-stealth/create-erc20",
             post(deposits_create_route),
+        )
+        .route(
+            "/api/deposits/eth-stealth/scan-announcements",
+            post(deposits_scan_announcements_route),
         )
         .route(
             "/api/deposits/eth-stealth/delete",
@@ -1644,6 +1699,23 @@ async fn profile_and_queue_helpers_roundtrip_response_shapes() {
         erc20_deposit.deposit.token_address.as_deref(),
         Some("0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48")
     );
+
+    let announced = client
+        .scan_eth_stealth_announcements(EthStealthAnnouncementScanRequest {
+            wallet_profile: "payments-mainnet".into(),
+            from_block: "0x100".into(),
+            to_block: Some("latest".into()),
+            token_address: Some("0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48".into()),
+            limit: Some(100),
+            auto_queue_sweep: Some(false),
+            sweep_destination_address: Some("0x1111111111111111111111111111111111111111".into()),
+            min_sweep_amount_hex: Some("0xf4240".into()),
+            note: None,
+        })
+        .await
+        .unwrap();
+    assert_eq!(announced.created, 1);
+    assert_eq!(announced.deposits[0].id, "dep-announced");
 
     let refreshed = client
         .refresh_eth_stealth_deposits(EthStealthDepositRefreshRequest {

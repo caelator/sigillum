@@ -40,20 +40,21 @@ use sigillum_api::request::{
     BiometricEnrollRequest, BiometricUnlockRequest, ChainProfileDeleteRequest,
     ChainProfileUpsertRequest, CompartmentSwitchRequest, ConsolidationPlanApproveRequest,
     ConsolidationPlanGenerateRequest, DiscoveryJobMutationRequest,
-    EthSeedWalletProfileUpsertRequest, EthStealthCheckRequest, EthStealthDepositCreateErc20Request,
-    EthStealthDepositCreateNativeRequest, EthStealthDepositDeleteRequest,
-    EthStealthDepositEnqueueSweepRequest, EthStealthDepositRefreshRequest, EthStealthExportRequest,
-    EthStealthGenerateRequest, EthStealthSendErc20TransferRequest,
-    EthStealthSendErc20WithProfileRequest, EthStealthSendTransferRequest,
-    EthStealthSendWithProfileRequest, EthStealthSignErc20TransferRequest, EthStealthSignRequest,
-    EthStealthSignTransferRequest, EthStealthWalletProfileUpsertRequest, EthXpubDeriveRequest,
-    EthXpubExportRequest, EthXpubWalletProfileUpsertRequest, EvmProfileDeleteRequest,
-    EvmProviderProfileUpsertRequest, EvmRpcBalanceRequest, EvmRpcBroadcastRequest,
-    EvmRpcErc20BalanceRequest, EvmRpcNonceRequest, Fido2RegisterRequest, Fido2RemoveRequest,
-    Fido2SetupRequest, Fido2UnlockRequest, GenerateStoreRequest, KeyOnlyRequest, KeyValueRequest,
-    MaintenanceRunRequest, PassphraseRequest, RunAuditRequest, SecretResolveBatchRequest,
-    SnapshotRestoreRequest, StealthPaymentRef, TransitDecryptRequest, TransitEncryptRequest,
-    TransitHmacRequest, WalletInventoryScanRequest,
+    EthSeedWalletProfileUpsertRequest, EthStealthAnnouncementScanRequest, EthStealthCheckRequest,
+    EthStealthDepositCreateErc20Request, EthStealthDepositCreateNativeRequest,
+    EthStealthDepositDeleteRequest, EthStealthDepositEnqueueSweepRequest,
+    EthStealthDepositRefreshRequest, EthStealthExportRequest, EthStealthGenerateRequest,
+    EthStealthSendErc20TransferRequest, EthStealthSendErc20WithProfileRequest,
+    EthStealthSendTransferRequest, EthStealthSendWithProfileRequest,
+    EthStealthSignErc20TransferRequest, EthStealthSignRequest, EthStealthSignTransferRequest,
+    EthStealthWalletProfileUpsertRequest, EthXpubDeriveRequest, EthXpubExportRequest,
+    EthXpubWalletProfileUpsertRequest, EvmProfileDeleteRequest, EvmProviderProfileUpsertRequest,
+    EvmRpcBalanceRequest, EvmRpcBroadcastRequest, EvmRpcErc20BalanceRequest, EvmRpcNonceRequest,
+    Fido2RegisterRequest, Fido2RemoveRequest, Fido2SetupRequest, Fido2UnlockRequest,
+    GenerateStoreRequest, KeyOnlyRequest, KeyValueRequest, MaintenanceRunRequest,
+    PassphraseRequest, RunAuditRequest, SecretResolveBatchRequest, SnapshotRestoreRequest,
+    StealthPaymentRef, TransitDecryptRequest, TransitEncryptRequest, TransitHmacRequest,
+    WalletInventoryScanRequest,
 };
 pub use sigillum_api::response::Fido2StatusResponse as DaemonFido2Status;
 pub use sigillum_api::response::{
@@ -63,8 +64,8 @@ pub use sigillum_api::response::{
     ConsolidationPlanMutationResponse, ConsolidationPlanStep, ConsolidationPlanSummary,
     DiagnosticsResponse, DiscoveryJobListResponse, DiscoveryJobMutationResponse, ErrorResponse,
     EthSeedWalletProfile, EthSeedWalletProfileListResponse, EthSeedWalletProfileMutationResponse,
-    EthSignedTransactionResponse, EthStealthCheckResponse, EthStealthDeposit,
-    EthStealthDepositEnqueueSweepResponse, EthStealthDepositListResponse,
+    EthSignedTransactionResponse, EthStealthAnnouncementScanResponse, EthStealthCheckResponse,
+    EthStealthDeposit, EthStealthDepositEnqueueSweepResponse, EthStealthDepositListResponse,
     EthStealthDepositMutationResponse, EthStealthDepositRefreshResponse,
     EthStealthGenerateResponse, EthStealthMetaAddressResponse, EthStealthSendResponse,
     EthStealthSignResponse, EthStealthWalletProfile, EthStealthWalletProfileListResponse,
@@ -941,6 +942,16 @@ impl SigillumClient {
     ) -> Result<EthStealthDepositMutationResponse, ClientError> {
         let builder = self
             .request(Method::POST, "/api/deposits/eth-stealth/create-erc20")
+            .json(&request);
+        self.send(builder).await
+    }
+
+    pub async fn scan_eth_stealth_announcements(
+        &self,
+        request: EthStealthAnnouncementScanRequest,
+    ) -> Result<EthStealthAnnouncementScanResponse, ClientError> {
+        let builder = self
+            .request(Method::POST, "/api/deposits/eth-stealth/scan-announcements")
             .json(&request);
         self.send(builder).await
     }

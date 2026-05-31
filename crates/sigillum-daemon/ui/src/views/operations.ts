@@ -242,6 +242,51 @@ export function createOperationsActions(deps: OperationsDeps) {
     deps.refresh();
   }
 
+  async function scanEthStealthAnnouncements(): Promise<void> {
+    const walletProfile = textValue("depositScanWalletProfile");
+    const fromBlock = textValue("depositScanFromBlock");
+    if (!walletProfile || !fromBlock) {
+      deps.toast("Wallet profile and from block are required", "error");
+      return;
+    }
+    const r = await deps.api("POST", "/api/deposits/eth-stealth/scan-announcements", {
+      wallet_profile: walletProfile,
+      from_block: fromBlock,
+      to_block: optionalTextValue("depositScanToBlock"),
+      token_address: optionalTextValue("depositScanTokenAddress"),
+      limit: optionalNumberValue("depositScanLimit"),
+      auto_queue_sweep: input("depositScanAutoQueue").checked,
+      sweep_destination_address: optionalTextValue("depositScanDestination"),
+      min_sweep_amount_hex: optionalTextValue("depositScanMinSweep"),
+      note: optionalTextValue("depositScanNote"),
+    });
+    if (r.error) {
+      deps.toast(r.error, "error");
+      return;
+    }
+    deps.showResultBox(
+      "depositRefreshResult",
+      "scanned=" +
+        esc(String(r.scanned || 0)) +
+        " · matched=" +
+        esc(String(r.matched || 0)) +
+        " · created=" +
+        esc(String(r.created || 0)) +
+        " · existing=" +
+        esc(String(r.existing || 0)),
+    );
+    clearFields([
+      "depositScanToBlock",
+      "depositScanTokenAddress",
+      "depositScanMinSweep",
+      "depositScanDestination",
+      "depositScanNote",
+    ]);
+    await loadDepositRegistry();
+    deps.updateNextStepCard();
+    deps.toast("Announcement scan completed");
+  }
+
   async function refreshDepositRegistry(): Promise<void> {
     const r = await deps.api("POST", "/api/deposits/eth-stealth/refresh", {
       id: null,
@@ -473,6 +518,7 @@ export function createOperationsActions(deps: OperationsDeps) {
     loadDepositRegistry,
     createNativeDeposit,
     createErc20Deposit,
+    scanEthStealthAnnouncements,
     refreshDepositRegistry,
     refreshSingleDeposit,
     enqueueDepositSweep,

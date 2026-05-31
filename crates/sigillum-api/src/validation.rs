@@ -649,6 +649,23 @@ impl Validate for crate::request::EthStealthDepositRefreshRequest {
     }
 }
 
+impl Validate for crate::request::EthStealthAnnouncementScanRequest {
+    fn validate(&self) -> Result<(), String> {
+        check_len("wallet_profile", &self.wallet_profile, MAX_LABEL)?;
+        check_len("from_block", &self.from_block, MAX_LABEL)?;
+        check_optional_len("to_block", &self.to_block, MAX_LABEL)?;
+        check_optional_len("token_address", &self.token_address, MAX_ADDRESS)?;
+        check_optional_len(
+            "sweep_destination_address",
+            &self.sweep_destination_address,
+            MAX_ADDRESS,
+        )?;
+        check_optional_len("min_sweep_amount_hex", &self.min_sweep_amount_hex, MAX_HEX)?;
+        check_optional_len("note", &self.note, MAX_NOTE)?;
+        Ok(())
+    }
+}
+
 impl Validate for crate::request::EthStealthDepositEnqueueSweepRequest {
     fn validate(&self) -> Result<(), String> {
         check_len("id", &self.id, MAX_ID)?;
