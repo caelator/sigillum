@@ -30,6 +30,28 @@ async fn spawn_mock_evm_provider() -> (SocketAddr, tokio::task::JoinHandle<()>) 
             "eth_getTransactionCount" => json!("0x7"),
             "eth_getBalance" => json!("0xde0b6b3a7640000"),
             "eth_call" => json!("0x0f4240"),
+            "eth_getLogs" => {
+                let filter = &request["params"][0];
+                let fallback_topic = format!("0x{}", "00".repeat(32));
+                let topics = filter["topics"].as_array().cloned().unwrap_or_default();
+                let log_topics = topics
+                    .iter()
+                    .map(|topic| {
+                        topic
+                            .as_str()
+                            .map(|value| json!(value))
+                            .unwrap_or_else(|| json!(fallback_topic))
+                    })
+                    .collect::<Vec<_>>();
+                json!([{
+                    "address": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+                    "topics": log_topics,
+                    "data": format!("0x{}0f4240", "0".repeat(58)),
+                    "blockNumber": "0x10",
+                    "transactionHash": format!("0x{}", "44".repeat(32)),
+                    "logIndex": "0x0"
+                }])
+            }
             "eth_sendRawTransaction" => json!(format!("0x{}", "11".repeat(32))),
             other => json!({ "unsupported": other }),
         };
@@ -1349,6 +1371,104 @@ async fn wallet_inventory_scan_records_seed_profile_native_holdings() {
     assert_eq!(list_json["jobs"].as_array().unwrap().len(), 1);
     assert_eq!(list_json["addresses"].as_array().unwrap().len(), 4);
     assert_eq!(list_json["holdings"].as_array().unwrap().len(), 4);
+
+    handle.abort();
+    rpc_handle.abort();
+}
+
+#[tokio::test]
+async fn wallet_inventory_scan_discovers_erc20_tokens_from_transfer_logs() {
+    let dir = TempDir::new().unwrap();
+    let (addr, handle) = spawn_daemon(dir.path().to_path_buf()).await;
+    let (rpc_addr, rpc_handle) = spawn_mock_evm_provider().await;
+    let client = reqwest::Client::new();
+
+    let init = post_json(
+        &client,
+        addr,
+        "/api/compartment/init",
+        json!({
+            "id": 0,
+            "label": "default",
+            "threshold": 1,
+            "passphrase": "correct horse battery staple",
+        }),
+        None,
+    )
+    .await;
+    let init_json: serde_json::Value = init.json().await.unwrap();
+    let token = init_json["session_token"].as_str().unwrap().to_string();
+
+    post_json(
+        &client,
+        addr,
+        "/api/api-keys/set",
+        json!({ "key": "alchemy", "value": "rpc-test-token" }),
+        Some(&token),
+    )
+    .await;
+
+    post_json(
+        &client,
+        addr,
+        "/api/profiles/evm/upsert",
+        json!({
+            "name": "mainnet",
+            "rpc_url": format!("http://{rpc_addr}/"),
+            "auth_token_key": "alchemy",
+            "chain_id": 1,
+        }),
+        Some(&token),
+    )
+    .await;
+
+    let seed = post_json(
+        &client,
+        addr,
+        "/api/profiles/eth-seed/upsert",
+        json!({
+            "name": "seed-main",
+            "label": "Seed main",
+            "mnemonic": "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about",
+            "project_account": 0,
+            "provider_profile": "mainnet",
+        }),
+        Some(&token),
+    )
+    .await;
+    assert_eq!(seed.status(), StatusCode::OK);
+
+    let scan = post_json(
+        &client,
+        addr,
+        "/api/inventory/scan/evm",
+        json!({
+            "wallet_family": "eth-seed",
+            "wallet_profile": "seed-main",
+            "provider_profile": "mainnet",
+            "gap_limit": 1,
+            "max_index": 0,
+            "discover_erc20_transfers": true,
+            "token_discovery_from_block": "0x0",
+            "token_discovery_limit": 4
+        }),
+        Some(&token),
+    )
+    .await;
+    assert_eq!(scan.status(), StatusCode::OK);
+    let scan_json: serde_json::Value = scan.json().await.unwrap();
+    assert_eq!(scan_json["job"]["status"], "completed");
+    assert_eq!(scan_json["job"]["addresses_scanned"], 4);
+    assert_eq!(scan_json["job"]["holdings_detected"], 8);
+
+    let holdings = scan_json["holdings"].as_array().unwrap();
+    assert_eq!(holdings.len(), 8);
+    assert!(holdings.iter().any(|holding| {
+        holding["asset_kind"] == "erc20"
+            && holding["asset_address"] == "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"
+            && holding["amount_hex"] == "0xf4240"
+            && holding["source"] == "erc20-transfer-log"
+    }));
 
     handle.abort();
     rpc_handle.abort();

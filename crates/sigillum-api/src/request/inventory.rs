@@ -1,0 +1,91 @@
+//! Wallet inventory and discovery request contracts.
+
+use serde::{Deserialize, Serialize};
+
+/// Run read-only EVM wallet discovery for imported seed and xpub profiles.
+///
+/// When no wallet filter is provided, all `eth-seed` and `eth-xpub` profiles
+/// are scanned. When no provider filter is provided, every configured EVM
+/// provider profile is scanned so one derived address can be checked across
+/// multiple L1/L2 networks.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct WalletInventoryScanRequest {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub wallet_family: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub wallet_profile: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub provider_profile: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub gap_limit: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_index: Option<u32>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub token_addresses: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub block_tag: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub discover_erc20_transfers: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub token_discovery_from_block: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub token_discovery_to_block: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub token_discovery_limit: Option<usize>,
+}
+
+/// Create or update a local chain profile used by discovery and planning.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ChainProfileUpsertRequest {
+    pub name: String,
+    pub chain_family: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub chain_id: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub provider_profile: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub native_symbol: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub explorer_url: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub capabilities: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub enabled: Option<bool>,
+}
+
+/// Delete a local chain profile.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ChainProfileDeleteRequest {
+    pub name: String,
+}
+
+/// Mutate a persisted discovery job by ID.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct DiscoveryJobMutationRequest {
+    pub id: String,
+}
+
+/// Generate a dry-run consolidation plan from the current inventory.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ConsolidationPlanGenerateRequest {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub destination_address: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub wallet_family: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub wallet_profile: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub provider_profile: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub include_watch_only: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub auto_queue_low_risk: Option<bool>,
+}
+
+/// Approve reviewable consolidation plan steps.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ConsolidationPlanApproveRequest {
+    pub plan_id: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub step_ids: Vec<String>,
+}

@@ -271,6 +271,10 @@ fn cmd_api_inventory(args: &[String]) {
                 max_index: parse_u32_flag(args, "--max-index"),
                 token_addresses: parse_multi_flag(args, "--token-address"),
                 block_tag: parse_flag(args, "--block-tag"),
+                discover_erc20_transfers: flag_option(args, "--discover-erc20-transfers"),
+                token_discovery_from_block: parse_flag(args, "--token-discovery-from-block"),
+                token_discovery_to_block: parse_flag(args, "--token-discovery-to-block"),
+                token_discovery_limit: parse_usize_flag(args, "--token-discovery-limit"),
             };
             run_api_command(args, true, move |client| async move {
                 client.scan_evm_wallet_inventory(request).await

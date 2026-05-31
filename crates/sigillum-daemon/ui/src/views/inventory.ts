@@ -41,6 +41,10 @@ export interface InventoryActionsDeps {
   toast: (message: string, type?: string) => void;
 }
 
+function input(id: string): HTMLInputElement {
+  return document.getElementById(id) as HTMLInputElement;
+}
+
 export function createInventoryActions(deps: InventoryActionsDeps) {
   function renderChainProfiles(profiles: any[]): void {
     renderEntityList(
@@ -159,6 +163,8 @@ export function createInventoryActions(deps: InventoryActionsDeps) {
         esc(holding.wallet_profile) +
         " · provider=" +
         esc(holding.provider_profile) +
+        " · source=" +
+        esc(holding.source || "-") +
         "</div></div></li>",
     );
   }
@@ -308,6 +314,10 @@ export function createInventoryActions(deps: InventoryActionsDeps) {
       max_index: optionalNumberValue("inventoryMaxIndex"),
       token_addresses: token ? [token] : [],
       block_tag: "latest",
+      discover_erc20_transfers: input("inventoryDiscoverErc20Transfers").checked,
+      token_discovery_from_block: optionalTextValue("inventoryTokenDiscoveryFromBlock"),
+      token_discovery_to_block: optionalTextValue("inventoryTokenDiscoveryToBlock"),
+      token_discovery_limit: optionalNumberValue("inventoryTokenDiscoveryLimit"),
     });
     if (r.error) {
       deps.toast(r.error, "error");

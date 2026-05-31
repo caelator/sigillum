@@ -1,8 +1,10 @@
 //! Wallet inventory and read-only discovery operations.
 
+mod observation;
 mod planner;
 mod risk;
 mod support;
+mod token_discovery;
 
 use sigillum_api::{
     ChainProfile, ChainProfileDeleteRequest, ChainProfileListResponse,
@@ -10,8 +12,8 @@ use sigillum_api::{
     ConsolidationPlanApproveRequest, ConsolidationPlanGenerateRequest,
     ConsolidationPlanListResponse, ConsolidationPlanMutationResponse, DiscoveryJobListResponse,
     DiscoveryJobMutationRequest, DiscoveryJobMutationResponse, EthSeedWalletProfile,
-    EthXpubWalletProfile, EvmProviderProfile, RiskFindingListResponse, WalletDiscoveryJob,
-    WalletInventoryListResponse, WalletInventoryScanRequest, WalletInventoryScanResponse,
+    EthXpubWalletProfile, RiskFindingListResponse, WalletDiscoveryJob, WalletInventoryListResponse,
+    WalletInventoryScanRequest, WalletInventoryScanResponse,
 };
 use sigillum_core::{
     VaultLifecycle, decode_quantity_hex, derive_ethereum_address_from_control_xpub,
@@ -23,11 +25,11 @@ use crate::audit_log::AuditEventSpec;
 use planner::{plan_step_for_holding, signer_status_for_holding, summarize_plan_steps};
 use risk::derive_inventory_risk_findings;
 use support::{
-    InventoryAddressObservation, InventoryRecordContext, address_record, default_native_symbol,
-    holding_record, load_inventory_state, normalized_wallet_family, quantity_hex_is_nonzero,
+    default_native_symbol, load_inventory_state, normalized_wallet_family, quantity_hex_is_nonzero,
     remove_holding, save_inventory_state, select_providers, trimmed_optional, trimmed_required,
     unique_strings, upsert_address, upsert_holding, validated_gap_limit, validated_max_index,
 };
+use token_discovery::erc20_transfer_discovery_config;
 
 use super::evm::normalize_address;
 use super::helpers::{compare_u256, map_xpub_error, now_unix, random_id};
@@ -432,6 +434,12 @@ impl SigillumService {
             .iter()
             .map(|address| normalize_address(address))
             .collect::<ServiceResult<Vec<_>>>()?;
+        let token_discovery = erc20_transfer_discovery_config(
+            body.discover_erc20_transfers,
+            body.token_discovery_from_block.as_deref(),
+            body.token_discovery_to_block.as_deref(),
+            body.token_discovery_limit,
+        )?;
         let requested_family = normalized_wallet_family(body.wallet_family.as_deref())?;
 
         let registry = crate::profiles::load_profiles(&self.state.base_dir).map_err(|error| {
@@ -494,6 +502,7 @@ impl SigillumService {
                             index,
                             &block_tag,
                             &token_addresses,
+                            token_discovery.as_ref(),
                             started_at_unix,
                         )
                         .await?;
@@ -553,6 +562,7 @@ impl SigillumService {
                                         control_index,
                                         &block_tag,
                                         &token_addresses,
+                                        token_discovery.as_ref(),
                                         started_at_unix,
                                     )
                                     .await?;
@@ -665,84 +675,5 @@ impl SigillumService {
         }
 
         Ok(wallets)
-    }
-
-    #[allow(clippy::too_many_arguments)]
-    async fn observe_inventory_address(
-        &self,
-        wallet: &DiscoveryWallet,
-        provider: &EvmProviderProfile,
-        address: &str,
-        derivation_path: &str,
-        address_index: u32,
-        block_tag: &str,
-        token_addresses: &[String],
-        now: u64,
-    ) -> ServiceResult<InventoryAddressObservation> {
-        let address = normalize_address(address)?;
-        let native_balance_wei_hex = self
-            .evm_native_balance_for_provider(provider.compartment_id, provider, &address, block_tag)
-            .await?;
-        let transaction_count = self
-            .evm_transaction_count_for_provider(
-                provider.compartment_id,
-                provider,
-                &address,
-                block_tag,
-            )
-            .await?;
-        let mut activity_state = if quantity_hex_is_nonzero(&native_balance_wei_hex) {
-            "funded"
-        } else if transaction_count > 0 {
-            "active"
-        } else {
-            "empty"
-        };
-
-        let record_context = InventoryRecordContext {
-            wallet,
-            provider,
-            address: &address,
-            derivation_path,
-            now,
-        };
-        let mut holdings = vec![holding_record(
-            &record_context,
-            "native",
-            None,
-            &native_balance_wei_hex,
-        )];
-
-        for token_address in token_addresses {
-            let amount_hex = self
-                .evm_erc20_balance_for_provider(
-                    provider.compartment_id,
-                    provider,
-                    token_address,
-                    &address,
-                    block_tag,
-                )
-                .await?;
-            if quantity_hex_is_nonzero(&amount_hex) {
-                activity_state = "funded";
-            }
-            holdings.push(holding_record(
-                &record_context,
-                "erc20",
-                Some(token_address.clone()),
-                &amount_hex,
-            ));
-        }
-
-        Ok(InventoryAddressObservation {
-            address: address_record(
-                &record_context,
-                address_index,
-                activity_state,
-                &native_balance_wei_hex,
-                transaction_count,
-            ),
-            holdings,
-        })
     }
 }

@@ -461,6 +461,24 @@ impl SigillumService {
         .await
     }
 
+    pub(super) async fn evm_filtered_logs_for_provider(
+        &self,
+        provider_compartment_id: usize,
+        provider: &sigillum_api::EvmProviderProfile,
+        address: Option<&str>,
+        topics: &[Option<String>],
+        from_block: &str,
+        to_block: &str,
+    ) -> ServiceResult<Vec<EvmLogEntry>> {
+        self.resolve_provider_rpc_client_for_compartment(
+            provider_compartment_id,
+            &provider.rpc_url,
+            provider.auth_token_key.as_deref(),
+        )?
+        .get_filtered_logs(address, topics, from_block, to_block)
+        .await
+    }
+
     pub(super) async fn fetch_balance_observations(
         &self,
         plans: Vec<EvmBalanceObservationPlan>,

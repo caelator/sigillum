@@ -142,6 +142,22 @@ pub(super) fn holding_record(
     asset_address: Option<String>,
     amount_hex: &str,
 ) -> WalletAssetHolding {
+    holding_record_with_source(
+        context,
+        asset_kind,
+        asset_address,
+        amount_hex,
+        DISCOVERY_SOURCE_LOCAL_RPC,
+    )
+}
+
+pub(super) fn holding_record_with_source(
+    context: &InventoryRecordContext<'_>,
+    asset_kind: &str,
+    asset_address: Option<String>,
+    amount_hex: &str,
+    source: &str,
+) -> WalletAssetHolding {
     WalletAssetHolding {
         id: random_id(),
         wallet_family: context.wallet.family.clone(),
@@ -153,7 +169,7 @@ pub(super) fn holding_record(
         asset_kind: asset_kind.to_string(),
         asset_address,
         amount_hex: amount_hex.to_string(),
-        source: DISCOVERY_SOURCE_LOCAL_RPC.into(),
+        source: source.into(),
         status: if quantity_hex_is_nonzero(amount_hex) {
             "detected".into()
         } else {

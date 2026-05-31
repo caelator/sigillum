@@ -3,7 +3,7 @@
 use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
-use serde_json::{Value, json};
+use serde_json::{Map, Value, json};
 
 use crate::service::{ServiceError, ServiceResult};
 
@@ -146,17 +146,35 @@ impl ProviderRpcClient {
         from_block: &str,
         to_block: &str,
     ) -> ServiceResult<Vec<EvmLogEntry>> {
+        let topics = topics.iter().cloned().map(Some).collect::<Vec<_>>();
+        self.get_filtered_logs(Some(address), &topics, from_block, to_block)
+            .await
+    }
+
+    pub(super) async fn get_filtered_logs(
+        &self,
+        address: Option<&str>,
+        topics: &[Option<String>],
+        from_block: &str,
+        to_block: &str,
+    ) -> ServiceResult<Vec<EvmLogEntry>> {
+        let mut filter = Map::new();
+        if let Some(address) = address {
+            filter.insert("address".into(), json!(normalize_address(address)?));
+        }
+        filter.insert("fromBlock".into(), json!(from_block));
+        filter.insert("toBlock".into(), json!(to_block));
+        filter.insert(
+            "topics".into(),
+            Value::Array(
+                topics
+                    .iter()
+                    .map(|topic| topic.clone().map(Value::String).unwrap_or(Value::Null))
+                    .collect(),
+            ),
+        );
         let value = self
-            .request(
-                1,
-                "eth_getLogs",
-                json!([{
-                    "address": normalize_address(address)?,
-                    "fromBlock": from_block,
-                    "toBlock": to_block,
-                    "topics": topics,
-                }]),
-            )
+            .request(1, "eth_getLogs", Value::Array(vec![Value::Object(filter)]))
             .await?;
         let logs = value.as_array().ok_or_else(|| {
             ServiceError::internal("Invalid provider response: expected log array")

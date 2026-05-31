@@ -555,6 +555,15 @@
       <input type="text" id="inventoryTokenAddress" placeholder="ERC-20 token address (optional)">
       <button class="btn-primary" data-action="scanInventoryEvm">Scan EVM</button>
     </div>
+    <div class="form-row">
+      <input type="text" id="inventoryTokenDiscoveryFromBlock" placeholder="ERC-20 discovery from block">
+      <input type="text" id="inventoryTokenDiscoveryToBlock" placeholder="ERC-20 discovery to block (optional)">
+      <input type="number" id="inventoryTokenDiscoveryLimit" placeholder="Token discovery limit" value="250" class="input-wide">
+      <label class="checkbox-row">
+        <input type="checkbox" id="inventoryDiscoverErc20Transfers">
+        Discover ERC-20 transfer logs
+      </label>
+    </div>
     <div id="inventoryJobList"></div>
     <div id="inventoryAddressList"></div>
     <div id="inventoryHoldingList"></div>

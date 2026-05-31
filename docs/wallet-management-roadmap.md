@@ -45,6 +45,9 @@ Required discovery classes:
   address detection, balance checks, and gap-limit continuation.
 - ERC-20 discovery from configured allowlists, transfer logs, token registries,
   and positive balances discovered through provider APIs or local index data.
+  The first bounded transfer-log discovery slice is implemented for EVM
+  inventory scans; registries, indexers, and richer positive-balance evidence
+  remain future work.
 - NFT discovery for ERC-721 and ERC-1155 ownership, including metadata caching,
   spam filtering, and optional floor or collection valuation providers.
 - DeFi position discovery for common protocols: lending, staking, liquid
@@ -207,7 +210,8 @@ The CLI should have parity for automation:
 1. Inventory schema and read-only EVM discovery.
 2. Seed/xpub derivation scanning with gap limits and historical address
    activity.
-3. ERC-20 and native multi-L2 discovery.
+3. ERC-20 and native multi-L2 discovery. Bounded ERC-20 transfer-log discovery
+   is the first implemented slice.
 4. NFT and allowance discovery.
 5. DeFi position adapters for the most common protocols.
 6. Airdrop/reward discovery with strict claim risk gates.

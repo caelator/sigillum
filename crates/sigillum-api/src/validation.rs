@@ -478,6 +478,16 @@ impl Validate for crate::request::WalletInventoryScanRequest {
         check_optional_len("wallet_profile", &self.wallet_profile, MAX_LABEL)?;
         check_optional_len("provider_profile", &self.provider_profile, MAX_LABEL)?;
         check_optional_len("block_tag", &self.block_tag, MAX_LABEL)?;
+        check_optional_len(
+            "token_discovery_from_block",
+            &self.token_discovery_from_block,
+            MAX_LABEL,
+        )?;
+        check_optional_len(
+            "token_discovery_to_block",
+            &self.token_discovery_to_block,
+            MAX_LABEL,
+        )?;
         if self.token_addresses.len() > MAX_TOKEN_ADDRESSES {
             return Err(format!(
                 "token_addresses exceeds maximum length of {MAX_TOKEN_ADDRESSES} items"
