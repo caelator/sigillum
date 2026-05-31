@@ -1,10 +1,27 @@
 # Wallet Competitive Landscape And World-Class Strategy
 
-Reviewed: 2026-05-30
+Reviewed: 2026-05-31
 
 This note evaluates Sigillum against adjacent wallet, portfolio, security, and
 operations tools. It is meant to keep roadmap work grounded in the current
 wallet market while preserving Sigillum's local-first design.
+
+## Research Refresh: 2026-05-31
+
+- MetaMask Portfolio remains the mainstream reference for multichain account
+  portfolio views, watched accounts, tokens, NFTs, staking, and related
+  dashboard workflows:
+  <https://support.metamask.io/manage-crypto/portfolio/getting-started-with-the-metamask-portfolio-dashboard/>
+- Rabby remains the EVM power-user reference for pre-signing simulation and
+  risk review:
+  <https://support.rabby.io/hc/en-us/articles/11495560464143-Why-do-I-see-Simulation-Failed-error>
+- Revoke.cash remains the focused reference for token approval hygiene,
+  Permit-style approval education, and revocation workflows:
+  <https://beta.revoke.cash/learn/approvals>
+- Rotki remains the closest self-hosted/privacy reference for local portfolio
+  tracking, snapshots, exchange/blockchain/manual balances, DeFi liquidity
+  pools, and optional NFT balance views:
+  <https://docs.rotki.com/usage-guides/portfolio/dashboard.html>
 
 ## Product Thesis
 
@@ -140,7 +157,7 @@ safe consolidation from those accounts.
 | NFTs | Not implemented | MetaMask Portfolio, Phantom, Zerion, Zapper | ERC-721/ERC-1155 inventory, metadata cache, spam flags, unknown collection policy, reviewed NFT sweeps |
 | DeFi positions | Not implemented | Rotki, Zapper, DeBank, Zerion, Rabby | Protocol adapters for lending, staking, LPs, vaults, bridges, vesting, streams, and rewards |
 | Airdrops and rewards | Not implemented | Portfolio tools, protocol claim portals | Trusted-source candidate discovery, claim-contract verification, simulation, explicit review only |
-| Approvals and revokes | Not implemented | Revoke.cash, Rabby | ERC-20, Permit2, and NFT operator discovery with risky spender labels and revoke recommendations |
+| Approvals and revokes | Bounded ERC-20 allowance probes for operator-supplied spender addresses, persisted as approval holdings with risk findings | Revoke.cash, Rabby | ERC-20, Permit2, and NFT operator discovery with risky spender labels, simulation, and revoke recommendations |
 | Transaction simulation | Not implemented as a required planning step | Rabby, Safe tools, Tenderly-style infrastructure | Every plan step carries simulation evidence or remains blocked |
 | Consolidation planning | Foundation exists: inventory, risk findings, dry-run plans, and approval state | No single consumer wallet owns this end to end | Execution graph for gas top-ups, revokes, claims, DeFi exits, swaps, sweeps, and treasury routing |
 | Bitcoin/UTXO | Not implemented | Sparrow, Electrum, Liana, Specter, Caravan | Descriptor/xpub scan, UTXO inventory, PSBT construction, coin control, fee policy, hardware signing |

@@ -427,6 +427,26 @@ impl SigillumService {
         Ok(encode_quantity_u256(&balance))
     }
 
+    pub(super) async fn evm_erc20_allowance_for_provider(
+        &self,
+        provider_compartment_id: usize,
+        provider: &sigillum_api::EvmProviderProfile,
+        token_address: &str,
+        owner_address: &str,
+        spender_address: &str,
+        block_tag: &str,
+    ) -> ServiceResult<String> {
+        let allowance = self
+            .resolve_provider_rpc_client_for_compartment(
+                provider_compartment_id,
+                &provider.rpc_url,
+                provider.auth_token_key.as_deref(),
+            )?
+            .get_erc20_allowance(token_address, owner_address, spender_address, block_tag)
+            .await?;
+        Ok(encode_quantity_u256(&allowance))
+    }
+
     pub(super) async fn evm_transaction_count_for_provider(
         &self,
         provider_compartment_id: usize,
@@ -606,6 +626,18 @@ fn erc20_balance_call_data(owner_address: &str) -> ServiceResult<String> {
         "0x70a08231{}{}",
         "0".repeat(24),
         hex::encode(owner)
+    ))
+}
+
+fn erc20_allowance_call_data(owner_address: &str, spender_address: &str) -> ServiceResult<String> {
+    let owner = decode_address(owner_address)?;
+    let spender = decode_address(spender_address)?;
+    Ok(format!(
+        "0xdd62ed3e{}{}{}{}",
+        "0".repeat(24),
+        hex::encode(owner),
+        "0".repeat(24),
+        hex::encode(spender)
     ))
 }
 

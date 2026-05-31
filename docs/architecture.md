@@ -162,12 +162,12 @@ What it intentionally does not do today:
 - multi-host coordination
 - SSE streams
 - remote audit aggregation pipeline
-- deep on-chain indexing beyond provider RPC balance checks and bounded ERC-20
-  transfer-log token discovery
+- deep on-chain indexing beyond provider RPC balance checks, bounded ERC-20
+  transfer-log token discovery, and operator-bounded ERC-20 allowance probes
 - seed/xpub gap-limit discovery, historical receive-address scanning, or
   dormant-wallet classification
-- full token registry/indexer scraping, NFT inventory, allowance scanning,
-  DeFi position discovery, or airdrop/reward discovery
+- full token registry/indexer scraping, NFT inventory, Permit2/NFT operator
+  approval scanning, DeFi position discovery, or airdrop/reward discovery
 - consolidation planning for discovered holdings outside the current stealth
   deposit sweep flow
 

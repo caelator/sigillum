@@ -296,9 +296,10 @@ consolidation roadmap in
 [`docs/wallet-management-roadmap.md`](docs/wallet-management-roadmap.md). That
 roadmap covers seed/xpub gap-limit discovery, old-wallet classification, L1/L2
 holdings, ERC-20 transfer-log token discovery, NFTs, DeFi positions,
-airdrops/rewards, allowances, and reviewable consolidation planning. Broader
-token registries, NFT inventory, DeFi adapters, and allowance scanners remain
-roadmap work. The product strategy and market comparison are captured in
+airdrops/rewards, ERC-20 allowance probing, and reviewable consolidation
+planning. Broader token registries, NFT inventory, DeFi adapters, Permit2/NFT
+operator approval scanners, and revoke execution remain roadmap work. The
+product strategy and market comparison are captured in
 [`docs/wallet-competitive-landscape.md`](docs/wallet-competitive-landscape.md).
 This is not another round of ad hoc transport or route growth and not a shift
 toward internet deployment.

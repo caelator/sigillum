@@ -7,11 +7,9 @@ use serde_json::{Map, Value, json};
 
 use crate::service::{ServiceError, ServiceResult};
 
-use super::{
-    erc20_balance_call_data, normalize_address, normalize_hex_blob, parse_quantity_u64,
-    parse_quantity_u256,
-};
+use super::{normalize_address, normalize_hex_blob, parse_quantity_u64, parse_quantity_u256};
 
+mod erc20;
 mod logs;
 
 pub(in crate::service) use logs::EvmLogEntry;
@@ -82,61 +80,6 @@ impl ProviderRpcClient {
             )
             .await?;
         parse_quantity_u256(&value)
-    }
-
-    pub(super) async fn get_erc20_balance(
-        &self,
-        token_address: &str,
-        owner_address: &str,
-        block_tag: &str,
-    ) -> ServiceResult<[u8; 32]> {
-        let value = self
-            .request(
-                1,
-                "eth_call",
-                json!([{
-                    "to": normalize_address(token_address)?,
-                    "data": erc20_balance_call_data(owner_address)?,
-                }, block_tag]),
-            )
-            .await?;
-        parse_quantity_u256(&value)
-    }
-
-    pub(super) async fn get_native_and_erc20_balance(
-        &self,
-        owner_address: &str,
-        token_address: &str,
-        block_tag: &str,
-    ) -> ServiceResult<([u8; 32], [u8; 32])> {
-        let responses = self
-            .request_batch(&[
-                JsonRpcRequest {
-                    jsonrpc: "2.0",
-                    id: 1,
-                    method: "eth_getBalance",
-                    params: json!([normalize_address(owner_address)?, block_tag]),
-                },
-                JsonRpcRequest {
-                    jsonrpc: "2.0",
-                    id: 2,
-                    method: "eth_call",
-                    params: json!([{
-                        "to": normalize_address(token_address)?,
-                        "data": erc20_balance_call_data(owner_address)?,
-                    }, block_tag]),
-                },
-            ])
-            .await?;
-
-        let mut by_id: HashMap<u64, JsonRpcResponse> = HashMap::with_capacity(responses.len());
-        for response in responses {
-            by_id.insert(response.id, response);
-        }
-
-        let native_balance = parse_quantity_u256(&batch_result(&mut by_id, 1, "eth_getBalance")?)?;
-        let token_balance = parse_quantity_u256(&batch_result(&mut by_id, 2, "eth_call")?)?;
-        Ok((native_balance, token_balance))
     }
 
     pub(super) async fn get_logs(

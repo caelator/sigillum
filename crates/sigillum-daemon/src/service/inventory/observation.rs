@@ -2,9 +2,12 @@ use sigillum_api::EvmProviderProfile;
 
 use crate::service::{ServiceResult, SigillumService};
 
+use super::allowance_discovery::{
+    DISCOVERY_SOURCE_ERC20_ALLOWANCE_PROBE, Erc20AllowanceDiscoveryConfig,
+};
 use super::support::{
     InventoryAddressObservation, InventoryRecordContext, address_record, holding_record,
-    holding_record_with_source, quantity_hex_is_nonzero,
+    holding_record_with_counterparty, holding_record_with_source, quantity_hex_is_nonzero,
 };
 use super::token_discovery::{
     DISCOVERY_SOURCE_ERC20_TRANSFER_LOG, Erc20TransferDiscoveryConfig, push_unique_token,
@@ -23,6 +26,7 @@ impl SigillumService {
         block_tag: &str,
         token_addresses: &[String],
         token_discovery: Option<&Erc20TransferDiscoveryConfig>,
+        allowance_discovery: Option<&Erc20AllowanceDiscoveryConfig>,
         now: u64,
     ) -> ServiceResult<InventoryAddressObservation> {
         let address = super::normalize_address(address)?;
@@ -73,12 +77,12 @@ impl SigillumService {
             }
         }
 
-        for token_address in observed_token_addresses {
+        for token_address in &observed_token_addresses {
             let amount_hex = self
                 .evm_erc20_balance_for_provider(
                     provider.compartment_id,
                     provider,
-                    &token_address,
+                    token_address,
                     &address,
                     block_tag,
                 )
@@ -91,8 +95,30 @@ impl SigillumService {
                 "erc20",
                 Some(token_address.clone()),
                 &amount_hex,
-                source_for_token(&transfer_log_tokens, &token_address),
+                source_for_token(&transfer_log_tokens, token_address),
             ));
+        }
+
+        if let Some(config) = allowance_discovery {
+            let allowances = self
+                .discover_erc20_allowances_for_address(
+                    provider,
+                    &address,
+                    &observed_token_addresses,
+                    block_tag,
+                    config,
+                )
+                .await?;
+            for allowance in allowances {
+                holdings.push(holding_record_with_counterparty(
+                    &record_context,
+                    "approval",
+                    Some(allowance.token_address),
+                    Some(allowance.spender_address),
+                    &allowance.amount_hex,
+                    DISCOVERY_SOURCE_ERC20_ALLOWANCE_PROBE,
+                ));
+            }
         }
 
         Ok(InventoryAddressObservation {

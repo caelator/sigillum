@@ -1450,7 +1450,10 @@ async fn wallet_inventory_scan_discovers_erc20_tokens_from_transfer_logs() {
             "max_index": 0,
             "discover_erc20_transfers": true,
             "token_discovery_from_block": "0x0",
-            "token_discovery_limit": 4
+            "token_discovery_limit": 4,
+            "discover_erc20_allowances": true,
+            "allowance_spender_addresses": ["0x2222222222222222222222222222222222222222"],
+            "allowance_discovery_limit": 4
         }),
         Some(&token),
     )
@@ -1459,15 +1462,32 @@ async fn wallet_inventory_scan_discovers_erc20_tokens_from_transfer_logs() {
     let scan_json: serde_json::Value = scan.json().await.unwrap();
     assert_eq!(scan_json["job"]["status"], "completed");
     assert_eq!(scan_json["job"]["addresses_scanned"], 4);
-    assert_eq!(scan_json["job"]["holdings_detected"], 8);
+    assert_eq!(scan_json["job"]["holdings_detected"], 12);
 
     let holdings = scan_json["holdings"].as_array().unwrap();
-    assert_eq!(holdings.len(), 8);
+    assert_eq!(holdings.len(), 12);
     assert!(holdings.iter().any(|holding| {
         holding["asset_kind"] == "erc20"
             && holding["asset_address"] == "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"
             && holding["amount_hex"] == "0xf4240"
             && holding["source"] == "erc20-transfer-log"
+    }));
+    assert!(holdings.iter().any(|holding| {
+        holding["asset_kind"] == "approval"
+            && holding["asset_address"] == "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"
+            && holding["counterparty_address"] == "0x2222222222222222222222222222222222222222"
+            && holding["amount_hex"] == "0xf4240"
+            && holding["source"] == "erc20-allowance-probe"
+    }));
+
+    let risks = get(&client, addr, "/api/risk/findings", Some(&token)).await;
+    assert_eq!(risks.status(), StatusCode::OK);
+    let risks_json: serde_json::Value = risks.json().await.unwrap();
+    let findings = risks_json["findings"].as_array().unwrap();
+    assert!(findings.iter().any(|finding| {
+        finding["category"] == "risky_approval"
+            && finding["subject"] == "0x2222222222222222222222222222222222222222"
+            && finding["risk_level"] == "medium"
     }));
 
     handle.abort();

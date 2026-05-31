@@ -155,6 +155,9 @@ export function createInventoryActions(deps: InventoryActionsDeps) {
         esc(holding.address) +
         " · asset=" +
         esc(holding.asset_address || "native") +
+        (holding.counterparty_address
+          ? " · spender=" + esc(holding.counterparty_address)
+          : "") +
         " · amount=" +
         esc(holding.amount_hex) +
         "<br>" +
@@ -306,6 +309,7 @@ export function createInventoryActions(deps: InventoryActionsDeps) {
 
   async function scanInventoryEvm(): Promise<void> {
     const token = optionalTextValue("inventoryTokenAddress");
+    const spender = optionalTextValue("inventoryAllowanceSpender");
     const r = await deps.api("POST", "/api/inventory/scan/evm", {
       wallet_family: optionalTextValue("inventoryWalletFamily"),
       wallet_profile: optionalTextValue("inventoryWalletProfile"),
@@ -318,6 +322,9 @@ export function createInventoryActions(deps: InventoryActionsDeps) {
       token_discovery_from_block: optionalTextValue("inventoryTokenDiscoveryFromBlock"),
       token_discovery_to_block: optionalTextValue("inventoryTokenDiscoveryToBlock"),
       token_discovery_limit: optionalNumberValue("inventoryTokenDiscoveryLimit"),
+      discover_erc20_allowances: input("inventoryDiscoverErc20Allowances").checked,
+      allowance_spender_addresses: spender ? [spender] : [],
+      allowance_discovery_limit: optionalNumberValue("inventoryAllowanceLimit"),
     });
     if (r.error) {
       deps.toast(r.error, "error");

@@ -530,6 +530,9 @@ fn test_wallet_inventory_scan_request_roundtrip() {
         token_discovery_from_block: Some("0x100".to_string()),
         token_discovery_to_block: Some("latest".to_string()),
         token_discovery_limit: Some(250),
+        discover_erc20_allowances: Some(true),
+        allowance_spender_addresses: vec!["0x2222222222222222222222222222222222222222".to_string()],
+        allowance_discovery_limit: Some(16),
     };
     roundtrip_test(req);
 }

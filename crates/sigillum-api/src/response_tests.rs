@@ -582,6 +582,7 @@ fn test_wallet_inventory_scan_response_roundtrip() {
         derivation_path: address.derivation_path.clone(),
         asset_kind: "native".to_string(),
         asset_address: None,
+        counterparty_address: None,
         amount_hex: "0x1".to_string(),
         source: "local-rpc".to_string(),
         status: "detected".to_string(),

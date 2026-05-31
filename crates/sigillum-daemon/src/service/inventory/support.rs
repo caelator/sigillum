@@ -158,6 +158,17 @@ pub(super) fn holding_record_with_source(
     amount_hex: &str,
     source: &str,
 ) -> WalletAssetHolding {
+    holding_record_with_counterparty(context, asset_kind, asset_address, None, amount_hex, source)
+}
+
+pub(super) fn holding_record_with_counterparty(
+    context: &InventoryRecordContext<'_>,
+    asset_kind: &str,
+    asset_address: Option<String>,
+    counterparty_address: Option<String>,
+    amount_hex: &str,
+    source: &str,
+) -> WalletAssetHolding {
     WalletAssetHolding {
         id: random_id(),
         wallet_family: context.wallet.family.clone(),
@@ -168,6 +179,7 @@ pub(super) fn holding_record_with_source(
         derivation_path: context.derivation_path.to_string(),
         asset_kind: asset_kind.to_string(),
         asset_address,
+        counterparty_address,
         amount_hex: amount_hex.to_string(),
         source: source.into(),
         status: if quantity_hex_is_nonzero(amount_hex) {
@@ -224,6 +236,7 @@ fn holding_key_matches(left: &WalletAssetHolding, right: &WalletAssetHolding) ->
         && left.address == right.address
         && left.asset_kind == right.asset_kind
         && left.asset_address == right.asset_address
+        && left.counterparty_address == right.counterparty_address
 }
 
 pub(super) fn quantity_hex_is_nonzero(value: &str) -> bool {

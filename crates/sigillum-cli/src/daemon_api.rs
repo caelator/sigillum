@@ -275,6 +275,9 @@ fn cmd_api_inventory(args: &[String]) {
                 token_discovery_from_block: parse_flag(args, "--token-discovery-from-block"),
                 token_discovery_to_block: parse_flag(args, "--token-discovery-to-block"),
                 token_discovery_limit: parse_usize_flag(args, "--token-discovery-limit"),
+                discover_erc20_allowances: flag_option(args, "--discover-erc20-allowances"),
+                allowance_spender_addresses: parse_multi_flag(args, "--allowance-spender"),
+                allowance_discovery_limit: parse_usize_flag(args, "--allowance-discovery-limit"),
             };
             run_api_command(args, true, move |client| async move {
                 client.scan_evm_wallet_inventory(request).await

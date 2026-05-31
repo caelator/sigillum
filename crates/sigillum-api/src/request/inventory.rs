@@ -32,6 +32,12 @@ pub struct WalletInventoryScanRequest {
     pub token_discovery_to_block: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub token_discovery_limit: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub discover_erc20_allowances: Option<bool>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub allowance_spender_addresses: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub allowance_discovery_limit: Option<usize>,
 }
 
 /// Create or update a local chain profile used by discovery and planning.

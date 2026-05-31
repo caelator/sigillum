@@ -493,7 +493,17 @@ impl Validate for crate::request::WalletInventoryScanRequest {
                 "token_addresses exceeds maximum length of {MAX_TOKEN_ADDRESSES} items"
             ));
         }
+        if self.allowance_spender_addresses.len() > MAX_TOKEN_ADDRESSES {
+            return Err(format!(
+                "allowance_spender_addresses exceeds maximum length of {MAX_TOKEN_ADDRESSES} items"
+            ));
+        }
         check_vec_items_len("token_addresses", &self.token_addresses, MAX_ADDRESS)?;
+        check_vec_items_len(
+            "allowance_spender_addresses",
+            &self.allowance_spender_addresses,
+            MAX_ADDRESS,
+        )?;
         Ok(())
     }
 }

@@ -57,6 +57,9 @@ Required discovery classes:
   with claim-contract risk classification and no blind auto-claiming.
 - Allowance and approval discovery, including unlimited ERC-20 approvals, NFT
   operator approvals, known-drainer spenders, and revoke recommendations.
+  The first bounded ERC-20 allowance-probe slice is implemented for
+  operator-supplied spender addresses; Permit2, NFT operator approvals,
+  spender registries, and revoke execution remain future work.
 - Dormant-wallet classification using last activity, transaction count, current
   value, token/NFT/DeFi exposure, gas availability, and whether the private key
   or signing path is actually available.
@@ -212,7 +215,8 @@ The CLI should have parity for automation:
    activity.
 3. ERC-20 and native multi-L2 discovery. Bounded ERC-20 transfer-log discovery
    is the first implemented slice.
-4. NFT and allowance discovery.
+4. NFT and allowance discovery. Operator-bounded ERC-20 allowance probing is
+   the first implemented approval-discovery slice.
 5. DeFi position adapters for the most common protocols.
 6. Airdrop/reward discovery with strict claim risk gates.
 7. Consolidation planner with dry-run and simulation.
