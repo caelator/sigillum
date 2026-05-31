@@ -152,6 +152,7 @@ mod tests {
             derivation_path: "m/44'/60'/0'/0/0".into(),
             asset_kind: "native".into(),
             asset_address: None,
+            token_id_hex: None,
             counterparty_address: None,
             amount_hex: "0x1".into(),
             source: "local-rpc".into(),

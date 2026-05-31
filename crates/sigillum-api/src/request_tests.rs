@@ -533,6 +533,10 @@ fn test_wallet_inventory_scan_request_roundtrip() {
         discover_erc20_allowances: Some(true),
         allowance_spender_addresses: vec!["0x2222222222222222222222222222222222222222".to_string()],
         allowance_discovery_limit: Some(16),
+        discover_erc721_transfers: Some(true),
+        nft_discovery_from_block: Some("0x100".to_string()),
+        nft_discovery_to_block: Some("latest".to_string()),
+        nft_discovery_limit: Some(100),
     };
     roundtrip_test(req);
 }

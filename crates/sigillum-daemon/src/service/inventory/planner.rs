@@ -59,6 +59,7 @@ pub(super) fn plan_step_for_holding(
         derivation_path: holding.derivation_path.clone(),
         asset_kind: holding.asset_kind.clone(),
         asset_address: holding.asset_address.clone(),
+        token_id_hex: holding.token_id_hex.clone(),
         amount_hex: holding.amount_hex.clone(),
         destination_address,
         signer_status: signer_status.into(),

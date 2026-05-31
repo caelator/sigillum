@@ -5,9 +5,11 @@ use crate::service::{ServiceResult, SigillumService};
 use super::allowance_discovery::{
     DISCOVERY_SOURCE_ERC20_ALLOWANCE_PROBE, Erc20AllowanceDiscoveryConfig,
 };
+use super::nft_discovery::{DISCOVERY_SOURCE_ERC721_TRANSFER_LOG, Erc721TransferDiscoveryConfig};
 use super::support::{
     InventoryAddressObservation, InventoryRecordContext, address_record, holding_record,
-    holding_record_with_counterparty, holding_record_with_source, quantity_hex_is_nonzero,
+    holding_record_with_counterparty, holding_record_with_source, holding_record_with_token_id,
+    quantity_hex_is_nonzero,
 };
 use super::token_discovery::{
     DISCOVERY_SOURCE_ERC20_TRANSFER_LOG, Erc20TransferDiscoveryConfig, push_unique_token,
@@ -27,6 +29,7 @@ impl SigillumService {
         token_addresses: &[String],
         token_discovery: Option<&Erc20TransferDiscoveryConfig>,
         allowance_discovery: Option<&Erc20AllowanceDiscoveryConfig>,
+        nft_discovery: Option<&Erc721TransferDiscoveryConfig>,
         now: u64,
     ) -> ServiceResult<InventoryAddressObservation> {
         let address = super::normalize_address(address)?;
@@ -117,6 +120,25 @@ impl SigillumService {
                     Some(allowance.spender_address),
                     &allowance.amount_hex,
                     DISCOVERY_SOURCE_ERC20_ALLOWANCE_PROBE,
+                ));
+            }
+        }
+
+        if let Some(config) = nft_discovery {
+            let nfts = self
+                .discover_erc721_transfer_holdings_for_address(provider, &address, config)
+                .await?;
+            if !nfts.is_empty() {
+                activity_state = "funded";
+            }
+            for nft in nfts {
+                holdings.push(holding_record_with_token_id(
+                    &record_context,
+                    "erc721",
+                    Some(nft.contract_address),
+                    Some(nft.token_id_hex),
+                    "0x1",
+                    DISCOVERY_SOURCE_ERC721_TRANSFER_LOG,
                 ));
             }
         }

@@ -161,10 +161,49 @@ pub(super) fn holding_record_with_source(
     holding_record_with_counterparty(context, asset_kind, asset_address, None, amount_hex, source)
 }
 
+pub(super) fn holding_record_with_token_id(
+    context: &InventoryRecordContext<'_>,
+    asset_kind: &str,
+    asset_address: Option<String>,
+    token_id_hex: Option<String>,
+    amount_hex: &str,
+    source: &str,
+) -> WalletAssetHolding {
+    holding_record_full(
+        context,
+        asset_kind,
+        asset_address,
+        token_id_hex,
+        None,
+        amount_hex,
+        source,
+    )
+}
+
 pub(super) fn holding_record_with_counterparty(
     context: &InventoryRecordContext<'_>,
     asset_kind: &str,
     asset_address: Option<String>,
+    counterparty_address: Option<String>,
+    amount_hex: &str,
+    source: &str,
+) -> WalletAssetHolding {
+    holding_record_full(
+        context,
+        asset_kind,
+        asset_address,
+        None,
+        counterparty_address,
+        amount_hex,
+        source,
+    )
+}
+
+fn holding_record_full(
+    context: &InventoryRecordContext<'_>,
+    asset_kind: &str,
+    asset_address: Option<String>,
+    token_id_hex: Option<String>,
     counterparty_address: Option<String>,
     amount_hex: &str,
     source: &str,
@@ -179,6 +218,7 @@ pub(super) fn holding_record_with_counterparty(
         derivation_path: context.derivation_path.to_string(),
         asset_kind: asset_kind.to_string(),
         asset_address,
+        token_id_hex,
         counterparty_address,
         amount_hex: amount_hex.to_string(),
         source: source.into(),
@@ -236,6 +276,7 @@ fn holding_key_matches(left: &WalletAssetHolding, right: &WalletAssetHolding) ->
         && left.address == right.address
         && left.asset_kind == right.asset_kind
         && left.asset_address == right.asset_address
+        && left.token_id_hex == right.token_id_hex
         && left.counterparty_address == right.counterparty_address
 }
 

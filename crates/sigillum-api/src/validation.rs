@@ -488,6 +488,16 @@ impl Validate for crate::request::WalletInventoryScanRequest {
             &self.token_discovery_to_block,
             MAX_LABEL,
         )?;
+        check_optional_len(
+            "nft_discovery_from_block",
+            &self.nft_discovery_from_block,
+            MAX_LABEL,
+        )?;
+        check_optional_len(
+            "nft_discovery_to_block",
+            &self.nft_discovery_to_block,
+            MAX_LABEL,
+        )?;
         if self.token_addresses.len() > MAX_TOKEN_ADDRESSES {
             return Err(format!(
                 "token_addresses exceeds maximum length of {MAX_TOKEN_ADDRESSES} items"

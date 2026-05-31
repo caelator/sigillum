@@ -155,6 +155,9 @@ export function createInventoryActions(deps: InventoryActionsDeps) {
         esc(holding.address) +
         " · asset=" +
         esc(holding.asset_address || "native") +
+        (holding.token_id_hex
+          ? " · tokenId=" + esc(holding.token_id_hex)
+          : "") +
         (holding.counterparty_address
           ? " · spender=" + esc(holding.counterparty_address)
           : "") +
@@ -214,6 +217,7 @@ export function createInventoryActions(deps: InventoryActionsDeps) {
               statusPill(step.status) +
               " · " +
               esc(step.asset_kind) +
+              (step.token_id_hex ? " #" + esc(step.token_id_hex) : "") +
               " · amount=" +
               esc(step.amount_hex) +
               " · blockers=" +
@@ -325,6 +329,10 @@ export function createInventoryActions(deps: InventoryActionsDeps) {
       discover_erc20_allowances: input("inventoryDiscoverErc20Allowances").checked,
       allowance_spender_addresses: spender ? [spender] : [],
       allowance_discovery_limit: optionalNumberValue("inventoryAllowanceLimit"),
+      discover_erc721_transfers: input("inventoryDiscoverErc721Transfers").checked,
+      nft_discovery_from_block: optionalTextValue("inventoryNftDiscoveryFromBlock"),
+      nft_discovery_to_block: optionalTextValue("inventoryNftDiscoveryToBlock"),
+      nft_discovery_limit: optionalNumberValue("inventoryNftDiscoveryLimit"),
     });
     if (r.error) {
       deps.toast(r.error, "error");

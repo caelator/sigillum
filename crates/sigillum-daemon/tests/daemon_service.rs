@@ -29,12 +29,19 @@ async fn spawn_mock_evm_provider() -> (SocketAddr, tokio::task::JoinHandle<()>) 
         let result = match method {
             "eth_getTransactionCount" => json!("0x7"),
             "eth_getBalance" => json!("0xde0b6b3a7640000"),
-            "eth_call" => json!("0x0f4240"),
+            "eth_call" => {
+                let data = request["params"][0]["data"].as_str().unwrap_or_default();
+                if data.starts_with("0x6352211e") {
+                    json!("0x0000000000000000000000009858effd232b4033e47d90003d41ec34ecaeda94")
+                } else {
+                    json!("0x0f4240")
+                }
+            }
             "eth_getLogs" => {
                 let filter = &request["params"][0];
                 let fallback_topic = format!("0x{}", "00".repeat(32));
                 let topics = filter["topics"].as_array().cloned().unwrap_or_default();
-                let log_topics = topics
+                let mut log_topics = topics
                     .iter()
                     .map(|topic| {
                         topic
@@ -43,8 +50,16 @@ async fn spawn_mock_evm_provider() -> (SocketAddr, tokio::task::JoinHandle<()>) 
                             .unwrap_or_else(|| json!(fallback_topic))
                     })
                     .collect::<Vec<_>>();
+                let is_nft_filter = topics.len() >= 4;
+                if is_nft_filter {
+                    log_topics[3] = json!(format!("0x{}7b", "0".repeat(62)));
+                }
                 json!([{
-                    "address": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+                    "address": if is_nft_filter {
+                        "0x1234500000000000000000000000000000000000"
+                    } else {
+                        "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"
+                    },
                     "topics": log_topics,
                     "data": format!("0x{}0f4240", "0".repeat(58)),
                     "blockNumber": "0x10",
@@ -1453,7 +1468,10 @@ async fn wallet_inventory_scan_discovers_erc20_tokens_from_transfer_logs() {
             "token_discovery_limit": 4,
             "discover_erc20_allowances": true,
             "allowance_spender_addresses": ["0x2222222222222222222222222222222222222222"],
-            "allowance_discovery_limit": 4
+            "allowance_discovery_limit": 4,
+            "discover_erc721_transfers": true,
+            "nft_discovery_from_block": "0x0",
+            "nft_discovery_limit": 4
         }),
         Some(&token),
     )
@@ -1462,10 +1480,10 @@ async fn wallet_inventory_scan_discovers_erc20_tokens_from_transfer_logs() {
     let scan_json: serde_json::Value = scan.json().await.unwrap();
     assert_eq!(scan_json["job"]["status"], "completed");
     assert_eq!(scan_json["job"]["addresses_scanned"], 4);
-    assert_eq!(scan_json["job"]["holdings_detected"], 12);
+    assert_eq!(scan_json["job"]["holdings_detected"], 13);
 
     let holdings = scan_json["holdings"].as_array().unwrap();
-    assert_eq!(holdings.len(), 12);
+    assert_eq!(holdings.len(), 13);
     assert!(holdings.iter().any(|holding| {
         holding["asset_kind"] == "erc20"
             && holding["asset_address"] == "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"
@@ -1478,6 +1496,14 @@ async fn wallet_inventory_scan_discovers_erc20_tokens_from_transfer_logs() {
             && holding["counterparty_address"] == "0x2222222222222222222222222222222222222222"
             && holding["amount_hex"] == "0xf4240"
             && holding["source"] == "erc20-allowance-probe"
+    }));
+    assert!(holdings.iter().any(|holding| {
+        holding["asset_kind"] == "erc721"
+            && holding["asset_address"] == "0x1234500000000000000000000000000000000000"
+            && holding["token_id_hex"]
+                == "0x000000000000000000000000000000000000000000000000000000000000007b"
+            && holding["amount_hex"] == "0x1"
+            && holding["source"] == "erc721-transfer-log"
     }));
 
     let risks = get(&client, addr, "/api/risk/findings", Some(&token)).await;
