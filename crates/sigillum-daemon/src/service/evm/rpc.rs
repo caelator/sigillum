@@ -13,6 +13,7 @@ mod erc1155;
 mod erc20;
 mod erc721;
 mod logs;
+mod permit2;
 
 pub(in crate::service) use logs::EvmLogEntry;
 use logs::parse_log_entry;

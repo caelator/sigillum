@@ -39,6 +39,14 @@ pub struct WalletInventoryScanRequest {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub allowance_discovery_limit: Option<usize>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub discover_permit2_allowances: Option<bool>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub permit2_contract_addresses: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub permit2_spender_addresses: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub permit2_allowance_limit: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub discover_erc721_transfers: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub discover_erc1155_transfers: Option<bool>,

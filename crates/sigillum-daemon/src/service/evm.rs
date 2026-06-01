@@ -46,6 +46,14 @@ pub(super) struct EvmBalanceObservation {
     pub observed_amount_hex: String,
 }
 
+pub(super) struct Permit2AllowanceProbe<'a> {
+    pub(super) permit2_address: &'a str,
+    pub(super) owner_address: &'a str,
+    pub(super) token_address: &'a str,
+    pub(super) spender_address: &'a str,
+    pub(super) block_tag: &'a str,
+}
+
 // ── RPC Query Operations ──────────────────────────────────────────────────
 
 impl SigillumService {
@@ -371,6 +379,18 @@ impl SigillumService {
         ))
     }
 
+    fn provider_rpc_for_profile(
+        &self,
+        provider_compartment_id: usize,
+        provider: &sigillum_api::EvmProviderProfile,
+    ) -> ServiceResult<ProviderRpcClient> {
+        self.resolve_provider_rpc_client_for_compartment(
+            provider_compartment_id,
+            &provider.rpc_url,
+            provider.auth_token_key.as_deref(),
+        )
+    }
+
     // ── Balance Observation ───────────────────────────────────────────────
 
     pub(super) async fn evm_native_and_erc20_balance_for_provider(
@@ -381,13 +401,9 @@ impl SigillumService {
         token_address: &str,
         block_tag: &str,
     ) -> ServiceResult<([u8; 32], [u8; 32])> {
-        self.resolve_provider_rpc_client_for_compartment(
-            provider_compartment_id,
-            &provider.rpc_url,
-            provider.auth_token_key.as_deref(),
-        )?
-        .get_native_and_erc20_balance(owner_address, token_address, block_tag)
-        .await
+        self.provider_rpc_for_profile(provider_compartment_id, provider)?
+            .get_native_and_erc20_balance(owner_address, token_address, block_tag)
+            .await
     }
 
     pub(super) async fn evm_native_balance_for_provider(
@@ -398,11 +414,7 @@ impl SigillumService {
         block_tag: &str,
     ) -> ServiceResult<String> {
         let balance = self
-            .resolve_provider_rpc_client_for_compartment(
-                provider_compartment_id,
-                &provider.rpc_url,
-                provider.auth_token_key.as_deref(),
-            )?
+            .provider_rpc_for_profile(provider_compartment_id, provider)?
             .get_balance(owner_address, block_tag)
             .await?;
         Ok(encode_quantity_u256(&balance))
@@ -417,11 +429,7 @@ impl SigillumService {
         block_tag: &str,
     ) -> ServiceResult<String> {
         let balance = self
-            .resolve_provider_rpc_client_for_compartment(
-                provider_compartment_id,
-                &provider.rpc_url,
-                provider.auth_token_key.as_deref(),
-            )?
+            .provider_rpc_for_profile(provider_compartment_id, provider)?
             .get_erc20_balance(token_address, owner_address, block_tag)
             .await?;
         Ok(encode_quantity_u256(&balance))
@@ -437,14 +445,32 @@ impl SigillumService {
         block_tag: &str,
     ) -> ServiceResult<String> {
         let allowance = self
-            .resolve_provider_rpc_client_for_compartment(
-                provider_compartment_id,
-                &provider.rpc_url,
-                provider.auth_token_key.as_deref(),
-            )?
+            .provider_rpc_for_profile(provider_compartment_id, provider)?
             .get_erc20_allowance(token_address, owner_address, spender_address, block_tag)
             .await?;
         Ok(encode_quantity_u256(&allowance))
+    }
+
+    pub(super) async fn evm_permit2_allowance_for_provider(
+        &self,
+        provider_compartment_id: usize,
+        provider: &sigillum_api::EvmProviderProfile,
+        probe: Permit2AllowanceProbe<'_>,
+    ) -> ServiceResult<(String, u64)> {
+        let allowance = self
+            .provider_rpc_for_profile(provider_compartment_id, provider)?
+            .get_permit2_allowance(
+                probe.permit2_address,
+                probe.owner_address,
+                probe.token_address,
+                probe.spender_address,
+                probe.block_tag,
+            )
+            .await?;
+        Ok((
+            encode_quantity_u256(&allowance.amount),
+            allowance.expiration_unix,
+        ))
     }
 
     pub(super) async fn evm_erc721_owner_for_provider(
@@ -455,13 +481,9 @@ impl SigillumService {
         token_id_hex: &str,
         block_tag: &str,
     ) -> ServiceResult<String> {
-        self.resolve_provider_rpc_client_for_compartment(
-            provider_compartment_id,
-            &provider.rpc_url,
-            provider.auth_token_key.as_deref(),
-        )?
-        .get_erc721_owner(contract_address, token_id_hex, block_tag)
-        .await
+        self.provider_rpc_for_profile(provider_compartment_id, provider)?
+            .get_erc721_owner(contract_address, token_id_hex, block_tag)
+            .await
     }
 
     pub(super) async fn evm_nft_operator_approval_for_provider(
@@ -473,13 +495,9 @@ impl SigillumService {
         operator_address: &str,
         block_tag: &str,
     ) -> ServiceResult<bool> {
-        self.resolve_provider_rpc_client_for_compartment(
-            provider_compartment_id,
-            &provider.rpc_url,
-            provider.auth_token_key.as_deref(),
-        )?
-        .get_nft_operator_approval(contract_address, owner_address, operator_address, block_tag)
-        .await
+        self.provider_rpc_for_profile(provider_compartment_id, provider)?
+            .get_nft_operator_approval(contract_address, owner_address, operator_address, block_tag)
+            .await
     }
 
     pub(super) async fn evm_erc1155_balance_for_provider(
@@ -492,11 +510,7 @@ impl SigillumService {
         block_tag: &str,
     ) -> ServiceResult<String> {
         let balance = self
-            .resolve_provider_rpc_client_for_compartment(
-                provider_compartment_id,
-                &provider.rpc_url,
-                provider.auth_token_key.as_deref(),
-            )?
+            .provider_rpc_for_profile(provider_compartment_id, provider)?
             .get_erc1155_balance(contract_address, owner_address, token_id_hex, block_tag)
             .await?;
         Ok(encode_quantity_u256(&balance))
@@ -509,13 +523,9 @@ impl SigillumService {
         owner_address: &str,
         block_tag: &str,
     ) -> ServiceResult<u64> {
-        self.resolve_provider_rpc_client_for_compartment(
-            provider_compartment_id,
-            &provider.rpc_url,
-            provider.auth_token_key.as_deref(),
-        )?
-        .get_transaction_count(owner_address, block_tag)
-        .await
+        self.provider_rpc_for_profile(provider_compartment_id, provider)?
+            .get_transaction_count(owner_address, block_tag)
+            .await
     }
 
     pub(super) async fn evm_logs_for_provider(
@@ -527,13 +537,9 @@ impl SigillumService {
         from_block: &str,
         to_block: &str,
     ) -> ServiceResult<Vec<EvmLogEntry>> {
-        self.resolve_provider_rpc_client_for_compartment(
-            provider_compartment_id,
-            &provider.rpc_url,
-            provider.auth_token_key.as_deref(),
-        )?
-        .get_logs(address, topics, from_block, to_block)
-        .await
+        self.provider_rpc_for_profile(provider_compartment_id, provider)?
+            .get_logs(address, topics, from_block, to_block)
+            .await
     }
 
     pub(super) async fn evm_filtered_logs_for_provider(
@@ -545,13 +551,9 @@ impl SigillumService {
         from_block: &str,
         to_block: &str,
     ) -> ServiceResult<Vec<EvmLogEntry>> {
-        self.resolve_provider_rpc_client_for_compartment(
-            provider_compartment_id,
-            &provider.rpc_url,
-            provider.auth_token_key.as_deref(),
-        )?
-        .get_filtered_logs(address, topics, from_block, to_block)
-        .await
+        self.provider_rpc_for_profile(provider_compartment_id, provider)?
+            .get_filtered_logs(address, topics, from_block, to_block)
+            .await
     }
 
     pub(super) async fn fetch_balance_observations(

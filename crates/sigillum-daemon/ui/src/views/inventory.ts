@@ -314,6 +314,8 @@ export function createInventoryActions(deps: InventoryActionsDeps) {
   async function scanInventoryEvm(): Promise<void> {
     const token = optionalTextValue("inventoryTokenAddress");
     const spender = optionalTextValue("inventoryAllowanceSpender");
+    const permit2Contract = optionalTextValue("inventoryPermit2Contract");
+    const permit2Spender = optionalTextValue("inventoryPermit2Spender");
     const nftOperator = optionalTextValue("inventoryNftOperator");
     const r = await deps.api("POST", "/api/inventory/scan/evm", {
       wallet_family: optionalTextValue("inventoryWalletFamily"),
@@ -330,6 +332,10 @@ export function createInventoryActions(deps: InventoryActionsDeps) {
       discover_erc20_allowances: input("inventoryDiscoverErc20Allowances").checked,
       allowance_spender_addresses: spender ? [spender] : [],
       allowance_discovery_limit: optionalNumberValue("inventoryAllowanceLimit"),
+      discover_permit2_allowances: input("inventoryDiscoverPermit2Allowances").checked,
+      permit2_contract_addresses: permit2Contract ? [permit2Contract] : [],
+      permit2_spender_addresses: permit2Spender ? [permit2Spender] : [],
+      permit2_allowance_limit: optionalNumberValue("inventoryPermit2AllowanceLimit"),
       discover_erc721_transfers: input("inventoryDiscoverErc721Transfers").checked,
       discover_erc1155_transfers: input("inventoryDiscoverErc1155Transfers").checked,
       discover_nft_operator_approvals: input("inventoryDiscoverNftOperatorApprovals").checked,

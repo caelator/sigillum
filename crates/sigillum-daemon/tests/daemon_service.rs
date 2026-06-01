@@ -25,13 +25,35 @@ struct RpcState;
 
 async fn spawn_mock_evm_provider() -> (SocketAddr, tokio::task::JoinHandle<()>) {
     fn rpc_response(request: &serde_json::Value) -> serde_json::Value {
+        fn abi_word(value: u64) -> String {
+            format!("{value:064x}")
+        }
+
         let method = request["method"].as_str().unwrap_or_default();
         let result = match method {
             "eth_getTransactionCount" => json!("0x7"),
             "eth_getBalance" => json!("0xde0b6b3a7640000"),
             "eth_call" => {
+                let to = request["params"][0]["to"]
+                    .as_str()
+                    .unwrap_or_default()
+                    .to_ascii_lowercase();
                 let data = request["params"][0]["data"].as_str().unwrap_or_default();
-                if data.starts_with("0xe985e9c5") {
+                if to == "0x000000000022d473030f116ddee9f6b43ac78ba3" {
+                    if data.contains("9858effd232b4033e47d90003d41ec34ecaeda94")
+                        && data.contains("a0b86991c6218b36c1d19d4a2e9eb0ce3606eb48")
+                        && data.contains("4444444444444444444444444444444444444444")
+                    {
+                        json!(format!(
+                            "0x{}{}{}",
+                            abi_word(0x0f4240),
+                            abi_word(0x6fffffff),
+                            abi_word(1)
+                        ))
+                    } else {
+                        json!(format!("0x{}{}{}", abi_word(0), abi_word(0), abi_word(0)))
+                    }
+                } else if data.starts_with("0xe985e9c5") {
                     if data.contains("9858effd232b4033e47d90003d41ec34ecaeda94")
                         && data.contains("3333333333333333333333333333333333333333")
                     {
@@ -1510,6 +1532,9 @@ async fn wallet_inventory_scan_discovers_erc20_tokens_from_transfer_logs() {
             "discover_erc20_allowances": true,
             "allowance_spender_addresses": ["0x2222222222222222222222222222222222222222"],
             "allowance_discovery_limit": 4,
+            "discover_permit2_allowances": true,
+            "permit2_spender_addresses": ["0x4444444444444444444444444444444444444444"],
+            "permit2_allowance_limit": 8,
             "discover_erc721_transfers": true,
             "discover_erc1155_transfers": true,
             "discover_nft_operator_approvals": true,
@@ -1526,10 +1551,10 @@ async fn wallet_inventory_scan_discovers_erc20_tokens_from_transfer_logs() {
     assert_eq!(scan_status, StatusCode::OK, "scan response: {scan_json}");
     assert_eq!(scan_json["job"]["status"], "completed");
     assert_eq!(scan_json["job"]["addresses_scanned"], 4);
-    assert_eq!(scan_json["job"]["holdings_detected"], 16);
+    assert_eq!(scan_json["job"]["holdings_detected"], 17);
 
     let holdings = scan_json["holdings"].as_array().unwrap();
-    assert_eq!(holdings.len(), 16);
+    assert_eq!(holdings.len(), 17);
     assert!(holdings.iter().any(|holding| {
         holding["asset_kind"] == "erc20"
             && holding["asset_address"] == "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"
@@ -1542,6 +1567,13 @@ async fn wallet_inventory_scan_discovers_erc20_tokens_from_transfer_logs() {
             && holding["counterparty_address"] == "0x2222222222222222222222222222222222222222"
             && holding["amount_hex"] == "0xf4240"
             && holding["source"] == "erc20-allowance-probe"
+    }));
+    assert!(holdings.iter().any(|holding| {
+        holding["asset_kind"] == "approval"
+            && holding["asset_address"] == "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"
+            && holding["counterparty_address"] == "0x4444444444444444444444444444444444444444"
+            && holding["amount_hex"] == "0xf4240"
+            && holding["source"] == "permit2-allowance-probe"
     }));
     assert!(holdings.iter().any(|holding| {
         holding["asset_kind"] == "erc721"
@@ -1582,6 +1614,16 @@ async fn wallet_inventory_scan_discovers_erc20_tokens_from_transfer_logs() {
         finding["category"] == "risky_approval"
             && finding["subject"] == "0x2222222222222222222222222222222222222222"
             && finding["risk_level"] == "medium"
+    }));
+    assert!(findings.iter().any(|finding| {
+        finding["category"] == "risky_approval"
+            && finding["subject"] == "0x4444444444444444444444444444444444444444"
+            && finding["risk_level"] == "medium"
+            && finding["evidence"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|evidence| evidence == "Approval surface: Permit2 AllowanceTransfer")
     }));
     assert!(findings.iter().any(|finding| {
         finding["category"] == "risky_approval"

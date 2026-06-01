@@ -193,9 +193,10 @@ On top of that, the daemon now includes:
 - persistent stealth deposit records for native ETH and ERC-20 flows, including bounded ERC-5564 announcement-log discovery
 - wallet inventory scans for native balances, manually supplied ERC-20 probes,
   bounded ERC-20 transfer-log token discovery, operator-bounded ERC-20
-  allowance probes, bounded ERC-721 transfer-log discovery with `ownerOf`
-  confirmation, bounded ERC-1155 transfer discovery with `balanceOf`
-  confirmation, and operator-bounded NFT `isApprovedForAll` approval probes
+  allowance probes, operator-bounded Permit2 allowance probes, bounded ERC-721
+  transfer-log discovery with `ownerOf` confirmation, bounded ERC-1155
+  transfer discovery with `balanceOf` confirmation, and operator-bounded NFT
+  `isApprovedForAll` approval probes
 - persistent queue jobs for direct sends and sweep jobs
 - atomic sidecar-backed persistence for profile, deposit, and queue state with
   automatic restore/quarantine behavior
@@ -223,7 +224,7 @@ The embedded UI currently supports:
 - local EIP-1559 native ETH and ERC-20 transfer signing from derived stealth keys
 - EVM provider profile management
 - stealth wallet profile management
-- wallet inventory scans with ERC-20, ERC-20 allowance, ERC-721, ERC-1155, and NFT operator-approval discovery controls
+- wallet inventory scans with ERC-20, ERC-20 allowance, Permit2 allowance, ERC-721, ERC-1155, and NFT operator-approval discovery controls
 - stealth deposit creation, refresh, sweep enqueue, and registry browsing
 - queue inspection and batch processing
 - maintenance runs for deposit refresh plus queue draining
@@ -303,10 +304,11 @@ roadmap covers seed/xpub gap-limit discovery, old-wallet classification, L1/L2
 holdings, ERC-20 transfer-log token discovery, the first bounded ERC-721 NFT
 discovery slice, bounded ERC-1155 transfer discovery, DeFi positions,
 airdrops/rewards, ERC-20 allowance probing, bounded NFT operator-approval
-probing, and reviewable consolidation planning. Broader token registries, full
-ERC-1155 batch coverage, NFT metadata/spam classification, DeFi adapters,
-Permit2 discovery, spender registries, and revoke execution remain roadmap
-work. The
+probing, bounded Permit2 allowance probing, and reviewable consolidation
+planning. Broader token registries, full ERC-1155 batch coverage, NFT
+metadata/spam classification, DeFi adapters, Permit2 expiration-aware
+classification, spender registries, and revoke execution remain roadmap work.
+The
 product strategy and market comparison are captured in
 [`docs/wallet-competitive-landscape.md`](docs/wallet-competitive-landscape.md).
 This is not another round of ad hoc transport or route growth and not a shift

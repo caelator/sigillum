@@ -278,6 +278,10 @@ fn cmd_api_inventory(args: &[String]) {
                 discover_erc20_allowances: flag_option(args, "--discover-erc20-allowances"),
                 allowance_spender_addresses: parse_multi_flag(args, "--allowance-spender"),
                 allowance_discovery_limit: parse_usize_flag(args, "--allowance-discovery-limit"),
+                discover_permit2_allowances: flag_option(args, "--discover-permit2-allowances"),
+                permit2_contract_addresses: parse_multi_flag(args, "--permit2-contract"),
+                permit2_spender_addresses: parse_multi_flag(args, "--permit2-spender"),
+                permit2_allowance_limit: parse_usize_flag(args, "--permit2-allowance-limit"),
                 discover_erc721_transfers: flag_option(args, "--discover-erc721-transfers"),
                 discover_erc1155_transfers: flag_option(args, "--discover-erc1155-transfers"),
                 discover_nft_operator_approvals: flag_option(

@@ -2,6 +2,7 @@ use sigillum_api::{RiskFinding, WalletAssetHolding, WalletInventoryAddress};
 use sigillum_core::decode_quantity_hex;
 
 use super::nft_approval_discovery::DISCOVERY_SOURCE_NFT_OPERATOR_APPROVAL_PROBE;
+use super::permit2_discovery::DISCOVERY_SOURCE_PERMIT2_ALLOWANCE_PROBE;
 use super::support::quantity_hex_is_nonzero;
 
 pub(super) fn derive_inventory_risk_findings(
@@ -57,6 +58,7 @@ fn approval_finding(holding: &WalletAssetHolding) -> RiskFinding {
         .clone()
         .unwrap_or_else(|| "unknown-spender".into());
     let is_nft_operator_approval = holding.source == DISCOVERY_SOURCE_NFT_OPERATOR_APPROVAL_PROBE;
+    let is_permit2_allowance = holding.source == DISCOVERY_SOURCE_PERMIT2_ALLOWANCE_PROBE;
     let risk_level = if is_nft_operator_approval || is_very_large_approval(&holding.amount_hex) {
         "high"
     } else {
@@ -75,6 +77,22 @@ fn approval_finding(holding: &WalletAssetHolding) -> RiskFinding {
                 ),
                 format!("Operator: {spender}"),
                 "Approval: setApprovalForAll(true)".into(),
+            ],
+        )
+    } else if is_permit2_allowance {
+        (
+            "Review the spender and revoke the Permit2 allowance if it is no longer needed.",
+            vec![
+                format!(
+                    "Permit2 token {} has a non-zero allowance",
+                    holding
+                        .asset_address
+                        .clone()
+                        .unwrap_or_else(|| "unknown-token".into())
+                ),
+                format!("Spender: {spender}"),
+                format!("Allowance: {}", holding.amount_hex),
+                "Approval surface: Permit2 AllowanceTransfer".into(),
             ],
         )
     } else {

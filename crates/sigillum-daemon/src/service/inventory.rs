@@ -4,6 +4,7 @@ mod allowance_discovery;
 mod nft_approval_discovery;
 mod nft_discovery;
 mod observation;
+mod permit2_discovery;
 mod planner;
 mod risk;
 mod support;
@@ -28,6 +29,7 @@ use crate::audit_log::AuditEventSpec;
 use allowance_discovery::erc20_allowance_discovery_config;
 use nft_approval_discovery::nft_operator_approval_discovery_config;
 use nft_discovery::{erc721_transfer_discovery_config, erc1155_transfer_discovery_config};
+use permit2_discovery::permit2_allowance_discovery_config;
 use planner::{plan_step_for_holding, signer_status_for_holding, summarize_plan_steps};
 use risk::derive_inventory_risk_findings;
 use support::{
@@ -451,6 +453,12 @@ impl SigillumService {
             &body.allowance_spender_addresses,
             body.allowance_discovery_limit,
         )?;
+        let permit2_allowance_discovery = permit2_allowance_discovery_config(
+            body.discover_permit2_allowances,
+            &body.permit2_contract_addresses,
+            &body.permit2_spender_addresses,
+            body.permit2_allowance_limit,
+        )?;
         let nft_discovery = erc721_transfer_discovery_config(
             body.discover_erc721_transfers,
             body.nft_discovery_from_block.as_deref(),
@@ -532,6 +540,7 @@ impl SigillumService {
                             &token_addresses,
                             token_discovery.as_ref(),
                             allowance_discovery.as_ref(),
+                            permit2_allowance_discovery.as_ref(),
                             nft_discovery.as_ref(),
                             erc1155_discovery.as_ref(),
                             nft_operator_approval_discovery.as_ref(),
@@ -596,6 +605,7 @@ impl SigillumService {
                                         &token_addresses,
                                         token_discovery.as_ref(),
                                         allowance_discovery.as_ref(),
+                                        permit2_allowance_discovery.as_ref(),
                                         nft_discovery.as_ref(),
                                         erc1155_discovery.as_ref(),
                                         nft_operator_approval_discovery.as_ref(),

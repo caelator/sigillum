@@ -12,6 +12,9 @@ use super::nft_discovery::{
     DISCOVERY_SOURCE_ERC721_TRANSFER_LOG, DISCOVERY_SOURCE_ERC1155_TRANSFER_LOG,
     Erc721TransferDiscoveryConfig, Erc1155TransferDiscoveryConfig,
 };
+use super::permit2_discovery::{
+    DISCOVERY_SOURCE_PERMIT2_ALLOWANCE_PROBE, Permit2AllowanceDiscoveryConfig,
+};
 use super::support::{
     InventoryAddressObservation, InventoryRecordContext, address_record, holding_record,
     holding_record_with_counterparty, holding_record_with_source, holding_record_with_token_id,
@@ -35,6 +38,7 @@ impl SigillumService {
         token_addresses: &[String],
         token_discovery: Option<&Erc20TransferDiscoveryConfig>,
         allowance_discovery: Option<&Erc20AllowanceDiscoveryConfig>,
+        permit2_allowance_discovery: Option<&Permit2AllowanceDiscoveryConfig>,
         nft_discovery: Option<&Erc721TransferDiscoveryConfig>,
         erc1155_discovery: Option<&Erc1155TransferDiscoveryConfig>,
         nft_operator_approval_discovery: Option<&NftOperatorApprovalDiscoveryConfig>,
@@ -128,6 +132,28 @@ impl SigillumService {
                     Some(allowance.spender_address),
                     &allowance.amount_hex,
                     DISCOVERY_SOURCE_ERC20_ALLOWANCE_PROBE,
+                ));
+            }
+        }
+
+        if let Some(config) = permit2_allowance_discovery {
+            let allowances = self
+                .discover_permit2_allowances_for_address(
+                    provider,
+                    &address,
+                    &observed_token_addresses,
+                    block_tag,
+                    config,
+                )
+                .await?;
+            for allowance in allowances {
+                holdings.push(holding_record_with_counterparty(
+                    &record_context,
+                    "approval",
+                    Some(allowance.token_address),
+                    Some(allowance.spender_address),
+                    &allowance.amount_hex,
+                    DISCOVERY_SOURCE_PERMIT2_ALLOWANCE_PROBE,
                 ));
             }
         }
