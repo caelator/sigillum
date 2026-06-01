@@ -4,6 +4,7 @@ pub(in crate::service) struct EvmContractCallPreflight<'a> {
     pub(in crate::service) from_address: &'a str,
     pub(in crate::service) target_address: &'a str,
     pub(in crate::service) data_hex: &'a str,
+    pub(in crate::service) value_hex: Option<&'a str>,
     pub(in crate::service) block_tag: &'a str,
 }
 
@@ -19,6 +20,7 @@ impl SigillumService {
                 call.from_address,
                 call.target_address,
                 call.data_hex,
+                call.value_hex,
                 call.block_tag,
             )
             .await

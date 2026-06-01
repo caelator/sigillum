@@ -156,17 +156,30 @@ impl ProviderRpcClient {
         from_address: &str,
         target_address: &str,
         data_hex: &str,
+        value_hex: Option<&str>,
         block_tag: &str,
     ) -> ServiceResult<String> {
+        let mut transaction = Map::new();
+        transaction.insert("from".into(), json!(normalize_address(from_address)?));
+        transaction.insert("to".into(), json!(normalize_address(target_address)?));
+        transaction.insert(
+            "data".into(),
+            json!(normalize_hex_blob_allow_empty(
+                data_hex,
+                "contract call data"
+            )?),
+        );
+        if let Some(value_hex) = value_hex {
+            transaction.insert(
+                "value".into(),
+                json!(normalize_hex_blob(value_hex, "call value")?),
+            );
+        }
         let value = self
             .request(
                 1,
                 "eth_call",
-                json!([{
-                    "from": normalize_address(from_address)?,
-                    "to": normalize_address(target_address)?,
-                    "data": normalize_hex_blob(data_hex, "contract call data")?,
-                }, block_tag]),
+                Value::Array(vec![Value::Object(transaction), json!(block_tag)]),
             )
             .await?;
         let result = value.as_str().ok_or_else(|| {

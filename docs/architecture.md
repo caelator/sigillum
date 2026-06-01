@@ -155,6 +155,9 @@ Current daemon behavior:
 - exposes a maintenance cycle that refreshes deposits, auto-enqueues sweeps, and processes queue work
 - generates reviewable approval revoke plan steps for ERC-20 allowances,
   Permit2 allowances, and NFT operator approvals
+- preflights native sweeps, ERC-20 sweeps, ERC-20 approval revokes, Permit2
+  allowance revokes, and NFT operator revokes with provider-backed `eth_call`
+  evidence before those consolidation steps can become executable
 - classifies discovered inventory addresses with signer, gas, value, approval,
   stranded-value, watch-only, and dormant-candidate labels so risk and
   consolidation views can distinguish recoverable value from merely visible
@@ -179,8 +182,9 @@ What it intentionally does not do today:
 - full token registry/indexer scraping, full ERC-1155 batch/history coverage,
   NFT metadata and spam classification, Permit2 expiration-aware risk scoring,
   external spender/operator registries, revoke transaction builders beyond
-  approval revokes, sweep/claim/swap/exit transaction simulation, DeFi position
-  discovery, or airdrop/reward discovery
+  approval revokes, NFT sweep/claim/swap/exit transaction simulation, gas-fee
+  reservation for native sweep execution, DeFi position discovery, or
+  airdrop/reward discovery
 - queued execution of consolidation plans for discovered holdings outside the
   current stealth deposit sweep flow
 

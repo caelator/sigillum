@@ -73,6 +73,12 @@ async fn spawn_mock_evm_provider() -> (SocketAddr, tokio::task::JoinHandle<()>) 
                     } else {
                         json!("0x0")
                     }
+                } else if data == "0x" {
+                    if request["params"][0]["value"].as_str().is_some() {
+                        json!("0x")
+                    } else {
+                        json!({ "missing": "value" })
+                    }
                 } else {
                     json!("0x0f4240")
                 }
@@ -1761,6 +1767,31 @@ async fn wallet_inventory_scan_discovers_erc20_tokens_from_transfer_logs() {
         "simulate response: {simulate_json}"
     );
     let simulated_steps = simulate_json["plan"]["steps"].as_array().unwrap();
+    let passed_native_sweep = simulated_steps.iter().any(|step| {
+        step["action"] == "sweep_native"
+            && step["simulation_status"] == "passed"
+            && step["simulation_evidence"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|evidence| evidence == "prepared_call=native.transfer(value)")
+            && step["simulation_evidence"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|evidence| evidence == "fee_policy=not_estimated")
+    });
+    assert!(passed_native_sweep);
+    let passed_erc20_sweep = simulated_steps.iter().any(|step| {
+        step["action"] == "sweep_erc20"
+            && step["simulation_status"] == "passed"
+            && step["simulation_evidence"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|evidence| evidence == "prepared_call=erc20.transfer(destination,amount)")
+    });
+    assert!(passed_erc20_sweep);
     let passed_erc20_revoke = simulated_steps.iter().any(|step| {
         step["action"] == "revoke_erc20_approval"
             && step["simulation_status"] == "passed"

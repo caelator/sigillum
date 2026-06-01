@@ -134,6 +134,9 @@ impl SigillumService {
         evidence.push(format!("chain_id={}", provider.chain_id));
         evidence.push(format!("from={}", step.address));
         evidence.push(format!("to={}", call.target_address));
+        if let Some(value_hex) = call.value_hex.as_deref() {
+            evidence.push(format!("value={value_hex}"));
+        }
         evidence.push(format!("call={}", call.label));
         evidence.push("rpc_method=eth_call".into());
         match self
@@ -144,6 +147,7 @@ impl SigillumService {
                     from_address: &step.address,
                     target_address: &call.target_address,
                     data_hex: &call.data_hex,
+                    value_hex: call.value_hex.as_deref(),
                     block_tag: "latest",
                 },
             )
