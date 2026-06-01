@@ -11,6 +11,9 @@ pub(super) fn derive_inventory_risk_findings(
     risk_catalog: &[RiskCatalogEntry],
 ) -> Vec<RiskFinding> {
     let mut findings = Vec::new();
+    for address in addresses {
+        findings.extend(address_classification_findings(address));
+    }
     for holding in holdings
         .iter()
         .filter(|holding| quantity_hex_is_nonzero(&holding.amount_hex))
@@ -55,6 +58,83 @@ pub(super) fn derive_inventory_risk_findings(
         }
     }
     findings
+}
+
+fn address_classification_findings(address: &WalletInventoryAddress) -> Vec<RiskFinding> {
+    let mut findings = Vec::new();
+    if address_has_classification(address, "watch_only")
+        && address_has_classification(address, "value_detected")
+    {
+        findings.push(address_finding(
+            "watch_only_value",
+            "medium",
+            address,
+            "Watch-only address has value. Import or connect the signer before planning any recovery action.",
+            vec![
+                "Address is visible but Sigillum cannot sign for it".into(),
+                "Value was detected during inventory discovery".into(),
+            ],
+        ));
+    }
+    if address_has_classification(address, "dormant_candidate") {
+        findings.push(address_finding(
+            "dormant_wallet",
+            "low",
+            address,
+            "Review this funded address as a dormant or historical receive address before consolidation.",
+            vec![
+                "Value was detected on an address with no outgoing transaction count".into(),
+                format!("Derivation path: {}", address.derivation_path),
+            ],
+        ));
+    }
+    if address_has_classification(address, "stranded_value") {
+        findings.push(address_finding(
+            "stranded_value",
+            "medium",
+            address,
+            "Fund gas or approve a gas sponsor before attempting token or NFT recovery from this address.",
+            vec![
+                "Non-native value was detected".into(),
+                "No native gas balance was detected for the same address".into(),
+            ],
+        ));
+    }
+    findings
+}
+
+fn address_finding(
+    category: &str,
+    risk_level: &str,
+    address: &WalletInventoryAddress,
+    recommendation: &str,
+    evidence: Vec<String>,
+) -> RiskFinding {
+    RiskFinding {
+        id: stable_address_finding_id(category, address),
+        category: category.into(),
+        risk_level: risk_level.into(),
+        status: "open".into(),
+        wallet_family: address.wallet_family.clone(),
+        wallet_profile: address.wallet_profile.clone(),
+        provider_profile: address.provider_profile.clone(),
+        chain_id: address.chain_id,
+        address: address.address.clone(),
+        subject_type: "address".into(),
+        subject: address.address.clone(),
+        source: "local-risk-engine".into(),
+        recommendation: recommendation.into(),
+        evidence,
+        first_seen_at_unix: address.first_seen_at_unix,
+        last_checked_at_unix: address.last_checked_at_unix,
+    }
+}
+
+fn address_has_classification(address: &WalletInventoryAddress, classification: &str) -> bool {
+    address
+        .classifications
+        .iter()
+        .any(|value| value == classification)
 }
 
 fn approval_finding(
@@ -221,6 +301,17 @@ fn stable_finding_id(prefix: &str, holding: &WalletAssetHolding) -> String {
     )
 }
 
+fn stable_address_finding_id(category: &str, address: &WalletInventoryAddress) -> String {
+    format!(
+        "{category}:{}:{}:{}:{}:{}",
+        address.wallet_family,
+        address.wallet_profile,
+        address.provider_profile,
+        address.chain_id,
+        address.address
+    )
+}
+
 fn stable_approval_finding_id(holding: &WalletAssetHolding, spender: &str) -> String {
     format!(
         "risky_approval:{}:{}:{}:{}:{}:{}:{}",
@@ -238,4 +329,66 @@ fn is_very_large_approval(amount_hex: &str) -> bool {
     decode_quantity_hex(amount_hex)
         .map(|amount| amount[0] >= 0x80)
         .unwrap_or(false)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn sample_address(classifications: &[&str]) -> WalletInventoryAddress {
+        WalletInventoryAddress {
+            id: "addr_1".into(),
+            wallet_family: "eth-xpub".into(),
+            wallet_profile: "archive".into(),
+            provider_profile: "mainnet".into(),
+            chain_id: 1,
+            address: "0x1111111111111111111111111111111111111111".into(),
+            derivation_path: "m/44'/60'/0'/0/0".into(),
+            address_index: 0,
+            activity_state: "funded".into(),
+            native_balance_wei_hex: "0x0".into(),
+            transaction_count: 0,
+            classifications: classifications
+                .iter()
+                .map(|value| (*value).into())
+                .collect(),
+            source: "local-rpc".into(),
+            first_seen_at_unix: 1,
+            last_checked_at_unix: 2,
+        }
+    }
+
+    #[test]
+    fn address_classifications_emit_watch_only_dormant_and_stranded_findings() {
+        let findings = derive_inventory_risk_findings(
+            &[sample_address(&[
+                "watch_only",
+                "value_detected",
+                "stranded_value",
+                "dormant_candidate",
+            ])],
+            &[],
+            &[],
+        );
+
+        assert!(findings.iter().any(|finding| {
+            finding.category == "watch_only_value" && finding.risk_level == "medium"
+        }));
+        assert!(findings.iter().any(|finding| {
+            finding.category == "dormant_wallet" && finding.risk_level == "low"
+        }));
+        assert!(findings.iter().any(|finding| {
+            finding.category == "stranded_value" && finding.subject_type == "address"
+        }));
+    }
+
+    #[test]
+    fn empty_address_classifications_do_not_emit_address_findings() {
+        let findings = derive_inventory_risk_findings(
+            &[sample_address(&["watch_only", "empty_candidate"])],
+            &[],
+            &[],
+        );
+        assert!(findings.is_empty());
+    }
 }

@@ -1440,6 +1440,29 @@ async fn wallet_inventory_scan_records_seed_profile_native_holdings() {
     assert_eq!(scan_json["job"]["holdings_detected"], 4);
     assert_eq!(scan_json["addresses"].as_array().unwrap().len(), 4);
     assert_eq!(scan_json["holdings"].as_array().unwrap().len(), 4);
+    let first_address_classes = scan_json["addresses"][0]["classifications"]
+        .as_array()
+        .unwrap();
+    assert!(
+        first_address_classes
+            .iter()
+            .any(|classification| classification == "signer_available")
+    );
+    assert!(
+        first_address_classes
+            .iter()
+            .any(|classification| classification == "gas_available")
+    );
+    assert!(
+        first_address_classes
+            .iter()
+            .any(|classification| classification == "transaction_history")
+    );
+    assert!(
+        first_address_classes
+            .iter()
+            .any(|classification| classification == "value_detected")
+    );
     assert_eq!(scan_json["holdings"][0]["asset_kind"], "native");
     assert_eq!(scan_json["holdings"][0]["amount_hex"], "0xde0b6b3a7640000");
 
@@ -1552,6 +1575,19 @@ async fn wallet_inventory_scan_discovers_erc20_tokens_from_transfer_logs() {
     assert_eq!(scan_json["job"]["status"], "completed");
     assert_eq!(scan_json["job"]["addresses_scanned"], 4);
     assert_eq!(scan_json["job"]["holdings_detected"], 17);
+    let scan_addresses = scan_json["addresses"].as_array().unwrap();
+    assert!(scan_addresses.iter().any(|address| {
+        let classifications = address["classifications"].as_array().unwrap();
+        classifications
+            .iter()
+            .any(|classification| classification == "token_holding")
+            && classifications
+                .iter()
+                .any(|classification| classification == "nft_holding")
+            && classifications
+                .iter()
+                .any(|classification| classification == "approval_exposure")
+    }));
 
     let holdings = scan_json["holdings"].as_array().unwrap();
     assert_eq!(holdings.len(), 17);

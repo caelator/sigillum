@@ -141,6 +141,9 @@ export function createInventoryActions(deps: InventoryActionsDeps) {
         esc(address.native_balance_wei_hex || "0x0") +
         " · txCount=" +
         esc(String(address.transaction_count || 0)) +
+        ((address.classifications || []).length
+          ? "<br>classifications=" + esc((address.classifications || []).join(", "))
+          : "") +
         "</div></div></li>",
     );
     renderEntityList(

@@ -568,6 +568,7 @@ fn test_wallet_inventory_scan_response_roundtrip() {
         activity_state: "funded".to_string(),
         native_balance_wei_hex: "0x1".to_string(),
         transaction_count: 1,
+        classifications: vec!["signer_available".to_string(), "gas_available".to_string()],
         source: "local-rpc".to_string(),
         first_seen_at_unix: 1,
         last_checked_at_unix: 2,

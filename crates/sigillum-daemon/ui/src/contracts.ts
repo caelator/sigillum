@@ -80,6 +80,24 @@ export interface RiskCatalogEntry {
   updated_at_unix: number;
 }
 
+export interface WalletInventoryAddress {
+  id: string;
+  wallet_family: string;
+  wallet_profile: string;
+  provider_profile: string;
+  chain_id: number;
+  address: string;
+  derivation_path: string;
+  address_index: number;
+  activity_state: string;
+  native_balance_wei_hex: string;
+  transaction_count: number;
+  classifications?: string[];
+  source: string;
+  first_seen_at_unix: number;
+  last_checked_at_unix: number;
+}
+
 export interface ConsolidationPlanSummary {
   total_steps: number;
   blocked_steps: number;

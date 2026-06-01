@@ -74,7 +74,11 @@ Required discovery classes:
   and execution remain future work.
 - Dormant-wallet classification using last activity, transaction count, current
   value, token/NFT/DeFi exposure, gas availability, and whether the private key
-  or signing path is actually available.
+  or signing path is actually available. Inventory addresses now carry
+  operator-facing classifications such as `signer_available`, `watch_only`,
+  `gas_available`, `stranded_value`, `approval_exposure`, and
+  `dormant_candidate`; richer last-activity timestamps and valuation remain
+  future work.
 
 ## Local Indexing Architecture
 
@@ -241,6 +245,11 @@ The CLI should have parity for automation:
    `setApprovalForAll(operator, false)` revokes. Permit2 allowance probes now
    retain the Permit2 contract address so `approve(token, spender, 0, 0)`
    revokes can be simulated against the correct protocol contract.
+5a. Wallet archaeology labels. Discovery now classifies addresses for signer
+    availability, watch-only status, gas availability, token/NFT/protocol
+    value, stranded value, approval exposure, and dormant-candidate state, and
+    the local risk engine emits review findings for watch-only value, stranded
+    value, and dormant funded addresses.
 6. DeFi position adapters for the most common protocols.
 7. Airdrop/reward discovery with strict claim risk gates.
 8. Consolidation planner with broader dry-run simulation for sweeps, gas

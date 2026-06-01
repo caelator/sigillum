@@ -127,6 +127,7 @@ pub(super) fn address_record(
     activity_state: &str,
     native_balance_wei_hex: &str,
     transaction_count: u64,
+    classifications: Vec<String>,
 ) -> WalletInventoryAddress {
     WalletInventoryAddress {
         id: random_id(),
@@ -140,6 +141,7 @@ pub(super) fn address_record(
         activity_state: activity_state.to_string(),
         native_balance_wei_hex: native_balance_wei_hex.to_string(),
         transaction_count,
+        classifications,
         source: DISCOVERY_SOURCE_LOCAL_RPC.into(),
         first_seen_at_unix: context.now,
         last_checked_at_unix: context.now,

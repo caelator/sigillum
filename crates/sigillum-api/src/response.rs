@@ -625,6 +625,8 @@ pub struct WalletInventoryAddress {
     pub activity_state: String,
     pub native_balance_wei_hex: String,
     pub transaction_count: u64,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub classifications: Vec<String>,
     pub source: String,
     pub first_seen_at_unix: u64,
     pub last_checked_at_unix: u64,

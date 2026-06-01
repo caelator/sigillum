@@ -155,6 +155,10 @@ Current daemon behavior:
 - exposes a maintenance cycle that refreshes deposits, auto-enqueues sweeps, and processes queue work
 - generates reviewable approval revoke plan steps for ERC-20 allowances,
   Permit2 allowances, and NFT operator approvals
+- classifies discovered inventory addresses with signer, gas, value, approval,
+  stranded-value, watch-only, and dormant-candidate labels so risk and
+  consolidation views can distinguish recoverable value from merely visible
+  value
 - keeps the gateway surface local-sidecar-only rather than treating it as an internet-facing service boundary
 
 What it intentionally does not do today:
@@ -171,11 +175,12 @@ What it intentionally does not do today:
   Permit2 allowance probes, operator-bounded NFT approval probes, and local
   operator-managed spender/operator risk catalog overrides
 - seed/xpub gap-limit discovery, historical receive-address scanning, or
-  dormant-wallet classification
+  rich dormant-wallet classification with last-activity timestamps
 - full token registry/indexer scraping, full ERC-1155 batch/history coverage,
   NFT metadata and spam classification, Permit2 expiration-aware risk scoring,
-  external spender/operator registries, revoke transaction builders,
-  transaction simulation, DeFi position discovery, or airdrop/reward discovery
+  external spender/operator registries, revoke transaction builders beyond
+  approval revokes, sweep/claim/swap/exit transaction simulation, DeFi position
+  discovery, or airdrop/reward discovery
 - queued execution of consolidation plans for discovered holdings outside the
   current stealth deposit sweep flow
 
