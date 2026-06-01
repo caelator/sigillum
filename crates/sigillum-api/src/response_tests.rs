@@ -687,6 +687,7 @@ fn test_wallet_operations_response_roundtrips() {
         asset_kind: "erc20".to_string(),
         asset_address: Some("0xtoken".to_string()),
         token_id_hex: None,
+        counterparty_address: None,
         amount_hex: "0x1".to_string(),
         destination_address: Some("0xdestination".to_string()),
         signer_status: "signing_not_implemented".to_string(),

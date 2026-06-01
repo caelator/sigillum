@@ -1655,6 +1655,56 @@ async fn wallet_inventory_scan_discovers_erc20_tokens_from_transfer_logs() {
                 .any(|evidence| evidence == "Approval: setApprovalForAll(true)")
     }));
 
+    let plan = post_json(
+        &client,
+        addr,
+        "/api/plans/consolidation/generate",
+        json!({
+            "destination_address": "0x9999999999999999999999999999999999999999",
+        }),
+        Some(&token),
+    )
+    .await;
+    assert_eq!(plan.status(), StatusCode::OK);
+    let plan_json: serde_json::Value = plan.json().await.unwrap();
+    let steps = plan_json["plan"]["steps"].as_array().unwrap();
+    assert!(steps.iter().any(|step| {
+        step["action"] == "revoke_erc20_approval"
+            && step["status"] == "review_required"
+            && step["counterparty_address"] == "0x2222222222222222222222222222222222222222"
+            && step["simulation_status"] == "required"
+            && step["blockers"]
+                .as_array()
+                .is_none_or(|blockers| blockers.is_empty())
+    }));
+    assert!(steps.iter().any(|step| {
+        step["action"] == "revoke_permit2_allowance"
+            && step["counterparty_address"] == "0x4444444444444444444444444444444444444444"
+            && step["simulation_status"] == "required"
+    }));
+    assert!(steps.iter().any(|step| {
+        step["action"] == "revoke_nft_operator_approval"
+            && step["counterparty_address"] == "0x3333333333333333333333333333333333333333"
+            && step["risk_level"] == "high"
+    }));
+
+    let approve_plan = post_json(
+        &client,
+        addr,
+        "/api/plans/consolidation/approve",
+        json!({
+            "plan_id": plan_json["plan"]["id"].as_str().unwrap(),
+        }),
+        Some(&token),
+    )
+    .await;
+    assert_eq!(approve_plan.status(), StatusCode::OK);
+    let approve_plan_json: serde_json::Value = approve_plan.json().await.unwrap();
+    assert_eq!(
+        approve_plan_json["plan"]["summary"]["executable_steps"],
+        json!(0)
+    );
+
     let catalog_delete = post_json(
         &client,
         addr,

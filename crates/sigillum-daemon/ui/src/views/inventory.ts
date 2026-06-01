@@ -1,6 +1,7 @@
 import type {
   ChainProfile,
-  ConsolidationPlanSummary,
+  ConsolidationPlan,
+  ConsolidationPlanStep,
   RiskCatalogEntry,
   RiskFinding,
   WalletDiscoveryJob,
@@ -19,7 +20,7 @@ export interface InventoryViewModel {
   discoveryJobs: WalletDiscoveryJob[];
   riskCatalog: RiskCatalogEntry[];
   riskFindings: RiskFinding[];
-  consolidationPlans: ConsolidationPlanSummary[];
+  consolidationPlans: ConsolidationPlan[];
 }
 
 export function summarizeInventory(view: InventoryViewModel): string {
@@ -35,7 +36,7 @@ export function summarizeInventory(view: InventoryViewModel): string {
 export function inventoryNeedsOperatorReview(view: InventoryViewModel): boolean {
   return (
     view.riskFindings.length > 0 ||
-    view.consolidationPlans.some((plan) => plan.review_required_step_count > 0)
+    view.consolidationPlans.some((plan) => plan.summary?.review_required_steps > 0)
   );
 }
 
@@ -231,17 +232,17 @@ export function createInventoryActions(deps: InventoryActionsDeps) {
     );
   }
 
-  function renderConsolidationPlans(plans: any[]): void {
+  function renderConsolidationPlans(plans: ConsolidationPlan[]): void {
     renderEntityList(
       "consolidationPlanList",
       plans,
       "No consolidation plans generated yet.",
       (plan) => {
-        const summary = plan.summary || {};
+        const summary = plan.summary;
         const stepLines = (plan.steps || [])
           .slice(0, 8)
           .map(
-            (step: any) =>
+            (step: ConsolidationPlanStep) =>
               '<div class="entity-meta">' +
               esc(step.action) +
               " " +
@@ -249,8 +250,13 @@ export function createInventoryActions(deps: InventoryActionsDeps) {
               " · " +
               esc(step.asset_kind) +
               (step.token_id_hex ? " #" + esc(step.token_id_hex) : "") +
+              (step.counterparty_address
+                ? " · spender/operator=" + esc(step.counterparty_address)
+                : "") +
               " · amount=" +
               esc(step.amount_hex) +
+              " · simulation=" +
+              esc(step.simulation_status || "not_run") +
               " · blockers=" +
               esc((step.blockers || []).join(", ") || "-") +
               "</div>",

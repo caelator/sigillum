@@ -153,6 +153,8 @@ Current daemon behavior:
   blast-radius wallet signing, route-facing balance operations, and shared
   address/quantity helpers
 - exposes a maintenance cycle that refreshes deposits, auto-enqueues sweeps, and processes queue work
+- generates reviewable approval revoke plan steps for ERC-20 allowances,
+  Permit2 allowances, and NFT operator approvals
 - keeps the gateway surface local-sidecar-only rather than treating it as an internet-facing service boundary
 
 What it intentionally does not do today:
@@ -172,10 +174,10 @@ What it intentionally does not do today:
   dormant-wallet classification
 - full token registry/indexer scraping, full ERC-1155 batch/history coverage,
   NFT metadata and spam classification, Permit2 expiration-aware risk scoring,
-  external spender/operator registries, DeFi position discovery, or
-  airdrop/reward discovery
-- consolidation planning for discovered holdings outside the current stealth
-  deposit sweep flow
+  external spender/operator registries, revoke transaction builders,
+  transaction simulation, DeFi position discovery, or airdrop/reward discovery
+- queued execution of consolidation plans for discovered holdings outside the
+  current stealth deposit sweep flow
 
 ## Architectural Priorities
 

@@ -115,6 +115,7 @@ test("queue and inventory renderers produce reviewable DOM summaries", () => {
     "inventoryJobList",
     "inventoryAddressList",
     "inventoryHoldingList",
+    "consolidationPlanList",
   ]);
   const operations = createOperationsActions({
     api: async () => ({}),
@@ -167,6 +168,49 @@ test("queue and inventory renderers produce reviewable DOM summaries", () => {
   ok(dom.el("inventoryJobList").innerHTML.includes("scan-1"));
   ok(dom.el("inventoryAddressList").innerHTML.includes("0xabc"));
   ok(dom.el("inventoryHoldingList").innerHTML.includes("native"));
+
+  inventory.renderConsolidationPlans([
+    {
+      id: "plan-1",
+      status: "review_required",
+      summary: {
+        total_steps: 1,
+        blocked_steps: 0,
+        review_required_steps: 1,
+        approved_steps: 0,
+        executable_steps: 0,
+        value_items: 1,
+      },
+      created_at_unix: 1,
+      updated_at_unix: 2,
+      steps: [
+        {
+          id: "step-1",
+          action: "revoke_erc20_approval",
+          status: "review_required",
+          wallet_family: "eth-seed",
+          wallet_profile: "archive",
+          provider_profile: "mainnet",
+          chain_id: 1,
+          address: "0xabc",
+          derivation_path: "m/44'/60'/0'/0/0",
+          asset_kind: "approval",
+          asset_address: "0xtoken",
+          amount_hex: "0xffff",
+          counterparty_address: "0xspender",
+          signer_status: "available",
+          simulation_status: "required",
+          risk_level: "high",
+          blockers: [],
+          auto_eligible: false,
+          approved: false,
+        },
+      ],
+    },
+  ]);
+  ok(dom.el("consolidationPlanList").innerHTML.includes("revoke_erc20_approval"));
+  ok(dom.el("consolidationPlanList").innerHTML.includes("0xspender"));
+  ok(dom.el("consolidationPlanList").innerHTML.includes("simulation=required"));
 });
 
 test("data-action dispatcher coerces args and restores button busy state", async () => {

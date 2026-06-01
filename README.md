@@ -199,6 +199,8 @@ On top of that, the daemon now includes:
   `isApprovedForAll` approval probes
 - a local operator-managed risk catalog for spender/operator labels and
   approval-risk overrides
+- reviewable consolidation-plan revoke steps for discovered ERC-20, Permit2,
+  and NFT operator approvals, with signer and simulation gates before execution
 - persistent queue jobs for direct sends and sweep jobs
 - atomic sidecar-backed persistence for profile, deposit, and queue state with
   automatic restore/quarantine behavior
@@ -228,6 +230,7 @@ The embedded UI currently supports:
 - stealth wallet profile management
 - wallet inventory scans with ERC-20, ERC-20 allowance, Permit2 allowance, ERC-721, ERC-1155, and NFT operator-approval discovery controls
 - local risk catalog management for approval spender/operator labels
+- dry-run consolidation plans that surface approval revokes alongside sweeps
 - stealth deposit creation, refresh, sweep enqueue, and registry browsing
 - queue inspection and batch processing
 - maintenance runs for deposit refresh plus queue draining
@@ -308,10 +311,10 @@ holdings, ERC-20 transfer-log token discovery, the first bounded ERC-721 NFT
 discovery slice, bounded ERC-1155 transfer discovery, DeFi positions,
 airdrops/rewards, ERC-20 allowance probing, bounded NFT operator-approval
 probing, bounded Permit2 allowance probing, and reviewable consolidation
-planning. Broader token registries, full ERC-1155 batch coverage, NFT
-metadata/spam classification, DeFi adapters, Permit2 expiration-aware
-classification, external spender registries, and revoke execution remain
-roadmap work. The
+planning with approval revoke steps. Broader token registries, full ERC-1155
+batch coverage, NFT metadata/spam classification, DeFi adapters, Permit2
+expiration-aware classification, external spender registries, revoke
+transaction builders, simulation, and execution remain roadmap work. The
 product strategy and market comparison are captured in
 [`docs/wallet-competitive-landscape.md`](docs/wallet-competitive-landscape.md).
 This is not another round of ad hoc transport or route growth and not a shift

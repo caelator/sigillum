@@ -81,15 +81,46 @@ export interface RiskCatalogEntry {
 }
 
 export interface ConsolidationPlanSummary {
-  plan_id: string;
+  total_steps: number;
+  blocked_steps: number;
+  review_required_steps: number;
+  approved_steps: number;
+  executable_steps: number;
+  value_items: number;
+}
+
+export interface ConsolidationPlanStep {
+  id: string;
+  action: string;
   status: string;
-  step_count: number;
-  blocked_step_count: number;
-  review_required_step_count: number;
-  approved_step_count: number;
-  estimated_native_gas_wei?: string | null;
+  wallet_family: string;
+  wallet_profile: string;
+  provider_profile: string;
+  chain_id: number;
+  address: string;
+  derivation_path: string;
+  asset_kind: string;
+  asset_address?: string | null;
+  token_id_hex?: string | null;
+  counterparty_address?: string | null;
+  amount_hex: string;
+  destination_address?: string | null;
+  signer_status: string;
+  simulation_status: string;
+  risk_level: string;
+  blockers: string[];
+  auto_eligible: boolean;
+  approved: boolean;
+}
+
+export interface ConsolidationPlan {
+  id: string;
+  status: string;
+  destination_address?: string | null;
   created_at_unix: number;
   updated_at_unix: number;
+  summary: ConsolidationPlanSummary;
+  steps: ConsolidationPlanStep[];
 }
 
 export interface ApiRequestOptions<TBody = unknown> {
