@@ -542,6 +542,13 @@ fn test_wallet_inventory_scan_request_roundtrip() {
         discover_nft_operator_approvals: Some(true),
         nft_operator_addresses: vec!["0x3333333333333333333333333333333333333333".to_string()],
         nft_operator_approval_limit: Some(8),
+        discover_defi_token_positions: Some(true),
+        defi_token_probes: vec![DefiTokenProbe {
+            protocol: "aave-v3".to_string(),
+            token_address: "0x4d5f47fa6a74757f35c14fd3a6ef8e3c9bc514e8".to_string(),
+            protocol_address: Some("0x87870bca3f3fd6335c3f4ce8392d69350b4fa4e2".to_string()),
+        }],
+        defi_position_limit: Some(16),
         nft_discovery_from_block: Some("0x100".to_string()),
         nft_discovery_to_block: Some("latest".to_string()),
         nft_discovery_limit: Some(100),

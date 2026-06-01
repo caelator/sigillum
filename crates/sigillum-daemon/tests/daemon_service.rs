@@ -1573,6 +1573,13 @@ async fn wallet_inventory_scan_discovers_erc20_tokens_from_transfer_logs() {
             "discover_nft_operator_approvals": true,
             "nft_operator_addresses": ["0x3333333333333333333333333333333333333333"],
             "nft_operator_approval_limit": 8,
+            "discover_defi_token_positions": true,
+            "defi_token_probes": [{
+                "protocol": "aave-v3",
+                "token_address": "0x4d5f47fa6a74757f35c14fd3a6ef8e3c9bc514e8",
+                "protocol_address": "0x87870bca3f3fd6335c3f4ce8392d69350b4fa4e2"
+            }],
+            "defi_position_limit": 8,
             "nft_discovery_from_block": "0x0",
             "nft_discovery_limit": 4
         }),
@@ -1584,7 +1591,7 @@ async fn wallet_inventory_scan_discovers_erc20_tokens_from_transfer_logs() {
     assert_eq!(scan_status, StatusCode::OK, "scan response: {scan_json}");
     assert_eq!(scan_json["job"]["status"], "completed");
     assert_eq!(scan_json["job"]["addresses_scanned"], 4);
-    assert_eq!(scan_json["job"]["holdings_detected"], 17);
+    assert_eq!(scan_json["job"]["holdings_detected"], 21);
     let scan_addresses = scan_json["addresses"].as_array().unwrap();
     assert!(scan_addresses.iter().any(|address| {
         let classifications = address["classifications"].as_array().unwrap();
@@ -1597,10 +1604,13 @@ async fn wallet_inventory_scan_discovers_erc20_tokens_from_transfer_logs() {
             && classifications
                 .iter()
                 .any(|classification| classification == "approval_exposure")
+            && classifications
+                .iter()
+                .any(|classification| classification == "protocol_holding")
     }));
 
     let holdings = scan_json["holdings"].as_array().unwrap();
-    assert_eq!(holdings.len(), 17);
+    assert_eq!(holdings.len(), 21);
     assert!(holdings.iter().any(|holding| {
         holding["asset_kind"] == "erc20"
             && holding["asset_address"] == "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"
@@ -1651,6 +1661,13 @@ async fn wallet_inventory_scan_discovers_erc20_tokens_from_transfer_logs() {
             && holding["counterparty_address"] == "0x3333333333333333333333333333333333333333"
             && holding["amount_hex"] == "0x1"
             && holding["source"] == "nft-operator-approval-probe"
+    }));
+    assert!(holdings.iter().any(|holding| {
+        holding["asset_kind"] == "defi"
+            && holding["asset_address"] == "0x4d5f47fa6a74757f35c14fd3a6ef8e3c9bc514e8"
+            && holding["protocol_address"] == "0x87870bca3f3fd6335c3f4ce8392d69350b4fa4e2"
+            && holding["amount_hex"] == "0xf4240"
+            && holding["source"] == "defi-token-probe:aave-v3"
     }));
 
     let catalog_upsert = post_json(
@@ -1734,6 +1751,18 @@ async fn wallet_inventory_scan_discovers_erc20_tokens_from_transfer_logs() {
         step["action"] == "revoke_nft_operator_approval"
             && step["counterparty_address"] == "0x3333333333333333333333333333333333333333"
             && step["risk_level"] == "high"
+    }));
+    assert!(steps.iter().any(|step| {
+        step["action"] == "exit_defi_position"
+            && step["asset_kind"] == "defi"
+            && step["asset_address"] == "0x4d5f47fa6a74757f35c14fd3a6ef8e3c9bc514e8"
+            && step["protocol_address"] == "0x87870bca3f3fd6335c3f4ce8392d69350b4fa4e2"
+            && step["status"] == "blocked"
+            && step["blockers"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|blocker| blocker == "requires_protocol_adapter")
     }));
 
     let approve_plan = post_json(

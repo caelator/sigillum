@@ -518,6 +518,11 @@ impl Validate for crate::request::WalletInventoryScanRequest {
                 "permit2_spender_addresses exceeds maximum length of {MAX_TOKEN_ADDRESSES} items"
             ));
         }
+        if self.defi_token_probes.len() > MAX_TOKEN_ADDRESSES {
+            return Err(format!(
+                "defi_token_probes exceeds maximum length of {MAX_TOKEN_ADDRESSES} items"
+            ));
+        }
         check_vec_items_len("token_addresses", &self.token_addresses, MAX_ADDRESS)?;
         check_vec_items_len(
             "allowance_spender_addresses",
@@ -534,6 +539,23 @@ impl Validate for crate::request::WalletInventoryScanRequest {
             &self.permit2_spender_addresses,
             MAX_ADDRESS,
         )?;
+        for (index, probe) in self.defi_token_probes.iter().enumerate() {
+            check_len(
+                &format!("defi_token_probes[{index}].protocol"),
+                &probe.protocol,
+                MAX_LABEL,
+            )?;
+            check_len(
+                &format!("defi_token_probes[{index}].token_address"),
+                &probe.token_address,
+                MAX_ADDRESS,
+            )?;
+            check_optional_len(
+                &format!("defi_token_probes[{index}].protocol_address"),
+                &probe.protocol_address,
+                MAX_ADDRESS,
+            )?;
+        }
         Ok(())
     }
 }

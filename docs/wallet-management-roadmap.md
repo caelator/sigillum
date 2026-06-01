@@ -57,7 +57,10 @@ Required discovery classes:
   work.
 - DeFi position discovery for common protocols: lending, staking, liquid
   staking, LP positions, vault shares, bridges, vesting/streaming contracts, and
-  rewards contracts.
+  rewards contracts. The first local slice records operator-configured ERC-20
+  receipt/share token probes as `defi` holdings with protocol provenance, which
+  covers many lending, vault, staking, and LP receipt-token positions before
+  protocol-specific exit adapters exist.
 - Airdrop and reward discovery for claimable or potentially claimable assets,
   with claim-contract risk classification and no blind auto-claiming.
 - Allowance and approval discovery, including unlimited ERC-20 approvals, NFT
@@ -258,7 +261,10 @@ The CLI should have parity for automation:
     value, stranded value, approval exposure, and dormant-candidate state, and
     the local risk engine emits review findings for watch-only value, stranded
     value, and dormant funded addresses.
-6. DeFi position adapters for the most common protocols.
+6. DeFi position adapters. The first implemented slice records
+   operator-configured ERC-20 receipt/share token probes as protocol holdings.
+   Protocol-specific exit adapters, reward accounting, lockup metadata, and
+   valuation remain future work.
 7. Airdrop/reward discovery with strict claim risk gates.
 8. Consolidation planner with broader dry-run simulation for dynamic fee
    estimation, gas top-ups, exits, claims, swaps, and treasury routing.

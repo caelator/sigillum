@@ -5,6 +5,7 @@ use crate::service::{ServiceResult, SigillumService};
 use super::allowance_discovery::{
     DISCOVERY_SOURCE_ERC20_ALLOWANCE_PROBE, Erc20AllowanceDiscoveryConfig,
 };
+use super::defi_discovery::{DefiTokenPositionDiscoveryConfig, defi_token_probe_source};
 use super::nft_approval_discovery::{
     DISCOVERY_SOURCE_NFT_OPERATOR_APPROVAL_PROBE, NftOperatorApprovalDiscoveryConfig,
 };
@@ -44,6 +45,7 @@ impl SigillumService {
         nft_discovery: Option<&Erc721TransferDiscoveryConfig>,
         erc1155_discovery: Option<&Erc1155TransferDiscoveryConfig>,
         nft_operator_approval_discovery: Option<&NftOperatorApprovalDiscoveryConfig>,
+        defi_position_discovery: Option<&DefiTokenPositionDiscoveryConfig>,
         now: u64,
     ) -> ServiceResult<InventoryAddressObservation> {
         let address = super::normalize_address(address)?;
@@ -228,6 +230,26 @@ impl SigillumService {
                     Some(approval.operator_address),
                     &approval.amount_hex,
                     DISCOVERY_SOURCE_NFT_OPERATOR_APPROVAL_PROBE,
+                ));
+            }
+        }
+
+        if let Some(config) = defi_position_discovery {
+            let positions = self
+                .discover_defi_token_positions_for_address(provider, &address, block_tag, config)
+                .await?;
+            for position in positions {
+                if quantity_hex_is_nonzero(&position.amount_hex) {
+                    activity_state = "funded";
+                }
+                holdings.push(holding_record_with_protocol_counterparty(
+                    &record_context,
+                    "defi",
+                    Some(position.token_address),
+                    position.protocol_address,
+                    None,
+                    &position.amount_hex,
+                    &defi_token_probe_source(&position.protocol),
                 ));
             }
         }

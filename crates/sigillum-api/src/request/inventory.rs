@@ -2,6 +2,20 @@
 
 use serde::{Deserialize, Serialize};
 
+/// Configured ERC-20-like DeFi position token to probe during wallet discovery.
+///
+/// Many first-class DeFi positions are represented by receipt/share tokens:
+/// lending aTokens/cTokens, staking receipts, vault shares, and LP tokens. A
+/// probe records the protocol provenance separately from ordinary wallet tokens
+/// so the inventory can distinguish protocol exposure from spendable ERC-20s.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct DefiTokenProbe {
+    pub protocol: String,
+    pub token_address: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub protocol_address: Option<String>,
+}
+
 /// Run read-only EVM wallet discovery for imported seed and xpub profiles.
 ///
 /// When no wallet filter is provided, all `eth-seed` and `eth-xpub` profiles
@@ -56,6 +70,12 @@ pub struct WalletInventoryScanRequest {
     pub nft_operator_addresses: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub nft_operator_approval_limit: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub discover_defi_token_positions: Option<bool>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub defi_token_probes: Vec<DefiTokenProbe>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub defi_position_limit: Option<usize>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub nft_discovery_from_block: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
