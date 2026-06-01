@@ -163,6 +163,10 @@ Current daemon behavior:
   contract, amount, protocol, and source provenance; these surface in inventory
   and consolidation planning, but remain blocked until a protocol-specific
   claim adapter verifies and simulates the transaction path
+- emits local risk findings for `reward` and `airdrop` claim candidates, using
+  the claim contract as the review subject and applying risk-catalog overrides
+  so trusted, high-risk, or critical claim contracts are visible before any
+  claim transaction is considered
 - preflights native sweeps, ERC-20 sweeps, ERC-20 approval revokes, Permit2
   allowance revokes, and NFT operator revokes with provider-backed `eth_call`
   evidence before those consolidation steps can become executable; native sweep
@@ -188,8 +192,8 @@ What it intentionally does not do today:
   confirmation, operator-bounded ERC-20 allowance probes, operator-bounded
   Permit2 allowance probes, operator-bounded NFT approval probes,
   operator-configured DeFi receipt/share token probes, operator-configured
-  trusted claim candidates, and local operator-managed spender/operator risk
-  catalog overrides
+  trusted claim candidates, claim-contract risk findings, and local
+  operator-managed spender/operator/claim-contract risk catalog overrides
 - seed/xpub gap-limit discovery, historical receive-address scanning, or
   rich dormant-wallet classification with last-activity timestamps
 - full token registry/indexer scraping, full ERC-1155 batch/history coverage,

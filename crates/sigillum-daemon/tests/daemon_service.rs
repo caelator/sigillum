@@ -1702,10 +1702,24 @@ async fn wallet_inventory_scan_discovers_erc20_tokens_from_transfer_logs() {
     )
     .await;
     assert_eq!(catalog_upsert.status(), StatusCode::OK);
+    let claim_catalog_upsert = post_json(
+        &client,
+        addr,
+        "/api/risk/catalog/upsert",
+        json!({
+            "address": "0x1111111111111111111111111111111111111111",
+            "label": "Known OP claim contract",
+            "risk_level": "trusted",
+            "notes": ["trusted source still requires adapter simulation"],
+        }),
+        Some(&token),
+    )
+    .await;
+    assert_eq!(claim_catalog_upsert.status(), StatusCode::OK);
     let catalog = get(&client, addr, "/api/risk/catalog", Some(&token)).await;
     assert_eq!(catalog.status(), StatusCode::OK);
     let catalog_json: serde_json::Value = catalog.json().await.unwrap();
-    assert_eq!(catalog_json["entries"].as_array().unwrap().len(), 1);
+    assert_eq!(catalog_json["entries"].as_array().unwrap().len(), 2);
 
     let risks = get(&client, addr, "/api/risk/findings", Some(&token)).await;
     assert_eq!(risks.status(), StatusCode::OK);
@@ -1735,6 +1749,21 @@ async fn wallet_inventory_scan_discovers_erc20_tokens_from_transfer_logs() {
                 .unwrap()
                 .iter()
                 .any(|evidence| evidence == "Approval: setApprovalForAll(true)")
+    }));
+    assert!(findings.iter().any(|finding| {
+        finding["category"] == "claim_candidate"
+            && finding["subject_type"] == "claim_contract"
+            && finding["subject"] == "0x1111111111111111111111111111111111111111"
+            && finding["risk_level"] == "low"
+            && finding["evidence"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|evidence| evidence == "Risk catalog: Known OP claim contract (trusted)")
+            && finding["recommendation"]
+                .as_str()
+                .unwrap()
+                .contains("adapter verification and simulation")
     }));
 
     let plan = post_json(
@@ -1963,6 +1992,17 @@ async fn wallet_inventory_scan_discovers_erc20_tokens_from_transfer_logs() {
     )
     .await;
     assert_eq!(catalog_delete.status(), StatusCode::OK);
+    let claim_catalog_delete = post_json(
+        &client,
+        addr,
+        "/api/risk/catalog/delete",
+        json!({
+            "address": "0x1111111111111111111111111111111111111111",
+        }),
+        Some(&token),
+    )
+    .await;
+    assert_eq!(claim_catalog_delete.status(), StatusCode::OK);
     let catalog = get(&client, addr, "/api/risk/catalog", Some(&token)).await;
     let catalog_json: serde_json::Value = catalog.json().await.unwrap();
     assert!(catalog_json["entries"].as_array().unwrap().is_empty());

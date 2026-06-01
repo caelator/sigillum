@@ -168,7 +168,7 @@ safe consolidation from those accounts.
 | Native and token inventory | Native balances, manually supplied ERC-20 probes, and bounded ERC-20 transfer-log discovery | Portfolio/indexing tools | Expand ERC-20 discovery with registries, indexers, allowlists, and positive balance evidence |
 | NFTs | Bounded ERC-721 and ERC-1155 transfer discovery with current-owner/balance confirmation and token IDs in inventory/plans | MetaMask Portfolio, Phantom, Rotki, Zerion, Zapper | Full ERC-1155 batch/history coverage, metadata cache, spam flags, unknown collection policy, reviewed NFT sweeps |
 | DeFi positions | Operator-configured ERC-20 receipt/share token probes are recorded as `defi` holdings with protocol provenance | Rotki, Zapper, DeBank, Zerion, Rabby | Protocol adapters for lending, staking, LPs, vaults, bridges, vesting, streams, and rewards |
-| Airdrops and rewards | Operator-configured trusted claim candidates are recorded as `airdrop` or `reward` holdings and remain blocked in claim plans until an adapter verifies the path | Portfolio tools, protocol claim portals | Trusted-source candidate discovery, claim-contract verification, simulation, explicit review only |
+| Airdrops and rewards | Operator-configured trusted claim candidates are recorded as `airdrop` or `reward` holdings, emit claim-contract risk findings, and remain blocked in claim plans until an adapter verifies the path | Portfolio tools, protocol claim portals | Trusted-source candidate discovery, claim-contract verification, simulation, explicit review only |
 | Approvals and revokes | Bounded ERC-20 allowance probes, Permit2 allowance probes, NFT operator-approval probes, a local spender/operator risk catalog, and reviewable revoke plan steps, persisted as approval holdings with risk findings | Revoke.cash, Rabby, Scam Sniffer | External spender registries, expiration-aware Permit2 scoring, revoke transaction builders, simulation, and execution |
 | Transaction simulation | Provider-backed preflight simulation is implemented for native sweeps, ERC-20 sweeps, ERC-20 approval revokes, Permit2 allowance revokes, and NFT operator revokes; NFT sweeps, claims, swaps, and protocol exits still need simulation coverage | Rabby, Safe tools, Tenderly-style infrastructure | Every plan step carries simulation evidence or remains blocked |
 | Consolidation planning | Foundation exists: inventory, risk findings, dry-run plans, approval state, and approval revoke plan steps | No single consumer wallet owns this end to end | Execution graph for gas top-ups, simulated revokes, claims, DeFi exits, swaps, sweeps, and treasury routing |
@@ -240,9 +240,9 @@ the operator which value can actually be recovered.
    token discovery, richer activity history, and dormant wallet labels.
 3. Extend approvals, NFTs, DeFi, and airdrops as separate adapter families with
    spam/risk provenance; ERC-721/ERC-1155 transfer discovery, DeFi receipt-token
-   probes, and trusted claim-candidate ingestion are now the first slices, while
-   metadata, spam classification, protocol exit adapters, and verified claim
-   adapters remain open.
+   probes, trusted claim-candidate ingestion, and claim-contract risk findings
+   are now the first slices, while metadata, spam classification, protocol exit
+   adapters, and verified claim adapters remain open.
 4. Require simulation evidence for any consolidation step that could execute.
 5. Expand the planner into real multi-step graphs for gas top-ups, revokes,
    claims, exits, unwraps, swaps, sweeps, and treasury routing.

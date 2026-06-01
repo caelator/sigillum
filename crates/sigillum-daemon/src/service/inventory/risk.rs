@@ -26,6 +26,15 @@ pub(super) fn derive_inventory_risk_findings(
             findings.push(approval_finding(holding, catalog_entry));
             continue;
         }
+        if is_claim_candidate_holding(holding) {
+            let catalog_entry = holding
+                .protocol_address
+                .as_deref()
+                .and_then(|claim_contract| {
+                    risk_catalog_entry_for_address(risk_catalog, claim_contract)
+                });
+            findings.push(claim_candidate_finding(holding, catalog_entry));
+        }
         if holding.asset_kind != "native"
             && native_balance_for_holding(addresses, holding)
                 .is_none_or(|balance| !quantity_hex_is_nonzero(balance))
@@ -58,6 +67,10 @@ pub(super) fn derive_inventory_risk_findings(
         }
     }
     findings
+}
+
+fn is_claim_candidate_holding(holding: &WalletAssetHolding) -> bool {
+    matches!(holding.asset_kind.as_str(), "airdrop" | "reward")
 }
 
 fn address_classification_findings(address: &WalletInventoryAddress) -> Vec<RiskFinding> {
@@ -135,6 +148,73 @@ fn address_has_classification(address: &WalletInventoryAddress, classification: 
         .classifications
         .iter()
         .any(|value| value == classification)
+}
+
+fn claim_candidate_finding(
+    holding: &WalletAssetHolding,
+    catalog_entry: Option<&RiskCatalogEntry>,
+) -> RiskFinding {
+    let claim_contract = holding
+        .protocol_address
+        .clone()
+        .unwrap_or_else(|| "unknown-claim-contract".into());
+    let asset = holding
+        .asset_address
+        .clone()
+        .unwrap_or_else(|| "unknown-asset".into());
+    let mut risk_level = "medium".to_string();
+    let (recommendation, mut evidence) = (
+        "Review the claim source, contract, and future simulation evidence before signing any claim transaction.",
+        vec![
+            format!("Claim candidate kind: {}", holding.asset_kind),
+            format!("Claim contract: {claim_contract}"),
+            format!("Claim asset: {asset}"),
+            format!("Claim amount: {}", holding.amount_hex),
+            format!("Source: {}", holding.source),
+            "Execution blocked: requires protocol-specific claim adapter".into(),
+            "No blind claim signing or unknown claim contracts".into(),
+        ],
+    );
+    if claim_contract == "unknown-claim-contract" {
+        risk_level = "high".into();
+        evidence.push("Claim contract is missing from inventory holding".into());
+    }
+    if let Some(entry) = catalog_entry {
+        risk_level = risk_level_from_catalog_entry(entry);
+        evidence.push(format!(
+            "Risk catalog: {} ({})",
+            entry.label, entry.risk_level
+        ));
+        evidence.push(format!("Catalog source: {}", entry.source));
+        evidence.extend(
+            entry
+                .notes
+                .iter()
+                .map(|note| format!("Catalog note: {note}")),
+        );
+    }
+    let recommendation = catalog_entry
+        .map(|entry| claim_recommendation_with_catalog(entry, recommendation))
+        .unwrap_or_else(|| recommendation.into());
+
+    RiskFinding {
+        id: stable_claim_finding_id(holding, &claim_contract),
+        category: "claim_candidate".into(),
+        risk_level,
+        status: "open".into(),
+        wallet_family: holding.wallet_family.clone(),
+        wallet_profile: holding.wallet_profile.clone(),
+        provider_profile: holding.provider_profile.clone(),
+        chain_id: holding.chain_id,
+        address: holding.address.clone(),
+        subject_type: "claim_contract".into(),
+        subject: claim_contract,
+        source: "local-risk-engine".into(),
+        recommendation,
+        evidence,
+        first_seen_at_unix: holding.first_seen_at_unix,
+        last_checked_at_unix: holding.last_checked_at_unix,
+    }
 }
 
 fn approval_finding(
@@ -274,6 +354,24 @@ fn recommendation_with_catalog(entry: &RiskCatalogEntry, default: &str) -> Strin
     }
 }
 
+fn claim_recommendation_with_catalog(entry: &RiskCatalogEntry, default: &str) -> String {
+    match entry.risk_level.as_str() {
+        "trusted" | "low" => format!(
+            "Risk catalog marks {} as {}; still require protocol adapter verification and simulation before signing this claim.",
+            entry.label, entry.risk_level
+        ),
+        "high" | "critical" => format!(
+            "Risk catalog marks {} as {}; do not claim unless there is an explicit operator exception and verified adapter evidence.",
+            entry.label, entry.risk_level
+        ),
+        "medium" => format!(
+            "Risk catalog marks {} as medium risk; review this claim contract before any claim attempt.",
+            entry.label
+        ),
+        _ => default.into(),
+    }
+}
+
 fn native_balance_for_holding<'a>(
     addresses: &'a [WalletInventoryAddress],
     holding: &WalletAssetHolding,
@@ -325,6 +423,21 @@ fn stable_approval_finding_id(holding: &WalletAssetHolding, spender: &str) -> St
     )
 }
 
+fn stable_claim_finding_id(holding: &WalletAssetHolding, claim_contract: &str) -> String {
+    format!(
+        "claim_candidate:{}:{}:{}:{}:{}:{}:{}:{}:{}",
+        holding.wallet_family,
+        holding.wallet_profile,
+        holding.provider_profile,
+        holding.chain_id,
+        holding.address,
+        holding.asset_kind,
+        holding.asset_address.as_deref().unwrap_or("unknown-asset"),
+        claim_contract,
+        holding.source
+    )
+}
+
 fn is_very_large_approval(amount_hex: &str) -> bool {
     decode_quantity_hex(amount_hex)
         .map(|amount| amount[0] >= 0x80)
@@ -355,6 +468,40 @@ mod tests {
             source: "local-rpc".into(),
             first_seen_at_unix: 1,
             last_checked_at_unix: 2,
+        }
+    }
+
+    fn sample_claim_holding(kind: &str) -> WalletAssetHolding {
+        WalletAssetHolding {
+            id: "holding_1".into(),
+            wallet_family: "eth-seed".into(),
+            wallet_profile: "seed-main".into(),
+            provider_profile: "mainnet".into(),
+            chain_id: 1,
+            address: "0x1111111111111111111111111111111111111111".into(),
+            derivation_path: "m/44'/60'/0'/0/0".into(),
+            asset_kind: kind.into(),
+            asset_address: Some("0x4200000000000000000000000000000000000042".into()),
+            token_id_hex: None,
+            counterparty_address: None,
+            protocol_address: Some("0x2222222222222222222222222222222222222222".into()),
+            amount_hex: "0xf4240".into(),
+            source: format!("claim-candidate:{kind}:optimism:op-token-list"),
+            status: "detected".into(),
+            first_seen_at_unix: 1,
+            last_checked_at_unix: 2,
+        }
+    }
+
+    fn sample_catalog_entry(address: &str, risk_level: &str) -> RiskCatalogEntry {
+        RiskCatalogEntry {
+            address: address.into(),
+            label: "Known claim contract".into(),
+            risk_level: risk_level.into(),
+            source: "operator".into(),
+            notes: vec!["reviewed by operator".into()],
+            created_at_unix: 1,
+            updated_at_unix: 2,
         }
     }
 
@@ -390,5 +537,73 @@ mod tests {
             &[],
         );
         assert!(findings.is_empty());
+    }
+
+    #[test]
+    fn claim_candidates_emit_review_findings() {
+        let holding = sample_claim_holding("airdrop");
+        let findings = derive_inventory_risk_findings(&[], &[holding], &[]);
+
+        let finding = findings
+            .iter()
+            .find(|finding| finding.category == "claim_candidate")
+            .unwrap();
+        assert_eq!(finding.risk_level, "medium");
+        assert_eq!(finding.subject_type, "claim_contract");
+        assert_eq!(
+            finding.subject,
+            "0x2222222222222222222222222222222222222222"
+        );
+        assert!(finding.evidence.iter().any(|value| {
+            value == "Execution blocked: requires protocol-specific claim adapter"
+        }));
+        assert!(
+            finding
+                .recommendation
+                .contains("before signing any claim transaction")
+        );
+    }
+
+    #[test]
+    fn claim_candidates_use_risk_catalog_for_claim_contracts() {
+        let holding = sample_claim_holding("reward");
+        let catalog = vec![sample_catalog_entry(
+            "0x2222222222222222222222222222222222222222",
+            "critical",
+        )];
+        let findings = derive_inventory_risk_findings(&[], &[holding], &catalog);
+
+        let finding = findings
+            .iter()
+            .find(|finding| finding.category == "claim_candidate")
+            .unwrap();
+        assert_eq!(finding.risk_level, "critical");
+        assert!(
+            finding
+                .evidence
+                .iter()
+                .any(|value| value == "Risk catalog: Known claim contract (critical)")
+        );
+        assert!(finding.recommendation.contains("do not claim"));
+    }
+
+    #[test]
+    fn claim_candidates_without_claim_contract_are_high_risk() {
+        let mut holding = sample_claim_holding("airdrop");
+        holding.protocol_address = None;
+        let findings = derive_inventory_risk_findings(&[], &[holding], &[]);
+
+        let finding = findings
+            .iter()
+            .find(|finding| finding.category == "claim_candidate")
+            .unwrap();
+        assert_eq!(finding.risk_level, "high");
+        assert_eq!(finding.subject, "unknown-claim-contract");
+        assert!(
+            finding
+                .evidence
+                .iter()
+                .any(|value| { value == "Claim contract is missing from inventory holding" })
+        );
     }
 }
