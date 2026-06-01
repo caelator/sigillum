@@ -5,9 +5,7 @@ use serde_json::json;
 use crate::service::ServiceResult;
 
 use super::{JsonRpcRequest, JsonRpcResponse, ProviderRpcClient, batch_result};
-use crate::service::evm::{
-    erc20_allowance_call_data, erc20_balance_call_data, normalize_address, parse_quantity_u256,
-};
+use crate::service::evm::{normalize_address, parse_quantity_u256};
 
 impl ProviderRpcClient {
     pub(in crate::service::evm) async fn get_erc20_balance(
@@ -93,4 +91,21 @@ impl ProviderRpcClient {
             .await?;
         parse_quantity_u256(&value)
     }
+}
+
+fn erc20_balance_call_data(owner_address: &str) -> ServiceResult<String> {
+    Ok(format!("0x70a08231{}", encoded_address_arg(owner_address)?))
+}
+
+fn erc20_allowance_call_data(owner_address: &str, spender_address: &str) -> ServiceResult<String> {
+    Ok(format!(
+        "0xdd62ed3e{}{}",
+        encoded_address_arg(owner_address)?,
+        encoded_address_arg(spender_address)?
+    ))
+}
+
+fn encoded_address_arg(address: &str) -> ServiceResult<String> {
+    let normalized = normalize_address(address)?;
+    Ok(format!("{}{}", "0".repeat(24), &normalized[2..]))
 }

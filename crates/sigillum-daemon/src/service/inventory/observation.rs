@@ -5,6 +5,9 @@ use crate::service::{ServiceResult, SigillumService};
 use super::allowance_discovery::{
     DISCOVERY_SOURCE_ERC20_ALLOWANCE_PROBE, Erc20AllowanceDiscoveryConfig,
 };
+use super::nft_approval_discovery::{
+    DISCOVERY_SOURCE_NFT_OPERATOR_APPROVAL_PROBE, NftOperatorApprovalDiscoveryConfig,
+};
 use super::nft_discovery::{
     DISCOVERY_SOURCE_ERC721_TRANSFER_LOG, DISCOVERY_SOURCE_ERC1155_TRANSFER_LOG,
     Erc721TransferDiscoveryConfig, Erc1155TransferDiscoveryConfig,
@@ -34,6 +37,7 @@ impl SigillumService {
         allowance_discovery: Option<&Erc20AllowanceDiscoveryConfig>,
         nft_discovery: Option<&Erc721TransferDiscoveryConfig>,
         erc1155_discovery: Option<&Erc1155TransferDiscoveryConfig>,
+        nft_operator_approval_discovery: Option<&NftOperatorApprovalDiscoveryConfig>,
         now: u64,
     ) -> ServiceResult<InventoryAddressObservation> {
         let address = super::normalize_address(address)?;
@@ -128,6 +132,7 @@ impl SigillumService {
             }
         }
 
+        let mut observed_nft_contract_addresses = Vec::new();
         if let Some(config) = nft_discovery {
             let nfts = self
                 .discover_erc721_transfer_holdings_for_address(provider, &address, config)
@@ -136,10 +141,15 @@ impl SigillumService {
                 activity_state = "funded";
             }
             for nft in nfts {
+                let contract_address = nft.contract_address;
+                push_unique_contract(
+                    &mut observed_nft_contract_addresses,
+                    contract_address.clone(),
+                );
                 holdings.push(holding_record_with_token_id(
                     &record_context,
                     "erc721",
-                    Some(nft.contract_address),
+                    Some(contract_address),
                     Some(nft.token_id_hex),
                     "0x1",
                     DISCOVERY_SOURCE_ERC721_TRANSFER_LOG,
@@ -155,13 +165,40 @@ impl SigillumService {
                 activity_state = "funded";
             }
             for token in tokens {
+                let contract_address = token.contract_address;
+                push_unique_contract(
+                    &mut observed_nft_contract_addresses,
+                    contract_address.clone(),
+                );
                 holdings.push(holding_record_with_token_id(
                     &record_context,
                     "erc1155",
-                    Some(token.contract_address),
+                    Some(contract_address),
                     Some(token.token_id_hex),
                     &token.amount_hex,
                     DISCOVERY_SOURCE_ERC1155_TRANSFER_LOG,
+                ));
+            }
+        }
+
+        if let Some(config) = nft_operator_approval_discovery {
+            let approvals = self
+                .discover_nft_operator_approvals_for_address(
+                    provider,
+                    &address,
+                    &observed_nft_contract_addresses,
+                    block_tag,
+                    config,
+                )
+                .await?;
+            for approval in approvals {
+                holdings.push(holding_record_with_counterparty(
+                    &record_context,
+                    "approval",
+                    Some(approval.contract_address),
+                    Some(approval.operator_address),
+                    &approval.amount_hex,
+                    DISCOVERY_SOURCE_NFT_OPERATOR_APPROVAL_PROBE,
                 ));
             }
         }
@@ -187,5 +224,14 @@ fn source_for_token(discovered_tokens: &[String], token_address: &str) -> &'stat
         DISCOVERY_SOURCE_ERC20_TRANSFER_LOG
     } else {
         DISCOVERY_SOURCE_LOCAL_RPC
+    }
+}
+
+fn push_unique_contract(contracts: &mut Vec<String>, contract_address: String) {
+    if !contracts
+        .iter()
+        .any(|existing| existing.eq_ignore_ascii_case(&contract_address))
+    {
+        contracts.push(contract_address);
     }
 }

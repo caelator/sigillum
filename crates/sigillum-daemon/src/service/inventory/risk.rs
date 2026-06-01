@@ -1,6 +1,7 @@
 use sigillum_api::{RiskFinding, WalletAssetHolding, WalletInventoryAddress};
 use sigillum_core::decode_quantity_hex;
 
+use super::nft_approval_discovery::DISCOVERY_SOURCE_NFT_OPERATOR_APPROVAL_PROBE;
 use super::support::quantity_hex_is_nonzero;
 
 pub(super) fn derive_inventory_risk_findings(
@@ -55,10 +56,42 @@ fn approval_finding(holding: &WalletAssetHolding) -> RiskFinding {
         .counterparty_address
         .clone()
         .unwrap_or_else(|| "unknown-spender".into());
-    let risk_level = if is_very_large_approval(&holding.amount_hex) {
+    let is_nft_operator_approval = holding.source == DISCOVERY_SOURCE_NFT_OPERATOR_APPROVAL_PROBE;
+    let risk_level = if is_nft_operator_approval || is_very_large_approval(&holding.amount_hex) {
         "high"
     } else {
         "medium"
+    };
+    let (recommendation, evidence) = if is_nft_operator_approval {
+        (
+            "Review the operator and revoke setApprovalForAll if it is no longer needed.",
+            vec![
+                format!(
+                    "NFT collection {} has operator approval",
+                    holding
+                        .asset_address
+                        .clone()
+                        .unwrap_or_else(|| "unknown-collection".into())
+                ),
+                format!("Operator: {spender}"),
+                "Approval: setApprovalForAll(true)".into(),
+            ],
+        )
+    } else {
+        (
+            "Review the spender and revoke the allowance if it is no longer needed.",
+            vec![
+                format!(
+                    "Token {} has a non-zero allowance",
+                    holding
+                        .asset_address
+                        .clone()
+                        .unwrap_or_else(|| "unknown-token".into())
+                ),
+                format!("Spender: {spender}"),
+                format!("Allowance: {}", holding.amount_hex),
+            ],
+        )
     };
     RiskFinding {
         id: stable_approval_finding_id(holding, &spender),
@@ -73,19 +106,8 @@ fn approval_finding(holding: &WalletAssetHolding) -> RiskFinding {
         subject_type: "approval".into(),
         subject: spender.clone(),
         source: "local-risk-engine".into(),
-        recommendation: "Review the spender and revoke the allowance if it is no longer needed."
-            .into(),
-        evidence: vec![
-            format!(
-                "Token {} has a non-zero allowance",
-                holding
-                    .asset_address
-                    .clone()
-                    .unwrap_or_else(|| "unknown-token".into())
-            ),
-            format!("Spender: {spender}"),
-            format!("Allowance: {}", holding.amount_hex),
-        ],
+        recommendation: recommendation.into(),
+        evidence,
         first_seen_at_unix: holding.first_seen_at_unix,
         last_checked_at_unix: holding.last_checked_at_unix,
     }

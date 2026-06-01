@@ -464,6 +464,24 @@ impl SigillumService {
         .await
     }
 
+    pub(super) async fn evm_nft_operator_approval_for_provider(
+        &self,
+        provider_compartment_id: usize,
+        provider: &sigillum_api::EvmProviderProfile,
+        contract_address: &str,
+        owner_address: &str,
+        operator_address: &str,
+        block_tag: &str,
+    ) -> ServiceResult<bool> {
+        self.resolve_provider_rpc_client_for_compartment(
+            provider_compartment_id,
+            &provider.rpc_url,
+            provider.auth_token_key.as_deref(),
+        )?
+        .get_nft_operator_approval(contract_address, owner_address, operator_address, block_tag)
+        .await
+    }
+
     pub(super) async fn evm_erc1155_balance_for_provider(
         &self,
         provider_compartment_id: usize,
@@ -655,29 +673,6 @@ async fn fetch_balance_observation(
     })
 }
 
-// ── ERC-20 Utilities ──────────────────────────────────────────────────────
-
-fn erc20_balance_call_data(owner_address: &str) -> ServiceResult<String> {
-    let owner = decode_address(owner_address)?;
-    Ok(format!(
-        "0x70a08231{}{}",
-        "0".repeat(24),
-        hex::encode(owner)
-    ))
-}
-
-fn erc20_allowance_call_data(owner_address: &str, spender_address: &str) -> ServiceResult<String> {
-    let owner = decode_address(owner_address)?;
-    let spender = decode_address(spender_address)?;
-    Ok(format!(
-        "0xdd62ed3e{}{}{}{}",
-        "0".repeat(24),
-        hex::encode(owner),
-        "0".repeat(24),
-        hex::encode(spender)
-    ))
-}
-
 // ── Address & Encoding Utilities ──────────────────────────────────────────
 
 pub(super) fn normalize_address(address: &str) -> ServiceResult<String> {
@@ -689,15 +684,6 @@ pub(super) fn normalize_address(address: &str) -> ServiceResult<String> {
         return Err(ServiceError::bad_request("Invalid ethereum address."));
     }
     Ok(format!("0x{}", raw.to_ascii_lowercase()))
-}
-
-fn decode_address(address: &str) -> ServiceResult<[u8; 20]> {
-    let normalized = normalize_address(address)?;
-    let bytes = hex::decode(&normalized[2..])
-        .map_err(|error| ServiceError::bad_request(format!("Invalid ethereum address: {error}")))?;
-    let mut out = [0u8; 20];
-    out.copy_from_slice(&bytes);
-    Ok(out)
 }
 
 fn parse_quantity_u64(value: &Value) -> ServiceResult<u64> {

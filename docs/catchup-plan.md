@@ -229,7 +229,9 @@ Deliverables:
 - Add NFT inventory for ERC-721 and ERC-1155 assets. Bounded transfer-log
   discovery now records confirmed ERC-721 and ERC-1155 holdings; spam,
   metadata provenance, and reviewed transfer support still need follow-up.
-- Add allowance and approval discovery for ERC-20 and NFT approvals.
+- Add allowance and approval discovery for ERC-20 and NFT approvals. Bounded
+  ERC-20 allowance probes and NFT operator-approval probes are implemented for
+  operator-supplied spender/operator addresses.
 - Add DeFi position discovery for common lending, staking, LP, vault, bridge,
   vesting, streaming, and rewards contracts through isolated protocol adapters.
 - Add airdrop and reward discovery with strict claim-risk classification and no

@@ -31,7 +31,15 @@ async fn spawn_mock_evm_provider() -> (SocketAddr, tokio::task::JoinHandle<()>) 
             "eth_getBalance" => json!("0xde0b6b3a7640000"),
             "eth_call" => {
                 let data = request["params"][0]["data"].as_str().unwrap_or_default();
-                if data.starts_with("0x6352211e") {
+                if data.starts_with("0xe985e9c5") {
+                    if data.contains("9858effd232b4033e47d90003d41ec34ecaeda94")
+                        && data.contains("3333333333333333333333333333333333333333")
+                    {
+                        json!(format!("0x{}1", "0".repeat(63)))
+                    } else {
+                        json!(format!("0x{}", "0".repeat(64)))
+                    }
+                } else if data.starts_with("0x6352211e") {
                     json!("0x0000000000000000000000009858effd232b4033e47d90003d41ec34ecaeda94")
                 } else if data.starts_with("0x00fdd58e") {
                     if data.contains("9858effd232b4033e47d90003d41ec34ecaeda94")
@@ -1504,6 +1512,9 @@ async fn wallet_inventory_scan_discovers_erc20_tokens_from_transfer_logs() {
             "allowance_discovery_limit": 4,
             "discover_erc721_transfers": true,
             "discover_erc1155_transfers": true,
+            "discover_nft_operator_approvals": true,
+            "nft_operator_addresses": ["0x3333333333333333333333333333333333333333"],
+            "nft_operator_approval_limit": 8,
             "nft_discovery_from_block": "0x0",
             "nft_discovery_limit": 4
         }),
@@ -1515,10 +1526,10 @@ async fn wallet_inventory_scan_discovers_erc20_tokens_from_transfer_logs() {
     assert_eq!(scan_status, StatusCode::OK, "scan response: {scan_json}");
     assert_eq!(scan_json["job"]["status"], "completed");
     assert_eq!(scan_json["job"]["addresses_scanned"], 4);
-    assert_eq!(scan_json["job"]["holdings_detected"], 14);
+    assert_eq!(scan_json["job"]["holdings_detected"], 16);
 
     let holdings = scan_json["holdings"].as_array().unwrap();
-    assert_eq!(holdings.len(), 14);
+    assert_eq!(holdings.len(), 16);
     assert!(holdings.iter().any(|holding| {
         holding["asset_kind"] == "erc20"
             && holding["asset_address"] == "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"
@@ -1548,6 +1559,20 @@ async fn wallet_inventory_scan_discovers_erc20_tokens_from_transfer_logs() {
             && holding["amount_hex"] == "0x2a"
             && holding["source"] == "erc1155-transfer-log"
     }));
+    assert!(holdings.iter().any(|holding| {
+        holding["asset_kind"] == "approval"
+            && holding["asset_address"] == "0x1234500000000000000000000000000000000000"
+            && holding["counterparty_address"] == "0x3333333333333333333333333333333333333333"
+            && holding["amount_hex"] == "0x1"
+            && holding["source"] == "nft-operator-approval-probe"
+    }));
+    assert!(holdings.iter().any(|holding| {
+        holding["asset_kind"] == "approval"
+            && holding["asset_address"] == "0x1155000000000000000000000000000000000000"
+            && holding["counterparty_address"] == "0x3333333333333333333333333333333333333333"
+            && holding["amount_hex"] == "0x1"
+            && holding["source"] == "nft-operator-approval-probe"
+    }));
 
     let risks = get(&client, addr, "/api/risk/findings", Some(&token)).await;
     assert_eq!(risks.status(), StatusCode::OK);
@@ -1557,6 +1582,16 @@ async fn wallet_inventory_scan_discovers_erc20_tokens_from_transfer_logs() {
         finding["category"] == "risky_approval"
             && finding["subject"] == "0x2222222222222222222222222222222222222222"
             && finding["risk_level"] == "medium"
+    }));
+    assert!(findings.iter().any(|finding| {
+        finding["category"] == "risky_approval"
+            && finding["subject"] == "0x3333333333333333333333333333333333333333"
+            && finding["risk_level"] == "high"
+            && finding["evidence"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|evidence| evidence == "Approval: setApprovalForAll(true)")
     }));
 
     handle.abort();

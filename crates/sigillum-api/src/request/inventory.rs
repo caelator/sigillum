@@ -43,6 +43,12 @@ pub struct WalletInventoryScanRequest {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub discover_erc1155_transfers: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub discover_nft_operator_approvals: Option<bool>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub nft_operator_addresses: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub nft_operator_approval_limit: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub nft_discovery_from_block: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub nft_discovery_to_block: Option<String>,

@@ -314,6 +314,7 @@ export function createInventoryActions(deps: InventoryActionsDeps) {
   async function scanInventoryEvm(): Promise<void> {
     const token = optionalTextValue("inventoryTokenAddress");
     const spender = optionalTextValue("inventoryAllowanceSpender");
+    const nftOperator = optionalTextValue("inventoryNftOperator");
     const r = await deps.api("POST", "/api/inventory/scan/evm", {
       wallet_family: optionalTextValue("inventoryWalletFamily"),
       wallet_profile: optionalTextValue("inventoryWalletProfile"),
@@ -331,6 +332,9 @@ export function createInventoryActions(deps: InventoryActionsDeps) {
       allowance_discovery_limit: optionalNumberValue("inventoryAllowanceLimit"),
       discover_erc721_transfers: input("inventoryDiscoverErc721Transfers").checked,
       discover_erc1155_transfers: input("inventoryDiscoverErc1155Transfers").checked,
+      discover_nft_operator_approvals: input("inventoryDiscoverNftOperatorApprovals").checked,
+      nft_operator_addresses: nftOperator ? [nftOperator] : [],
+      nft_operator_approval_limit: optionalNumberValue("inventoryNftOperatorApprovalLimit"),
       nft_discovery_from_block: optionalTextValue("inventoryNftDiscoveryFromBlock"),
       nft_discovery_to_block: optionalTextValue("inventoryNftDiscoveryToBlock"),
       nft_discovery_limit: optionalNumberValue("inventoryNftDiscoveryLimit"),

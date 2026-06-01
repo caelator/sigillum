@@ -280,6 +280,15 @@ fn cmd_api_inventory(args: &[String]) {
                 allowance_discovery_limit: parse_usize_flag(args, "--allowance-discovery-limit"),
                 discover_erc721_transfers: flag_option(args, "--discover-erc721-transfers"),
                 discover_erc1155_transfers: flag_option(args, "--discover-erc1155-transfers"),
+                discover_nft_operator_approvals: flag_option(
+                    args,
+                    "--discover-nft-operator-approvals",
+                ),
+                nft_operator_addresses: parse_multi_flag(args, "--nft-operator"),
+                nft_operator_approval_limit: parse_usize_flag(
+                    args,
+                    "--nft-operator-approval-limit",
+                ),
                 nft_discovery_from_block: parse_flag(args, "--nft-discovery-from-block"),
                 nft_discovery_to_block: parse_flag(args, "--nft-discovery-to-block"),
                 nft_discovery_limit: parse_usize_flag(args, "--nft-discovery-limit"),
