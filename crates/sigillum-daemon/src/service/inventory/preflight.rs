@@ -4,11 +4,14 @@ use sigillum_api::ConsolidationPlanStep;
 use crate::service::evm::normalize_address;
 use crate::service::{ServiceError, ServiceResult};
 
+use super::claim_discovery::CLAIM_ADAPTER_MERKLE_DISTRIBUTOR_V1;
+
 const ERC20_APPROVE_SELECTOR: &str = "095ea7b3";
 const ERC20_TRANSFER_SELECTOR: &str = "a9059cbb";
 const ERC721_SAFE_TRANSFER_FROM_SELECTOR: &str = "42842e0e";
 const ERC1155_SAFE_TRANSFER_FROM_SELECTOR: &str = "f242432a";
 const NFT_SET_APPROVAL_FOR_ALL_SELECTOR: &str = "a22cb465";
+const CLAIM_PROOF_OFFSET_HEX: &str = "0x80";
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) struct PlanStepPreflightCall {
@@ -158,6 +161,45 @@ pub(super) fn prepare_plan_step_preflight(
                 ],
             }))
         }
+        "claim_reward" => {
+            let adapter = step
+                .claim_adapter
+                .as_deref()
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .ok_or_else(|| {
+                    ServiceError::bad_request("claim adapter is required for simulation")
+                })?;
+            if adapter != CLAIM_ADAPTER_MERKLE_DISTRIBUTOR_V1 {
+                return Ok(PlanStepPreflight::Unsupported {
+                    evidence: vec![
+                        format!("unsupported_claim_adapter={adapter}"),
+                        "reason=no_local_claim_builder_for_adapter".into(),
+                    ],
+                });
+            }
+            let claim_contract =
+                required_address("claim contract", step.protocol_address.as_deref())?;
+            let account = required_address("claim account", Some(step.address.as_str()))?;
+            let amount = required_quantity("claim amount", &step.amount_hex)?;
+            let index = required_optional_quantity("claim index", step.claim_index_hex.as_deref())?;
+            let proof = required_claim_proof(&step.claim_proof)?;
+            let data_hex = merkle_claim_call_data(&index, &account, &amount, &proof)?;
+            Ok(PlanStepPreflight::Call(PlanStepPreflightCall {
+                label: "claim.merkleDistributor(index,account,amount,proof)",
+                target_address: claim_contract,
+                data_hex,
+                value_hex: None,
+                evidence: vec![
+                    "prepared_call=claim.merkle_distributor_v1(index,account,amount,proof)".into(),
+                    format!("claim_adapter={CLAIM_ADAPTER_MERKLE_DISTRIBUTOR_V1}"),
+                    format!("claim_index={index}"),
+                    format!("claim_account={account}"),
+                    format!("amount={amount}"),
+                    format!("claim_proof_words={}", proof.len()),
+                ],
+            }))
+        }
         action => Ok(PlanStepPreflight::Unsupported {
             evidence: vec![
                 format!("unsupported_action={action}"),
@@ -235,12 +277,61 @@ fn permit2_revoke_allowance_call_data(
     ))
 }
 
+fn merkle_claim_call_data(
+    index_hex: &str,
+    account_address: &str,
+    amount_hex: &str,
+    proof: &[String],
+) -> ServiceResult<String> {
+    let proof_words = proof
+        .iter()
+        .map(|word| required_proof_word(word))
+        .collect::<ServiceResult<Vec<_>>>()?
+        .join("");
+    Ok(format!(
+        "0x{}{}{}{}{}{}{}",
+        function_selector_hex("claim(uint256,address,uint256,bytes32[])"),
+        encoded_quantity_arg(index_hex, "claim index")?,
+        encoded_address_arg(account_address)?,
+        encoded_quantity_arg(amount_hex, "claim amount")?,
+        encoded_quantity_arg(CLAIM_PROOF_OFFSET_HEX, "claim proof offset")?,
+        encoded_quantity_arg(&format!("0x{:x}", proof.len()), "claim proof length")?,
+        proof_words
+    ))
+}
+
 fn required_optional_quantity(field: &str, value: Option<&str>) -> ServiceResult<String> {
     let value = value
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .ok_or_else(|| ServiceError::bad_request(format!("{field} is required for simulation")))?;
     required_quantity(field, value)
+}
+
+fn required_claim_proof(values: &[String]) -> ServiceResult<Vec<String>> {
+    if values.is_empty() {
+        return Err(ServiceError::bad_request(
+            "claim proof is required for simulation",
+        ));
+    }
+    values
+        .iter()
+        .map(|value| required_proof_word(value))
+        .collect()
+}
+
+fn required_proof_word(value: &str) -> ServiceResult<String> {
+    let raw = value
+        .trim()
+        .strip_prefix("0x")
+        .or_else(|| value.trim().strip_prefix("0X"))
+        .unwrap_or_else(|| value.trim());
+    if raw.len() != 64 || !raw.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        return Err(ServiceError::bad_request(
+            "claim proof words must be 32-byte hex values",
+        ));
+    }
+    Ok(raw.to_ascii_lowercase())
 }
 
 fn required_address(field: &str, value: Option<&str>) -> ServiceResult<String> {
@@ -307,6 +398,9 @@ mod tests {
             token_id_hex: None,
             counterparty_address: Some("0x3333333333333333333333333333333333333333".into()),
             protocol_address: Some("0x000000000022d473030f116ddee9f6b43ac78ba3".into()),
+            claim_adapter: None,
+            claim_index_hex: None,
+            claim_proof: Vec::new(),
             amount_hex: "0x1".into(),
             destination_address: Some("0x9999999999999999999999999999999999999999".into()),
             signer_status: "available".into(),
@@ -485,5 +579,63 @@ mod tests {
         step.protocol_address = None;
         let error = prepare_plan_step_preflight(&step).unwrap_err();
         assert!(error.to_string().contains("Permit2 contract"));
+    }
+
+    #[test]
+    fn prepares_merkle_claim_call_data() {
+        let mut step = sample_step("claim_reward");
+        step.asset_kind = "reward".into();
+        step.address = "0x9858effd232b4033e47d90003d41ec34ecaeda94".into();
+        step.protocol_address = Some("0x1111111111111111111111111111111111111111".into());
+        step.claim_adapter = Some(CLAIM_ADAPTER_MERKLE_DISTRIBUTOR_V1.into());
+        step.claim_index_hex = Some("0x7".into());
+        step.amount_hex = "0xf4240".into();
+        step.claim_proof = vec![
+            format!("0x{}", "11".repeat(32)),
+            format!("0x{}", "22".repeat(32)),
+        ];
+
+        let prepared = prepare_plan_step_preflight(&step).unwrap();
+        let PlanStepPreflight::Call(call) = prepared else {
+            panic!("expected call");
+        };
+
+        assert_eq!(
+            call.target_address,
+            "0x1111111111111111111111111111111111111111"
+        );
+        assert!(call.data_hex.starts_with(&format!(
+            "0x{}",
+            function_selector_hex("claim(uint256,address,uint256,bytes32[])")
+        )));
+        assert!(
+            call.data_hex
+                .contains("9858effd232b4033e47d90003d41ec34ecaeda94")
+        );
+        assert!(
+            call.data_hex
+                .ends_with(&format!("{}{}", "11".repeat(32), "22".repeat(32)))
+        );
+        assert!(call.evidence.iter().any(|item| {
+            item == "prepared_call=claim.merkle_distributor_v1(index,account,amount,proof)"
+        }));
+        assert!(
+            call.evidence
+                .iter()
+                .any(|item| item == "claim_proof_words=2")
+        );
+    }
+
+    #[test]
+    fn merkle_claim_requires_proof_evidence() {
+        let mut step = sample_step("claim_reward");
+        step.protocol_address = Some("0x1111111111111111111111111111111111111111".into());
+        step.claim_adapter = Some(CLAIM_ADAPTER_MERKLE_DISTRIBUTOR_V1.into());
+        step.claim_index_hex = Some("0x7".into());
+        step.claim_proof = Vec::new();
+
+        let error = prepare_plan_step_preflight(&step).unwrap_err();
+
+        assert!(error.to_string().contains("claim proof"));
     }
 }

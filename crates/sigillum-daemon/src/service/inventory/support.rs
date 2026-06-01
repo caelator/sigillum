@@ -23,12 +23,20 @@ pub(super) struct InventoryRecordContext<'a> {
     pub(super) now: u64,
 }
 
+#[derive(Clone, Debug, Default)]
+pub(super) struct ClaimRecordMetadata {
+    pub(super) adapter: Option<String>,
+    pub(super) index_hex: Option<String>,
+    pub(super) proof: Vec<String>,
+}
+
 struct HoldingRecordParts<'a> {
     asset_kind: &'a str,
     asset_address: Option<String>,
     token_id_hex: Option<String>,
     counterparty_address: Option<String>,
     protocol_address: Option<String>,
+    claim: ClaimRecordMetadata,
     amount_hex: &'a str,
     source: &'a str,
 }
@@ -189,6 +197,7 @@ pub(super) fn holding_record_with_token_id(
             token_id_hex,
             counterparty_address: None,
             protocol_address: None,
+            claim: ClaimRecordMetadata::default(),
             amount_hex,
             source,
         },
@@ -211,6 +220,7 @@ pub(super) fn holding_record_with_counterparty(
             token_id_hex: None,
             counterparty_address,
             protocol_address: None,
+            claim: ClaimRecordMetadata::default(),
             amount_hex,
             source,
         },
@@ -234,6 +244,31 @@ pub(super) fn holding_record_with_protocol_counterparty(
             token_id_hex: None,
             counterparty_address,
             protocol_address,
+            claim: ClaimRecordMetadata::default(),
+            amount_hex,
+            source,
+        },
+    )
+}
+
+pub(super) fn holding_record_with_claim_metadata(
+    context: &InventoryRecordContext<'_>,
+    asset_kind: &str,
+    asset_address: Option<String>,
+    protocol_address: Option<String>,
+    amount_hex: &str,
+    source: &str,
+    claim: ClaimRecordMetadata,
+) -> WalletAssetHolding {
+    holding_record_full(
+        context,
+        HoldingRecordParts {
+            asset_kind,
+            asset_address,
+            token_id_hex: None,
+            counterparty_address: None,
+            protocol_address,
+            claim,
             amount_hex,
             source,
         },
@@ -257,6 +292,9 @@ fn holding_record_full(
         token_id_hex: parts.token_id_hex,
         counterparty_address: parts.counterparty_address,
         protocol_address: parts.protocol_address,
+        claim_adapter: parts.claim.adapter,
+        claim_index_hex: parts.claim.index_hex,
+        claim_proof: parts.claim.proof,
         amount_hex: parts.amount_hex.to_string(),
         source: parts.source.into(),
         status: if quantity_hex_is_nonzero(parts.amount_hex) {
@@ -315,6 +353,9 @@ fn holding_key_matches(left: &WalletAssetHolding, right: &WalletAssetHolding) ->
         && left.asset_address == right.asset_address
         && left.token_id_hex == right.token_id_hex
         && left.counterparty_address == right.counterparty_address
+        && left.claim_adapter == right.claim_adapter
+        && left.claim_index_hex == right.claim_index_hex
+        && left.claim_proof == right.claim_proof
         && approval_source_key_matches(left, right)
         && protocol_address_key_matches(left, right)
 }

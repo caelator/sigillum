@@ -122,6 +122,9 @@ export interface ConsolidationPlanStep {
   token_id_hex?: string | null;
   counterparty_address?: string | null;
   protocol_address?: string | null;
+  claim_adapter?: string | null;
+  claim_index_hex?: string | null;
+  claim_proof?: string[];
   amount_hex: string;
   destination_address?: string | null;
   signer_status: string;

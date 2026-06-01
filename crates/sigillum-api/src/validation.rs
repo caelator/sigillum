@@ -59,6 +59,7 @@ const MAX_NOTE: usize = 1024;
 const MAX_ID: usize = 256;
 const MAX_ENV_NAME: usize = 256;
 const MAX_TOKEN_ADDRESSES: usize = 128;
+const MAX_CLAIM_PROOF_WORDS: usize = 64;
 
 // ── Validation implementations ──────────────────────────────────────
 
@@ -596,6 +597,26 @@ impl Validate for crate::request::WalletInventoryScanRequest {
                 &format!("claim_candidate_probes[{index}].source_label"),
                 &probe.source_label,
                 MAX_LABEL,
+            )?;
+            check_optional_len(
+                &format!("claim_candidate_probes[{index}].claim_adapter"),
+                &probe.claim_adapter,
+                MAX_LABEL,
+            )?;
+            check_optional_len(
+                &format!("claim_candidate_probes[{index}].claim_index_hex"),
+                &probe.claim_index_hex,
+                MAX_HEX,
+            )?;
+            if probe.claim_proof.len() > MAX_CLAIM_PROOF_WORDS {
+                return Err(format!(
+                    "claim_candidate_probes[{index}].claim_proof exceeds maximum length of {MAX_CLAIM_PROOF_WORDS} items"
+                ));
+            }
+            check_vec_items_len(
+                &format!("claim_candidate_probes[{index}].claim_proof"),
+                &probe.claim_proof,
+                MAX_HEX,
             )?;
         }
         Ok(())

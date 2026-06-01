@@ -558,6 +558,12 @@ fn test_wallet_inventory_scan_request_roundtrip() {
             asset_address: "0x4200000000000000000000000000000000000042".to_string(),
             amount_hex: "0xf4240".to_string(),
             source_label: "op-token-list".to_string(),
+            claim_adapter: Some("merkle-distributor-v1".to_string()),
+            claim_index_hex: Some("0x7".to_string()),
+            claim_proof: vec![
+                format!("0x{}", "11".repeat(32)),
+                format!("0x{}", "22".repeat(32)),
+            ],
         }],
         claim_candidate_limit: Some(12),
         nft_discovery_from_block: Some("0x100".to_string()),

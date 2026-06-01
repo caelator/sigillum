@@ -160,18 +160,20 @@ Current daemon behavior:
   positions can be surfaced locally before protocol-specific exit adapters exist
 - records operator-configured trusted claim candidates as first-class `reward`
   or `airdrop` holdings keyed by claimant address, asset contract, claim
-  contract, amount, protocol, and source provenance; these surface in inventory
-  and consolidation planning, but remain blocked until a protocol-specific
-  claim adapter verifies and simulates the transaction path
+  contract, amount, protocol, optional Merkle proof evidence, and source
+  provenance; these surface in inventory and consolidation planning. Standard
+  `claim(uint256,address,uint256,bytes32[])` Merkle distributor candidates can
+  be simulated with provider-backed `eth_call`, but claim execution remains
+  blocked behind explicit review and a disabled execution gate.
 - emits local risk findings for `reward` and `airdrop` claim candidates, using
   the claim contract as the review subject and applying risk-catalog overrides
   so trusted, high-risk, or critical claim contracts are visible before any
   claim transaction is considered
-- preflights native sweeps, ERC-20 sweeps, ERC-20 approval revokes, Permit2
-  allowance revokes, and NFT operator revokes with provider-backed `eth_call`
-  evidence before those consolidation steps can become executable; native sweep
-  preflight reserves gas from the transfer value using the provider profile's
-  max-fee policy, and zero-value ERC-20/revoke preflights verify inventoried
+- preflights native sweeps, ERC-20 sweeps, NFT sweeps, ERC-20 approval revokes,
+  Permit2 allowance revokes, NFT operator revokes, and standard Merkle claim
+  candidates with provider-backed `eth_call` evidence; native sweep preflight
+  reserves gas from the transfer value using the provider profile's max-fee
+  policy, and zero-value token/NFT/revoke/claim preflights verify inventoried
   native gas against the same provider fee policy
 - classifies discovered inventory addresses with signer, gas, value, approval,
   stranded-value, watch-only, and dormant-candidate labels so risk and
@@ -192,16 +194,17 @@ What it intentionally does not do today:
   confirmation, operator-bounded ERC-20 allowance probes, operator-bounded
   Permit2 allowance probes, operator-bounded NFT approval probes,
   operator-configured DeFi receipt/share token probes, operator-configured
-  trusted claim candidates, claim-contract risk findings, and local
-  operator-managed spender/operator/claim-contract risk catalog overrides
+  trusted claim candidates, standard Merkle claim preflight simulation,
+  claim-contract risk findings, and local operator-managed
+  spender/operator/claim-contract risk catalog overrides
 - seed/xpub gap-limit discovery, historical receive-address scanning, or
   rich dormant-wallet classification with last-activity timestamps
 - full token registry/indexer scraping, full ERC-1155 batch/history coverage,
   NFT metadata and spam classification, Permit2 expiration-aware risk scoring,
   external spender/operator registries, revoke transaction builders beyond
   approval revokes, NFT claim/swap/exit transaction simulation, dynamic network
-  fee estimation, protocol-specific DeFi exit adapters, or verified
-  airdrop/reward claim adapters
+  fee estimation, protocol-specific DeFi exit adapters, or claim execution
+  adapters for airdrops/rewards
 - queued execution of consolidation plans for discovered holdings outside the
   current stealth deposit sweep flow
 

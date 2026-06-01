@@ -18,9 +18,10 @@ use super::permit2_discovery::{
     DISCOVERY_SOURCE_PERMIT2_ALLOWANCE_PROBE, Permit2AllowanceDiscoveryConfig,
 };
 use super::support::{
-    InventoryAddressObservation, InventoryRecordContext, address_record, holding_record,
-    holding_record_with_counterparty, holding_record_with_protocol_counterparty,
-    holding_record_with_source, holding_record_with_token_id, quantity_hex_is_nonzero,
+    ClaimRecordMetadata, InventoryAddressObservation, InventoryRecordContext, address_record,
+    holding_record, holding_record_with_claim_metadata, holding_record_with_counterparty,
+    holding_record_with_protocol_counterparty, holding_record_with_source,
+    holding_record_with_token_id, quantity_hex_is_nonzero,
 };
 use super::token_discovery::{
     DISCOVERY_SOURCE_ERC20_TRANSFER_LOG, Erc20TransferDiscoveryConfig, push_unique_token,
@@ -259,18 +260,22 @@ impl SigillumService {
         if let Some(config) = claim_candidate_discovery {
             for candidate in config.candidates_for_address(&address) {
                 activity_state = "funded";
-                holdings.push(holding_record_with_protocol_counterparty(
+                holdings.push(holding_record_with_claim_metadata(
                     &record_context,
                     &candidate.kind,
                     Some(candidate.asset_address),
                     Some(candidate.claim_contract_address),
-                    None,
                     &candidate.amount_hex,
                     &claim_candidate_source(
                         &candidate.kind,
                         &candidate.protocol,
                         &candidate.source_label,
                     ),
+                    ClaimRecordMetadata {
+                        adapter: candidate.claim_adapter,
+                        index_hex: candidate.claim_index_hex,
+                        proof: candidate.claim_proof,
+                    },
                 ));
             }
         }
@@ -436,6 +441,9 @@ mod tests {
             token_id_hex: None,
             counterparty_address: None,
             protocol_address: None,
+            claim_adapter: None,
+            claim_index_hex: None,
+            claim_proof: Vec::new(),
             amount_hex: amount_hex.into(),
             source: "test".into(),
             status: "detected".into(),

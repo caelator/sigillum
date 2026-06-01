@@ -4,6 +4,7 @@ use sigillum_core::decode_quantity_hex;
 use crate::service::helpers::random_id;
 
 use super::allowance_discovery::DISCOVERY_SOURCE_ERC20_ALLOWANCE_PROBE;
+use super::claim_discovery::CLAIM_ADAPTER_MERKLE_DISTRIBUTOR_V1;
 use super::nft_approval_discovery::DISCOVERY_SOURCE_NFT_OPERATOR_APPROVAL_PROBE;
 use super::permit2_discovery::DISCOVERY_SOURCE_PERMIT2_ALLOWANCE_PROBE;
 use super::support::quantity_hex_is_nonzero;
@@ -61,13 +62,21 @@ pub(super) fn plan_step_for_holding(
         if !matches!(holding.asset_kind.as_str(), "erc721" | "erc1155") {
             blockers.push("unsupported_nft_standard".into());
         }
-    } else if matches!(holding.asset_kind.as_str(), "defi" | "airdrop" | "reward") {
+    } else if holding.asset_kind == "defi" {
         blockers.push("requires_protocol_adapter".into());
+    } else if matches!(holding.asset_kind.as_str(), "airdrop" | "reward") {
+        push_claim_reward_blockers(holding, &mut blockers);
     }
     let status = if blockers.is_empty() {
         "review_required"
     } else {
         "blocked"
+    };
+    let simulation_status = if blockers.is_empty() || claim_reward_is_simulatable(action, &blockers)
+    {
+        "required"
+    } else {
+        "not_run"
     };
 
     ConsolidationPlanStep {
@@ -85,14 +94,13 @@ pub(super) fn plan_step_for_holding(
         token_id_hex: holding.token_id_hex.clone(),
         counterparty_address: holding.counterparty_address.clone(),
         protocol_address: holding.protocol_address.clone(),
+        claim_adapter: holding.claim_adapter.clone(),
+        claim_index_hex: holding.claim_index_hex.clone(),
+        claim_proof: holding.claim_proof.clone(),
         amount_hex: holding.amount_hex.clone(),
         destination_address,
         signer_status: signer_status.into(),
-        simulation_status: if blockers.is_empty() {
-            "required".into()
-        } else {
-            "not_run".into()
-        },
+        simulation_status: simulation_status.into(),
         simulation_evidence: Vec::new(),
         risk_level: if blockers.is_empty() {
             risk_level_for_holding(holding).into()
@@ -103,6 +111,37 @@ pub(super) fn plan_step_for_holding(
         auto_eligible: false,
         approved: false,
     }
+}
+
+fn push_claim_reward_blockers(holding: &WalletAssetHolding, blockers: &mut Vec<String>) {
+    if holding.protocol_address.is_none() {
+        blockers.push("missing_claim_contract".into());
+    }
+    match holding.claim_adapter.as_deref() {
+        Some(CLAIM_ADAPTER_MERKLE_DISTRIBUTOR_V1) => {
+            if holding.claim_index_hex.is_none() {
+                blockers.push("missing_claim_index".into());
+            }
+            if holding.claim_proof.is_empty() {
+                blockers.push("missing_claim_proof".into());
+            }
+            if holding.protocol_address.is_some()
+                && holding.claim_index_hex.is_some()
+                && !holding.claim_proof.is_empty()
+            {
+                blockers.push("claim_execution_disabled".into());
+            }
+        }
+        _ => blockers.push("requires_protocol_adapter".into()),
+    }
+}
+
+fn claim_reward_is_simulatable(action: &str, blockers: &[String]) -> bool {
+    action == "claim_reward"
+        && !blockers.is_empty()
+        && blockers
+            .iter()
+            .all(|blocker| blocker == "claim_execution_disabled")
 }
 
 fn action_for_holding(holding: &WalletAssetHolding) -> &'static str {
@@ -188,6 +227,9 @@ mod tests {
             token_id_hex: None,
             counterparty_address: counterparty_address.map(str::to_string),
             protocol_address: None,
+            claim_adapter: None,
+            claim_index_hex: None,
+            claim_proof: Vec::new(),
             amount_hex: "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff".into(),
             source: source.into(),
             status: "detected".into(),
@@ -350,5 +392,39 @@ mod tests {
 
         assert_eq!(step.status, "blocked");
         assert!(step.blockers.contains(&"missing_nft_amount".into()));
+    }
+
+    #[test]
+    fn merkle_claim_steps_are_simulatable_but_execution_blocked() {
+        let mut holding = sample_holding("reward", "claim-candidate:reward:op:list", None);
+        holding.protocol_address = Some("0x1111111111111111111111111111111111111111".into());
+        holding.claim_adapter = Some(CLAIM_ADAPTER_MERKLE_DISTRIBUTOR_V1.into());
+        holding.claim_index_hex = Some("0x7".into());
+        holding.claim_proof = vec![format!("0x{}", "11".repeat(32))];
+
+        let step = plan_step_for_holding(&holding, None, "available");
+
+        assert_eq!(step.action, "claim_reward");
+        assert_eq!(step.status, "blocked");
+        assert_eq!(step.simulation_status, "required");
+        assert_eq!(
+            step.claim_adapter.as_deref(),
+            Some(CLAIM_ADAPTER_MERKLE_DISTRIBUTOR_V1)
+        );
+        assert!(step.blockers.contains(&"claim_execution_disabled".into()));
+        assert!(!step.blockers.contains(&"requires_protocol_adapter".into()));
+    }
+
+    #[test]
+    fn claim_steps_without_adapter_remain_blocked_before_simulation() {
+        let mut holding = sample_holding("airdrop", "claim-candidate:airdrop:op:list", None);
+        holding.protocol_address = Some("0x1111111111111111111111111111111111111111".into());
+
+        let step = plan_step_for_holding(&holding, None, "available");
+
+        assert_eq!(step.action, "claim_reward");
+        assert_eq!(step.status, "blocked");
+        assert_eq!(step.simulation_status, "not_run");
+        assert!(step.blockers.contains(&"requires_protocol_adapter".into()));
     }
 }

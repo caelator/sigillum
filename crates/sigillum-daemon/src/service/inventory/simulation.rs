@@ -17,6 +17,7 @@ use super::support::{load_inventory_state, save_inventory_state};
 
 const DEFAULT_TOKEN_TRANSACTION_GAS_LIMIT: u64 = 65_000;
 const DEFAULT_NFT_SWEEP_GAS_LIMIT: u64 = 100_000;
+const DEFAULT_CLAIM_TRANSACTION_GAS_LIMIT: u64 = 120_000;
 
 impl SigillumService {
     pub(crate) async fn simulate_consolidation_plan(
@@ -290,6 +291,10 @@ fn zero_value_transaction_gas_limit(
         "revoke_nft_operator_approval" => provider
             .erc20_gas_limit
             .unwrap_or(DEFAULT_TOKEN_TRANSACTION_GAS_LIMIT),
+        "claim_reward" => provider
+            .erc20_gas_limit
+            .unwrap_or(DEFAULT_CLAIM_TRANSACTION_GAS_LIMIT)
+            .max(DEFAULT_CLAIM_TRANSACTION_GAS_LIMIT),
         _ => provider
             .erc20_gas_limit
             .unwrap_or(DEFAULT_TOKEN_TRANSACTION_GAS_LIMIT),
@@ -395,7 +400,7 @@ fn non_simulation_blockers(step: &ConsolidationPlanStep) -> Option<Vec<String>> 
     let blockers = step
         .blockers
         .iter()
-        .filter(|blocker| !is_simulation_blocker(blocker))
+        .filter(|blocker| blocks_simulation(blocker))
         .cloned()
         .collect::<Vec<_>>();
     if blockers.is_empty() {
@@ -403,6 +408,10 @@ fn non_simulation_blockers(step: &ConsolidationPlanStep) -> Option<Vec<String>> 
     } else {
         Some(blockers)
     }
+}
+
+fn blocks_simulation(blocker: &str) -> bool {
+    !is_simulation_blocker(blocker) && blocker != "claim_execution_disabled"
 }
 
 fn apply_simulation_outcome(step: &mut ConsolidationPlanStep, outcome: PlanSimulationOutcome) {
@@ -483,6 +492,9 @@ mod tests {
             token_id_hex: None,
             counterparty_address: None,
             protocol_address: None,
+            claim_adapter: None,
+            claim_index_hex: None,
+            claim_proof: Vec::new(),
             amount_hex: amount_hex.into(),
             destination_address: Some("0x9999999999999999999999999999999999999999".into()),
             signer_status: "available".into(),
@@ -719,6 +731,52 @@ mod tests {
             evidence
                 .iter()
                 .any(|item| item == "estimated_gas_cost_wei_hex=0x30d40")
+        );
+    }
+
+    #[test]
+    fn claim_steps_keep_execution_blocker_but_allow_simulation() {
+        let mut step = sample_step("0xf4240");
+        step.action = "claim_reward".into();
+        step.blockers = vec!["claim_execution_disabled".into()];
+
+        assert!(non_simulation_blockers(&step).is_none());
+
+        apply_simulation_outcome(
+            &mut step,
+            PlanSimulationOutcome {
+                status: "passed".into(),
+                blocker: None,
+                evidence: vec!["prepared_call=claim.merkle_distributor_v1".into()],
+            },
+        );
+
+        assert_eq!(step.simulation_status, "passed");
+        assert_eq!(step.status, "blocked");
+        assert!(step.blockers.contains(&"claim_execution_disabled".into()));
+    }
+
+    #[test]
+    fn claim_gas_policy_uses_conservative_floor() {
+        let provider = sample_provider();
+        let mut step = sample_erc20_step();
+        step.action = "claim_reward".into();
+        let call = sample_erc20_call();
+        let addresses = vec![sample_inventory_address("0x40000")];
+        let mut evidence = Vec::new();
+
+        apply_zero_value_transaction_gas_policy(&provider, &addresses, &step, &call, &mut evidence)
+            .unwrap();
+
+        assert!(
+            evidence
+                .iter()
+                .any(|item| item == "transaction_gas_limit=120000")
+        );
+        assert!(
+            evidence
+                .iter()
+                .any(|item| item == "estimated_gas_cost_wei_hex=0x3a980")
         );
     }
 }

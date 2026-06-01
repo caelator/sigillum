@@ -39,7 +39,21 @@ async fn spawn_mock_evm_provider() -> (SocketAddr, tokio::task::JoinHandle<()>) 
                     .unwrap_or_default()
                     .to_ascii_lowercase();
                 let data = request["params"][0]["data"].as_str().unwrap_or_default();
-                if to == "0x000000000022d473030f116ddee9f6b43ac78ba3" {
+                if to == "0x1111111111111111111111111111111111111111"
+                    && data.starts_with("0x2e7ba6ef")
+                {
+                    if data.contains("9858effd232b4033e47d90003d41ec34ecaeda94")
+                        && data.contains(
+                            "00000000000000000000000000000000000000000000000000000000000f4240",
+                        )
+                        && data.contains(&"11".repeat(32))
+                        && data.contains(&"22".repeat(32))
+                    {
+                        json!("0x")
+                    } else {
+                        json!({ "claim": "missing evidence" })
+                    }
+                } else if to == "0x000000000022d473030f116ddee9f6b43ac78ba3" {
                     if data.contains("9858effd232b4033e47d90003d41ec34ecaeda94")
                         && data.contains("a0b86991c6218b36c1d19d4a2e9eb0ce3606eb48")
                         && data.contains("4444444444444444444444444444444444444444")
@@ -1588,7 +1602,13 @@ async fn wallet_inventory_scan_discovers_erc20_tokens_from_transfer_logs() {
                 "claim_contract_address": "0x1111111111111111111111111111111111111111",
                 "asset_address": "0x4200000000000000000000000000000000000042",
                 "amount_hex": "0xf4240",
-                "source_label": "op-token-list"
+                "source_label": "op-token-list",
+                "claim_adapter": "merkle-distributor-v1",
+                "claim_index_hex": "0x7",
+                "claim_proof": [
+                    format!("0x{}", "11".repeat(32)),
+                    format!("0x{}", "22".repeat(32))
+                ]
             }],
             "claim_candidate_limit": 4,
             "nft_discovery_from_block": "0x0",
@@ -1684,6 +1704,9 @@ async fn wallet_inventory_scan_discovers_erc20_tokens_from_transfer_logs() {
         holding["asset_kind"] == "airdrop"
             && holding["asset_address"] == "0x4200000000000000000000000000000000000042"
             && holding["protocol_address"] == "0x1111111111111111111111111111111111111111"
+            && holding["claim_adapter"] == "merkle-distributor-v1"
+            && holding["claim_index_hex"] == "0x7"
+            && holding["claim_proof"].as_array().unwrap().len() == 2
             && holding["amount_hex"] == "0xf4240"
             && holding["source"] == "claim-candidate:airdrop:optimism:op-token-list"
     }));
@@ -1816,12 +1839,16 @@ async fn wallet_inventory_scan_discovers_erc20_tokens_from_transfer_logs() {
             && step["asset_kind"] == "airdrop"
             && step["asset_address"] == "0x4200000000000000000000000000000000000042"
             && step["protocol_address"] == "0x1111111111111111111111111111111111111111"
+            && step["claim_adapter"] == "merkle-distributor-v1"
+            && step["claim_index_hex"] == "0x7"
+            && step["claim_proof"].as_array().unwrap().len() == 2
             && step["status"] == "blocked"
+            && step["simulation_status"] == "required"
             && step["blockers"]
                 .as_array()
                 .unwrap()
                 .iter()
-                .any(|blocker| blocker == "requires_protocol_adapter")
+                .any(|blocker| blocker == "claim_execution_disabled")
     }));
 
     let approve_plan = post_json(
@@ -1974,6 +2001,35 @@ async fn wallet_inventory_scan_discovers_erc20_tokens_from_transfer_logs() {
                 .any(|evidence| evidence == "prepared_call=permit2.approve(token,spender,0,0)")
     });
     assert!(passed_permit2);
+    let passed_claim = simulated_steps.iter().any(|step| {
+        step["action"] == "claim_reward"
+            && step["simulation_status"] == "passed"
+            && step["status"] == "blocked"
+            && step["blockers"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|blocker| blocker == "claim_execution_disabled")
+            && step["simulation_evidence"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|evidence| {
+                    evidence
+                        == "prepared_call=claim.merkle_distributor_v1(index,account,amount,proof)"
+                })
+            && step["simulation_evidence"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|evidence| evidence == "claim_proof_words=2")
+            && step["simulation_evidence"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|evidence| evidence == "transaction_gas_limit=120000")
+    });
+    assert!(passed_claim);
     assert!(
         simulate_json["plan"]["summary"]["executable_steps"]
             .as_u64()

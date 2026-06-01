@@ -33,6 +33,12 @@ pub struct ClaimCandidateProbe {
     pub asset_address: String,
     pub amount_hex: String,
     pub source_label: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub claim_adapter: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub claim_index_hex: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub claim_proof: Vec<String>,
 }
 
 /// Run read-only EVM wallet discovery for imported seed and xpub profiles.

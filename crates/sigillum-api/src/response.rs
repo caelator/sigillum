@@ -650,6 +650,12 @@ pub struct WalletAssetHolding {
     pub counterparty_address: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub protocol_address: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub claim_adapter: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub claim_index_hex: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub claim_proof: Vec<String>,
     pub amount_hex: String,
     pub source: String,
     pub status: String,
@@ -814,6 +820,12 @@ pub struct ConsolidationPlanStep {
     pub counterparty_address: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub protocol_address: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub claim_adapter: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub claim_index_hex: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub claim_proof: Vec<String>,
     pub amount_hex: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub destination_address: Option<String>,

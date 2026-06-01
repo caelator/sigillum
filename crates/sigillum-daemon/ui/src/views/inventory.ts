@@ -169,6 +169,11 @@ export function createInventoryActions(deps: InventoryActionsDeps) {
           ? " · spender=" + esc(holding.counterparty_address)
           : "") +
         (holding.protocol_address ? " · protocol=" + esc(holding.protocol_address) : "") +
+        (holding.claim_adapter ? " · claimAdapter=" + esc(holding.claim_adapter) : "") +
+        (holding.claim_index_hex ? " · claimIndex=" + esc(holding.claim_index_hex) : "") +
+        ((holding.claim_proof || []).length
+          ? " · proofWords=" + esc(String((holding.claim_proof || []).length))
+          : "") +
         " · amount=" +
         esc(holding.amount_hex) +
         "<br>" +
@@ -259,6 +264,11 @@ export function createInventoryActions(deps: InventoryActionsDeps) {
                 ? " · spender/operator=" + esc(step.counterparty_address)
                 : "") +
               (step.protocol_address ? " · protocol=" + esc(step.protocol_address) : "") +
+              (step.claim_adapter ? " · claimAdapter=" + esc(step.claim_adapter) : "") +
+              (step.claim_index_hex ? " · claimIndex=" + esc(step.claim_index_hex) : "") +
+              ((step.claim_proof || []).length
+                ? " · proofWords=" + esc(String((step.claim_proof || []).length))
+                : "") +
               " · amount=" +
               esc(step.amount_hex) +
               " · simulation=" +

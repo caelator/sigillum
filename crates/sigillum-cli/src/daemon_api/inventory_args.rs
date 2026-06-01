@@ -33,12 +33,26 @@ fn parse_defi_token_probe_value(value: &str) -> DefiTokenProbe {
 
 fn parse_claim_candidate_value(value: &str) -> ClaimCandidateProbe {
     let parts = value.split(':').collect::<Vec<_>>();
-    if parts.len() != 7 || parts.iter().any(|part| part.trim().is_empty()) {
+    if !(parts.len() == 7 || parts.len() == 10) || parts.iter().any(|part| part.trim().is_empty()) {
         eprintln!(
-            "Invalid value for --claim-candidate: expected kind:protocol:claimant_address:claim_contract_address:asset_address:amount_hex:source_label"
+            "Invalid value for --claim-candidate: expected kind:protocol:claimant_address:claim_contract_address:asset_address:amount_hex:source_label[:claim_adapter:claim_index_hex:proof1,proof2]"
         );
         process::exit(1);
     }
+    let (claim_adapter, claim_index_hex, claim_proof) = if parts.len() == 10 {
+        (
+            Some(parts[7].trim().to_string()),
+            Some(parts[8].trim().to_string()),
+            parts[9]
+                .split(',')
+                .map(str::trim)
+                .filter(|part| !part.is_empty())
+                .map(str::to_string)
+                .collect(),
+        )
+    } else {
+        (None, None, Vec::new())
+    };
     ClaimCandidateProbe {
         kind: parts[0].trim().to_string(),
         protocol: parts[1].trim().to_string(),
@@ -47,6 +61,9 @@ fn parse_claim_candidate_value(value: &str) -> ClaimCandidateProbe {
         asset_address: parts[4].trim().to_string(),
         amount_hex: parts[5].trim().to_string(),
         source_label: parts[6].trim().to_string(),
+        claim_adapter,
+        claim_index_hex,
+        claim_proof,
     }
 }
 

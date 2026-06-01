@@ -7,9 +7,11 @@ use super::super::evm::{encode_quantity_u256, normalize_address};
 use super::support::quantity_hex_is_nonzero;
 
 pub(super) const DISCOVERY_SOURCE_CLAIM_CANDIDATE_PREFIX: &str = "claim-candidate";
+pub(super) const CLAIM_ADAPTER_MERKLE_DISTRIBUTOR_V1: &str = "merkle-distributor-v1";
 
 const DEFAULT_CLAIM_CANDIDATE_LIMIT: usize = 100;
 const MAX_CLAIM_CANDIDATE_LIMIT: usize = 1_000;
+const MAX_CLAIM_PROOF_WORDS: usize = 64;
 
 #[derive(Clone, Debug)]
 pub(super) struct ClaimCandidateDiscoveryConfig {
@@ -26,6 +28,9 @@ pub(super) struct ClaimCandidate {
     pub(super) asset_address: String,
     pub(super) amount_hex: String,
     pub(super) source_label: String,
+    pub(super) claim_adapter: Option<String>,
+    pub(super) claim_index_hex: Option<String>,
+    pub(super) claim_proof: Vec<String>,
 }
 
 pub(super) fn claim_candidate_discovery_config(
@@ -49,6 +54,12 @@ pub(super) fn claim_candidate_discovery_config(
                 asset_address: normalize_address(&probe.asset_address)?,
                 amount_hex: normalized_claim_amount(&probe.amount_hex)?,
                 source_label: normalized_label("claim source", &probe.source_label)?,
+                claim_adapter: normalized_claim_adapter(probe.claim_adapter.as_deref())?,
+                claim_index_hex: normalized_optional_quantity(
+                    "claim candidate index",
+                    probe.claim_index_hex.as_deref(),
+                )?,
+                claim_proof: normalized_claim_proof(&probe.claim_proof)?,
             },
         );
     }
@@ -56,6 +67,9 @@ pub(super) fn claim_candidate_discovery_config(
         return Err(ServiceError::bad_request(
             "claim_candidate_probes is required when claim candidate discovery is enabled",
         ));
+    }
+    for candidate in &candidates {
+        validate_claim_adapter_evidence(candidate)?;
     }
 
     Ok(Some(ClaimCandidateDiscoveryConfig {
@@ -115,6 +129,82 @@ fn normalized_claim_amount(value: &str) -> ServiceResult<String> {
     Ok(encoded)
 }
 
+fn normalized_optional_quantity(field: &str, value: Option<&str>) -> ServiceResult<Option<String>> {
+    value
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(|value| normalized_quantity(field, value))
+        .transpose()
+}
+
+fn normalized_quantity(field: &str, value: &str) -> ServiceResult<String> {
+    let decoded = decode_quantity_hex(value)
+        .map_err(|_| ServiceError::bad_request(format!("{field} must be valid hex")))?;
+    Ok(encode_quantity_u256(&decoded))
+}
+
+fn normalized_claim_adapter(value: Option<&str>) -> ServiceResult<Option<String>> {
+    let Some(value) = value.map(str::trim).filter(|value| !value.is_empty()) else {
+        return Ok(None);
+    };
+    let value = normalized_label("claim adapter", value)?;
+    match value.as_str() {
+        CLAIM_ADAPTER_MERKLE_DISTRIBUTOR_V1 => Ok(Some(value)),
+        _ => Err(ServiceError::bad_request(format!(
+            "claim adapter must be {CLAIM_ADAPTER_MERKLE_DISTRIBUTOR_V1}"
+        ))),
+    }
+}
+
+fn normalized_claim_proof(values: &[String]) -> ServiceResult<Vec<String>> {
+    if values.len() > MAX_CLAIM_PROOF_WORDS {
+        return Err(ServiceError::bad_request(format!(
+            "claim proof exceeds maximum length of {MAX_CLAIM_PROOF_WORDS} words"
+        )));
+    }
+    values
+        .iter()
+        .map(|value| normalized_proof_word(value))
+        .collect()
+}
+
+fn normalized_proof_word(value: &str) -> ServiceResult<String> {
+    let raw = value
+        .trim()
+        .strip_prefix("0x")
+        .or_else(|| value.trim().strip_prefix("0X"))
+        .unwrap_or_else(|| value.trim());
+    if raw.len() != 64 || !raw.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        return Err(ServiceError::bad_request(
+            "claim proof words must be 32-byte hex values",
+        ));
+    }
+    Ok(format!("0x{}", raw.to_ascii_lowercase()))
+}
+
+fn validate_claim_adapter_evidence(candidate: &ClaimCandidate) -> ServiceResult<()> {
+    if candidate.claim_adapter.is_none() {
+        if candidate.claim_index_hex.is_some() || !candidate.claim_proof.is_empty() {
+            return Err(ServiceError::bad_request(
+                "claim_adapter is required when claim index or proof is provided",
+            ));
+        }
+        return Ok(());
+    }
+
+    if candidate.claim_index_hex.is_none() {
+        return Err(ServiceError::bad_request(
+            "claim_index_hex is required for Merkle claim candidates",
+        ));
+    }
+    if candidate.claim_proof.is_empty() {
+        return Err(ServiceError::bad_request(
+            "claim_proof is required for Merkle claim candidates",
+        ));
+    }
+    Ok(())
+}
+
 fn normalized_label(label: &str, value: &str) -> ServiceResult<String> {
     let value = value.trim().to_ascii_lowercase();
     if value.is_empty() {
@@ -146,6 +236,9 @@ fn push_unique_candidate(candidates: &mut Vec<ClaimCandidate>, next: ClaimCandid
                 .eq_ignore_ascii_case(&next.asset_address)
             && existing.amount_hex == next.amount_hex
             && existing.source_label == next.source_label
+            && existing.claim_adapter == next.claim_adapter
+            && existing.claim_index_hex == next.claim_index_hex
+            && existing.claim_proof == next.claim_proof
     }) {
         candidates.push(next);
     }
@@ -164,7 +257,21 @@ mod tests {
             asset_address: "0X2222222222222222222222222222222222222222".into(),
             amount_hex: "0X000F4240".into(),
             source_label: "OP-Token-List".into(),
+            claim_adapter: None,
+            claim_index_hex: None,
+            claim_proof: Vec::new(),
         }
+    }
+
+    fn merkle_candidate(kind: &str) -> ClaimCandidateProbe {
+        let mut candidate = candidate(kind);
+        candidate.claim_adapter = Some("Merkle-Distributor-V1".into());
+        candidate.claim_index_hex = Some("0X0007".into());
+        candidate.claim_proof = vec![
+            format!("0X{}", "11".repeat(32)),
+            format!("0X{}", "22".repeat(32)),
+        ];
+        candidate
     }
 
     #[test]
@@ -208,6 +315,23 @@ mod tests {
     }
 
     #[test]
+    fn normalizes_merkle_claim_evidence() {
+        let config =
+            claim_candidate_discovery_config(Some(true), &[merkle_candidate("reward")], None)
+                .unwrap()
+                .unwrap();
+        let matches = config.candidates_for_address("0x9858effd232b4033e47d90003d41ec34ecaeda94");
+
+        assert_eq!(
+            matches[0].claim_adapter.as_deref(),
+            Some(CLAIM_ADAPTER_MERKLE_DISTRIBUTOR_V1)
+        );
+        assert_eq!(matches[0].claim_index_hex.as_deref(), Some("0x7"));
+        assert_eq!(matches[0].claim_proof[0], format!("0x{}", "11".repeat(32)));
+        assert_eq!(matches[0].claim_proof[1], format!("0x{}", "22".repeat(32)));
+    }
+
+    #[test]
     fn validates_kind_labels_amounts_and_limit() {
         assert!(claim_candidate_discovery_config(Some(true), &[candidate("claim")], None).is_err());
 
@@ -222,5 +346,20 @@ mod tests {
         assert!(
             claim_candidate_discovery_config(Some(true), &[candidate("reward")], Some(0)).is_err()
         );
+
+        let mut proof_without_adapter = candidate("reward");
+        proof_without_adapter.claim_proof = vec![format!("0x{}", "11".repeat(32))];
+        assert!(
+            claim_candidate_discovery_config(Some(true), &[proof_without_adapter], None).is_err()
+        );
+
+        let mut missing_proof = candidate("reward");
+        missing_proof.claim_adapter = Some(CLAIM_ADAPTER_MERKLE_DISTRIBUTOR_V1.into());
+        missing_proof.claim_index_hex = Some("0x1".into());
+        assert!(claim_candidate_discovery_config(Some(true), &[missing_proof], None).is_err());
+
+        let mut malformed_proof = merkle_candidate("reward");
+        malformed_proof.claim_proof = vec!["0x1234".into()];
+        assert!(claim_candidate_discovery_config(Some(true), &[malformed_proof], None).is_err());
     }
 }
