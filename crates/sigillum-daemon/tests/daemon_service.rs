@@ -1580,6 +1580,17 @@ async fn wallet_inventory_scan_discovers_erc20_tokens_from_transfer_logs() {
                 "protocol_address": "0x87870bca3f3fd6335c3f4ce8392d69350b4fa4e2"
             }],
             "defi_position_limit": 8,
+            "discover_claim_candidates": true,
+            "claim_candidate_probes": [{
+                "kind": "airdrop",
+                "protocol": "optimism",
+                "claimant_address": "0x9858effd232b4033e47d90003d41ec34ecaeda94",
+                "claim_contract_address": "0x1111111111111111111111111111111111111111",
+                "asset_address": "0x4200000000000000000000000000000000000042",
+                "amount_hex": "0xf4240",
+                "source_label": "op-token-list"
+            }],
+            "claim_candidate_limit": 4,
             "nft_discovery_from_block": "0x0",
             "nft_discovery_limit": 4
         }),
@@ -1591,7 +1602,7 @@ async fn wallet_inventory_scan_discovers_erc20_tokens_from_transfer_logs() {
     assert_eq!(scan_status, StatusCode::OK, "scan response: {scan_json}");
     assert_eq!(scan_json["job"]["status"], "completed");
     assert_eq!(scan_json["job"]["addresses_scanned"], 4);
-    assert_eq!(scan_json["job"]["holdings_detected"], 21);
+    assert_eq!(scan_json["job"]["holdings_detected"], 22);
     let scan_addresses = scan_json["addresses"].as_array().unwrap();
     assert!(scan_addresses.iter().any(|address| {
         let classifications = address["classifications"].as_array().unwrap();
@@ -1610,7 +1621,7 @@ async fn wallet_inventory_scan_discovers_erc20_tokens_from_transfer_logs() {
     }));
 
     let holdings = scan_json["holdings"].as_array().unwrap();
-    assert_eq!(holdings.len(), 21);
+    assert_eq!(holdings.len(), 22);
     assert!(holdings.iter().any(|holding| {
         holding["asset_kind"] == "erc20"
             && holding["asset_address"] == "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"
@@ -1668,6 +1679,13 @@ async fn wallet_inventory_scan_discovers_erc20_tokens_from_transfer_logs() {
             && holding["protocol_address"] == "0x87870bca3f3fd6335c3f4ce8392d69350b4fa4e2"
             && holding["amount_hex"] == "0xf4240"
             && holding["source"] == "defi-token-probe:aave-v3"
+    }));
+    assert!(holdings.iter().any(|holding| {
+        holding["asset_kind"] == "airdrop"
+            && holding["asset_address"] == "0x4200000000000000000000000000000000000042"
+            && holding["protocol_address"] == "0x1111111111111111111111111111111111111111"
+            && holding["amount_hex"] == "0xf4240"
+            && holding["source"] == "claim-candidate:airdrop:optimism:op-token-list"
     }));
 
     let catalog_upsert = post_json(
@@ -1757,6 +1775,18 @@ async fn wallet_inventory_scan_discovers_erc20_tokens_from_transfer_logs() {
             && step["asset_kind"] == "defi"
             && step["asset_address"] == "0x4d5f47fa6a74757f35c14fd3a6ef8e3c9bc514e8"
             && step["protocol_address"] == "0x87870bca3f3fd6335c3f4ce8392d69350b4fa4e2"
+            && step["status"] == "blocked"
+            && step["blockers"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|blocker| blocker == "requires_protocol_adapter")
+    }));
+    assert!(steps.iter().any(|step| {
+        step["action"] == "claim_reward"
+            && step["asset_kind"] == "airdrop"
+            && step["asset_address"] == "0x4200000000000000000000000000000000000042"
+            && step["protocol_address"] == "0x1111111111111111111111111111111111111111"
             && step["status"] == "blocked"
             && step["blockers"]
                 .as_array()

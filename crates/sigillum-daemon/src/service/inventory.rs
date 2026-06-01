@@ -1,6 +1,7 @@
 //! Wallet inventory and read-only discovery operations.
 
 mod allowance_discovery;
+mod claim_discovery;
 mod defi_discovery;
 mod nft_approval_discovery;
 mod nft_discovery;
@@ -31,6 +32,7 @@ use sigillum_core::{
 use crate::audit_log::AuditEventSpec;
 
 use allowance_discovery::erc20_allowance_discovery_config;
+use claim_discovery::claim_candidate_discovery_config;
 use defi_discovery::defi_token_position_discovery_config;
 use nft_approval_discovery::nft_operator_approval_discovery_config;
 use nft_discovery::{erc721_transfer_discovery_config, erc1155_transfer_discovery_config};
@@ -487,6 +489,11 @@ impl SigillumService {
             &body.defi_token_probes,
             body.defi_position_limit,
         )?;
+        let claim_candidate_discovery = claim_candidate_discovery_config(
+            body.discover_claim_candidates,
+            &body.claim_candidate_probes,
+            body.claim_candidate_limit,
+        )?;
         let requested_family = normalized_wallet_family(body.wallet_family.as_deref())?;
 
         let registry = crate::profiles::load_profiles(&self.state.base_dir).map_err(|error| {
@@ -556,6 +563,7 @@ impl SigillumService {
                             erc1155_discovery.as_ref(),
                             nft_operator_approval_discovery.as_ref(),
                             defi_position_discovery.as_ref(),
+                            claim_candidate_discovery.as_ref(),
                             started_at_unix,
                         )
                         .await?;
@@ -622,6 +630,7 @@ impl SigillumService {
                                         erc1155_discovery.as_ref(),
                                         nft_operator_approval_discovery.as_ref(),
                                         defi_position_discovery.as_ref(),
+                                        claim_candidate_discovery.as_ref(),
                                         started_at_unix,
                                     )
                                     .await?;

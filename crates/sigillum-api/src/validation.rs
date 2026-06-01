@@ -523,6 +523,11 @@ impl Validate for crate::request::WalletInventoryScanRequest {
                 "defi_token_probes exceeds maximum length of {MAX_TOKEN_ADDRESSES} items"
             ));
         }
+        if self.claim_candidate_probes.len() > MAX_TOKEN_ADDRESSES {
+            return Err(format!(
+                "claim_candidate_probes exceeds maximum length of {MAX_TOKEN_ADDRESSES} items"
+            ));
+        }
         check_vec_items_len("token_addresses", &self.token_addresses, MAX_ADDRESS)?;
         check_vec_items_len(
             "allowance_spender_addresses",
@@ -554,6 +559,43 @@ impl Validate for crate::request::WalletInventoryScanRequest {
                 &format!("defi_token_probes[{index}].protocol_address"),
                 &probe.protocol_address,
                 MAX_ADDRESS,
+            )?;
+        }
+        for (index, probe) in self.claim_candidate_probes.iter().enumerate() {
+            check_len(
+                &format!("claim_candidate_probes[{index}].kind"),
+                &probe.kind,
+                MAX_LABEL,
+            )?;
+            check_len(
+                &format!("claim_candidate_probes[{index}].protocol"),
+                &probe.protocol,
+                MAX_LABEL,
+            )?;
+            check_len(
+                &format!("claim_candidate_probes[{index}].claimant_address"),
+                &probe.claimant_address,
+                MAX_ADDRESS,
+            )?;
+            check_len(
+                &format!("claim_candidate_probes[{index}].claim_contract_address"),
+                &probe.claim_contract_address,
+                MAX_ADDRESS,
+            )?;
+            check_len(
+                &format!("claim_candidate_probes[{index}].asset_address"),
+                &probe.asset_address,
+                MAX_ADDRESS,
+            )?;
+            check_len(
+                &format!("claim_candidate_probes[{index}].amount_hex"),
+                &probe.amount_hex,
+                MAX_HEX,
+            )?;
+            check_len(
+                &format!("claim_candidate_probes[{index}].source_label"),
+                &probe.source_label,
+                MAX_LABEL,
             )?;
         }
         Ok(())

@@ -5,6 +5,7 @@ use crate::service::{ServiceResult, SigillumService};
 use super::allowance_discovery::{
     DISCOVERY_SOURCE_ERC20_ALLOWANCE_PROBE, Erc20AllowanceDiscoveryConfig,
 };
+use super::claim_discovery::{ClaimCandidateDiscoveryConfig, claim_candidate_source};
 use super::defi_discovery::{DefiTokenPositionDiscoveryConfig, defi_token_probe_source};
 use super::nft_approval_discovery::{
     DISCOVERY_SOURCE_NFT_OPERATOR_APPROVAL_PROBE, NftOperatorApprovalDiscoveryConfig,
@@ -46,6 +47,7 @@ impl SigillumService {
         erc1155_discovery: Option<&Erc1155TransferDiscoveryConfig>,
         nft_operator_approval_discovery: Option<&NftOperatorApprovalDiscoveryConfig>,
         defi_position_discovery: Option<&DefiTokenPositionDiscoveryConfig>,
+        claim_candidate_discovery: Option<&ClaimCandidateDiscoveryConfig>,
         now: u64,
     ) -> ServiceResult<InventoryAddressObservation> {
         let address = super::normalize_address(address)?;
@@ -250,6 +252,25 @@ impl SigillumService {
                     None,
                     &position.amount_hex,
                     &defi_token_probe_source(&position.protocol),
+                ));
+            }
+        }
+
+        if let Some(config) = claim_candidate_discovery {
+            for candidate in config.candidates_for_address(&address) {
+                activity_state = "funded";
+                holdings.push(holding_record_with_protocol_counterparty(
+                    &record_context,
+                    &candidate.kind,
+                    Some(candidate.asset_address),
+                    Some(candidate.claim_contract_address),
+                    None,
+                    &candidate.amount_hex,
+                    &claim_candidate_source(
+                        &candidate.kind,
+                        &candidate.protocol,
+                        &candidate.source_label,
+                    ),
                 ));
             }
         }

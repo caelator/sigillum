@@ -62,7 +62,12 @@ Required discovery classes:
   covers many lending, vault, staking, and LP receipt-token positions before
   protocol-specific exit adapters exist.
 - Airdrop and reward discovery for claimable or potentially claimable assets,
-  with claim-contract risk classification and no blind auto-claiming.
+  with claim-contract risk classification and no blind auto-claiming. The first
+  local slice records operator-configured trusted claim candidates as `airdrop`
+  or `reward` holdings keyed to the claimant address, asset contract, claim
+  contract, amount, protocol, and source label. These candidates are reviewable
+  in inventory and planning, but claim execution remains blocked until a
+  protocol-specific adapter verifies and simulates the transaction path.
 - Allowance and approval discovery, including unlimited ERC-20 approvals, NFT
   operator approvals, known-drainer spenders, and revoke recommendations.
   Bounded ERC-20 allowance probes and NFT operator-approval probes are
@@ -265,7 +270,9 @@ The CLI should have parity for automation:
    operator-configured ERC-20 receipt/share token probes as protocol holdings.
    Protocol-specific exit adapters, reward accounting, lockup metadata, and
    valuation remain future work.
-7. Airdrop/reward discovery with strict claim risk gates.
+7. Airdrop/reward discovery with strict claim risk gates. The first trusted
+   candidate-ingestion slice is implemented; verified source adapters, claim
+   proof handling, risk scoring, and claim simulation remain future work.
 8. Consolidation planner with broader dry-run simulation for dynamic fee
    estimation, gas top-ups, exits, claims, swaps, and treasury routing.
 9. Controlled execution for native/ERC-20 sweeps, gas top-ups, NFT transfers,

@@ -158,6 +158,11 @@ Current daemon behavior:
 - records operator-configured DeFi receipt/share token probes as first-class
   `defi` holdings with protocol provenance, so lending, vault, staking, and LP
   positions can be surfaced locally before protocol-specific exit adapters exist
+- records operator-configured trusted claim candidates as first-class `reward`
+  or `airdrop` holdings keyed by claimant address, asset contract, claim
+  contract, amount, protocol, and source provenance; these surface in inventory
+  and consolidation planning, but remain blocked until a protocol-specific
+  claim adapter verifies and simulates the transaction path
 - preflights native sweeps, ERC-20 sweeps, ERC-20 approval revokes, Permit2
   allowance revokes, and NFT operator revokes with provider-backed `eth_call`
   evidence before those consolidation steps can become executable; native sweep
@@ -182,16 +187,17 @@ What it intentionally does not do today:
   `ownerOf` confirmation, bounded ERC-1155 transfer discovery with `balanceOf`
   confirmation, operator-bounded ERC-20 allowance probes, operator-bounded
   Permit2 allowance probes, operator-bounded NFT approval probes,
-  operator-configured DeFi receipt/share token probes, and local
-  operator-managed spender/operator risk catalog overrides
+  operator-configured DeFi receipt/share token probes, operator-configured
+  trusted claim candidates, and local operator-managed spender/operator risk
+  catalog overrides
 - seed/xpub gap-limit discovery, historical receive-address scanning, or
   rich dormant-wallet classification with last-activity timestamps
 - full token registry/indexer scraping, full ERC-1155 batch/history coverage,
   NFT metadata and spam classification, Permit2 expiration-aware risk scoring,
   external spender/operator registries, revoke transaction builders beyond
   approval revokes, NFT claim/swap/exit transaction simulation, dynamic network
-  fee estimation, protocol-specific DeFi exit adapters, or airdrop/reward
-  discovery
+  fee estimation, protocol-specific DeFi exit adapters, or verified
+  airdrop/reward claim adapters
 - queued execution of consolidation plans for discovered holdings outside the
   current stealth deposit sweep flow
 

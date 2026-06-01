@@ -16,6 +16,25 @@ pub struct DefiTokenProbe {
     pub protocol_address: Option<String>,
 }
 
+/// Trusted claim candidate supplied by an operator or configured source.
+///
+/// A claim candidate is not executable by itself. It records bounded evidence
+/// that a claimant address may have a reward or airdrop worth reviewing. The
+/// daemon stores it as inventory so risk review and consolidation planning can
+/// surface the value while still requiring protocol-specific adapters before
+/// any claim transaction is built or signed.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ClaimCandidateProbe {
+    /// Either `reward` or `airdrop`.
+    pub kind: String,
+    pub protocol: String,
+    pub claimant_address: String,
+    pub claim_contract_address: String,
+    pub asset_address: String,
+    pub amount_hex: String,
+    pub source_label: String,
+}
+
 /// Run read-only EVM wallet discovery for imported seed and xpub profiles.
 ///
 /// When no wallet filter is provided, all `eth-seed` and `eth-xpub` profiles
@@ -76,6 +95,12 @@ pub struct WalletInventoryScanRequest {
     pub defi_token_probes: Vec<DefiTokenProbe>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub defi_position_limit: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub discover_claim_candidates: Option<bool>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub claim_candidate_probes: Vec<ClaimCandidateProbe>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub claim_candidate_limit: Option<usize>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub nft_discovery_from_block: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]

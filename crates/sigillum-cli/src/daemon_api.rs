@@ -29,7 +29,7 @@ use std::time::{Duration, Instant};
 use serde::Serialize;
 use sigillum_api::request::{
     ChainProfileUpsertRequest, ConsolidationPlanApproveRequest, ConsolidationPlanGenerateRequest,
-    ConsolidationPlanSimulateRequest, DefiTokenProbe, EthStealthWalletProfileUpsertRequest,
+    ConsolidationPlanSimulateRequest, EthStealthWalletProfileUpsertRequest,
     EvmProviderProfileUpsertRequest, EvmProviderRef, Fido2UnlockRequest, MaintenanceRunRequest,
     RiskCatalogDeleteRequest, RiskCatalogUpsertRequest, WalletInventoryScanRequest,
 };
@@ -37,7 +37,10 @@ use sigillum_client::{ClientError, SigillumClient};
 use url::Url;
 
 mod deposits;
+mod inventory_args;
 mod queue;
+
+use inventory_args::{parse_claim_candidate_probes, parse_defi_token_probes};
 
 const DEFAULT_DAEMON_BASE_URL: &str = "http://127.0.0.1:9743";
 const DAEMON_READY_TIMEOUT: Duration = Duration::from_secs(10);
@@ -297,6 +300,9 @@ fn cmd_api_inventory(args: &[String]) {
                 discover_defi_token_positions: flag_option(args, "--discover-defi-token-positions"),
                 defi_token_probes: parse_defi_token_probes(args),
                 defi_position_limit: parse_usize_flag(args, "--defi-position-limit"),
+                discover_claim_candidates: flag_option(args, "--discover-claim-candidates"),
+                claim_candidate_probes: parse_claim_candidate_probes(args),
+                claim_candidate_limit: parse_usize_flag(args, "--claim-candidate-limit"),
                 nft_discovery_from_block: parse_flag(args, "--nft-discovery-from-block"),
                 nft_discovery_to_block: parse_flag(args, "--nft-discovery-to-block"),
                 nft_discovery_limit: parse_usize_flag(args, "--nft-discovery-limit"),
@@ -719,28 +725,6 @@ fn parse_multi_flag(args: &[String], flag: &str) -> Vec<String> {
         i += 1;
     }
     values
-}
-
-fn parse_defi_token_probes(args: &[String]) -> Vec<DefiTokenProbe> {
-    parse_multi_flag(args, "--defi-token-probe")
-        .into_iter()
-        .map(|value| parse_defi_token_probe_value(&value))
-        .collect()
-}
-
-fn parse_defi_token_probe_value(value: &str) -> DefiTokenProbe {
-    let parts = value.split(':').collect::<Vec<_>>();
-    if !(parts.len() == 2 || parts.len() == 3) || parts.iter().any(|part| part.trim().is_empty()) {
-        eprintln!(
-            "Invalid value for --defi-token-probe: expected protocol:token_address[:protocol_address]"
-        );
-        process::exit(1);
-    }
-    DefiTokenProbe {
-        protocol: parts[0].trim().to_string(),
-        token_address: parts[1].trim().to_string(),
-        protocol_address: parts.get(2).map(|value| value.trim().to_string()),
-    }
 }
 
 fn has_flag(args: &[String], flag: &str) -> bool {
