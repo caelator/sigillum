@@ -159,6 +159,7 @@ test("queue and inventory renderers produce reviewable DOM summaries", () => {
         status: "active",
         address: "0xabc",
         amount_hex: "0x1",
+        protocol_address: "0xpermit2",
         wallet_family: "eth-seed",
         wallet_profile: "archive",
         provider_profile: "mainnet",
@@ -168,6 +169,7 @@ test("queue and inventory renderers produce reviewable DOM summaries", () => {
   ok(dom.el("inventoryJobList").innerHTML.includes("scan-1"));
   ok(dom.el("inventoryAddressList").innerHTML.includes("0xabc"));
   ok(dom.el("inventoryHoldingList").innerHTML.includes("native"));
+  ok(dom.el("inventoryHoldingList").innerHTML.includes("0xpermit2"));
 
   inventory.renderConsolidationPlans([
     {
@@ -198,6 +200,7 @@ test("queue and inventory renderers produce reviewable DOM summaries", () => {
           asset_address: "0xtoken",
           amount_hex: "0xffff",
           counterparty_address: "0xspender",
+          protocol_address: null,
           signer_status: "available",
           simulation_status: "required",
           simulation_evidence: ["rpc_method=eth_call"],

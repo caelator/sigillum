@@ -42,6 +42,9 @@ pub(super) fn plan_step_for_holding(
         if holding.counterparty_address.is_none() {
             blockers.push("missing_spender_or_operator".into());
         }
+        if action == "revoke_permit2_allowance" && holding.protocol_address.is_none() {
+            blockers.push("missing_permit2_contract".into());
+        }
         if action == "revoke_approval" {
             blockers.push("unsupported_approval_source".into());
         }
@@ -68,6 +71,7 @@ pub(super) fn plan_step_for_holding(
         asset_address: holding.asset_address.clone(),
         token_id_hex: holding.token_id_hex.clone(),
         counterparty_address: holding.counterparty_address.clone(),
+        protocol_address: holding.protocol_address.clone(),
         amount_hex: holding.amount_hex.clone(),
         destination_address,
         signer_status: signer_status.into(),
@@ -170,6 +174,7 @@ mod tests {
             asset_address: Some("0x2222222222222222222222222222222222222222".into()),
             token_id_hex: None,
             counterparty_address: counterparty_address.map(str::to_string),
+            protocol_address: None,
             amount_hex: "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff".into(),
             source: source.into(),
             status: "detected".into(),
@@ -206,16 +211,29 @@ mod tests {
 
     #[test]
     fn permit2_and_nft_approvals_get_distinct_actions() {
-        let permit2 = plan_step_for_holding(
-            &sample_holding(
-                "approval",
-                DISCOVERY_SOURCE_PERMIT2_ALLOWANCE_PROBE,
-                Some("0x4444444444444444444444444444444444444444"),
-            ),
-            None,
-            "available",
+        let mut permit2_holding = sample_holding(
+            "approval",
+            DISCOVERY_SOURCE_PERMIT2_ALLOWANCE_PROBE,
+            Some("0x4444444444444444444444444444444444444444"),
         );
+        let permit2_missing_contract = plan_step_for_holding(&permit2_holding, None, "available");
+        assert_eq!(permit2_missing_contract.action, "revoke_permit2_allowance");
+        assert!(
+            permit2_missing_contract
+                .blockers
+                .iter()
+                .any(|blocker| blocker == "missing_permit2_contract")
+        );
+
+        permit2_holding.protocol_address =
+            Some("0x000000000022d473030f116ddee9f6b43ac78ba3".into());
+        let permit2 = plan_step_for_holding(&permit2_holding, None, "available");
         assert_eq!(permit2.action, "revoke_permit2_allowance");
+        assert_eq!(
+            permit2.protocol_address.as_deref(),
+            Some("0x000000000022d473030f116ddee9f6b43ac78ba3")
+        );
+        assert!(permit2.blockers.is_empty());
 
         let nft = plan_step_for_holding(
             &sample_holding(

@@ -17,8 +17,8 @@ use super::permit2_discovery::{
 };
 use super::support::{
     InventoryAddressObservation, InventoryRecordContext, address_record, holding_record,
-    holding_record_with_counterparty, holding_record_with_source, holding_record_with_token_id,
-    quantity_hex_is_nonzero,
+    holding_record_with_counterparty, holding_record_with_protocol_counterparty,
+    holding_record_with_source, holding_record_with_token_id, quantity_hex_is_nonzero,
 };
 use super::token_discovery::{
     DISCOVERY_SOURCE_ERC20_TRANSFER_LOG, Erc20TransferDiscoveryConfig, push_unique_token,
@@ -147,10 +147,11 @@ impl SigillumService {
                 )
                 .await?;
             for allowance in allowances {
-                holdings.push(holding_record_with_counterparty(
+                holdings.push(holding_record_with_protocol_counterparty(
                     &record_context,
                     "approval",
                     Some(allowance.token_address),
+                    Some(allowance.permit2_address),
                     Some(allowance.spender_address),
                     &allowance.amount_hex,
                     DISCOVERY_SOURCE_PERMIT2_ALLOWANCE_PROBE,

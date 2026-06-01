@@ -103,6 +103,7 @@ export interface ConsolidationPlanStep {
   asset_address?: string | null;
   token_id_hex?: string | null;
   counterparty_address?: string | null;
+  protocol_address?: string | null;
   amount_hex: string;
   destination_address?: string | null;
   signer_status: string;

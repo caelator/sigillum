@@ -19,6 +19,7 @@ pub(super) struct Permit2AllowanceDiscoveryConfig {
 
 #[derive(Clone, Debug)]
 pub(super) struct Permit2AllowanceObservation {
+    pub(super) permit2_address: String,
     pub(super) token_address: String,
     pub(super) spender_address: String,
     pub(super) amount_hex: String,
@@ -87,6 +88,7 @@ impl SigillumService {
                         )
                         .await?;
                     observations.push(Permit2AllowanceObservation {
+                        permit2_address: permit2_address.clone(),
                         token_address: token_address.clone(),
                         spender_address: spender_address.clone(),
                         amount_hex: if expiration_unix == 0 {

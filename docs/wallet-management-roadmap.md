@@ -238,9 +238,9 @@ The CLI should have parity for automation:
    discovery with owner/balance confirmation is the first NFT inventory slice.
 5. Consolidation preflight. Provider-backed `eth_call` simulation is
    implemented for ERC-20 `approve(spender, 0)` revokes and NFT
-   `setApprovalForAll(operator, false)` revokes. Permit2 revoke simulation is
-   intentionally marked unsupported until inventory records retain the Permit2
-   contract address required to build the revoke call.
+   `setApprovalForAll(operator, false)` revokes. Permit2 allowance probes now
+   retain the Permit2 contract address so `approve(token, spender, 0, 0)`
+   revokes can be simulated against the correct protocol contract.
 6. DeFi position adapters for the most common protocols.
 7. Airdrop/reward discovery with strict claim risk gates.
 8. Consolidation planner with broader dry-run simulation for sweeps, gas

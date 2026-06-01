@@ -165,6 +165,7 @@ export function createInventoryActions(deps: InventoryActionsDeps) {
         (holding.counterparty_address
           ? " · spender=" + esc(holding.counterparty_address)
           : "") +
+        (holding.protocol_address ? " · protocol=" + esc(holding.protocol_address) : "") +
         " · amount=" +
         esc(holding.amount_hex) +
         "<br>" +
@@ -254,6 +255,7 @@ export function createInventoryActions(deps: InventoryActionsDeps) {
               (step.counterparty_address
                 ? " · spender/operator=" + esc(step.counterparty_address)
                 : "") +
+              (step.protocol_address ? " · protocol=" + esc(step.protocol_address) : "") +
               " · amount=" +
               esc(step.amount_hex) +
               " · simulation=" +

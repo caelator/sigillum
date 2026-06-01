@@ -646,6 +646,8 @@ pub struct WalletAssetHolding {
     pub token_id_hex: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub counterparty_address: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub protocol_address: Option<String>,
     pub amount_hex: String,
     pub source: String,
     pub status: String,
@@ -808,6 +810,8 @@ pub struct ConsolidationPlanStep {
     pub token_id_hex: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub counterparty_address: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub protocol_address: Option<String>,
     pub amount_hex: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub destination_address: Option<String>,

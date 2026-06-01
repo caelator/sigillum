@@ -23,6 +23,16 @@ pub(super) struct InventoryRecordContext<'a> {
     pub(super) now: u64,
 }
 
+struct HoldingRecordParts<'a> {
+    asset_kind: &'a str,
+    asset_address: Option<String>,
+    token_id_hex: Option<String>,
+    counterparty_address: Option<String>,
+    protocol_address: Option<String>,
+    amount_hex: &'a str,
+    source: &'a str,
+}
+
 pub(super) fn load_inventory_state(
     base_dir: &std::path::Path,
 ) -> ServiceResult<crate::inventory::WalletInventoryState> {
@@ -171,12 +181,15 @@ pub(super) fn holding_record_with_token_id(
 ) -> WalletAssetHolding {
     holding_record_full(
         context,
-        asset_kind,
-        asset_address,
-        token_id_hex,
-        None,
-        amount_hex,
-        source,
+        HoldingRecordParts {
+            asset_kind,
+            asset_address,
+            token_id_hex,
+            counterparty_address: None,
+            protocol_address: None,
+            amount_hex,
+            source,
+        },
     )
 }
 
@@ -190,23 +203,44 @@ pub(super) fn holding_record_with_counterparty(
 ) -> WalletAssetHolding {
     holding_record_full(
         context,
-        asset_kind,
-        asset_address,
-        None,
-        counterparty_address,
-        amount_hex,
-        source,
+        HoldingRecordParts {
+            asset_kind,
+            asset_address,
+            token_id_hex: None,
+            counterparty_address,
+            protocol_address: None,
+            amount_hex,
+            source,
+        },
+    )
+}
+
+pub(super) fn holding_record_with_protocol_counterparty(
+    context: &InventoryRecordContext<'_>,
+    asset_kind: &str,
+    asset_address: Option<String>,
+    protocol_address: Option<String>,
+    counterparty_address: Option<String>,
+    amount_hex: &str,
+    source: &str,
+) -> WalletAssetHolding {
+    holding_record_full(
+        context,
+        HoldingRecordParts {
+            asset_kind,
+            asset_address,
+            token_id_hex: None,
+            counterparty_address,
+            protocol_address,
+            amount_hex,
+            source,
+        },
     )
 }
 
 fn holding_record_full(
     context: &InventoryRecordContext<'_>,
-    asset_kind: &str,
-    asset_address: Option<String>,
-    token_id_hex: Option<String>,
-    counterparty_address: Option<String>,
-    amount_hex: &str,
-    source: &str,
+    parts: HoldingRecordParts<'_>,
 ) -> WalletAssetHolding {
     WalletAssetHolding {
         id: random_id(),
@@ -216,13 +250,14 @@ fn holding_record_full(
         chain_id: context.provider.chain_id,
         address: context.address.to_string(),
         derivation_path: context.derivation_path.to_string(),
-        asset_kind: asset_kind.to_string(),
-        asset_address,
-        token_id_hex,
-        counterparty_address,
-        amount_hex: amount_hex.to_string(),
-        source: source.into(),
-        status: if quantity_hex_is_nonzero(amount_hex) {
+        asset_kind: parts.asset_kind.to_string(),
+        asset_address: parts.asset_address,
+        token_id_hex: parts.token_id_hex,
+        counterparty_address: parts.counterparty_address,
+        protocol_address: parts.protocol_address,
+        amount_hex: parts.amount_hex.to_string(),
+        source: parts.source.into(),
+        status: if quantity_hex_is_nonzero(parts.amount_hex) {
             "detected".into()
         } else {
             "not_detected".into()
@@ -278,6 +313,21 @@ fn holding_key_matches(left: &WalletAssetHolding, right: &WalletAssetHolding) ->
         && left.asset_address == right.asset_address
         && left.token_id_hex == right.token_id_hex
         && left.counterparty_address == right.counterparty_address
+        && approval_source_key_matches(left, right)
+        && protocol_address_key_matches(left, right)
+}
+
+fn approval_source_key_matches(left: &WalletAssetHolding, right: &WalletAssetHolding) -> bool {
+    left.asset_kind != "approval" || left.source == right.source
+}
+
+fn protocol_address_key_matches(left: &WalletAssetHolding, right: &WalletAssetHolding) -> bool {
+    if left.protocol_address == right.protocol_address {
+        return true;
+    }
+    left.source == "permit2-allowance-probe"
+        && right.source == "permit2-allowance-probe"
+        && (left.protocol_address.is_none() || right.protocol_address.is_none())
 }
 
 pub(super) fn quantity_hex_is_nonzero(value: &str) -> bool {

@@ -1572,6 +1572,7 @@ async fn wallet_inventory_scan_discovers_erc20_tokens_from_transfer_logs() {
         holding["asset_kind"] == "approval"
             && holding["asset_address"] == "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"
             && holding["counterparty_address"] == "0x4444444444444444444444444444444444444444"
+            && holding["protocol_address"] == "0x000000000022d473030f116ddee9f6b43ac78ba3"
             && holding["amount_hex"] == "0xf4240"
             && holding["source"] == "permit2-allowance-probe"
     }));
@@ -1680,6 +1681,7 @@ async fn wallet_inventory_scan_discovers_erc20_tokens_from_transfer_logs() {
     assert!(steps.iter().any(|step| {
         step["action"] == "revoke_permit2_allowance"
             && step["counterparty_address"] == "0x4444444444444444444444444444444444444444"
+            && step["protocol_address"] == "0x000000000022d473030f116ddee9f6b43ac78ba3"
             && step["simulation_status"] == "required"
     }));
     assert!(steps.iter().any(|step| {
@@ -1737,16 +1739,16 @@ async fn wallet_inventory_scan_discovers_erc20_tokens_from_transfer_logs() {
         step["action"] == "revoke_nft_operator_approval" && step["simulation_status"] == "passed"
     });
     assert!(passed_nft_revoke);
-    let unsupported_permit2 = simulated_steps.iter().any(|step| {
+    let passed_permit2 = simulated_steps.iter().any(|step| {
         step["action"] == "revoke_permit2_allowance"
-            && step["simulation_status"] == "unsupported"
-            && step["blockers"]
+            && step["simulation_status"] == "passed"
+            && step["simulation_evidence"]
                 .as_array()
                 .unwrap()
                 .iter()
-                .any(|blocker| blocker == "simulation_unsupported")
+                .any(|evidence| evidence == "prepared_call=permit2.approve(token,spender,0,0)")
     });
-    assert!(unsupported_permit2);
+    assert!(passed_permit2);
     assert!(
         simulate_json["plan"]["summary"]["executable_steps"]
             .as_u64()

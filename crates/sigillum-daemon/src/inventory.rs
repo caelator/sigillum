@@ -33,7 +33,7 @@ pub struct WalletInventoryState {
 }
 
 impl JsonDocument for WalletInventoryState {
-    const SCHEMA: JsonSchema = JsonSchema::new("sigillum.wallet-inventory", 4);
+    const SCHEMA: JsonSchema = JsonSchema::new("sigillum.wallet-inventory", 5);
 
     fn from_enveloped_json(
         path: &std::path::Path,
@@ -41,7 +41,7 @@ impl JsonDocument for WalletInventoryState {
         data: serde_json::Value,
     ) -> Result<Self, std::io::Error> {
         match version {
-            1..=4 => serde_json::from_value(data).map_err(|error| {
+            1..=5 => serde_json::from_value(data).map_err(|error| {
                 std::io::Error::new(
                     std::io::ErrorKind::InvalidData,
                     format!(
@@ -156,6 +156,7 @@ mod tests {
             asset_address: None,
             token_id_hex: None,
             counterparty_address: None,
+            protocol_address: None,
             amount_hex: "0x1".into(),
             source: "local-rpc".into(),
             status: "detected".into(),
@@ -215,7 +216,7 @@ mod tests {
             serde_json::from_slice(&std::fs::read(wallet_inventory_path(dir.path())).unwrap())
                 .unwrap();
         assert_eq!(saved["schema"], json!("sigillum.wallet-inventory"));
-        assert_eq!(saved["schema_version"], json!(4));
+        assert_eq!(saved["schema_version"], json!(5));
         assert!(saved["data"]["chain_profiles"].is_array());
         assert!(saved["data"]["jobs"].is_array());
         assert!(saved["data"]["addresses"].is_array());

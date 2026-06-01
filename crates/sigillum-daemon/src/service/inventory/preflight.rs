@@ -1,3 +1,4 @@
+use sha3::{Digest, Keccak256};
 use sigillum_api::ConsolidationPlanStep;
 
 use crate::service::evm::normalize_address;
@@ -52,12 +53,22 @@ pub(super) fn prepare_plan_step_preflight(
                 ],
             }))
         }
-        "revoke_permit2_allowance" => Ok(PlanStepPreflight::Unsupported {
-            evidence: vec![
-                "unsupported_action=revoke_permit2_allowance".into(),
-                "reason=permit2_contract_address_not_recorded_in_plan_step".into(),
-            ],
-        }),
+        "revoke_permit2_allowance" => {
+            let permit2 = required_address("Permit2 contract", step.protocol_address.as_deref())?;
+            let token = required_address("asset contract", step.asset_address.as_deref())?;
+            let spender = required_address("spender", step.counterparty_address.as_deref())?;
+            let data_hex = permit2_revoke_allowance_call_data(&token, &spender)?;
+            Ok(PlanStepPreflight::Call(PlanStepPreflightCall {
+                label: "permit2.approve(token,spender,0,0)",
+                target_address: permit2,
+                data_hex,
+                evidence: vec![
+                    "prepared_call=permit2.approve(token,spender,0,0)".into(),
+                    format!("token={token}"),
+                    format!("spender={spender}"),
+                ],
+            }))
+        }
         action => Ok(PlanStepPreflight::Unsupported {
             evidence: vec![
                 format!("unsupported_action={action}"),
@@ -83,6 +94,20 @@ fn nft_revoke_operator_call_data(operator_address: &str) -> ServiceResult<String
     ))
 }
 
+fn permit2_revoke_allowance_call_data(
+    token_address: &str,
+    spender_address: &str,
+) -> ServiceResult<String> {
+    Ok(format!(
+        "0x{}{}{}{}{}",
+        function_selector_hex("approve(address,address,uint160,uint48)"),
+        encoded_address_arg(token_address)?,
+        encoded_address_arg(spender_address)?,
+        zero_word(),
+        zero_word()
+    ))
+}
+
 fn required_address(field: &str, value: Option<&str>) -> ServiceResult<String> {
     let value = value
         .map(str::trim)
@@ -98,6 +123,11 @@ fn encoded_address_arg(address: &str) -> ServiceResult<String> {
 
 fn zero_word() -> String {
     "0".repeat(64)
+}
+
+fn function_selector_hex(signature: &str) -> String {
+    let digest = Keccak256::digest(signature.as_bytes());
+    hex::encode(&digest[..4])
 }
 
 #[cfg(test)]
@@ -119,6 +149,7 @@ mod tests {
             asset_address: Some("0x2222222222222222222222222222222222222222".into()),
             token_id_hex: None,
             counterparty_address: Some("0x3333333333333333333333333333333333333333".into()),
+            protocol_address: Some("0x000000000022d473030f116ddee9f6b43ac78ba3".into()),
             amount_hex: "0x1".into(),
             destination_address: None,
             signer_status: "available".into(),
@@ -165,16 +196,28 @@ mod tests {
     }
 
     #[test]
-    fn keeps_permit2_unsupported_until_contract_is_recorded() {
+    fn prepares_permit2_approve_zero_expiration_call_data() {
         let prepared =
             prepare_plan_step_preflight(&sample_step("revoke_permit2_allowance")).unwrap();
-        let PlanStepPreflight::Unsupported { evidence } = prepared else {
-            panic!("expected unsupported");
+        let PlanStepPreflight::Call(call) = prepared else {
+            panic!("expected call");
         };
-        assert!(
-            evidence
-                .iter()
-                .any(|line| line.contains("permit2_contract"))
+        assert_eq!(
+            call.target_address,
+            "0x000000000022d473030f116ddee9f6b43ac78ba3"
         );
+        assert!(call.data_hex.starts_with(&format!(
+            "0x{}",
+            function_selector_hex("approve(address,address,uint160,uint48)")
+        )));
+        assert!(call.data_hex.ends_with(&"0".repeat(128)));
+    }
+
+    #[test]
+    fn permit2_revoke_requires_protocol_contract() {
+        let mut step = sample_step("revoke_permit2_allowance");
+        step.protocol_address = None;
+        let error = prepare_plan_step_preflight(&step).unwrap_err();
+        assert!(error.to_string().contains("Permit2 contract"));
     }
 }
