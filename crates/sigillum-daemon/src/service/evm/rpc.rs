@@ -7,7 +7,10 @@ use serde_json::{Map, Value, json};
 
 use crate::service::{ServiceError, ServiceResult};
 
-use super::{normalize_address, normalize_hex_blob, parse_quantity_u64, parse_quantity_u256};
+use super::{
+    normalize_address, normalize_hex_blob, normalize_hex_blob_allow_empty, parse_quantity_u64,
+    parse_quantity_u256,
+};
 
 mod erc1155;
 mod erc20;
@@ -146,6 +149,30 @@ impl ProviderRpcClient {
             ));
         }
         Ok(normalized[2..].to_string())
+    }
+
+    pub(super) async fn simulate_contract_call(
+        &self,
+        from_address: &str,
+        target_address: &str,
+        data_hex: &str,
+        block_tag: &str,
+    ) -> ServiceResult<String> {
+        let value = self
+            .request(
+                1,
+                "eth_call",
+                json!([{
+                    "from": normalize_address(from_address)?,
+                    "to": normalize_address(target_address)?,
+                    "data": normalize_hex_blob(data_hex, "contract call data")?,
+                }, block_tag]),
+            )
+            .await?;
+        let result = value.as_str().ok_or_else(|| {
+            ServiceError::internal("Invalid provider response: expected eth_call result hex")
+        })?;
+        normalize_hex_blob_allow_empty(result, "eth_call result")
     }
 
     async fn request(&self, id: u64, method: &'static str, params: Value) -> ServiceResult<Value> {

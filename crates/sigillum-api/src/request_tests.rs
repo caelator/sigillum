@@ -607,6 +607,15 @@ fn test_consolidation_plan_approve_request_roundtrip() {
 }
 
 #[test]
+fn test_consolidation_plan_simulate_request_roundtrip() {
+    let req = ConsolidationPlanSimulateRequest {
+        plan_id: "plan_1".to_string(),
+        step_ids: vec!["step_1".to_string()],
+    };
+    roundtrip_test(req);
+}
+
+#[test]
 fn test_eth_stealth_send_with_profile_request_roundtrip() {
     let req = EthStealthSendWithProfileRequest {
         wallet_profile: "my_profile".to_string(),

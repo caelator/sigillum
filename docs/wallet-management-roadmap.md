@@ -236,12 +236,18 @@ The CLI should have parity for automation:
    catalog, and reviewable approval revoke plan steps are the first
    approval-management slices, and bounded ERC-721/ERC-1155 transfer-log
    discovery with owner/balance confirmation is the first NFT inventory slice.
-5. DeFi position adapters for the most common protocols.
-6. Airdrop/reward discovery with strict claim risk gates.
-7. Consolidation planner with dry-run and simulation.
-8. Controlled execution for native/ERC-20 sweeps, gas top-ups, NFT transfers,
+5. Consolidation preflight. Provider-backed `eth_call` simulation is
+   implemented for ERC-20 `approve(spender, 0)` revokes and NFT
+   `setApprovalForAll(operator, false)` revokes. Permit2 revoke simulation is
+   intentionally marked unsupported until inventory records retain the Permit2
+   contract address required to build the revoke call.
+6. DeFi position adapters for the most common protocols.
+7. Airdrop/reward discovery with strict claim risk gates.
+8. Consolidation planner with broader dry-run simulation for sweeps, gas
+   top-ups, exits, claims, swaps, and treasury routing.
+9. Controlled execution for native/ERC-20 sweeps, gas top-ups, NFT transfers,
    DeFi exits, claims, swaps, and treasury routing.
-9. Non-EVM chain families, starting with Bitcoin/UTXO and only then Solana,
+10. Non-EVM chain families, starting with Bitcoin/UTXO and only then Solana,
    Tron, and Cosmos-style networks.
 
 Completion means a recovered or imported wallet can move from "unknown" to

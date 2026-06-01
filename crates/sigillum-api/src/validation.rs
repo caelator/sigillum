@@ -608,6 +608,14 @@ impl Validate for crate::request::ConsolidationPlanApproveRequest {
     }
 }
 
+impl Validate for crate::request::ConsolidationPlanSimulateRequest {
+    fn validate(&self) -> Result<(), String> {
+        check_len("plan_id", &self.plan_id, MAX_ID)?;
+        check_vec_items_len("step_ids", &self.step_ids, MAX_ID)?;
+        Ok(())
+    }
+}
+
 impl Validate for crate::request::EthStealthSendWithProfileRequest {
     fn validate(&self) -> Result<(), String> {
         check_len("wallet_profile", &self.wallet_profile, MAX_LABEL)?;

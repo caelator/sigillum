@@ -1176,6 +1176,7 @@ const UI_ACTIONS = {
   runMaintenanceCycle: operationsActions.runMaintenanceCycle,
   scanEthStealthAnnouncements: operationsActions.scanEthStealthAnnouncements,
   scanInventoryEvm: inventoryActions.scanInventoryEvm,
+  simulateConsolidationPlan: inventoryActions.simulateConsolidationPlan,
   selectWorkspaceSection,
   setApiKey,
   setSecret,

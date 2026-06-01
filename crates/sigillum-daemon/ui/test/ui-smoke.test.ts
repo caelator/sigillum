@@ -200,6 +200,7 @@ test("queue and inventory renderers produce reviewable DOM summaries", () => {
           counterparty_address: "0xspender",
           signer_status: "available",
           simulation_status: "required",
+          simulation_evidence: ["rpc_method=eth_call"],
           risk_level: "high",
           blockers: [],
           auto_eligible: false,
@@ -211,6 +212,8 @@ test("queue and inventory renderers produce reviewable DOM summaries", () => {
   ok(dom.el("consolidationPlanList").innerHTML.includes("revoke_erc20_approval"));
   ok(dom.el("consolidationPlanList").innerHTML.includes("0xspender"));
   ok(dom.el("consolidationPlanList").innerHTML.includes("simulation=required"));
+  ok(dom.el("consolidationPlanList").innerHTML.includes("rpc_method=eth_call"));
+  ok(dom.el("consolidationPlanList").innerHTML.includes("simulateConsolidationPlan"));
 });
 
 test("data-action dispatcher coerces args and restores button busy state", async () => {

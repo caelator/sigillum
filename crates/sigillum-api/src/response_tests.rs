@@ -692,6 +692,7 @@ fn test_wallet_operations_response_roundtrips() {
         destination_address: Some("0xdestination".to_string()),
         signer_status: "signing_not_implemented".to_string(),
         simulation_status: "not_run".to_string(),
+        simulation_evidence: vec!["preflight not available".to_string()],
         risk_level: "blocked".to_string(),
         blockers: vec!["signing_not_implemented".to_string()],
         auto_eligible: false,

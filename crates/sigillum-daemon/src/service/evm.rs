@@ -23,8 +23,10 @@ use crate::audit_log::AuditEventSpec;
 use super::helpers::{decode_optional_view_tag, map_wallet_error};
 use super::{ServiceError, ServiceResult, SigillumService};
 
+mod preflight;
 mod rpc;
 
+pub(in crate::service) use preflight::EvmContractCallPreflight;
 pub(super) use rpc::EvmLogEntry;
 use rpc::ProviderRpcClient;
 

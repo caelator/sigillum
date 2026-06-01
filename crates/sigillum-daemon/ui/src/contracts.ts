@@ -107,6 +107,7 @@ export interface ConsolidationPlanStep {
   destination_address?: string | null;
   signer_status: string;
   simulation_status: string;
+  simulation_evidence?: string[];
   risk_level: string;
   blockers: string[];
   auto_eligible: boolean;

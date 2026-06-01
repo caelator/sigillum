@@ -29,9 +29,9 @@ use std::time::{Duration, Instant};
 use serde::Serialize;
 use sigillum_api::request::{
     ChainProfileUpsertRequest, ConsolidationPlanApproveRequest, ConsolidationPlanGenerateRequest,
-    EthStealthWalletProfileUpsertRequest, EvmProviderProfileUpsertRequest, EvmProviderRef,
-    Fido2UnlockRequest, MaintenanceRunRequest, RiskCatalogDeleteRequest, RiskCatalogUpsertRequest,
-    WalletInventoryScanRequest,
+    ConsolidationPlanSimulateRequest, EthStealthWalletProfileUpsertRequest,
+    EvmProviderProfileUpsertRequest, EvmProviderRef, Fido2UnlockRequest, MaintenanceRunRequest,
+    RiskCatalogDeleteRequest, RiskCatalogUpsertRequest, WalletInventoryScanRequest,
 };
 use sigillum_client::{ClientError, SigillumClient};
 use url::Url;
@@ -414,10 +414,10 @@ fn cmd_api_risk(args: &[String]) {
     }
 }
 
-/// Dispatch `sigillum api plans <list|generate|approve>`.
+/// Dispatch `sigillum api plans <list|generate|approve|simulate>`.
 fn cmd_api_plans(args: &[String]) {
     if args.len() < 2 {
-        eprintln!("Usage: sigillum api plans <list|generate|approve> [...]");
+        eprintln!("Usage: sigillum api plans <list|generate|approve|simulate> [...]");
         process::exit(1);
     }
 
@@ -451,8 +451,21 @@ fn cmd_api_plans(args: &[String]) {
                 client.approve_consolidation_plan(request).await
             });
         }
+        "simulate" => {
+            let request = ConsolidationPlanSimulateRequest {
+                plan_id: require_flag(
+                    args,
+                    "--plan-id",
+                    "sigillum api plans simulate --plan-id <ID>",
+                ),
+                step_ids: parse_multi_flag(args, "--step-id"),
+            };
+            run_api_command(args, true, move |client| async move {
+                client.simulate_consolidation_plan(request).await
+            });
+        }
         _ => {
-            eprintln!("Usage: sigillum api plans <list|generate|approve> [...]");
+            eprintln!("Usage: sigillum api plans <list|generate|approve|simulate> [...]");
             process::exit(1);
         }
     }
@@ -804,7 +817,7 @@ COMMANDS:
   inventory <list|chains|scan-evm> [...]
   discovery <jobs|scan-evm> [...]
   risk <list|catalog|catalog-upsert|catalog-delete> [...]
-  plans <list|generate|approve> [...]
+  plans <list|generate|approve|simulate> [...]
   queue <list|process> [...]
   maintenance run [...]
 

@@ -76,6 +76,7 @@ pub(super) fn plan_step_for_holding(
         } else {
             "not_run".into()
         },
+        simulation_evidence: Vec::new(),
         risk_level: if blockers.is_empty() {
             risk_level_for_holding(holding).into()
         } else {

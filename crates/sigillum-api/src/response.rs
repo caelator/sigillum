@@ -813,6 +813,8 @@ pub struct ConsolidationPlanStep {
     pub destination_address: Option<String>,
     pub signer_status: String,
     pub simulation_status: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub simulation_evidence: Vec<String>,
     pub risk_level: String,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub blockers: Vec<String>,

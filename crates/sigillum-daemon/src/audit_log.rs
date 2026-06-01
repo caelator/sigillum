@@ -385,6 +385,13 @@ pub(crate) enum AuditEventSpec {
     },
     #[serde(rename = "wallet_consolidation.plan.approve")]
     WalletConsolidationPlanApprove { id: String, approved: usize },
+    #[serde(rename = "wallet_consolidation.plan.simulate")]
+    WalletConsolidationPlanSimulate {
+        id: String,
+        passed: usize,
+        failed: usize,
+        unsupported: usize,
+    },
     #[serde(rename = "run.complete")]
     RunComplete {
         program: String,
@@ -471,6 +478,7 @@ impl AuditEventSpec {
             Self::WalletInventoryRiskCatalogDelete { .. } => "wallet_inventory.risk_catalog.delete",
             Self::WalletConsolidationPlanGenerate { .. } => "wallet_consolidation.plan.generate",
             Self::WalletConsolidationPlanApprove { .. } => "wallet_consolidation.plan.approve",
+            Self::WalletConsolidationPlanSimulate { .. } => "wallet_consolidation.plan.simulate",
             Self::RunComplete { .. } => "run.complete",
         }
     }
@@ -775,6 +783,17 @@ impl AuditEventSpec {
             Self::WalletConsolidationPlanApprove { id, approved } => {
                 json!({ "id": id, "approved": approved })
             }
+            Self::WalletConsolidationPlanSimulate {
+                id,
+                passed,
+                failed,
+                unsupported,
+            } => json!({
+                "id": id,
+                "passed": passed,
+                "failed": failed,
+                "unsupported": unsupported,
+            }),
             Self::RunComplete {
                 program,
                 args,
@@ -1236,6 +1255,17 @@ impl AuditEventSpec {
                     approved: details.approved,
                 })
             }
+            "wallet_consolidation.plan.simulate" => {
+                let details = parse_legacy_details::<WalletConsolidationPlanSimulateDetails>(
+                    path, &kind, details,
+                )?;
+                Ok(Self::WalletConsolidationPlanSimulate {
+                    id: details.id,
+                    passed: details.passed,
+                    failed: details.failed,
+                    unsupported: details.unsupported,
+                })
+            }
             "run.complete" => {
                 let details = parse_legacy_details::<RunCompleteDetails>(path, &kind, details)?;
                 Ok(Self::RunComplete {
@@ -1632,6 +1662,14 @@ struct WalletConsolidationPlanGenerateDetails {
 struct WalletConsolidationPlanApproveDetails {
     id: String,
     approved: usize,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+struct WalletConsolidationPlanSimulateDetails {
+    id: String,
+    passed: usize,
+    failed: usize,
+    unsupported: usize,
 }
 
 #[derive(Clone, Debug, Deserialize)]

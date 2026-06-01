@@ -38,8 +38,7 @@ use secrecy::SecretString;
 use serde::de::DeserializeOwned;
 use sigillum_api::request::{
     BiometricEnrollRequest, BiometricUnlockRequest, ChainProfileDeleteRequest,
-    ChainProfileUpsertRequest, CompartmentSwitchRequest, ConsolidationPlanApproveRequest,
-    ConsolidationPlanGenerateRequest, DiscoveryJobMutationRequest,
+    ChainProfileUpsertRequest, CompartmentSwitchRequest, DiscoveryJobMutationRequest,
     EthSeedWalletProfileUpsertRequest, EthStealthAnnouncementScanRequest, EthStealthCheckRequest,
     EthStealthDepositCreateErc20Request, EthStealthDepositCreateNativeRequest,
     EthStealthDepositDeleteRequest, EthStealthDepositEnqueueSweepRequest,
@@ -89,6 +88,7 @@ use thiserror::Error;
 
 pub use sigillum_core::{SecretStore, VaultError};
 
+mod plans;
 mod queue;
 
 // ── Error types ────────────────────────────────────────────────
@@ -910,33 +910,6 @@ impl SigillumClient {
     ) -> Result<RiskCatalogMutationResponse, ClientError> {
         let builder = self
             .request(Method::POST, "/api/risk/catalog/delete")
-            .json(&request);
-        self.send(builder).await
-    }
-
-    pub async fn list_consolidation_plans(
-        &self,
-    ) -> Result<ConsolidationPlanListResponse, ClientError> {
-        let builder = self.request(Method::GET, "/api/plans/consolidation");
-        self.send(builder).await
-    }
-
-    pub async fn generate_consolidation_plan(
-        &self,
-        request: ConsolidationPlanGenerateRequest,
-    ) -> Result<ConsolidationPlanMutationResponse, ClientError> {
-        let builder = self
-            .request(Method::POST, "/api/plans/consolidation/generate")
-            .json(&request);
-        self.send(builder).await
-    }
-
-    pub async fn approve_consolidation_plan(
-        &self,
-        request: ConsolidationPlanApproveRequest,
-    ) -> Result<ConsolidationPlanMutationResponse, ClientError> {
-        let builder = self
-            .request(Method::POST, "/api/plans/consolidation/approve")
             .json(&request);
         self.send(builder).await
     }

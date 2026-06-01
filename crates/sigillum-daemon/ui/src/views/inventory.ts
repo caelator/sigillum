@@ -241,8 +241,9 @@ export function createInventoryActions(deps: InventoryActionsDeps) {
         const summary = plan.summary;
         const stepLines = (plan.steps || [])
           .slice(0, 8)
-          .map(
-            (step: ConsolidationPlanStep) =>
+          .map((step: ConsolidationPlanStep) => {
+            const evidence = (step.simulation_evidence || []).join(" | ");
+            return (
               '<div class="entity-meta">' +
               esc(step.action) +
               " " +
@@ -259,8 +260,10 @@ export function createInventoryActions(deps: InventoryActionsDeps) {
               esc(step.simulation_status || "not_run") +
               " · blockers=" +
               esc((step.blockers || []).join(", ") || "-") +
-              "</div>",
-          )
+              (evidence ? "<br>evidence=" + esc(evidence) : "") +
+              "</div>"
+            );
+          })
           .join("");
         return (
           '<li><div class="entity-main">' +
@@ -282,6 +285,9 @@ export function createInventoryActions(deps: InventoryActionsDeps) {
           stepLines +
           "</div>" +
           '<div class="entity-actions">' +
+          '<button class="btn-ghost" data-action="simulateConsolidationPlan" data-arg0="' +
+          escAttr(plan.id) +
+          '">Simulate</button>' +
           '<button class="btn-ghost" data-action="approveConsolidationPlan" data-arg0="' +
           escAttr(plan.id) +
           '">Approve Reviewable</button>' +
@@ -487,6 +493,19 @@ export function createInventoryActions(deps: InventoryActionsDeps) {
     void loadInventoryOperations();
   }
 
+  async function simulateConsolidationPlan(planId: string): Promise<void> {
+    const r = await deps.api("POST", "/api/plans/consolidation/simulate", {
+      plan_id: planId,
+      step_ids: [],
+    });
+    if (r.error) {
+      deps.toast(r.error, "error");
+      return;
+    }
+    deps.toast("Plan preflight simulation updated");
+    void loadInventoryOperations();
+  }
+
   return {
     renderChainProfiles,
     renderInventoryState,
@@ -504,5 +523,6 @@ export function createInventoryActions(deps: InventoryActionsDeps) {
     deleteRiskCatalogEntry,
     generateConsolidationPlan,
     approveConsolidationPlan,
+    simulateConsolidationPlan,
   };
 }

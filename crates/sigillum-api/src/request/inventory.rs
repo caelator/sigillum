@@ -136,3 +136,11 @@ pub struct ConsolidationPlanApproveRequest {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub step_ids: Vec<String>,
 }
+
+/// Simulate/preflight reviewable or approved consolidation plan steps.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ConsolidationPlanSimulateRequest {
+    pub plan_id: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub step_ids: Vec<String>,
+}

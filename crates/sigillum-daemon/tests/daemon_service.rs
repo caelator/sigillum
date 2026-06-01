@@ -1705,6 +1705,55 @@ async fn wallet_inventory_scan_discovers_erc20_tokens_from_transfer_logs() {
         json!(0)
     );
 
+    let simulate_plan = post_json(
+        &client,
+        addr,
+        "/api/plans/consolidation/simulate",
+        json!({
+            "plan_id": plan_json["plan"]["id"].as_str().unwrap(),
+        }),
+        Some(&token),
+    )
+    .await;
+    let simulate_status = simulate_plan.status();
+    let simulate_json: serde_json::Value = simulate_plan.json().await.unwrap();
+    assert_eq!(
+        simulate_status,
+        StatusCode::OK,
+        "simulate response: {simulate_json}"
+    );
+    let simulated_steps = simulate_json["plan"]["steps"].as_array().unwrap();
+    let passed_erc20_revoke = simulated_steps.iter().any(|step| {
+        step["action"] == "revoke_erc20_approval"
+            && step["simulation_status"] == "passed"
+            && step["simulation_evidence"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|evidence| evidence == "rpc_method=eth_call")
+    });
+    assert!(passed_erc20_revoke);
+    let passed_nft_revoke = simulated_steps.iter().any(|step| {
+        step["action"] == "revoke_nft_operator_approval" && step["simulation_status"] == "passed"
+    });
+    assert!(passed_nft_revoke);
+    let unsupported_permit2 = simulated_steps.iter().any(|step| {
+        step["action"] == "revoke_permit2_allowance"
+            && step["simulation_status"] == "unsupported"
+            && step["blockers"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|blocker| blocker == "simulation_unsupported")
+    });
+    assert!(unsupported_permit2);
+    assert!(
+        simulate_json["plan"]["summary"]["executable_steps"]
+            .as_u64()
+            .unwrap()
+            > 0
+    );
+
     let catalog_delete = post_json(
         &client,
         addr,

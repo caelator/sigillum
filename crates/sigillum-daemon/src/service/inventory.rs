@@ -6,8 +6,10 @@ mod nft_discovery;
 mod observation;
 mod permit2_discovery;
 mod planner;
+mod preflight;
 mod risk;
 mod risk_catalog;
+mod simulation;
 mod support;
 mod token_discovery;
 
