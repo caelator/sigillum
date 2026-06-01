@@ -1808,6 +1808,16 @@ async fn wallet_inventory_scan_discovers_erc20_tokens_from_transfer_logs() {
                 .unwrap()
                 .iter()
                 .any(|evidence| evidence == "prepared_call=erc20.transfer(destination,amount)")
+            && step["simulation_evidence"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|evidence| evidence == "gas_policy=profile_max_fee")
+            && step["simulation_evidence"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|evidence| evidence == "estimated_gas_cost_wei_hex=0x763bfbd22000")
     });
     assert!(passed_erc20_sweep);
     let passed_erc20_revoke = simulated_steps.iter().any(|step| {
@@ -1818,6 +1828,11 @@ async fn wallet_inventory_scan_discovers_erc20_tokens_from_transfer_logs() {
                 .unwrap()
                 .iter()
                 .any(|evidence| evidence == "rpc_method=eth_call")
+            && step["simulation_evidence"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|evidence| evidence == "gas_policy=profile_max_fee")
     });
     assert!(passed_erc20_revoke);
     let passed_nft_revoke = simulated_steps.iter().any(|step| {

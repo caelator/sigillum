@@ -248,7 +248,9 @@ The CLI should have parity for automation:
    ERC-20 sweep plan steps now also build provider-backed preflight calls before
    they become executable. Native sweep simulation reserves gas using the
    provider profile's max-fee policy and gas limit, records the resulting
-   spendable amount, and blocks plans that cannot pay gas.
+   spendable amount, and blocks plans that cannot pay gas. ERC-20 sweeps and
+   approval revokes also verify inventoried native gas against the provider fee
+   policy before simulation can pass.
 5a. Wallet archaeology labels. Discovery now classifies addresses for signer
     availability, watch-only status, gas availability, token/NFT/protocol
     value, stranded value, approval exposure, and dormant-candidate state, and

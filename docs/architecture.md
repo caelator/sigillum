@@ -159,7 +159,8 @@ Current daemon behavior:
   allowance revokes, and NFT operator revokes with provider-backed `eth_call`
   evidence before those consolidation steps can become executable; native sweep
   preflight reserves gas from the transfer value using the provider profile's
-  max-fee policy
+  max-fee policy, and zero-value ERC-20/revoke preflights verify inventoried
+  native gas against the same provider fee policy
 - classifies discovered inventory addresses with signer, gas, value, approval,
   stranded-value, watch-only, and dormant-candidate labels so risk and
   consolidation views can distinguish recoverable value from merely visible
