@@ -41,6 +41,10 @@ use crate::json_store::{
     JsonDocument, JsonSchema, decode_json_document, encode_json_document_compact,
 };
 
+mod legacy_details;
+
+use legacy_details::*;
+
 // ── Core Structures ─────────────────────────────
 
 /// An audit event persisted to the audit trail.
@@ -392,6 +396,13 @@ pub(crate) enum AuditEventSpec {
         failed: usize,
         unsupported: usize,
     },
+    #[serde(rename = "wallet_consolidation.plan.export")]
+    WalletConsolidationPlanExport {
+        id: String,
+        format: String,
+        exported: usize,
+        skipped: usize,
+    },
     #[serde(rename = "run.complete")]
     RunComplete {
         program: String,
@@ -479,6 +490,7 @@ impl AuditEventSpec {
             Self::WalletConsolidationPlanGenerate { .. } => "wallet_consolidation.plan.generate",
             Self::WalletConsolidationPlanApprove { .. } => "wallet_consolidation.plan.approve",
             Self::WalletConsolidationPlanSimulate { .. } => "wallet_consolidation.plan.simulate",
+            Self::WalletConsolidationPlanExport { .. } => "wallet_consolidation.plan.export",
             Self::RunComplete { .. } => "run.complete",
         }
     }
@@ -793,6 +805,17 @@ impl AuditEventSpec {
                 "passed": passed,
                 "failed": failed,
                 "unsupported": unsupported,
+            }),
+            Self::WalletConsolidationPlanExport {
+                id,
+                format,
+                exported,
+                skipped,
+            } => json!({
+                "id": id,
+                "format": format,
+                "exported": exported,
+                "skipped": skipped,
             }),
             Self::RunComplete {
                 program,
@@ -1266,6 +1289,17 @@ impl AuditEventSpec {
                     unsupported: details.unsupported,
                 })
             }
+            "wallet_consolidation.plan.export" => {
+                let details = parse_legacy_details::<WalletConsolidationPlanExportDetails>(
+                    path, &kind, details,
+                )?;
+                Ok(Self::WalletConsolidationPlanExport {
+                    id: details.id,
+                    format: details.format,
+                    exported: details.exported,
+                    skipped: details.skipped,
+                })
+            }
             "run.complete" => {
                 let details = parse_legacy_details::<RunCompleteDetails>(path, &kind, details)?;
                 Ok(Self::RunComplete {
@@ -1375,311 +1409,6 @@ fn invalid_audit_data(path: &Path, kind: &str, error: serde_json::Error) -> std:
             path.display()
         ),
     )
-}
-
-// ── Legacy Migration Helpers ────────────────────
-
-#[derive(Clone, Debug, Deserialize)]
-struct KeyMutationDetails {
-    key: String,
-}
-
-#[derive(Clone, Debug, Deserialize)]
-struct SecretReadDetails {
-    key: String,
-    env_name: String,
-    tier: u8,
-}
-
-#[derive(Clone, Debug, Deserialize)]
-struct SecretPushDetails {
-    from_compartment: usize,
-    to_compartment: usize,
-    key: String,
-    new_key: String,
-    tier: u8,
-}
-
-#[derive(Clone, Debug, Deserialize)]
-struct CompartmentMutationDetails {
-    label: String,
-    threshold: usize,
-}
-
-#[derive(Clone, Debug, Deserialize)]
-struct CompartmentRemoveDetails {
-    id: usize,
-}
-
-#[derive(Clone, Debug, Deserialize)]
-struct CompartmentSwitchDetails {
-    label: String,
-}
-
-#[derive(Clone, Debug, Deserialize)]
-struct UnlockPassphraseDetails {
-    compartment_ids: Vec<usize>,
-    count: usize,
-}
-
-#[derive(Clone, Debug, Deserialize)]
-struct UnlockFido2Details {
-    compartment_ids: Vec<usize>,
-    count: usize,
-    tap_count: usize,
-}
-
-#[derive(Clone, Debug, Deserialize)]
-struct UnlockBiometricDetails {
-    compartment_id: usize,
-    fingerprint_hex: String,
-}
-
-#[derive(Clone, Debug, Deserialize)]
-struct BiometricEnrollDetails {
-    fingerprint_hex: String,
-}
-
-#[derive(Clone, Debug, Deserialize)]
-struct ProfilesEvmProviderUpsertDetails {
-    name: String,
-    chain_id: u64,
-}
-
-#[derive(Clone, Debug, Deserialize)]
-struct NamedAuditDetails {
-    name: String,
-}
-
-#[derive(Clone, Debug, Deserialize)]
-struct ProfilesEthStealthWalletUpsertDetails {
-    name: String,
-    provider_profile: String,
-}
-
-#[derive(Clone, Debug, Deserialize)]
-struct ProfilesEthXpubWalletUpsertDetails {
-    name: String,
-    provider_profile: String,
-}
-
-#[derive(Clone, Debug, Deserialize)]
-struct ProfilesEthSeedWalletUpsertDetails {
-    name: String,
-    provider_profile: String,
-    word_count: usize,
-}
-
-#[derive(Clone, Debug, Deserialize)]
-struct SnapshotAuditDetails {
-    file_count: usize,
-    total_bytes: usize,
-}
-
-#[derive(Clone, Debug, Deserialize)]
-struct Fido2SetupDetails {
-    label: String,
-    #[serde(alias = "compartments")]
-    compartment_count: usize,
-    total_keys: usize,
-}
-
-#[derive(Clone, Debug, Deserialize)]
-struct Fido2RegisterDetails {
-    label: String,
-    total_keys: usize,
-}
-
-#[derive(Clone, Debug, Deserialize)]
-struct Fido2RemoveDetails {
-    label: String,
-    sessions_invalidated: bool,
-}
-
-#[derive(Clone, Debug, Deserialize)]
-struct QueueEnqueueDetails {
-    id: String,
-    kind: String,
-}
-
-#[derive(Clone, Debug, Deserialize)]
-struct QueueProcessDetails {
-    processed: usize,
-    succeeded: usize,
-    blocked: usize,
-    retrying: usize,
-    failed: usize,
-}
-
-#[derive(Clone, Debug, Deserialize)]
-struct TransitEncryptDetails {
-    key: String,
-    ciphertext_len: usize,
-}
-
-#[derive(Clone, Debug, Deserialize)]
-struct TransitDecryptDetails {
-    key: String,
-    plaintext_len: usize,
-}
-
-#[derive(Clone, Debug, Deserialize)]
-struct TransitHmacDetails {
-    key: String,
-    input_len: usize,
-}
-
-#[derive(Clone, Debug, Deserialize)]
-struct EvmBroadcastDetails {
-    transaction_hash_hex: String,
-}
-
-#[derive(Clone, Debug, Deserialize)]
-struct WalletExportDetails {
-    wallet: String,
-    short_name: String,
-}
-
-#[derive(Clone, Debug, Deserialize)]
-struct WalletXpubExportDetails {
-    wallet_profile: String,
-    project_account: u32,
-}
-
-#[derive(Clone, Debug, Deserialize)]
-struct WalletCheckDetails {
-    wallet: String,
-    matches: bool,
-}
-
-#[derive(Clone, Debug, Deserialize)]
-struct WalletSignDetails {
-    wallet: String,
-    stealth_address: String,
-}
-
-#[derive(Clone, Debug, Deserialize)]
-struct WalletSignedTransactionDetails {
-    wallet: String,
-    kind: String,
-    to: String,
-    nonce: u64,
-}
-
-#[derive(Clone, Debug, Deserialize)]
-struct WalletSendTransactionDetails {
-    wallet: String,
-    to: String,
-    nonce: u64,
-    broadcast: bool,
-    transaction_hash_hex: String,
-    #[serde(default)]
-    broadcast_transaction_hash_hex: Option<String>,
-}
-
-#[derive(Clone, Debug, Deserialize)]
-struct DepositsCreateDetails {
-    id: String,
-    wallet_profile: String,
-    asset_kind: String,
-    #[serde(default)]
-    token_address: Option<String>,
-}
-
-#[derive(Clone, Debug, Deserialize)]
-struct IdOnlyDetails {
-    id: String,
-}
-
-#[derive(Clone, Debug, Deserialize)]
-struct DepositsRefreshDetails {
-    processed: usize,
-    detected: usize,
-    queued: usize,
-}
-
-#[derive(Clone, Debug, Deserialize)]
-struct DepositEnqueueSweepDetails {
-    id: String,
-    job_id: String,
-}
-
-#[derive(Clone, Debug, Deserialize)]
-struct DepositsAnnouncementScanDetails {
-    wallet_profile: String,
-    provider_profile: String,
-    scanned: usize,
-    matched: usize,
-    created: usize,
-}
-
-#[derive(Clone, Debug, Deserialize)]
-struct MaintenanceRunDetails {
-    refreshed: usize,
-    detected: usize,
-    queued: usize,
-    processed: usize,
-    succeeded: usize,
-    blocked: usize,
-    retrying: usize,
-    failed: usize,
-}
-
-#[derive(Clone, Debug, Deserialize)]
-struct WalletInventoryScanDetails {
-    id: String,
-    wallets: usize,
-    providers: usize,
-    addresses: usize,
-    holdings: usize,
-}
-
-#[derive(Clone, Debug, Deserialize)]
-struct WalletInventoryChainProfileUpsertDetails {
-    name: String,
-    chain_family: String,
-}
-
-#[derive(Clone, Debug, Deserialize)]
-struct WalletInventoryChainProfileDeleteDetails {
-    name: String,
-}
-
-#[derive(Clone, Debug, Deserialize)]
-struct WalletInventoryDiscoveryJobUpdateDetails {
-    id: String,
-    status: String,
-}
-
-#[derive(Clone, Debug, Deserialize)]
-struct WalletConsolidationPlanGenerateDetails {
-    id: String,
-    steps: usize,
-    blocked: usize,
-}
-
-#[derive(Clone, Debug, Deserialize)]
-struct WalletConsolidationPlanApproveDetails {
-    id: String,
-    approved: usize,
-}
-
-#[derive(Clone, Debug, Deserialize)]
-struct WalletConsolidationPlanSimulateDetails {
-    id: String,
-    passed: usize,
-    failed: usize,
-    unsupported: usize,
-}
-
-#[derive(Clone, Debug, Deserialize)]
-struct RunCompleteDetails {
-    program: String,
-    #[serde(default)]
-    args: Vec<String>,
-    exit_code: Option<i32>,
-    signal: Option<i32>,
-    success: bool,
 }
 
 #[cfg(test)]

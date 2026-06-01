@@ -3,6 +3,7 @@
 mod allowance_discovery;
 mod claim_discovery;
 mod defi_discovery;
+mod export;
 mod nft_approval_discovery;
 mod nft_discovery;
 mod observation;

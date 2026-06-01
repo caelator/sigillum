@@ -81,9 +81,10 @@ Required discovery classes:
   operator-managed risk catalog is implemented for spender/operator labels and
   trusted, low, medium, high, or critical risk overrides. Reviewable
   consolidation-plan revoke steps are implemented for discovered ERC-20,
-  Permit2, and NFT operator approvals. External spender registries,
-  expiration-aware Permit2 scoring, revoke transaction builders, simulation,
-  and execution remain future work.
+  Permit2, and NFT operator approvals. Revoke and sweep transaction calldata
+  can be preflighted and exported after explicit approval and successful
+  simulation. External spender registries, expiration-aware Permit2 scoring,
+  dynamic fee policy, and direct queue execution remain future work.
 - Dormant-wallet classification using last activity, transaction count, current
   value, token/NFT/DeFi exposure, gas availability, and whether the private key
   or signing path is actually available. Inventory addresses now carry
@@ -149,6 +150,13 @@ Every step should carry:
 The existing queue and maintenance loop are the right execution substrate, but
 the queue needs richer job payloads and pre-flight simulation before it should
 move beyond current stealth-sweep behavior.
+
+The first execution handoff boundary is now explicit export, not signing:
+approved, simulated, unblocked plan steps can be exported as local call
+manifests grouped by source wallet, chain, and provider. When an operator
+supplies a matching Safe address, Sigillum can also emit a Safe Transaction
+Builder-compatible batch. Suspicious, blocked, unsimulated, unapproved,
+watch-only, and source-mismatched steps are skipped with reasons.
 
 ## Airdrops And Claims
 
@@ -237,7 +245,8 @@ The CLI should have parity for automation:
 - list findings and stale inventories
 - generate consolidation plans
 - run dry-runs and simulations
-- approve or execute bounded queue jobs
+- approve plans and export bounded execution manifests
+- execute bounded queue jobs where a Sigillum signing path already exists
 - export machine-readable reports
 
 ## Phasing
@@ -270,6 +279,11 @@ The CLI should have parity for automation:
     value, stranded value, approval exposure, and dormant-candidate state, and
     the local risk engine emits review findings for watch-only value, stranded
     value, and dormant funded addresses.
+5b. Consolidation execution handoff. Approved, simulated, unblocked plan steps
+    can be exported as call manifests or matching-Safe Transaction Builder
+    batches. This creates auditable execution evidence for native/ERC-20/NFT
+    sweeps and approval revokes while keeping direct signing and queue
+    execution disabled until signer-specific policy is implemented.
 6. DeFi position adapters. The first implemented slice records
    operator-configured ERC-20 receipt/share token probes as protocol holdings.
    Protocol-specific exit adapters, reward accounting, lockup metadata, and

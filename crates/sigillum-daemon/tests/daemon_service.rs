@@ -2037,6 +2037,90 @@ async fn wallet_inventory_scan_discovers_erc20_tokens_from_transfer_logs() {
             > 0
     );
 
+    let export_plan = post_json(
+        &client,
+        addr,
+        "/api/plans/consolidation/export",
+        json!({
+            "plan_id": plan_json["plan"]["id"].as_str().unwrap(),
+        }),
+        Some(&token),
+    )
+    .await;
+    let export_status = export_plan.status();
+    let export_json: serde_json::Value = export_plan.json().await.unwrap();
+    assert_eq!(
+        export_status,
+        StatusCode::OK,
+        "export response: {export_json}"
+    );
+    assert_eq!(export_json["status"], "exported");
+    assert_eq!(export_json["format"], "call_manifest");
+    assert!(export_json["exported_steps"].as_u64().unwrap() > 0);
+    let export_bundles = export_json["bundles"].as_array().unwrap();
+    assert!(export_bundles.iter().any(|bundle| {
+        bundle["source_address"] == "0x9858effd232b4033e47d90003d41ec34ecaeda94"
+            && bundle["calls"].as_array().unwrap().iter().any(|call| {
+                call["action"] == "sweep_erc20"
+                    && call["data_hex"]
+                        .as_str()
+                        .is_some_and(|value| value.starts_with("0xa9059cbb"))
+                    && call["value_wei_hex"] == "0x0"
+            })
+    }));
+    assert!(export_bundles.iter().any(|bundle| {
+        bundle["calls"].as_array().unwrap().iter().any(|call| {
+            call["action"] == "sweep_native"
+                && call["value_wei_hex"]
+                    .as_str()
+                    .is_some_and(|value| value.starts_with("0x"))
+                && call["evidence"].as_array().unwrap().iter().any(|evidence| {
+                    evidence.as_str().is_some_and(|value| {
+                        value.starts_with("native_sweep_spendable_amount_hex=0x")
+                    })
+                })
+        })
+    }));
+    assert!(
+        export_json["skipped_steps"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|step| {
+                step["action"] == "claim_reward"
+                    && step["reason"] == "blocked"
+                    && step["blockers"]
+                        .as_array()
+                        .unwrap()
+                        .iter()
+                        .any(|blocker| blocker == "claim_execution_disabled")
+            })
+    );
+
+    let safe_export_without_address = post_json(
+        &client,
+        addr,
+        "/api/plans/consolidation/export",
+        json!({
+            "plan_id": plan_json["plan"]["id"].as_str().unwrap(),
+            "format": "safe_tx_builder",
+        }),
+        Some(&token),
+    )
+    .await;
+    let safe_export_status = safe_export_without_address.status();
+    let safe_export_json: serde_json::Value = safe_export_without_address.json().await.unwrap();
+    assert_eq!(
+        safe_export_status,
+        StatusCode::BAD_REQUEST,
+        "safe export response: {safe_export_json}"
+    );
+    assert!(
+        safe_export_json["error"]
+            .as_str()
+            .is_some_and(|error| error.contains("safe_address"))
+    );
+
     let catalog_delete = post_json(
         &client,
         addr,

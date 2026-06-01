@@ -195,3 +195,15 @@ pub struct ConsolidationPlanSimulateRequest {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub step_ids: Vec<String>,
 }
+
+/// Export approved and simulated consolidation plan steps as execution evidence.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ConsolidationPlanExportRequest {
+    pub plan_id: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub step_ids: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub format: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub safe_address: Option<String>,
+}

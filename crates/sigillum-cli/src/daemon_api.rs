@@ -28,10 +28,11 @@ use std::time::{Duration, Instant};
 
 use serde::Serialize;
 use sigillum_api::request::{
-    ChainProfileUpsertRequest, ConsolidationPlanApproveRequest, ConsolidationPlanGenerateRequest,
-    ConsolidationPlanSimulateRequest, EthStealthWalletProfileUpsertRequest,
-    EvmProviderProfileUpsertRequest, EvmProviderRef, Fido2UnlockRequest, MaintenanceRunRequest,
-    RiskCatalogDeleteRequest, RiskCatalogUpsertRequest, WalletInventoryScanRequest,
+    ChainProfileUpsertRequest, ConsolidationPlanApproveRequest, ConsolidationPlanExportRequest,
+    ConsolidationPlanGenerateRequest, ConsolidationPlanSimulateRequest,
+    EthStealthWalletProfileUpsertRequest, EvmProviderProfileUpsertRequest, EvmProviderRef,
+    Fido2UnlockRequest, MaintenanceRunRequest, RiskCatalogDeleteRequest, RiskCatalogUpsertRequest,
+    WalletInventoryScanRequest,
 };
 use sigillum_client::{ClientError, SigillumClient};
 use url::Url;
@@ -423,10 +424,10 @@ fn cmd_api_risk(args: &[String]) {
     }
 }
 
-/// Dispatch `sigillum api plans <list|generate|approve|simulate>`.
+/// Dispatch `sigillum api plans <list|generate|approve|simulate|export>`.
 fn cmd_api_plans(args: &[String]) {
     if args.len() < 2 {
-        eprintln!("Usage: sigillum api plans <list|generate|approve|simulate> [...]");
+        eprintln!("Usage: sigillum api plans <list|generate|approve|simulate|export> [...]");
         process::exit(1);
     }
 
@@ -473,8 +474,23 @@ fn cmd_api_plans(args: &[String]) {
                 client.simulate_consolidation_plan(request).await
             });
         }
+        "export" => {
+            let request = ConsolidationPlanExportRequest {
+                plan_id: require_flag(
+                    args,
+                    "--plan-id",
+                    "sigillum api plans export --plan-id <ID> [--format call_manifest|safe_tx_builder] [--safe-address 0x...]",
+                ),
+                step_ids: parse_multi_flag(args, "--step-id"),
+                format: parse_flag(args, "--format"),
+                safe_address: parse_flag(args, "--safe-address"),
+            };
+            run_api_command(args, true, move |client| async move {
+                client.export_consolidation_plan(request).await
+            });
+        }
         _ => {
-            eprintln!("Usage: sigillum api plans <list|generate|approve|simulate> [...]");
+            eprintln!("Usage: sigillum api plans <list|generate|approve|simulate|export> [...]");
             process::exit(1);
         }
     }
@@ -826,7 +842,7 @@ COMMANDS:
   inventory <list|chains|scan-evm> [...]
   discovery <jobs|scan-evm> [...]
   risk <list|catalog|catalog-upsert|catalog-delete> [...]
-  plans <list|generate|approve|simulate> [...]
+  plans <list|generate|approve|simulate|export> [...]
   queue <list|process> [...]
   maintenance run [...]
 

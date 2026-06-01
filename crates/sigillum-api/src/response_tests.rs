@@ -730,6 +730,56 @@ fn test_wallet_operations_response_roundtrips() {
         status: "generated".to_string(),
         plan,
     });
+    roundtrip_test(ConsolidationPlanExportResponse {
+        status: "exported".to_string(),
+        plan_id: "plan_1".to_string(),
+        format: "safe_tx_builder".to_string(),
+        exported_steps: 1,
+        skipped_steps: vec![ConsolidationPlanExportSkippedStep {
+            step_id: "step_2".to_string(),
+            action: "claim_reward".to_string(),
+            reason: "blocked".to_string(),
+            blockers: vec!["claim_execution_disabled".to_string()],
+        }],
+        bundles: vec![ConsolidationPlanExportBundle {
+            chain_id: 1,
+            provider_profile: "mainnet".to_string(),
+            source_address: None,
+            safe_address: Some("0x1111111111111111111111111111111111111111".to_string()),
+            calls: vec![ConsolidationPlanExportCall {
+                step_id: "step_1".to_string(),
+                action: "sweep_erc20".to_string(),
+                from_address: "0x1111111111111111111111111111111111111111".to_string(),
+                to_address: "0xtoken".to_string(),
+                value_wei_hex: "0x0".to_string(),
+                data_hex: "0xa9059cbb".to_string(),
+                operation: 0,
+                chain_id: 1,
+                provider_profile: "mainnet".to_string(),
+                asset_kind: "erc20".to_string(),
+                amount_hex: "0x1".to_string(),
+                evidence: vec!["prepared_call=erc20.transfer(destination,amount)".to_string()],
+            }],
+            safe_transaction_builder: Some(SafeTransactionBuilderBatch {
+                version: "1.0".to_string(),
+                chain_id: "1".to_string(),
+                meta: SafeTransactionBuilderMeta {
+                    name: "Sigillum consolidation export".to_string(),
+                    description: "Approved Sigillum consolidation plan calls".to_string(),
+                    tx_builder_version: "1.0".to_string(),
+                    created_from_safe_address: Some(
+                        "0x1111111111111111111111111111111111111111".to_string(),
+                    ),
+                },
+                transactions: vec![SafeTransactionBuilderTransaction {
+                    to: "0xtoken".to_string(),
+                    value: "0".to_string(),
+                    data: "0xa9059cbb".to_string(),
+                    operation: 0,
+                }],
+            }),
+        }],
+    });
 }
 
 #[test]

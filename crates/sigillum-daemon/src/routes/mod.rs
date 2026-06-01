@@ -457,6 +457,10 @@ fn inventory_routes() -> AppRouter {
             "/api/plans/consolidation/simulate",
             post(inventory::simulate_consolidation_plan),
         )
+        .route(
+            "/api/plans/consolidation/export",
+            post(inventory::export_consolidation_plan),
+        )
 }
 
 fn deposit_routes() -> AppRouter {

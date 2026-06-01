@@ -640,6 +640,17 @@ fn test_consolidation_plan_simulate_request_roundtrip() {
 }
 
 #[test]
+fn test_consolidation_plan_export_request_roundtrip() {
+    let req = ConsolidationPlanExportRequest {
+        plan_id: "plan_1".to_string(),
+        step_ids: vec!["step_1".to_string()],
+        format: Some("safe_tx_builder".to_string()),
+        safe_address: Some("0x1111111111111111111111111111111111111111".to_string()),
+    };
+    roundtrip_test(req);
+}
+
+#[test]
 fn test_eth_stealth_send_with_profile_request_roundtrip() {
     let req = EthStealthSendWithProfileRequest {
         wallet_profile: "my_profile".to_string(),

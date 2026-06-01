@@ -175,6 +175,11 @@ Current daemon behavior:
   reserves gas from the transfer value using the provider profile's max-fee
   policy, and zero-value token/NFT/revoke/claim preflights verify inventoried
   native gas against the same provider fee policy
+- exports approved, simulated, and unblocked consolidation plan steps as
+  source-address-aware call manifests, with optional Safe Transaction
+  Builder-compatible batches only when a supplied Safe address matches the
+  step source address; exports are audited and remain unsigned execution
+  evidence rather than automatic queue execution
 - classifies discovered inventory addresses with signer, gas, value, approval,
   stranded-value, watch-only, and dormant-candidate labels so risk and
   consolidation views can distinguish recoverable value from merely visible
@@ -201,12 +206,13 @@ What it intentionally does not do today:
   rich dormant-wallet classification with last-activity timestamps
 - full token registry/indexer scraping, full ERC-1155 batch/history coverage,
   NFT metadata and spam classification, Permit2 expiration-aware risk scoring,
-  external spender/operator registries, revoke transaction builders beyond
-  approval revokes, NFT claim/swap/exit transaction simulation, dynamic network
-  fee estimation, protocol-specific DeFi exit adapters, or claim execution
-  adapters for airdrops/rewards
+  external spender/operator registries, queued execution for approval revokes,
+  NFT claim/swap/exit transaction simulation, dynamic network fee estimation,
+  protocol-specific DeFi exit adapters, or claim execution adapters for
+  airdrops/rewards
 - queued execution of consolidation plans for discovered holdings outside the
-  current stealth deposit sweep flow
+  current stealth deposit sweep flow; consolidation plan exports are the current
+  execution handoff boundary
 
 ## Architectural Priorities
 

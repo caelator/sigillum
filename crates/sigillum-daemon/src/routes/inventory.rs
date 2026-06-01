@@ -8,9 +8,9 @@ use axum::http::HeaderMap;
 use axum::response::Response;
 use sigillum_api::{
     ChainProfileDeleteRequest, ChainProfileUpsertRequest, ConsolidationPlanApproveRequest,
-    ConsolidationPlanGenerateRequest, ConsolidationPlanSimulateRequest,
-    DiscoveryJobMutationRequest, RiskCatalogDeleteRequest, RiskCatalogUpsertRequest,
-    WalletInventoryScanRequest,
+    ConsolidationPlanExportRequest, ConsolidationPlanGenerateRequest,
+    ConsolidationPlanSimulateRequest, DiscoveryJobMutationRequest, RiskCatalogDeleteRequest,
+    RiskCatalogUpsertRequest, WalletInventoryScanRequest,
 };
 
 use crate::AppState;
@@ -234,4 +234,17 @@ pub(crate) async fn simulate_consolidation_plan(
             .simulate_consolidation_plan(bearer_token(&headers).as_deref(), body)
             .await,
     )
+}
+
+pub(crate) async fn export_consolidation_plan(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Json(body): Json<ConsolidationPlanExportRequest>,
+) -> Response {
+    let body = match validated(Json(body)) {
+        Ok(b) => b,
+        Err(resp) => return resp,
+    };
+    let service = SigillumService::new(state);
+    service_response(service.export_consolidation_plan(bearer_token(&headers).as_deref(), body))
 }
