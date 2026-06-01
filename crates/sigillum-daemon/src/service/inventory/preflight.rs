@@ -6,6 +6,8 @@ use crate::service::{ServiceError, ServiceResult};
 
 const ERC20_APPROVE_SELECTOR: &str = "095ea7b3";
 const ERC20_TRANSFER_SELECTOR: &str = "a9059cbb";
+const ERC721_SAFE_TRANSFER_FROM_SELECTOR: &str = "42842e0e";
+const ERC1155_SAFE_TRANSFER_FROM_SELECTOR: &str = "f242432a";
 const NFT_SET_APPROVAL_FOR_ALL_SELECTOR: &str = "a22cb465";
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -58,6 +60,56 @@ pub(super) fn prepare_plan_step_preflight(
                     format!("amount={amount}"),
                 ],
             }))
+        }
+        "sweep_nft" => {
+            let collection = required_address("asset contract", step.asset_address.as_deref())?;
+            let destination = required_address("destination", step.destination_address.as_deref())?;
+            let token_id = required_optional_quantity("token id", step.token_id_hex.as_deref())?;
+            match step.asset_kind.as_str() {
+                "erc721" => {
+                    let data_hex =
+                        erc721_safe_transfer_call_data(&step.address, &destination, &token_id)?;
+                    Ok(PlanStepPreflight::Call(PlanStepPreflightCall {
+                        label: "erc721.safeTransferFrom(owner,destination,tokenId)",
+                        target_address: collection,
+                        data_hex,
+                        value_hex: None,
+                        evidence: vec![
+                            "prepared_call=erc721.safeTransferFrom(owner,destination,tokenId)"
+                                .into(),
+                            format!("destination={destination}"),
+                            format!("token_id={token_id}"),
+                        ],
+                    }))
+                }
+                "erc1155" => {
+                    let amount = required_quantity("sweep amount", &step.amount_hex)?;
+                    let data_hex = erc1155_safe_transfer_call_data(
+                        &step.address,
+                        &destination,
+                        &token_id,
+                        &amount,
+                    )?;
+                    Ok(PlanStepPreflight::Call(PlanStepPreflightCall {
+                        label: "erc1155.safeTransferFrom(owner,destination,tokenId,amount,empty)",
+                        target_address: collection,
+                        data_hex,
+                        value_hex: None,
+                        evidence: vec![
+                            "prepared_call=erc1155.safeTransferFrom(owner,destination,tokenId,amount,empty)".into(),
+                            format!("destination={destination}"),
+                            format!("token_id={token_id}"),
+                            format!("amount={amount}"),
+                        ],
+                    }))
+                }
+                kind => Ok(PlanStepPreflight::Unsupported {
+                    evidence: vec![
+                        format!("unsupported_nft_asset_kind={kind}"),
+                        "reason=no_local_nft_transfer_builder_for_asset_kind".into(),
+                    ],
+                }),
+            }
         }
         "revoke_erc20_approval" => {
             let token = required_address("asset contract", step.asset_address.as_deref())?;
@@ -123,6 +175,36 @@ fn erc20_transfer_call_data(destination_address: &str, amount_hex: &str) -> Serv
     ))
 }
 
+fn erc721_safe_transfer_call_data(
+    owner_address: &str,
+    destination_address: &str,
+    token_id_hex: &str,
+) -> ServiceResult<String> {
+    Ok(format!(
+        "0x{ERC721_SAFE_TRANSFER_FROM_SELECTOR}{}{}{}",
+        encoded_address_arg(owner_address)?,
+        encoded_address_arg(destination_address)?,
+        encoded_quantity_arg(token_id_hex, "token id")?
+    ))
+}
+
+fn erc1155_safe_transfer_call_data(
+    owner_address: &str,
+    destination_address: &str,
+    token_id_hex: &str,
+    amount_hex: &str,
+) -> ServiceResult<String> {
+    Ok(format!(
+        "0x{ERC1155_SAFE_TRANSFER_FROM_SELECTOR}{}{}{}{}{}{}",
+        encoded_address_arg(owner_address)?,
+        encoded_address_arg(destination_address)?,
+        encoded_quantity_arg(token_id_hex, "token id")?,
+        encoded_quantity_arg(amount_hex, "sweep amount")?,
+        encoded_quantity_arg("0xa0", "bytes offset")?,
+        zero_word()
+    ))
+}
+
 fn erc20_revoke_approval_call_data(spender_address: &str) -> ServiceResult<String> {
     Ok(format!(
         "0x{ERC20_APPROVE_SELECTOR}{}{}",
@@ -151,6 +233,14 @@ fn permit2_revoke_allowance_call_data(
         zero_word(),
         zero_word()
     ))
+}
+
+fn required_optional_quantity(field: &str, value: Option<&str>) -> ServiceResult<String> {
+    let value = value
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| ServiceError::bad_request(format!("{field} is required for simulation")))?;
+    required_quantity(field, value)
 }
 
 fn required_address(field: &str, value: Option<&str>) -> ServiceResult<String> {
@@ -266,6 +356,76 @@ mod tests {
         );
         assert_eq!(call.value_hex, None);
         assert!(call.evidence.iter().any(|item| item == "amount=0xf4240"));
+    }
+
+    #[test]
+    fn prepares_erc721_safe_transfer_call_data() {
+        let mut step = sample_step("sweep_nft");
+        step.asset_kind = "erc721".into();
+        step.token_id_hex =
+            Some("0x000000000000000000000000000000000000000000000000000000000000007b".into());
+
+        let prepared = prepare_plan_step_preflight(&step).unwrap();
+        let PlanStepPreflight::Call(call) = prepared else {
+            panic!("expected call");
+        };
+
+        assert_eq!(
+            call.label,
+            "erc721.safeTransferFrom(owner,destination,tokenId)"
+        );
+        assert_eq!(
+            call.data_hex,
+            format!(
+                "0x42842e0e{}1111111111111111111111111111111111111111{}9999999999999999999999999999999999999999{}7b",
+                "0".repeat(24),
+                "0".repeat(24),
+                "0".repeat(62)
+            )
+        );
+        assert!(call.evidence.iter().any(|item| item == "token_id=0x7b"));
+    }
+
+    #[test]
+    fn prepares_erc1155_safe_transfer_call_data() {
+        let mut step = sample_step("sweep_nft");
+        step.asset_kind = "erc1155".into();
+        step.token_id_hex =
+            Some("0x000000000000000000000000000000000000000000000000000000000000007b".into());
+        step.amount_hex = "0x2a".into();
+
+        let prepared = prepare_plan_step_preflight(&step).unwrap();
+        let PlanStepPreflight::Call(call) = prepared else {
+            panic!("expected call");
+        };
+
+        assert_eq!(
+            call.label,
+            "erc1155.safeTransferFrom(owner,destination,tokenId,amount,empty)"
+        );
+        assert_eq!(
+            call.data_hex,
+            format!(
+                "0xf242432a{}1111111111111111111111111111111111111111{}9999999999999999999999999999999999999999{}7b{}2a{}a0{}",
+                "0".repeat(24),
+                "0".repeat(24),
+                "0".repeat(62),
+                "0".repeat(62),
+                "0".repeat(62),
+                "0".repeat(64)
+            )
+        );
+        assert!(call.evidence.iter().any(|item| item == "amount=0x2a"));
+    }
+
+    #[test]
+    fn nft_sweep_requires_token_id() {
+        let mut step = sample_step("sweep_nft");
+        step.asset_kind = "erc721".into();
+
+        let error = prepare_plan_step_preflight(&step).unwrap_err();
+
+        assert!(error.to_string().contains("token id"));
     }
 
     #[test]

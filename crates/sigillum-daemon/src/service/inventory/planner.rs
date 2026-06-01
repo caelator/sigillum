@@ -48,6 +48,19 @@ pub(super) fn plan_step_for_holding(
         if action == "revoke_approval" {
             blockers.push("unsupported_approval_source".into());
         }
+    } else if action == "sweep_nft" {
+        if holding.asset_address.is_none() {
+            blockers.push("missing_asset_contract".into());
+        }
+        if holding.token_id_hex.is_none() {
+            blockers.push("missing_token_id".into());
+        }
+        if holding.asset_kind == "erc1155" && !quantity_hex_is_nonzero(&holding.amount_hex) {
+            blockers.push("missing_nft_amount".into());
+        }
+        if !matches!(holding.asset_kind.as_str(), "erc721" | "erc1155") {
+            blockers.push("unsupported_nft_standard".into());
+        }
     } else if matches!(holding.asset_kind.as_str(), "defi" | "airdrop" | "reward") {
         blockers.push("requires_protocol_adapter".into());
     }
@@ -282,5 +295,60 @@ mod tests {
         step.simulation_status = "passed".into();
         let summary = summarize_plan_steps(&[step]);
         assert_eq!(summary.executable_steps, 1);
+    }
+
+    #[test]
+    fn nft_sweeps_require_standard_contract_and_token_id() {
+        let mut holding = sample_holding("erc721", "erc721-transfer-log", None);
+        holding.amount_hex = "0x1".into();
+        holding.token_id_hex = Some("0x7b".into());
+
+        let step = plan_step_for_holding(
+            &holding,
+            Some("0x9999999999999999999999999999999999999999".into()),
+            "available",
+        );
+        assert_eq!(step.action, "sweep_nft");
+        assert_eq!(step.status, "review_required");
+        assert!(step.blockers.is_empty());
+
+        holding.token_id_hex = None;
+        let missing_token = plan_step_for_holding(
+            &holding,
+            Some("0x9999999999999999999999999999999999999999".into()),
+            "available",
+        );
+        assert_eq!(missing_token.status, "blocked");
+        assert!(missing_token.blockers.contains(&"missing_token_id".into()));
+
+        holding.asset_kind = "nft".into();
+        holding.token_id_hex = Some("0x7b".into());
+        let generic = plan_step_for_holding(
+            &holding,
+            Some("0x9999999999999999999999999999999999999999".into()),
+            "available",
+        );
+        assert_eq!(generic.status, "blocked");
+        assert!(
+            generic
+                .blockers
+                .contains(&"unsupported_nft_standard".into())
+        );
+    }
+
+    #[test]
+    fn erc1155_sweeps_require_positive_amount() {
+        let mut holding = sample_holding("erc1155", "erc1155-transfer-log", None);
+        holding.token_id_hex = Some("0x7b".into());
+        holding.amount_hex = "0x0".into();
+
+        let step = plan_step_for_holding(
+            &holding,
+            Some("0x9999999999999999999999999999999999999999".into()),
+            "available",
+        );
+
+        assert_eq!(step.status, "blocked");
+        assert!(step.blockers.contains(&"missing_nft_amount".into()));
     }
 }

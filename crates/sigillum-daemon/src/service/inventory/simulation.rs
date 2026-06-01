@@ -15,6 +15,9 @@ use super::planner::summarize_plan_steps;
 use super::preflight::{PlanStepPreflight, PlanStepPreflightCall, prepare_plan_step_preflight};
 use super::support::{load_inventory_state, save_inventory_state};
 
+const DEFAULT_TOKEN_TRANSACTION_GAS_LIMIT: u64 = 65_000;
+const DEFAULT_NFT_SWEEP_GAS_LIMIT: u64 = 100_000;
+
 impl SigillumService {
     pub(crate) async fn simulate_consolidation_plan(
         &self,
@@ -277,11 +280,19 @@ fn zero_value_transaction_gas_limit(
     step: &ConsolidationPlanStep,
 ) -> u64 {
     match step.action.as_str() {
-        "sweep_erc20" | "revoke_erc20_approval" | "revoke_permit2_allowance" => {
-            provider.erc20_gas_limit.unwrap_or(65_000)
-        }
-        "revoke_nft_operator_approval" => provider.erc20_gas_limit.unwrap_or(65_000),
-        _ => provider.erc20_gas_limit.unwrap_or(65_000),
+        "sweep_erc20" | "revoke_erc20_approval" | "revoke_permit2_allowance" => provider
+            .erc20_gas_limit
+            .unwrap_or(DEFAULT_TOKEN_TRANSACTION_GAS_LIMIT),
+        "sweep_nft" => provider
+            .erc20_gas_limit
+            .unwrap_or(DEFAULT_NFT_SWEEP_GAS_LIMIT)
+            .max(DEFAULT_NFT_SWEEP_GAS_LIMIT),
+        "revoke_nft_operator_approval" => provider
+            .erc20_gas_limit
+            .unwrap_or(DEFAULT_TOKEN_TRANSACTION_GAS_LIMIT),
+        _ => provider
+            .erc20_gas_limit
+            .unwrap_or(DEFAULT_TOKEN_TRANSACTION_GAS_LIMIT),
     }
 }
 
@@ -512,6 +523,25 @@ mod tests {
         }
     }
 
+    fn sample_nft_step() -> ConsolidationPlanStep {
+        let mut step = sample_step("0x1");
+        step.action = "sweep_nft".into();
+        step.asset_kind = "erc721".into();
+        step.asset_address = Some("0x2222222222222222222222222222222222222222".into());
+        step.token_id_hex = Some("0x7b".into());
+        step
+    }
+
+    fn sample_nft_call() -> PlanStepPreflightCall {
+        PlanStepPreflightCall {
+            label: "erc721.safeTransferFrom(owner,destination,tokenId)",
+            target_address: "0x2222222222222222222222222222222222222222".into(),
+            data_hex: "0x42842e0e".into(),
+            value_hex: None,
+            evidence: Vec::new(),
+        }
+    }
+
     fn sample_inventory_address(native_balance_wei_hex: &str) -> WalletInventoryAddress {
         WalletInventoryAddress {
             id: "addr_1".into(),
@@ -666,6 +696,29 @@ mod tests {
                 .evidence
                 .iter()
                 .any(|item| item == "gas_policy_blocker=missing_inventory_address")
+        );
+    }
+
+    #[test]
+    fn nft_sweep_gas_policy_uses_conservative_floor() {
+        let provider = sample_provider();
+        let step = sample_nft_step();
+        let call = sample_nft_call();
+        let addresses = vec![sample_inventory_address("0x40000")];
+        let mut evidence = Vec::new();
+
+        apply_zero_value_transaction_gas_policy(&provider, &addresses, &step, &call, &mut evidence)
+            .unwrap();
+
+        assert!(
+            evidence
+                .iter()
+                .any(|item| item == "transaction_gas_limit=100000")
+        );
+        assert!(
+            evidence
+                .iter()
+                .any(|item| item == "estimated_gas_cost_wei_hex=0x30d40")
         );
     }
 }

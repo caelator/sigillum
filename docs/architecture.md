@@ -185,8 +185,8 @@ What it intentionally does not do today:
 - full token registry/indexer scraping, full ERC-1155 batch/history coverage,
   NFT metadata and spam classification, Permit2 expiration-aware risk scoring,
   external spender/operator registries, revoke transaction builders beyond
-  approval revokes, NFT sweep/claim/swap/exit transaction simulation, dynamic
-  network fee estimation, DeFi position discovery, or airdrop/reward discovery
+  approval revokes, NFT claim/swap/exit transaction simulation, dynamic network
+  fee estimation, DeFi position discovery, or airdrop/reward discovery
 - queued execution of consolidation plans for discovered holdings outside the
   current stealth deposit sweep flow
 

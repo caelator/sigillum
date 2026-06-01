@@ -1820,6 +1820,43 @@ async fn wallet_inventory_scan_discovers_erc20_tokens_from_transfer_logs() {
                 .any(|evidence| evidence == "estimated_gas_cost_wei_hex=0x763bfbd22000")
     });
     assert!(passed_erc20_sweep);
+    let passed_erc721_sweep = simulated_steps.iter().any(|step| {
+        step["action"] == "sweep_nft"
+            && step["asset_kind"] == "erc721"
+            && step["simulation_status"] == "passed"
+            && step["simulation_evidence"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|evidence| {
+                    evidence == "prepared_call=erc721.safeTransferFrom(owner,destination,tokenId)"
+                })
+            && step["simulation_evidence"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|evidence| evidence == "transaction_gas_limit=100000")
+    });
+    assert!(passed_erc721_sweep);
+    let passed_erc1155_sweep = simulated_steps.iter().any(|step| {
+        step["action"] == "sweep_nft"
+            && step["asset_kind"] == "erc1155"
+            && step["simulation_status"] == "passed"
+            && step["simulation_evidence"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|evidence| {
+                    evidence
+                        == "prepared_call=erc1155.safeTransferFrom(owner,destination,tokenId,amount,empty)"
+                })
+            && step["simulation_evidence"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|evidence| evidence == "transaction_gas_limit=100000")
+    });
+    assert!(passed_erc1155_sweep);
     let passed_erc20_revoke = simulated_steps.iter().any(|step| {
         step["action"] == "revoke_erc20_approval"
             && step["simulation_status"] == "passed"
