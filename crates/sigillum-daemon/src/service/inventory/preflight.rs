@@ -38,8 +38,7 @@ pub(super) fn prepare_plan_step_preflight(
                 evidence: vec![
                     "prepared_call=native.transfer(value)".into(),
                     format!("destination={destination}"),
-                    format!("value={value}"),
-                    "fee_policy=not_estimated".into(),
+                    format!("requested_value={value}"),
                 ],
             }))
         }
@@ -245,7 +244,7 @@ mod tests {
         assert!(
             call.evidence
                 .iter()
-                .any(|item| item == "fee_policy=not_estimated")
+                .any(|item| item == "requested_value=0x1")
         );
     }
 

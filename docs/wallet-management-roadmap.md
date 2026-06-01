@@ -246,8 +246,9 @@ The CLI should have parity for automation:
    retain the Permit2 contract address so `approve(token, spender, 0, 0)`
    revokes can be simulated against the correct protocol contract. Native and
    ERC-20 sweep plan steps now also build provider-backed preflight calls before
-   they become executable, with native sweeps explicitly marked as not yet
-   gas-fee-estimated.
+   they become executable. Native sweep simulation reserves gas using the
+   provider profile's max-fee policy and gas limit, records the resulting
+   spendable amount, and blocks plans that cannot pay gas.
 5a. Wallet archaeology labels. Discovery now classifies addresses for signer
     availability, watch-only status, gas availability, token/NFT/protocol
     value, stranded value, approval exposure, and dormant-candidate state, and
@@ -255,8 +256,9 @@ The CLI should have parity for automation:
     value, and dormant funded addresses.
 6. DeFi position adapters for the most common protocols.
 7. Airdrop/reward discovery with strict claim risk gates.
-8. Consolidation planner with broader dry-run simulation for NFT sweeps, gas
-   top-ups, exits, claims, swaps, and treasury routing.
+8. Consolidation planner with broader dry-run simulation for NFT sweeps,
+   dynamic fee estimation, gas top-ups, exits, claims, swaps, and treasury
+   routing.
 9. Controlled execution for native/ERC-20 sweeps, gas top-ups, NFT transfers,
    DeFi exits, claims, swaps, and treasury routing.
 10. Non-EVM chain families, starting with Bitcoin/UTXO and only then Solana,

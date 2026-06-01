@@ -1524,6 +1524,10 @@ async fn wallet_inventory_scan_discovers_erc20_tokens_from_transfer_logs() {
             "rpc_url": format!("http://{rpc_addr}/"),
             "auth_token_key": "alchemy",
             "chain_id": 1,
+            "max_priority_fee_per_gas_hex": "0x59682f00",
+            "max_fee_per_gas_hex": "0x77359400",
+            "native_gas_limit": 21000,
+            "erc20_gas_limit": 65000,
         }),
         Some(&token),
     )
@@ -1779,7 +1783,21 @@ async fn wallet_inventory_scan_discovers_erc20_tokens_from_transfer_logs() {
                 .as_array()
                 .unwrap()
                 .iter()
-                .any(|evidence| evidence == "fee_policy=not_estimated")
+                .any(|evidence| evidence == "fee_policy=profile_max_fee")
+            && step["simulation_evidence"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|evidence| evidence == "estimated_gas_cost_wei_hex=0x2632e314a000")
+            && step["simulation_evidence"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|evidence| {
+                    evidence.as_str().is_some_and(|value| {
+                        value.starts_with("native_sweep_spendable_amount_hex=0x")
+                    })
+                })
     });
     assert!(passed_native_sweep);
     let passed_erc20_sweep = simulated_steps.iter().any(|step| {
