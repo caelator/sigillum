@@ -51,8 +51,10 @@ Required discovery classes:
 - NFT discovery for ERC-721 and ERC-1155 ownership, including metadata caching,
   spam filtering, and optional floor or collection valuation providers.
   The first bounded ERC-721 transfer-log slice is implemented for EVM inventory
-  scans and confirms current ownership with `ownerOf`; ERC-1155, metadata,
-  spam filtering, and valuation providers remain future work.
+  scans and confirms current ownership with `ownerOf`; bounded ERC-1155
+  transfer discovery is implemented with `balanceOf` confirmation for touched
+  token IDs. Metadata, spam filtering, and valuation providers remain future
+  work.
 - DeFi position discovery for common protocols: lending, staking, liquid
   staking, LP positions, vault shares, bridges, vesting/streaming contracts, and
   rewards contracts.
@@ -165,8 +167,9 @@ Each adapter should expose:
 
 NFT support should prioritize correctness and safety over gallery polish:
 
-The first implementation scans bounded ERC-721 transfer-log ranges and records
-only token IDs whose `ownerOf` result matches the scanned address.
+The first implementation scans bounded ERC-721 and ERC-1155 transfer-log ranges
+and records only ERC-721 token IDs whose `ownerOf` result matches the scanned
+address or ERC-1155 token IDs with a positive `balanceOf(address,id)` result.
 
 - discover ERC-721 ownership from transfer logs and owner queries
 - discover ERC-1155 balances for touched token IDs
@@ -222,8 +225,9 @@ The CLI should have parity for automation:
 3. ERC-20 and native multi-L2 discovery. Bounded ERC-20 transfer-log discovery
    is the first implemented slice.
 4. NFT and allowance discovery. Operator-bounded ERC-20 allowance probing is
-   the first implemented approval-discovery slice, and bounded ERC-721
-   transfer-log discovery with owner confirmation is the first NFT slice.
+   the first implemented approval-discovery slice, and bounded ERC-721/ERC-1155
+   transfer-log discovery with owner/balance confirmation is the first NFT
+   slice.
 5. DeFi position adapters for the most common protocols.
 6. Airdrop/reward discovery with strict claim risk gates.
 7. Consolidation planner with dry-run and simulation.

@@ -5,7 +5,10 @@ use crate::service::{ServiceResult, SigillumService};
 use super::allowance_discovery::{
     DISCOVERY_SOURCE_ERC20_ALLOWANCE_PROBE, Erc20AllowanceDiscoveryConfig,
 };
-use super::nft_discovery::{DISCOVERY_SOURCE_ERC721_TRANSFER_LOG, Erc721TransferDiscoveryConfig};
+use super::nft_discovery::{
+    DISCOVERY_SOURCE_ERC721_TRANSFER_LOG, DISCOVERY_SOURCE_ERC1155_TRANSFER_LOG,
+    Erc721TransferDiscoveryConfig, Erc1155TransferDiscoveryConfig,
+};
 use super::support::{
     InventoryAddressObservation, InventoryRecordContext, address_record, holding_record,
     holding_record_with_counterparty, holding_record_with_source, holding_record_with_token_id,
@@ -30,6 +33,7 @@ impl SigillumService {
         token_discovery: Option<&Erc20TransferDiscoveryConfig>,
         allowance_discovery: Option<&Erc20AllowanceDiscoveryConfig>,
         nft_discovery: Option<&Erc721TransferDiscoveryConfig>,
+        erc1155_discovery: Option<&Erc1155TransferDiscoveryConfig>,
         now: u64,
     ) -> ServiceResult<InventoryAddressObservation> {
         let address = super::normalize_address(address)?;
@@ -139,6 +143,25 @@ impl SigillumService {
                     Some(nft.token_id_hex),
                     "0x1",
                     DISCOVERY_SOURCE_ERC721_TRANSFER_LOG,
+                ));
+            }
+        }
+
+        if let Some(config) = erc1155_discovery {
+            let tokens = self
+                .discover_erc1155_transfer_holdings_for_address(provider, &address, config)
+                .await?;
+            if !tokens.is_empty() {
+                activity_state = "funded";
+            }
+            for token in tokens {
+                holdings.push(holding_record_with_token_id(
+                    &record_context,
+                    "erc1155",
+                    Some(token.contract_address),
+                    Some(token.token_id_hex),
+                    &token.amount_hex,
+                    DISCOVERY_SOURCE_ERC1155_TRANSFER_LOG,
                 ));
             }
         }

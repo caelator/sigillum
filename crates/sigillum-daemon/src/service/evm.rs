@@ -464,6 +464,26 @@ impl SigillumService {
         .await
     }
 
+    pub(super) async fn evm_erc1155_balance_for_provider(
+        &self,
+        provider_compartment_id: usize,
+        provider: &sigillum_api::EvmProviderProfile,
+        contract_address: &str,
+        owner_address: &str,
+        token_id_hex: &str,
+        block_tag: &str,
+    ) -> ServiceResult<String> {
+        let balance = self
+            .resolve_provider_rpc_client_for_compartment(
+                provider_compartment_id,
+                &provider.rpc_url,
+                provider.auth_token_key.as_deref(),
+            )?
+            .get_erc1155_balance(contract_address, owner_address, token_id_hex, block_tag)
+            .await?;
+        Ok(encode_quantity_u256(&balance))
+    }
+
     pub(super) async fn evm_transaction_count_for_provider(
         &self,
         provider_compartment_id: usize,

@@ -573,12 +573,16 @@
       </label>
     </div>
     <div class="form-row">
-      <input type="text" id="inventoryNftDiscoveryFromBlock" placeholder="ERC-721 discovery from block">
-      <input type="text" id="inventoryNftDiscoveryToBlock" placeholder="ERC-721 discovery to block (optional)">
+      <input type="text" id="inventoryNftDiscoveryFromBlock" placeholder="NFT discovery from block">
+      <input type="text" id="inventoryNftDiscoveryToBlock" placeholder="NFT discovery to block (optional)">
       <input type="number" id="inventoryNftDiscoveryLimit" placeholder="NFT discovery limit" value="100" class="input-wide">
       <label class="checkbox-row">
         <input type="checkbox" id="inventoryDiscoverErc721Transfers">
         Discover ERC-721 transfers
+      </label>
+      <label class="checkbox-row">
+        <input type="checkbox" id="inventoryDiscoverErc1155Transfers">
+        Discover ERC-1155 transfers
       </label>
     </div>
     <div id="inventoryJobList"></div>

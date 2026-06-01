@@ -226,8 +226,9 @@ Deliverables:
 - Support native holdings across configured EVM L1/L2 provider profiles.
 - Discover ERC-20 balances from allowlists, transfer logs, token registries, and
   positive balance probes.
-- Add NFT inventory for ERC-721 and ERC-1155 assets, with spam and provenance
-  classification before any transfer support.
+- Add NFT inventory for ERC-721 and ERC-1155 assets. Bounded transfer-log
+  discovery now records confirmed ERC-721 and ERC-1155 holdings; spam,
+  metadata provenance, and reviewed transfer support still need follow-up.
 - Add allowance and approval discovery for ERC-20 and NFT approvals.
 - Add DeFi position discovery for common lending, staking, LP, vault, bridge,
   vesting, streaming, and rewards contracts through isolated protocol adapters.

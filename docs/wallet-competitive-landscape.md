@@ -160,7 +160,7 @@ safe consolidation from those accounts.
 | ERC-5564 stealth receiving | Meta-address export, one-time deposit derivation, bounded announcement-log scanning, local checks, announcement payloads, ETH/ERC-20 signing and sending | ERC-5564, Umbra, Fluidkey | Add stealth-aware consolidation, richer inventory, and reviewed recovery workflows from one-time accounts |
 | Seed/xpub discovery | Initial EVM scan foundation for seed/xpub profiles with gap-limit style scan over configured providers | MetaMask/Ledger/Trezor account discovery, Bitcoin xpub wallets | Scan common Ethereum derivation paths, historical receive addresses, dormant wallets, and configured L1/L2 chains |
 | Native and token inventory | Native balances, manually supplied ERC-20 probes, and bounded ERC-20 transfer-log discovery | Portfolio/indexing tools | Expand ERC-20 discovery with registries, indexers, allowlists, and positive balance evidence |
-| NFTs | Bounded ERC-721 transfer-log discovery with `ownerOf` confirmation and token IDs in inventory/plans | MetaMask Portfolio, Phantom, Rotki, Zerion, Zapper | ERC-1155 inventory, metadata cache, spam flags, unknown collection policy, reviewed NFT sweeps |
+| NFTs | Bounded ERC-721 and ERC-1155 transfer discovery with current-owner/balance confirmation and token IDs in inventory/plans | MetaMask Portfolio, Phantom, Rotki, Zerion, Zapper | Full ERC-1155 batch/history coverage, metadata cache, spam flags, unknown collection policy, reviewed NFT sweeps |
 | DeFi positions | Not implemented | Rotki, Zapper, DeBank, Zerion, Rabby | Protocol adapters for lending, staking, LPs, vaults, bridges, vesting, streams, and rewards |
 | Airdrops and rewards | Not implemented | Portfolio tools, protocol claim portals | Trusted-source candidate discovery, claim-contract verification, simulation, explicit review only |
 | Approvals and revokes | Bounded ERC-20 allowance probes for operator-supplied spender addresses, persisted as approval holdings with risk findings | Revoke.cash, Rabby | ERC-20, Permit2, and NFT operator discovery with risky spender labels, simulation, and revoke recommendations |
@@ -233,8 +233,8 @@ the operator which value can actually be recovered.
 2. Finish EVM discovery breadth: common derivation paths, L1/L2 native balances,
    token discovery, activity history, and dormant wallet labels.
 3. Extend approvals, NFTs, DeFi, and airdrops as separate adapter families with
-   spam/risk provenance; ERC-721 transfer-log discovery is now the first NFT
-   slice, while ERC-1155, metadata, and spam classification remain open.
+   spam/risk provenance; ERC-721 and ERC-1155 transfer discovery are now the
+   first NFT slices, while metadata and spam classification remain open.
 4. Require simulation evidence for any consolidation step that could execute.
 5. Expand the planner into real multi-step graphs for gas top-ups, revokes,
    claims, exits, unwraps, swaps, sweeps, and treasury routing.

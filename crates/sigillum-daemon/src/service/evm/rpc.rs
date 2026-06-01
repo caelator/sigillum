@@ -9,6 +9,7 @@ use crate::service::{ServiceError, ServiceResult};
 
 use super::{normalize_address, normalize_hex_blob, parse_quantity_u64, parse_quantity_u256};
 
+mod erc1155;
 mod erc20;
 mod erc721;
 mod logs;

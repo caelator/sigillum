@@ -25,7 +25,7 @@ use sigillum_core::{
 use crate::audit_log::AuditEventSpec;
 
 use allowance_discovery::erc20_allowance_discovery_config;
-use nft_discovery::erc721_transfer_discovery_config;
+use nft_discovery::{erc721_transfer_discovery_config, erc1155_transfer_discovery_config};
 use planner::{plan_step_for_holding, signer_status_for_holding, summarize_plan_steps};
 use risk::derive_inventory_risk_findings;
 use support::{
@@ -455,6 +455,12 @@ impl SigillumService {
             body.nft_discovery_to_block.as_deref(),
             body.nft_discovery_limit,
         )?;
+        let erc1155_discovery = erc1155_transfer_discovery_config(
+            body.discover_erc1155_transfers,
+            body.nft_discovery_from_block.as_deref(),
+            body.nft_discovery_to_block.as_deref(),
+            body.nft_discovery_limit,
+        )?;
         let requested_family = normalized_wallet_family(body.wallet_family.as_deref())?;
 
         let registry = crate::profiles::load_profiles(&self.state.base_dir).map_err(|error| {
@@ -520,6 +526,7 @@ impl SigillumService {
                             token_discovery.as_ref(),
                             allowance_discovery.as_ref(),
                             nft_discovery.as_ref(),
+                            erc1155_discovery.as_ref(),
                             started_at_unix,
                         )
                         .await?;
@@ -582,6 +589,7 @@ impl SigillumService {
                                         token_discovery.as_ref(),
                                         allowance_discovery.as_ref(),
                                         nft_discovery.as_ref(),
+                                        erc1155_discovery.as_ref(),
                                         started_at_unix,
                                     )
                                     .await?;

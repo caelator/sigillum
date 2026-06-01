@@ -330,6 +330,7 @@ export function createInventoryActions(deps: InventoryActionsDeps) {
       allowance_spender_addresses: spender ? [spender] : [],
       allowance_discovery_limit: optionalNumberValue("inventoryAllowanceLimit"),
       discover_erc721_transfers: input("inventoryDiscoverErc721Transfers").checked,
+      discover_erc1155_transfers: input("inventoryDiscoverErc1155Transfers").checked,
       nft_discovery_from_block: optionalTextValue("inventoryNftDiscoveryFromBlock"),
       nft_discovery_to_block: optionalTextValue("inventoryNftDiscoveryToBlock"),
       nft_discovery_limit: optionalNumberValue("inventoryNftDiscoveryLimit"),
