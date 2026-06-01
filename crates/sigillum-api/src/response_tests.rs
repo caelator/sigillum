@@ -657,6 +657,22 @@ fn test_wallet_operations_response_roundtrips() {
     roundtrip_test(RiskFindingListResponse {
         findings: vec![finding],
     });
+    let catalog_entry = RiskCatalogEntry {
+        address: "0x4444444444444444444444444444444444444444".to_string(),
+        label: "Known router".to_string(),
+        risk_level: "trusted".to_string(),
+        source: "operator".to_string(),
+        notes: vec!["Operator-approved spender".to_string()],
+        created_at_unix: 1,
+        updated_at_unix: 2,
+    };
+    roundtrip_test(RiskCatalogListResponse {
+        entries: vec![catalog_entry.clone()],
+    });
+    roundtrip_test(RiskCatalogMutationResponse {
+        status: "upserted".to_string(),
+        entry: catalog_entry,
+    });
 
     let step = ConsolidationPlanStep {
         id: "step_1".to_string(),

@@ -432,6 +432,15 @@ fn inventory_routes() -> AppRouter {
             post(inventory::resume_discovery_job),
         )
         .route("/api/risk/findings", get(inventory::list_risk_findings))
+        .route("/api/risk/catalog", get(inventory::list_risk_catalog))
+        .route(
+            "/api/risk/catalog/upsert",
+            post(inventory::upsert_risk_catalog_entry),
+        )
+        .route(
+            "/api/risk/catalog/delete",
+            post(inventory::delete_risk_catalog_entry),
+        )
         .route(
             "/api/plans/consolidation",
             get(inventory::list_consolidation_plans),

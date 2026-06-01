@@ -65,9 +65,11 @@ Required discovery classes:
   Bounded ERC-20 allowance probes and NFT operator-approval probes are
   implemented for operator-supplied spender/operator addresses. Bounded Permit2
   allowance probes are implemented for operator-supplied Permit2 contracts and
-  spenders, defaulting to the canonical Permit2 contract when enabled. Spender
-  registries, expiration-aware risk scoring, and revoke execution remain future
-  work.
+  spenders, defaulting to the canonical Permit2 contract when enabled. A local
+  operator-managed risk catalog is implemented for spender/operator labels and
+  trusted, low, medium, high, or critical risk overrides. External spender
+  registries, expiration-aware Permit2 scoring, and revoke execution remain
+  future work.
 - Dormant-wallet classification using last activity, transaction count, current
   value, token/NFT/DeFi exposure, gas availability, and whether the private key
   or signing path is actually available.
@@ -228,9 +230,10 @@ The CLI should have parity for automation:
 3. ERC-20 and native multi-L2 discovery. Bounded ERC-20 transfer-log discovery
    is the first implemented slice.
 4. NFT and allowance discovery. Operator-bounded ERC-20 allowance probing,
-   Permit2 allowance probing, and NFT operator-approval probing are the first
-   approval-discovery slices, and bounded ERC-721/ERC-1155 transfer-log
-   discovery with owner/balance confirmation is the first NFT inventory slice.
+   Permit2 allowance probing, NFT operator-approval probing, and a local risk
+   catalog are the first approval-discovery slices, and bounded
+   ERC-721/ERC-1155 transfer-log discovery with owner/balance confirmation is
+   the first NFT inventory slice.
 5. DeFi position adapters for the most common protocols.
 6. Airdrop/reward discovery with strict claim risk gates.
 7. Consolidation planner with dry-run and simulation.

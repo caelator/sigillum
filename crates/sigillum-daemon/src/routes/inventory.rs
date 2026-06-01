@@ -8,7 +8,8 @@ use axum::http::HeaderMap;
 use axum::response::Response;
 use sigillum_api::{
     ChainProfileDeleteRequest, ChainProfileUpsertRequest, ConsolidationPlanApproveRequest,
-    ConsolidationPlanGenerateRequest, DiscoveryJobMutationRequest, WalletInventoryScanRequest,
+    ConsolidationPlanGenerateRequest, DiscoveryJobMutationRequest, RiskCatalogDeleteRequest,
+    RiskCatalogUpsertRequest, WalletInventoryScanRequest,
 };
 
 use crate::AppState;
@@ -131,6 +132,48 @@ pub(crate) async fn list_risk_findings(
 ) -> Response {
     let service = SigillumService::new(state);
     service_response(service.list_risk_findings(bearer_token(&headers).as_deref()))
+}
+
+pub(crate) async fn list_risk_catalog(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+) -> Response {
+    let service = SigillumService::new(state);
+    service_response(service.list_risk_catalog(bearer_token(&headers).as_deref()))
+}
+
+pub(crate) async fn upsert_risk_catalog_entry(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Json(body): Json<RiskCatalogUpsertRequest>,
+) -> Response {
+    let body = match validated(Json(body)) {
+        Ok(b) => b,
+        Err(resp) => return resp,
+    };
+    let service = SigillumService::new(state);
+    service_response(
+        service
+            .upsert_risk_catalog_entry(bearer_token(&headers).as_deref(), body)
+            .await,
+    )
+}
+
+pub(crate) async fn delete_risk_catalog_entry(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Json(body): Json<RiskCatalogDeleteRequest>,
+) -> Response {
+    let body = match validated(Json(body)) {
+        Ok(b) => b,
+        Err(resp) => return resp,
+    };
+    let service = SigillumService::new(state);
+    service_response(
+        service
+            .delete_risk_catalog_entry(bearer_token(&headers).as_deref(), body)
+            .await,
+    )
 }
 
 pub(crate) async fn list_consolidation_plans(

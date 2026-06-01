@@ -564,6 +564,28 @@ impl Validate for crate::request::DiscoveryJobMutationRequest {
     }
 }
 
+impl Validate for crate::request::RiskCatalogUpsertRequest {
+    fn validate(&self) -> Result<(), String> {
+        check_len("address", &self.address, MAX_ADDRESS)?;
+        check_optional_len("label", &self.label, MAX_LABEL)?;
+        check_len("risk_level", &self.risk_level, MAX_LABEL)?;
+        if self.notes.len() > MAX_TOKEN_ADDRESSES {
+            return Err(format!(
+                "notes exceeds maximum length of {MAX_TOKEN_ADDRESSES} items"
+            ));
+        }
+        check_vec_items_len("notes", &self.notes, MAX_NOTE)?;
+        Ok(())
+    }
+}
+
+impl Validate for crate::request::RiskCatalogDeleteRequest {
+    fn validate(&self) -> Result<(), String> {
+        check_len("address", &self.address, MAX_ADDRESS)?;
+        Ok(())
+    }
+}
+
 impl Validate for crate::request::ConsolidationPlanGenerateRequest {
     fn validate(&self) -> Result<(), String> {
         check_optional_len(

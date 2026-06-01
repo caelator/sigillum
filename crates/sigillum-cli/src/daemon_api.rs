@@ -30,7 +30,8 @@ use serde::Serialize;
 use sigillum_api::request::{
     ChainProfileUpsertRequest, ConsolidationPlanApproveRequest, ConsolidationPlanGenerateRequest,
     EthStealthWalletProfileUpsertRequest, EvmProviderProfileUpsertRequest, EvmProviderRef,
-    Fido2UnlockRequest, MaintenanceRunRequest, WalletInventoryScanRequest,
+    Fido2UnlockRequest, MaintenanceRunRequest, RiskCatalogDeleteRequest, RiskCatalogUpsertRequest,
+    WalletInventoryScanRequest,
 };
 use sigillum_client::{ClientError, SigillumClient};
 use url::Url;
@@ -364,14 +365,50 @@ fn cmd_api_discovery(args: &[String]) {
     }
 }
 
-/// Dispatch `sigillum api risk <list>`.
+/// Dispatch `sigillum api risk <list|catalog|catalog-upsert|catalog-delete>`.
 fn cmd_api_risk(args: &[String]) {
     match args.get(1).map(String::as_str) {
         Some("list") => run_api_command(args, true, |client| async move {
             client.list_risk_findings().await
         }),
+        Some("catalog") => run_api_command(args, true, |client| async move {
+            client.list_risk_catalog().await
+        }),
+        Some("catalog-upsert") => {
+            let request = RiskCatalogUpsertRequest {
+                address: require_flag(
+                    args,
+                    "--address",
+                    "sigillum api risk catalog-upsert --address <ADDRESS> --risk-level <LEVEL>",
+                ),
+                label: parse_flag(args, "--label"),
+                risk_level: require_flag(
+                    args,
+                    "--risk-level",
+                    "sigillum api risk catalog-upsert --address <ADDRESS> --risk-level <LEVEL>",
+                ),
+                notes: parse_multi_flag(args, "--note"),
+            };
+            run_api_command(args, true, move |client| async move {
+                client.upsert_risk_catalog_entry(request).await
+            });
+        }
+        Some("catalog-delete") => {
+            let address = require_flag(
+                args,
+                "--address",
+                "sigillum api risk catalog-delete --address <ADDRESS>",
+            );
+            run_api_command(args, true, move |client| async move {
+                client
+                    .delete_risk_catalog_entry(RiskCatalogDeleteRequest { address })
+                    .await
+            });
+        }
         _ => {
-            eprintln!("Usage: sigillum api risk list");
+            eprintln!(
+                "Usage: sigillum api risk <list|catalog|catalog-upsert|catalog-delete> [...]"
+            );
             process::exit(1);
         }
     }
@@ -766,7 +803,7 @@ COMMANDS:
   deposits <list|create-native|create-erc20|scan-announcements|refresh|enqueue-sweep|delete> [...]
   inventory <list|chains|scan-evm> [...]
   discovery <jobs|scan-evm> [...]
-  risk list
+  risk <list|catalog|catalog-upsert|catalog-delete> [...]
   plans <list|generate|approve> [...]
   queue <list|process> [...]
   maintenance run [...]

@@ -197,6 +197,8 @@ On top of that, the daemon now includes:
   transfer-log discovery with `ownerOf` confirmation, bounded ERC-1155
   transfer discovery with `balanceOf` confirmation, and operator-bounded NFT
   `isApprovedForAll` approval probes
+- a local operator-managed risk catalog for spender/operator labels and
+  approval-risk overrides
 - persistent queue jobs for direct sends and sweep jobs
 - atomic sidecar-backed persistence for profile, deposit, and queue state with
   automatic restore/quarantine behavior
@@ -225,6 +227,7 @@ The embedded UI currently supports:
 - EVM provider profile management
 - stealth wallet profile management
 - wallet inventory scans with ERC-20, ERC-20 allowance, Permit2 allowance, ERC-721, ERC-1155, and NFT operator-approval discovery controls
+- local risk catalog management for approval spender/operator labels
 - stealth deposit creation, refresh, sweep enqueue, and registry browsing
 - queue inspection and batch processing
 - maintenance runs for deposit refresh plus queue draining
@@ -307,8 +310,8 @@ airdrops/rewards, ERC-20 allowance probing, bounded NFT operator-approval
 probing, bounded Permit2 allowance probing, and reviewable consolidation
 planning. Broader token registries, full ERC-1155 batch coverage, NFT
 metadata/spam classification, DeFi adapters, Permit2 expiration-aware
-classification, spender registries, and revoke execution remain roadmap work.
-The
+classification, external spender registries, and revoke execution remain
+roadmap work. The
 product strategy and market comparison are captured in
 [`docs/wallet-competitive-landscape.md`](docs/wallet-competitive-landscape.md).
 This is not another round of ad hoc transport or route growth and not a shift

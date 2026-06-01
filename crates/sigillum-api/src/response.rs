@@ -732,6 +732,29 @@ pub struct DiscoveryJobMutationResponse {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct RiskCatalogEntry {
+    pub address: String,
+    pub label: String,
+    pub risk_level: String,
+    pub source: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub notes: Vec<String>,
+    pub created_at_unix: u64,
+    pub updated_at_unix: u64,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct RiskCatalogListResponse {
+    pub entries: Vec<RiskCatalogEntry>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct RiskCatalogMutationResponse {
+    pub status: String,
+    pub entry: RiskCatalogEntry,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct RiskFinding {
     pub id: String,
     pub category: String,

@@ -231,7 +231,8 @@ Deliverables:
   metadata provenance, and reviewed transfer support still need follow-up.
 - Add allowance and approval discovery for ERC-20 and NFT approvals. Bounded
   ERC-20 allowance probes, Permit2 allowance probes, and NFT operator-approval
-  probes are implemented for operator-supplied spender/operator addresses.
+  probes are implemented for operator-supplied spender/operator addresses, with
+  a local operator-managed risk catalog for spender/operator overrides.
 - Add DeFi position discovery for common lending, staking, LP, vault, bridge,
   vesting, streaming, and rewards contracts through isolated protocol adapters.
 - Add airdrop and reward discovery with strict claim-risk classification and no

@@ -1606,6 +1606,25 @@ async fn wallet_inventory_scan_discovers_erc20_tokens_from_transfer_logs() {
             && holding["source"] == "nft-operator-approval-probe"
     }));
 
+    let catalog_upsert = post_json(
+        &client,
+        addr,
+        "/api/risk/catalog/upsert",
+        json!({
+            "address": "0x4444444444444444444444444444444444444444",
+            "label": "Known malicious spender",
+            "risk_level": "critical",
+            "notes": ["test catalog override"],
+        }),
+        Some(&token),
+    )
+    .await;
+    assert_eq!(catalog_upsert.status(), StatusCode::OK);
+    let catalog = get(&client, addr, "/api/risk/catalog", Some(&token)).await;
+    assert_eq!(catalog.status(), StatusCode::OK);
+    let catalog_json: serde_json::Value = catalog.json().await.unwrap();
+    assert_eq!(catalog_json["entries"].as_array().unwrap().len(), 1);
+
     let risks = get(&client, addr, "/api/risk/findings", Some(&token)).await;
     assert_eq!(risks.status(), StatusCode::OK);
     let risks_json: serde_json::Value = risks.json().await.unwrap();
@@ -1618,12 +1637,12 @@ async fn wallet_inventory_scan_discovers_erc20_tokens_from_transfer_logs() {
     assert!(findings.iter().any(|finding| {
         finding["category"] == "risky_approval"
             && finding["subject"] == "0x4444444444444444444444444444444444444444"
-            && finding["risk_level"] == "medium"
+            && finding["risk_level"] == "critical"
             && finding["evidence"]
                 .as_array()
                 .unwrap()
                 .iter()
-                .any(|evidence| evidence == "Approval surface: Permit2 AllowanceTransfer")
+                .any(|evidence| evidence == "Risk catalog: Known malicious spender (critical)")
     }));
     assert!(findings.iter().any(|finding| {
         finding["category"] == "risky_approval"
@@ -1635,6 +1654,21 @@ async fn wallet_inventory_scan_discovers_erc20_tokens_from_transfer_logs() {
                 .iter()
                 .any(|evidence| evidence == "Approval: setApprovalForAll(true)")
     }));
+
+    let catalog_delete = post_json(
+        &client,
+        addr,
+        "/api/risk/catalog/delete",
+        json!({
+            "address": "0x4444444444444444444444444444444444444444",
+        }),
+        Some(&token),
+    )
+    .await;
+    assert_eq!(catalog_delete.status(), StatusCode::OK);
+    let catalog = get(&client, addr, "/api/risk/catalog", Some(&token)).await;
+    let catalog_json: serde_json::Value = catalog.json().await.unwrap();
+    assert!(catalog_json["entries"].as_array().unwrap().is_empty());
 
     handle.abort();
     rpc_handle.abort();

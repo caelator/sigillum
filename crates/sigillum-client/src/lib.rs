@@ -52,9 +52,9 @@ use sigillum_api::request::{
     EvmRpcBalanceRequest, EvmRpcBroadcastRequest, EvmRpcErc20BalanceRequest, EvmRpcNonceRequest,
     Fido2RegisterRequest, Fido2RemoveRequest, Fido2SetupRequest, Fido2UnlockRequest,
     GenerateStoreRequest, KeyOnlyRequest, KeyValueRequest, MaintenanceRunRequest,
-    PassphraseRequest, RunAuditRequest, SecretResolveBatchRequest, SnapshotRestoreRequest,
-    StealthPaymentRef, TransitDecryptRequest, TransitEncryptRequest, TransitHmacRequest,
-    WalletInventoryScanRequest,
+    PassphraseRequest, RiskCatalogDeleteRequest, RiskCatalogUpsertRequest, RunAuditRequest,
+    SecretResolveBatchRequest, SnapshotRestoreRequest, StealthPaymentRef, TransitDecryptRequest,
+    TransitEncryptRequest, TransitHmacRequest, WalletInventoryScanRequest,
 };
 pub use sigillum_api::response::Fido2StatusResponse as DaemonFido2Status;
 pub use sigillum_api::response::{
@@ -77,12 +77,12 @@ pub use sigillum_api::response::{
     Fido2RegisterResponse, Fido2RemoveResponse, Fido2SetupResponse, Fido2StatusResponse,
     GenerateStoreResponse, GenericStatusResponse, KeyListResponse, KeyValueResponse,
     MaintenanceRunResponse, QueueEnqueueResponse, QueueJob, QueueJobListResponse,
-    QueueProcessResponse, RiskFinding, RiskFindingListResponse, SecretResolveBatchResponse,
-    SecretResolveValue, SessionRevokeResponse, SnapshotExportResponse, SnapshotRestoreResponse,
-    StatusResponse, SwitchCompartmentResponse, TransitDecryptResponse, TransitEncryptResponse,
-    TransitHmacResponse, UnlockResponse, UnlockedCompartment, WalletAssetHolding,
-    WalletDiscoveryJob, WalletInventoryAddress, WalletInventoryListResponse,
-    WalletInventoryScanResponse,
+    QueueProcessResponse, RiskCatalogEntry, RiskCatalogListResponse, RiskCatalogMutationResponse,
+    RiskFinding, RiskFindingListResponse, SecretResolveBatchResponse, SecretResolveValue,
+    SessionRevokeResponse, SnapshotExportResponse, SnapshotRestoreResponse, StatusResponse,
+    SwitchCompartmentResponse, TransitDecryptResponse, TransitEncryptResponse, TransitHmacResponse,
+    UnlockResponse, UnlockedCompartment, WalletAssetHolding, WalletDiscoveryJob,
+    WalletInventoryAddress, WalletInventoryListResponse, WalletInventoryScanResponse,
 };
 use sigillum_core::SnapshotSummary;
 use thiserror::Error;
@@ -886,6 +886,31 @@ impl SigillumClient {
 
     pub async fn list_risk_findings(&self) -> Result<RiskFindingListResponse, ClientError> {
         let builder = self.request(Method::GET, "/api/risk/findings");
+        self.send(builder).await
+    }
+
+    pub async fn list_risk_catalog(&self) -> Result<RiskCatalogListResponse, ClientError> {
+        let builder = self.request(Method::GET, "/api/risk/catalog");
+        self.send(builder).await
+    }
+
+    pub async fn upsert_risk_catalog_entry(
+        &self,
+        request: RiskCatalogUpsertRequest,
+    ) -> Result<RiskCatalogMutationResponse, ClientError> {
+        let builder = self
+            .request(Method::POST, "/api/risk/catalog/upsert")
+            .json(&request);
+        self.send(builder).await
+    }
+
+    pub async fn delete_risk_catalog_entry(
+        &self,
+        request: RiskCatalogDeleteRequest,
+    ) -> Result<RiskCatalogMutationResponse, ClientError> {
+        let builder = self
+            .request(Method::POST, "/api/risk/catalog/delete")
+            .json(&request);
         self.send(builder).await
     }
 

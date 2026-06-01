@@ -1,6 +1,7 @@
 import type {
   ChainProfile,
   ConsolidationPlanSummary,
+  RiskCatalogEntry,
   RiskFinding,
   WalletDiscoveryJob,
 } from "../contracts";
@@ -16,6 +17,7 @@ import { esc, escAttr, statusPill } from "../render/html";
 export interface InventoryViewModel {
   enabledChains: ChainProfile[];
   discoveryJobs: WalletDiscoveryJob[];
+  riskCatalog: RiskCatalogEntry[];
   riskFindings: RiskFinding[];
   consolidationPlans: ConsolidationPlanSummary[];
 }
@@ -24,6 +26,7 @@ export function summarizeInventory(view: InventoryViewModel): string {
   return [
     `${view.enabledChains.length} enabled chains`,
     `${view.discoveryJobs.length} discovery jobs`,
+    `${view.riskCatalog.length} risk catalog entries`,
     `${view.riskFindings.length} risk findings`,
     `${view.consolidationPlans.length} plans`,
   ].join(" | ");
@@ -200,6 +203,34 @@ export function createInventoryActions(deps: InventoryActionsDeps) {
     );
   }
 
+  function renderRiskCatalog(entries: any[]): void {
+    renderEntityList(
+      "riskCatalogList",
+      entries,
+      "No local risk catalog entries yet.",
+      (entry: any) =>
+        '<li><div class="entity-main">' +
+        '<div class="entity-title">' +
+        esc(entry.label || entry.address) +
+        " " +
+        statusPill(entry.risk_level) +
+        "</div>" +
+        '<div class="entity-meta">' +
+        esc(entry.address) +
+        " · source=" +
+        esc(entry.source || "-") +
+        ((entry.notes || []).length
+          ? "<br>" + esc((entry.notes || []).join(" | "))
+          : "") +
+        "</div></div>" +
+        '<div class="entity-actions">' +
+        '<button class="btn-danger" data-action="deleteRiskCatalogEntry" data-arg0="' +
+        escAttr(entry.address) +
+        '">Delete</button>' +
+        "</div></li>",
+    );
+  }
+
   function renderConsolidationPlans(plans: any[]): void {
     renderEntityList(
       "consolidationPlanList",
@@ -256,14 +287,16 @@ export function createInventoryActions(deps: InventoryActionsDeps) {
 
   async function loadInventoryOperations(): Promise<void> {
     try {
-      const [chains, inventory, risks, plans] = await Promise.all([
+      const [chains, inventory, catalog, risks, plans] = await Promise.all([
         deps.api("GET", "/api/inventory/chains"),
         deps.api("GET", "/api/inventory/wallets"),
+        deps.api("GET", "/api/risk/catalog"),
         deps.api("GET", "/api/risk/findings"),
         deps.api("GET", "/api/plans/consolidation"),
       ]);
       if (!chains.error) renderChainProfiles(chains.profiles || []);
       if (!inventory.error) renderInventoryState(inventory);
+      if (!catalog.error) renderRiskCatalog(catalog.entries || []);
       if (!risks.error) renderRiskFindings(risks.findings || []);
       if (!plans.error) renderConsolidationPlans(plans.plans || []);
     } catch (_) {}
@@ -374,13 +407,51 @@ export function createInventoryActions(deps: InventoryActionsDeps) {
   }
 
   async function loadRiskFindings(): Promise<void> {
-    const r = await deps.api("GET", "/api/risk/findings");
+    const [catalog, risks] = await Promise.all([
+      deps.api("GET", "/api/risk/catalog"),
+      deps.api("GET", "/api/risk/findings"),
+    ]);
+    if (catalog.error || risks.error) {
+      deps.toast(catalog.error || risks.error, "error");
+      return;
+    }
+    renderRiskCatalog(catalog.entries || []);
+    renderRiskFindings(risks.findings || []);
+    deps.toast("Risk findings refreshed");
+  }
+
+  async function upsertRiskCatalogEntry(): Promise<void> {
+    const address = textValue("riskCatalogAddress");
+    const riskLevel = textValue("riskCatalogLevel");
+    if (!address || !riskLevel) {
+      deps.toast("Risk catalog address and level are required", "error");
+      return;
+    }
+    const note = optionalTextValue("riskCatalogNote");
+    const r = await deps.api("POST", "/api/risk/catalog/upsert", {
+      address,
+      label: optionalTextValue("riskCatalogLabel"),
+      risk_level: riskLevel,
+      notes: note ? [note] : [],
+    });
     if (r.error) {
       deps.toast(r.error, "error");
       return;
     }
-    renderRiskFindings(r.findings || []);
-    deps.toast("Risk findings refreshed");
+    clearFields(["riskCatalogAddress", "riskCatalogLabel", "riskCatalogNote"]);
+    deps.toast("Risk catalog entry saved");
+    void loadInventoryOperations();
+  }
+
+  async function deleteRiskCatalogEntry(address: string): Promise<void> {
+    if (!confirm('Delete risk catalog entry "' + address + '"?')) return;
+    const r = await deps.api("POST", "/api/risk/catalog/delete", { address });
+    if (r.error) {
+      deps.toast(r.error, "error");
+      return;
+    }
+    deps.toast("Risk catalog entry deleted");
+    void loadInventoryOperations();
   }
 
   async function generateConsolidationPlan(): Promise<void> {
@@ -413,6 +484,7 @@ export function createInventoryActions(deps: InventoryActionsDeps) {
   return {
     renderChainProfiles,
     renderInventoryState,
+    renderRiskCatalog,
     renderRiskFindings,
     renderConsolidationPlans,
     loadInventoryOperations,
@@ -422,6 +494,8 @@ export function createInventoryActions(deps: InventoryActionsDeps) {
     cancelDiscoveryJob,
     resumeDiscoveryJob,
     loadRiskFindings,
+    upsertRiskCatalogEntry,
+    deleteRiskCatalogEntry,
     generateConsolidationPlan,
     approveConsolidationPlan,
   };

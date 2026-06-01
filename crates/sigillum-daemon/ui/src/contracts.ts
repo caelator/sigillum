@@ -70,6 +70,16 @@ export interface RiskFinding {
   updated_at_unix: number;
 }
 
+export interface RiskCatalogEntry {
+  address: string;
+  label: string;
+  risk_level: string;
+  source: string;
+  notes: string[];
+  created_at_unix: number;
+  updated_at_unix: number;
+}
+
 export interface ConsolidationPlanSummary {
   plan_id: string;
   status: string;

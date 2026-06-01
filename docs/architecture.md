@@ -166,13 +166,14 @@ What it intentionally does not do today:
   transfer-log token discovery, bounded ERC-721 transfer-log discovery with
   `ownerOf` confirmation, bounded ERC-1155 transfer discovery with `balanceOf`
   confirmation, operator-bounded ERC-20 allowance probes, operator-bounded
-  Permit2 allowance probes, and operator-bounded NFT approval probes
+  Permit2 allowance probes, operator-bounded NFT approval probes, and local
+  operator-managed spender/operator risk catalog overrides
 - seed/xpub gap-limit discovery, historical receive-address scanning, or
   dormant-wallet classification
 - full token registry/indexer scraping, full ERC-1155 batch/history coverage,
   NFT metadata and spam classification, Permit2 expiration-aware risk scoring,
-  spender/operator registries, DeFi position discovery, or airdrop/reward
-  discovery
+  external spender/operator registries, DeFi position discovery, or
+  airdrop/reward discovery
 - consolidation planning for discovered holdings outside the current stealth
   deposit sweep flow
 

@@ -95,6 +95,23 @@ pub struct DiscoveryJobMutationRequest {
     pub id: String,
 }
 
+/// Add or replace a local risk catalog entry for a spender/operator address.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct RiskCatalogUpsertRequest {
+    pub address: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
+    pub risk_level: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub notes: Vec<String>,
+}
+
+/// Delete a local risk catalog entry by address.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct RiskCatalogDeleteRequest {
+    pub address: String,
+}
+
 /// Generate a dry-run consolidation plan from the current inventory.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ConsolidationPlanGenerateRequest {

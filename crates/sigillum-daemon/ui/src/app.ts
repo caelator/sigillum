@@ -1028,6 +1028,8 @@ function formatAuditEvent(event) {
     'profiles.eth_xpub_wallet.delete': 'Deleted xpub wallet profile',
     'profiles.eth_seed_wallet.upsert': 'Imported seed wallet profile',
     'profiles.eth_seed_wallet.delete': 'Deleted seed wallet profile',
+    'wallet_inventory.risk_catalog.upsert': 'Saved risk catalog entry',
+    'wallet_inventory.risk_catalog.delete': 'Deleted risk catalog entry',
     'wallet.eth_xpub.export': 'Exported xpub receive branch',
     'fido2.setup': 'Completed FIDO2 setup',
     'fido2.register': 'Registered FIDO2 key',
@@ -1040,6 +1042,7 @@ function formatAuditEvent(event) {
   if (details.label) suffix = ' - ' + details.label;
   else if (details.key) suffix = ' - ' + details.key;
   else if (details.name) suffix = ' - ' + details.name;
+  else if (details.address) suffix = ' - ' + details.address;
   else if (details.wallet_profile) suffix = ' - ' + details.wallet_profile;
   else if (details.compartment_count) suffix = ' - ' + details.compartment_count + ' compartments';
   else if (details.count) suffix = ' - ' + details.count + ' compartments';
@@ -1132,6 +1135,7 @@ const UI_ACTIONS = {
   createNativeDeposit: operationsActions.createNativeDeposit,
   deleteApiKey,
   deleteChainProfile: inventoryActions.deleteChainProfile,
+  deleteRiskCatalogEntry: inventoryActions.deleteRiskCatalogEntry,
   deleteDeposit: operationsActions.deleteDeposit,
   deleteProviderProfile: walletActions.deleteProviderProfile,
   deleteSecret,
@@ -1180,6 +1184,7 @@ const UI_ACTIONS = {
   togglePoisonWarning: fido2Actions.togglePoisonWarning,
   unlock,
   upsertChainProfile: inventoryActions.upsertChainProfile,
+  upsertRiskCatalogEntry: inventoryActions.upsertRiskCatalogEntry,
   upsertProviderProfile: walletActions.upsertProviderProfile,
   upsertSeedWalletProfile: walletActions.upsertSeedWalletProfile,
   upsertWalletProfile: walletActions.upsertWalletProfile,

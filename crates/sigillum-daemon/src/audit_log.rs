@@ -373,6 +373,10 @@ pub(crate) enum AuditEventSpec {
     WalletInventoryChainProfileDelete { name: String },
     #[serde(rename = "wallet_inventory.discovery_job.update")]
     WalletInventoryDiscoveryJobUpdate { id: String, status: String },
+    #[serde(rename = "wallet_inventory.risk_catalog.upsert")]
+    WalletInventoryRiskCatalogUpsert { address: String, risk_level: String },
+    #[serde(rename = "wallet_inventory.risk_catalog.delete")]
+    WalletInventoryRiskCatalogDelete { address: String },
     #[serde(rename = "wallet_consolidation.plan.generate")]
     WalletConsolidationPlanGenerate {
         id: String,
@@ -463,6 +467,8 @@ impl AuditEventSpec {
             Self::WalletInventoryDiscoveryJobUpdate { .. } => {
                 "wallet_inventory.discovery_job.update"
             }
+            Self::WalletInventoryRiskCatalogUpsert { .. } => "wallet_inventory.risk_catalog.upsert",
+            Self::WalletInventoryRiskCatalogDelete { .. } => "wallet_inventory.risk_catalog.delete",
             Self::WalletConsolidationPlanGenerate { .. } => "wallet_consolidation.plan.generate",
             Self::WalletConsolidationPlanApprove { .. } => "wallet_consolidation.plan.approve",
             Self::RunComplete { .. } => "run.complete",
@@ -755,6 +761,13 @@ impl AuditEventSpec {
             Self::WalletInventoryChainProfileDelete { name } => json!({ "name": name }),
             Self::WalletInventoryDiscoveryJobUpdate { id, status } => {
                 json!({ "id": id, "status": status })
+            }
+            Self::WalletInventoryRiskCatalogUpsert {
+                address,
+                risk_level,
+            } => json!({ "address": address, "risk_level": risk_level }),
+            Self::WalletInventoryRiskCatalogDelete { address } => {
+                json!({ "address": address })
             }
             Self::WalletConsolidationPlanGenerate { id, steps, blocked } => {
                 json!({ "id": id, "steps": steps, "blocked": blocked })

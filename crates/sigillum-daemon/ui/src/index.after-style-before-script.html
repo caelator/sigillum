@@ -609,6 +609,22 @@
     <div class="section-divider"></div>
     <div class="section-title">Risk And Plans</div>
     <div class="form-row">
+      <input type="text" id="riskCatalogAddress" placeholder="Spender/operator address">
+      <input type="text" id="riskCatalogLabel" placeholder="Risk label">
+      <select id="riskCatalogLevel" class="input-mid">
+        <option value="trusted">trusted</option>
+        <option value="low">low</option>
+        <option value="medium">medium</option>
+        <option value="high">high</option>
+        <option value="critical">critical</option>
+      </select>
+    </div>
+    <div class="form-row">
+      <input type="text" id="riskCatalogNote" placeholder="Catalog note (optional)">
+      <button class="btn-ghost" data-action="upsertRiskCatalogEntry">Save Risk Label</button>
+    </div>
+    <div id="riskCatalogList"></div>
+    <div class="form-row">
       <input type="text" id="planDestinationAddress" placeholder="Consolidation destination address">
       <button class="btn-ghost" data-action="loadRiskFindings">Refresh Risks</button>
       <button class="btn-primary" data-action="generateConsolidationPlan">Generate Plan</button>

@@ -8,8 +8,8 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 use sigillum_api::{
-    ChainProfile, ConsolidationPlan, RiskFinding, WalletAssetHolding, WalletDiscoveryJob,
-    WalletInventoryAddress,
+    ChainProfile, ConsolidationPlan, RiskCatalogEntry, RiskFinding, WalletAssetHolding,
+    WalletDiscoveryJob, WalletInventoryAddress,
 };
 
 use crate::json_store::{JsonDocument, JsonSchema};
@@ -25,13 +25,15 @@ pub struct WalletInventoryState {
     #[serde(default)]
     pub holdings: Vec<WalletAssetHolding>,
     #[serde(default)]
+    pub risk_catalog: Vec<RiskCatalogEntry>,
+    #[serde(default)]
     pub risk_findings: Vec<RiskFinding>,
     #[serde(default)]
     pub consolidation_plans: Vec<ConsolidationPlan>,
 }
 
 impl JsonDocument for WalletInventoryState {
-    const SCHEMA: JsonSchema = JsonSchema::new("sigillum.wallet-inventory", 2);
+    const SCHEMA: JsonSchema = JsonSchema::new("sigillum.wallet-inventory", 3);
 
     fn from_enveloped_json(
         path: &std::path::Path,
@@ -39,7 +41,7 @@ impl JsonDocument for WalletInventoryState {
         data: serde_json::Value,
     ) -> Result<Self, std::io::Error> {
         match version {
-            1 | 2 => serde_json::from_value(data).map_err(|error| {
+            1..=3 => serde_json::from_value(data).map_err(|error| {
                 std::io::Error::new(
                     std::io::ErrorKind::InvalidData,
                     format!(
@@ -162,6 +164,18 @@ mod tests {
         }
     }
 
+    fn sample_risk_catalog_entry() -> RiskCatalogEntry {
+        RiskCatalogEntry {
+            address: "0x4444444444444444444444444444444444444444".into(),
+            label: "Known router".into(),
+            risk_level: "trusted".into(),
+            source: "operator".into(),
+            notes: vec!["Operator-approved spender".into()],
+            created_at_unix: 1,
+            updated_at_unix: 2,
+        }
+    }
+
     #[test]
     fn load_returns_default_when_no_file() {
         let dir = TempDir::new().unwrap();
@@ -179,6 +193,7 @@ mod tests {
         state.jobs.push(sample_job());
         state.addresses.push(sample_address());
         state.holdings.push(sample_holding());
+        state.risk_catalog.push(sample_risk_catalog_entry());
 
         save_wallet_inventory(dir.path(), &state).unwrap();
         let loaded = load_wallet_inventory(dir.path()).unwrap();
@@ -187,6 +202,7 @@ mod tests {
         assert_eq!(loaded.chain_profiles.len(), 1);
         assert_eq!(loaded.addresses.len(), 1);
         assert_eq!(loaded.holdings.len(), 1);
+        assert_eq!(loaded.risk_catalog.len(), 1);
         assert_eq!(loaded.addresses[0].wallet_profile, "seed-main");
     }
 
@@ -199,10 +215,11 @@ mod tests {
             serde_json::from_slice(&std::fs::read(wallet_inventory_path(dir.path())).unwrap())
                 .unwrap();
         assert_eq!(saved["schema"], json!("sigillum.wallet-inventory"));
-        assert_eq!(saved["schema_version"], json!(2));
+        assert_eq!(saved["schema_version"], json!(3));
         assert!(saved["data"]["chain_profiles"].is_array());
         assert!(saved["data"]["jobs"].is_array());
         assert!(saved["data"]["addresses"].is_array());
         assert!(saved["data"]["holdings"].is_array());
+        assert!(saved["data"]["risk_catalog"].is_array());
     }
 }

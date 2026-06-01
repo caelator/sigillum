@@ -572,6 +572,19 @@ fn test_discovery_job_mutation_request_roundtrip() {
 }
 
 #[test]
+fn test_risk_catalog_requests_roundtrip() {
+    roundtrip_test(RiskCatalogUpsertRequest {
+        address: "0x4444444444444444444444444444444444444444".to_string(),
+        label: Some("Known router".to_string()),
+        risk_level: "trusted".to_string(),
+        notes: vec!["Operator-approved spender".to_string()],
+    });
+    roundtrip_test(RiskCatalogDeleteRequest {
+        address: "0x4444444444444444444444444444444444444444".to_string(),
+    });
+}
+
+#[test]
 fn test_consolidation_plan_generate_request_roundtrip() {
     let req = ConsolidationPlanGenerateRequest {
         destination_address: Some("0xdestination".to_string()),

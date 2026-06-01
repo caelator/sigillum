@@ -7,6 +7,7 @@ mod observation;
 mod permit2_discovery;
 mod planner;
 mod risk;
+mod risk_catalog;
 mod support;
 mod token_discovery;
 
@@ -243,6 +244,7 @@ impl SigillumService {
         findings.extend(derive_inventory_risk_findings(
             &state.addresses,
             &state.holdings,
+            &state.risk_catalog,
         ));
         Ok(RiskFindingListResponse { findings })
     }

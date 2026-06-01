@@ -1,4 +1,4 @@
-use sigillum_api::{RiskFinding, WalletAssetHolding, WalletInventoryAddress};
+use sigillum_api::{RiskCatalogEntry, RiskFinding, WalletAssetHolding, WalletInventoryAddress};
 use sigillum_core::decode_quantity_hex;
 
 use super::nft_approval_discovery::DISCOVERY_SOURCE_NFT_OPERATOR_APPROVAL_PROBE;
@@ -8,6 +8,7 @@ use super::support::quantity_hex_is_nonzero;
 pub(super) fn derive_inventory_risk_findings(
     addresses: &[WalletInventoryAddress],
     holdings: &[WalletAssetHolding],
+    risk_catalog: &[RiskCatalogEntry],
 ) -> Vec<RiskFinding> {
     let mut findings = Vec::new();
     for holding in holdings
@@ -15,7 +16,11 @@ pub(super) fn derive_inventory_risk_findings(
         .filter(|holding| quantity_hex_is_nonzero(&holding.amount_hex))
     {
         if holding.asset_kind == "approval" {
-            findings.push(approval_finding(holding));
+            let catalog_entry = holding
+                .counterparty_address
+                .as_deref()
+                .and_then(|spender| risk_catalog_entry_for_address(risk_catalog, spender));
+            findings.push(approval_finding(holding, catalog_entry));
             continue;
         }
         if holding.asset_kind != "native"
@@ -52,19 +57,23 @@ pub(super) fn derive_inventory_risk_findings(
     findings
 }
 
-fn approval_finding(holding: &WalletAssetHolding) -> RiskFinding {
+fn approval_finding(
+    holding: &WalletAssetHolding,
+    catalog_entry: Option<&RiskCatalogEntry>,
+) -> RiskFinding {
     let spender = holding
         .counterparty_address
         .clone()
         .unwrap_or_else(|| "unknown-spender".into());
     let is_nft_operator_approval = holding.source == DISCOVERY_SOURCE_NFT_OPERATOR_APPROVAL_PROBE;
     let is_permit2_allowance = holding.source == DISCOVERY_SOURCE_PERMIT2_ALLOWANCE_PROBE;
-    let risk_level = if is_nft_operator_approval || is_very_large_approval(&holding.amount_hex) {
+    let base_risk_level = if is_nft_operator_approval || is_very_large_approval(&holding.amount_hex)
+    {
         "high"
     } else {
         "medium"
     };
-    let (recommendation, evidence) = if is_nft_operator_approval {
+    let (recommendation, mut evidence) = if is_nft_operator_approval {
         (
             "Review the operator and revoke setApprovalForAll if it is no longer needed.",
             vec![
@@ -111,10 +120,29 @@ fn approval_finding(holding: &WalletAssetHolding) -> RiskFinding {
             ],
         )
     };
+    let mut risk_level = base_risk_level.to_string();
+    if let Some(entry) = catalog_entry {
+        risk_level = risk_level_from_catalog_entry(entry);
+        evidence.push(format!(
+            "Risk catalog: {} ({})",
+            entry.label, entry.risk_level
+        ));
+        evidence.push(format!("Catalog source: {}", entry.source));
+        evidence.extend(
+            entry
+                .notes
+                .iter()
+                .map(|note| format!("Catalog note: {note}")),
+        );
+    }
+    let recommendation = catalog_entry
+        .map(|entry| recommendation_with_catalog(entry, recommendation))
+        .unwrap_or_else(|| recommendation.into());
+
     RiskFinding {
         id: stable_approval_finding_id(holding, &spender),
         category: "risky_approval".into(),
-        risk_level: risk_level.into(),
+        risk_level,
         status: "open".into(),
         wallet_family: holding.wallet_family.clone(),
         wallet_profile: holding.wallet_profile.clone(),
@@ -124,10 +152,45 @@ fn approval_finding(holding: &WalletAssetHolding) -> RiskFinding {
         subject_type: "approval".into(),
         subject: spender.clone(),
         source: "local-risk-engine".into(),
-        recommendation: recommendation.into(),
+        recommendation,
         evidence,
         first_seen_at_unix: holding.first_seen_at_unix,
         last_checked_at_unix: holding.last_checked_at_unix,
+    }
+}
+
+fn risk_catalog_entry_for_address<'a>(
+    entries: &'a [RiskCatalogEntry],
+    address: &str,
+) -> Option<&'a RiskCatalogEntry> {
+    entries
+        .iter()
+        .find(|entry| entry.address.eq_ignore_ascii_case(address))
+}
+
+fn risk_level_from_catalog_entry(entry: &RiskCatalogEntry) -> String {
+    match entry.risk_level.as_str() {
+        "trusted" => "low".into(),
+        "low" | "medium" | "high" | "critical" => entry.risk_level.clone(),
+        _ => "medium".into(),
+    }
+}
+
+fn recommendation_with_catalog(entry: &RiskCatalogEntry, default: &str) -> String {
+    match entry.risk_level.as_str() {
+        "trusted" | "low" => format!(
+            "Risk catalog marks {} as {}; keep this approval only if it is still intentional.",
+            entry.label, entry.risk_level
+        ),
+        "high" | "critical" => format!(
+            "Risk catalog marks {} as {}; revoke this approval unless there is an explicit operator exception.",
+            entry.label, entry.risk_level
+        ),
+        "medium" => format!(
+            "Risk catalog marks {} as medium risk; review this approval before consolidation.",
+            entry.label
+        ),
+        _ => default.into(),
     }
 }
 
