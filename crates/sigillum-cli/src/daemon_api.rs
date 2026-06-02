@@ -41,7 +41,9 @@ mod deposits;
 mod inventory_args;
 mod queue;
 
-use inventory_args::{parse_claim_candidate_probes, parse_defi_token_probes};
+use inventory_args::{
+    parse_claim_candidate_probes, parse_defi_token_probes, parse_watch_address_probes,
+};
 
 const DEFAULT_DAEMON_BASE_URL: &str = "http://127.0.0.1:9743";
 const DAEMON_READY_TIMEOUT: Duration = Duration::from_secs(10);
@@ -272,6 +274,7 @@ fn cmd_api_inventory(args: &[String]) {
                 wallet_family: parse_flag(args, "--wallet-family"),
                 wallet_profile: parse_flag(args, "--wallet-profile"),
                 provider_profile: parse_flag(args, "--provider-profile"),
+                watch_addresses: parse_watch_address_probes(args),
                 gap_limit: parse_u32_flag(args, "--gap-limit"),
                 max_index: parse_u32_flag(args, "--max-index"),
                 token_addresses: parse_multi_flag(args, "--token-address"),

@@ -1,11 +1,14 @@
-use sigillum_api::{EvmProviderProfile, WalletAssetHolding, WalletInventoryAddress};
+use sigillum_api::{
+    EvmProviderProfile, WalletAssetHolding, WalletDiscoveryJob, WalletInventoryAddress,
+};
 
 use crate::service::helpers::random_id;
 use crate::service::{ServiceError, ServiceResult};
 
 use super::{
     DEFAULT_GAP_LIMIT, DEFAULT_MAX_INDEX, DISCOVERY_SOURCE_LOCAL_RPC, DiscoveryWallet,
-    MAX_GAP_LIMIT, MAX_SCAN_INDEX, WALLET_FAMILY_ETH_SEED, WALLET_FAMILY_ETH_XPUB,
+    MAX_GAP_LIMIT, MAX_SCAN_INDEX, WALLET_FAMILY_ETH_SEED, WALLET_FAMILY_ETH_WATCH,
+    WALLET_FAMILY_ETH_XPUB,
 };
 
 #[derive(Clone, Debug)]
@@ -58,6 +61,35 @@ pub(super) fn save_inventory_state(
     })
 }
 
+pub(super) fn record_inventory_observation(
+    job: &mut WalletDiscoveryJob,
+    inventory: &mut crate::inventory::WalletInventoryState,
+    observation: InventoryAddressObservation,
+    detected_holdings: &mut Vec<WalletAssetHolding>,
+    scanned_addresses: &mut Vec<WalletInventoryAddress>,
+) {
+    job.addresses_scanned += 1;
+    if observation.address.activity_state != "empty" {
+        job.active_addresses += 1;
+    }
+    for holding in &observation.holdings {
+        if quantity_hex_is_nonzero(&holding.amount_hex) {
+            job.holdings_detected += 1;
+        }
+    }
+
+    upsert_address(&mut inventory.addresses, observation.address.clone());
+    for holding in observation.holdings {
+        if quantity_hex_is_nonzero(&holding.amount_hex) {
+            upsert_holding(&mut inventory.holdings, holding.clone());
+            detected_holdings.push(holding);
+        } else {
+            remove_holding(&mut inventory.holdings, &holding);
+        }
+    }
+    scanned_addresses.push(observation.address);
+}
+
 pub(super) fn trimmed_required(field: &str, value: &str) -> ServiceResult<String> {
     let value = value.trim();
     if value.is_empty() {
@@ -106,8 +138,9 @@ pub(super) fn normalized_wallet_family(value: Option<&str>) -> ServiceResult<Opt
         None => Ok(None),
         Some(WALLET_FAMILY_ETH_SEED) => Ok(Some(WALLET_FAMILY_ETH_SEED.into())),
         Some(WALLET_FAMILY_ETH_XPUB) => Ok(Some(WALLET_FAMILY_ETH_XPUB.into())),
+        Some(WALLET_FAMILY_ETH_WATCH) => Ok(Some(WALLET_FAMILY_ETH_WATCH.into())),
         Some(_) => Err(ServiceError::bad_request(
-            "wallet_family must be 'eth-seed' or 'eth-xpub'",
+            "wallet_family must be 'eth-seed', 'eth-xpub', or 'eth-watch'",
         )),
     }
 }

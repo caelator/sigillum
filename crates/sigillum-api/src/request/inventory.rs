@@ -41,6 +41,18 @@ pub struct ClaimCandidateProbe {
     pub claim_proof: Vec<String>,
 }
 
+/// Ad-hoc EVM address to include in read-only wallet inventory discovery.
+///
+/// Watch probes are useful for old exchange, hardware-wallet, client, or
+/// manually found addresses where Sigillum should inventory balances and risk
+/// without implying signer availability.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct WatchAddressProbe {
+    pub address: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
+}
+
 /// Run read-only EVM wallet discovery for imported seed and xpub profiles.
 ///
 /// When no wallet filter is provided, all `eth-seed` and `eth-xpub` profiles
@@ -55,6 +67,8 @@ pub struct WalletInventoryScanRequest {
     pub wallet_profile: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub provider_profile: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub watch_addresses: Vec<WatchAddressProbe>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub gap_limit: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]

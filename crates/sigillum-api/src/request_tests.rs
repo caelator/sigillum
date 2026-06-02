@@ -522,6 +522,10 @@ fn test_wallet_inventory_scan_request_roundtrip() {
         wallet_family: Some("eth-seed".to_string()),
         wallet_profile: Some("seed-main".to_string()),
         provider_profile: Some("mainnet".to_string()),
+        watch_addresses: vec![WatchAddressProbe {
+            address: "0x7777777777777777777777777777777777777777".to_string(),
+            label: Some("old-ledger".to_string()),
+        }],
         gap_limit: Some(20),
         max_index: Some(200),
         token_addresses: vec!["0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48".to_string()],

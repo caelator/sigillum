@@ -1498,6 +1498,109 @@ async fn wallet_inventory_scan_records_seed_profile_native_holdings() {
 }
 
 #[tokio::test]
+async fn wallet_inventory_scan_records_ad_hoc_watch_addresses() {
+    let dir = TempDir::new().unwrap();
+    let (addr, handle) = spawn_daemon(dir.path().to_path_buf()).await;
+    let (rpc_addr, rpc_handle) = spawn_mock_evm_provider().await;
+    let client = reqwest::Client::new();
+
+    let init = post_json(
+        &client,
+        addr,
+        "/api/compartment/init",
+        json!({
+            "id": 0,
+            "label": "default",
+            "threshold": 1,
+            "passphrase": "correct horse battery staple",
+        }),
+        None,
+    )
+    .await;
+    let init_json: serde_json::Value = init.json().await.unwrap();
+    let token = init_json["session_token"].as_str().unwrap().to_string();
+
+    post_json(
+        &client,
+        addr,
+        "/api/api-keys/set",
+        json!({ "key": "alchemy", "value": "rpc-test-token" }),
+        Some(&token),
+    )
+    .await;
+
+    post_json(
+        &client,
+        addr,
+        "/api/profiles/evm/upsert",
+        json!({
+            "name": "mainnet",
+            "rpc_url": format!("http://{rpc_addr}/"),
+            "auth_token_key": "alchemy",
+            "chain_id": 1,
+        }),
+        Some(&token),
+    )
+    .await;
+
+    let scan = post_json(
+        &client,
+        addr,
+        "/api/inventory/scan/evm",
+        json!({
+            "provider_profile": "mainnet",
+            "wallet_family": "eth-watch",
+            "watch_addresses": [{
+                "address": "0x7777777777777777777777777777777777777777",
+                "label": "old-ledger"
+            }]
+        }),
+        Some(&token),
+    )
+    .await;
+    let scan_status = scan.status();
+    let scan_json: serde_json::Value = scan.json().await.unwrap();
+    assert_eq!(scan_status, StatusCode::OK, "scan response: {scan_json}");
+    assert_eq!(scan_json["job"]["status"], "completed");
+    assert_eq!(scan_json["job"]["addresses_scanned"], 1);
+    assert_eq!(scan_json["job"]["active_addresses"], 1);
+    assert_eq!(scan_json["job"]["holdings_detected"], 1);
+    assert_eq!(scan_json["job"]["wallet_families"][0], "eth-watch");
+    assert_eq!(scan_json["job"]["wallet_profiles"][0], "watch:old-ledger");
+    assert_eq!(scan_json["addresses"][0]["wallet_family"], "eth-watch");
+    assert_eq!(
+        scan_json["addresses"][0]["wallet_profile"],
+        "watch:old-ledger"
+    );
+    assert_eq!(
+        scan_json["addresses"][0]["address"],
+        "0x7777777777777777777777777777777777777777"
+    );
+    let classifications = scan_json["addresses"][0]["classifications"]
+        .as_array()
+        .unwrap();
+    assert!(
+        classifications
+            .iter()
+            .any(|classification| classification == "watch_only")
+    );
+    assert!(
+        classifications
+            .iter()
+            .any(|classification| classification == "gas_available")
+    );
+
+    let list = get(&client, addr, "/api/inventory/wallets", Some(&token)).await;
+    assert_eq!(list.status(), StatusCode::OK);
+    let list_json: serde_json::Value = list.json().await.unwrap();
+    assert_eq!(list_json["addresses"].as_array().unwrap().len(), 1);
+    assert_eq!(list_json["holdings"].as_array().unwrap().len(), 1);
+
+    handle.abort();
+    rpc_handle.abort();
+}
+
+#[tokio::test]
 async fn wallet_inventory_scan_discovers_erc20_tokens_from_transfer_logs() {
     let dir = TempDir::new().unwrap();
     let (addr, handle) = spawn_daemon(dir.path().to_path_buf()).await;

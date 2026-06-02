@@ -1,6 +1,6 @@
 use std::process;
 
-use sigillum_api::request::{ClaimCandidateProbe, DefiTokenProbe};
+use sigillum_api::request::{ClaimCandidateProbe, DefiTokenProbe, WatchAddressProbe};
 
 pub(super) fn parse_defi_token_probes(args: &[String]) -> Vec<DefiTokenProbe> {
     parse_multi_flag(args, "--defi-token-probe")
@@ -13,6 +13,13 @@ pub(super) fn parse_claim_candidate_probes(args: &[String]) -> Vec<ClaimCandidat
     parse_multi_flag(args, "--claim-candidate")
         .into_iter()
         .map(|value| parse_claim_candidate_value(&value))
+        .collect()
+}
+
+pub(super) fn parse_watch_address_probes(args: &[String]) -> Vec<WatchAddressProbe> {
+    parse_multi_flag(args, "--watch-address")
+        .into_iter()
+        .map(|value| parse_watch_address_value(&value))
         .collect()
 }
 
@@ -64,6 +71,23 @@ fn parse_claim_candidate_value(value: &str) -> ClaimCandidateProbe {
         claim_adapter,
         claim_index_hex,
         claim_proof,
+    }
+}
+
+fn parse_watch_address_value(value: &str) -> WatchAddressProbe {
+    let mut parts = value.splitn(2, ':');
+    let address = parts.next().unwrap_or_default().trim();
+    if address.is_empty() {
+        eprintln!("Invalid value for --watch-address: expected address[:label]");
+        process::exit(1);
+    }
+    WatchAddressProbe {
+        address: address.to_string(),
+        label: parts
+            .next()
+            .map(str::trim)
+            .filter(|label| !label.is_empty())
+            .map(str::to_string),
     }
 }
 

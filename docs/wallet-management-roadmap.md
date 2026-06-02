@@ -43,6 +43,11 @@ Required discovery classes:
   account paths, and configurable gap limits.
 - Xpub receive branch discovery for public project wallets, including used
   address detection, balance checks, and gap-limit continuation.
+- Ad-hoc EVM watch-address discovery for old exchange, hardware wallet,
+  client, or externally found addresses. The first slice is implemented as
+  bounded read-only `eth-watch` probes in EVM inventory scans, preserving
+  watch-only classification and blocking consolidation execution unless signer
+  material is later introduced through an explicit profile.
 - ERC-20 discovery from configured allowlists, transfer logs, token registries,
   and positive balances discovered through provider APIs or local index data.
   The first bounded transfer-log discovery slice is implemented for EVM

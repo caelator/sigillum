@@ -1,5 +1,6 @@
 use sigillum_api::EvmProviderProfile;
 
+use crate::service::evm::normalize_address;
 use crate::service::{ServiceResult, SigillumService};
 
 use super::allowance_discovery::{
@@ -27,7 +28,8 @@ use super::token_discovery::{
     DISCOVERY_SOURCE_ERC20_TRANSFER_LOG, Erc20TransferDiscoveryConfig, push_unique_token,
 };
 use super::{
-    DISCOVERY_SOURCE_LOCAL_RPC, DiscoveryWallet, WALLET_FAMILY_ETH_SEED, WALLET_FAMILY_ETH_XPUB,
+    DISCOVERY_SOURCE_LOCAL_RPC, DiscoveryWallet, WALLET_FAMILY_ETH_SEED, WALLET_FAMILY_ETH_WATCH,
+    WALLET_FAMILY_ETH_XPUB,
 };
 
 impl SigillumService {
@@ -51,7 +53,7 @@ impl SigillumService {
         claim_candidate_discovery: Option<&ClaimCandidateDiscoveryConfig>,
         now: u64,
     ) -> ServiceResult<InventoryAddressObservation> {
-        let address = super::normalize_address(address)?;
+        let address = normalize_address(address)?;
         let native_balance_wei_hex = self
             .evm_native_balance_for_provider(provider.compartment_id, provider, &address, block_tag)
             .await?;
@@ -328,7 +330,9 @@ fn address_classifications(
     let mut classifications = Vec::new();
     match wallet.family.as_str() {
         WALLET_FAMILY_ETH_SEED => push_classification(&mut classifications, "signer_available"),
-        WALLET_FAMILY_ETH_XPUB => push_classification(&mut classifications, "watch_only"),
+        WALLET_FAMILY_ETH_XPUB | WALLET_FAMILY_ETH_WATCH => {
+            push_classification(&mut classifications, "watch_only");
+        }
         _ => push_classification(&mut classifications, "signer_unknown"),
     }
 

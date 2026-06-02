@@ -15,19 +15,21 @@ mod risk_catalog;
 mod simulation;
 mod support;
 mod token_discovery;
+mod wallet_selection;
+mod watch_discovery;
 
 use sigillum_api::{
     ChainProfile, ChainProfileDeleteRequest, ChainProfileListResponse,
     ChainProfileMutationResponse, ChainProfileUpsertRequest, ConsolidationPlan,
     ConsolidationPlanApproveRequest, ConsolidationPlanGenerateRequest,
     ConsolidationPlanListResponse, ConsolidationPlanMutationResponse, DiscoveryJobListResponse,
-    DiscoveryJobMutationRequest, DiscoveryJobMutationResponse, EthSeedWalletProfile,
-    EthXpubWalletProfile, RiskFindingListResponse, WalletDiscoveryJob, WalletInventoryListResponse,
-    WalletInventoryScanRequest, WalletInventoryScanResponse,
+    DiscoveryJobMutationRequest, DiscoveryJobMutationResponse, RiskFindingListResponse,
+    WalletDiscoveryJob, WalletInventoryListResponse, WalletInventoryScanRequest,
+    WalletInventoryScanResponse,
 };
 use sigillum_core::{
-    VaultLifecycle, decode_quantity_hex, derive_ethereum_address_from_control_xpub,
-    derive_ethereum_address_from_xpub, derive_sigillum_ethereum_xpub_receive_branch,
+    decode_quantity_hex, derive_ethereum_address_from_control_xpub,
+    derive_ethereum_address_from_xpub,
 };
 
 use crate::audit_log::AuditEventSpec;
@@ -42,10 +44,12 @@ use planner::{plan_step_for_holding, signer_status_for_holding, summarize_plan_s
 use risk::derive_inventory_risk_findings;
 use support::{
     default_native_symbol, load_inventory_state, normalized_wallet_family, quantity_hex_is_nonzero,
-    remove_holding, save_inventory_state, select_providers, trimmed_optional, trimmed_required,
-    unique_strings, upsert_address, upsert_holding, validated_gap_limit, validated_max_index,
+    record_inventory_observation, save_inventory_state, select_providers, trimmed_optional,
+    trimmed_required, unique_strings, validated_gap_limit, validated_max_index,
 };
 use token_discovery::erc20_transfer_discovery_config;
+use wallet_selection::{DiscoveryWallet, select_discovery_wallets};
+use watch_discovery::select_watch_addresses;
 
 use super::evm::normalize_address;
 use super::helpers::{compare_u256, map_xpub_error, now_unix, random_id};
@@ -53,20 +57,14 @@ use super::{ServiceError, ServiceResult, SigillumService};
 
 const WALLET_FAMILY_ETH_SEED: &str = "eth-seed";
 const WALLET_FAMILY_ETH_XPUB: &str = "eth-xpub";
+const WALLET_FAMILY_ETH_WATCH: &str = "eth-watch";
 const DISCOVERY_SOURCE_LOCAL_RPC: &str = "local-rpc";
 const DISCOVERY_SOURCE_OPERATOR: &str = "operator";
 const DEFAULT_GAP_LIMIT: u32 = 20;
 const MAX_GAP_LIMIT: u32 = 100;
 const DEFAULT_MAX_INDEX: u32 = 200;
 const MAX_SCAN_INDEX: u32 = 10_000;
-
-#[derive(Clone, Debug)]
-struct DiscoveryWallet {
-    family: String,
-    profile: String,
-    receive_path: String,
-    receive_xpub: String,
-}
+const NO_DISCOVERY_WALLETS_ERROR: &str = "No matching discovery wallets found.";
 
 impl SigillumService {
     pub(crate) fn list_wallet_inventory(
@@ -502,21 +500,41 @@ impl SigillumService {
         })?;
         let providers =
             select_providers(&registry.evm_providers, body.provider_profile.as_deref())?;
-        let wallets = self.select_discovery_wallets(
-            token,
+        let wallets = select_discovery_wallets(
+            self,
             &registry.eth_seed_wallets,
             &registry.eth_xpub_wallets,
             requested_family.as_deref(),
             body.wallet_profile.as_deref(),
         )?;
+        let watch_addresses = select_watch_addresses(
+            &body.watch_addresses,
+            requested_family.as_deref(),
+            body.wallet_profile.as_deref(),
+        )?;
+        if wallets.is_empty() && watch_addresses.is_empty() {
+            return Err(ServiceError::not_found(NO_DISCOVERY_WALLETS_ERROR));
+        }
 
         let started_at_unix = now_unix();
         let mut job = WalletDiscoveryJob {
             id: random_id(),
             status: "running".into(),
             source: DISCOVERY_SOURCE_LOCAL_RPC.into(),
-            wallet_families: unique_strings(wallets.iter().map(|wallet| wallet.family.clone())),
-            wallet_profiles: unique_strings(wallets.iter().map(|wallet| wallet.profile.clone())),
+            wallet_families: unique_strings(
+                wallets.iter().map(|wallet| wallet.family.clone()).chain(
+                    watch_addresses
+                        .iter()
+                        .map(|watch| watch.wallet.family.clone()),
+                ),
+            ),
+            wallet_profiles: unique_strings(
+                wallets.iter().map(|wallet| wallet.profile.clone()).chain(
+                    watch_addresses
+                        .iter()
+                        .map(|watch| watch.wallet.profile.clone()),
+                ),
+            ),
             provider_profiles: unique_strings(
                 providers.iter().map(|provider| provider.name.clone()),
             ),
@@ -568,27 +586,16 @@ impl SigillumService {
                             started_at_unix,
                         )
                         .await?;
-                    job.addresses_scanned += 1;
                     if observation.address.activity_state != "empty" {
-                        job.active_addresses += 1;
                         index_has_activity = true;
                     }
-                    for holding in &observation.holdings {
-                        if quantity_hex_is_nonzero(&holding.amount_hex) {
-                            job.holdings_detected += 1;
-                        }
-                    }
-
-                    upsert_address(&mut inventory.addresses, observation.address.clone());
-                    for holding in observation.holdings.iter().cloned() {
-                        if quantity_hex_is_nonzero(&holding.amount_hex) {
-                            upsert_holding(&mut inventory.holdings, holding.clone());
-                            detected_holdings.push(holding);
-                        } else {
-                            remove_holding(&mut inventory.holdings, &holding);
-                        }
-                    }
-                    scanned_addresses.push(observation.address);
+                    record_inventory_observation(
+                        &mut job,
+                        &mut inventory,
+                        observation,
+                        &mut detected_holdings,
+                        &mut scanned_addresses,
+                    );
                 }
 
                 if index_has_activity {
@@ -635,32 +642,50 @@ impl SigillumService {
                                         started_at_unix,
                                     )
                                     .await?;
-                                job.addresses_scanned += 1;
-                                if observation.address.activity_state != "empty" {
-                                    job.active_addresses += 1;
-                                }
-                                for holding in &observation.holdings {
-                                    if quantity_hex_is_nonzero(&holding.amount_hex) {
-                                        job.holdings_detected += 1;
-                                    }
-                                }
-                                upsert_address(
-                                    &mut inventory.addresses,
-                                    observation.address.clone(),
+                                record_inventory_observation(
+                                    &mut job,
+                                    &mut inventory,
+                                    observation,
+                                    &mut detected_holdings,
+                                    &mut scanned_addresses,
                                 );
-                                for holding in observation.holdings.iter().cloned() {
-                                    if quantity_hex_is_nonzero(&holding.amount_hex) {
-                                        upsert_holding(&mut inventory.holdings, holding.clone());
-                                        detected_holdings.push(holding);
-                                    } else {
-                                        remove_holding(&mut inventory.holdings, &holding);
-                                    }
-                                }
-                                scanned_addresses.push(observation.address);
                             }
                         }
                     }
                 }
+            }
+        }
+
+        for watch in &watch_addresses {
+            let derivation_path = format!("{}/{}", watch.wallet.receive_path, watch.address_index);
+            for provider in &providers {
+                let observation = self
+                    .observe_inventory_address(
+                        &watch.wallet,
+                        provider,
+                        &watch.address,
+                        &derivation_path,
+                        watch.address_index,
+                        &block_tag,
+                        &token_addresses,
+                        token_discovery.as_ref(),
+                        allowance_discovery.as_ref(),
+                        permit2_allowance_discovery.as_ref(),
+                        nft_discovery.as_ref(),
+                        erc1155_discovery.as_ref(),
+                        nft_operator_approval_discovery.as_ref(),
+                        defi_position_discovery.as_ref(),
+                        claim_candidate_discovery.as_ref(),
+                        started_at_unix,
+                    )
+                    .await?;
+                record_inventory_observation(
+                    &mut job,
+                    &mut inventory,
+                    observation,
+                    &mut detected_holdings,
+                    &mut scanned_addresses,
+                );
             }
         }
 
@@ -687,62 +712,5 @@ impl SigillumService {
             addresses: scanned_addresses,
             holdings: detected_holdings,
         })
-    }
-
-    fn select_discovery_wallets(
-        &self,
-        _token: &str,
-        seed_profiles: &[EthSeedWalletProfile],
-        xpub_profiles: &[EthXpubWalletProfile],
-        requested_family: Option<&str>,
-        requested_profile: Option<&str>,
-    ) -> ServiceResult<Vec<DiscoveryWallet>> {
-        let mut wallets = Vec::new();
-
-        if requested_family.is_none() || requested_family == Some(WALLET_FAMILY_ETH_SEED) {
-            for profile in seed_profiles {
-                if requested_profile.is_some_and(|name| name != profile.name) {
-                    continue;
-                }
-                wallets.push(DiscoveryWallet {
-                    family: WALLET_FAMILY_ETH_SEED.into(),
-                    profile: profile.name.clone(),
-                    receive_path: profile.receive_path.clone(),
-                    receive_xpub: profile.receive_xpub.clone(),
-                });
-            }
-        }
-
-        if requested_family.is_none() || requested_family == Some(WALLET_FAMILY_ETH_XPUB) {
-            for profile in xpub_profiles {
-                if requested_profile.is_some_and(|name| name != profile.name) {
-                    continue;
-                }
-                let export = self.with_vault(profile.compartment_id, |vault| {
-                    let master_key = vault
-                        .extract_master_key()
-                        .ok_or_else(|| ServiceError::forbidden("Wallet compartment is locked."))?;
-                    derive_sigillum_ethereum_xpub_receive_branch(
-                        master_key.as_ref(),
-                        profile.project_account,
-                    )
-                    .map_err(map_xpub_error)
-                })?;
-                wallets.push(DiscoveryWallet {
-                    family: WALLET_FAMILY_ETH_XPUB.into(),
-                    profile: profile.name.clone(),
-                    receive_path: export.receive_path,
-                    receive_xpub: export.receive_xpub,
-                });
-            }
-        }
-
-        if wallets.is_empty() {
-            return Err(ServiceError::not_found(
-                "No matching seed or xpub wallet profiles found.",
-            ));
-        }
-
-        Ok(wallets)
     }
 }

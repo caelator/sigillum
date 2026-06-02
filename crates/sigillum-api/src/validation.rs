@@ -529,6 +529,11 @@ impl Validate for crate::request::WalletInventoryScanRequest {
                 "claim_candidate_probes exceeds maximum length of {MAX_TOKEN_ADDRESSES} items"
             ));
         }
+        if self.watch_addresses.len() > MAX_TOKEN_ADDRESSES {
+            return Err(format!(
+                "watch_addresses exceeds maximum length of {MAX_TOKEN_ADDRESSES} items"
+            ));
+        }
         check_vec_items_len("token_addresses", &self.token_addresses, MAX_ADDRESS)?;
         check_vec_items_len(
             "allowance_spender_addresses",
@@ -617,6 +622,18 @@ impl Validate for crate::request::WalletInventoryScanRequest {
                 &format!("claim_candidate_probes[{index}].claim_proof"),
                 &probe.claim_proof,
                 MAX_HEX,
+            )?;
+        }
+        for (index, probe) in self.watch_addresses.iter().enumerate() {
+            check_len(
+                &format!("watch_addresses[{index}].address"),
+                &probe.address,
+                MAX_ADDRESS,
+            )?;
+            check_optional_len(
+                &format!("watch_addresses[{index}].label"),
+                &probe.label,
+                MAX_LABEL,
             )?;
         }
         Ok(())

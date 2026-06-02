@@ -263,6 +263,64 @@ test("inventory actions export consolidation manifests as downloads", async () =
   ok(toasts.some((message) => message.includes("Exported 2 step(s); skipped 1")));
 });
 
+test("inventory scan sends optional EVM watch-address probes", async () => {
+  const dom = installDom([
+    "inventoryWatchAddress",
+    "inventoryWatchLabel",
+    "inventoryTokenAddress",
+    "inventoryAllowanceSpender",
+    "inventoryPermit2Contract",
+    "inventoryPermit2Spender",
+    "inventoryNftOperator",
+    "inventoryWalletFamily",
+    "inventoryWalletProfile",
+    "inventoryProviderProfile",
+    "inventoryGapLimit",
+    "inventoryMaxIndex",
+    "inventoryDiscoverErc20Transfers",
+    "inventoryTokenDiscoveryFromBlock",
+    "inventoryTokenDiscoveryToBlock",
+    "inventoryTokenDiscoveryLimit",
+    "inventoryDiscoverErc20Allowances",
+    "inventoryAllowanceLimit",
+    "inventoryDiscoverPermit2Allowances",
+    "inventoryPermit2AllowanceLimit",
+    "inventoryDiscoverErc721Transfers",
+    "inventoryDiscoverErc1155Transfers",
+    "inventoryDiscoverNftOperatorApprovals",
+    "inventoryNftOperatorApprovalLimit",
+    "inventoryNftDiscoveryFromBlock",
+    "inventoryNftDiscoveryToBlock",
+    "inventoryNftDiscoveryLimit",
+  ]);
+  dom.el("inventoryWatchAddress").value = "0x7777777777777777777777777777777777777777";
+  dom.el("inventoryWatchLabel").value = "old-ledger";
+  dom.el("inventoryProviderProfile").value = "mainnet";
+  let requestBody: any = null;
+  const inventory = createInventoryActions({
+    api: async (method, path, body) => {
+      equal(method, "POST");
+      equal(path, "/api/inventory/scan/evm");
+      requestBody = body;
+      return { status: "completed" };
+    },
+    toast: () => undefined,
+    downloadJson: () => undefined,
+  });
+
+  await inventory.scanInventoryEvm();
+
+  deepEqual(requestBody.watch_addresses, [
+    {
+      address: "0x7777777777777777777777777777777777777777",
+      label: "old-ledger",
+    },
+  ]);
+  equal(requestBody.wallet_family, "eth-watch");
+  equal(requestBody.provider_profile, "mainnet");
+  equal(requestBody.block_tag, "latest");
+});
+
 test("data-action dispatcher coerces args and restores button busy state", async () => {
   const dom = installDom();
   const button = dom.el("action", "BUTTON");

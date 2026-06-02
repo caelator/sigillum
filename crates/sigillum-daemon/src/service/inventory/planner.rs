@@ -8,11 +8,11 @@ use super::claim_discovery::CLAIM_ADAPTER_MERKLE_DISTRIBUTOR_V1;
 use super::nft_approval_discovery::DISCOVERY_SOURCE_NFT_OPERATOR_APPROVAL_PROBE;
 use super::permit2_discovery::DISCOVERY_SOURCE_PERMIT2_ALLOWANCE_PROBE;
 use super::support::quantity_hex_is_nonzero;
-use super::{WALLET_FAMILY_ETH_SEED, WALLET_FAMILY_ETH_XPUB};
+use super::{WALLET_FAMILY_ETH_SEED, WALLET_FAMILY_ETH_WATCH, WALLET_FAMILY_ETH_XPUB};
 
 pub(super) fn signer_status_for_holding(holding: &WalletAssetHolding) -> &'static str {
     match holding.wallet_family.as_str() {
-        WALLET_FAMILY_ETH_XPUB => "watch_only",
+        WALLET_FAMILY_ETH_XPUB | WALLET_FAMILY_ETH_WATCH => "watch_only",
         WALLET_FAMILY_ETH_SEED => "available",
         _ => "unknown",
     }

@@ -387,15 +387,22 @@ export function createInventoryActions(deps: InventoryActionsDeps) {
   }
 
   async function scanInventoryEvm(): Promise<void> {
+    const watchAddress = optionalTextValue("inventoryWatchAddress");
+    const watchLabel = optionalTextValue("inventoryWatchLabel");
+    const walletFamily =
+      optionalTextValue("inventoryWalletFamily") || (watchAddress ? "eth-watch" : null);
     const token = optionalTextValue("inventoryTokenAddress");
     const spender = optionalTextValue("inventoryAllowanceSpender");
     const permit2Contract = optionalTextValue("inventoryPermit2Contract");
     const permit2Spender = optionalTextValue("inventoryPermit2Spender");
     const nftOperator = optionalTextValue("inventoryNftOperator");
     const r = await deps.api("POST", "/api/inventory/scan/evm", {
-      wallet_family: optionalTextValue("inventoryWalletFamily"),
+      wallet_family: walletFamily,
       wallet_profile: optionalTextValue("inventoryWalletProfile"),
       provider_profile: optionalTextValue("inventoryProviderProfile"),
+      watch_addresses: watchAddress
+        ? [{ address: watchAddress, label: watchLabel }]
+        : [],
       gap_limit: optionalNumberValue("inventoryGapLimit"),
       max_index: optionalNumberValue("inventoryMaxIndex"),
       token_addresses: token ? [token] : [],
