@@ -1,6 +1,7 @@
 import type {
   ChainProfile,
   ConsolidationPlan,
+  ConsolidationPlanExportResponse,
   ConsolidationPlanStep,
   RiskCatalogEntry,
   RiskFinding,
@@ -43,6 +44,7 @@ export function inventoryNeedsOperatorReview(view: InventoryViewModel): boolean 
 export interface InventoryActionsDeps {
   api: (method: string, path: string, body?: unknown) => Promise<any>;
   toast: (message: string, type?: string) => void;
+  downloadJson: (filename: string, payload: unknown) => void;
 }
 
 function input(id: string): HTMLInputElement {
@@ -248,6 +250,8 @@ export function createInventoryActions(deps: InventoryActionsDeps) {
       "No consolidation plans generated yet.",
       (plan) => {
         const summary = plan.summary;
+        const safeAddressInput =
+          '<input type="text" class="input-wide plan-safe-address" data-plan-safe-address placeholder="Safe address" autocomplete="off">';
         const stepLines = (plan.steps || [])
           .slice(0, 8)
           .map((step: ConsolidationPlanStep) => {
@@ -296,6 +300,8 @@ export function createInventoryActions(deps: InventoryActionsDeps) {
           esc(String(summary.review_required_steps || 0)) +
           " · approved=" +
           esc(String(summary.approved_steps || 0)) +
+          " · executable=" +
+          esc(String(summary.executable_steps || 0)) +
           "</div>" +
           stepLines +
           "</div>" +
@@ -306,6 +312,15 @@ export function createInventoryActions(deps: InventoryActionsDeps) {
           '<button class="btn-ghost" data-action="approveConsolidationPlan" data-arg0="' +
           escAttr(plan.id) +
           '">Approve Reviewable</button>' +
+          '<button class="btn-ghost" data-action="exportConsolidationPlan" data-arg0="' +
+          escAttr(plan.id) +
+          '" data-arg1="call_manifest">Call JSON</button>' +
+          '<div class="plan-export-controls">' +
+          safeAddressInput +
+          '<button class="btn-ghost" data-action="exportConsolidationPlan" data-arg0="' +
+          escAttr(plan.id) +
+          '" data-arg1="safe_tx_builder" data-self="append">Safe JSON</button>' +
+          "</div>" +
           "</div></li>"
         );
       },
@@ -521,6 +536,38 @@ export function createInventoryActions(deps: InventoryActionsDeps) {
     void loadInventoryOperations();
   }
 
+  async function exportConsolidationPlan(
+    planId: string,
+    format = "call_manifest",
+    actionEl?: unknown,
+  ): Promise<void> {
+    const safeAddress =
+      format === "safe_tx_builder" ? safeAddressForExportAction(actionEl) : null;
+    if (format === "safe_tx_builder" && !safeAddress) {
+      deps.toast("Safe address is required", "error");
+      return;
+    }
+
+    const r = (await deps.api("POST", "/api/plans/consolidation/export", {
+      plan_id: planId,
+      step_ids: [],
+      format,
+      safe_address: safeAddress,
+    })) as ConsolidationPlanExportResponse & { error?: string };
+    if (r.error) {
+      deps.toast(r.error, "error");
+      return;
+    }
+
+    deps.downloadJson(exportFilename(r), r);
+    deps.toast(
+      "Exported " +
+        String(r.exported_steps || 0) +
+        " step(s); skipped " +
+        String((r.skipped_steps || []).length),
+    );
+  }
+
   return {
     renderChainProfiles,
     renderInventoryState,
@@ -539,5 +586,25 @@ export function createInventoryActions(deps: InventoryActionsDeps) {
     generateConsolidationPlan,
     approveConsolidationPlan,
     simulateConsolidationPlan,
+    exportConsolidationPlan,
   };
+}
+
+function safeAddressForExportAction(actionEl: unknown): string | null {
+  const maybeButton = actionEl as {
+    closest?: (selector: string) => Element | null;
+  };
+  const row = maybeButton?.closest?.("li");
+  const input = row?.querySelector("[data-plan-safe-address]") as
+    | HTMLInputElement
+    | null
+    | undefined;
+  const fromInput = input?.value?.trim();
+  if (fromInput) return fromInput;
+  return window.prompt("Safe address")?.trim() || null;
+}
+
+function exportFilename(response: ConsolidationPlanExportResponse): string {
+  const plan = response.plan_id.replace(/[^a-zA-Z0-9_.-]/g, "_");
+  return "sigillum-" + plan + "-" + response.format + ".json";
 }

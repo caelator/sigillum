@@ -518,6 +518,20 @@ function toast(msg, type = 'success') {
   setTimeout(() => el.remove(), 3000);
 }
 
+function downloadJson(filename, payload) {
+  const blob = new Blob([JSON.stringify(payload, null, 2)], {
+    type: 'application/json',
+  });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 0);
+}
+
 const fido2Actions = createFido2Actions({
   api,
   toast,
@@ -543,6 +557,7 @@ const walletActions = createWalletActions({
 const inventoryActions = createInventoryActions({
   api,
   toast,
+  downloadJson,
 });
 
 const operationsActions = createOperationsActions({
@@ -1145,6 +1160,7 @@ const UI_ACTIONS = {
   enqueueDepositSweep: operationsActions.enqueueDepositSweep,
   exportSelectedXpubWallet: walletActions.exportSelectedXpubWallet,
   exportSnapshot,
+  exportConsolidationPlan: inventoryActions.exportConsolidationPlan,
   exportWalletMeta: walletActions.exportWalletMeta,
   exportXpubWalletProfile: walletActions.exportXpubWalletProfile,
   fido2Register: fido2Actions.fido2Register,

@@ -140,6 +140,7 @@ test("queue and inventory renderers produce reviewable DOM summaries", () => {
   const inventory = createInventoryActions({
     api: async () => ({}),
     toast: () => undefined,
+    downloadJson: () => undefined,
   });
   inventory.renderInventoryState({
     jobs: [{ id: "scan-1", status: "queued", wallet_profiles: ["daily"] }],
@@ -219,6 +220,47 @@ test("queue and inventory renderers produce reviewable DOM summaries", () => {
   ok(dom.el("consolidationPlanList").innerHTML.includes("simulation=required"));
   ok(dom.el("consolidationPlanList").innerHTML.includes("rpc_method=eth_call"));
   ok(dom.el("consolidationPlanList").innerHTML.includes("simulateConsolidationPlan"));
+  ok(dom.el("consolidationPlanList").innerHTML.includes("exportConsolidationPlan"));
+  ok(dom.el("consolidationPlanList").innerHTML.includes("Safe JSON"));
+  ok(dom.el("consolidationPlanList").innerHTML.includes("Call JSON"));
+});
+
+test("inventory actions export consolidation manifests as downloads", async () => {
+  installDom();
+  let requestBody: any = null;
+  let download: { filename: string; payload: any } | null = null;
+  const toasts: string[] = [];
+  const inventory = createInventoryActions({
+    api: async (method, path, body) => {
+      equal(method, "POST");
+      equal(path, "/api/plans/consolidation/export");
+      requestBody = body;
+      return {
+        status: "exported",
+        plan_id: "plan-1",
+        format: "call_manifest",
+        exported_steps: 2,
+        skipped_steps: [{ step_id: "step-3", action: "claim_reward", reason: "blocked", blockers: [] }],
+        bundles: [],
+      };
+    },
+    toast: (message) => toasts.push(message),
+    downloadJson: (filename, payload) => {
+      download = { filename, payload };
+    },
+  });
+
+  await inventory.exportConsolidationPlan("plan-1", "call_manifest");
+
+  deepEqual(requestBody, {
+    plan_id: "plan-1",
+    step_ids: [],
+    format: "call_manifest",
+    safe_address: null,
+  });
+  equal(download?.filename, "sigillum-plan-1-call_manifest.json");
+  equal(download?.payload.exported_steps, 2);
+  ok(toasts.some((message) => message.includes("Exported 2 step(s); skipped 1")));
 });
 
 test("data-action dispatcher coerces args and restores button busy state", async () => {

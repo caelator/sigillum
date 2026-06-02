@@ -146,6 +146,65 @@ export interface ConsolidationPlan {
   steps: ConsolidationPlanStep[];
 }
 
+export interface ConsolidationPlanExportCall {
+  step_id: string;
+  action: string;
+  from_address: string;
+  to_address: string;
+  value_wei_hex: string;
+  data_hex: string;
+  operation: number;
+  chain_id: number;
+  provider_profile: string;
+  asset_kind: string;
+  amount_hex: string;
+  evidence: string[];
+}
+
+export interface SafeTransactionBuilderTransaction {
+  to: string;
+  value: string;
+  data: string;
+  operation: number;
+}
+
+export interface SafeTransactionBuilderBatch {
+  version: string;
+  chainId: string;
+  meta: {
+    name: string;
+    description: string;
+    txBuilderVersion: string;
+    createdFromSafeAddress?: string | null;
+  };
+  transactions: SafeTransactionBuilderTransaction[];
+}
+
+export interface ConsolidationPlanExportBundle {
+  chain_id: number;
+  provider_profile: string;
+  source_address?: string | null;
+  safe_address?: string | null;
+  calls: ConsolidationPlanExportCall[];
+  safe_transaction_builder?: SafeTransactionBuilderBatch | null;
+}
+
+export interface ConsolidationPlanExportSkippedStep {
+  step_id: string;
+  action: string;
+  reason: string;
+  blockers: string[];
+}
+
+export interface ConsolidationPlanExportResponse {
+  status: string;
+  plan_id: string;
+  format: string;
+  exported_steps: number;
+  skipped_steps: ConsolidationPlanExportSkippedStep[];
+  bundles: ConsolidationPlanExportBundle[];
+}
+
 export interface ApiRequestOptions<TBody = unknown> {
   method: "GET" | "POST" | "DELETE";
   path: string;

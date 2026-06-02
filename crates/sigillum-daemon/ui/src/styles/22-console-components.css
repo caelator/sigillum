@@ -85,6 +85,18 @@
     padding: 0 14px;
     font-size: 11px;
   }
+  .plan-export-controls {
+    display: inline-flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    justify-content: flex-end;
+    min-width: min(100%, 300px);
+  }
+  .plan-safe-address {
+    min-height: 40px;
+    width: min(220px, 100%);
+    font-size: 12px;
+  }
   .secret-value {
     margin-top: 12px;
     padding: 12px 14px;
