@@ -1601,6 +1601,138 @@ async fn wallet_inventory_scan_records_ad_hoc_watch_addresses() {
 }
 
 #[tokio::test]
+async fn watch_address_book_routes_feed_inventory_scans() {
+    let dir = TempDir::new().unwrap();
+    let (addr, handle) = spawn_daemon(dir.path().to_path_buf()).await;
+    let (rpc_addr, rpc_handle) = spawn_mock_evm_provider().await;
+    let client = reqwest::Client::new();
+
+    let init = post_json(
+        &client,
+        addr,
+        "/api/compartment/init",
+        json!({
+            "id": 0,
+            "label": "default",
+            "threshold": 1,
+            "passphrase": "correct horse battery staple",
+        }),
+        None,
+    )
+    .await;
+    let init_json: serde_json::Value = init.json().await.unwrap();
+    let token = init_json["session_token"].as_str().unwrap().to_string();
+
+    post_json(
+        &client,
+        addr,
+        "/api/api-keys/set",
+        json!({ "key": "alchemy", "value": "rpc-test-token" }),
+        Some(&token),
+    )
+    .await;
+
+    post_json(
+        &client,
+        addr,
+        "/api/profiles/evm/upsert",
+        json!({
+            "name": "mainnet",
+            "rpc_url": format!("http://{rpc_addr}/"),
+            "auth_token_key": "alchemy",
+            "chain_id": 1,
+        }),
+        Some(&token),
+    )
+    .await;
+
+    let upsert = post_json(
+        &client,
+        addr,
+        "/api/inventory/watch-addresses/upsert",
+        json!({
+            "address": "0x8888888888888888888888888888888888888888",
+            "label": "saved-ledger",
+            "tags": ["archive", "ledger"],
+            "enabled": true
+        }),
+        Some(&token),
+    )
+    .await;
+    let upsert_status = upsert.status();
+    let upsert_json: serde_json::Value = upsert.json().await.unwrap();
+    assert_eq!(
+        upsert_status,
+        StatusCode::OK,
+        "upsert response: {upsert_json}"
+    );
+    assert_eq!(upsert_json["entry"]["label"], "saved-ledger");
+
+    let list = get(
+        &client,
+        addr,
+        "/api/inventory/watch-addresses",
+        Some(&token),
+    )
+    .await;
+    let list_json: serde_json::Value = list.json().await.unwrap();
+    assert_eq!(list_json["entries"].as_array().unwrap().len(), 1);
+    assert_eq!(list_json["entries"][0]["tags"][0], "archive");
+
+    let scan = post_json(
+        &client,
+        addr,
+        "/api/inventory/scan/evm",
+        json!({
+            "provider_profile": "mainnet",
+            "wallet_family": "eth-watch",
+            "include_watch_book": true
+        }),
+        Some(&token),
+    )
+    .await;
+    let scan_status = scan.status();
+    let scan_json: serde_json::Value = scan.json().await.unwrap();
+    assert_eq!(scan_status, StatusCode::OK, "scan response: {scan_json}");
+    assert_eq!(scan_json["job"]["addresses_scanned"], 1);
+    assert_eq!(scan_json["job"]["wallet_profiles"][0], "watch:saved-ledger");
+    assert_eq!(
+        scan_json["addresses"][0]["address"],
+        "0x8888888888888888888888888888888888888888"
+    );
+
+    let delete = post_json(
+        &client,
+        addr,
+        "/api/inventory/watch-addresses/delete",
+        json!({ "address": "0x8888888888888888888888888888888888888888" }),
+        Some(&token),
+    )
+    .await;
+    let delete_status = delete.status();
+    let delete_json: serde_json::Value = delete.json().await.unwrap();
+    assert_eq!(
+        delete_status,
+        StatusCode::OK,
+        "delete response: {delete_json}"
+    );
+    assert_eq!(delete_json["status"], "deleted");
+
+    let list = get(
+        &client,
+        addr,
+        "/api/inventory/watch-addresses",
+        Some(&token),
+    )
+    .await;
+    let list_json: serde_json::Value = list.json().await.unwrap();
+    assert!(list_json["entries"].as_array().unwrap().is_empty());
+
+    handle.abort();
+    rpc_handle.abort();
+}
+
+#[tokio::test]
 async fn wallet_inventory_scan_discovers_erc20_tokens_from_transfer_logs() {
     let dir = TempDir::new().unwrap();
     let (addr, handle) = spawn_daemon(dir.path().to_path_buf()).await;

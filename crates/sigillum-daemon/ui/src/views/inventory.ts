@@ -47,6 +47,11 @@ export interface InventoryActionsDeps {
   downloadJson: (filename: string, payload: unknown) => void;
 }
 
+export interface WatchAddressProbe {
+  address: string;
+  label?: string | null;
+}
+
 function input(id: string): HTMLInputElement {
   return document.getElementById(id) as HTMLInputElement;
 }
@@ -389,8 +394,13 @@ export function createInventoryActions(deps: InventoryActionsDeps) {
   async function scanInventoryEvm(): Promise<void> {
     const watchAddress = optionalTextValue("inventoryWatchAddress");
     const watchLabel = optionalTextValue("inventoryWatchLabel");
+    const watchAddresses = parseWatchAddressProbes(
+      optionalTextValue("inventoryWatchAddresses"),
+      watchAddress,
+      watchLabel,
+    );
     const walletFamily =
-      optionalTextValue("inventoryWalletFamily") || (watchAddress ? "eth-watch" : null);
+      optionalTextValue("inventoryWalletFamily") || (watchAddresses.length ? "eth-watch" : null);
     const token = optionalTextValue("inventoryTokenAddress");
     const spender = optionalTextValue("inventoryAllowanceSpender");
     const permit2Contract = optionalTextValue("inventoryPermit2Contract");
@@ -400,9 +410,7 @@ export function createInventoryActions(deps: InventoryActionsDeps) {
       wallet_family: walletFamily,
       wallet_profile: optionalTextValue("inventoryWalletProfile"),
       provider_profile: optionalTextValue("inventoryProviderProfile"),
-      watch_addresses: watchAddress
-        ? [{ address: watchAddress, label: watchLabel }]
-        : [],
+      watch_addresses: watchAddresses,
       gap_limit: optionalNumberValue("inventoryGapLimit"),
       max_index: optionalNumberValue("inventoryMaxIndex"),
       token_addresses: token ? [token] : [],
@@ -575,6 +583,21 @@ export function createInventoryActions(deps: InventoryActionsDeps) {
     );
   }
 
+  async function exportInventoryReport(): Promise<void> {
+    const [inventory, risks, plans] = await Promise.all([
+      deps.api("GET", "/api/inventory/wallets"),
+      deps.api("GET", "/api/risk/findings"),
+      deps.api("GET", "/api/plans/consolidation"),
+    ]);
+    if (inventory.error || risks.error || plans.error) {
+      deps.toast(inventory.error || risks.error || plans.error, "error");
+      return;
+    }
+    const report = buildInventoryReport(inventory, risks.findings || [], plans.plans || []);
+    deps.downloadJson(inventoryReportFilename(report.generated_at_unix), report);
+    deps.toast("Inventory report exported");
+  }
+
   return {
     renderChainProfiles,
     renderInventoryState,
@@ -594,7 +617,98 @@ export function createInventoryActions(deps: InventoryActionsDeps) {
     approveConsolidationPlan,
     simulateConsolidationPlan,
     exportConsolidationPlan,
+    exportInventoryReport,
   };
+}
+
+export function parseWatchAddressProbes(
+  bulkInput: string | null | undefined,
+  singleAddress?: string | null,
+  singleLabel?: string | null,
+): WatchAddressProbe[] {
+  const probes: WatchAddressProbe[] = [];
+  const addProbe = (probe: WatchAddressProbe | null) => {
+    if (!probe) return;
+    const key = probe.address.toLowerCase();
+    const existing = probes.find((item) => item.address.toLowerCase() === key);
+    if (existing) {
+      if (!existing.label && probe.label) existing.label = probe.label;
+      return;
+    }
+    probes.push(probe);
+  };
+
+  addProbe(buildWatchAddressProbe(singleAddress, singleLabel));
+  (bulkInput || "")
+    .split(/\r?\n/)
+    .map(parseWatchAddressLine)
+    .forEach(addProbe);
+  return probes;
+}
+
+export function buildInventoryReport(
+  inventory: any,
+  riskFindings: any[],
+  consolidationPlans: ConsolidationPlan[],
+  generatedAtUnix = Math.floor(Date.now() / 1000),
+) {
+  const addresses = inventory.addresses || [];
+  const holdings = inventory.holdings || [];
+  const watchAddresses = addresses.filter((address: any) => address.wallet_family === "eth-watch");
+  const activeAddresses = addresses.filter((address: any) => address.activity_state !== "empty");
+  const blockedPlanSteps = consolidationPlans.reduce(
+    (count, plan) => count + plan.steps.filter((step) => step.blockers.length > 0).length,
+    0,
+  );
+  return {
+    generated_at_unix: generatedAtUnix,
+    summary: {
+      discovery_job_count: (inventory.jobs || []).length,
+      address_count: addresses.length,
+      active_address_count: activeAddresses.length,
+      watch_address_count: watchAddresses.length,
+      holding_count: holdings.length,
+      risk_finding_count: riskFindings.length,
+      consolidation_plan_count: consolidationPlans.length,
+      blocked_plan_step_count: blockedPlanSteps,
+    },
+    watch_addresses: watchAddresses,
+    addresses,
+    holdings,
+    risk_findings: riskFindings,
+    consolidation_plans: consolidationPlans,
+  };
+}
+
+function parseWatchAddressLine(line: string): WatchAddressProbe | null {
+  const trimmed = line.trim();
+  if (!trimmed || trimmed.startsWith("#")) return null;
+  const commaIndex = trimmed.indexOf(",");
+  if (commaIndex >= 0) {
+    return buildWatchAddressProbe(trimmed.slice(0, commaIndex), trimmed.slice(commaIndex + 1));
+  }
+  const colonIndex = trimmed.indexOf(":");
+  if (colonIndex >= 0) {
+    return buildWatchAddressProbe(trimmed.slice(0, colonIndex), trimmed.slice(colonIndex + 1));
+  }
+  return buildWatchAddressProbe(trimmed, null);
+}
+
+function buildWatchAddressProbe(
+  address: string | null | undefined,
+  label: string | null | undefined,
+): WatchAddressProbe | null {
+  const trimmedAddress = (address || "").trim();
+  if (!trimmedAddress) return null;
+  const trimmedLabel = (label || "").trim();
+  return {
+    address: trimmedAddress,
+    ...(trimmedLabel ? { label: trimmedLabel } : {}),
+  };
+}
+
+function inventoryReportFilename(generatedAtUnix: number): string {
+  return "sigillum-inventory-report-" + generatedAtUnix + ".json";
 }
 
 function safeAddressForExportAction(actionEl: unknown): string | null {

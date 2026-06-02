@@ -1161,6 +1161,7 @@ const UI_ACTIONS = {
   exportSelectedXpubWallet: walletActions.exportSelectedXpubWallet,
   exportSnapshot,
   exportConsolidationPlan: inventoryActions.exportConsolidationPlan,
+  exportInventoryReport: inventoryActions.exportInventoryReport,
   exportWalletMeta: walletActions.exportWalletMeta,
   exportXpubWalletProfile: walletActions.exportXpubWalletProfile,
   fido2Register: fido2Actions.fido2Register,

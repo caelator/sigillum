@@ -1,4 +1,4 @@
-use std::process;
+use std::{fs, process};
 
 use sigillum_api::request::{ClaimCandidateProbe, DefiTokenProbe, WatchAddressProbe};
 
@@ -17,10 +17,16 @@ pub(super) fn parse_claim_candidate_probes(args: &[String]) -> Vec<ClaimCandidat
 }
 
 pub(super) fn parse_watch_address_probes(args: &[String]) -> Vec<WatchAddressProbe> {
-    parse_multi_flag(args, "--watch-address")
-        .into_iter()
-        .map(|value| parse_watch_address_value(&value))
-        .collect()
+    let mut probes = Vec::new();
+    for value in parse_multi_flag(args, "--watch-address") {
+        push_unique_watch_probe(&mut probes, parse_watch_address_value(&value));
+    }
+    for path in parse_multi_flag(args, "--watch-address-file") {
+        for probe in parse_watch_address_file(&path) {
+            push_unique_watch_probe(&mut probes, probe);
+        }
+    }
+    probes
 }
 
 fn parse_defi_token_probe_value(value: &str) -> DefiTokenProbe {
@@ -75,19 +81,64 @@ fn parse_claim_candidate_value(value: &str) -> ClaimCandidateProbe {
 }
 
 fn parse_watch_address_value(value: &str) -> WatchAddressProbe {
-    let mut parts = value.splitn(2, ':');
-    let address = parts.next().unwrap_or_default().trim();
-    if address.is_empty() {
+    parse_watch_address_record(value).unwrap_or_else(|| {
         eprintln!("Invalid value for --watch-address: expected address[:label]");
         process::exit(1);
+    })
+}
+
+fn parse_watch_address_file(path: &str) -> Vec<WatchAddressProbe> {
+    let contents = fs::read_to_string(path).unwrap_or_else(|error| {
+        eprintln!("Failed to read --watch-address-file {path}: {error}");
+        process::exit(1);
+    });
+    contents
+        .lines()
+        .filter_map(parse_watch_address_record)
+        .collect()
+}
+
+fn parse_watch_address_record(value: &str) -> Option<WatchAddressProbe> {
+    let value = value.trim();
+    if value.is_empty()
+        || value.starts_with('#')
+        || value.to_ascii_lowercase().starts_with("address,")
+    {
+        return None;
     }
-    WatchAddressProbe {
+    if let Some((address, label)) = value.split_once(',') {
+        return build_watch_address_probe(address, Some(label));
+    }
+    if let Some((address, label)) = value.split_once(':') {
+        return build_watch_address_probe(address, Some(label));
+    }
+    build_watch_address_probe(value, None)
+}
+
+fn build_watch_address_probe(address: &str, label: Option<&str>) -> Option<WatchAddressProbe> {
+    let address = address.trim();
+    if address.is_empty() {
+        return None;
+    }
+    Some(WatchAddressProbe {
         address: address.to_string(),
-        label: parts
-            .next()
+        label: label
             .map(str::trim)
             .filter(|label| !label.is_empty())
             .map(str::to_string),
+    })
+}
+
+fn push_unique_watch_probe(probes: &mut Vec<WatchAddressProbe>, probe: WatchAddressProbe) {
+    if let Some(existing) = probes
+        .iter_mut()
+        .find(|existing| existing.address.eq_ignore_ascii_case(&probe.address))
+    {
+        if existing.label.is_none() && probe.label.is_some() {
+            existing.label = probe.label;
+        }
+    } else {
+        probes.push(probe);
     }
 }
 
@@ -102,4 +153,73 @@ fn parse_multi_flag(args: &[String], flag: &str) -> Vec<String> {
         i += 1;
     }
     values
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_watch_address_flags_and_files_with_dedupe() {
+        let path = std::env::temp_dir().join(format!(
+            "sigillum-watch-addresses-{}-{}.csv",
+            std::process::id(),
+            "bulk"
+        ));
+        std::fs::write(
+            &path,
+            [
+                "address,label",
+                "# imported from old client sheet",
+                "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa,old-ledger",
+                "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb:client-vault",
+                "0xAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA,duplicate",
+            ]
+            .join("\n"),
+        )
+        .unwrap();
+        let args = vec![
+            "scan-evm".into(),
+            "--watch-address".into(),
+            "0xcccccccccccccccccccccccccccccccccccccccc:single".into(),
+            "--watch-address-file".into(),
+            path.to_string_lossy().into_owned(),
+        ];
+
+        let probes = parse_watch_address_probes(&args);
+        let _ = std::fs::remove_file(path);
+
+        assert_eq!(probes.len(), 3);
+        assert_eq!(
+            probes[0].address,
+            "0xcccccccccccccccccccccccccccccccccccccccc"
+        );
+        assert_eq!(probes[0].label.as_deref(), Some("single"));
+        assert_eq!(
+            probes[1].address,
+            "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        );
+        assert_eq!(probes[1].label.as_deref(), Some("old-ledger"));
+        assert_eq!(
+            probes[2].address,
+            "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        );
+        assert_eq!(probes[2].label.as_deref(), Some("client-vault"));
+    }
+
+    #[test]
+    fn parse_watch_address_record_accepts_line_formats() {
+        assert!(parse_watch_address_record("").is_none());
+        assert!(parse_watch_address_record("# comment").is_none());
+        assert!(parse_watch_address_record("address,label").is_none());
+
+        let plain =
+            parse_watch_address_record("0xdddddddddddddddddddddddddddddddddddddddd").unwrap();
+        assert_eq!(plain.label, None);
+
+        let csv =
+            parse_watch_address_record("0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee, old seed")
+                .unwrap();
+        assert_eq!(csv.label.as_deref(), Some("old seed"));
+    }
 }

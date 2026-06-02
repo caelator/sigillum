@@ -640,6 +640,27 @@ impl Validate for crate::request::WalletInventoryScanRequest {
     }
 }
 
+impl Validate for crate::request::WatchAddressBookUpsertRequest {
+    fn validate(&self) -> Result<(), String> {
+        check_len("address", &self.address, MAX_ADDRESS)?;
+        check_optional_len("label", &self.label, MAX_LABEL)?;
+        if self.tags.len() > MAX_TOKEN_ADDRESSES {
+            return Err(format!(
+                "tags exceeds maximum length of {MAX_TOKEN_ADDRESSES} items"
+            ));
+        }
+        check_vec_items_len("tags", &self.tags, MAX_LABEL)?;
+        Ok(())
+    }
+}
+
+impl Validate for crate::request::WatchAddressBookDeleteRequest {
+    fn validate(&self) -> Result<(), String> {
+        check_len("address", &self.address, MAX_ADDRESS)?;
+        Ok(())
+    }
+}
+
 impl Validate for crate::request::ChainProfileUpsertRequest {
     fn validate(&self) -> Result<(), String> {
         check_len("name", &self.name, MAX_LABEL)?;

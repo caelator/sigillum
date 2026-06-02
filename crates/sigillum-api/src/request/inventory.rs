@@ -53,6 +53,28 @@ pub struct WatchAddressProbe {
     pub label: Option<String>,
 }
 
+/// Add or update a persisted read-only watch address.
+///
+/// Saved watch addresses let operators preserve old wallet, client, exchange,
+/// or hardware-wallet archaeology inputs locally and rescan them without
+/// re-pasting public addresses.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct WatchAddressBookUpsertRequest {
+    pub address: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tags: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub enabled: Option<bool>,
+}
+
+/// Delete a persisted read-only watch address by public address.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct WatchAddressBookDeleteRequest {
+    pub address: String,
+}
+
 /// Run read-only EVM wallet discovery for imported seed and xpub profiles.
 ///
 /// When no wallet filter is provided, all `eth-seed` and `eth-xpub` profiles
@@ -69,6 +91,8 @@ pub struct WalletInventoryScanRequest {
     pub provider_profile: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub watch_addresses: Vec<WatchAddressProbe>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub include_watch_book: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub gap_limit: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]

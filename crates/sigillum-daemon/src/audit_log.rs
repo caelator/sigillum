@@ -381,6 +381,10 @@ pub(crate) enum AuditEventSpec {
     WalletInventoryRiskCatalogUpsert { address: String, risk_level: String },
     #[serde(rename = "wallet_inventory.risk_catalog.delete")]
     WalletInventoryRiskCatalogDelete { address: String },
+    #[serde(rename = "wallet_inventory.watch_address.upsert")]
+    WalletInventoryWatchAddressUpsert { address: String, label: String },
+    #[serde(rename = "wallet_inventory.watch_address.delete")]
+    WalletInventoryWatchAddressDelete { address: String },
     #[serde(rename = "wallet_consolidation.plan.generate")]
     WalletConsolidationPlanGenerate {
         id: String,
@@ -487,6 +491,12 @@ impl AuditEventSpec {
             }
             Self::WalletInventoryRiskCatalogUpsert { .. } => "wallet_inventory.risk_catalog.upsert",
             Self::WalletInventoryRiskCatalogDelete { .. } => "wallet_inventory.risk_catalog.delete",
+            Self::WalletInventoryWatchAddressUpsert { .. } => {
+                "wallet_inventory.watch_address.upsert"
+            }
+            Self::WalletInventoryWatchAddressDelete { .. } => {
+                "wallet_inventory.watch_address.delete"
+            }
             Self::WalletConsolidationPlanGenerate { .. } => "wallet_consolidation.plan.generate",
             Self::WalletConsolidationPlanApprove { .. } => "wallet_consolidation.plan.approve",
             Self::WalletConsolidationPlanSimulate { .. } => "wallet_consolidation.plan.simulate",
@@ -787,6 +797,12 @@ impl AuditEventSpec {
                 risk_level,
             } => json!({ "address": address, "risk_level": risk_level }),
             Self::WalletInventoryRiskCatalogDelete { address } => {
+                json!({ "address": address })
+            }
+            Self::WalletInventoryWatchAddressUpsert { address, label } => {
+                json!({ "address": address, "label": label })
+            }
+            Self::WalletInventoryWatchAddressDelete { address } => {
                 json!({ "address": address })
             }
             Self::WalletConsolidationPlanGenerate { id, steps, blocked } => {

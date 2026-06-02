@@ -866,6 +866,9 @@ pub struct ConsolidationPlanMutationResponse {
 mod consolidation_export;
 pub use consolidation_export::*;
 
+mod watch_book;
+pub use watch_book::*;
+
 // ── Queue ───────────────────────────────────────
 
 mod queue;

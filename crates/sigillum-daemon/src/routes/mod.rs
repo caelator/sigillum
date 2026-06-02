@@ -422,6 +422,18 @@ fn inventory_routes() -> AppRouter {
             "/api/inventory/scan/evm",
             post(inventory::scan_wallet_inventory_evm),
         )
+        .route(
+            "/api/inventory/watch-addresses",
+            get(inventory::list_watch_address_book),
+        )
+        .route(
+            "/api/inventory/watch-addresses/upsert",
+            post(inventory::upsert_watch_address_book_entry),
+        )
+        .route(
+            "/api/inventory/watch-addresses/delete",
+            post(inventory::delete_watch_address_book_entry),
+        )
         .route("/api/discovery/jobs", get(inventory::list_discovery_jobs))
         .route(
             "/api/discovery/jobs/cancel",

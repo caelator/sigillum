@@ -10,7 +10,8 @@ use sigillum_api::{
     ChainProfileDeleteRequest, ChainProfileUpsertRequest, ConsolidationPlanApproveRequest,
     ConsolidationPlanExportRequest, ConsolidationPlanGenerateRequest,
     ConsolidationPlanSimulateRequest, DiscoveryJobMutationRequest, RiskCatalogDeleteRequest,
-    RiskCatalogUpsertRequest, WalletInventoryScanRequest,
+    RiskCatalogUpsertRequest, WalletInventoryScanRequest, WatchAddressBookDeleteRequest,
+    WatchAddressBookUpsertRequest,
 };
 
 use crate::AppState;
@@ -39,6 +40,48 @@ pub(crate) async fn scan_wallet_inventory_evm(
     service_response(
         service
             .scan_wallet_inventory_evm(bearer_token(&headers).as_deref(), body)
+            .await,
+    )
+}
+
+pub(crate) async fn list_watch_address_book(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+) -> Response {
+    let service = SigillumService::new(state);
+    service_response(service.list_watch_address_book(bearer_token(&headers).as_deref()))
+}
+
+pub(crate) async fn upsert_watch_address_book_entry(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Json(body): Json<WatchAddressBookUpsertRequest>,
+) -> Response {
+    let body = match validated(Json(body)) {
+        Ok(b) => b,
+        Err(resp) => return resp,
+    };
+    let service = SigillumService::new(state);
+    service_response(
+        service
+            .upsert_watch_address_book_entry(bearer_token(&headers).as_deref(), body)
+            .await,
+    )
+}
+
+pub(crate) async fn delete_watch_address_book_entry(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Json(body): Json<WatchAddressBookDeleteRequest>,
+) -> Response {
+    let body = match validated(Json(body)) {
+        Ok(b) => b,
+        Err(resp) => return resp,
+    };
+    let service = SigillumService::new(state);
+    service_response(
+        service
+            .delete_watch_address_book_entry(bearer_token(&headers).as_deref(), body)
             .await,
     )
 }

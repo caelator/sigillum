@@ -619,6 +619,28 @@ fn test_wallet_inventory_scan_response_roundtrip() {
 }
 
 #[test]
+fn test_watch_address_book_responses_roundtrip() {
+    let entry = WatchAddressBookEntry {
+        id: "watch_1".to_string(),
+        address: "0x7777777777777777777777777777777777777777".to_string(),
+        label: "old-ledger".to_string(),
+        tags: vec!["client".to_string(), "hardware".to_string()],
+        source: "operator".to_string(),
+        enabled: true,
+        created_at_unix: 1,
+        updated_at_unix: 2,
+    };
+
+    roundtrip_test(WatchAddressBookListResponse {
+        entries: vec![entry.clone()],
+    });
+    roundtrip_test(WatchAddressBookMutationResponse {
+        status: "saved".to_string(),
+        entry,
+    });
+}
+
+#[test]
 fn test_wallet_operations_response_roundtrips() {
     let chain = ChainProfile {
         name: "base".to_string(),

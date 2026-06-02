@@ -16,6 +16,7 @@ mod simulation;
 mod support;
 mod token_discovery;
 mod wallet_selection;
+mod watch_book;
 mod watch_discovery;
 
 use sigillum_api::{
@@ -25,7 +26,7 @@ use sigillum_api::{
     ConsolidationPlanListResponse, ConsolidationPlanMutationResponse, DiscoveryJobListResponse,
     DiscoveryJobMutationRequest, DiscoveryJobMutationResponse, RiskFindingListResponse,
     WalletDiscoveryJob, WalletInventoryListResponse, WalletInventoryScanRequest,
-    WalletInventoryScanResponse,
+    WalletInventoryScanResponse, WatchAddressProbe,
 };
 use sigillum_core::{
     decode_quantity_hex, derive_ethereum_address_from_control_xpub,
@@ -507,8 +508,23 @@ impl SigillumService {
             requested_family.as_deref(),
             body.wallet_profile.as_deref(),
         )?;
+        let _guard = self.state.operation_guard().await;
+        let mut inventory = load_inventory_state(&self.state.base_dir)?;
+        let mut watch_probes = body.watch_addresses.clone();
+        if body.include_watch_book.unwrap_or(false) {
+            watch_probes.extend(
+                inventory
+                    .watch_address_book
+                    .iter()
+                    .filter(|entry| entry.enabled)
+                    .map(|entry| WatchAddressProbe {
+                        address: entry.address.clone(),
+                        label: Some(entry.label.clone()),
+                    }),
+            );
+        }
         let watch_addresses = select_watch_addresses(
-            &body.watch_addresses,
+            &watch_probes,
             requested_family.as_deref(),
             body.wallet_profile.as_deref(),
         )?;
@@ -548,11 +564,6 @@ impl SigillumService {
             last_error: None,
         };
 
-        let _guard = self.state.operation_guard().await;
-        let mut inventory =
-            crate::inventory::load_wallet_inventory(&self.state.base_dir).map_err(|error| {
-                ServiceError::internal(format!("Failed to load wallet inventory: {error}"))
-            })?;
         let mut scanned_addresses = Vec::new();
         let mut detected_holdings = Vec::new();
 

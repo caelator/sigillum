@@ -8,7 +8,11 @@ import {
   writeSessionToken,
 } from "../src/api/session";
 import { dispatchDataAction } from "../src/actions/dispatcher";
-import { createInventoryActions } from "../src/views/inventory";
+import {
+  buildInventoryReport,
+  createInventoryActions,
+  parseWatchAddressProbes,
+} from "../src/views/inventory";
 import { createOperationsActions } from "../src/views/operations";
 import { createShellRenderer } from "../src/views/shell";
 import { installDom } from "./dom-fixture";
@@ -267,6 +271,7 @@ test("inventory scan sends optional EVM watch-address probes", async () => {
   const dom = installDom([
     "inventoryWatchAddress",
     "inventoryWatchLabel",
+    "inventoryWatchAddresses",
     "inventoryTokenAddress",
     "inventoryAllowanceSpender",
     "inventoryPermit2Contract",
@@ -295,6 +300,11 @@ test("inventory scan sends optional EVM watch-address probes", async () => {
   ]);
   dom.el("inventoryWatchAddress").value = "0x7777777777777777777777777777777777777777";
   dom.el("inventoryWatchLabel").value = "old-ledger";
+  dom.el("inventoryWatchAddresses").value = [
+    "# old client batch",
+    "0x8888888888888888888888888888888888888888,client-vault",
+    "0x7777777777777777777777777777777777777777:duplicate",
+  ].join("\n");
   dom.el("inventoryProviderProfile").value = "mainnet";
   let requestBody: any = null;
   const inventory = createInventoryActions({
@@ -315,10 +325,98 @@ test("inventory scan sends optional EVM watch-address probes", async () => {
       address: "0x7777777777777777777777777777777777777777",
       label: "old-ledger",
     },
+    {
+      address: "0x8888888888888888888888888888888888888888",
+      label: "client-vault",
+    },
   ]);
   equal(requestBody.wallet_family, "eth-watch");
   equal(requestBody.provider_profile, "mainnet");
   equal(requestBody.block_tag, "latest");
+});
+
+test("watch-address parser accepts bulk line formats and dedupes", () => {
+  deepEqual(
+    parseWatchAddressProbes(
+      [
+        "# imported sheet",
+        "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa,old-ledger",
+        "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb:client",
+        "0xAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA,duplicate",
+      ].join("\n"),
+      "0xcccccccccccccccccccccccccccccccccccccccc",
+      "single",
+    ),
+    [
+      {
+        address: "0xcccccccccccccccccccccccccccccccccccccccc",
+        label: "single",
+      },
+      {
+        address: "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        label: "old-ledger",
+      },
+      {
+        address: "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        label: "client",
+      },
+    ],
+  );
+});
+
+test("inventory report export summarizes watch addresses and risk state", async () => {
+  let download: { filename: string; payload: any } | null = null;
+  const inventory = createInventoryActions({
+    api: async (_method, path) => {
+      if (path === "/api/inventory/wallets") {
+        return {
+          jobs: [{ id: "job-1" }],
+          addresses: [
+            {
+              wallet_family: "eth-watch",
+              wallet_profile: "watch:old-ledger",
+              activity_state: "funded",
+            },
+            {
+              wallet_family: "eth-seed",
+              wallet_profile: "seed-main",
+              activity_state: "empty",
+            },
+          ],
+          holdings: [{ asset_kind: "native" }],
+        };
+      }
+      if (path === "/api/risk/findings") {
+        return { findings: [{ id: "risk-1" }] };
+      }
+      if (path === "/api/plans/consolidation") {
+        return {
+          plans: [
+            {
+              id: "plan-1",
+              steps: [{ blockers: ["watch_only"] }, { blockers: [] }],
+            },
+          ],
+        };
+      }
+      return { error: "unexpected path" };
+    },
+    toast: () => undefined,
+    downloadJson: (filename, payload) => {
+      download = { filename, payload };
+    },
+  });
+
+  await inventory.exportInventoryReport();
+
+  ok(download?.filename.startsWith("sigillum-inventory-report-"));
+  equal(download?.payload.summary.watch_address_count, 1);
+  equal(download?.payload.summary.blocked_plan_step_count, 1);
+  equal(download?.payload.risk_findings.length, 1);
+
+  const report = buildInventoryReport({ jobs: [], addresses: [], holdings: [] }, [], [], 42);
+  equal(report.generated_at_unix, 42);
+  equal(report.summary.address_count, 0);
 });
 
 test("data-action dispatcher coerces args and restores button busy state", async () => {

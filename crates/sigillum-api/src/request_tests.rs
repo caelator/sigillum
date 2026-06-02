@@ -526,6 +526,7 @@ fn test_wallet_inventory_scan_request_roundtrip() {
             address: "0x7777777777777777777777777777777777777777".to_string(),
             label: Some("old-ledger".to_string()),
         }],
+        include_watch_book: Some(true),
         gap_limit: Some(20),
         max_index: Some(200),
         token_addresses: vec!["0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48".to_string()],
@@ -575,6 +576,19 @@ fn test_wallet_inventory_scan_request_roundtrip() {
         nft_discovery_limit: Some(100),
     };
     roundtrip_test(req);
+}
+
+#[test]
+fn test_watch_address_book_requests_roundtrip() {
+    roundtrip_test(WatchAddressBookUpsertRequest {
+        address: "0x7777777777777777777777777777777777777777".to_string(),
+        label: Some("old-ledger".to_string()),
+        tags: vec!["client".to_string(), "hardware".to_string()],
+        enabled: Some(true),
+    });
+    roundtrip_test(WatchAddressBookDeleteRequest {
+        address: "0x7777777777777777777777777777777777777777".to_string(),
+    });
 }
 
 #[test]

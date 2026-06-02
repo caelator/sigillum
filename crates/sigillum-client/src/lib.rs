@@ -37,23 +37,22 @@ use reqwest::Method;
 use secrecy::SecretString;
 use serde::de::DeserializeOwned;
 use sigillum_api::request::{
-    BiometricEnrollRequest, BiometricUnlockRequest, ChainProfileDeleteRequest,
-    ChainProfileUpsertRequest, CompartmentSwitchRequest, DiscoveryJobMutationRequest,
-    EthSeedWalletProfileUpsertRequest, EthStealthAnnouncementScanRequest, EthStealthCheckRequest,
-    EthStealthDepositCreateErc20Request, EthStealthDepositCreateNativeRequest,
-    EthStealthDepositDeleteRequest, EthStealthDepositEnqueueSweepRequest,
-    EthStealthDepositRefreshRequest, EthStealthExportRequest, EthStealthGenerateRequest,
-    EthStealthSendErc20TransferRequest, EthStealthSendErc20WithProfileRequest,
-    EthStealthSendTransferRequest, EthStealthSendWithProfileRequest,
-    EthStealthSignErc20TransferRequest, EthStealthSignRequest, EthStealthSignTransferRequest,
-    EthStealthWalletProfileUpsertRequest, EthXpubDeriveRequest, EthXpubExportRequest,
-    EthXpubWalletProfileUpsertRequest, EvmProfileDeleteRequest, EvmProviderProfileUpsertRequest,
-    EvmRpcBalanceRequest, EvmRpcBroadcastRequest, EvmRpcErc20BalanceRequest, EvmRpcNonceRequest,
-    Fido2RegisterRequest, Fido2RemoveRequest, Fido2SetupRequest, Fido2UnlockRequest,
-    GenerateStoreRequest, KeyOnlyRequest, KeyValueRequest, MaintenanceRunRequest,
-    PassphraseRequest, RiskCatalogDeleteRequest, RiskCatalogUpsertRequest, RunAuditRequest,
-    SecretResolveBatchRequest, SnapshotRestoreRequest, StealthPaymentRef, TransitDecryptRequest,
-    TransitEncryptRequest, TransitHmacRequest, WalletInventoryScanRequest,
+    BiometricEnrollRequest, BiometricUnlockRequest, CompartmentSwitchRequest,
+    DiscoveryJobMutationRequest, EthSeedWalletProfileUpsertRequest,
+    EthStealthAnnouncementScanRequest, EthStealthCheckRequest, EthStealthDepositCreateErc20Request,
+    EthStealthDepositCreateNativeRequest, EthStealthDepositDeleteRequest,
+    EthStealthDepositEnqueueSweepRequest, EthStealthDepositRefreshRequest, EthStealthExportRequest,
+    EthStealthGenerateRequest, EthStealthSendErc20TransferRequest,
+    EthStealthSendErc20WithProfileRequest, EthStealthSendTransferRequest,
+    EthStealthSendWithProfileRequest, EthStealthSignErc20TransferRequest, EthStealthSignRequest,
+    EthStealthSignTransferRequest, EthStealthWalletProfileUpsertRequest, EthXpubDeriveRequest,
+    EthXpubExportRequest, EthXpubWalletProfileUpsertRequest, EvmProfileDeleteRequest,
+    EvmProviderProfileUpsertRequest, EvmRpcBalanceRequest, EvmRpcBroadcastRequest,
+    EvmRpcErc20BalanceRequest, EvmRpcNonceRequest, Fido2RegisterRequest, Fido2RemoveRequest,
+    Fido2SetupRequest, Fido2UnlockRequest, GenerateStoreRequest, KeyOnlyRequest, KeyValueRequest,
+    MaintenanceRunRequest, PassphraseRequest, RiskCatalogDeleteRequest, RiskCatalogUpsertRequest,
+    RunAuditRequest, SecretResolveBatchRequest, SnapshotRestoreRequest, StealthPaymentRef,
+    TransitDecryptRequest, TransitEncryptRequest, TransitHmacRequest,
 };
 pub use sigillum_api::response::Fido2StatusResponse as DaemonFido2Status;
 pub use sigillum_api::response::{
@@ -85,12 +84,14 @@ pub use sigillum_api::response::{
     SwitchCompartmentResponse, TransitDecryptResponse, TransitEncryptResponse, TransitHmacResponse,
     UnlockResponse, UnlockedCompartment, WalletAssetHolding, WalletDiscoveryJob,
     WalletInventoryAddress, WalletInventoryListResponse, WalletInventoryScanResponse,
+    WatchAddressBookListResponse, WatchAddressBookMutationResponse,
 };
 use sigillum_core::SnapshotSummary;
 use thiserror::Error;
 
 pub use sigillum_core::{SecretStore, VaultError};
 
+mod inventory;
 mod plans;
 mod queue;
 
@@ -817,48 +818,6 @@ impl SigillumClient {
                 "/api/wallets/eth-stealth/send-erc20-with-profile",
             )
             .json(&request);
-        self.send(builder).await
-    }
-
-    // ── Wallet inventory ────────────────────────────────────────────
-
-    pub async fn list_wallet_inventory(&self) -> Result<WalletInventoryListResponse, ClientError> {
-        let builder = self.request(Method::GET, "/api/inventory/wallets");
-        self.send(builder).await
-    }
-
-    pub async fn scan_evm_wallet_inventory(
-        &self,
-        request: WalletInventoryScanRequest,
-    ) -> Result<WalletInventoryScanResponse, ClientError> {
-        let builder = self
-            .request(Method::POST, "/api/inventory/scan/evm")
-            .json(&request);
-        self.send(builder).await
-    }
-
-    pub async fn list_chain_profiles(&self) -> Result<ChainProfileListResponse, ClientError> {
-        let builder = self.request(Method::GET, "/api/inventory/chains");
-        self.send(builder).await
-    }
-
-    pub async fn upsert_chain_profile(
-        &self,
-        request: ChainProfileUpsertRequest,
-    ) -> Result<ChainProfileMutationResponse, ClientError> {
-        let builder = self
-            .request(Method::POST, "/api/inventory/chains/upsert")
-            .json(&request);
-        self.send(builder).await
-    }
-
-    pub async fn delete_chain_profile(
-        &self,
-        name: &str,
-    ) -> Result<ChainProfileMutationResponse, ClientError> {
-        let builder = self
-            .request(Method::POST, "/api/inventory/chains/delete")
-            .json(&ChainProfileDeleteRequest { name: name.into() });
         self.send(builder).await
     }
 
