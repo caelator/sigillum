@@ -1,0 +1,211 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "${ROOT}"
+
+PORT="${SIGILLUM_RUNTIME_SMOKE_PORT:-19743}"
+URL="http://127.0.0.1:${PORT}"
+BASE_DIR="$(mktemp -d "${TMPDIR:-/tmp}/sigillum-runtime-smoke.XXXXXX")"
+LOG_FILE="${BASE_DIR}/daemon.log"
+DAEMON_PID=""
+PASSPHRASE="runtime-smoke-passphrase-123"
+
+cleanup() {
+  if [[ -n "${DAEMON_PID}" ]] && kill -0 "${DAEMON_PID}" >/dev/null 2>&1; then
+    kill "${DAEMON_PID}" >/dev/null 2>&1 || true
+    wait "${DAEMON_PID}" >/dev/null 2>&1 || true
+  fi
+  rm -rf "${BASE_DIR}"
+}
+trap cleanup EXIT
+
+fail() {
+  echo "runtime smoke failed: $*" >&2
+  if [[ -f "${LOG_FILE}" ]]; then
+    echo "--- daemon log ---" >&2
+    tail -n 80 "${LOG_FILE}" >&2 || true
+  fi
+  exit 1
+}
+
+require_command() {
+  local command_name="$1"
+  if ! command -v "${command_name}" >/dev/null 2>&1; then
+    fail "required command is missing: ${command_name}"
+  fi
+}
+
+json_assert() {
+  local json="$1"
+  local label="$2"
+  local predicate="$3"
+  node -e '
+const fs = require("fs");
+const label = process.argv[1];
+const predicate = process.argv[2];
+const input = fs.readFileSync(0, "utf8");
+const data = JSON.parse(input);
+const ok = Function("data", predicate)(data);
+if (!ok) {
+  console.error(`json assertion failed: ${label}`);
+  console.error(JSON.stringify(data, null, 2));
+  process.exit(1);
+}
+' "${label}" "${predicate}" <<< "${json}" || fail "${label}"
+}
+
+json_session_token() {
+  node -e '
+const fs = require("fs");
+const data = JSON.parse(fs.readFileSync(0, "utf8"));
+if (typeof data.session_token !== "string" || data.session_token.length === 0) {
+  console.error("session_token missing");
+  console.error(JSON.stringify(data, null, 2));
+  process.exit(1);
+}
+console.log(data.session_token);
+' <<< "$1"
+}
+
+api_get() {
+  local path="$1"
+  local token="${2:-}"
+  if [[ -n "${token}" ]]; then
+    curl -fsS -H "Authorization: Bearer ${token}" "${URL}${path}"
+  else
+    curl -fsS "${URL}${path}"
+  fi
+}
+
+api_post() {
+  local path="$1"
+  local body="$2"
+  local token="${3:-}"
+  if [[ -n "${token}" ]]; then
+    curl -fsS \
+      -X POST \
+      -H "Content-Type: application/json" \
+      -H "Authorization: Bearer ${token}" \
+      --data "${body}" \
+      "${URL}${path}"
+  else
+    curl -fsS \
+      -X POST \
+      -H "Content-Type: application/json" \
+      --data "${body}" \
+      "${URL}${path}"
+  fi
+}
+
+wait_for_daemon() {
+  for _ in {1..80}; do
+    if curl -fsS "${URL}/api/status" >/dev/null 2>&1; then
+      return
+    fi
+    if ! kill -0 "${DAEMON_PID}" >/dev/null 2>&1; then
+      fail "daemon exited before becoming ready"
+    fi
+    sleep 0.25
+  done
+  fail "daemon did not become ready at ${URL}"
+}
+
+run_doctor() {
+  local token="${1:-}"
+  if [[ -n "${token}" ]]; then
+    SIGILLUM_BASE_DIR="${BASE_DIR}" \
+      SIGILLUM_SESSION_TOKEN="${token}" \
+      cargo run -p sigillum-cli --quiet -- doctor --url "${URL}" >/dev/null
+  else
+    SIGILLUM_BASE_DIR="${BASE_DIR}" \
+      cargo run -p sigillum-cli --quiet -- doctor --url "${URL}" >/dev/null
+  fi
+}
+
+require_command cargo
+require_command curl
+require_command node
+
+echo "==> starting sigillum daemon runtime smoke on ${URL}"
+SIGILLUM_BASE_DIR="${BASE_DIR}" \
+  cargo run -p sigillum-cli --quiet -- daemon --port "${PORT}" >"${LOG_FILE}" 2>&1 &
+DAEMON_PID="$!"
+wait_for_daemon
+
+html="$(curl -fsS "${URL}/")"
+[[ "${html}" == *"Sigillum Vault"* ]] || fail "daemon UI shell did not render expected title"
+[[ "${html}" == *"id=\"statusCard\""* ]] || fail "daemon UI shell is missing status card"
+[[ "${html}" == *"/api/status"* ]] || fail "daemon UI shell is missing API status wiring"
+
+fresh_status="$(api_get "/api/status")"
+json_assert "${fresh_status}" "fresh first-run status" '
+return data.initialized === false &&
+  data.locked === true &&
+  Array.isArray(data.unlocked_compartments) &&
+  data.unlocked_compartments.length === 0;
+'
+run_doctor
+
+init_body='{"id":0,"passphrase":"runtime-smoke-passphrase-123","label":"runtime-smoke","threshold":1}'
+init_response="$(api_post "/api/compartment/init" "${init_body}")"
+json_assert "${init_response}" "passphrase compartment init" '
+return data.status === "initialized" &&
+  data.compartment_id === 0 &&
+  data.compartment_label === "runtime-smoke" &&
+  typeof data.session_token === "string" &&
+  data.session_token.length > 0;
+'
+session_token="$(json_session_token "${init_response}")"
+
+unlocked_status="$(api_get "/api/status" "${session_token}")"
+json_assert "${unlocked_status}" "initialized unlocked status" '
+return data.initialized === true &&
+  data.locked === false &&
+  Array.isArray(data.unlocked_compartments) &&
+  data.unlocked_compartments.length === 1 &&
+  data.active_compartment &&
+  data.active_compartment.compartment_id === 0;
+'
+
+compartments="$(api_get "/api/compartment/list" "${session_token}")"
+json_assert "${compartments}" "compartment list after init" '
+return Array.isArray(data.compartments) &&
+  data.compartments.length === 1 &&
+  data.compartments[0].id === 0 &&
+  data.compartments[0].label === "runtime-smoke" &&
+  data.compartments[0].is_active === true;
+'
+run_doctor "${session_token}"
+
+api_post "/api/lock" "{}" "${session_token}" >/dev/null
+locked_status="$(api_get "/api/status")"
+json_assert "${locked_status}" "locked status after lock" '
+return data.initialized === true &&
+  data.locked === true &&
+  Array.isArray(data.unlocked_compartments) &&
+  data.unlocked_compartments.length === 0;
+'
+
+unlock_response="$(api_post "/api/unlock" "{\"passphrase\":\"${PASSPHRASE}\"}")"
+json_assert "${unlock_response}" "unlock response after lock" '
+return data.status === "unlocked" &&
+  typeof data.session_token === "string" &&
+  data.session_token.length > 0 &&
+  Array.isArray(data.unlocked_compartments) &&
+  data.unlocked_compartments.length === 1;
+'
+unlocked_again_token="$(json_session_token "${unlock_response}")"
+
+unlocked_again_status="$(api_get "/api/status" "${unlocked_again_token}")"
+json_assert "${unlocked_again_status}" "status after re-unlock" '
+return data.initialized === true &&
+  data.locked === false &&
+  Array.isArray(data.unlocked_compartments) &&
+  data.unlocked_compartments.length === 1 &&
+  data.active_compartment &&
+  data.active_compartment.compartment_id === 0;
+'
+run_doctor "${unlocked_again_token}"
+
+echo "runtime smoke checks passed"

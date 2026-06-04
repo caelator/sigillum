@@ -79,7 +79,9 @@ verify_generated_assets_unchanged() {
 }
 
 require_command cargo
+require_command curl
 require_command git
+require_command node
 require_command npm
 require_command shasum
 require_cargo_subcommand audit "cargo install cargo-audit --version 0.22.1 --locked"
@@ -98,6 +100,7 @@ run_step cargo fmt --all --check
 run_step cargo check --workspace
 run_step cargo test --workspace
 run_step cargo clippy --workspace --all-targets -- -D warnings
+run_step ./scripts/check-runtime-smoke.sh
 run_step cargo audit
 run_step cargo deny check
 run_git_diff_check

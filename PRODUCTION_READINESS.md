@@ -11,7 +11,7 @@ core, CLI, and the `sigillum-gateway` sidecar:
 
 - the workspace needs to stay green on the executable `./scripts/check-release.sh`
   gate, including metadata, architecture guardrails, daemon UI checks, tests,
-  fmt, clippy, audit, and deny
+  fmt, clippy, runtime smoke, audit, and deny
 - clean-clone reproducibility depends on the committed `Cargo.lock`, Rust
   `1.88.0`, crates.io dependencies, and no local vendored SQLite patch
 - Rust `1.88.0` supersedes the earlier `1.85.0` target because the current
@@ -78,7 +78,7 @@ Sigillum should only be treated as release-ready for a given scope when all of
 these are true:
 
 1. `./scripts/check-release.sh` passes from a clean checkout with the pinned
-   Rust toolchain and committed daemon UI assets.
+   Rust toolchain, committed daemon UI assets, and local daemon runtime smoke.
 2. The API, daemon route, client surface, and docs all match.
 3. The feature has an operator surface or an explicit API-only decision.
 4. Persistence and restart behavior are explicit and tested.

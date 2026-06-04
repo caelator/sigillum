@@ -271,8 +271,9 @@ Full release gate:
 
 The release gate runs Cargo metadata, architecture guardrails, daemon UI
 install/typecheck/tests/build, generated UI asset freshness, Rust
-fmt/check/test/clippy, `cargo audit`, `cargo deny check`, and whitespace
-checks. The commands below are useful for targeted local iteration.
+fmt/check/test/clippy, a real local daemon runtime smoke test, `cargo audit`,
+`cargo deny check`, and whitespace checks. The commands below are useful for
+targeted local iteration.
 
 Metadata:
 
