@@ -56,6 +56,8 @@ By default, Sigillum stores data under:
 The daemon and CLI both operate on that same local data directory unless configured otherwise in code.
 Set `SIGILLUM_BASE_DIR` to point both tools at an alternate local directory for
 tests or separate operator profiles.
+On Unix, daemon startup creates or repairs this directory with `0700`
+permissions before opening runtime state.
 
 ## Mode 3: Local Gateway Sidecar
 
@@ -74,7 +76,13 @@ Provide a pre-established daemon bearer token through
 `SIGILLUM_DAEMON_SESSION_TOKEN` or `SIGILLUM_SESSION_TOKEN` when the gateway
 needs authenticated daemon operations.
 
-Before calling a host production-ready for this local boundary, run:
+Before calling a source checkout release-ready for this local boundary, run:
+
+```bash
+./scripts/check-release.sh
+```
+
+Before calling a host operationally ready for this local boundary, run:
 
 ```bash
 sigillum doctor
@@ -95,7 +103,7 @@ tokens are reported as warnings so first-run setup remains possible.
 - Recent state-changing operations are appended to a local audit log and visible through the UI/API.
 - The CLI is useful for setup and launch, but the daemon is the more coherent way to keep compartments unlocked across multiple operations.
 - Reproducible local releases use the committed `Cargo.lock`, Rust `1.88.0`,
-  `cargo audit`, and `cargo deny check`.
+  `./scripts/check-release.sh`, and `sigillum doctor` on the target host.
 
 ## What This Guide Does Not Cover
 

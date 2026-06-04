@@ -1,6 +1,6 @@
 # Sigillum — Production Readiness
 
-**Date:** April 24, 2026  
+**Date:** June 4, 2026
 **Current Verdict:** The target is local-first single-host readiness; internet-facing and remote-platform scope is explicitly unsupported
 
 ## Summary
@@ -9,18 +9,25 @@ Sigillum now meets its current full-workspace release baseline for the
 documented local-first scope. That baseline covers the local daemon, client,
 core, CLI, and the `sigillum-gateway` sidecar:
 
-- the workspace needs to stay green on metadata, tests, fmt, clippy, audit, and deny
+- the workspace needs to stay green on the executable `./scripts/check-release.sh`
+  gate, including metadata, architecture guardrails, daemon UI checks, tests,
+  fmt, clippy, audit, and deny
 - clean-clone reproducibility depends on the committed `Cargo.lock`, Rust
   `1.88.0`, crates.io dependencies, and no local vendored SQLite patch
 - Rust `1.88.0` supersedes the earlier `1.85.0` target because the current
   RustSec gates require the fixed `time` crate and a `cargo-deny` release that
   both have Rust `1.88` MSRVs
 - the local daemon uses bearer session-token auth over local HTTP
+- daemon startup creates or repairs its local base directory to `0700` on Unix
+  before opening runtime state
 - the gateway is part of the workspace release bar, but remains a local-sidecar
   preview surface in this phase
 - the passphrase unlock path, daemon state recovery, and gateway/payment flows
   are all part of the same readiness story
 - `sigillum doctor` is the operator preflight for local host readiness
+
+The current evidence and remaining caveats are tracked in
+[docs/production-readiness-audit.md](./docs/production-readiness-audit.md).
 
 That does **not** mean the project is aiming toward a remote, multi-tenant, or
 internet-facing deployment. The green bar here is explicitly the single-machine
@@ -70,7 +77,8 @@ The main remaining limits are scope and assurance, not the current local-first b
 Sigillum should only be treated as release-ready for a given scope when all of
 these are true:
 
-1. The workspace is green on metadata, tests, fmt, clippy, audit, and deny.
+1. `./scripts/check-release.sh` passes from a clean checkout with the pinned
+   Rust toolchain and committed daemon UI assets.
 2. The API, daemon route, client surface, and docs all match.
 3. The feature has an operator surface or an explicit API-only decision.
 4. Persistence and restart behavior are explicit and tested.
@@ -97,7 +105,7 @@ The current execution order is:
 The next work should still avoid speculative new product scope first. The right
 immediate move is:
 
-1. keep the full-workspace release gate enforced in CI across Ubuntu and macOS
+1. keep `./scripts/check-release.sh` enforced in CI across Ubuntu and macOS
 2. expand higher-assurance testing around long-running recovery, gateway delivery, and browser/widget behavior
 3. close the remaining CLI/operator gaps for wallet/send flows and polish
 4. keep documentation and audits anchored to the local-on-your-computer boundary

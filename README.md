@@ -260,6 +260,19 @@ sigillum-fido2 = { version = "0.1", default-features = false }
 
 The application release contract is a clean checkout with the committed
 `Cargo.lock` and the pinned Rust toolchain in `rust-toolchain.toml`.
+Current readiness evidence and caveats are tracked in
+[`docs/production-readiness-audit.md`](docs/production-readiness-audit.md).
+
+Full release gate:
+
+```bash
+./scripts/check-release.sh
+```
+
+The release gate runs Cargo metadata, architecture guardrails, daemon UI
+install/typecheck/tests/build, generated UI asset freshness, Rust
+fmt/check/test/clippy, `cargo audit`, `cargo deny check`, and whitespace
+checks. The commands below are useful for targeted local iteration.
 
 Metadata:
 

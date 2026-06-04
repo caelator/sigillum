@@ -39,7 +39,7 @@ mod ui;
 pub use state::AppState;
 
 use std::net::SocketAddr;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use axum::Router;
@@ -50,6 +50,14 @@ use tower_http::trace::TraceLayer;
 
 /// Build the Axum router with multi-compartment vault state.
 pub fn build_router(base_dir: PathBuf, listen_port: u16) -> (Router, Arc<AppState>) {
+    if let Err(error) = prepare_base_dir(&base_dir) {
+        tracing::warn!(
+            path = %base_dir.display(),
+            error = %error,
+            "failed to prepare daemon base directory"
+        );
+    }
+
     let state = Arc::new(AppState::new(base_dir));
     let service = service::SigillumService::new(state.clone());
     if let Err(error) = service.recover_runtime_state() {
@@ -85,6 +93,7 @@ pub async fn run(addr: SocketAddr, base_dir: PathBuf) -> Result<(), Box<dyn std:
         )
         .init();
 
+    prepare_base_dir(&base_dir)?;
     let (app, state) = build_router(base_dir, addr.port());
 
     let listener = tokio::net::TcpListener::bind(addr).await?;
@@ -113,4 +122,40 @@ pub async fn run(addr: SocketAddr, base_dir: PathBuf) -> Result<(), Box<dyn std:
         })
         .await?;
     Ok(())
+}
+
+fn prepare_base_dir(base_dir: &Path) -> std::io::Result<()> {
+    std::fs::create_dir_all(base_dir)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(base_dir, std::fs::Permissions::from_mode(0o700))?;
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::prepare_base_dir;
+
+    #[test]
+    fn prepare_base_dir_restricts_unix_permissions() {
+        let temp = tempfile::tempdir().unwrap();
+        let base = temp.path().join("sigillum");
+
+        prepare_base_dir(&base).unwrap();
+
+        assert!(base.is_dir());
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = std::fs::metadata(&base).unwrap().permissions().mode() & 0o777;
+            assert_eq!(mode, 0o700);
+
+            std::fs::set_permissions(&base, std::fs::Permissions::from_mode(0o755)).unwrap();
+            prepare_base_dir(&base).unwrap();
+            let repaired = std::fs::metadata(&base).unwrap().permissions().mode() & 0o777;
+            assert_eq!(repaired, 0o700);
+        }
+    }
 }

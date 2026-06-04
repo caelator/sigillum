@@ -21,14 +21,16 @@ multi-host work is deliberately sequenced after the local platform is coherent.
 
 Status after this catch-up pass:
 
-- The workspace is back to a fully green release baseline as of 2026-03-24.
+- The workspace is back to a fully green release baseline as of 2026-06-04,
+  with current evidence tracked in
+  [production-readiness-audit.md](./production-readiness-audit.md).
 - `sigillum-core`, `sigillum-daemon`, `sigillum-client`, `sigillum-cli`, and
   `sigillum-gateway` all remain in the production-readiness scope.
 - The non-vault JSON stores for profiles, deposits, and queue state use atomic
   writes, sidecar backups, and automatic restore/quarantine behavior for
   missing or corrupted live files.
-- The next release gate is keeping build, test, fmt, clippy, and audit aligned
-  across the whole workspace.
+- The next release gate is keeping `./scripts/check-release.sh` green across
+  the whole workspace.
 
 The remaining maturity mismatches are now product-surface, CLI, gateway, and
 longer-running recovery gaps, not a broken baseline build:
@@ -84,6 +86,7 @@ work.
 Every phase and workstream must pass these gates before the next one is opened:
 
 1. `Build Gate`
+   - `./scripts/check-release.sh` is green for the release candidate
    - `cargo test --workspace` is green
    - `cargo fmt --all --check` is green
    - `cargo clippy --workspace --all-targets` is green
@@ -105,8 +108,7 @@ Structural scaffolding landed in this catch-up pass:
   by restoring `.bak` sidecars and quarantining broken state files
 - this catch-up roadmap is now the repo-level execution plan
 - readiness documentation has been reset to match the current codebase
-- CI now enforces workspace tests, formatting, clippy, and audit for the
-  release gate
+- CI now enforces `./scripts/check-release.sh` for the release gate
 
 ## Phase 0 — Restore A Green Baseline
 

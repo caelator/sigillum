@@ -33,32 +33,11 @@ jobs:
       - name: Cache cargo artifacts
         uses: Swatinem/rust-cache@v2
 
-      - name: Run workspace tests
-        run: cargo test --workspace --quiet
-
-      - name: Check architecture boundaries
-        run: ./scripts/check-architecture.sh
-
-      - name: Install daemon UI dependencies
-        run: npm --prefix crates/sigillum-daemon/ui ci --ignore-scripts
-
-      - name: Type-check daemon UI
-        run: npm --prefix crates/sigillum-daemon/ui run typecheck
-
-      - name: Check formatting
-        run: cargo fmt --all --check
-
-      - name: Run clippy
-        run: cargo clippy --workspace --all-targets --quiet -- -D warnings
-
       - name: Install cargo-audit
         run: cargo install cargo-audit --version 0.22.1 --locked
-
-      - name: Run security audit
-        run: cargo audit
 
       - name: Install cargo-deny
         run: cargo install cargo-deny --version 0.19.4 --locked
 
-      - name: Run supply-chain policy
-        run: cargo deny check
+      - name: Run release gate
+        run: ./scripts/check-release.sh

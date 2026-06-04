@@ -13,17 +13,21 @@ cargo test
 
 ### Workspace Structure
 
-Sigillum is a Cargo workspace with 8 crates. Changes to `sigillum-core` affect everything downstream.
+Sigillum is a Cargo workspace with local vault, API, daemon, client, CLI, SDK,
+FIDO2, generator, server, gateway, and meta crates. Changes to
+`sigillum-core` affect everything downstream.
 
 ```
 crates/
 ├── sigillum-core      ← Start here. Traits and file vault.
 ├── sigillum-daemon    ← Axum server, routes, web UI
-├── sigillum-client    ← Remote vault SDK
+├── sigillum-api       ← Shared daemon/client request and response contracts
+├── sigillum-client    ← Daemon API client
 ├── sigillum-fido2     ← Hardware key integration
 ├── sigillum-cli       ← Terminal interface
 ├── sigillum-sdk       ← Embeddable SDK
 ├── sigillum-server    ← Server library
+├── sigillum-gateway   ← Local-sidecar payment preview gateway
 └── sigillum           ← Meta-crate (re-exports core)
 ```
 
@@ -43,6 +47,9 @@ RUST_LOG=debug cargo test --workspace -- --nocapture
 ### Code Quality
 
 ```bash
+# Full release gate
+./scripts/check-release.sh
+
 # Lint
 cargo clippy --workspace -- -D warnings
 
@@ -57,10 +64,8 @@ cargo audit
 
 1. Fork the repo and create a branch from `main`.
 2. If you've added code, add tests.
-3. Ensure `cargo test --workspace` passes.
-4. Ensure `cargo clippy --workspace -- -D warnings` is clean.
-5. Ensure `cargo fmt --all -- --check` passes.
-6. Open a PR with a clear description of the change.
+3. Ensure `./scripts/check-release.sh` passes.
+4. Open a PR with a clear description of the change.
 
 ### Commit Messages
 
