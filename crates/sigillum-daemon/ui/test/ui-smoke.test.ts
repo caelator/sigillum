@@ -272,6 +272,7 @@ test("inventory scan sends optional EVM watch-address probes", async () => {
     "inventoryWatchAddress",
     "inventoryWatchLabel",
     "inventoryWatchAddresses",
+    "inventoryIncludeWatchBook",
     "inventoryTokenAddress",
     "inventoryAllowanceSpender",
     "inventoryPermit2Contract",
@@ -300,6 +301,7 @@ test("inventory scan sends optional EVM watch-address probes", async () => {
   ]);
   dom.el("inventoryWatchAddress").value = "0x7777777777777777777777777777777777777777";
   dom.el("inventoryWatchLabel").value = "old-ledger";
+  dom.el("inventoryIncludeWatchBook").checked = true;
   dom.el("inventoryWatchAddresses").value = [
     "# old client batch",
     "0x8888888888888888888888888888888888888888,client-vault",
@@ -331,6 +333,7 @@ test("inventory scan sends optional EVM watch-address probes", async () => {
     },
   ]);
   equal(requestBody.wallet_family, "eth-watch");
+  equal(requestBody.include_watch_book, true);
   equal(requestBody.provider_profile, "mainnet");
   equal(requestBody.block_tag, "latest");
 });
@@ -368,6 +371,18 @@ test("inventory report export summarizes watch addresses and risk state", async 
   let download: { filename: string; payload: any } | null = null;
   const inventory = createInventoryActions({
     api: async (_method, path) => {
+      if (path === "/api/inventory/watch-addresses") {
+        return {
+          entries: [
+            {
+              address: "0x7777777777777777777777777777777777777777",
+              label: "old-ledger",
+              tags: ["archive"],
+              enabled: true,
+            },
+          ],
+        };
+      }
       if (path === "/api/inventory/wallets") {
         return {
           jobs: [{ id: "job-1" }],
@@ -411,12 +426,115 @@ test("inventory report export summarizes watch addresses and risk state", async 
 
   ok(download?.filename.startsWith("sigillum-inventory-report-"));
   equal(download?.payload.summary.watch_address_count, 1);
+  equal(download?.payload.summary.saved_watch_address_count, 1);
   equal(download?.payload.summary.blocked_plan_step_count, 1);
+  equal(download?.payload.watch_address_book[0].label, "old-ledger");
   equal(download?.payload.risk_findings.length, 1);
 
-  const report = buildInventoryReport({ jobs: [], addresses: [], holdings: [] }, [], [], 42);
+  const report = buildInventoryReport({ jobs: [], addresses: [], holdings: [] }, [], [], [], 42);
   equal(report.generated_at_unix, 42);
   equal(report.summary.address_count, 0);
+});
+
+test("saved watch-address UI renders, saves, toggles, and deletes entries", async () => {
+  const dom = installDom([
+    "watchAddressBookList",
+    "watchBookAddress",
+    "watchBookLabel",
+    "watchBookTags",
+    "watchBookEnabled",
+    "inventoryWatchAddress",
+    "inventoryWatchLabel",
+    "inventoryWatchAddresses",
+  ]);
+  (globalThis as any).confirm = () => true;
+  const calls: Array<{ method: string; path: string; body?: any }> = [];
+  const toasts: string[] = [];
+  const inventory = createInventoryActions({
+    api: async (method, path, body) => {
+      calls.push({ method, path, body });
+      return { status: "ok", entries: [] };
+    },
+    toast: (message) => toasts.push(message),
+    downloadJson: () => undefined,
+  });
+
+  inventory.renderWatchAddressBook([
+    {
+      id: "watch-1",
+      address: "0x7777777777777777777777777777777777777777",
+      label: "old-ledger",
+      tags: ["archive", "ledger"],
+      source: "operator",
+      enabled: true,
+      created_at_unix: 1,
+      updated_at_unix: 2,
+    },
+  ]);
+  ok(dom.el("watchAddressBookList").innerHTML.includes("old-ledger"));
+  ok(dom.el("watchAddressBookList").innerHTML.includes("Disable"));
+
+  inventory.loadWatchAddressBookEntry(
+    "0x7777777777777777777777777777777777777777",
+    "old-ledger",
+    "archive, ledger",
+    "true",
+  );
+  equal(dom.el("watchBookAddress").value, "0x7777777777777777777777777777777777777777");
+  equal(dom.el("watchBookTags").value, "archive, ledger");
+  equal(dom.el("watchBookEnabled").checked, true);
+
+  dom.el("watchBookAddress").value = "0x8888888888888888888888888888888888888888";
+  dom.el("watchBookLabel").value = "client";
+  dom.el("watchBookTags").value = "archive, archive, client";
+  dom.el("watchBookEnabled").checked = false;
+  await inventory.upsertWatchAddressBookEntry();
+  const firstUpsert = calls.find(
+    (call) => call.path === "/api/inventory/watch-addresses/upsert",
+  );
+  deepEqual(firstUpsert, {
+    method: "POST",
+    path: "/api/inventory/watch-addresses/upsert",
+    body: {
+      address: "0x8888888888888888888888888888888888888888",
+      label: "client",
+      tags: ["archive", "client"],
+      enabled: false,
+    },
+  });
+
+  calls.length = 0;
+  dom.el("inventoryWatchAddress").value = "0x9999999999999999999999999999999999999999";
+  dom.el("inventoryWatchLabel").value = "batch-one";
+  dom.el("inventoryWatchAddresses").value =
+    "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa,batch-two";
+  await inventory.upsertBulkWatchAddressBookEntries();
+  const bulkUpserts = calls.filter(
+    (call) => call.path === "/api/inventory/watch-addresses/upsert",
+  );
+  equal(bulkUpserts.length, 2);
+  equal(bulkUpserts[0].body.address, "0x9999999999999999999999999999999999999999");
+  equal(bulkUpserts[1].body.address, "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
+
+  calls.length = 0;
+  await inventory.toggleWatchAddressBookEntry(
+    "0x7777777777777777777777777777777777777777",
+    "old-ledger",
+    "archive",
+    "false",
+  );
+  const toggleUpsert = calls.find(
+    (call) => call.path === "/api/inventory/watch-addresses/upsert",
+  );
+  equal(toggleUpsert?.body.enabled, false);
+
+  calls.length = 0;
+  await inventory.deleteWatchAddressBookEntry("0x7777777777777777777777777777777777777777");
+  const deleteCall = calls.find(
+    (call) => call.path === "/api/inventory/watch-addresses/delete",
+  );
+  equal(deleteCall?.body.address, "0x7777777777777777777777777777777777777777");
+  ok(toasts.some((message) => message.includes("deleted")));
 });
 
 test("data-action dispatcher coerces args and restores button busy state", async () => {

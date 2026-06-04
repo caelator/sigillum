@@ -47,7 +47,7 @@ Required discovery classes:
   wallet, client, or externally found addresses. The first slices are
   implemented as bounded read-only `eth-watch` probes in EVM inventory scans,
   bulk operator input in the UI, CLI `--watch-address-file` import, duplicate
-  probe collapse, JSON inventory report export, and a persisted daemon/CLI
+  probe collapse, JSON inventory report export, and a persisted daemon/CLI/UI
   watch-address book that scans with `--include-watch-book`, preserving
   watch-only classification and blocking consolidation execution unless signer
   material is later introduced through an explicit profile.

@@ -5,6 +5,7 @@ import type {
   ConsolidationPlanStep,
   RiskCatalogEntry,
   RiskFinding,
+  WatchAddressBookEntry,
   WalletDiscoveryJob,
 } from "../contracts";
 import {
@@ -18,6 +19,7 @@ import { esc, escAttr, statusPill } from "../render/html";
 
 export interface InventoryViewModel {
   enabledChains: ChainProfile[];
+  watchAddressBook: WatchAddressBookEntry[];
   discoveryJobs: WalletDiscoveryJob[];
   riskCatalog: RiskCatalogEntry[];
   riskFindings: RiskFinding[];
@@ -27,6 +29,7 @@ export interface InventoryViewModel {
 export function summarizeInventory(view: InventoryViewModel): string {
   return [
     `${view.enabledChains.length} enabled chains`,
+    `${view.watchAddressBook.length} saved watch addresses`,
     `${view.discoveryJobs.length} discovery jobs`,
     `${view.riskCatalog.length} risk catalog entries`,
     `${view.riskFindings.length} risk findings`,
@@ -195,6 +198,60 @@ export function createInventoryActions(deps: InventoryActionsDeps) {
     );
   }
 
+  function renderWatchAddressBook(entries: WatchAddressBookEntry[]): void {
+    renderEntityList(
+      "watchAddressBookList",
+      entries,
+      "No saved watch addresses yet.",
+      (entry) => {
+        const tagsCsv = (entry.tags || []).join(", ");
+        const nextEnabled = !entry.enabled;
+        return (
+          '<li><div class="entity-main">' +
+          '<div class="entity-title">' +
+          esc(entry.label || entry.address) +
+          " " +
+          statusPill(entry.enabled ? "enabled" : "disabled") +
+          "</div>" +
+          '<div class="entity-meta">' +
+          esc(entry.address) +
+          " · tags=" +
+          esc(tagsCsv || "-") +
+          " · source=" +
+          esc(entry.source || "-") +
+          " · updated=" +
+          esc(String(entry.updated_at_unix || "-")) +
+          "</div></div>" +
+          '<div class="entity-actions">' +
+          '<button class="btn-ghost" data-action="loadWatchAddressBookEntry" data-arg0="' +
+          escAttr(entry.address) +
+          '" data-arg1="' +
+          escAttr(entry.label || "") +
+          '" data-arg2="' +
+          escAttr(tagsCsv) +
+          '" data-arg3="' +
+          escAttr(String(entry.enabled)) +
+          '">Load</button>' +
+          '<button class="btn-ghost" data-action="toggleWatchAddressBookEntry" data-arg0="' +
+          escAttr(entry.address) +
+          '" data-arg1="' +
+          escAttr(entry.label || "") +
+          '" data-arg2="' +
+          escAttr(tagsCsv) +
+          '" data-arg3="' +
+          escAttr(String(nextEnabled)) +
+          '">' +
+          esc(nextEnabled ? "Enable" : "Disable") +
+          "</button>" +
+          '<button class="btn-danger" data-action="deleteWatchAddressBookEntry" data-arg0="' +
+          escAttr(entry.address) +
+          '">Delete</button>' +
+          "</div></li>"
+        );
+      },
+    );
+  }
+
   function renderRiskFindings(findings: any[]): void {
     renderEntityList(
       "riskFindingList",
@@ -334,14 +391,16 @@ export function createInventoryActions(deps: InventoryActionsDeps) {
 
   async function loadInventoryOperations(): Promise<void> {
     try {
-      const [chains, inventory, catalog, risks, plans] = await Promise.all([
+      const [chains, watchBook, inventory, catalog, risks, plans] = await Promise.all([
         deps.api("GET", "/api/inventory/chains"),
+        deps.api("GET", "/api/inventory/watch-addresses"),
         deps.api("GET", "/api/inventory/wallets"),
         deps.api("GET", "/api/risk/catalog"),
         deps.api("GET", "/api/risk/findings"),
         deps.api("GET", "/api/plans/consolidation"),
       ]);
       if (!chains.error) renderChainProfiles(chains.profiles || []);
+      if (!watchBook.error) renderWatchAddressBook(watchBook.entries || []);
       if (!inventory.error) renderInventoryState(inventory);
       if (!catalog.error) renderRiskCatalog(catalog.entries || []);
       if (!risks.error) renderRiskFindings(risks.findings || []);
@@ -411,6 +470,7 @@ export function createInventoryActions(deps: InventoryActionsDeps) {
       wallet_profile: optionalTextValue("inventoryWalletProfile"),
       provider_profile: optionalTextValue("inventoryProviderProfile"),
       watch_addresses: watchAddresses,
+      include_watch_book: input("inventoryIncludeWatchBook").checked,
       gap_limit: optionalNumberValue("inventoryGapLimit"),
       max_index: optionalNumberValue("inventoryMaxIndex"),
       token_addresses: token ? [token] : [],
@@ -440,6 +500,98 @@ export function createInventoryActions(deps: InventoryActionsDeps) {
       return;
     }
     deps.toast("Inventory scan completed");
+    void loadInventoryOperations();
+  }
+
+  function loadWatchAddressBookEntry(
+    address: string,
+    label = "",
+    tagsCsv = "",
+    enabled = "true",
+  ): void {
+    input("watchBookAddress").value = address;
+    input("watchBookLabel").value = label;
+    input("watchBookTags").value = tagsCsv;
+    input("watchBookEnabled").checked = enabled !== "false";
+  }
+
+  async function upsertWatchAddressBookEntry(): Promise<void> {
+    const address = textValue("watchBookAddress");
+    if (!address) {
+      deps.toast("Watch address is required", "error");
+      return;
+    }
+    const r = await deps.api("POST", "/api/inventory/watch-addresses/upsert", {
+      address,
+      label: optionalTextValue("watchBookLabel"),
+      tags: parseTagList(optionalTextValue("watchBookTags")),
+      enabled: input("watchBookEnabled").checked,
+    });
+    if (r.error) {
+      deps.toast(r.error, "error");
+      return;
+    }
+    clearFields(["watchBookAddress", "watchBookLabel", "watchBookTags"]);
+    input("watchBookEnabled").checked = true;
+    deps.toast("Watch address saved");
+    void loadInventoryOperations();
+  }
+
+  async function upsertBulkWatchAddressBookEntries(): Promise<void> {
+    const probes = parseWatchAddressProbes(
+      optionalTextValue("inventoryWatchAddresses"),
+      optionalTextValue("inventoryWatchAddress"),
+      optionalTextValue("inventoryWatchLabel"),
+    );
+    if (!probes.length) {
+      deps.toast("No watch addresses to save", "error");
+      return;
+    }
+    const tags = parseTagList(optionalTextValue("watchBookTags"));
+    for (const probe of probes) {
+      const r = await deps.api("POST", "/api/inventory/watch-addresses/upsert", {
+        address: probe.address,
+        label: probe.label || null,
+        tags,
+        enabled: true,
+      });
+      if (r.error) {
+        deps.toast(r.error, "error");
+        return;
+      }
+    }
+    deps.toast("Watch addresses saved");
+    void loadInventoryOperations();
+  }
+
+  async function toggleWatchAddressBookEntry(
+    address: string,
+    label: string,
+    tagsCsv: string,
+    enabled: string,
+  ): Promise<void> {
+    const r = await deps.api("POST", "/api/inventory/watch-addresses/upsert", {
+      address,
+      label: label || null,
+      tags: parseTagList(tagsCsv),
+      enabled: enabled === "true",
+    });
+    if (r.error) {
+      deps.toast(r.error, "error");
+      return;
+    }
+    deps.toast(enabled === "true" ? "Watch address enabled" : "Watch address disabled");
+    void loadInventoryOperations();
+  }
+
+  async function deleteWatchAddressBookEntry(address: string): Promise<void> {
+    if (!confirm('Delete saved watch address "' + address + '"?')) return;
+    const r = await deps.api("POST", "/api/inventory/watch-addresses/delete", { address });
+    if (r.error) {
+      deps.toast(r.error, "error");
+      return;
+    }
+    deps.toast("Watch address deleted");
     void loadInventoryOperations();
   }
 
@@ -584,16 +736,22 @@ export function createInventoryActions(deps: InventoryActionsDeps) {
   }
 
   async function exportInventoryReport(): Promise<void> {
-    const [inventory, risks, plans] = await Promise.all([
+    const [watchBook, inventory, risks, plans] = await Promise.all([
+      deps.api("GET", "/api/inventory/watch-addresses"),
       deps.api("GET", "/api/inventory/wallets"),
       deps.api("GET", "/api/risk/findings"),
       deps.api("GET", "/api/plans/consolidation"),
     ]);
-    if (inventory.error || risks.error || plans.error) {
-      deps.toast(inventory.error || risks.error || plans.error, "error");
+    if (watchBook.error || inventory.error || risks.error || plans.error) {
+      deps.toast(watchBook.error || inventory.error || risks.error || plans.error, "error");
       return;
     }
-    const report = buildInventoryReport(inventory, risks.findings || [], plans.plans || []);
+    const report = buildInventoryReport(
+      inventory,
+      risks.findings || [],
+      plans.plans || [],
+      watchBook.entries || [],
+    );
     deps.downloadJson(inventoryReportFilename(report.generated_at_unix), report);
     deps.toast("Inventory report exported");
   }
@@ -601,6 +759,7 @@ export function createInventoryActions(deps: InventoryActionsDeps) {
   return {
     renderChainProfiles,
     renderInventoryState,
+    renderWatchAddressBook,
     renderRiskCatalog,
     renderRiskFindings,
     renderConsolidationPlans,
@@ -608,6 +767,11 @@ export function createInventoryActions(deps: InventoryActionsDeps) {
     upsertChainProfile,
     deleteChainProfile,
     scanInventoryEvm,
+    loadWatchAddressBookEntry,
+    upsertWatchAddressBookEntry,
+    upsertBulkWatchAddressBookEntries,
+    toggleWatchAddressBookEntry,
+    deleteWatchAddressBookEntry,
     cancelDiscoveryJob,
     resumeDiscoveryJob,
     loadRiskFindings,
@@ -650,6 +814,7 @@ export function buildInventoryReport(
   inventory: any,
   riskFindings: any[],
   consolidationPlans: ConsolidationPlan[],
+  watchAddressBook: WatchAddressBookEntry[] = [],
   generatedAtUnix = Math.floor(Date.now() / 1000),
 ) {
   const addresses = inventory.addresses || [];
@@ -667,11 +832,13 @@ export function buildInventoryReport(
       address_count: addresses.length,
       active_address_count: activeAddresses.length,
       watch_address_count: watchAddresses.length,
+      saved_watch_address_count: watchAddressBook.length,
       holding_count: holdings.length,
       risk_finding_count: riskFindings.length,
       consolidation_plan_count: consolidationPlans.length,
       blocked_plan_step_count: blockedPlanSteps,
     },
+    watch_address_book: watchAddressBook,
     watch_addresses: watchAddresses,
     addresses,
     holdings,
@@ -705,6 +872,14 @@ function buildWatchAddressProbe(
     address: trimmedAddress,
     ...(trimmedLabel ? { label: trimmedLabel } : {}),
   };
+}
+
+function parseTagList(value: string | null | undefined): string[] {
+  return (value || "")
+    .split(",")
+    .map((tag) => tag.trim())
+    .filter(Boolean)
+    .filter((tag, index, tags) => tags.findIndex((item) => item.toLowerCase() === tag.toLowerCase()) === index);
 }
 
 function inventoryReportFilename(generatedAtUnix: number): string {

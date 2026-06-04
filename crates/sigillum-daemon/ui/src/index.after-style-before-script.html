@@ -558,8 +558,24 @@
     <div class="form-row">
       <input type="text" id="inventoryWatchAddress" placeholder="Watch address (optional)">
       <input type="text" id="inventoryWatchLabel" placeholder="Watch label (optional)">
+      <label class="checkbox-row">
+        <input type="checkbox" id="inventoryIncludeWatchBook" checked>
+        Include saved watch book
+      </label>
     </div>
     <textarea id="inventoryWatchAddresses" placeholder="Bulk watch addresses, one per line: address[:label] or address,label"></textarea>
+    <div class="form-row">
+      <input type="text" id="watchBookAddress" placeholder="Saved watch address">
+      <input type="text" id="watchBookLabel" placeholder="Saved label">
+      <input type="text" id="watchBookTags" placeholder="Tags, comma-separated">
+      <label class="checkbox-row">
+        <input type="checkbox" id="watchBookEnabled" checked>
+        Enabled
+      </label>
+      <button class="btn-ghost" data-action="upsertWatchAddressBookEntry">Save Watch</button>
+      <button class="btn-ghost" data-action="upsertBulkWatchAddressBookEntries">Save Bulk</button>
+    </div>
+    <div id="watchAddressBookList"></div>
     <div class="form-row">
       <input type="text" id="inventoryTokenDiscoveryFromBlock" placeholder="ERC-20 discovery from block">
       <input type="text" id="inventoryTokenDiscoveryToBlock" placeholder="ERC-20 discovery to block (optional)">

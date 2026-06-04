@@ -50,6 +50,17 @@ export interface ChainProfile {
   updated_at_unix: number;
 }
 
+export interface WatchAddressBookEntry {
+  id: string;
+  address: string;
+  label: string;
+  tags: string[];
+  source: string;
+  enabled: boolean;
+  created_at_unix: number;
+  updated_at_unix: number;
+}
+
 export interface WalletDiscoveryJob {
   id: string;
   kind: string;
