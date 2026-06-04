@@ -17,14 +17,16 @@ The gate covers:
 
 - Cargo metadata resolution
 - architecture guardrails and file-size/module-boundary budgets
-- daemon UI dependency install, TypeScript typecheck, DOM smoke tests, and Vite
-  build
+- daemon UI dependency install, TypeScript typecheck, DOM smoke tests including
+  setup-wizard passphrase initialization coverage, and Vite build
 - generated daemon UI asset freshness for `app.js` and `styles.css`
 - Rust formatting, workspace check, workspace tests, and clippy with warnings
   denied
 - real local daemon runtime smoke for first-run status, served UI shell,
   passphrase compartment initialization, lock/unlock, compartment listing, and
   `sigillum doctor`
+- vault write/read canaries for connection keys and encrypted secrets before
+  and after re-unlock inside the runtime smoke gate
 - configurable local daemon/gateway soak harness for repeated daemon status,
   vault write/read canaries, gateway health, and `sigillum doctor`
 - RustSec advisory scan through `cargo audit`
@@ -52,9 +54,17 @@ state, action controls, and live refresh metadata.
 The repeatable version of that proof is now `scripts/check-runtime-smoke.sh`.
 It starts a real daemon on a temporary local base directory, verifies first-run
 status, checks the served UI shell, initializes a passphrase compartment,
-verifies initialized/unlocked state and compartment listing, locks the daemon,
-unlocks it again, and runs `sigillum doctor` against first-run and unlocked
-states.
+verifies initialized/unlocked state and compartment listing, stores and reads
+connection-key and encrypted-secret canaries, locks the daemon, unlocks it
+again, reads the canaries again, and runs `sigillum doctor` against first-run
+and unlocked states.
+
+A browser-level proof was also run against an isolated daemon on
+`http://127.0.0.1:19943`: the in-app browser completed passphrase setup through
+the setup wizard, reached the unlocked operator workspace, stored and revealed
+one connection-key canary and one encrypted-secret canary, logged out the browser
+session into the locked UI, re-unlocked through the passphrase form, and showed
+the same canary counts after re-authentication.
 
 The configurable reliability harness is `scripts/check-local-soak.sh`. A bounded
 local validation run passed with `SIGILLUM_SOAK_SECONDS=20` and five full
@@ -75,8 +85,8 @@ successfully with advisories, bans, licenses, and sources all accepted.
 | Security and supply-chain baseline | `cargo audit` and `cargo deny check` inside the release gate | Proven for current checkout, with accepted duplicate dependency warnings |
 | Local daemon and gateway loopback integration behavior | Workspace integration tests pass outside the sandbox | Proven for current checkout in an unsandboxed local environment |
 | Target-host operational readiness | `sigillum doctor` passed in `scripts/check-runtime-smoke.sh` for first-run and unlocked temporary daemon states | Proven for repeatable isolated local proof; each target host still needs its own doctor result |
-| Runtime daemon lifecycle behavior | `scripts/check-runtime-smoke.sh` starts the daemon, verifies status, initializes a passphrase compartment, locks, unlocks, lists compartments, and runs doctor | Proven for current checkout in an unsandboxed local environment |
-| Runtime browser/UI visual behavior | DOM smoke tests pass, the runtime smoke checks the served UI shell, and a browser rendered the first-run daemon UI against the isolated local daemon | Proven for fresh first-run state and served shell; initialized/unlocked workflow browser automation remains useful |
+| Runtime daemon lifecycle behavior | `scripts/check-runtime-smoke.sh` starts the daemon, verifies status, initializes a passphrase compartment, writes and reads vault canaries, locks, unlocks, lists compartments, and runs doctor | Proven for current checkout in an unsandboxed local environment |
+| Runtime browser/UI visual behavior | DOM smoke tests pass, the runtime smoke checks the served UI shell, and a browser completed setup, unlocked operator workspace, vault canary write/read, browser-session logout, passphrase re-authentication, and post-auth canary count checks against an isolated local daemon | Proven for current checkout as a manual in-app browser proof; repeatable browser automation remains useful |
 | Long-duration reliability | Recovery and crash tests pass, and `scripts/check-local-soak.sh` passed a bounded local daemon/gateway run | Harness proven for current checkout; longer target-host soak evidence still needed |
 | External security assurance | Code gates, audit, deny, and SSRF/local-boundary tests pass | Not fully proven; no external penetration test or broad fuzzing campaign yet |
 | Full wallet-management product roadmap | Existing docs and tests cover current local wallet, inventory, risk, and plan slices | Not complete; deeper discovery, DeFi/NFT metadata, broader non-EVM support, and richer consolidation execution remain roadmap work |
@@ -101,8 +111,9 @@ The active product objective remains larger than the current release gate. To
 claim Sigillum is fully operational and production ready without qualification,
 the project still needs:
 
-1. browser-level coverage for the initialized and unlocked operator workflows,
-   not only DOM-module tests and served-shell smoke
+1. repeatable browser automation for the initialized and unlocked operator
+   workflows, not only DOM-module tests, served-shell smoke, and the current
+   manual in-app browser proof
 2. target-host `sigillum doctor` results for any real host being called ready
 3. a long-duration target-host daemon and gateway soak run, beyond the bounded
    local harness validation

@@ -21,6 +21,7 @@ import { deriveUiMode } from "./state/status";
 import { createFido2Actions } from "./views/fido2";
 import { createInventoryActions } from "./views/inventory";
 import { createOperationsActions } from "./views/operations";
+import { createSessionActions } from "./views/session";
 import { createShellRenderer } from "./views/shell";
 import { createSetupWizard } from "./views/setup";
 import { createWalletActions } from "./views/wallets";
@@ -263,10 +264,6 @@ function renderNextStepItems(items) {
   return items.map(item =>
     '<div class="next-step-item"><strong>' + esc(item.title) + '</strong><span>' + esc(item.body) + '</span></div>'
   ).join('');
-}
-
-function isAlreadyUnlockedConflict(message) {
-  return String(message || '').toLowerCase().includes('already unlocked');
 }
 
 function nextStepPrimaryAction() {
@@ -568,6 +565,12 @@ const operationsActions = createOperationsActions({
   updateNextStepCard: () => updateNextStepCard(),
 });
 
+const sessionActions = createSessionActions({
+  api,
+  toast,
+  refresh: () => refresh(),
+});
+
 const shellRenderer = createShellRenderer({
   operatorCardIds: OPERATOR_CARD_IDS,
   setUiMode: mode => { currentUiMode = mode; },
@@ -729,46 +732,6 @@ async function copyText(value, label) {
     }
   } catch (_) {}
   window.prompt('Copy ' + label + ':', value);
-}
-
-async function unlock() {
-  const p = document.getElementById('passphrase').value;
-  if (!p) return;
-  const r = await api('POST', '/api/unlock', { passphrase: p });
-  if (r.error) {
-    if (isAlreadyUnlockedConflict(r.error)) {
-      toast('Session already active. Refreshing workspace…');
-      await refresh();
-      return;
-    }
-    toast(r.error, 'error');
-    return;
-  }
-  document.getElementById('passphrase').value = '';
-  if (r.unlocked_compartments && r.unlocked_compartments.length > 0) {
-    const labels = r.unlocked_compartments.map(c => c.label).join(', ');
-    toast('Unlocked: ' + labels);
-  } else {
-    toast('Unlocked');
-  }
-  refresh();
-}
-
-async function lock() {
-  if (!confirm('Lock all compartments? Master keys will be zeroized from memory.')) return;
-  const r = await api('POST', '/api/lock');
-  if (r.error) { toast(r.error, 'error'); return; }
-  clearSessionToken();
-  toast('All compartments locked');
-  refresh();
-}
-
-async function logoutSession() {
-  const r = await api('POST', '/api/session/revoke');
-  if (r.error) { toast(r.error, 'error'); return; }
-  clearSessionToken();
-  toast('Session logged out');
-  refresh();
 }
 
 // ── API Keys & Secrets ────────────────────────────────────────
@@ -1175,8 +1138,8 @@ const UI_ACTIONS = {
   loadQueueJobs: operationsActions.loadQueueJobs,
   loadWatchAddressBookEntry: inventoryActions.loadWatchAddressBookEntry,
   loadRiskFindings: inventoryActions.loadRiskFindings,
-  lock,
-  logoutSession,
+  lock: sessionActions.lock,
+  logoutSession: sessionActions.logoutSession,
   nextStepPrimaryAction,
   nextStepSecondaryAction,
   previewXpubReceiveAddress: walletActions.previewXpubReceiveAddress,
@@ -1203,7 +1166,7 @@ const UI_ACTIONS = {
   switchUnlockTab: fido2Actions.switchUnlockTab,
   toggleWatchAddressBookEntry: inventoryActions.toggleWatchAddressBookEntry,
   togglePoisonWarning: fido2Actions.togglePoisonWarning,
-  unlock,
+  unlock: sessionActions.unlock,
   upsertChainProfile: inventoryActions.upsertChainProfile,
   upsertBulkWatchAddressBookEntries: inventoryActions.upsertBulkWatchAddressBookEntries,
   upsertWatchAddressBookEntry: inventoryActions.upsertWatchAddressBookEntry,
@@ -1236,7 +1199,7 @@ function handleActionEvent(event) {
 
 document.addEventListener('keydown', e => {
   if (e.key !== 'Enter') return;
-  if (e.target.id === 'passphrase') unlock();
+  if (e.target.id === 'passphrase') sessionActions.unlock();
   if (e.target.id === 'fido2Pin') fido2Actions.fido2Unlock();
   if (e.target.id === 'wizPassphraseConfirm') setupWizard.wizInitPassphrase();
   if (e.target.id === 'wizFido2Label') setupWizard.wizRegisterKey();

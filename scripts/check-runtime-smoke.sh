@@ -10,6 +10,10 @@ BASE_DIR="$(mktemp -d "${TMPDIR:-/tmp}/sigillum-runtime-smoke.XXXXXX")"
 LOG_FILE="${BASE_DIR}/daemon.log"
 DAEMON_PID=""
 PASSPHRASE="runtime-smoke-passphrase-123"
+API_KEY_NAME="runtime_rpc_canary"
+API_KEY_VALUE="runtime-rpc-canary-value"
+SECRET_NAME="runtime_secret_canary"
+SECRET_VALUE="runtime-secret-canary-value"
 
 cleanup() {
   if [[ -n "${DAEMON_PID}" ]] && kill -0 "${DAEMON_PID}" >/dev/null 2>&1; then
@@ -123,6 +127,25 @@ run_doctor() {
   fi
 }
 
+verify_vault_canaries() {
+  local token="$1"
+  local label="$2"
+
+  local api_key_get
+  api_key_get="$(api_post "/api/api-keys/get" "{\"key\":\"${API_KEY_NAME}\"}" "${token}")"
+  json_assert "${api_key_get}" "api key canary get ${label}" "
+return data.key === '${API_KEY_NAME}' &&
+  data.value === '${API_KEY_VALUE}';
+"
+
+  local secret_get
+  secret_get="$(api_post "/api/secrets/get" "{\"key\":\"${SECRET_NAME}\"}" "${token}")"
+  json_assert "${secret_get}" "secret canary get ${label}" "
+return data.key === '${SECRET_NAME}' &&
+  data.value === '${SECRET_VALUE}';
+"
+}
+
 require_command cargo
 require_command curl
 require_command node
@@ -178,6 +201,19 @@ return Array.isArray(data.compartments) &&
 '
 run_doctor "${session_token}"
 
+api_key_set="$(api_post "/api/api-keys/set" "{\"key\":\"${API_KEY_NAME}\",\"value\":\"${API_KEY_VALUE}\"}" "${session_token}")"
+json_assert "${api_key_set}" "api key canary set" "
+return data.status === 'ok' &&
+  data.key === '${API_KEY_NAME}';
+"
+
+secret_set="$(api_post "/api/secrets/set" "{\"key\":\"${SECRET_NAME}\",\"value\":\"${SECRET_VALUE}\"}" "${session_token}")"
+json_assert "${secret_set}" "secret canary set" "
+return data.status === 'ok' &&
+  data.key === '${SECRET_NAME}';
+"
+verify_vault_canaries "${session_token}" "after init"
+
 api_post "/api/lock" "{}" "${session_token}" >/dev/null
 locked_status="$(api_get "/api/status")"
 json_assert "${locked_status}" "locked status after lock" '
@@ -207,5 +243,6 @@ return data.initialized === true &&
   data.active_compartment.compartment_id === 0;
 '
 run_doctor "${unlocked_again_token}"
+verify_vault_canaries "${unlocked_again_token}" "after re-unlock"
 
 echo "runtime smoke checks passed"

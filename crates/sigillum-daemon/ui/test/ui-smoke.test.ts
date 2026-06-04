@@ -14,6 +14,8 @@ import {
   parseWatchAddressProbes,
 } from "../src/views/inventory";
 import { createOperationsActions } from "../src/views/operations";
+import { createSessionActions } from "../src/views/session";
+import { createSetupWizard } from "../src/views/setup";
 import { createShellRenderer } from "../src/views/shell";
 import { installDom } from "./dom-fixture";
 
@@ -111,6 +113,165 @@ test("session requests persist fresh tokens and clear stale tokens on 401", asyn
   });
   await requestWithSession("GET", "/api/expired");
   equal(readSessionToken(), null);
+});
+
+test("session actions drive unlock, lock, and browser logout workflow", async () => {
+  const dom = installDom(["passphrase"]);
+  const calls: Array<{ method: string; path: string; body?: any }> = [];
+  const toasts: Array<{ message: string; type?: string }> = [];
+  let refreshCount = 0;
+  let confirmResult = false;
+  const actions = createSessionActions({
+    api: async (method, path, body) => {
+      calls.push({ method, path, body });
+      const requestBody = body as { passphrase?: string } | undefined;
+      if (path === "/api/unlock" && requestBody?.passphrase === "already") {
+        return { error: "Vault is already unlocked." };
+      }
+      if (path === "/api/unlock") {
+        return {
+          status: "unlocked",
+          session_token: "fresh-session",
+          unlocked_compartments: [{ id: 0, label: "browser-smoke" }],
+        };
+      }
+      return { status: "ok" };
+    },
+    toast: (message, type) => toasts.push({ message, type }),
+    refresh: () => {
+      refreshCount += 1;
+    },
+    confirm: () => confirmResult,
+  });
+
+  dom.el("passphrase").value = "browser-smoke-passphrase-123";
+  await actions.unlock();
+  deepEqual(calls.pop(), {
+    method: "POST",
+    path: "/api/unlock",
+    body: { passphrase: "browser-smoke-passphrase-123" },
+  });
+  equal(dom.el("passphrase").value, "");
+  deepEqual(toasts.pop(), { message: "Unlocked: browser-smoke", type: undefined });
+  equal(refreshCount, 1);
+
+  dom.el("passphrase").value = "already";
+  await actions.unlock();
+  equal(dom.el("passphrase").value, "already");
+  deepEqual(toasts.pop(), {
+    message: "Session already active. Refreshing workspace...",
+    type: undefined,
+  });
+  equal(refreshCount, 2);
+
+  writeSessionToken("still-active");
+  await actions.lock();
+  equal(readSessionToken(), "still-active");
+  ok(!calls.some((call) => call.path === "/api/lock"));
+
+  confirmResult = true;
+  await actions.lock();
+  deepEqual(calls.pop(), { method: "POST", path: "/api/lock", body: undefined });
+  equal(readSessionToken(), null);
+  deepEqual(toasts.pop(), { message: "All compartments locked", type: undefined });
+  equal(refreshCount, 3);
+
+  writeSessionToken("browser-only");
+  await actions.logoutSession();
+  deepEqual(calls.pop(), {
+    method: "POST",
+    path: "/api/session/revoke",
+    body: undefined,
+  });
+  equal(readSessionToken(), null);
+  deepEqual(toasts.pop(), { message: "Session logged out", type: undefined });
+  equal(refreshCount, 4);
+});
+
+test("setup wizard passphrase path validates and initializes a local vault", async () => {
+  const dom = installDom([
+    "wizStep0",
+    "wizStepPassphrase",
+    "wizStepDone",
+    "wizStagePill",
+    "wizStageTitle",
+    "wizStageSummary",
+    "wizChecklist",
+    "wizPLabel",
+    "wizPassphrase",
+    "wizPassphraseConfirm",
+    "wizDoneMsg",
+    "wizDoneDetail",
+  ]);
+  const calls: Array<{ method: string; path: string; body?: any }> = [];
+  const toasts: Array<{ message: string; type?: string }> = [];
+  let refreshed = false;
+  const originalSetTimeout = globalThis.setTimeout;
+  (globalThis as any).setTimeout = (handler: TimerHandler) => {
+    if (typeof handler === "function") handler();
+    return 0;
+  };
+
+  try {
+    const wizard = createSetupWizard({
+      api: async (method, path, body) => {
+        calls.push({ method, path, body });
+        return {
+          status: "initialized",
+          compartment_id: 0,
+          session_token: "session-1",
+        };
+      },
+      toast: (message, type) => toasts.push({ message, type }),
+      refresh: () => {
+        refreshed = true;
+      },
+      submitNewFido2Pin: async () => undefined,
+      friendlyFidoError: (message) => String(message),
+    });
+
+    wizard.wizPreset("passphrase");
+    equal(dom.el("wizStepPassphrase").classList.contains("active"), true);
+    equal(dom.el("wizStageTitle").textContent, "Create your first local compartment");
+
+    dom.el("wizPLabel").value = "browser-smoke";
+    dom.el("wizPassphrase").value = "short";
+    dom.el("wizPassphraseConfirm").value = "short";
+    await wizard.wizInitPassphrase();
+    equal(calls.length, 0);
+    deepEqual(toasts.pop(), { message: "Min 8 characters", type: "error" });
+
+    dom.el("wizPassphrase").value = "browser-smoke-passphrase-123";
+    dom.el("wizPassphraseConfirm").value = "browser-smoke-passphrase-456";
+    await wizard.wizInitPassphrase();
+    equal(calls.length, 0);
+    deepEqual(toasts.pop(), { message: "Passphrases do not match", type: "error" });
+
+    dom.el("wizPassphraseConfirm").value = "browser-smoke-passphrase-123";
+    await wizard.wizInitPassphrase();
+
+    deepEqual(calls, [
+      {
+        method: "POST",
+        path: "/api/compartment/init",
+        body: {
+          id: 0,
+          label: "browser-smoke",
+          threshold: 1,
+          passphrase: "browser-smoke-passphrase-123",
+        },
+      },
+    ]);
+    equal(dom.el("wizDoneMsg").textContent, "Vault Created");
+    equal(
+      dom.el("wizDoneDetail").textContent,
+      'Compartment "browser-smoke" initialized. You are unlocked.',
+    );
+    equal(dom.el("wizStepDone").classList.contains("active"), true);
+    equal(refreshed, true);
+  } finally {
+    globalThis.setTimeout = originalSetTimeout;
+  }
 });
 
 test("queue and inventory renderers produce reviewable DOM summaries", () => {

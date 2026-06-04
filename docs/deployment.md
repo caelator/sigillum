@@ -94,8 +94,9 @@ Unix data-directory permissions. Missing initialization or missing session
 tokens are reported as warnings so first-run setup remains possible.
 The release gate also runs `scripts/check-runtime-smoke.sh`, which starts a
 temporary daemon, checks the served UI shell, initializes a passphrase
-compartment, locks and unlocks it, and runs `sigillum doctor` against both
-first-run and unlocked states.
+compartment, verifies vault write/read canaries, locks and unlocks it, verifies
+the canaries again, and runs `sigillum doctor` against both first-run and
+unlocked states.
 For longer pre-production confidence, run `scripts/check-local-soak.sh` on the
 target host. Set `SIGILLUM_SOAK_SECONDS` and `SIGILLUM_SOAK_INTERVAL_SECONDS` to
 control duration and cadence; the harness repeatedly checks daemon status,
