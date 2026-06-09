@@ -8,8 +8,9 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 use sigillum_api::{
-    ChainProfile, ConsolidationPlan, RiskCatalogEntry, RiskFinding, WalletAssetHolding,
-    WalletDiscoveryJob, WalletInventoryAddress, WatchAddressBookEntry,
+    ChainProfile, ConsolidationPlan, RiskCatalogEntry, RiskFinding, TreasuryPolicy,
+    TreasuryReceiveAllocation, WalletAssetHolding, WalletDiscoveryJob, WalletInventoryAddress,
+    WatchAddressBookEntry,
 };
 
 use crate::json_store::{JsonDocument, JsonSchema};
@@ -32,10 +33,14 @@ pub struct WalletInventoryState {
     pub risk_findings: Vec<RiskFinding>,
     #[serde(default)]
     pub consolidation_plans: Vec<ConsolidationPlan>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub treasury_policy: Option<TreasuryPolicy>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub receive_allocations: Vec<TreasuryReceiveAllocation>,
 }
 
 impl JsonDocument for WalletInventoryState {
-    const SCHEMA: JsonSchema = JsonSchema::new("sigillum.wallet-inventory", 7);
+    const SCHEMA: JsonSchema = JsonSchema::new("sigillum.wallet-inventory", 9);
 
     fn from_enveloped_json(
         path: &std::path::Path,
@@ -43,7 +48,7 @@ impl JsonDocument for WalletInventoryState {
         data: serde_json::Value,
     ) -> Result<Self, std::io::Error> {
         match version {
-            1..=7 => serde_json::from_value(data).map_err(|error| {
+            1..=9 => serde_json::from_value(data).map_err(|error| {
                 std::io::Error::new(
                     std::io::ErrorKind::InvalidData,
                     format!(
@@ -201,6 +206,37 @@ mod tests {
         }
     }
 
+    fn sample_receive_allocation() -> TreasuryReceiveAllocation {
+        TreasuryReceiveAllocation {
+            id: "alloc_1".into(),
+            wallet_family: "eth-seed".into(),
+            wallet_profile: "seed-main".into(),
+            address: "0x2222222222222222222222222222222222222222".into(),
+            derivation_path: "m/44'/60'/0'/0/3".into(),
+            address_index: 3,
+            purpose: "counterparty-acme".into(),
+            label: Some("Acme invoices".into()),
+            status: "active".into(),
+            created_at_unix: 1,
+            retired_at_unix: None,
+        }
+    }
+
+    fn sample_treasury_policy() -> TreasuryPolicy {
+        TreasuryPolicy {
+            enabled: true,
+            allowed_destinations: vec![sigillum_api::TreasuryAllowedDestination {
+                address: "0x9999999999999999999999999999999999999999".into(),
+                label: Some("cold-treasury".into()),
+            }],
+            max_step_native_wei_hex: Some("0xde0b6b3a7640000".into()),
+            max_plan_native_wei_hex: None,
+            require_simulation: true,
+            created_at_unix: 1,
+            updated_at_unix: 2,
+        }
+    }
+
     #[test]
     fn load_returns_default_when_no_file() {
         let dir = TempDir::new().unwrap();
@@ -222,6 +258,7 @@ mod tests {
         state.addresses.push(sample_address());
         state.holdings.push(sample_holding());
         state.risk_catalog.push(sample_risk_catalog_entry());
+        state.receive_allocations.push(sample_receive_allocation());
 
         save_wallet_inventory(dir.path(), &state).unwrap();
         let loaded = load_wallet_inventory(dir.path()).unwrap();
@@ -233,6 +270,37 @@ mod tests {
         assert_eq!(loaded.holdings.len(), 1);
         assert_eq!(loaded.risk_catalog.len(), 1);
         assert_eq!(loaded.addresses[0].wallet_profile, "seed-main");
+        assert!(loaded.treasury_policy.is_none());
+        assert_eq!(loaded.receive_allocations.len(), 1);
+        assert_eq!(loaded.receive_allocations[0].address_index, 3);
+        assert_eq!(loaded.receive_allocations[0].status, "active");
+        assert_eq!(loaded.receive_allocations[0].purpose, "counterparty-acme");
+        assert!(loaded.receive_allocations[0].retired_at_unix.is_none());
+    }
+
+    #[test]
+    fn save_and_load_roundtrip_preserves_treasury_policy() {
+        let dir = TempDir::new().unwrap();
+        let state = WalletInventoryState {
+            treasury_policy: Some(sample_treasury_policy()),
+            ..WalletInventoryState::default()
+        };
+
+        save_wallet_inventory(dir.path(), &state).unwrap();
+        let loaded = load_wallet_inventory(dir.path()).unwrap();
+
+        let policy = loaded.treasury_policy.expect("policy persisted");
+        assert!(policy.enabled);
+        assert_eq!(policy.allowed_destinations.len(), 1);
+        assert_eq!(
+            policy.allowed_destinations[0].address,
+            "0x9999999999999999999999999999999999999999"
+        );
+        assert_eq!(
+            policy.max_step_native_wei_hex.as_deref(),
+            Some("0xde0b6b3a7640000")
+        );
+        assert!(policy.require_simulation);
     }
 
     #[test]
@@ -244,7 +312,7 @@ mod tests {
             serde_json::from_slice(&std::fs::read(wallet_inventory_path(dir.path())).unwrap())
                 .unwrap();
         assert_eq!(saved["schema"], json!("sigillum.wallet-inventory"));
-        assert_eq!(saved["schema_version"], json!(7));
+        assert_eq!(saved["schema_version"], json!(9));
         assert!(saved["data"]["chain_profiles"].is_array());
         assert!(saved["data"]["watch_address_book"].is_array());
         assert!(saved["data"]["jobs"].is_array());

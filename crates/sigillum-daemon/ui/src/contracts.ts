@@ -155,6 +155,7 @@ export interface ConsolidationPlan {
   updated_at_unix: number;
   summary: ConsolidationPlanSummary;
   steps: ConsolidationPlanStep[];
+  policy_violations?: string[];
 }
 
 export interface ConsolidationPlanExportCall {
@@ -214,6 +215,118 @@ export interface ConsolidationPlanExportResponse {
   exported_steps: number;
   skipped_steps: ConsolidationPlanExportSkippedStep[];
   bundles: ConsolidationPlanExportBundle[];
+}
+
+export interface TreasuryChainSummary {
+  chain_id: number;
+  native_symbol: string;
+  address_count: number;
+  funded_address_count: number;
+  native_total_wei_hex: string;
+}
+
+export interface TreasuryGroupSummary {
+  wallet_family: string;
+  wallet_profile: string;
+  chain_id: number;
+  address_count: number;
+  funded_address_count: number;
+  native_total_wei_hex: string;
+  signer_address_count: number;
+  watch_only_address_count: number;
+  erc20_holding_count: number;
+  nft_holding_count: number;
+  defi_holding_count: number;
+  claimable_holding_count: number;
+  approval_exposure_count: number;
+  dormant_candidate_count: number;
+}
+
+export interface TreasuryRoutingStatus {
+  wallet_profile: string;
+  hot_address?: string | null;
+  treasury_address?: string | null;
+  default_destination_address?: string | null;
+  hot_native_balance_wei_hex?: string | null;
+  treasury_native_balance_wei_hex?: string | null;
+  routing_ready: boolean;
+}
+
+export interface TreasuryRiskSummary {
+  total_findings: number;
+  critical_findings: number;
+  high_findings: number;
+  medium_findings: number;
+  low_findings: number;
+}
+
+export interface TreasuryPlanSummary {
+  total_plans: number;
+  latest_plan_id?: string | null;
+  latest_plan_status?: string | null;
+  latest_review_required_steps: number;
+  latest_approved_steps: number;
+  latest_executable_steps: number;
+  latest_blocked_steps: number;
+  policy_violations?: string[];
+  latest_policy_violations?: string[];
+}
+
+export interface TreasuryReceiveSummary {
+  active_allocations: number;
+  retired_allocations: number;
+  purposes: number;
+}
+
+export interface TreasuryOverviewResponse {
+  generated_at_unix: number;
+  tracked_address_count: number;
+  funded_address_count: number;
+  watch_only_address_count: number;
+  signer_address_count: number;
+  chains?: TreasuryChainSummary[];
+  groups?: TreasuryGroupSummary[];
+  routing?: TreasuryRoutingStatus[];
+  risk: TreasuryRiskSummary;
+  plans: TreasuryPlanSummary;
+  receive?: TreasuryReceiveSummary;
+}
+
+export interface TreasuryAllowedDestination {
+  address: string;
+  label?: string | null;
+}
+
+export interface TreasuryPolicy {
+  enabled: boolean;
+  allowed_destinations?: TreasuryAllowedDestination[];
+  max_step_native_wei_hex?: string | null;
+  max_plan_native_wei_hex?: string | null;
+  require_simulation: boolean;
+  created_at_unix: number;
+  updated_at_unix: number;
+}
+
+export interface TreasuryPolicyUpdateRequest {
+  enabled: boolean;
+  allowed_destinations?: TreasuryAllowedDestination[];
+  max_step_native_wei_hex?: string | null;
+  max_plan_native_wei_hex?: string | null;
+  require_simulation?: boolean | null;
+}
+
+export interface TreasuryReceiveAllocation {
+  id: string;
+  wallet_family: string;
+  wallet_profile: string;
+  address: string;
+  derivation_path: string;
+  address_index: number;
+  purpose: string;
+  label?: string | null;
+  status: string;
+  created_at_unix: number;
+  retired_at_unix?: number | null;
 }
 
 export interface ApiRequestOptions<TBody = unknown> {

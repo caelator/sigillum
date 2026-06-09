@@ -94,6 +94,7 @@ pub use sigillum_core::{SecretStore, VaultError};
 mod inventory;
 mod plans;
 mod queue;
+mod treasury;
 
 // ── Error types ────────────────────────────────────────────────
 

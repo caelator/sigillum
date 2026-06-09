@@ -2583,3 +2583,561 @@ async fn deposit_registry_refresh_and_sweep_flow_roundtrip() {
     handle.abort();
     rpc_handle.abort();
 }
+
+#[tokio::test]
+async fn treasury_policy_routes_enforce_consolidation_guardrails() {
+    let dir = TempDir::new().unwrap();
+    let (addr, handle) = spawn_daemon(dir.path().to_path_buf()).await;
+    let (rpc_addr, rpc_handle) = spawn_mock_evm_provider().await;
+    let client = reqwest::Client::new();
+
+    let init = post_json(
+        &client,
+        addr,
+        "/api/compartment/init",
+        json!({
+            "id": 0,
+            "label": "default",
+            "threshold": 1,
+            "passphrase": "correct horse battery staple",
+        }),
+        None,
+    )
+    .await;
+    let init_json: serde_json::Value = init.json().await.unwrap();
+    let token = init_json["session_token"].as_str().unwrap().to_string();
+
+    post_json(
+        &client,
+        addr,
+        "/api/api-keys/set",
+        json!({ "key": "alchemy", "value": "rpc-test-token" }),
+        Some(&token),
+    )
+    .await;
+
+    post_json(
+        &client,
+        addr,
+        "/api/profiles/evm/upsert",
+        json!({
+            "name": "mainnet",
+            "rpc_url": format!("http://{rpc_addr}/"),
+            "auth_token_key": "alchemy",
+            "chain_id": 1,
+        }),
+        Some(&token),
+    )
+    .await;
+
+    let seed = post_json(
+        &client,
+        addr,
+        "/api/profiles/eth-seed/upsert",
+        json!({
+            "name": "seed-main",
+            "label": "Seed main",
+            "mnemonic": "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about",
+            "project_account": 0,
+            "provider_profile": "mainnet",
+        }),
+        Some(&token),
+    )
+    .await;
+    assert_eq!(seed.status(), StatusCode::OK);
+
+    // No policy until an operator configures one.
+    let policy = get(&client, addr, "/api/treasury/policy", Some(&token)).await;
+    assert_eq!(policy.status(), StatusCode::OK);
+    let policy_json: serde_json::Value = policy.json().await.unwrap();
+    assert!(policy_json["policy"].is_null());
+
+    // Configure the policy; the duplicate uppercase destination collapses
+    // into the first normalized entry and its label is preserved.
+    let update = post_json(
+        &client,
+        addr,
+        "/api/treasury/policy/update",
+        json!({
+            "enabled": true,
+            "allowed_destinations": [
+                { "address": "0x9999999999999999999999999999999999999999", "label": "cold-treasury" },
+                { "address": "0X9999999999999999999999999999999999999999", "label": "duplicate" },
+            ],
+        }),
+        Some(&token),
+    )
+    .await;
+    let update_status = update.status();
+    let update_json: serde_json::Value = update.json().await.unwrap();
+    assert_eq!(
+        update_status,
+        StatusCode::OK,
+        "policy update response: {update_json}"
+    );
+    assert_eq!(update_json["status"], "updated");
+    assert_eq!(update_json["policy"]["enabled"], true);
+    assert_eq!(
+        update_json["policy"]["allowed_destinations"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
+    assert_eq!(
+        update_json["policy"]["allowed_destinations"][0]["address"],
+        "0x9999999999999999999999999999999999999999"
+    );
+    assert_eq!(
+        update_json["policy"]["allowed_destinations"][0]["label"],
+        "cold-treasury"
+    );
+    assert_eq!(update_json["policy"]["require_simulation"], true);
+
+    let read_back = get(&client, addr, "/api/treasury/policy", Some(&token)).await;
+    let read_back_json: serde_json::Value = read_back.json().await.unwrap();
+    assert_eq!(read_back_json["policy"], update_json["policy"]);
+
+    // Seed native holdings (1 ETH per discovered address from the mock RPC).
+    let scan = post_json(
+        &client,
+        addr,
+        "/api/inventory/scan/evm",
+        json!({
+            "wallet_family": "eth-seed",
+            "wallet_profile": "seed-main",
+            "provider_profile": "mainnet",
+            "gap_limit": 1,
+            "max_index": 0,
+        }),
+        Some(&token),
+    )
+    .await;
+    let scan_status = scan.status();
+    let scan_json: serde_json::Value = scan.json().await.unwrap();
+    assert_eq!(scan_status, StatusCode::OK, "scan response: {scan_json}");
+    assert!(!scan_json["holdings"].as_array().unwrap().is_empty());
+
+    // Non-allowlisted destination: every native sweep is policy-blocked.
+    let blocked_plan = post_json(
+        &client,
+        addr,
+        "/api/plans/consolidation/generate",
+        json!({ "destination_address": "0x8888888888888888888888888888888888888888" }),
+        Some(&token),
+    )
+    .await;
+    assert_eq!(blocked_plan.status(), StatusCode::OK);
+    let blocked_plan_json: serde_json::Value = blocked_plan.json().await.unwrap();
+    assert_eq!(blocked_plan_json["plan"]["status"], "blocked");
+    let blocked_steps = blocked_plan_json["plan"]["steps"].as_array().unwrap();
+    assert!(!blocked_steps.is_empty());
+    assert!(blocked_steps.iter().all(|step| {
+        step["action"] == "sweep_native"
+            && step["status"] == "blocked"
+            && step["risk_level"] == "blocked"
+            && step["blockers"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|blocker| blocker == "destination_not_allowlisted")
+    }));
+
+    // Allowlisted destination: no policy blockers, plan stays reviewable.
+    let open_plan = post_json(
+        &client,
+        addr,
+        "/api/plans/consolidation/generate",
+        json!({ "destination_address": "0x9999999999999999999999999999999999999999" }),
+        Some(&token),
+    )
+    .await;
+    assert_eq!(open_plan.status(), StatusCode::OK);
+    let open_plan_json: serde_json::Value = open_plan.json().await.unwrap();
+    assert_eq!(open_plan_json["plan"]["status"], "review_required");
+    assert!(open_plan_json["plan"]["policy_violations"].is_null());
+    let open_steps = open_plan_json["plan"]["steps"].as_array().unwrap();
+    assert!(!open_steps.is_empty());
+    assert!(open_steps.iter().all(|step| {
+        step["status"] == "review_required"
+            && step["blockers"]
+                .as_array()
+                .is_none_or(|blockers| blockers.is_empty())
+    }));
+
+    // Approval re-checks the CURRENT policy: rotating the allowlist after
+    // plan generation blocks the previously reviewable steps.
+    let rotate = post_json(
+        &client,
+        addr,
+        "/api/treasury/policy/update",
+        json!({
+            "enabled": true,
+            "allowed_destinations": [
+                { "address": "0x7777777777777777777777777777777777777777" },
+            ],
+        }),
+        Some(&token),
+    )
+    .await;
+    assert_eq!(rotate.status(), StatusCode::OK);
+
+    let approve = post_json(
+        &client,
+        addr,
+        "/api/plans/consolidation/approve",
+        json!({ "plan_id": open_plan_json["plan"]["id"].as_str().unwrap() }),
+        Some(&token),
+    )
+    .await;
+    assert_eq!(approve.status(), StatusCode::OK);
+    let approve_json: serde_json::Value = approve.json().await.unwrap();
+    assert_eq!(approve_json["plan"]["status"], "blocked");
+    assert_eq!(approve_json["plan"]["summary"]["approved_steps"], json!(0));
+    let approve_steps = approve_json["plan"]["steps"].as_array().unwrap();
+    assert!(approve_steps.iter().all(|step| {
+        step["approved"] == false
+            && step["status"] == "blocked"
+            && step["blockers"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|blocker| blocker == "destination_not_allowlisted")
+    }));
+
+    // Plan cap: reviewable native sweeps sum above the cap, so the plan is
+    // blocked as a whole while individual steps stay reviewable.
+    let plan_cap = post_json(
+        &client,
+        addr,
+        "/api/treasury/policy/update",
+        json!({
+            "enabled": true,
+            "allowed_destinations": [
+                { "address": "0x9999999999999999999999999999999999999999" },
+            ],
+            "max_plan_native_wei_hex": "0x1",
+        }),
+        Some(&token),
+    )
+    .await;
+    assert_eq!(plan_cap.status(), StatusCode::OK);
+
+    let capped_plan = post_json(
+        &client,
+        addr,
+        "/api/plans/consolidation/generate",
+        json!({ "destination_address": "0x9999999999999999999999999999999999999999" }),
+        Some(&token),
+    )
+    .await;
+    assert_eq!(capped_plan.status(), StatusCode::OK);
+    let capped_plan_json: serde_json::Value = capped_plan.json().await.unwrap();
+    assert_eq!(capped_plan_json["plan"]["status"], "blocked");
+    assert!(
+        capped_plan_json["plan"]["policy_violations"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|violation| violation == "exceeds_policy_plan_cap")
+    );
+    assert!(
+        capped_plan_json["plan"]["steps"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|step| step["status"] == "review_required")
+    );
+
+    // Step cap: each native sweep above the cap is blocked individually.
+    let step_cap = post_json(
+        &client,
+        addr,
+        "/api/treasury/policy/update",
+        json!({
+            "enabled": true,
+            "allowed_destinations": [
+                { "address": "0x9999999999999999999999999999999999999999" },
+            ],
+            "max_step_native_wei_hex": "0x1",
+        }),
+        Some(&token),
+    )
+    .await;
+    assert_eq!(step_cap.status(), StatusCode::OK);
+
+    let step_capped_plan = post_json(
+        &client,
+        addr,
+        "/api/plans/consolidation/generate",
+        json!({ "destination_address": "0x9999999999999999999999999999999999999999" }),
+        Some(&token),
+    )
+    .await;
+    assert_eq!(step_capped_plan.status(), StatusCode::OK);
+    let step_capped_json: serde_json::Value = step_capped_plan.json().await.unwrap();
+    assert_eq!(step_capped_json["plan"]["status"], "blocked");
+    assert!(
+        step_capped_json["plan"]["steps"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|step| {
+                step["status"] == "blocked"
+                    && step["blockers"]
+                        .as_array()
+                        .unwrap()
+                        .iter()
+                        .any(|blocker| blocker == "exceeds_policy_step_cap")
+            })
+    );
+
+    handle.abort();
+    rpc_handle.abort();
+}
+
+#[tokio::test]
+async fn treasury_receive_address_routes_allocate_and_rotate() {
+    let dir = TempDir::new().unwrap();
+    let (addr, handle) = spawn_daemon(dir.path().to_path_buf()).await;
+    let client = reqwest::Client::new();
+
+    let init = post_json(
+        &client,
+        addr,
+        "/api/compartment/init",
+        json!({
+            "id": 0,
+            "label": "default",
+            "threshold": 1,
+            "passphrase": "correct horse battery staple",
+        }),
+        None,
+    )
+    .await;
+    let init_json: serde_json::Value = init.json().await.unwrap();
+    let token = init_json["session_token"].as_str().unwrap().to_string();
+
+    // The provider profile only satisfies the seed profile's routing config.
+    // No mock RPC is spawned: receive allocation is pure local xpub
+    // derivation and must never dial a provider.
+    post_json(
+        &client,
+        addr,
+        "/api/profiles/evm/upsert",
+        json!({
+            "name": "mainnet",
+            "rpc_url": "http://127.0.0.1:9/",
+            "chain_id": 1,
+        }),
+        Some(&token),
+    )
+    .await;
+
+    let seed = post_json(
+        &client,
+        addr,
+        "/api/profiles/eth-seed/upsert",
+        json!({
+            "name": "seed-main",
+            "label": "Seed main",
+            "mnemonic": "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about",
+            "project_account": 0,
+            "provider_profile": "mainnet",
+        }),
+        Some(&token),
+    )
+    .await;
+    assert_eq!(seed.status(), StatusCode::OK);
+    let seed_json: serde_json::Value = seed.json().await.unwrap();
+    let receive_xpub = seed_json["profile"]["receive_xpub"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let first_receive_address = seed_json["profile"]["first_receive_address"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    // Independent expectation: derive addresses straight from the exported
+    // receive xpub, outside the allocation flow.
+    let expected_address = |index: u32| {
+        sigillum_core::derive_ethereum_address_from_xpub(&receive_xpub, index)
+            .unwrap()
+            .address
+    };
+
+    let empty_list = get(
+        &client,
+        addr,
+        "/api/treasury/receive-addresses",
+        Some(&token),
+    )
+    .await;
+    assert_eq!(empty_list.status(), StatusCode::OK);
+    let empty_list_json: serde_json::Value = empty_list.json().await.unwrap();
+    assert_eq!(empty_list_json["allocations"].as_array().unwrap().len(), 0);
+
+    // First allocation takes index 0, the profile's first receive address.
+    let acme = post_json(
+        &client,
+        addr,
+        "/api/treasury/receive-addresses/allocate",
+        json!({
+            "wallet_profile": "seed-main",
+            "purpose": "counterparty-acme",
+            "label": "Acme invoices",
+        }),
+        Some(&token),
+    )
+    .await;
+    assert_eq!(acme.status(), StatusCode::OK);
+    let acme_json: serde_json::Value = acme.json().await.unwrap();
+    assert_eq!(acme_json["status"], "allocated");
+    assert_eq!(acme_json["allocation"]["wallet_family"], "eth-seed");
+    assert_eq!(acme_json["allocation"]["wallet_profile"], "seed-main");
+    assert_eq!(acme_json["allocation"]["address_index"], 0);
+    assert_eq!(
+        acme_json["allocation"]["derivation_path"],
+        "m/44'/60'/0'/0/0"
+    );
+    assert_eq!(
+        acme_json["allocation"]["address"],
+        json!(expected_address(0))
+    );
+    assert_eq!(
+        acme_json["allocation"]["address"],
+        json!(first_receive_address)
+    );
+    // Known BIP-44 vector for the all-abandon test mnemonic at m/44'/60'/0'/0/0.
+    assert!(
+        acme_json["allocation"]["address"]
+            .as_str()
+            .unwrap()
+            .eq_ignore_ascii_case("0x9858effd232b4033e47d90003d41ec34ecaeda94")
+    );
+    assert_eq!(acme_json["allocation"]["purpose"], "counterparty-acme");
+    assert_eq!(acme_json["allocation"]["label"], "Acme invoices");
+    assert_eq!(acme_json["allocation"]["status"], "active");
+    assert!(acme_json["allocation"]["retired_at_unix"].is_null());
+    let acme_id = acme_json["allocation"]["id"].as_str().unwrap().to_string();
+
+    // A second purpose advances to the next fresh index.
+    let beta = post_json(
+        &client,
+        addr,
+        "/api/treasury/receive-addresses/allocate",
+        json!({
+            "wallet_profile": "seed-main",
+            "purpose": "counterparty-beta",
+        }),
+        Some(&token),
+    )
+    .await;
+    assert_eq!(beta.status(), StatusCode::OK);
+    let beta_json: serde_json::Value = beta.json().await.unwrap();
+    assert_eq!(beta_json["allocation"]["address_index"], 1);
+    assert_eq!(
+        beta_json["allocation"]["derivation_path"],
+        "m/44'/60'/0'/0/1"
+    );
+    assert_eq!(
+        beta_json["allocation"]["address"],
+        json!(expected_address(1))
+    );
+    assert!(beta_json["allocation"]["label"].is_null());
+
+    // Rotation retires the acme allocation and issues the next index with
+    // the same purpose and label.
+    let rotate = post_json(
+        &client,
+        addr,
+        "/api/treasury/receive-addresses/rotate",
+        json!({ "allocation_id": acme_id }),
+        Some(&token),
+    )
+    .await;
+    assert_eq!(rotate.status(), StatusCode::OK);
+    let rotate_json: serde_json::Value = rotate.json().await.unwrap();
+    assert_eq!(rotate_json["status"], "rotated");
+    assert_eq!(rotate_json["allocation"]["address_index"], 2);
+    assert_eq!(
+        rotate_json["allocation"]["address"],
+        json!(expected_address(2))
+    );
+    assert_eq!(rotate_json["allocation"]["purpose"], "counterparty-acme");
+    assert_eq!(rotate_json["allocation"]["label"], "Acme invoices");
+    assert_eq!(rotate_json["allocation"]["status"], "active");
+    assert_ne!(rotate_json["allocation"]["id"], json!(acme_id.clone()));
+
+    // The list keeps the retired allocation alongside both active ones.
+    let list = get(
+        &client,
+        addr,
+        "/api/treasury/receive-addresses",
+        Some(&token),
+    )
+    .await;
+    let list_json: serde_json::Value = list.json().await.unwrap();
+    let allocations = list_json["allocations"].as_array().unwrap();
+    assert_eq!(allocations.len(), 3);
+    assert_eq!(allocations[0]["id"], json!(acme_id.clone()));
+    assert_eq!(allocations[0]["status"], "retired");
+    assert!(allocations[0]["retired_at_unix"].is_u64());
+    assert_eq!(allocations[1]["status"], "active");
+    assert_eq!(allocations[2]["status"], "active");
+
+    // The console overview reports the receive rollup.
+    let overview = get(&client, addr, "/api/treasury/overview", Some(&token)).await;
+    assert_eq!(overview.status(), StatusCode::OK);
+    let overview_json: serde_json::Value = overview.json().await.unwrap();
+    assert_eq!(overview_json["receive"]["active_allocations"], 2);
+    assert_eq!(overview_json["receive"]["retired_allocations"], 1);
+    assert_eq!(overview_json["receive"]["purposes"], 2);
+
+    // Unknown wallet profile is a 404.
+    let unknown_profile = post_json(
+        &client,
+        addr,
+        "/api/treasury/receive-addresses/allocate",
+        json!({ "wallet_profile": "missing", "purpose": "x" }),
+        Some(&token),
+    )
+    .await;
+    assert_eq!(unknown_profile.status(), StatusCode::NOT_FOUND);
+
+    // Unknown allocation id is a 404.
+    let unknown_allocation = post_json(
+        &client,
+        addr,
+        "/api/treasury/receive-addresses/rotate",
+        json!({ "allocation_id": "missing" }),
+        Some(&token),
+    )
+    .await;
+    assert_eq!(unknown_allocation.status(), StatusCode::NOT_FOUND);
+
+    // Rotating an already-retired allocation is a 400.
+    let retired_again = post_json(
+        &client,
+        addr,
+        "/api/treasury/receive-addresses/rotate",
+        json!({ "allocation_id": acme_id }),
+        Some(&token),
+    )
+    .await;
+    assert_eq!(retired_again.status(), StatusCode::BAD_REQUEST);
+
+    // Whitespace-only purpose fails request validation with a 400.
+    let empty_purpose = post_json(
+        &client,
+        addr,
+        "/api/treasury/receive-addresses/allocate",
+        json!({ "wallet_profile": "seed-main", "purpose": "   " }),
+        Some(&token),
+    )
+    .await;
+    assert_eq!(empty_purpose.status(), StatusCode::BAD_REQUEST);
+
+    handle.abort();
+}

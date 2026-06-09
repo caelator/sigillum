@@ -85,6 +85,7 @@ export function createShellRenderer(deps: ShellRendererDeps) {
     setHidden("guideCard", false);
     setHidden("profilesCard", false);
     setHidden("xpubCard", false);
+    setHidden("treasuryCard", false);
     setHidden("inventoryCard", false);
     setHidden("depositsCard", false);
     setHidden("queueCard", false);

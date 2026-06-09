@@ -24,6 +24,7 @@ import { createOperationsActions } from "./views/operations";
 import { createSessionActions } from "./views/session";
 import { createShellRenderer } from "./views/shell";
 import { createSetupWizard } from "./views/setup";
+import { createTreasuryActions } from "./views/treasury";
 import { createWalletActions } from "./views/wallets";
 
 const SETUP_RESET_CONFIRMATION = 'RESET LOCAL SIGILLUM DATA';
@@ -36,6 +37,7 @@ const OPERATOR_CARD_IDS = [
   'secretsCard',
   'profilesCard',
   'xpubCard',
+  'treasuryCard',
   'inventoryCard',
   'depositsCard',
   'queueCard',
@@ -557,6 +559,11 @@ const inventoryActions = createInventoryActions({
   downloadJson,
 });
 
+const treasuryActions = createTreasuryActions({
+  api,
+  toast,
+});
+
 const operationsActions = createOperationsActions({
   api,
   toast,
@@ -618,6 +625,7 @@ async function runRefreshCycle() {
     loadSecrets(),
     loadApiKeys(),
     walletActions.loadProfiles(),
+    treasuryActions.loadTreasuryOverview(),
     inventoryActions.loadInventoryOperations(),
     operationsActions.loadDepositRegistry(),
     operationsActions.loadQueueJobs(),
@@ -1106,6 +1114,7 @@ async function loadDiagnostics() {
 }
 
 const UI_ACTIONS = {
+  allocateTreasuryReceiveAddress: treasuryActions.allocateTreasuryReceiveAddress,
   approveConsolidationPlan: inventoryActions.approveConsolidationPlan,
   cancelDiscoveryJob: inventoryActions.cancelDiscoveryJob,
   copyText,
@@ -1148,6 +1157,7 @@ const UI_ACTIONS = {
   pushSecret,
   refreshDepositRegistry: operationsActions.refreshDepositRegistry,
   refreshSingleDeposit: operationsActions.refreshSingleDeposit,
+  refreshTreasuryOverview: treasuryActions.refreshTreasuryOverview,
   resetLocalData,
   restoreAuthSnapshot,
   restoreSetupSnapshot,
@@ -1155,6 +1165,7 @@ const UI_ACTIONS = {
   resumeDiscoveryJob: inventoryActions.resumeDiscoveryJob,
   revealApiKeyButton,
   revealSecretButton,
+  rotateTreasuryReceiveAddress: treasuryActions.rotateTreasuryReceiveAddress,
   runMaintenanceCycle: operationsActions.runMaintenanceCycle,
   scanEthStealthAnnouncements: operationsActions.scanEthStealthAnnouncements,
   scanInventoryEvm: inventoryActions.scanInventoryEvm,
@@ -1167,6 +1178,7 @@ const UI_ACTIONS = {
   toggleWatchAddressBookEntry: inventoryActions.toggleWatchAddressBookEntry,
   togglePoisonWarning: fido2Actions.togglePoisonWarning,
   unlock: sessionActions.unlock,
+  updateTreasuryPolicy: treasuryActions.updateTreasuryPolicy,
   upsertChainProfile: inventoryActions.upsertChainProfile,
   upsertBulkWatchAddressBookEntries: inventoryActions.upsertBulkWatchAddressBookEntries,
   upsertWatchAddressBookEntry: inventoryActions.upsertWatchAddressBookEntry,

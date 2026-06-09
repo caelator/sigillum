@@ -840,3 +840,57 @@ fn test_queue_process_request_empty() {
     };
     roundtrip_test(req);
 }
+
+#[test]
+fn test_treasury_policy_update_request_full() {
+    let req = TreasuryPolicyUpdateRequest {
+        enabled: true,
+        allowed_destinations: vec![
+            TreasuryAllowedDestinationInput {
+                address: "0x9999999999999999999999999999999999999999".to_string(),
+                label: Some("cold-treasury".to_string()),
+            },
+            TreasuryAllowedDestinationInput {
+                address: "0x8888888888888888888888888888888888888888".to_string(),
+                label: None,
+            },
+        ],
+        max_step_native_wei_hex: Some("0xde0b6b3a7640000".to_string()),
+        max_plan_native_wei_hex: Some("0x1bc16d674ec80000".to_string()),
+        require_simulation: Some(false),
+    };
+    roundtrip_test(req);
+}
+
+#[test]
+fn test_treasury_policy_update_request_minimal() {
+    let req = TreasuryPolicyUpdateRequest {
+        enabled: false,
+        allowed_destinations: Vec::new(),
+        max_step_native_wei_hex: None,
+        max_plan_native_wei_hex: None,
+        require_simulation: None,
+    };
+    roundtrip_test(req);
+}
+
+#[test]
+fn test_treasury_receive_allocate_request_roundtrip() {
+    roundtrip_test(TreasuryReceiveAllocateRequest {
+        wallet_profile: "seed-main".to_string(),
+        purpose: "counterparty-acme".to_string(),
+        label: Some("Acme invoices".to_string()),
+    });
+    roundtrip_test(TreasuryReceiveAllocateRequest {
+        wallet_profile: "seed-main".to_string(),
+        purpose: "grant-payout".to_string(),
+        label: None,
+    });
+}
+
+#[test]
+fn test_treasury_receive_rotate_request_roundtrip() {
+    roundtrip_test(TreasuryReceiveRotateRequest {
+        allocation_id: "alloc_123".to_string(),
+    });
+}

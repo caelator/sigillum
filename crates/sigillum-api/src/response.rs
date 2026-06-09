@@ -849,6 +849,10 @@ pub struct ConsolidationPlan {
     pub created_at_unix: u64,
     pub updated_at_unix: u64,
     pub summary: ConsolidationPlanSummary,
+    /// Plan-wide treasury policy violations (e.g. plan native cap exceeded).
+    /// Step-level violations live in each step's `blockers` instead.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub policy_violations: Vec<String>,
     pub steps: Vec<ConsolidationPlanStep>,
 }
 
@@ -868,6 +872,9 @@ pub use consolidation_export::*;
 
 mod watch_book;
 pub use watch_book::*;
+
+mod treasury;
+pub use treasury::*;
 
 // ── Queue ───────────────────────────────────────
 

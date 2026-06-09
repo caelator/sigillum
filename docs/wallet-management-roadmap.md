@@ -166,6 +166,19 @@ supplies a matching Safe address, Sigillum can also emit a Safe Transaction
 Builder-compatible batch. Suspicious, blocked, unsimulated, unapproved,
 watch-only, and source-mismatched steps are skipped with reasons.
 
+Treasury policy guardrails are implemented on top of this model: an
+operator-managed local policy (destination allowlist plus per-step and
+per-plan native value caps) is enforced at both plan generation and approval
+time. Sweep steps routed to non-allowlisted destinations and native sweeps
+above the step cap are blocked with explicit blockers, plans whose
+non-blocked native total exceeds the plan cap carry plan-level
+`policy_violations`, and approval re-evaluates the current policy so an
+allowlist change between generation and approval still blocks. The treasury
+console, the policy editor, and locally derived purpose-labeled receive
+allocations (with rotation) are exposed through `/api/treasury/*` routes,
+the CLI `sigillum api treasury` namespace, and the operator UI treasury
+card.
+
 ## Airdrops And Claims
 
 Airdrops are discovery targets, but claiming is high risk. Sigillum should:

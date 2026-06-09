@@ -521,6 +521,69 @@
     <div id="xpubPreviewResult" class="result-box hidden"></div>
   </div>
 
+  <!-- Treasury Card -->
+  <div class="card hidden" id="treasuryCard" data-nav-label="Treasury" data-workspace-section="operations">
+    <div class="eyebrow">Operations</div>
+    <h2>Treasury</h2>
+    <p class="helper-text">
+      Roll-up of tracked addresses, per-chain balances, wallet groups, routing readiness, and outstanding risk and plan work, plus treasury policy controls and receive-address allocation.
+    </p>
+
+    <div class="stats" id="treasuryOverviewStats"></div>
+    <p class="text-meta" id="treasuryGeneratedAt"></p>
+    <div class="form-row">
+      <button class="btn-ghost" data-action="refreshTreasuryOverview">Refresh Overview</button>
+    </div>
+
+    <div class="section-divider"></div>
+    <div class="section-title">Chains</div>
+    <div id="treasuryChainList"></div>
+
+    <div class="section-divider"></div>
+    <div class="section-title">Wallet Groups</div>
+    <div id="treasuryGroupList"></div>
+
+    <div class="section-divider"></div>
+    <div class="section-title">Treasury Routing</div>
+    <div id="treasuryRoutingList"></div>
+
+    <div class="section-divider"></div>
+    <div class="section-title">Risk And Plans</div>
+    <div id="treasuryRiskPlanList"></div>
+
+    <div class="section-divider"></div>
+    <div class="section-title">Treasury Policy</div>
+    <p class="helper-text">Constrain consolidation plans with an allow-list of destinations, native value caps, and a simulation requirement. Plans that violate the policy are flagged before any queue work.</p>
+    <div id="treasuryPolicyList"></div>
+    <div class="form-row">
+      <label class="checkbox-row">
+        <input type="checkbox" id="treasuryPolicyEnabled">
+        Policy enabled
+      </label>
+      <label class="checkbox-row">
+        <input type="checkbox" id="treasuryPolicyRequireSim" checked>
+        Require simulation
+      </label>
+    </div>
+    <textarea id="treasuryPolicyDestinations" placeholder="Allowed destinations, one per line: 0xADDRESS or 0xADDRESS:label"></textarea>
+    <div class="form-row">
+      <input type="text" id="treasuryPolicyMaxStepEth" placeholder="Max per-step native (ETH, optional)">
+      <input type="text" id="treasuryPolicyMaxPlanEth" placeholder="Max per-plan native (ETH, optional)">
+      <button class="btn-primary" data-action="updateTreasuryPolicy">Save Policy</button>
+    </div>
+
+    <div class="section-divider"></div>
+    <div class="section-title">Receive Addresses</div>
+    <p class="helper-text">Allocate a dedicated receive address per wallet profile and purpose, and rotate an address when it should stop being handed out. Rotated addresses stay tracked as retired.</p>
+    <div id="treasuryReceiveList"></div>
+    <div class="form-row">
+      <input type="text" id="treasuryReceiveProfile" placeholder="Wallet profile">
+      <input type="text" id="treasuryReceivePurpose" placeholder="Purpose (e.g. invoices)">
+      <input type="text" id="treasuryReceiveLabel" placeholder="Label (optional)">
+      <button class="btn-primary" data-action="allocateTreasuryReceiveAddress">Allocate Address</button>
+    </div>
+  </div>
+
   <!-- Wallet Operations Card -->
   <div class="card hidden" id="inventoryCard" data-nav-label="Inventory" data-workspace-section="operations">
     <div class="eyebrow">Operations</div>

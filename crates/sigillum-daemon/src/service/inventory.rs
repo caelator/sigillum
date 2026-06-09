@@ -15,6 +15,7 @@ mod risk_catalog;
 mod simulation;
 mod support;
 mod token_discovery;
+mod treasury;
 mod wallet_selection;
 mod watch_book;
 mod watch_discovery;
@@ -23,10 +24,10 @@ use sigillum_api::{
     ChainProfile, ChainProfileDeleteRequest, ChainProfileListResponse,
     ChainProfileMutationResponse, ChainProfileUpsertRequest, ConsolidationPlan,
     ConsolidationPlanApproveRequest, ConsolidationPlanGenerateRequest,
-    ConsolidationPlanListResponse, ConsolidationPlanMutationResponse, DiscoveryJobListResponse,
-    DiscoveryJobMutationRequest, DiscoveryJobMutationResponse, RiskFindingListResponse,
-    WalletDiscoveryJob, WalletInventoryListResponse, WalletInventoryScanRequest,
-    WalletInventoryScanResponse, WatchAddressProbe,
+    ConsolidationPlanListResponse, ConsolidationPlanMutationResponse, ConsolidationPlanStep,
+    DiscoveryJobListResponse, DiscoveryJobMutationRequest, DiscoveryJobMutationResponse,
+    RiskFindingListResponse, TreasuryPolicy, WalletDiscoveryJob, WalletInventoryListResponse,
+    WalletInventoryScanRequest, WalletInventoryScanResponse, WatchAddressProbe,
 };
 use sigillum_core::{
     decode_quantity_hex, derive_ethereum_address_from_control_xpub,
@@ -49,6 +50,7 @@ use support::{
     trimmed_required, unique_strings, validated_gap_limit, validated_max_index,
 };
 use token_discovery::erc20_transfer_discovery_config;
+use treasury::{add_u256, policy_blockers_for_step};
 use wallet_selection::{DiscoveryWallet, select_discovery_wallets};
 use watch_discovery::select_watch_addresses;
 
@@ -278,6 +280,7 @@ impl SigillumService {
             .map_err(|error| ServiceError::internal(format!("Failed to load profiles: {error}")))?;
         let now = now_unix();
         let destination_address = body.destination_address.and_then(trimmed_optional);
+        let policy = state.treasury_policy.clone();
         let mut steps = Vec::new();
 
         for holding in state
@@ -347,10 +350,22 @@ impl SigillumService {
             ));
         }
 
+        // Policy runs after planning so planner blockers and policy verdicts
+        // are both visible on each step, then the summary reflects the final
+        // step statuses.
+        if let Some(policy) = policy.as_ref() {
+            for step in &mut steps {
+                apply_policy_blockers_to_step(policy, step);
+            }
+        }
+        let policy_violations = policy
+            .as_ref()
+            .map(|policy| plan_policy_violations(policy, &steps))
+            .unwrap_or_default();
         let summary = summarize_plan_steps(&steps);
         let status = if summary.total_steps == 0 {
             "empty"
-        } else if summary.blocked_steps > 0 {
+        } else if summary.blocked_steps > 0 || !policy_violations.is_empty() {
             "blocked"
         } else {
             "review_required"
@@ -362,6 +377,7 @@ impl SigillumService {
             created_at_unix: now,
             updated_at_unix: now,
             summary,
+            policy_violations,
             steps,
         };
         state.consolidation_plans.push(plan.clone());
@@ -390,6 +406,7 @@ impl SigillumService {
         let token = self.require_session(token)?;
         let _guard = self.state.operation_guard().await;
         let mut state = load_inventory_state(&self.state.base_dir)?;
+        let policy = state.treasury_policy.clone();
         let plan = state
             .consolidation_plans
             .iter_mut()
@@ -400,13 +417,22 @@ impl SigillumService {
             if step.status == "review_required"
                 && (approve_all || body.step_ids.iter().any(|id| id == &step.id))
             {
+                // Approval is the last review gate, so candidates are
+                // re-checked against the CURRENT policy: a step planned
+                // before a policy change must not slip through approval.
+                if let Some(policy) = policy.as_ref() {
+                    apply_policy_blockers_to_step(policy, step);
+                    if step.status == "blocked" {
+                        continue;
+                    }
+                }
                 step.approved = true;
                 step.status = "approved".into();
             }
         }
         plan.updated_at_unix = now_unix();
         plan.summary = summarize_plan_steps(&plan.steps);
-        plan.status = if plan.summary.blocked_steps > 0 {
+        plan.status = if plan.summary.blocked_steps > 0 || !plan.policy_violations.is_empty() {
             "blocked".into()
         } else if plan.summary.review_required_steps > 0 {
             "review_required".into()
@@ -724,4 +750,56 @@ impl SigillumService {
             holdings: detected_holdings,
         })
     }
+}
+
+/// Extend a step with treasury policy blockers, mirroring planner semantics:
+/// any blocker forces blocked status and blocked risk level. Blockers are
+/// deduped because approval re-evaluates steps that generation already marked.
+fn apply_policy_blockers_to_step(policy: &TreasuryPolicy, step: &mut ConsolidationPlanStep) {
+    let policy_blockers = policy_blockers_for_step(
+        policy,
+        &step.action,
+        step.destination_address.as_deref(),
+        &step.asset_kind,
+        &step.amount_hex,
+    );
+    if policy_blockers.is_empty() {
+        return;
+    }
+    for blocker in policy_blockers {
+        if !step.blockers.contains(&blocker) {
+            step.blockers.push(blocker);
+        }
+    }
+    step.status = "blocked".into();
+    step.risk_level = "blocked".into();
+}
+
+/// Plan-level policy violations: currently only the native plan cap, summed
+/// over steps that can still move value. Blocked steps cannot execute, so
+/// they do not consume cap budget.
+fn plan_policy_violations(policy: &TreasuryPolicy, steps: &[ConsolidationPlanStep]) -> Vec<String> {
+    let mut violations = Vec::new();
+    if !policy.enabled {
+        return violations;
+    }
+    if let Some(cap_hex) = policy.max_plan_native_wei_hex.as_deref() {
+        if let Ok(cap) = decode_quantity_hex(cap_hex) {
+            let mut total = [0u8; 32];
+            for step in steps.iter().filter(|step| {
+                step.status != "blocked"
+                    && step.asset_kind == "native"
+                    && step.action.starts_with("sweep")
+            }) {
+                total = add_u256(
+                    &total,
+                    &decode_quantity_hex(&step.amount_hex).unwrap_or([0u8; 32]),
+                );
+            }
+            if compare_u256(&total, &cap).is_gt() {
+                violations.push("exceeds_policy_plan_cap".into());
+            }
+        }
+    }
+    violations
 }

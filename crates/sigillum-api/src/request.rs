@@ -541,6 +541,11 @@ pub struct EthXpubDeriveRequest {
 mod inventory;
 pub use inventory::*;
 
+// ── Treasury policy ─────────────────────────────────────────────────
+
+mod treasury;
+pub use treasury::*;
+
 /// Send a native ETH transfer using a saved wallet profile.
 ///
 /// This is the ergonomic variant of [`EthStealthSendTransferRequest`] — the

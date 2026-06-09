@@ -749,6 +749,64 @@ impl Validate for crate::request::ConsolidationPlanExportRequest {
     }
 }
 
+impl Validate for crate::request::TreasuryPolicyUpdateRequest {
+    fn validate(&self) -> Result<(), String> {
+        if self.allowed_destinations.len() > 256 {
+            return Err("allowed_destinations exceeds maximum length of 256 items".into());
+        }
+        for (index, destination) in self.allowed_destinations.iter().enumerate() {
+            if destination.address.trim().is_empty() {
+                return Err(format!(
+                    "allowed_destinations[{index}].address must not be empty"
+                ));
+            }
+            check_len(
+                &format!("allowed_destinations[{index}].address"),
+                &destination.address,
+                MAX_ADDRESS,
+            )?;
+            check_optional_len(
+                &format!("allowed_destinations[{index}].label"),
+                &destination.label,
+                MAX_LABEL,
+            )?;
+        }
+        check_optional_len(
+            "max_step_native_wei_hex",
+            &self.max_step_native_wei_hex,
+            MAX_HEX,
+        )?;
+        check_optional_len(
+            "max_plan_native_wei_hex",
+            &self.max_plan_native_wei_hex,
+            MAX_HEX,
+        )?;
+        Ok(())
+    }
+}
+
+impl Validate for crate::request::TreasuryReceiveAllocateRequest {
+    fn validate(&self) -> Result<(), String> {
+        if self.wallet_profile.trim().is_empty() {
+            return Err("wallet_profile must not be empty".into());
+        }
+        check_len("wallet_profile", &self.wallet_profile, MAX_LABEL)?;
+        if self.purpose.trim().is_empty() {
+            return Err("purpose must not be empty".into());
+        }
+        check_len("purpose", &self.purpose, MAX_LABEL)?;
+        check_optional_len("label", &self.label, MAX_LABEL)?;
+        Ok(())
+    }
+}
+
+impl Validate for crate::request::TreasuryReceiveRotateRequest {
+    fn validate(&self) -> Result<(), String> {
+        check_len("allocation_id", &self.allocation_id, MAX_ID)?;
+        Ok(())
+    }
+}
+
 impl Validate for crate::request::EthStealthSendWithProfileRequest {
     fn validate(&self) -> Result<(), String> {
         check_len("wallet_profile", &self.wallet_profile, MAX_LABEL)?;

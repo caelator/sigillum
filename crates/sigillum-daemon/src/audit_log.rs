@@ -407,6 +407,17 @@ pub(crate) enum AuditEventSpec {
         exported: usize,
         skipped: usize,
     },
+    #[serde(rename = "treasury.policy.update")]
+    TreasuryPolicyUpdate { enabled: bool, destinations: usize },
+    /// Derived addresses are intentionally omitted: the audit log records
+    /// that an allocation happened, not which address it produced.
+    #[serde(rename = "treasury.receive.allocate")]
+    TreasuryReceiveAllocate {
+        wallet_profile: String,
+        purpose: String,
+    },
+    #[serde(rename = "treasury.receive.rotate")]
+    TreasuryReceiveRotate { id: String },
     #[serde(rename = "run.complete")]
     RunComplete {
         program: String,
@@ -501,6 +512,9 @@ impl AuditEventSpec {
             Self::WalletConsolidationPlanApprove { .. } => "wallet_consolidation.plan.approve",
             Self::WalletConsolidationPlanSimulate { .. } => "wallet_consolidation.plan.simulate",
             Self::WalletConsolidationPlanExport { .. } => "wallet_consolidation.plan.export",
+            Self::TreasuryPolicyUpdate { .. } => "treasury.policy.update",
+            Self::TreasuryReceiveAllocate { .. } => "treasury.receive.allocate",
+            Self::TreasuryReceiveRotate { .. } => "treasury.receive.rotate",
             Self::RunComplete { .. } => "run.complete",
         }
     }
@@ -833,6 +847,15 @@ impl AuditEventSpec {
                 "exported": exported,
                 "skipped": skipped,
             }),
+            Self::TreasuryPolicyUpdate {
+                enabled,
+                destinations,
+            } => json!({ "enabled": enabled, "destinations": destinations }),
+            Self::TreasuryReceiveAllocate {
+                wallet_profile,
+                purpose,
+            } => json!({ "wallet_profile": wallet_profile, "purpose": purpose }),
+            Self::TreasuryReceiveRotate { id } => json!({ "id": id }),
             Self::RunComplete {
                 program,
                 args,

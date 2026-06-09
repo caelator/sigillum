@@ -10,7 +10,8 @@ use sigillum_api::{
     ChainProfileDeleteRequest, ChainProfileUpsertRequest, ConsolidationPlanApproveRequest,
     ConsolidationPlanExportRequest, ConsolidationPlanGenerateRequest,
     ConsolidationPlanSimulateRequest, DiscoveryJobMutationRequest, RiskCatalogDeleteRequest,
-    RiskCatalogUpsertRequest, WalletInventoryScanRequest, WatchAddressBookDeleteRequest,
+    RiskCatalogUpsertRequest, TreasuryPolicyUpdateRequest, TreasuryReceiveAllocateRequest,
+    TreasuryReceiveRotateRequest, WalletInventoryScanRequest, WatchAddressBookDeleteRequest,
     WatchAddressBookUpsertRequest,
 };
 
@@ -226,6 +227,81 @@ pub(crate) async fn list_consolidation_plans(
 ) -> Response {
     let service = SigillumService::new(state);
     service_response(service.list_consolidation_plans(bearer_token(&headers).as_deref()))
+}
+
+pub(crate) async fn treasury_overview(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+) -> Response {
+    let service = SigillumService::new(state);
+    service_response(service.treasury_overview(bearer_token(&headers).as_deref()))
+}
+
+pub(crate) async fn get_treasury_policy(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+) -> Response {
+    let service = SigillumService::new(state);
+    service_response(service.get_treasury_policy(bearer_token(&headers).as_deref()))
+}
+
+pub(crate) async fn update_treasury_policy(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Json(body): Json<TreasuryPolicyUpdateRequest>,
+) -> Response {
+    let body = match validated(Json(body)) {
+        Ok(b) => b,
+        Err(resp) => return resp,
+    };
+    let service = SigillumService::new(state);
+    service_response(
+        service
+            .update_treasury_policy(bearer_token(&headers).as_deref(), body)
+            .await,
+    )
+}
+
+pub(crate) async fn list_treasury_receive_allocations(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+) -> Response {
+    let service = SigillumService::new(state);
+    service_response(service.list_treasury_receive_allocations(bearer_token(&headers).as_deref()))
+}
+
+pub(crate) async fn allocate_treasury_receive_address(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Json(body): Json<TreasuryReceiveAllocateRequest>,
+) -> Response {
+    let body = match validated(Json(body)) {
+        Ok(b) => b,
+        Err(resp) => return resp,
+    };
+    let service = SigillumService::new(state);
+    service_response(
+        service
+            .allocate_treasury_receive_address(bearer_token(&headers).as_deref(), body)
+            .await,
+    )
+}
+
+pub(crate) async fn rotate_treasury_receive_address(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Json(body): Json<TreasuryReceiveRotateRequest>,
+) -> Response {
+    let body = match validated(Json(body)) {
+        Ok(b) => b,
+        Err(resp) => return resp,
+    };
+    let service = SigillumService::new(state);
+    service_response(
+        service
+            .rotate_treasury_receive_address(bearer_token(&headers).as_deref(), body)
+            .await,
+    )
 }
 
 pub(crate) async fn generate_consolidation_plan(

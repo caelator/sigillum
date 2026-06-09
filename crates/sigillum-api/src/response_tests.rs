@@ -743,6 +743,7 @@ fn test_wallet_operations_response_roundtrips() {
             executable_steps: 0,
             value_items: 1,
         },
+        policy_violations: Vec::new(),
         steps: vec![step],
     };
     roundtrip_test(ConsolidationPlanListResponse {
@@ -1237,4 +1238,220 @@ fn test_session_revoke_response_roundtrip() {
         requires_reauth: true,
     };
     roundtrip_test(resp);
+}
+
+#[test]
+fn test_treasury_overview_response_roundtrip() {
+    let resp = TreasuryOverviewResponse {
+        generated_at_unix: 99,
+        tracked_address_count: 4,
+        funded_address_count: 2,
+        watch_only_address_count: 1,
+        signer_address_count: 3,
+        chains: vec![TreasuryChainSummary {
+            chain_id: 1,
+            native_symbol: "ETH".to_string(),
+            address_count: 4,
+            funded_address_count: 2,
+            native_total_wei_hex: "0xde0b6b3a7640000".to_string(),
+        }],
+        groups: vec![TreasuryGroupSummary {
+            wallet_family: "eth-seed".to_string(),
+            wallet_profile: "seed-main".to_string(),
+            chain_id: 1,
+            address_count: 3,
+            funded_address_count: 2,
+            native_total_wei_hex: "0xde0b6b3a7640000".to_string(),
+            signer_address_count: 3,
+            watch_only_address_count: 0,
+            erc20_holding_count: 2,
+            nft_holding_count: 1,
+            defi_holding_count: 1,
+            claimable_holding_count: 1,
+            approval_exposure_count: 1,
+            dormant_candidate_count: 1,
+        }],
+        routing: vec![TreasuryRoutingStatus {
+            wallet_profile: "seed-main".to_string(),
+            hot_address: Some("0x1111111111111111111111111111111111111111".to_string()),
+            treasury_address: Some("0x2222222222222222222222222222222222222222".to_string()),
+            default_destination_address: None,
+            hot_native_balance_wei_hex: Some("0x1".to_string()),
+            treasury_native_balance_wei_hex: Some("0x2".to_string()),
+            routing_ready: true,
+        }],
+        risk: TreasuryRiskSummary {
+            total_findings: 3,
+            critical_findings: 0,
+            high_findings: 1,
+            medium_findings: 1,
+            low_findings: 1,
+        },
+        plans: TreasuryPlanSummary {
+            total_plans: 2,
+            latest_plan_id: Some("plan_1".to_string()),
+            latest_plan_status: Some("review_required".to_string()),
+            latest_review_required_steps: 2,
+            latest_approved_steps: 1,
+            latest_executable_steps: 0,
+            latest_blocked_steps: 1,
+            latest_policy_violations: vec!["exceeds_policy_plan_cap".to_string()],
+        },
+        receive: TreasuryReceiveSummary {
+            active_allocations: 2,
+            retired_allocations: 1,
+            purposes: 2,
+        },
+    };
+    roundtrip_test(resp);
+}
+
+#[test]
+fn test_treasury_overview_receive_summary_defaults_when_absent() {
+    // Payloads generated before receive allocations existed omit the field.
+    let resp: TreasuryOverviewResponse = serde_json::from_str(
+        r#"{
+            "generated_at_unix": 1,
+            "tracked_address_count": 0,
+            "funded_address_count": 0,
+            "watch_only_address_count": 0,
+            "signer_address_count": 0,
+            "risk": {
+                "total_findings": 0,
+                "critical_findings": 0,
+                "high_findings": 0,
+                "medium_findings": 0,
+                "low_findings": 0
+            },
+            "plans": {
+                "total_plans": 0,
+                "latest_review_required_steps": 0,
+                "latest_approved_steps": 0,
+                "latest_executable_steps": 0,
+                "latest_blocked_steps": 0
+            }
+        }"#,
+    )
+    .unwrap();
+    assert_eq!(resp.receive, TreasuryReceiveSummary::default());
+}
+
+fn sample_receive_allocation() -> TreasuryReceiveAllocation {
+    TreasuryReceiveAllocation {
+        id: "alloc_1".to_string(),
+        wallet_family: "eth-seed".to_string(),
+        wallet_profile: "seed-main".to_string(),
+        address: "0x1111111111111111111111111111111111111111".to_string(),
+        derivation_path: "m/44'/60'/0'/0/5".to_string(),
+        address_index: 5,
+        purpose: "counterparty-acme".to_string(),
+        label: Some("Acme invoices".to_string()),
+        status: "active".to_string(),
+        created_at_unix: 10,
+        retired_at_unix: None,
+    }
+}
+
+#[test]
+fn test_treasury_receive_allocation_responses_roundtrip() {
+    roundtrip_test(sample_receive_allocation());
+    roundtrip_test(TreasuryReceiveAllocation {
+        label: None,
+        status: "retired".to_string(),
+        retired_at_unix: Some(11),
+        ..sample_receive_allocation()
+    });
+    roundtrip_test(TreasuryReceiveAllocationListResponse {
+        allocations: vec![sample_receive_allocation()],
+    });
+    roundtrip_test(TreasuryReceiveAllocationListResponse {
+        allocations: Vec::new(),
+    });
+    roundtrip_test(TreasuryReceiveAllocationMutationResponse {
+        status: "allocated".to_string(),
+        allocation: sample_receive_allocation(),
+    });
+}
+
+fn sample_treasury_policy() -> TreasuryPolicy {
+    TreasuryPolicy {
+        enabled: true,
+        allowed_destinations: vec![
+            TreasuryAllowedDestination {
+                address: "0x9999999999999999999999999999999999999999".to_string(),
+                label: Some("cold-treasury".to_string()),
+            },
+            TreasuryAllowedDestination {
+                address: "0x8888888888888888888888888888888888888888".to_string(),
+                label: None,
+            },
+        ],
+        max_step_native_wei_hex: Some("0xde0b6b3a7640000".to_string()),
+        max_plan_native_wei_hex: Some("0x1bc16d674ec80000".to_string()),
+        require_simulation: true,
+        created_at_unix: 1,
+        updated_at_unix: 2,
+    }
+}
+
+#[test]
+fn test_treasury_policy_responses_roundtrip() {
+    roundtrip_test(sample_treasury_policy());
+    roundtrip_test(TreasuryPolicyResponse {
+        policy: Some(sample_treasury_policy()),
+    });
+    roundtrip_test(TreasuryPolicyResponse { policy: None });
+    roundtrip_test(TreasuryPolicyMutationResponse {
+        status: "updated".to_string(),
+        policy: TreasuryPolicy {
+            enabled: false,
+            allowed_destinations: Vec::new(),
+            max_step_native_wei_hex: None,
+            max_plan_native_wei_hex: None,
+            require_simulation: false,
+            created_at_unix: 1,
+            updated_at_unix: 3,
+        },
+    });
+}
+
+#[test]
+fn test_treasury_policy_require_simulation_defaults_true() {
+    // Older or hand-written payloads without the field must stay strict.
+    let policy: TreasuryPolicy =
+        serde_json::from_str(r#"{"enabled":true,"created_at_unix":1,"updated_at_unix":2}"#)
+            .unwrap();
+    assert!(policy.require_simulation);
+    assert!(policy.allowed_destinations.is_empty());
+}
+
+#[test]
+fn test_consolidation_plan_policy_violations_roundtrip() {
+    let base = ConsolidationPlan {
+        id: "plan_2".to_string(),
+        status: "blocked".to_string(),
+        destination_address: Some("0x9999999999999999999999999999999999999999".to_string()),
+        created_at_unix: 1,
+        updated_at_unix: 2,
+        summary: ConsolidationPlanSummary {
+            total_steps: 0,
+            blocked_steps: 0,
+            review_required_steps: 0,
+            approved_steps: 0,
+            executable_steps: 0,
+            value_items: 0,
+        },
+        policy_violations: vec!["exceeds_policy_plan_cap".to_string()],
+        steps: Vec::new(),
+    };
+    roundtrip_test(base.clone());
+
+    // Empty violations are skipped on the wire and default back in.
+    let empty = ConsolidationPlan {
+        policy_violations: Vec::new(),
+        ..base
+    };
+    let json = serde_json::to_string(&empty).unwrap();
+    assert!(!json.contains("policy_violations"));
+    roundtrip_test(empty);
 }

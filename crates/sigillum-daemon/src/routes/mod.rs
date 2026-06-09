@@ -473,6 +473,24 @@ fn inventory_routes() -> AppRouter {
             "/api/plans/consolidation/export",
             post(inventory::export_consolidation_plan),
         )
+        .route("/api/treasury/overview", get(inventory::treasury_overview))
+        .route("/api/treasury/policy", get(inventory::get_treasury_policy))
+        .route(
+            "/api/treasury/policy/update",
+            post(inventory::update_treasury_policy),
+        )
+        .route(
+            "/api/treasury/receive-addresses",
+            get(inventory::list_treasury_receive_allocations),
+        )
+        .route(
+            "/api/treasury/receive-addresses/allocate",
+            post(inventory::allocate_treasury_receive_address),
+        )
+        .route(
+            "/api/treasury/receive-addresses/rotate",
+            post(inventory::rotate_treasury_receive_address),
+        )
 }
 
 fn deposit_routes() -> AppRouter {
