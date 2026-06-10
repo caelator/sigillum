@@ -392,7 +392,12 @@ export function createTreasuryActions(deps: TreasuryActionsDeps) {
     renderEntityList(
       "treasuryReceiveList",
       allocations,
-      "No receive allocations yet.",
+      {
+        message:
+          "No receive allocations yet. Allocate a labeled receive address for a counterparty.",
+        actionLabel: "Allocate an address",
+        action: "focusTreasuryReceive",
+      },
       (allocation) =>
         '<li><div class="entity-main">' +
         '<div class="entity-title">' +
@@ -471,10 +476,17 @@ export function createTreasuryActions(deps: TreasuryActionsDeps) {
     void Promise.all([loadTreasuryPolicy(), loadTreasuryReceiveAddresses()]);
   }
 
+  function markInvalid(id: string, invalid: boolean): void {
+    const el = document.getElementById(id);
+    if (el) el.classList.toggle("input-invalid", invalid);
+  }
+
   async function updateTreasuryPolicy(): Promise<void> {
     const maxStepText = textValue("treasuryPolicyMaxStepEth");
     const maxStepWeiHex = parseEthToWeiHex(maxStepText);
-    if (maxStepText && maxStepWeiHex === null) {
+    const maxStepInvalid = Boolean(maxStepText) && maxStepWeiHex === null;
+    markInvalid("treasuryPolicyMaxStepEth", maxStepInvalid);
+    if (maxStepInvalid) {
       deps.toast(
         "Max per-step cap must be a decimal ETH amount with up to 18 decimals",
         "error",
@@ -483,7 +495,9 @@ export function createTreasuryActions(deps: TreasuryActionsDeps) {
     }
     const maxPlanText = textValue("treasuryPolicyMaxPlanEth");
     const maxPlanWeiHex = parseEthToWeiHex(maxPlanText);
-    if (maxPlanText && maxPlanWeiHex === null) {
+    const maxPlanInvalid = Boolean(maxPlanText) && maxPlanWeiHex === null;
+    markInvalid("treasuryPolicyMaxPlanEth", maxPlanInvalid);
+    if (maxPlanInvalid) {
       deps.toast(
         "Max per-plan cap must be a decimal ETH amount with up to 18 decimals",
         "error",
@@ -499,16 +513,24 @@ export function createTreasuryActions(deps: TreasuryActionsDeps) {
       max_plan_native_wei_hex: maxPlanWeiHex,
       require_simulation: Boolean(input("treasuryPolicyRequireSim")?.checked),
     };
-    const r = await deps.api("POST", "/api/treasury/policy/update", body);
-    if (r.error) {
-      deps.toast(r.error, "error");
-      return;
+    const saveButton = document.querySelector(
+      '[data-action="updateTreasuryPolicy"]',
+    );
+    if (saveButton) saveButton.classList.add("btn-busy");
+    try {
+      const r = await deps.api("POST", "/api/treasury/policy/update", body);
+      if (r.error) {
+        deps.toast(r.error, "error");
+        return;
+      }
+      const policy = (r.policy || null) as TreasuryPolicy | null;
+      renderTreasuryPolicy(policy);
+      prefillTreasuryPolicyForm(policy);
+      deps.toast("Treasury policy saved");
+      void loadTreasuryOverviewOnly();
+    } finally {
+      if (saveButton) saveButton.classList.remove("btn-busy");
     }
-    const policy = (r.policy || null) as TreasuryPolicy | null;
-    renderTreasuryPolicy(policy);
-    prefillTreasuryPolicyForm(policy);
-    deps.toast("Treasury policy saved");
-    void loadTreasuryOverviewOnly();
   }
 
   async function allocateTreasuryReceiveAddress(): Promise<void> {

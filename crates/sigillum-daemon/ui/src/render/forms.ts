@@ -15,16 +15,48 @@ export function clearFields(ids: string[]): void {
   });
 }
 
+/**
+ * Object form of the empty-state message: the message plus one inline
+ * action button (dispatched through the normal data-action pipeline) so an
+ * empty list always offers the next step instead of a dead end.
+ */
+export interface EmptyStateSpec {
+  message: string;
+  actionLabel?: string;
+  action?: string;
+  actionArg?: string;
+}
+
+export function renderEmptyState(empty: string | EmptyStateSpec): string {
+  if (typeof empty === "string") {
+    return '<p class="empty-state">' + esc(empty) + "</p>";
+  }
+  let html = '<p class="empty-state">' + esc(empty.message);
+  if (empty.action && empty.actionLabel) {
+    html +=
+      ' <button type="button" class="btn-ghost empty-state-action" data-action="' +
+      escAttr(empty.action) +
+      '"' +
+      (empty.actionArg != null
+        ? ' data-arg0="' + escAttr(empty.actionArg) + '"'
+        : "") +
+      ">" +
+      esc(empty.actionLabel) +
+      "</button>";
+  }
+  return html + "</p>";
+}
+
 export function renderEntityList<T>(
   containerId: string,
   items: T[],
-  emptyMsg: string,
+  emptyMsg: string | EmptyStateSpec,
   renderItem: (item: T) => string,
 ): void {
   const el = document.getElementById(containerId);
   if (!el) return;
   if (!items.length) {
-    el.innerHTML = '<p class="empty-state">' + esc(emptyMsg) + "</p>";
+    el.innerHTML = renderEmptyState(emptyMsg);
     return;
   }
   let html = '<ul class="entity-list">';

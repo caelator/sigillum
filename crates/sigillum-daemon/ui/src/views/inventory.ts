@@ -130,7 +130,12 @@ export function createInventoryActions(deps: InventoryActionsDeps) {
     renderEntityList(
       "inventoryAddressList",
       inventory.addresses || [],
-      "No discovered addresses yet.",
+      {
+        message:
+          "No discovered addresses yet. Run a balance scan to discover holdings.",
+        actionLabel: "Run balance scan",
+        action: "journeyRunScan",
+      },
       (address: any) =>
         '<li><div class="entity-main">' +
         '<div class="entity-title">' +
@@ -159,7 +164,12 @@ export function createInventoryActions(deps: InventoryActionsDeps) {
     renderEntityList(
       "inventoryHoldingList",
       inventory.holdings || [],
-      "No positive asset holdings detected yet.",
+      {
+        message:
+          "No positive asset holdings detected yet. Run a balance scan to discover holdings.",
+        actionLabel: "Run balance scan",
+        action: "journeyRunScan",
+      },
       (holding: any) =>
         '<li><div class="entity-main">' +
         '<div class="entity-title">' +
@@ -202,7 +212,12 @@ export function createInventoryActions(deps: InventoryActionsDeps) {
     renderEntityList(
       "watchAddressBookList",
       entries,
-      "No saved watch addresses yet.",
+      {
+        message:
+          "No saved watch addresses yet. Save an address you want to monitor.",
+        actionLabel: "Save an address",
+        action: "focusWatchBook",
+      },
       (entry) => {
         const tagsCsv = (entry.tags || []).join(", ");
         const nextEnabled = !entry.enabled;
@@ -451,6 +466,16 @@ export function createInventoryActions(deps: InventoryActionsDeps) {
   }
 
   async function scanInventoryEvm(): Promise<void> {
+    const scanButton = document.querySelector('[data-action="scanInventoryEvm"]');
+    if (scanButton) scanButton.classList.add("btn-busy");
+    try {
+      await scanInventoryEvmRequest();
+    } finally {
+      if (scanButton) scanButton.classList.remove("btn-busy");
+    }
+  }
+
+  async function scanInventoryEvmRequest(): Promise<void> {
     const watchAddress = optionalTextValue("inventoryWatchAddress");
     const watchLabel = optionalTextValue("inventoryWatchLabel");
     const watchAddresses = parseWatchAddressProbes(

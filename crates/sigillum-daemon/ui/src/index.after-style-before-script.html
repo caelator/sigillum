@@ -29,6 +29,7 @@
         <h1 id="topbarTitle">Sigillum</h1>
         <p id="topbarSummary" class="topbar-summary">Local treasury daemon</p>
       </div>
+      <div id="statusStrip" class="status-strip" aria-label="Workspace health"></div>
       <div class="topbar-meta">
         <div id="refreshMeta" class="refresh-meta" data-state="busy">syncing...</div>
         <button class="btn-ghost btn-small" data-action="refreshWorkspace">Refresh</button>
@@ -121,7 +122,7 @@
 
         <!-- Step 2a: Passphrase compartment setup -->
         <div class="wizard-step" id="wizStepPassphrase">
-          <p class="helper-text">Create your first compartment and protect it with a strong passphrase. You can add more compartments and hardware keys later.</p>
+          <p class="helper-text">Create your first <span class="term">compartment</span> <span class="help-tip" tabindex="0" data-tip="An isolated vault space with its own unlock requirements.">?</span> and protect it with a strong passphrase. You can add more compartments and hardware keys later.</p>
           <div class="form-row">
             <input type="text" id="wizPLabel" placeholder="Compartment name (e.g. default)" value="default">
           </div>
@@ -139,7 +140,7 @@
 
         <!-- Step 2b: FIDO2 compartment confirm (presets already selected) -->
         <div class="wizard-step" id="wizStepCompartments">
-          <p class="helper-text">Review the access layers Sigillum will create. Thresholds are how many distinct hardware keys unlock each compartment.</p>
+          <p class="helper-text">Review the access layers Sigillum will create. A <span class="term">threshold</span> <span class="help-tip" tabindex="0" data-tip="How many distinct hardware keys must tap to unlock this compartment.">?</span> is how many distinct hardware keys unlock each compartment.</p>
           <div id="wizCompList"></div>
           <div class="form-row mt-12">
             <button class="btn-ghost" data-action="wizBackToPresets">Back</button>
@@ -149,7 +150,7 @@
 
         <!-- Step 2c: Custom compartments -->
         <div class="wizard-step" id="wizStepCustomComps">
-          <p class="helper-text">Add each compartment you want Sigillum to create. Use thresholds to require more than one hardware key.</p>
+          <p class="helper-text">Add each compartment you want Sigillum to create. Use <span class="term">thresholds</span> <span class="help-tip" tabindex="0" data-tip="How many distinct hardware keys must tap to unlock this compartment.">?</span> to require more than one hardware key.</p>
           <div id="wizCustomCompList"></div>
           <div class="form-row">
             <input type="text" id="wizCustomLabel" placeholder="Label">
@@ -287,7 +288,22 @@
 
       <!-- ───────────────────────── Treasury ───────────────────────── -->
 
+      <!-- Guided journey: four operator goals from empty vault to working treasury -->
+      <div class="card journey-card hidden" id="journeyCard" data-workspace-section="treasury">
+        <div class="card-kicker">Getting started</div>
+        <div class="card-head">
+          <h2>Treasury setup</h2>
+          <div class="card-head-actions">
+            <span id="journeyProgress" class="text-meta" aria-live="polite"></span>
+          </div>
+        </div>
+        <p class="helper-text">Four steps take this machine from an empty vault to a working treasury. Finished steps stay checked.</p>
+        <p id="journeyComplete" class="text-meta hidden"></p>
+        <div id="journeyList" class="journey-list" aria-live="polite"></div>
+      </div>
+
       <div class="card hidden" id="treasuryCard" data-workspace-section="treasury">
+        <div class="card-kicker">Where is the money</div>
         <div class="card-head">
           <h2>Treasury</h2>
           <div class="card-head-actions">
@@ -364,6 +380,7 @@
       <!-- ───────────────────────── Wallets ───────────────────────── -->
 
       <div class="card hidden" id="walletManagerCard" data-workspace-section="wallets">
+        <div class="card-kicker">Keys and accounts</div>
         <div class="card-head">
           <h2>Wallets</h2>
           <div class="card-head-actions">
@@ -388,7 +405,7 @@
         <div class="section-divider"></div>
 
         <div class="section-title">Create A New Wallet</div>
-        <p class="helper-text">The daemon generates a fresh BIP-39 seed phrase, stores it as an encrypted vault secret, and shows you the phrase exactly once for backup.</p>
+        <p class="helper-text">The daemon generates a fresh BIP-39 <span class="term">seed phrase</span> <span class="help-tip" tabindex="0" data-tip="The 12/24 words that derive every key in the wallet. Anyone holding them controls the funds.">?</span>, stores it as an encrypted vault secret, and shows you the phrase exactly once for backup.</p>
         <div id="walletCreateForm">
           <div class="form-row">
             <input type="text" id="walletCreateName" placeholder="Wallet name (letters, digits, - and _)">
@@ -455,7 +472,7 @@
         </div>
 
         <div id="walletImportXpubForm" class="hidden">
-          <p class="helper-text">Save a watch-only xpub receive profile: deterministic receive addresses with no private key material on this machine.</p>
+          <p class="helper-text">Save a <span class="term">watch-only</span> <span class="help-tip" tabindex="0" data-tip="Sees addresses and balances but holds no keys on this machine &mdash; it can never spend.">?</span> <span class="term">xpub</span> <span class="help-tip" tabindex="0" data-tip="A public key that derives receive addresses. Can watch balances; cannot spend.">?</span> receive profile: deterministic receive addresses with no private key material on this machine.</p>
           <div class="form-row">
             <input type="text" id="walletImportXpubName" placeholder="Profile name">
             <input type="number" id="walletImportXpubAccount" placeholder="Project account" value="0" class="input-mid">
@@ -487,7 +504,7 @@
         </div>
         <p class="helper-text">Save reusable provider settings, then bind stealth wallet labels to those providers for deposits, sweeps, and queue work.</p>
 
-        <div class="section-title">EVM Provider Profiles</div>
+        <div class="section-title">RPC Providers <span class="help-tip" tabindex="0" data-tip="The endpoint Sigillum uses to read balances and broadcast transactions &mdash; your own node or any endpoint you trust.">?</span></div>
         <div class="form-row">
           <input type="text" id="providerName" placeholder="Profile name">
           <input type="text" id="providerRpcUrl" placeholder="RPC URL">
@@ -510,7 +527,7 @@
 
         <div class="section-divider"></div>
 
-        <div class="section-title">Stealth Wallet Profiles</div>
+        <div class="section-title">Stealth Wallets <span class="help-tip" tabindex="0" data-tip="A stealth address is a fresh one-time deposit address derived for each payment, so deposits cannot be linked to one published address.">?</span></div>
         <div class="form-row">
           <input type="text" id="walletProfileName" placeholder="Profile name">
           <input type="text" id="walletLabel" placeholder="Wallet label">
@@ -534,7 +551,7 @@
         </div>
         <p class="helper-text">Export public receive branches from xpub profiles, import BIP-39 seed wallets, and preview derived receive addresses.</p>
 
-        <div class="section-title">Xpub Receive Profiles</div>
+        <div class="section-title">Watch-Only Wallets (xpub) <span class="help-tip" tabindex="0" data-tip="A public key that derives receive addresses. Can watch balances; cannot spend.">?</span></div>
         <div class="form-row">
           <input type="text" id="xpubProfileName" placeholder="Profile name">
           <input type="number" id="xpubProjectAccount" placeholder="Project account" value="0" class="input-mid">
@@ -552,7 +569,7 @@
 
         <div class="section-divider"></div>
 
-        <div class="section-title">Seed Phrase Wallets</div>
+        <div class="section-title">Signing Wallets (seed) <span class="help-tip" tabindex="0" data-tip="The 12/24 words that derive every key in the wallet. Anyone holding them controls the funds.">?</span></div>
         <p class="helper-text">Import 12 or 24-word BIP-39 wallets for receive-tree visibility. The phrase is stored as an encrypted vault secret.</p>
         <div class="form-row">
           <input type="text" id="seedProfileName" placeholder="Profile name">
@@ -586,8 +603,8 @@
 
         <div class="section-divider"></div>
 
-        <div class="section-title">Preview Receive Addresses</div>
-        <p class="helper-text">Paste or reuse an exported receive-branch xpub, then derive the receive address at a specific index.</p>
+        <div class="section-title">Preview Receive Addresses <span class="help-tip" tabindex="0" data-tip="A derivation path (like m/44'/60'/0'/0/3) is the fixed route from the wallet key to one specific address &mdash; the same path always yields the same address.">?</span></div>
+        <p class="helper-text">Paste or reuse an exported receive-branch xpub, then derive the receive address at a specific <span class="term">derivation index</span>.</p>
         <div class="form-row">
           <input type="text" id="xpubReceiveXpub" placeholder="Receive-branch xpub" class="mono">
           <input type="number" id="xpubPreviewIndex" placeholder="Index" value="0" class="input-mid">
@@ -599,6 +616,7 @@
       <!-- ──────────────────────── Operations ─────────────────────── -->
 
       <div class="card hidden" id="inventoryCard" data-workspace-section="operations">
+        <div class="card-kicker">What you own, discovered locally</div>
         <div class="card-head">
           <h2>Wallet inventory</h2>
           <div class="card-head-actions">
@@ -670,6 +688,7 @@
             <input type="checkbox" id="inventoryDiscoverErc20Allowances">
             Probe ERC-20 allowances
           </label>
+          <span class="help-tip" tabindex="0" data-tip="An allowance is permission you granted a contract to move your tokens &mdash; revoke unused ones.">?</span>
         </div>
         <div class="form-row">
           <input type="text" id="inventoryPermit2Contract" placeholder="Permit2 contract (default canonical)">
@@ -679,6 +698,7 @@
             <input type="checkbox" id="inventoryDiscoverPermit2Allowances">
             Probe Permit2 allowances
           </label>
+          <span class="help-tip" tabindex="0" data-tip="Permit2 is a shared approval contract: one signature can let a spender move many of your tokens. Audit these like normal allowances.">?</span>
         </div>
         <div class="form-row">
           <input type="text" id="inventoryNftDiscoveryFromBlock" placeholder="NFT discovery from block">
@@ -733,6 +753,7 @@
       </div>
 
       <div class="card hidden" id="depositsCard" data-workspace-section="operations">
+        <div class="card-kicker">Money coming in</div>
         <div class="card-head">
           <h2>Deposits</h2>
         </div>
@@ -777,7 +798,7 @@
 
         <div class="section-divider"></div>
 
-        <div class="section-title">Scan ERC-5564 Announcements</div>
+        <div class="section-title">Scan Stealth Payments (ERC-5564) <span class="help-tip" tabindex="0" data-tip="A stealth address is a one-time address a sender derives just for you; scanning finds the payments announced for it on-chain.">?</span></div>
         <div class="form-row">
           <select id="depositScanWalletProfile"></select>
           <input type="text" id="depositScanFromBlock" placeholder="From block tag or 0x block">
@@ -814,6 +835,7 @@
       </div>
 
       <div class="card hidden" id="queueCard" data-workspace-section="operations">
+        <div class="card-kicker">Work waiting to run</div>
         <div class="card-head">
           <h2>Queue</h2>
           <div class="card-head-actions">
@@ -904,7 +926,7 @@
 
       <div class="card hidden" id="compartmentCard" data-workspace-section="secrets">
         <div class="card-head">
-          <h2>Unlocked compartments</h2>
+          <h2>Unlocked compartments <span class="help-tip" tabindex="0" data-tip="An isolated vault space with its own unlock requirements.">?</span></h2>
         </div>
         <p class="helper-text">Compartments available in this session; switching changes which compartment new operations target.</p>
         <div id="compartmentList"></div>
@@ -971,6 +993,7 @@
       </div>
 
       <div class="card hidden" id="auditCard" data-workspace-section="security">
+        <div class="card-kicker">What happened, and when</div>
         <div class="card-head">
           <h2>Audit trail</h2>
         </div>

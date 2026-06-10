@@ -174,7 +174,11 @@ export function createWalletManagerActions(deps: WalletManagerDeps) {
     renderEntityList(
       "walletManagerList",
       rows,
-      "No wallets yet — create one or import below.",
+      {
+        message: "No wallets yet. Create one below or import an existing wallet.",
+        actionLabel: "Create a wallet",
+        action: "focusWalletCreate",
+      },
       (row) => {
         const profile = row.profile;
         const seed = row.kind === "seed" ? (profile as EthSeedWalletProfile) : null;
@@ -261,7 +265,10 @@ export function createWalletManagerActions(deps: WalletManagerDeps) {
     const rpcUrl = textValue("walletQuickProviderUrl");
     const chainIdRaw = textValue("walletQuickProviderChainId");
     const chainId = chainIdRaw ? Number(chainIdRaw) : 1;
-    if (!rpcUrl || !/^https?:\/\//.test(rpcUrl)) {
+    const urlInvalid = !rpcUrl || !/^https?:\/\//.test(rpcUrl);
+    const urlField = input("walletQuickProviderUrl");
+    if (urlField) urlField.classList.toggle("input-invalid", urlInvalid);
+    if (urlInvalid) {
       deps.toast("Enter the RPC endpoint URL (http(s)://...)", "error");
       return;
     }
@@ -369,6 +376,18 @@ export function createWalletManagerActions(deps: WalletManagerDeps) {
   }
 
   async function createWallet(): Promise<void> {
+    // Busy affordance on the explicit submit control while the daemon
+    // generates and stores the new seed material.
+    const submit = input("walletCreateSubmit");
+    if (submit) submit.classList.add("btn-busy");
+    try {
+      await createWalletRequest();
+    } finally {
+      if (submit) submit.classList.remove("btn-busy");
+    }
+  }
+
+  async function createWalletRequest(): Promise<void> {
     disarmDelete();
     if (pendingMnemonic != null) {
       deps.toast("Confirm the current seed phrase backup first", "error");

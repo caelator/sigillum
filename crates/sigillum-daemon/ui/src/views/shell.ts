@@ -18,6 +18,14 @@ export interface ShellRendererDeps {
 }
 
 export function createShellRenderer(deps: ShellRendererDeps) {
+  function clearStatusStrip(): void {
+    // The topbar status strip only describes an unlocked workspace; leaving
+    // counts visible on the locked/setup screens would leak state and
+    // mislead. journey.ts also guards on body[data-mode] before rendering.
+    const strip = document.getElementById("statusStrip");
+    if (strip) strip.innerHTML = "";
+  }
+
   function applySetupUi(): void {
     // The refresh cycle re-applies setup mode every few seconds. Resetting
     // the wizard on every pass silently wipes in-progress choices (preset,
@@ -26,6 +34,7 @@ export function createShellRenderer(deps: ShellRendererDeps) {
     const alreadyInSetup = document.body.dataset.mode === "setup";
     deps.setUiMode("setup");
     document.body.dataset.mode = "setup";
+    clearStatusStrip();
     if (!alreadyInSetup) deps.resetSetupWizard();
     clearSessionToken();
     deps.setStatusBadge("status-no-vault", "NO VAULT");
@@ -45,6 +54,7 @@ export function createShellRenderer(deps: ShellRendererDeps) {
   function applyLockedUi(): void {
     deps.setUiMode("locked");
     document.body.dataset.mode = "locked";
+    clearStatusStrip();
     clearSessionToken();
     deps.setStatusBadge("status-locked", "LOCKED");
     setHidden("compartmentBadge", true);
@@ -96,6 +106,7 @@ export function createShellRenderer(deps: ShellRendererDeps) {
     if (unlocked.length >= 2) deps.buildPushSelectors(unlocked);
 
     setHidden("guideCard", false);
+    setHidden("journeyCard", false);
     setHidden("walletManagerCard", false);
     setHidden("profilesCard", false);
     setHidden("xpubCard", false);

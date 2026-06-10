@@ -8,11 +8,13 @@ import {
   writeSessionToken,
 } from "../src/api/session";
 import { dispatchDataAction } from "../src/actions/dispatcher";
+import { renderEntityList } from "../src/render/forms";
 import {
   buildInventoryReport,
   createInventoryActions,
   parseWatchAddressProbes,
 } from "../src/views/inventory";
+import { computeJourneySteps, createJourneyActions } from "../src/views/journey";
 import { createOperationsActions } from "../src/views/operations";
 import { createSessionActions } from "../src/views/session";
 import { createSetupWizard } from "../src/views/setup";
@@ -1539,8 +1541,11 @@ test("wallet manager list renders unified wallets with balances and fallbacks", 
   ok(
     dom
       .el("walletManagerList")
-      .innerHTML.includes("No wallets yet — create one or import below."),
+      .innerHTML.includes("No wallets yet. Create one below or import an existing wallet."),
   );
+  // The empty state is actionable: it carries a focus action, not a dead end.
+  ok(dom.el("walletManagerList").innerHTML.includes('data-action="focusWalletCreate"'));
+  ok(dom.el("walletManagerList").innerHTML.includes("empty-state-action"));
   equal(dom.el("walletCreateSubmit").disabled, true);
   equal(dom.el("walletCreateProviderHint").classList.contains("hidden"), false);
   // With no providers, the inline quick-add is the visible path forward.
@@ -2022,5 +2027,212 @@ test("wallet manager copy and receive-allocation flows hit clipboard and treasur
         entry.message ===
         "Receive address allocated: 0x6666666666666666666666666666666666666666",
     ),
+  );
+});
+
+// ── Guided journey + status strip ───────────────────────────────────────────
+
+interface JourneyStubState {
+  providers: any[];
+  seedProfiles: any[];
+  xpubProfiles: any[];
+  trackedAddressCount: number;
+  reviewRequiredSteps: number;
+  highFindings: number;
+  criticalFindings: number;
+  policy: any;
+}
+
+function journeyApiStub(state: JourneyStubState) {
+  return async (_method: string, path: string) => {
+    if (path === "/api/profiles/evm") return { profiles: state.providers };
+    if (path === "/api/profiles/eth-seed") return { profiles: state.seedProfiles };
+    if (path === "/api/profiles/eth-xpub") return { profiles: state.xpubProfiles };
+    if (path === "/api/treasury/overview") {
+      return {
+        generated_at_unix: 1,
+        tracked_address_count: state.trackedAddressCount,
+        funded_address_count: 0,
+        watch_only_address_count: 0,
+        signer_address_count: 0,
+        risk: {
+          total_findings: state.highFindings + state.criticalFindings,
+          critical_findings: state.criticalFindings,
+          high_findings: state.highFindings,
+          medium_findings: 0,
+          low_findings: 0,
+        },
+        plans: {
+          total_plans: 0,
+          latest_review_required_steps: state.reviewRequiredSteps,
+          latest_approved_steps: 0,
+          latest_executable_steps: 0,
+          latest_blocked_steps: 0,
+        },
+      };
+    }
+    if (path === "/api/treasury/policy") return { policy: state.policy };
+    return {};
+  };
+}
+
+test("journey card renders done/pending steps and collapses when all complete", async () => {
+  const dom = installDom(["journeyList", "journeyProgress", "journeyComplete", "statusStrip"]);
+  document.body.dataset.mode = "unlocked";
+  const state: JourneyStubState = {
+    providers: [{ name: "mainnet", chain_id: 1 }],
+    seedProfiles: [],
+    xpubProfiles: [],
+    trackedAddressCount: 0,
+    reviewRequiredSteps: 0,
+    highFindings: 0,
+    criticalFindings: 0,
+    policy: null,
+  };
+  const journey = createJourneyActions({
+    api: journeyApiStub(state),
+    toast: () => undefined,
+    jumpToCard: () => undefined,
+    refreshTreasury: () => undefined,
+  });
+
+  await journey.loadJourney();
+  const html = dom.el("journeyList").innerHTML;
+  equal(html.split("journey-step-title").length - 1, 4);
+  equal(html.split("journey-step-num").length - 1, 3);
+  equal(html.split("journey-step-done").length - 1, 1);
+  equal(html.split("journey-step-check").length - 1, 1);
+  ok(html.includes("✓"));
+  // Pending steps keep their number and an action; the done step hides its action.
+  equal(html.split("journey-step-action").length - 1, 3);
+  ok(html.includes("Add an RPC provider"));
+  ok(html.includes("Create or import a wallet"));
+  ok(html.includes("Run a balance scan"));
+  ok(html.includes("Set treasury guardrails"));
+  ok(html.includes('data-action="journeyRunScan"'));
+  ok(html.includes('data-action="journeyJump" data-arg0="walletManagerCard"'));
+  ok(html.includes('data-action="journeyJump" data-arg0="treasuryCard"'));
+  ok(html.includes("The endpoint Sigillum uses to read balances"));
+  equal(dom.el("journeyProgress").textContent, "1 of 4");
+  equal(dom.el("journeyComplete").classList.contains("hidden"), true);
+
+  // Pure step computation mirrors the rendered done flags.
+  const steps = computeJourneySteps({
+    providerCount: 1,
+    walletCount: 0,
+    trackedAddressCount: 0,
+    policyConfigured: false,
+    reviewNeededCount: 0,
+  });
+  deepEqual(steps.map((step) => step.done), [true, false, false, false]);
+
+  // Everything finished: checklist collapses into one quiet ready line.
+  state.seedProfiles = [{ name: "main" }];
+  state.trackedAddressCount = 4;
+  state.policy = { enabled: true, require_simulation: true };
+  await journey.loadJourney();
+  equal(dom.el("journeyList").innerHTML, "");
+  equal(dom.el("journeyList").classList.contains("hidden"), true);
+  equal(
+    dom.el("journeyComplete").textContent,
+    "Treasury ready — all setup steps complete",
+  );
+  equal(dom.el("journeyComplete").classList.contains("hidden"), false);
+  equal(dom.el("journeyProgress").textContent, "4 of 4");
+});
+
+test("status strip chips carry values, warn/danger tones, and jump targets", async () => {
+  const dom = installDom(["journeyList", "journeyProgress", "journeyComplete", "statusStrip"]);
+  document.body.dataset.mode = "unlocked";
+  const state: JourneyStubState = {
+    providers: [],
+    seedProfiles: [],
+    xpubProfiles: [],
+    trackedAddressCount: 6,
+    reviewRequiredSteps: 1,
+    highFindings: 1,
+    criticalFindings: 1,
+    policy: null,
+  };
+  const journey = createJourneyActions({
+    api: journeyApiStub(state),
+    toast: () => undefined,
+    jumpToCard: () => undefined,
+    refreshTreasury: () => undefined,
+  });
+
+  await journey.loadJourney();
+  const html = dom.el("statusStrip").innerHTML;
+  equal(html.split('<button').length - 1, 4);
+  // Providers and Wallets at zero warn; Review needed (1+1+1=3) is danger.
+  equal(html.split("status-chip-warn").length - 1, 2);
+  equal(html.split("status-chip-danger").length - 1, 1);
+  ok(html.includes('<span class="status-chip-value">6</span>'));
+  ok(html.includes('<span class="status-chip-value">3</span>'));
+  ok(html.includes('<span class="status-chip-label">Providers</span>'));
+  ok(html.includes('<span class="status-chip-label">Review needed</span>'));
+  ok(html.includes('data-action="journeyJump" data-arg0="walletManagerCard"'));
+  ok(html.includes('data-action="journeyJump" data-arg0="inventoryCard"'));
+  ok(html.includes('data-action="journeyJump" data-arg0="treasuryCard"'));
+
+  // Healthy counts drop the warn/danger tones.
+  state.providers = [{ name: "mainnet" }];
+  state.seedProfiles = [{ name: "main" }];
+  state.reviewRequiredSteps = 0;
+  state.highFindings = 0;
+  state.criticalFindings = 0;
+  await journey.loadJourney();
+  const healthy = dom.el("statusStrip").innerHTML;
+  equal(healthy.split("status-chip-warn").length - 1, 0);
+  equal(healthy.split("status-chip-danger").length - 1, 0);
+
+  // Outside the unlocked workspace the strip must stay empty.
+  document.body.dataset.mode = "locked";
+  await journey.loadJourney();
+  equal(dom.el("statusStrip").innerHTML, "");
+});
+
+test("renderEntityList object empty state renders an actionable button", () => {
+  const dom = installDom(["emptyWithArg", "emptyWithoutArg"]);
+  renderEntityList(
+    "emptyWithArg",
+    [],
+    {
+      message: "Nothing tracked yet.",
+      actionLabel: "Run balance scan",
+      action: "journeyRunScan",
+      actionArg: "all",
+    },
+    () => "",
+  );
+  const html = dom.el("emptyWithArg").innerHTML;
+  ok(html.includes('class="empty-state"'));
+  ok(html.includes("Nothing tracked yet."));
+  ok(html.includes('class="btn-ghost empty-state-action"'));
+  ok(html.includes('data-action="journeyRunScan"'));
+  ok(html.includes('data-arg0="all"'));
+  ok(html.includes(">Run balance scan</button>"));
+
+  renderEntityList(
+    "emptyWithoutArg",
+    [],
+    { message: "Empty.", actionLabel: "Go", action: "focusWalletCreate" },
+    () => "",
+  );
+  const noArgHtml = dom.el("emptyWithoutArg").innerHTML;
+  ok(noArgHtml.includes('data-action="focusWalletCreate"'));
+  ok(!noArgHtml.includes("data-arg0"));
+});
+
+test("renderEntityList plain-string empty state stays byte-identical (regression)", () => {
+  const dom = installDom(["plainEmpty"]);
+  renderEntityList("plainEmpty", [], "No entries yet.", () => "");
+  equal(dom.el("plainEmpty").innerHTML, '<p class="empty-state">No entries yet.</p>');
+  ok(!dom.el("plainEmpty").innerHTML.includes("empty-state-action"));
+
+  renderEntityList("plainEmpty", [1, 2], "No entries yet.", (item) => "<li>" + item + "</li>");
+  equal(
+    dom.el("plainEmpty").innerHTML,
+    '<ul class="entity-list"><li>1</li><li>2</li></ul>',
   );
 });

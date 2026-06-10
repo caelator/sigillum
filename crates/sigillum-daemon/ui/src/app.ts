@@ -19,6 +19,7 @@ import {
 import { deriveUiMode } from "./state/status";
 import { createFido2Actions } from "./views/fido2";
 import { createInventoryActions } from "./views/inventory";
+import { createJourneyActions } from "./views/journey";
 import { createOperationsActions } from "./views/operations";
 import { createSessionActions } from "./views/session";
 import { createShellRenderer } from "./views/shell";
@@ -29,6 +30,7 @@ import { createWalletActions } from "./views/wallets";
 
 const SETUP_RESET_CONFIRMATION = 'RESET LOCAL SIGILLUM DATA';
 const OPERATOR_CARD_IDS = [
+  'journeyCard',
   'nextStepCard',
   'guideCard',
   'compartmentCard',
@@ -252,6 +254,32 @@ function jumpToCard(id) {
       focusCard(el);
     }
   });
+}
+
+// Jump to a card AND drop the caret into the field the operator needs next.
+// Used by actionable empty states ("Create a wallet", "Save an address", …).
+function jumpToField(cardId, inputId) {
+  jumpToCard(cardId);
+  setTimeout(() => {
+    const field = document.getElementById(inputId);
+    if (!field) return;
+    if (typeof field.scrollIntoView === 'function') {
+      field.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+    if (typeof field.focus === 'function') field.focus({ preventScroll: true });
+  }, 120);
+}
+
+function focusWalletCreate() {
+  jumpToField('walletManagerCard', 'walletCreateName');
+}
+
+function focusTreasuryReceive() {
+  jumpToField('treasuryCard', 'treasuryReceivePurpose');
+}
+
+function focusWatchBook() {
+  jumpToField('inventoryCard', 'watchBookAddress');
 }
 
 function heroPrimaryAction() {
@@ -597,6 +625,13 @@ const treasuryActions = createTreasuryActions({
   toast,
 });
 
+const journeyActions = createJourneyActions({
+  api,
+  toast,
+  jumpToCard,
+  refreshTreasury: () => treasuryActions.loadTreasuryOverview(),
+});
+
 const operationsActions = createOperationsActions({
   api,
   toast,
@@ -659,6 +694,7 @@ async function runRefreshCycle() {
     loadApiKeys(),
     walletActions.loadProfiles(),
     walletManagerActions.loadWalletManager(),
+    journeyActions.loadJourney(),
     treasuryActions.loadTreasuryOverview(),
     inventoryActions.loadInventoryOperations(),
     operationsActions.loadDepositRegistry(),
@@ -1184,10 +1220,15 @@ const UI_ACTIONS = {
   fido2RemoveKey: fido2Actions.fido2RemoveKey,
   fido2SetNewPin: fido2Actions.fido2SetNewPin,
   fido2Unlock: fido2Actions.fido2Unlock,
+  focusTreasuryReceive,
+  focusWalletCreate,
+  focusWatchBook,
   generateConsolidationPlan: inventoryActions.generateConsolidationPlan,
   heroPrimaryAction,
   heroSecondaryAction,
   importSeedWallet: walletManagerActions.importSeedWallet,
+  journeyJump: journeyActions.journeyJump,
+  journeyRunScan: journeyActions.journeyRunScan,
   importWatchAddress: walletManagerActions.importWatchAddress,
   importXpubWallet: walletManagerActions.importXpubWallet,
   loadQueueJobs: operationsActions.loadQueueJobs,
@@ -1257,6 +1298,10 @@ function handleActionEvent(event) {
     actions: UI_ACTIONS,
     toast,
     quietActions: [
+      'focusTreasuryReceive',
+      'focusWalletCreate',
+      'focusWatchBook',
+      'journeyJump',
       'selectWorkspaceSection',
       'setWalletImportTab',
       'switchUnlockTab',
