@@ -32,8 +32,8 @@ use sigillum_api::request::{
     ConsolidationPlanGenerateRequest, ConsolidationPlanSimulateRequest, EthSeedWalletCreateRequest,
     EthStealthWalletProfileUpsertRequest, EvmProviderProfileUpsertRequest, EvmProviderRef,
     Fido2UnlockRequest, MaintenanceRunRequest, RiskCatalogDeleteRequest, RiskCatalogUpsertRequest,
-    TreasuryAllowedDestinationInput, TreasuryPolicyUpdateRequest, TreasuryReceiveAllocateRequest,
-    TreasuryReceiveRotateRequest,
+    SelfCheckRunRequest, TreasuryAllowedDestinationInput, TreasuryPolicyUpdateRequest,
+    TreasuryReceiveAllocateRequest, TreasuryReceiveRotateRequest,
 };
 use sigillum_client::{ClientError, SigillumClient};
 use url::Url;
@@ -94,6 +94,14 @@ pub fn cmd_api(args: &[String]) {
             true,
             |client| async move { client.diagnostics().await },
         ),
+        "selfcheck" => {
+            let request = SelfCheckRunRequest {
+                domains: parse_multi_flag(args, "--domain"),
+            };
+            run_api_command(args, true, move |client| async move {
+                client.run_self_check(request).await
+            });
+        }
         "profiles" => cmd_api_profiles(args),
         "deposits" => deposits::cmd_api_deposits(args),
         "inventory" => inventory::cmd_api_inventory(args),
@@ -864,6 +872,7 @@ COMMANDS:
   revoke-session
   switch --id <N>
   diagnostics
+  selfcheck [--domain <DOMAIN>]...  (domains: provider, seed-wallet, xpub-wallet, stealth-wallet, watch-book, policy, receive-allocation, fido2; default: all)
   profiles evm <list|upsert|delete> [...]
   profiles stealth <list|upsert|delete> [...]
   profiles eth-seed <list|create|delete> [...]  (create generates a new BIP-39 mnemonic and prints it exactly once)

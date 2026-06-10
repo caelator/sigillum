@@ -32,6 +32,7 @@ async fn spawn_mock_evm_provider() -> (SocketAddr, tokio::task::JoinHandle<()>) 
 
         let method = request["method"].as_str().unwrap_or_default();
         let result = match method {
+            "eth_chainId" => json!("0x1"),
             "eth_getTransactionCount" => json!("0x7"),
             "eth_getBalance" => json!("0xde0b6b3a7640000"),
             "eth_call" => {
@@ -3365,4 +3366,221 @@ async fn treasury_receive_address_routes_allocate_and_rotate() {
     assert_eq!(empty_purpose.status(), StatusCode::BAD_REQUEST);
 
     handle.abort();
+}
+
+#[tokio::test]
+async fn self_check_verifies_providers_wallets_policy_and_allocations() {
+    let dir = TempDir::new().unwrap();
+    let (addr, handle) = spawn_daemon(dir.path().to_path_buf()).await;
+    let (rpc_addr, rpc_handle) = spawn_mock_evm_provider().await;
+    let client = reqwest::Client::new();
+
+    let init = post_json(
+        &client,
+        addr,
+        "/api/compartment/init",
+        json!({
+            "id": 0,
+            "label": "default",
+            "threshold": 1,
+            "passphrase": "correct horse battery staple",
+        }),
+        None,
+    )
+    .await;
+    let init_json: serde_json::Value = init.json().await.unwrap();
+    let token = init_json["session_token"].as_str().unwrap().to_string();
+
+    // Self-check is session-gated.
+    let unauthorized = post_json(&client, addr, "/api/selfcheck/run", json!({}), None).await;
+    assert_eq!(unauthorized.status(), StatusCode::UNAUTHORIZED);
+
+    post_json(
+        &client,
+        addr,
+        "/api/api-keys/set",
+        json!({ "key": "alchemy", "value": "rpc-test-token" }),
+        Some(&token),
+    )
+    .await;
+
+    // One healthy provider on the mock RPC, one pointing at a dead port.
+    post_json(
+        &client,
+        addr,
+        "/api/profiles/evm/upsert",
+        json!({
+            "name": "mainnet",
+            "rpc_url": format!("http://{rpc_addr}/"),
+            "auth_token_key": "alchemy",
+            "chain_id": 1,
+        }),
+        Some(&token),
+    )
+    .await;
+    post_json(
+        &client,
+        addr,
+        "/api/profiles/evm/upsert",
+        json!({
+            "name": "deadnet",
+            "rpc_url": "http://127.0.0.1:9/",
+            "chain_id": 1,
+        }),
+        Some(&token),
+    )
+    .await;
+
+    let seed = post_json(
+        &client,
+        addr,
+        "/api/profiles/eth-seed/upsert",
+        json!({
+            "name": "seed-main",
+            "label": "Seed main",
+            "mnemonic": "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about",
+            "project_account": 0,
+            "provider_profile": "mainnet",
+        }),
+        Some(&token),
+    )
+    .await;
+    assert_eq!(seed.status(), StatusCode::OK);
+
+    // Enabled policy with an empty allowlist must surface as a warning.
+    let policy = post_json(
+        &client,
+        addr,
+        "/api/treasury/policy/update",
+        json!({ "enabled": true, "allowed_destinations": [] }),
+        Some(&token),
+    )
+    .await;
+    assert_eq!(policy.status(), StatusCode::OK);
+
+    let allocate = post_json(
+        &client,
+        addr,
+        "/api/treasury/receive-addresses/allocate",
+        json!({ "wallet_profile": "seed-main", "purpose": "counterparty-acme" }),
+        Some(&token),
+    )
+    .await;
+    assert_eq!(allocate.status(), StatusCode::OK);
+    let allocate_json: serde_json::Value = allocate.json().await.unwrap();
+    let allocation_id = allocate_json["allocation"]["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    // Unknown domains are rejected before any checks run.
+    let unknown = post_json(
+        &client,
+        addr,
+        "/api/selfcheck/run",
+        json!({ "domains": ["bogus"] }),
+        Some(&token),
+    )
+    .await;
+    assert_eq!(unknown.status(), StatusCode::BAD_REQUEST);
+
+    // Empty body = all domains; aggregate fails because deadnet is down.
+    let run = post_json(&client, addr, "/api/selfcheck/run", json!({}), Some(&token)).await;
+    assert_eq!(run.status(), StatusCode::OK);
+    let run_json: serde_json::Value = run.json().await.unwrap();
+    assert_eq!(run_json["status"], "fail");
+    assert!(run_json["generated_at_unix"].as_u64().unwrap() > 0);
+    let checks = run_json["checks"].as_array().unwrap();
+
+    let find = |id: &str| {
+        checks
+            .iter()
+            .find(|check| check["id"] == id)
+            .unwrap_or_else(|| panic!("missing check {id} in {checks:?}"))
+    };
+
+    let mainnet = find("provider:mainnet");
+    assert_eq!(mainnet["status"], "pass", "mainnet check: {mainnet}");
+    assert!(mainnet["latency_ms"].is_u64());
+
+    let deadnet = find("provider:deadnet");
+    assert_eq!(deadnet["status"], "fail");
+    assert!(
+        deadnet["detail"]
+            .as_str()
+            .unwrap()
+            .starts_with("RPC unreachable:")
+    );
+    // Unreachable probes have no latency and the field is skipped entirely.
+    assert!(deadnet.get("latency_ms").is_none());
+
+    let seed_check = find("seed-wallet:seed-main");
+    assert_eq!(seed_check["status"], "pass", "seed check: {seed_check}");
+    assert_eq!(seed_check["domain"], "seed-wallet");
+    assert_eq!(seed_check["subject"], "seed-main");
+
+    let policy_check = find("policy:treasury");
+    assert_eq!(policy_check["status"], "warn");
+    assert_eq!(
+        policy_check["detail"],
+        "Enabled policy with empty allowlist blocks every routed sweep"
+    );
+
+    let allocation_check = find(&format!("receive-allocation:{allocation_id}"));
+    assert_eq!(allocation_check["status"], "pass");
+
+    // Unconfigured domains contribute no results.
+    assert!(checks.iter().all(|check| {
+        !["xpub-wallet", "stealth-wallet", "watch-book", "fido2"]
+            .contains(&check["domain"].as_str().unwrap())
+    }));
+
+    // Domain filtering only runs the requested checks.
+    let filtered = post_json(
+        &client,
+        addr,
+        "/api/selfcheck/run",
+        json!({ "domains": ["policy"] }),
+        Some(&token),
+    )
+    .await;
+    assert_eq!(filtered.status(), StatusCode::OK);
+    let filtered_json: serde_json::Value = filtered.json().await.unwrap();
+    assert_eq!(filtered_json["status"], "warn");
+    let filtered_checks = filtered_json["checks"].as_array().unwrap();
+    assert_eq!(filtered_checks.len(), 1);
+    assert_eq!(filtered_checks[0]["id"], "policy:treasury");
+
+    // Deleting the wallet profile orphans its allocation.
+    let delete = post_json(
+        &client,
+        addr,
+        "/api/profiles/eth-seed/delete",
+        json!({ "name": "seed-main" }),
+        Some(&token),
+    )
+    .await;
+    assert_eq!(delete.status(), StatusCode::OK);
+
+    let orphaned = post_json(
+        &client,
+        addr,
+        "/api/selfcheck/run",
+        json!({ "domains": ["receive-allocation"] }),
+        Some(&token),
+    )
+    .await;
+    assert_eq!(orphaned.status(), StatusCode::OK);
+    let orphaned_json: serde_json::Value = orphaned.json().await.unwrap();
+    assert_eq!(orphaned_json["status"], "fail");
+    let orphaned_checks = orphaned_json["checks"].as_array().unwrap();
+    assert_eq!(orphaned_checks.len(), 1);
+    assert_eq!(orphaned_checks[0]["status"], "fail");
+    assert_eq!(
+        orphaned_checks[0]["detail"],
+        "Orphaned allocation — wallet profile deleted"
+    );
+
+    handle.abort();
+    rpc_handle.abort();
 }

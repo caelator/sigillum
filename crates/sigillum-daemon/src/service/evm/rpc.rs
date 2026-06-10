@@ -58,6 +58,13 @@ impl ProviderRpcClient {
         }
     }
 
+    /// Chain id reported by the provider (`eth_chainId`), for verifying that
+    /// an endpoint actually serves the network its profile claims.
+    pub(super) async fn get_chain_id(&self) -> ServiceResult<u64> {
+        let value = self.request(1, "eth_chainId", json!([])).await?;
+        parse_quantity_u64(&value)
+    }
+
     pub(super) async fn get_transaction_count(
         &self,
         address: &str,

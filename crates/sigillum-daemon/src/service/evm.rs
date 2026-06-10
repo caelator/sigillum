@@ -393,6 +393,18 @@ impl SigillumService {
         )
     }
 
+    /// Live `eth_chainId` probe against a provider profile, reusing the
+    /// daemon's bounded HTTP client and vault-backed auth-token resolution.
+    pub(super) async fn evm_chain_id_for_provider(
+        &self,
+        provider_compartment_id: usize,
+        provider: &sigillum_api::EvmProviderProfile,
+    ) -> ServiceResult<u64> {
+        self.provider_rpc_for_profile(provider_compartment_id, provider)?
+            .get_chain_id()
+            .await
+    }
+
     // ── Balance Observation ───────────────────────────────────────────────
 
     pub(super) async fn evm_native_and_erc20_balance_for_provider(

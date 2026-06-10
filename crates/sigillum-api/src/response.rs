@@ -291,6 +291,33 @@ pub struct DiagnosticsResponse {
     pub funded_eth_stealth_deposit_count: usize,
 }
 
+// ── Self-check ──────────────────────────────────
+
+/// One self-check verdict for a single configured subject.
+///
+/// `id` is the stable `"<domain>:<subject>"` pair so UIs can track a check
+/// across runs. `status` is `"pass"`, `"warn"`, or `"fail"`. `latency_ms` is
+/// only present for checks that performed a live probe (provider RPC).
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SelfCheckResult {
+    pub id: String,
+    pub domain: String,
+    pub subject: String,
+    pub status: String,
+    pub detail: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub latency_ms: Option<u64>,
+}
+
+/// Outcome of a self-check run: `status` is the worst individual check
+/// status (`"fail"` > `"warn"` > `"pass"`; an empty run is `"pass"`).
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SelfCheckRunResponse {
+    pub status: String,
+    pub generated_at_unix: u64,
+    pub checks: Vec<SelfCheckResult>,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Fido2StatusResponse {
     pub enabled: bool,

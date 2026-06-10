@@ -240,6 +240,7 @@ fn biometric_routes() -> AppRouter {
 fn system_routes() -> AppRouter {
     Router::new()
         .route("/api/diagnostics", get(diagnostics::diagnostics))
+        .route("/api/selfcheck/run", post(diagnostics::selfcheck_run))
         .route("/api/maintenance/run", post(maintenance::run_maintenance))
         .route("/api/audit", get(audit::audit_recent))
         .route("/api/audit/run", post(audit::audit_run))

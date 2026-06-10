@@ -929,3 +929,45 @@ fn test_treasury_receive_rotate_request_roundtrip() {
         allocation_id: "alloc_123".to_string(),
     });
 }
+
+#[test]
+fn test_self_check_run_request_roundtrip() {
+    roundtrip_test(SelfCheckRunRequest {
+        domains: vec!["provider".to_string(), "policy".to_string()],
+    });
+}
+
+#[test]
+fn test_self_check_run_request_empty_domains_default() {
+    // An empty body selects every domain and the field is skipped on the wire.
+    let req: SelfCheckRunRequest = serde_json::from_str("{}").unwrap();
+    assert!(req.domains.is_empty());
+    let json = serde_json::to_string(&req).unwrap();
+    assert!(!json.contains("domains"));
+    roundtrip_test(req);
+}
+
+#[test]
+fn test_self_check_run_request_validation() {
+    use crate::validation::Validate;
+
+    for domain in crate::validation::SELF_CHECK_DOMAINS {
+        let req = SelfCheckRunRequest {
+            domains: vec![domain.to_string()],
+        };
+        assert!(req.validate().is_ok(), "domain {domain} should validate");
+    }
+
+    let empty = SelfCheckRunRequest::default();
+    assert!(empty.validate().is_ok());
+
+    let unknown = SelfCheckRunRequest {
+        domains: vec!["bogus".to_string()],
+    };
+    assert!(unknown.validate().unwrap_err().contains("bogus"));
+
+    let oversize = SelfCheckRunRequest {
+        domains: vec!["p".repeat(65)],
+    };
+    assert!(oversize.validate().is_err());
+}

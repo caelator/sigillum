@@ -987,6 +987,35 @@ impl Validate for crate::request::MaintenanceRunRequest {
     }
 }
 
+/// Domains a [`crate::request::SelfCheckRunRequest`] may name.
+pub const SELF_CHECK_DOMAINS: &[&str] = &[
+    "provider",
+    "seed-wallet",
+    "xpub-wallet",
+    "stealth-wallet",
+    "watch-book",
+    "policy",
+    "receive-allocation",
+    "fido2",
+];
+
+const MAX_SELF_CHECK_DOMAIN: usize = 64;
+
+impl Validate for crate::request::SelfCheckRunRequest {
+    fn validate(&self) -> Result<(), String> {
+        check_vec_items_len("domains", &self.domains, MAX_SELF_CHECK_DOMAIN)?;
+        for domain in &self.domains {
+            if !SELF_CHECK_DOMAINS.contains(&domain.as_str()) {
+                return Err(format!(
+                    "unknown self-check domain '{domain}' (expected one of: {})",
+                    SELF_CHECK_DOMAINS.join(", ")
+                ));
+            }
+        }
+        Ok(())
+    }
+}
+
 impl Validate for crate::request::QueueProcessRequest {
     fn validate(&self) -> Result<(), String> {
         check_optional_len("id", &self.id, MAX_ID)?;

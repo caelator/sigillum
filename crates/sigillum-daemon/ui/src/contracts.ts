@@ -329,6 +329,23 @@ export interface TreasuryReceiveAllocation {
   retired_at_unix?: number | null;
 }
 
+export type SelfCheckStatus = "pass" | "warn" | "fail";
+
+export interface SelfCheckResult {
+  id: string;
+  domain: string;
+  subject: string;
+  status: SelfCheckStatus;
+  detail: string;
+  latency_ms?: number | null;
+}
+
+export interface SelfCheckRunResponse {
+  status: SelfCheckStatus;
+  generated_at_unix: number;
+  checks: SelfCheckResult[];
+}
+
 export interface EthXpubWalletProfile {
   name: string;
   project_account: number;

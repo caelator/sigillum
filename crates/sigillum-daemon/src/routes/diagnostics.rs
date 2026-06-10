@@ -1,15 +1,18 @@
-//! Route handler for the diagnostics endpoint (`/api/diagnostics`).
+//! Route handlers for the diagnostics endpoints (`/api/diagnostics`,
+//! `/api/selfcheck/run`).
 
 use std::sync::Arc;
 
+use axum::Json;
 use axum::extract::State;
 use axum::http::HeaderMap;
 use axum::response::Response;
+use sigillum_api::SelfCheckRunRequest;
 
 use crate::AppState;
 use crate::service::SigillumService;
 
-use super::{bearer_token, service_response};
+use super::{bearer_token, service_response, validated};
 
 pub(crate) async fn diagnostics(
     State(state): State<Arc<AppState>>,
@@ -17,4 +20,21 @@ pub(crate) async fn diagnostics(
 ) -> Response {
     let service = SigillumService::new(state);
     service_response(service.diagnostics(bearer_token(&headers).as_deref()))
+}
+
+pub(crate) async fn selfcheck_run(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Json(body): Json<SelfCheckRunRequest>,
+) -> Response {
+    let body = match validated(Json(body)) {
+        Ok(b) => b,
+        Err(resp) => return resp,
+    };
+    let service = SigillumService::new(state);
+    service_response(
+        service
+            .run_self_check(bearer_token(&headers).as_deref(), body)
+            .await,
+    )
 }

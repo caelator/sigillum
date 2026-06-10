@@ -21,6 +21,7 @@ import { createFido2Actions } from "./views/fido2";
 import { createInventoryActions } from "./views/inventory";
 import { createJourneyActions } from "./views/journey";
 import { createOperationsActions } from "./views/operations";
+import { createSelfCheckActions } from "./views/selfcheck";
 import { createSessionActions } from "./views/session";
 import { createShellRenderer } from "./views/shell";
 import { createSetupWizard } from "./views/setup";
@@ -630,6 +631,11 @@ const journeyActions = createJourneyActions({
   toast,
   jumpToCard,
   refreshTreasury: () => treasuryActions.loadTreasuryOverview(),
+});
+
+const selfCheckActions = createSelfCheckActions({
+  api,
+  toast,
 });
 
 const operationsActions = createOperationsActions({
@@ -1258,6 +1264,13 @@ const UI_ACTIONS = {
   revealSecretButton,
   rotateTreasuryReceiveAddress: treasuryActions.rotateTreasuryReceiveAddress,
   runMaintenanceCycle: operationsActions.runMaintenanceCycle,
+  runSelfCheck: selfCheckActions.runSelfCheck,
+  runSelfCheckFromTreasury: async () => {
+    // Run from the Treasury card head, then land on the results so the
+    // operator actually sees what was just verified.
+    await selfCheckActions.runSelfCheck();
+    jumpToCard('diagCard');
+  },
   scanEthStealthAnnouncements: operationsActions.scanEthStealthAnnouncements,
   scanInventoryEvm: inventoryActions.scanInventoryEvm,
   simulateConsolidationPlan: inventoryActions.simulateConsolidationPlan,

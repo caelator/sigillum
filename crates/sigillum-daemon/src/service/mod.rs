@@ -23,6 +23,8 @@
 //! - **backup / recovery** — encrypted snapshot export/restore
 //! - **transit** — inter-compartment secret push
 //! - **observability** — status and diagnostics endpoints
+//! - **selfcheck** — operator self-check verifying configured providers,
+//!   wallets, policy, and FIDO2 keys are well-formed and functioning
 //! - **error** — [`ServiceError`] type with HTTP status code mapping
 //! - **helpers** — shared hex decoding, u256 arithmetic, timestamps
 
@@ -42,6 +44,7 @@ mod profiles;
 mod queue;
 mod recovery;
 mod secrets;
+mod selfcheck;
 mod transit;
 pub(crate) mod unlock;
 mod wallets;

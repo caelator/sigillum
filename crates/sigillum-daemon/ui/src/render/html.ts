@@ -26,6 +26,7 @@ export function pillClass(status: unknown): string {
   }
   if (
     value.includes("ok") ||
+    value.includes("pass") ||
     value.includes("success") ||
     value.includes("sent") ||
     value.includes("broadcast") ||
@@ -42,6 +43,7 @@ export function pillClass(status: unknown): string {
     return "pill-good";
   }
   if (
+    value.includes("warn") ||
     value.includes("queue") ||
     value.includes("detected") ||
     value.includes("processing") ||

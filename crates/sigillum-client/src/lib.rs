@@ -81,11 +81,11 @@ pub use sigillum_api::response::{
     QueueProcessResponse, RiskCatalogEntry, RiskCatalogListResponse, RiskCatalogMutationResponse,
     RiskFinding, RiskFindingListResponse, SafeTransactionBuilderBatch, SafeTransactionBuilderMeta,
     SafeTransactionBuilderTransaction, SecretResolveBatchResponse, SecretResolveValue,
-    SessionRevokeResponse, SnapshotExportResponse, SnapshotRestoreResponse, StatusResponse,
-    SwitchCompartmentResponse, TransitDecryptResponse, TransitEncryptResponse, TransitHmacResponse,
-    UnlockResponse, UnlockedCompartment, WalletAssetHolding, WalletDiscoveryJob,
-    WalletInventoryAddress, WalletInventoryListResponse, WalletInventoryScanResponse,
-    WatchAddressBookListResponse, WatchAddressBookMutationResponse,
+    SelfCheckResult, SelfCheckRunResponse, SessionRevokeResponse, SnapshotExportResponse,
+    SnapshotRestoreResponse, StatusResponse, SwitchCompartmentResponse, TransitDecryptResponse,
+    TransitEncryptResponse, TransitHmacResponse, UnlockResponse, UnlockedCompartment,
+    WalletAssetHolding, WalletDiscoveryJob, WalletInventoryAddress, WalletInventoryListResponse,
+    WalletInventoryScanResponse, WatchAddressBookListResponse, WatchAddressBookMutationResponse,
 };
 use sigillum_core::SnapshotSummary;
 use thiserror::Error;
@@ -95,6 +95,7 @@ pub use sigillum_core::{SecretStore, VaultError};
 mod inventory;
 mod plans;
 mod queue;
+mod selfcheck;
 mod treasury;
 
 // ── Error types ────────────────────────────────────────────────

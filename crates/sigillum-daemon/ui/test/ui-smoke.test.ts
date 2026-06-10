@@ -16,6 +16,8 @@ import {
 } from "../src/views/inventory";
 import { computeJourneySteps, createJourneyActions } from "../src/views/journey";
 import { createOperationsActions } from "../src/views/operations";
+import { pillClass } from "../src/render/html";
+import { createSelfCheckActions, formatClockTime } from "../src/views/selfcheck";
 import { createSessionActions } from "../src/views/session";
 import { createSetupWizard } from "../src/views/setup";
 import { createShellRenderer } from "../src/views/shell";
@@ -34,6 +36,7 @@ import {
 import type {
   EthSeedWalletProfile,
   EthXpubWalletProfile,
+  SelfCheckRunResponse,
   TreasuryGroupSummary,
   TreasuryOverviewResponse,
   TreasuryPolicy,
@@ -2235,4 +2238,213 @@ test("renderEntityList plain-string empty state stays byte-identical (regression
     dom.el("plainEmpty").innerHTML,
     '<ul class="entity-list"><li>1</li><li>2</li></ul>',
   );
+});
+
+// ── Self-check ──────────────────────────────────────────────────────────────
+
+function installSelfCheckDom() {
+  const dom = installDom(["selfCheckSummary", "selfCheckList"]);
+  dom.el("selfCheckRunDiag", "BUTTON");
+  dom.el("selfCheckRunTreasury", "BUTTON");
+  return dom;
+}
+
+test("self-check run renders domain-grouped rows, latency, and summary counts", async () => {
+  const dom = installSelfCheckDom();
+  const toasts: Array<{ message: string; type?: string }> = [];
+  // Deliberately out of contract order: rendering must follow the stable
+  // domain order (provider before policy before fido2), not response order.
+  const response: SelfCheckRunResponse = {
+    status: "pass",
+    generated_at_unix: 1749700000,
+    checks: [
+      {
+        id: "fido2-1",
+        domain: "fido2",
+        subject: "yubikey-a",
+        status: "pass",
+        detail: "credential present",
+      },
+      {
+        id: "provider-1",
+        domain: "provider",
+        subject: "mainnet",
+        status: "pass",
+        detail: "chain 1 · block 19999999",
+        latency_ms: 42,
+      },
+      {
+        id: "provider-2",
+        domain: "provider",
+        subject: "base",
+        status: "pass",
+        detail: "chain 8453",
+        latency_ms: 7,
+      },
+      {
+        id: "policy-1",
+        domain: "policy",
+        subject: "treasury policy",
+        status: "pass",
+        detail: "destinations valid",
+      },
+    ],
+  };
+  let requested: { method: string; path: string; body?: any } | null = null;
+  const selfCheck = createSelfCheckActions({
+    api: async (method, path, body) => {
+      requested = { method, path, body };
+      return response;
+    },
+    toast: (message, type) => toasts.push({ message, type }),
+  });
+
+  await selfCheck.runSelfCheck();
+
+  deepEqual(requested, { method: "POST", path: "/api/selfcheck/run", body: {} });
+  equal(
+    dom.el("selfCheckSummary").textContent,
+    "4 pass · 0 warn · 0 fail · ran " + formatClockTime(1749700000),
+  );
+  const html = dom.el("selfCheckList").innerHTML;
+  ok(
+    html.includes(
+      '<div class="section-title">provider <span class="text-meta">· 2</span></div>',
+    ),
+  );
+  ok(
+    html.includes(
+      '<div class="section-title">policy <span class="text-meta">· 1</span></div>',
+    ),
+  );
+  ok(
+    html.includes(
+      '<div class="section-title">fido2 <span class="text-meta">· 1</span></div>',
+    ),
+  );
+  ok(html.indexOf(">provider <") < html.indexOf(">policy <"));
+  ok(html.indexOf(">policy <") < html.indexOf(">fido2 <"));
+  ok(html.includes("mainnet"));
+  ok(html.includes('class="pill pill-good">pass<'));
+  // Latency renders as a meta suffix; checks without latency omit it.
+  ok(html.includes("chain 1 · block 19999999 · 42ms"));
+  ok(html.includes("chain 8453 · 7ms"));
+  ok(html.includes("credential present</div>"));
+  deepEqual(toasts.pop(), {
+    message: "Self-check passed: 4 checks green.",
+    type: undefined,
+  });
+});
+
+test("self-check failures toast an error and surface pill counts in the summary", async () => {
+  const dom = installSelfCheckDom();
+  const toasts: Array<{ message: string; type?: string }> = [];
+  let overall: "warn" | "fail" = "fail";
+  const selfCheck = createSelfCheckActions({
+    api: async () => ({
+      status: overall,
+      generated_at_unix: 1749700000,
+      checks: [
+        {
+          id: "provider-1",
+          domain: "provider",
+          subject: "mainnet",
+          status: "pass",
+          detail: "chain 1",
+          latency_ms: 12,
+        },
+        {
+          id: "seed-1",
+          domain: "seed-wallet",
+          subject: "main",
+          status: "warn",
+          detail: "provider unreachable for balance read",
+        },
+        {
+          id: "xpub-1",
+          domain: "xpub-wallet",
+          subject: "cold-watch",
+          status: "fail",
+          detail: "receive xpub mismatch",
+        },
+      ],
+    }),
+    toast: (message, type) => toasts.push({ message, type }),
+  });
+
+  await selfCheck.runSelfCheck();
+  deepEqual(toasts.pop(), {
+    message: "Self-check: 2 issue(s) found — see System section",
+    type: "error",
+  });
+  const summary = dom.el("selfCheckSummary").innerHTML;
+  ok(summary.includes('class="pill pill-good">1 pass<'));
+  ok(summary.includes('class="pill pill-warn">1 warn<'));
+  ok(summary.includes('class="pill pill-danger">1 fail<'));
+  ok(summary.includes("ran " + formatClockTime(1749700000)));
+  const list = dom.el("selfCheckList").innerHTML;
+  ok(list.includes('class="pill pill-danger">fail<'));
+  ok(list.includes('class="pill pill-warn">warn<'));
+  ok(list.includes("receive xpub mismatch"));
+  ok(list.includes(">seed-wallet <"));
+
+  // Overall warn (no hard failures) keeps the default toast tone.
+  overall = "warn";
+  await selfCheck.runSelfCheck();
+  deepEqual(toasts.pop(), {
+    message: "Self-check: 2 issue(s) found — see System section",
+    type: undefined,
+  });
+});
+
+test("self-check panel offers a run action before the first run of a session", () => {
+  const dom = installSelfCheckDom();
+  const selfCheck = createSelfCheckActions({
+    api: async () => ({}),
+    toast: () => undefined,
+  });
+
+  selfCheck.renderSelfCheckPanel();
+  const html = dom.el("selfCheckList").innerHTML;
+  ok(html.includes('class="empty-state"'));
+  ok(html.includes("Not run yet in this session."));
+  ok(html.includes('class="btn-ghost empty-state-action"'));
+  ok(html.includes('data-action="runSelfCheck"'));
+  ok(html.includes(">Run Self-Check</button>"));
+  equal(dom.el("selfCheckSummary").textContent, "");
+});
+
+test("self-check toggles btn-busy on both run buttons while the request is in flight", async () => {
+  const dom = installSelfCheckDom();
+  let release: (value: SelfCheckRunResponse) => void = () => undefined;
+  const gate = new Promise<SelfCheckRunResponse>((resolve) => {
+    release = resolve;
+  });
+  let busyMidFlight: boolean | null = null;
+  const selfCheck = createSelfCheckActions({
+    api: () => {
+      // Inspect the buttons mid-flight, before the deferred response lands.
+      busyMidFlight =
+        dom.el("selfCheckRunDiag").classList.contains("btn-busy") &&
+        dom.el("selfCheckRunTreasury").classList.contains("btn-busy");
+      return gate;
+    },
+    toast: () => undefined,
+  });
+
+  const pending = selfCheck.runSelfCheck();
+  equal(busyMidFlight, true);
+  equal(dom.el("selfCheckRunDiag").classList.contains("btn-busy"), true);
+  equal(dom.el("selfCheckRunTreasury").classList.contains("btn-busy"), true);
+  release({ status: "pass", generated_at_unix: 1, checks: [] });
+  await pending;
+  equal(dom.el("selfCheckRunDiag").classList.contains("btn-busy"), false);
+  equal(dom.el("selfCheckRunTreasury").classList.contains("btn-busy"), false);
+});
+
+test("pillClass maps self-check statuses onto existing pill buckets", () => {
+  equal(pillClass("pass"), "pill-good");
+  equal(pillClass("fail"), "pill-danger");
+  equal(pillClass("warn"), "pill-warn");
+  equal(pillClass("something-else"), "pill-neutral");
 });

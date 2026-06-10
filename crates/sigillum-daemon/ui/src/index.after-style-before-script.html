@@ -308,6 +308,7 @@
           <h2>Treasury</h2>
           <div class="card-head-actions">
             <button class="btn-ghost btn-small" data-action="refreshTreasuryOverview">Refresh Overview</button>
+            <button class="btn-ghost btn-small" id="selfCheckRunTreasury" data-action="runSelfCheckFromTreasury">Self-Check</button>
           </div>
         </div>
         <p class="helper-text">Tracked addresses, per-chain balances, wallet groups, routing readiness, and outstanding risk and plan work.</p>
@@ -1006,11 +1007,20 @@
       <div class="card hidden" id="diagCard" data-workspace-section="system">
         <div class="card-head">
           <h2>Diagnostics</h2>
+          <div class="card-head-actions">
+            <button class="btn-ghost btn-small" id="selfCheckRunDiag" data-action="runSelfCheck">Run Self-Check</button>
+          </div>
         </div>
         <p class="helper-text">Low-level daemon health, queue, audit, and runtime policy details.</p>
         <div class="stats stat-tiles" id="diagGrid">
           <div class="stat"><div class="value">-</div><div class="label">Version</div></div>
         </div>
+
+        <div class="section-divider"></div>
+        <div class="section-title">Self-Check</div>
+        <p class="helper-text">Verifies every configured input live: providers answer RPC on the right chain, wallets re-derive, policy and allocations are internally consistent.</p>
+        <p class="text-meta" id="selfCheckSummary" aria-live="polite"></p>
+        <div id="selfCheckList"><p class="empty-state">Not run yet in this session. <button type="button" class="btn-ghost empty-state-action" data-action="runSelfCheck">Run Self-Check</button></p></div>
       </div>
 
       <div class="card hidden" id="guideCard" data-workspace-section="system">

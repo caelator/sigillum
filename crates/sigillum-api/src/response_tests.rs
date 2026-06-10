@@ -1486,6 +1486,59 @@ fn test_consolidation_plan_policy_violations_roundtrip() {
 }
 
 #[test]
+fn test_self_check_run_response_roundtrip() {
+    roundtrip_test(SelfCheckRunResponse {
+        status: "warn".to_string(),
+        generated_at_unix: 1_781_045_920,
+        checks: vec![
+            SelfCheckResult {
+                id: "provider:mainnet".to_string(),
+                domain: "provider".to_string(),
+                subject: "mainnet".to_string(),
+                status: "pass".to_string(),
+                detail: "Chain id 1 verified".to_string(),
+                latency_ms: Some(42),
+            },
+            SelfCheckResult {
+                id: "policy:treasury".to_string(),
+                domain: "policy".to_string(),
+                subject: "treasury".to_string(),
+                status: "warn".to_string(),
+                detail: "No treasury policy configured — sweeps are unguarded".to_string(),
+                latency_ms: None,
+            },
+        ],
+    });
+}
+
+#[test]
+fn test_self_check_result_skips_absent_latency() {
+    let probe_less = SelfCheckResult {
+        id: "watch-book:0xabc".to_string(),
+        domain: "watch-book".to_string(),
+        subject: "0xabc".to_string(),
+        status: "pass".to_string(),
+        detail: "disabled".to_string(),
+        latency_ms: None,
+    };
+    let json = serde_json::to_string(&probe_less).unwrap();
+    assert!(!json.contains("latency_ms"));
+    roundtrip_test(probe_less);
+
+    let probed = SelfCheckResult {
+        id: "provider:mainnet".to_string(),
+        domain: "provider".to_string(),
+        subject: "mainnet".to_string(),
+        status: "fail".to_string(),
+        detail: "Chain ID mismatch: provider reports 5, profile says 1".to_string(),
+        latency_ms: Some(7),
+    };
+    let json = serde_json::to_string(&probed).unwrap();
+    assert!(json.contains("\"latency_ms\":7"));
+    roundtrip_test(probed);
+}
+
+#[test]
 fn test_setup_reset_response_roundtrip() {
     roundtrip_test(SetupResetResponse {
         status: "reset".to_string(),

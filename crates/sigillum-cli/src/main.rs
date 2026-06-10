@@ -129,6 +129,7 @@ COMMANDS:
 
     daemon [--port N] Start HTTP daemon (default: localhost:9743)
     api <CMD>         Talk to the local daemon API with JSON output
+      selfcheck [--domain <D>]...  Verify configured providers, wallets, and policy
 
     version           Show version
     help              Show this message"

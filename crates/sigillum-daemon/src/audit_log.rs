@@ -426,6 +426,10 @@ pub(crate) enum AuditEventSpec {
     },
     #[serde(rename = "treasury.receive.rotate")]
     TreasuryReceiveRotate { id: String },
+    /// An operator-initiated self-check pass over configured subsystems.
+    /// Records only aggregate counts — never check subjects or details.
+    #[serde(rename = "selfcheck.run")]
+    SelfCheckRun { checks: usize, failures: usize },
     #[serde(rename = "run.complete")]
     RunComplete {
         program: String,
@@ -524,6 +528,7 @@ impl AuditEventSpec {
             Self::TreasuryPolicyUpdate { .. } => "treasury.policy.update",
             Self::TreasuryReceiveAllocate { .. } => "treasury.receive.allocate",
             Self::TreasuryReceiveRotate { .. } => "treasury.receive.rotate",
+            Self::SelfCheckRun { .. } => "selfcheck.run",
             Self::RunComplete { .. } => "run.complete",
         }
     }
@@ -870,6 +875,9 @@ impl AuditEventSpec {
                 purpose,
             } => json!({ "wallet_profile": wallet_profile, "purpose": purpose }),
             Self::TreasuryReceiveRotate { id } => json!({ "id": id }),
+            Self::SelfCheckRun { checks, failures } => {
+                json!({ "checks": checks, "failures": failures })
+            }
             Self::RunComplete {
                 program,
                 args,

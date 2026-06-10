@@ -712,6 +712,20 @@ pub struct EthStealthDepositEnqueueSweepRequest {
     pub force: Option<bool>,
 }
 
+// ── Self-check ───────────────────────────────────────────────────
+
+/// Run operator self-checks across configured subsystems.
+///
+/// `domains` filters which check domains run; an empty list (the serde
+/// default) runs every domain. Known domains are `provider`, `seed-wallet`,
+/// `xpub-wallet`, `stealth-wallet`, `watch-book`, `policy`,
+/// `receive-allocation`, and `fido2` — anything else fails validation.
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SelfCheckRunRequest {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub domains: Vec<String>,
+}
+
 // ── Maintenance ──────────────────────────────────────────────────
 
 /// Run a batch maintenance cycle: refresh deposits and process queued jobs.
