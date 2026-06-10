@@ -1562,6 +1562,13 @@ body:not([data-mode="unlocked"]) .overview-actions {
   display: none;
 }
 
+/* Locked and setup are focused flows. The overview hero only pushes the one
+   actionable panel below the fold, so it is removed outright and the unlock
+   or setup card becomes the first thing on screen. */
+body:not([data-mode="unlocked"]) #statusCard {
+  display: none;
+}
+
 body:not([data-mode="unlocked"]) .hero-context {
   text-align: left;
 }
@@ -1575,6 +1582,18 @@ body[data-mode="setup"] .hero-context {
 body:not([data-mode="unlocked"]) .focus-card {
   box-shadow: var(--shadow-2);
   border-color: var(--border-strong);
+}
+
+.field-hint {
+  margin: var(--space-2) 0 0;
+  font-size: var(--fs-xs);
+  color: var(--text-muted);
+}
+
+.field-error {
+  margin: var(--space-2) 0 0;
+  font-size: var(--fs-sm);
+  color: var(--danger);
 }
 
 .unlock-tabs {

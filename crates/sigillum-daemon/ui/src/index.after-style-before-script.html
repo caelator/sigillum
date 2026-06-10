@@ -253,9 +253,11 @@
         <!-- Deniable passphrase unlock: just a password field, no hints -->
         <div id="unlockPassphrase">
           <div class="form-row">
-            <input type="password" id="passphrase" placeholder="Enter vault passphrase">
-            <button class="btn-primary" data-action="unlock">Unlock vault</button>
+            <input type="password" id="passphrase" placeholder="Enter vault passphrase" autofocus>
+            <button class="btn-primary" id="unlockButton" data-action="unlock">Unlock vault</button>
           </div>
+          <p class="field-error hidden" id="unlockError" role="alert"></p>
+          <p class="field-hint">This is the vault passphrase you chose during setup &mdash; not a wallet seed phrase. Create or import 12/24-word wallets in the Wallets section after unlocking.</p>
         </div>
         <!-- Deniable FIDO2 unlock: optional PIN + number, no compartment hints -->
         <div id="unlockFido2" class="hidden">

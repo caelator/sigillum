@@ -140,7 +140,9 @@ test("session requests persist fresh tokens and clear stale tokens on 401", asyn
 });
 
 test("session actions drive unlock, lock, and browser logout workflow", async () => {
-  const dom = installDom(["passphrase"]);
+  const dom = installDom(["passphrase", "unlockButton", "unlockError"]);
+  dom.el("unlockError").classList.add("hidden");
+  dom.el("unlockButton").textContent = "Unlock vault";
   const calls: Array<{ method: string; path: string; body?: any }> = [];
   const toasts: Array<{ message: string; type?: string }> = [];
   let refreshCount = 0;
@@ -151,6 +153,9 @@ test("session actions drive unlock, lock, and browser logout workflow", async ()
       const requestBody = body as { passphrase?: string } | undefined;
       if (path === "/api/unlock" && requestBody?.passphrase === "already") {
         return { error: "Vault is already unlocked." };
+      }
+      if (path === "/api/unlock" && requestBody?.passphrase === "wrong") {
+        return { error: "Unlock failed: bad passphrase." };
       }
       if (path === "/api/unlock") {
         return {
@@ -168,6 +173,13 @@ test("session actions drive unlock, lock, and browser logout workflow", async ()
     confirm: () => confirmResult,
   });
 
+  // Empty passphrase: inline error, no network call, nothing silent.
+  dom.el("passphrase").value = "";
+  await actions.unlock();
+  equal(calls.length, 0);
+  equal(dom.el("unlockError").textContent, "Enter your vault passphrase first.");
+  ok(!dom.el("unlockError").classList.contains("hidden"));
+
   dom.el("passphrase").value = "browser-smoke-passphrase-123";
   await actions.unlock();
   deepEqual(calls.pop(), {
@@ -178,6 +190,10 @@ test("session actions drive unlock, lock, and browser logout workflow", async ()
   equal(dom.el("passphrase").value, "");
   deepEqual(toasts.pop(), { message: "Unlocked: browser-smoke", type: undefined });
   equal(refreshCount, 1);
+  // Busy state is restored after the attempt completes.
+  equal(dom.el("unlockButton").disabled, false);
+  equal(dom.el("unlockButton").textContent, "Unlock vault");
+  ok(dom.el("unlockError").classList.contains("hidden"));
 
   dom.el("passphrase").value = "already";
   await actions.unlock();
@@ -187,6 +203,14 @@ test("session actions drive unlock, lock, and browser logout workflow", async ()
     type: undefined,
   });
   equal(refreshCount, 2);
+  equal(dom.el("unlockButton").disabled, false);
+
+  // Wrong passphrase: the failure renders inline under the field too.
+  dom.el("passphrase").value = "wrong";
+  await actions.unlock();
+  equal(dom.el("unlockError").textContent, "Unlock failed: bad passphrase.");
+  ok(!dom.el("unlockError").classList.contains("hidden"));
+  deepEqual(toasts.pop(), { message: "Unlock failed: bad passphrase.", type: "error" });
 
   writeSessionToken("still-active");
   await actions.lock();

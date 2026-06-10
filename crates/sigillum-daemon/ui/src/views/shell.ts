@@ -48,14 +48,22 @@ export function createShellRenderer(deps: ShellRendererDeps) {
     setHidden("lockForm", true);
     setHidden("authRecovery", false);
     setHidden("compSwitcher", true);
-    setText("authTitle", "Unlock this local session");
+    setText("authTitle", "Unlock Sigillum");
     setText(
       "authLead",
-      "Unlock with the passphrase or hardware-key threshold you configured during setup. The resulting session token stays only in this browser tab.",
+      "Enter the vault passphrase you chose during setup, or switch to the hardware-key tab. The session token stays only in this browser tab.",
     );
     deps.setSecretsAccess(false);
     deps.setUnlockGuidance("passphrase");
     deps.updateHeroState("locked");
+    // The passphrase field is the only actionable control on this screen;
+    // hand it focus once the locked layout has settled.
+    setTimeout(() => {
+      const passphrase = document.getElementById(
+        "passphrase",
+      ) as HTMLInputElement | null;
+      passphrase?.focus?.();
+    }, 0);
   }
 
   function applyUnlockedUi(active: any, unlocked: any[]): void {
