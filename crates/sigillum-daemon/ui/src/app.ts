@@ -1202,6 +1202,7 @@ const UI_ACTIONS = {
   processQueueJob: operationsActions.processQueueJob,
   promptWalletReceiveAddress: walletManagerActions.promptWalletReceiveAddress,
   pushSecret,
+  quickAddWalletProvider: walletManagerActions.quickAddWalletProvider,
   refreshDepositRegistry: operationsActions.refreshDepositRegistry,
   refreshSingleDeposit: operationsActions.refreshSingleDeposit,
   refreshTreasuryOverview: treasuryActions.refreshTreasuryOverview,

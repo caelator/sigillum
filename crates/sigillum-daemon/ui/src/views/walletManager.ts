@@ -248,7 +248,39 @@ export function createWalletManagerActions(deps: WalletManagerDeps) {
     setSelectOptions("walletImportSeedProvider", providerOptions, placeholder);
     setSelectOptions("walletImportXpubProvider", providerOptions, placeholder);
     setHidden("walletCreateProviderHint", lastProviderProfiles.length > 0);
+    // No providers yet: offer the inline quick-add instead of sending the
+    // operator hunting for another card. Creating a wallet is local key
+    // derivation; the provider is only the RPC endpoint later used to read
+    // balances — but the profile requires one, so collect it right here.
+    setHidden("walletQuickProvider", lastProviderProfiles.length > 0);
     syncCreateFormAvailability();
+  }
+
+  async function quickAddWalletProvider(): Promise<void> {
+    const name = textValue("walletQuickProviderName") || "mainnet";
+    const rpcUrl = textValue("walletQuickProviderUrl");
+    const chainIdRaw = textValue("walletQuickProviderChainId");
+    const chainId = chainIdRaw ? Number(chainIdRaw) : 1;
+    if (!rpcUrl || !/^https?:\/\//.test(rpcUrl)) {
+      deps.toast("Enter the RPC endpoint URL (http(s)://...)", "error");
+      return;
+    }
+    if (!Number.isFinite(chainId) || chainId < 1) {
+      deps.toast("Chain ID must be a positive number", "error");
+      return;
+    }
+    const r = await deps.api("POST", "/api/profiles/evm/upsert", {
+      name,
+      rpc_url: rpcUrl,
+      chain_id: chainId,
+    });
+    if (r.error) {
+      deps.toast(r.error, "error");
+      return;
+    }
+    deps.toast("Provider '" + name + "' saved.");
+    clearFields(["walletQuickProviderUrl"]);
+    await loadWalletManager();
   }
 
   function setCreateFormDisabled(disabled: boolean): void {
@@ -706,6 +738,7 @@ export function createWalletManagerActions(deps: WalletManagerDeps) {
     loadWalletManager,
     refreshWalletManager,
     renderWalletManagerList,
+    quickAddWalletProvider,
     createWallet,
     confirmMnemonicSaved,
     copyMnemonicPhrase,

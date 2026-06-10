@@ -1382,6 +1382,10 @@ function installWalletManagerDom() {
     "walletCreateDestination",
     "walletCreatePassphrase",
     "walletCreateProviderHint",
+    "walletQuickProvider",
+    "walletQuickProviderName",
+    "walletQuickProviderUrl",
+    "walletQuickProviderChainId",
     "walletMnemonicReveal",
     "walletReceivePanel",
     "walletReceiveTarget",
@@ -1528,6 +1532,7 @@ test("wallet manager list renders unified wallets with balances and fallbacks", 
   ok(dom.el("walletCreateProvider").innerHTML.includes("mainnet · chain 1"));
   equal(dom.el("walletCreateSubmit").disabled, false);
   equal(dom.el("walletCreateProviderHint").classList.contains("hidden"), true);
+  equal(dom.el("walletQuickProvider").classList.contains("hidden"), true);
 
   empty = true;
   await manager.loadWalletManager();
@@ -1538,6 +1543,48 @@ test("wallet manager list renders unified wallets with balances and fallbacks", 
   );
   equal(dom.el("walletCreateSubmit").disabled, true);
   equal(dom.el("walletCreateProviderHint").classList.contains("hidden"), false);
+  // With no providers, the inline quick-add is the visible path forward.
+  equal(dom.el("walletQuickProvider").classList.contains("hidden"), false);
+});
+
+test("wallet manager quick-add provider validates, posts, and reloads", async () => {
+  const dom = installWalletManagerDom();
+  const calls: Array<{ method: string; path: string; body?: any }> = [];
+  const toasts: Array<{ message: string; type?: string }> = [];
+  const manager = createWalletManagerActions({
+    api: async (method, path, body) => {
+      calls.push({ method, path, body });
+      if (path === "/api/profiles/eth-seed") return { profiles: [] };
+      if (path === "/api/profiles/eth-xpub") return { profiles: [] };
+      if (path === "/api/profiles/evm") return { profiles: [] };
+      if (path === "/api/treasury/overview") return { groups: [] };
+      if (path === "/api/treasury/receive-addresses") return { allocations: [] };
+      return { status: "ok" };
+    },
+    toast: (message, type) => toasts.push({ message, type }),
+  });
+
+  // Invalid URL: error toast, no POST.
+  dom.el("walletQuickProviderName").value = "mainnet";
+  dom.el("walletQuickProviderUrl").value = "not-a-url";
+  dom.el("walletQuickProviderChainId").value = "1";
+  await manager.quickAddWalletProvider();
+  equal(calls.filter((call) => call.method === "POST").length, 0);
+  equal(toasts.pop()?.type, "error");
+
+  dom.el("walletQuickProviderUrl").value = "https://rpc.example.test";
+  dom.el("walletQuickProviderChainId").value = "8453";
+  await manager.quickAddWalletProvider();
+  const upsert = calls.find((call) => call.path === "/api/profiles/evm/upsert");
+  deepEqual(upsert?.body, {
+    name: "mainnet",
+    rpc_url: "https://rpc.example.test",
+    chain_id: 8453,
+  });
+  // Successful add reloads the manager so the select repopulates.
+  ok(calls.some((call) => call.path === "/api/profiles/evm" && call.method === "GET"));
+  equal(dom.el("walletQuickProviderUrl").value, "");
+  ok(toasts.some((entry) => entry.message.includes("Provider 'mainnet' saved.")));
 });
 
 test("wallet manager create flow reveals the one-time mnemonic and scrubs it on confirm", async () => {

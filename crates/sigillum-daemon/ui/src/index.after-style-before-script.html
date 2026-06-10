@@ -395,7 +395,13 @@
             <input type="text" id="walletCreateLabel" placeholder="Display label (optional)">
             <select id="walletCreateProvider"></select>
           </div>
-          <p class="card-note hidden" id="walletCreateProviderHint">Add an RPC provider first — save one in the providers card below, then come back here.</p>
+          <p class="card-note hidden" id="walletCreateProviderHint">A provider is the RPC endpoint Sigillum uses to read balances and broadcast for this wallet &mdash; your own node or any endpoint you trust (Alchemy, Infura, a public RPC). Add one below; it is saved for every wallet.</p>
+          <div class="form-row hidden" id="walletQuickProvider">
+            <input type="text" id="walletQuickProviderName" placeholder="Provider name" value="mainnet" class="input-mid">
+            <input type="text" id="walletQuickProviderUrl" placeholder="https:// RPC endpoint URL">
+            <input type="number" id="walletQuickProviderChainId" placeholder="Chain ID" value="1" class="input-narrow">
+            <button class="btn-ghost" data-action="quickAddWalletProvider">Add provider</button>
+          </div>
           <div class="form-row">
             <div class="segmented-tabs" role="radiogroup" aria-label="Seed phrase length">
               <label class="segmented-tab"><input type="radio" id="walletCreateWords12" name="walletCreateWordCount" value="12">12 words</label>
