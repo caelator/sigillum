@@ -4,8 +4,8 @@
 //! vault snapshots for backup and disaster recovery.
 
 use sigillum_api::{
-    PassphraseRequest, SetupResetRequest, SnapshotExportResponse, SnapshotRestoreRequest,
-    SnapshotRestoreResponse, response::GenericStatusResponse,
+    PassphraseRequest, SetupResetRequest, SetupResetResponse, SnapshotExportResponse,
+    SnapshotRestoreRequest, SnapshotRestoreResponse,
 };
 use sigillum_core::{
     export_encrypted_snapshot, inspect_encrypted_snapshot, restore_encrypted_snapshot,
@@ -19,17 +19,53 @@ use super::{ServiceError, ServiceResult, SigillumService};
 
 const SETUP_RESET_CONFIRMATION: &str = "RESET LOCAL SIGILLUM DATA";
 
-fn clear_base_dir(base_dir: &std::path::Path) -> Result<(), std::io::Error> {
-    std::fs::create_dir_all(base_dir)?;
-    for entry in std::fs::read_dir(base_dir)? {
-        let entry = entry?;
-        let path = entry.path();
-        let file_type = entry.file_type()?;
-        if file_type.is_dir() {
-            std::fs::remove_dir_all(path)?;
-        } else {
-            std::fs::remove_file(path)?;
-        }
+/// Move the data directory to a timestamped sibling archive and recreate it
+/// empty, returning the archive path when anything was archived.
+///
+/// Reset must never destroy key material: the most likely operator resetting
+/// is one who is locked out and frustrated, which is exactly when an
+/// irreversible delete of a vault (that a hardware key or remembered
+/// passphrase could still open later) would hurt the most. The archive stays
+/// encrypted at rest exactly as it was and can be restored by pointing
+/// `SIGILLUM_BASE_DIR` at it, or removed deliberately once the operator is
+/// sure it holds nothing of value.
+fn archive_base_dir(
+    base_dir: &std::path::Path,
+) -> Result<Option<std::path::PathBuf>, std::io::Error> {
+    if !base_dir.exists() {
+        create_private_dir(base_dir)?;
+        return Ok(None);
+    }
+    if std::fs::read_dir(base_dir)?.next().is_none() {
+        return Ok(None);
+    }
+
+    let dir_name = base_dir
+        .file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "sigillum".to_string());
+    let timestamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|elapsed| elapsed.as_secs())
+        .unwrap_or(0);
+    let mut archive_path = base_dir.with_file_name(format!("{dir_name}.archived-{timestamp}"));
+    let mut suffix = 1u32;
+    while archive_path.exists() {
+        archive_path = base_dir.with_file_name(format!("{dir_name}.archived-{timestamp}-{suffix}"));
+        suffix += 1;
+    }
+
+    std::fs::rename(base_dir, &archive_path)?;
+    create_private_dir(base_dir)?;
+    Ok(Some(archive_path))
+}
+
+fn create_private_dir(path: &std::path::Path) -> Result<(), std::io::Error> {
+    std::fs::create_dir_all(path)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o700))?;
     }
     Ok(())
 }
@@ -114,7 +150,7 @@ impl SigillumService {
     pub(crate) async fn setup_reset(
         &self,
         body: SetupResetRequest,
-    ) -> ServiceResult<GenericStatusResponse> {
+    ) -> ServiceResult<SetupResetResponse> {
         if body.confirmation != SETUP_RESET_CONFIRMATION {
             return Err(ServiceError::bad_request(format!(
                 "Type '{SETUP_RESET_CONFIRMATION}' exactly to reset local Sigillum data."
@@ -125,12 +161,13 @@ impl SigillumService {
         self.state.lock_all();
         self.state.reset_unlock_throttle();
         self.state.set_startup_recovery_summary(Default::default());
-        clear_base_dir(&self.state.base_dir).map_err(|error| {
+        let archived_to = archive_base_dir(&self.state.base_dir).map_err(|error| {
             ServiceError::internal(format!("Failed to reset local data: {error}"))
         })?;
 
-        Ok(GenericStatusResponse {
+        Ok(SetupResetResponse {
             status: "reset".into(),
+            archived_to: archived_to.map(|path| path.display().to_string()),
         })
     }
 }

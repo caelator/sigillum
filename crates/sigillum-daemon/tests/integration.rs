@@ -552,6 +552,17 @@ async fn test_post_setup_reset_clears_partial_uninitialized_state() {
     assert!(!dir.path().join(".ops").exists());
     assert!(!dir.path().join(".initialized").exists());
 
+    // Reset archives instead of deleting: the partial artifacts must survive
+    // in the timestamped sibling directory reported by the response.
+    let archived_to = body["archived_to"]
+        .as_str()
+        .expect("reset response should report the archive path");
+    let archive = std::path::PathBuf::from(archived_to);
+    assert!(archive.exists());
+    assert!(archive.join("compartments/0/meta.enc").exists());
+    assert!(archive.join("fido2_keys.json").exists());
+    std::fs::remove_dir_all(&archive).unwrap();
+
     let (status_after, body_after) = get_request(&app, "/api/status", None).await;
     assert_eq!(status_after, StatusCode::OK);
     assert_eq!(body_after["initialized"], json!(false));
@@ -603,6 +614,15 @@ async fn test_post_setup_reset_clears_initialized_local_data() {
     assert_eq!(body["status"], json!("reset"));
     assert!(!dir.path().join(".initialized").exists());
     assert!(!dir.path().join("compartments").exists());
+
+    // The initialized vault is archived, not destroyed.
+    let archived_to = body["archived_to"]
+        .as_str()
+        .expect("reset response should report the archive path");
+    let archive = std::path::PathBuf::from(archived_to);
+    assert!(archive.join(".initialized").exists());
+    assert!(archive.join("compartments").exists());
+    std::fs::remove_dir_all(&archive).unwrap();
 
     let (status_after, body_after) = get_request(&app, "/api/status", None).await;
     assert_eq!(status_after, StatusCode::OK);

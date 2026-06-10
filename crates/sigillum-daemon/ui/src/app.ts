@@ -1004,7 +1004,7 @@ async function resetLocalData(confirmId = 'setupResetConfirm') {
     toast("Type '" + SETUP_RESET_CONFIRMATION + "' exactly to continue.", 'error');
     return;
   }
-  if (!confirm('Erase all local Sigillum data on this machine and return to first-run setup?')) {
+  if (!confirm('Archive this machine\'s Sigillum data and return to first-run setup? The current data directory is moved aside (not deleted), but you will need a new vault to continue.')) {
     return;
   }
 
@@ -1024,7 +1024,9 @@ async function resetLocalData(confirmId = 'setupResetConfirm') {
     const el = document.getElementById(id);
     if (el) el.value = '';
   });
-  toast('Local Sigillum data cleared. You can start setup again or restore a snapshot.');
+  toast(r.archived_to
+    ? 'Previous data archived to ' + r.archived_to + '. Starting first-run setup.'
+    : 'Local Sigillum data cleared. Starting first-run setup.');
   refresh();
 }
 

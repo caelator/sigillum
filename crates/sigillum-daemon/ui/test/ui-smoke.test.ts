@@ -95,6 +95,13 @@ test("shell renderer applies setup, locked, and unlocked DOM state", () => {
   equal(dom.el("setupCard").classList.contains("hidden"), false);
   equal(dom.el("authCard").classList.contains("hidden"), true);
 
+  // The periodic refresh re-applies setup mode; the wizard must only be
+  // reset when ENTERING setup, or in-progress choices get wiped mid-flow.
+  equal(calls.filter((entry) => entry === "wizard:reset").length, 1);
+  renderer.applySetupUi();
+  renderer.applySetupUi();
+  equal(calls.filter((entry) => entry === "wizard:reset").length, 1);
+
   renderer.applyLockedUi();
   equal(mode, "locked");
   equal(document.body.dataset.mode, "locked");

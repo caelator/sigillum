@@ -19,9 +19,14 @@ export interface ShellRendererDeps {
 
 export function createShellRenderer(deps: ShellRendererDeps) {
   function applySetupUi(): void {
+    // The refresh cycle re-applies setup mode every few seconds. Resetting
+    // the wizard on every pass silently wipes in-progress choices (preset,
+    // compartments) while the rendered step still shows them — so only reset
+    // when actually ENTERING setup mode.
+    const alreadyInSetup = document.body.dataset.mode === "setup";
     deps.setUiMode("setup");
     document.body.dataset.mode = "setup";
-    deps.resetSetupWizard();
+    if (!alreadyInSetup) deps.resetSetupWizard();
     clearSessionToken();
     deps.setStatusBadge("status-no-vault", "NO VAULT");
     setHidden("compartmentBadge", true);

@@ -239,7 +239,7 @@
           <input type="text" id="setupResetConfirm" placeholder="Type RESET LOCAL SIGILLUM DATA to start over">
           <button class="btn-danger" data-action="resetLocalData" data-arg0="setupResetConfirm">Reset local setup</button>
         </div>
-        <p class="card-note">Resetting removes the local Sigillum data directory on this machine. Restoring replaces it with the selected encrypted snapshot.</p>
+        <p class="card-note">Resetting archives the local Sigillum data directory to a timestamped sibling (nothing is deleted). Restoring replaces local state with the selected encrypted snapshot.</p>
       </div>
 
       <!-- Unlock / session card (focused panel when locked; sectionless) -->
@@ -270,8 +270,8 @@
         <div id="authGuidance" class="info-box">Unlocking reveals the protected workspace only in this browser tab. The daemon keeps your local data on disk even while the session is locked.</div>
         <div id="authRecovery">
           <div class="section-divider"></div>
-          <div class="section-title">Recover this machine</div>
-          <p class="helper-text">If setup failed or this session got stranded, restore a snapshot or wipe only this machine&rsquo;s local Sigillum data.</p>
+          <div class="section-title">Recover or start fresh</div>
+          <p class="helper-text">Can&rsquo;t unlock? Try the hardware-key tab first if a key is detected, restore an encrypted snapshot, or archive this machine&rsquo;s data and start over with a brand-new vault.</p>
           <div class="form-row">
             <input type="file" id="authRestoreFile" class="flex-1">
             <input type="password" id="authRestorePass" placeholder="Restore passphrase" class="flex-1">
@@ -279,9 +279,9 @@
           </div>
           <div class="form-row">
             <input type="text" id="authResetConfirm" placeholder="Type RESET LOCAL SIGILLUM DATA to start over">
-            <button class="btn-danger" data-action="resetLocalData" data-arg0="authResetConfirm">Reset local data</button>
+            <button class="btn-danger" data-action="resetLocalData" data-arg0="authResetConfirm">Archive &amp; start fresh</button>
           </div>
-          <p class="card-note">Restoring replaces local on-disk state. Resetting erases the local Sigillum data directory and returns to first-run setup.</p>
+          <p class="card-note">Starting fresh moves the current data directory to a timestamped archive next to it &mdash; nothing is deleted &mdash; then returns to first-run setup, where you create a new vault and then create or import wallets in the Wallets section.</p>
         </div>
       </div>
 

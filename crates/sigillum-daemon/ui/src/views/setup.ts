@@ -309,7 +309,7 @@ export function createSetupWizard(deps: SetupWizardDeps) {
     setTimeout(deps.refresh, 1500);
   }
 
-  function wizProceedFido2(): void {
+  async function wizProceedFido2(): Promise<void> {
     let comps = wizCompartments;
     if (customCompartments.length > 0) comps = customCompartments;
     if (comps.length === 0) {
@@ -319,6 +319,26 @@ export function createSetupWizard(deps: SetupWizardDeps) {
     wizCompartments = comps;
     wizRequiredKeyCount = Math.max(1, ...wizCompartments.map((comp) => comp.threshold || 1));
     wizRegisteredKeyCount = 0;
+    // Thresholds above the number of detected devices are reachable by
+    // swapping keys in during registration, but the operator should know
+    // before committing rather than discovering it mid-ceremony.
+    if (wizRequiredKeyCount > 1) {
+      try {
+        const detect = await deps.api("GET", "/api/fido2/detect");
+        const detected = Number(detect?.device_count) || 0;
+        if (detected > 0 && detected < wizRequiredKeyCount) {
+          deps.toast(
+            "Highest threshold needs " +
+              wizRequiredKeyCount +
+              " distinct hardware keys; " +
+              detected +
+              " detected. You can register keys one at a time, swapping devices in between.",
+          );
+        }
+      } catch (_) {
+        // Detection is advisory only; never block the wizard on it.
+      }
+    }
     wizShowStep("wizStepFido2Pin");
   }
 

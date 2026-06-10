@@ -1484,3 +1484,18 @@ fn test_consolidation_plan_policy_violations_roundtrip() {
     assert!(!json.contains("policy_violations"));
     roundtrip_test(empty);
 }
+
+#[test]
+fn test_setup_reset_response_roundtrip() {
+    roundtrip_test(SetupResetResponse {
+        status: "reset".to_string(),
+        archived_to: Some("/home/op/.sigillum.archived-1781045920".to_string()),
+    });
+    let bare = SetupResetResponse {
+        status: "reset".to_string(),
+        archived_to: None,
+    };
+    let json = serde_json::to_string(&bare).unwrap();
+    assert!(!json.contains("archived_to"));
+    roundtrip_test(bare);
+}

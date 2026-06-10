@@ -209,6 +209,18 @@ pub struct SnapshotRestoreResponse {
     pub requires_reauth: bool,
 }
 
+/// Result of resetting local Sigillum data back to first-run setup.
+///
+/// Reset never destroys key material: when the data directory had contents,
+/// they are moved to a timestamped sibling archive whose path is returned in
+/// `archived_to` so the operator can restore or remove it deliberately later.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SetupResetResponse {
+    pub status: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub archived_to: Option<String>,
+}
+
 // ── Audit ───────────────────────────────────────
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
