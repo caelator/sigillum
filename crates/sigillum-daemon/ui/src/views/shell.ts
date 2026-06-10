@@ -83,6 +83,7 @@ export function createShellRenderer(deps: ShellRendererDeps) {
     if (unlocked.length >= 2) deps.buildPushSelectors(unlocked);
 
     setHidden("guideCard", false);
+    setHidden("walletManagerCard", false);
     setHidden("profilesCard", false);
     setHidden("xpubCard", false);
     setHidden("treasuryCard", false);

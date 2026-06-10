@@ -329,6 +329,45 @@ export interface TreasuryReceiveAllocation {
   retired_at_unix?: number | null;
 }
 
+export interface EthXpubWalletProfile {
+  name: string;
+  project_account: number;
+  provider_profile: string;
+  compartment_id: number;
+  chain_id?: number | null;
+  default_destination_address?: string | null;
+}
+
+export interface EthSeedWalletProfile {
+  name: string;
+  label?: string | null;
+  project_account: number;
+  provider_profile: string;
+  compartment_id: number;
+  chain_id?: number | null;
+  word_count: number;
+  mnemonic_secret_key: string;
+  account_path: string;
+  receive_path: string;
+  receive_xpub: string;
+  first_receive_address: string;
+  default_destination_address?: string | null;
+  control_xpub?: string | null;
+  sponsor_address?: string | null;
+  hot_address?: string | null;
+  treasury_address?: string | null;
+}
+
+export interface EthSeedWalletCreateResponse {
+  status: string;
+  /**
+   * Server-generated BIP-39 phrase, returned exactly once for operator
+   * backup. Never log, persist, or re-display this value.
+   */
+  mnemonic: string;
+  profile: EthSeedWalletProfile;
+}
+
 export interface ApiRequestOptions<TBody = unknown> {
   method: "GET" | "POST" | "DELETE";
   path: string;

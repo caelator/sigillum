@@ -523,6 +523,34 @@ pub struct EthSeedWalletProfileUpsertRequest {
     pub default_destination_address: Option<String>,
 }
 
+/// Create a brand-new Ethereum seed-phrase wallet profile from a
+/// server-generated BIP-39 mnemonic.
+///
+/// Unlike [`EthSeedWalletProfileUpsertRequest`], the caller supplies no
+/// mnemonic: the daemon generates fresh entropy, derives the profile, and
+/// returns the phrase exactly once in
+/// [`crate::response::EthSeedWalletCreateResponse`] for operator backup.
+/// Creation never overwrites an existing profile of the same name.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct EthSeedWalletCreateRequest {
+    pub name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
+    /// Number of BIP-39 words to generate: 12 or 24. Defaults to 24.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub word_count: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mnemonic_passphrase: Option<String>,
+    pub project_account: u32,
+    pub provider_profile: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub compartment_id: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub chain_id: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub default_destination_address: Option<String>,
+}
+
 /// Export the receive-branch xpub for a saved xpub wallet profile.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct EthXpubExportRequest {

@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::time::Duration;
@@ -1056,6 +1057,230 @@ async fn seed_wallet_profiles_import_12_and_24_word_phrases() {
     )
     .await;
     assert_eq!(delete.status(), StatusCode::OK);
+
+    handle.abort();
+}
+
+/// Collect lowercase word tokens from every JSON string *value*, skipping
+/// `kind` discriminants (compile-time constants of the audit schema, which
+/// legitimately contain words like "seed" and "wallet"). Any mnemonic leak
+/// would have to travel through a dynamic string value, so scanning these
+/// tokens proves the audit feed carries no mnemonic words.
+fn collect_audit_value_tokens(value: &serde_json::Value, tokens: &mut HashSet<String>) {
+    match value {
+        serde_json::Value::String(text) => {
+            for token in text.split(|c: char| !c.is_ascii_alphanumeric()) {
+                if !token.is_empty() {
+                    tokens.insert(token.to_ascii_lowercase());
+                }
+            }
+        }
+        serde_json::Value::Array(items) => {
+            for item in items {
+                collect_audit_value_tokens(item, tokens);
+            }
+        }
+        serde_json::Value::Object(map) => {
+            for (key, item) in map {
+                if key == "kind" {
+                    continue;
+                }
+                collect_audit_value_tokens(item, tokens);
+            }
+        }
+        _ => {}
+    }
+}
+
+#[tokio::test]
+async fn seed_wallet_create_generates_mnemonic_and_returns_it_exactly_once() {
+    let dir = TempDir::new().unwrap();
+    let (addr, handle) = spawn_daemon(dir.path().to_path_buf()).await;
+    let client = reqwest::Client::new();
+
+    let init = post_json(
+        &client,
+        addr,
+        "/api/compartment/init",
+        json!({
+            "id": 0,
+            "label": "default",
+            "threshold": 1,
+            "passphrase": "correct horse battery staple",
+        }),
+        None,
+    )
+    .await;
+    let init_json: serde_json::Value = init.json().await.unwrap();
+    let token = init_json["session_token"].as_str().unwrap().to_string();
+
+    let provider = post_json(
+        &client,
+        addr,
+        "/api/profiles/evm/upsert",
+        json!({
+            "name": "mainnet",
+            "rpc_url": "http://127.0.0.1:8545/",
+            "chain_id": 1,
+        }),
+        Some(&token),
+    )
+    .await;
+    assert_eq!(provider.status(), StatusCode::OK);
+
+    // Create a wallet with an explicit word_count of 12.
+    let create_12 = post_json(
+        &client,
+        addr,
+        "/api/profiles/eth-seed/create",
+        json!({
+            "name": "gen-12",
+            "word_count": 12,
+            "project_account": 0,
+            "provider_profile": "mainnet",
+        }),
+        Some(&token),
+    )
+    .await;
+    assert_eq!(create_12.status(), StatusCode::OK);
+    let create_12_json: serde_json::Value = create_12.json().await.unwrap();
+    assert_eq!(create_12_json["status"], "created");
+    let mnemonic = create_12_json["mnemonic"].as_str().unwrap().to_string();
+    assert_eq!(mnemonic.split_whitespace().count(), 12);
+
+    // The returned phrase is valid BIP-39 and reproduces the stored profile
+    // material when derived independently through sigillum-core.
+    assert_eq!(
+        sigillum_core::ethereum_mnemonic_word_count(&mnemonic).unwrap(),
+        12
+    );
+    let export =
+        sigillum_core::derive_ethereum_xpub_receive_branch_from_mnemonic(&mnemonic, None, 0)
+            .unwrap();
+    assert_eq!(
+        create_12_json["profile"]["receive_xpub"],
+        json!(export.receive_xpub)
+    );
+    let derived_first_address =
+        sigillum_core::derive_ethereum_address_from_xpub(&export.receive_xpub, 0)
+            .unwrap()
+            .address;
+    assert_eq!(
+        create_12_json["profile"]["first_receive_address"],
+        json!(derived_first_address)
+    );
+    assert_eq!(create_12_json["profile"]["word_count"], 12);
+    assert_eq!(create_12_json["profile"]["account_path"], "m/44'/60'/0'");
+    assert_eq!(
+        create_12_json["profile"]["mnemonic_secret_key"],
+        "wallet.seed.gen-12.mnemonic"
+    );
+
+    // The created profile appears in the list with the matching address.
+    let list = get(&client, addr, "/api/profiles/eth-seed", Some(&token)).await;
+    assert_eq!(list.status(), StatusCode::OK);
+    let list_json: serde_json::Value = list.json().await.unwrap();
+    let listed = list_json["profiles"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|profile| profile["name"] == "gen-12")
+        .expect("created profile is listed");
+    assert_eq!(
+        listed["first_receive_address"],
+        json!(derived_first_address)
+    );
+
+    // Creating the same name again must fail instead of overwriting.
+    let duplicate = post_json(
+        &client,
+        addr,
+        "/api/profiles/eth-seed/create",
+        json!({
+            "name": "gen-12",
+            "word_count": 12,
+            "project_account": 0,
+            "provider_profile": "mainnet",
+        }),
+        Some(&token),
+    )
+    .await;
+    assert_eq!(duplicate.status(), StatusCode::CONFLICT);
+
+    // Omitting word_count defaults to a 24-word mnemonic.
+    let create_default = post_json(
+        &client,
+        addr,
+        "/api/profiles/eth-seed/create",
+        json!({
+            "name": "gen-default",
+            "project_account": 1,
+            "provider_profile": "mainnet",
+        }),
+        Some(&token),
+    )
+    .await;
+    assert_eq!(create_default.status(), StatusCode::OK);
+    let create_default_json: serde_json::Value = create_default.json().await.unwrap();
+    assert_eq!(create_default_json["status"], "created");
+    let default_mnemonic = create_default_json["mnemonic"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    assert_eq!(default_mnemonic.split_whitespace().count(), 24);
+    assert_eq!(create_default_json["profile"]["word_count"], 24);
+    assert_ne!(default_mnemonic, mnemonic);
+
+    // Unsupported word counts are rejected up front.
+    let invalid = post_json(
+        &client,
+        addr,
+        "/api/profiles/eth-seed/create",
+        json!({
+            "name": "gen-invalid",
+            "word_count": 13,
+            "project_account": 0,
+            "provider_profile": "mainnet",
+        }),
+        Some(&token),
+    )
+    .await;
+    assert_eq!(invalid.status(), StatusCode::BAD_REQUEST);
+
+    // The audit feed records the create event with metadata only.
+    let audit = get(&client, addr, "/api/audit?limit=50", Some(&token)).await;
+    assert_eq!(audit.status(), StatusCode::OK);
+    let audit_json: serde_json::Value = audit.json().await.unwrap();
+    let events = audit_json["events"].as_array().unwrap();
+    let create_event = events
+        .iter()
+        .find(|event| {
+            event["kind"] == "profiles.eth_seed_wallet.create"
+                && event["details"]["name"] == "gen-12"
+        })
+        .expect("create audit event present");
+    assert_eq!(
+        create_event["details"],
+        json!({
+            "name": "gen-12",
+            "provider_profile": "mainnet",
+            "word_count": 12,
+        })
+    );
+
+    // No dynamic string value anywhere in the audit feed contains any word of
+    // either generated mnemonic.
+    let mut value_tokens = HashSet::new();
+    collect_audit_value_tokens(&audit_json, &mut value_tokens);
+    for word in mnemonic
+        .split_whitespace()
+        .chain(default_mnemonic.split_whitespace())
+    {
+        assert!(
+            !value_tokens.contains(word),
+            "audit feed leaked mnemonic word: {word}"
+        );
+    }
 
     handle.abort();
 }

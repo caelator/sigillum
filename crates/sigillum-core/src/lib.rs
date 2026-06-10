@@ -57,6 +57,7 @@ pub use ethereum_xpub::{
     derive_ethereum_xpub_receive_branch_from_mnemonic, derive_private_key_at_path,
     derive_sigillum_ethereum_xpub_control_branch, derive_sigillum_ethereum_xpub_receive_address,
     derive_sigillum_ethereum_xpub_receive_branch, ethereum_mnemonic_word_count,
+    generate_ethereum_mnemonic,
 };
 pub use traits::{SecretStore, VaultLifecycle};
 pub use unlock::provider::{

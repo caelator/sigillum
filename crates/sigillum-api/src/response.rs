@@ -595,6 +595,21 @@ pub struct EthSeedWalletProfileMutationResponse {
     pub profile: EthSeedWalletProfile,
 }
 
+/// Response for a freshly created seed wallet profile.
+///
+/// `mnemonic` is the server-generated BIP-39 phrase and is returned **exactly
+/// once** — in this response only — so the operator can back it up. The daemon
+/// never persists the phrase in plaintext beyond the encrypted vault secret
+/// referenced by `profile.mnemonic_secret_key` (the same vault-secret path the
+/// import/upsert flow uses), and never writes any mnemonic material to the
+/// audit log.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct EthSeedWalletCreateResponse {
+    pub status: String,
+    pub mnemonic: String,
+    pub profile: EthSeedWalletProfile,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct EthXpubExportResponse {
     pub wallet_profile: String,

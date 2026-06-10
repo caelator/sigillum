@@ -23,7 +23,16 @@ import {
   parseEthToWeiHex,
   parseTreasuryDestinationLines,
 } from "../src/views/treasury";
+import {
+  createWalletManagerActions,
+  walletNativeBalanceFromGroups,
+  walletRowMeta,
+  xpubDisplay,
+} from "../src/views/walletManager";
 import type {
+  EthSeedWalletProfile,
+  EthXpubWalletProfile,
+  TreasuryGroupSummary,
   TreasuryOverviewResponse,
   TreasuryPolicy,
   TreasuryReceiveAllocation,
@@ -46,6 +55,7 @@ test("shell renderer applies setup, locked, and unlocked DOM state", () => {
     "compartmentCard",
     "pushCard",
     "guideCard",
+    "walletManagerCard",
     "profilesCard",
     "xpubCard",
     "treasuryCard",
@@ -99,6 +109,7 @@ test("shell renderer applies setup, locked, and unlocked DOM state", () => {
   equal(document.body.dataset.mode, "unlocked");
   equal(dom.el("pushCard").classList.contains("hidden"), false);
   equal(dom.el("treasuryCard").classList.contains("hidden"), false);
+  equal(dom.el("walletManagerCard").classList.contains("hidden"), false);
   ok(calls.includes("push-selectors"));
 });
 
@@ -1269,4 +1280,669 @@ test("treasury receive allocate and rotate dispatch api calls with toasts", asyn
   });
   deepEqual(toasts.pop(), { message: "Receive address rotated", type: undefined });
   ok(calls.some((call) => call.path === "/api/treasury/receive-addresses"));
+});
+
+// ── Wallet manager ──────────────────────────────────────────────────────────
+
+const MNEMONIC_WORDS = [
+  "abandon",
+  "ability",
+  "able",
+  "about",
+  "above",
+  "absent",
+  "absorb",
+  "abstract",
+  "absurd",
+  "abuse",
+  "access",
+  "accident",
+];
+
+function walletManagerGroup(
+  profile: string,
+  chainId: number,
+  weiHex: string,
+): TreasuryGroupSummary {
+  return {
+    wallet_family: "eth-seed",
+    wallet_profile: profile,
+    chain_id: chainId,
+    address_count: 1,
+    funded_address_count: 1,
+    native_total_wei_hex: weiHex,
+    signer_address_count: 1,
+    watch_only_address_count: 0,
+    erc20_holding_count: 0,
+    nft_holding_count: 0,
+    defi_holding_count: 0,
+    claimable_holding_count: 0,
+    approval_exposure_count: 0,
+    dormant_candidate_count: 0,
+  };
+}
+
+function walletManagerSeedProfile(): EthSeedWalletProfile {
+  return {
+    name: "main",
+    label: "Main treasury",
+    project_account: 0,
+    provider_profile: "mainnet",
+    compartment_id: 0,
+    chain_id: 1,
+    word_count: 24,
+    mnemonic_secret_key: "wallet.eth-seed.main.mnemonic",
+    account_path: "m/44'/60'/0'",
+    receive_path: "m/44'/60'/0'/0",
+    receive_xpub: "xpub-main-receive",
+    first_receive_address: "0x1111111111111111111111111111111111111111",
+  };
+}
+
+function installWalletManagerDom() {
+  const dom = installDom([
+    "walletManagerList",
+    "walletManagerCard",
+    "walletCreateForm",
+    "walletCreateName",
+    "walletCreateLabel",
+    "walletCreateAccount",
+    "walletCreateChainId",
+    "walletCreateDestination",
+    "walletCreatePassphrase",
+    "walletCreateProviderHint",
+    "walletMnemonicReveal",
+    "walletReceivePanel",
+    "walletReceiveTarget",
+    "walletReceivePurpose",
+    "walletReceiveLabel",
+    "walletImportSeedForm",
+    "walletImportXpubForm",
+    "walletImportWatchForm",
+    "walletImportTabSeed",
+    "walletImportTabXpub",
+    "walletImportTabWatch",
+    "walletImportSeedName",
+    "walletImportSeedLabel",
+    "walletImportSeedMnemonic",
+    "walletImportSeedPassphrase",
+    "walletImportSeedAccount",
+    "walletImportSeedChainId",
+    "walletImportSeedDestination",
+    "walletImportXpubName",
+    "walletImportXpubAccount",
+    "walletImportXpubCompartmentId",
+    "walletImportXpubChainId",
+    "walletImportXpubDestination",
+    "walletImportWatchAddress",
+    "walletImportWatchLabel",
+  ]);
+  dom.el("walletCreateSubmit", "BUTTON");
+  dom.el("walletCreateProvider", "SELECT");
+  dom.el("walletImportSeedProvider", "SELECT");
+  dom.el("walletImportXpubProvider", "SELECT");
+  dom.el("walletCreateWords12", "INPUT");
+  dom.el("walletCreateWords24", "INPUT");
+  dom.el("walletCreateWords24").checked = true;
+  dom.el("walletMnemonicReveal").classList.add("hidden");
+  dom.el("walletReceivePanel").classList.add("hidden");
+  dom.el("walletImportXpubForm").classList.add("hidden");
+  dom.el("walletImportWatchForm").classList.add("hidden");
+  dom.el("walletImportTabSeed").classList.add("active");
+  return dom;
+}
+
+test("wallet row meta helpers summarize identity, balances, and xpub display", () => {
+  installDom();
+  const groups = [
+    walletManagerGroup("main", 1, "0x" + (1500000000000000000n).toString(16)),
+    walletManagerGroup("main", 8453, "0x" + (200000000000000000n).toString(16)),
+    walletManagerGroup("other", 1, "0xde0b6b3a7640000"),
+  ];
+  equal(
+    walletNativeBalanceFromGroups("main", groups),
+    "1.5 ETH on chain 1 · 0.2 on 8453",
+  );
+  equal(walletNativeBalanceFromGroups("missing", groups), "not scanned yet");
+  equal(walletNativeBalanceFromGroups("main", null), "not scanned yet");
+  equal(
+    walletNativeBalanceFromGroups("other", [
+      walletManagerGroup("other", 1, "0xde0b6b3a7640000"),
+      walletManagerGroup("other", 1, "0xde0b6b3a7640000"),
+    ]),
+    "2 ETH on chain 1",
+  );
+
+  equal(
+    walletRowMeta(walletManagerSeedProfile(), groups, 2),
+    "0x1111111111111111111111111111111111111111\n" +
+      "provider=mainnet · chain=1 · account=0 · words=24\n" +
+      "balance=1.5 ETH on chain 1 · 0.2 on 8453\n" +
+      "receive allocations=2",
+  );
+
+  const xpubProfile: EthXpubWalletProfile = {
+    name: "cold-watch",
+    project_account: 3,
+    provider_profile: "base",
+    compartment_id: 0,
+  };
+  equal(xpubDisplay(xpubProfile), "receive path m/44'/60'/3'/0");
+  equal(
+    walletRowMeta(xpubProfile, [], null),
+    "receive path m/44'/60'/3'/0\n" +
+      "provider=base · chain=- · account=3\n" +
+      "balance=not scanned yet",
+  );
+});
+
+test("wallet manager list renders unified wallets with balances and fallbacks", async () => {
+  const dom = installWalletManagerDom();
+  let empty = false;
+  const manager = createWalletManagerActions({
+    api: async (_method, path) => {
+      if (empty) return {};
+      if (path === "/api/profiles/eth-seed") {
+        return { profiles: [walletManagerSeedProfile()] };
+      }
+      if (path === "/api/profiles/eth-xpub") {
+        return {
+          profiles: [
+            {
+              name: "cold-watch",
+              project_account: 3,
+              provider_profile: "mainnet",
+              compartment_id: 0,
+            },
+          ],
+        };
+      }
+      if (path === "/api/profiles/evm") {
+        return { profiles: [{ name: "mainnet", chain_id: 1 }] };
+      }
+      if (path === "/api/treasury/overview") {
+        return {
+          groups: [
+            walletManagerGroup("main", 1, "0x" + (1500000000000000000n).toString(16)),
+            walletManagerGroup("main", 8453, "0x" + (200000000000000000n).toString(16)),
+          ],
+        };
+      }
+      if (path === "/api/treasury/receive-addresses") {
+        return {
+          allocations: [
+            { wallet_profile: "main", status: "active" },
+            { wallet_profile: "main", status: "retired" },
+          ],
+        };
+      }
+      return {};
+    },
+    toast: () => undefined,
+  });
+
+  await manager.loadWalletManager();
+  const html = dom.el("walletManagerList").innerHTML;
+  ok(html.includes("Main treasury"));
+  ok(html.includes(">signer<"));
+  ok(html.includes(">watch-only<"));
+  ok(html.includes("0x1111111111111111111111111111111111111111"));
+  ok(html.includes("balance=1.5 ETH on chain 1 · 0.2 on 8453"));
+  ok(html.includes("receive allocations=1"));
+  ok(html.includes("receive path m/44'/60'/3'/0"));
+  ok(html.includes("balance=not scanned yet"));
+  equal(html.split('data-action="copyWalletAddress"').length - 1, 1);
+  equal(html.split('data-action="promptWalletReceiveAddress"').length - 1, 2);
+  equal(html.split('data-action="deleteManagedWallet"').length - 1, 2);
+  ok(dom.el("walletCreateProvider").innerHTML.includes("mainnet · chain 1"));
+  equal(dom.el("walletCreateSubmit").disabled, false);
+  equal(dom.el("walletCreateProviderHint").classList.contains("hidden"), true);
+
+  empty = true;
+  await manager.loadWalletManager();
+  ok(
+    dom
+      .el("walletManagerList")
+      .innerHTML.includes("No wallets yet — create one or import below."),
+  );
+  equal(dom.el("walletCreateSubmit").disabled, true);
+  equal(dom.el("walletCreateProviderHint").classList.contains("hidden"), false);
+});
+
+test("wallet manager create flow reveals the one-time mnemonic and scrubs it on confirm", async () => {
+  const dom = installWalletManagerDom();
+  const mnemonic = MNEMONIC_WORDS.join(" ");
+  const calls: Array<{ method: string; path: string; body?: any }> = [];
+  const toasts: Array<{ message: string; type?: string }> = [];
+  const manager = createWalletManagerActions({
+    api: async (method, path, body) => {
+      calls.push({ method, path, body });
+      if (path === "/api/profiles/eth-seed/create") {
+        return {
+          status: "created",
+          mnemonic,
+          profile: { name: "treasury-main", word_count: 12 },
+        };
+      }
+      if (path === "/api/profiles/evm") {
+        return { profiles: [{ name: "mainnet", chain_id: 1 }] };
+      }
+      return {};
+    },
+    toast: (message, type) => toasts.push({ message, type }),
+  });
+
+  dom.el("walletCreateName").value = "treasury-main";
+  dom.el("walletCreateLabel").value = "Treasury Main";
+  dom.el("walletCreateProvider").value = "mainnet";
+  dom.el("walletCreateAccount").value = "0";
+  dom.el("walletCreatePassphrase").value = "tail-passphrase";
+  dom.el("walletCreateWords12").checked = true;
+  dom.el("walletCreateWords24").checked = false;
+
+  await manager.createWallet();
+
+  deepEqual(calls, [
+    {
+      method: "POST",
+      path: "/api/profiles/eth-seed/create",
+      body: {
+        name: "treasury-main",
+        word_count: 12,
+        project_account: 0,
+        provider_profile: "mainnet",
+        label: "Treasury Main",
+        mnemonic_passphrase: "tail-passphrase",
+      },
+    },
+  ]);
+  const reveal = dom.el("walletMnemonicReveal");
+  equal(manager.hasPendingMnemonic(), true);
+  equal(reveal.classList.contains("hidden"), false);
+  equal(reveal.innerHTML.split("mnemonic-word").length - 1, 12);
+  MNEMONIC_WORDS.forEach((word) => ok(reveal.innerHTML.includes(">" + word + "<")));
+  ok(reveal.innerHTML.includes("Written down? It will never be shown again."));
+  equal(dom.el("walletCreateName").disabled, true);
+  equal(dom.el("walletCreateSubmit").disabled, true);
+  equal(dom.el("walletCreateForm").classList.contains("form-disabled"), true);
+  equal(dom.el("walletCreatePassphrase").value, "");
+  ok(toasts.every((entry) => !entry.message.includes("abandon")));
+
+  let copied: string | null = null;
+  Object.defineProperty(globalThis, "navigator", {
+    configurable: true,
+    value: {
+      clipboard: {
+        writeText: async (value: string) => {
+          copied = value;
+        },
+      },
+    },
+  });
+  await manager.copyMnemonicPhrase();
+  equal(copied, mnemonic);
+
+  calls.length = 0;
+  await manager.confirmMnemonicSaved();
+  equal(manager.hasPendingMnemonic(), false);
+  equal(reveal.innerHTML, "");
+  equal(reveal.classList.contains("hidden"), true);
+  MNEMONIC_WORDS.forEach((word) => ok(!reveal.innerHTML.includes(word)));
+  equal(dom.el("walletCreateName").disabled, false);
+  equal(dom.el("walletCreateName").value, "");
+  equal(dom.el("walletCreateAccount").value, "0");
+  equal(dom.el("walletCreateWords24").checked, true);
+  equal(dom.el("walletCreateWords12").checked, false);
+  equal(dom.el("walletCreateForm").classList.contains("form-disabled"), false);
+  equal(dom.el("walletCreateSubmit").disabled, false);
+  ok(calls.some((call) => call.path === "/api/profiles/eth-seed"));
+  ok(toasts.every((entry) => !entry.message.includes("abandon")));
+
+  copied = null;
+  await manager.copyMnemonicPhrase();
+  equal(copied, null);
+  deepEqual(toasts.pop(), {
+    message: "No seed phrase is being shown",
+    type: "error",
+  });
+});
+
+test("wallet manager create surfaces conflicts and bad names without revealing", async () => {
+  const dom = installWalletManagerDom();
+  const calls: Array<{ method: string; path: string; body?: any }> = [];
+  const toasts: Array<{ message: string; type?: string }> = [];
+  const manager = createWalletManagerActions({
+    api: async (method, path, body) => {
+      calls.push({ method, path, body });
+      return {
+        error: "Seed wallet profile already exists. Use upsert to replace it.",
+      };
+    },
+    toast: (message, type) => toasts.push({ message, type }),
+  });
+
+  dom.el("walletCreateName").value = "bad name!";
+  dom.el("walletCreateProvider").value = "mainnet";
+  await manager.createWallet();
+  equal(calls.length, 0);
+  deepEqual(toasts.pop(), {
+    message: "Wallet name may only contain letters, digits, '-' and '_'",
+    type: "error",
+  });
+
+  dom.el("walletCreateName").value = "treasury-main";
+  await manager.createWallet();
+  equal(calls.length, 1);
+  deepEqual(toasts.pop(), {
+    message: "Seed wallet profile already exists. Use upsert to replace it.",
+    type: "error",
+  });
+  equal(manager.hasPendingMnemonic(), false);
+  equal(dom.el("walletMnemonicReveal").classList.contains("hidden"), true);
+  equal(dom.el("walletMnemonicReveal").innerHTML, "");
+  equal(dom.el("walletCreateName").disabled, false);
+  equal(dom.el("walletCreateName").value, "treasury-main");
+});
+
+test("wallet manager seed import validates words and posts the upsert contract", async () => {
+  const dom = installWalletManagerDom();
+  const calls: Array<{ method: string; path: string; body?: any }> = [];
+  const toasts: Array<{ message: string; type?: string }> = [];
+  const manager = createWalletManagerActions({
+    api: async (method, path, body) => {
+      calls.push({ method, path, body });
+      if (path === "/api/profiles/eth-seed/upsert") return { status: "saved" };
+      return {};
+    },
+    toast: (message, type) => toasts.push({ message, type }),
+  });
+
+  dom.el("walletImportSeedName").value = "imported-main";
+  dom.el("walletImportSeedProvider").value = "mainnet";
+  dom.el("walletImportSeedMnemonic").value = MNEMONIC_WORDS.slice(0, 11).join(" ");
+  await manager.importSeedWallet();
+  equal(calls.length, 0);
+  deepEqual(toasts.pop(), {
+    message: "Seed phrase must contain exactly 12 or 24 words",
+    type: "error",
+  });
+
+  dom.el("walletImportSeedMnemonic").value =
+    "  " + MNEMONIC_WORDS.join("\n  ") + "  ";
+  dom.el("walletImportSeedLabel").value = "Imported Main";
+  dom.el("walletImportSeedPassphrase").value = "extra secret";
+  dom.el("walletImportSeedAccount").value = "3";
+  dom.el("walletImportSeedChainId").value = "8453";
+  dom.el("walletImportSeedDestination").value =
+    "0x9999999999999999999999999999999999999999";
+  await manager.importSeedWallet();
+
+  const upsert = calls.find((call) => call.path === "/api/profiles/eth-seed/upsert");
+  deepEqual(upsert, {
+    method: "POST",
+    path: "/api/profiles/eth-seed/upsert",
+    body: {
+      name: "imported-main",
+      mnemonic: MNEMONIC_WORDS.join(" "),
+      project_account: 3,
+      provider_profile: "mainnet",
+      label: "Imported Main",
+      mnemonic_passphrase: "extra secret",
+      chain_id: 8453,
+      default_destination_address: "0x9999999999999999999999999999999999999999",
+    },
+  });
+  equal(dom.el("walletImportSeedMnemonic").value, "");
+  equal(dom.el("walletImportSeedPassphrase").value, "");
+  equal(dom.el("walletImportSeedName").value, "");
+  equal(dom.el("walletImportSeedAccount").value, "0");
+  ok(toasts.some((entry) => entry.message === 'Seed wallet "imported-main" imported'));
+  ok(calls.some((call) => call.path === "/api/profiles/eth-seed"));
+});
+
+test("wallet manager import tabs switch forms, scrub seed input, and post contracts", async () => {
+  const dom = installWalletManagerDom();
+  const calls: Array<{ method: string; path: string; body?: any }> = [];
+  const manager = createWalletManagerActions({
+    api: async (method, path, body) => {
+      calls.push({ method, path, body });
+      return { status: "ok" };
+    },
+    toast: () => undefined,
+  });
+
+  dom.el("walletImportSeedMnemonic").value = "leak words here";
+  dom.el("walletImportSeedPassphrase").value = "leak-pass";
+  manager.setWalletImportTab("xpub");
+  equal(dom.el("walletImportSeedForm").classList.contains("hidden"), true);
+  equal(dom.el("walletImportXpubForm").classList.contains("hidden"), false);
+  equal(dom.el("walletImportWatchForm").classList.contains("hidden"), true);
+  equal(dom.el("walletImportTabXpub").classList.contains("active"), true);
+  equal(dom.el("walletImportTabSeed").classList.contains("active"), false);
+  equal(dom.el("walletImportSeedMnemonic").value, "");
+  equal(dom.el("walletImportSeedPassphrase").value, "");
+
+  dom.el("walletImportXpubName").value = "cold-watch";
+  dom.el("walletImportXpubAccount").value = "2";
+  dom.el("walletImportXpubProvider").value = "mainnet";
+  dom.el("walletImportXpubCompartmentId").value = "1";
+  dom.el("walletImportXpubChainId").value = "10";
+  dom.el("walletImportXpubDestination").value =
+    "0x8888888888888888888888888888888888888888";
+  await manager.importXpubWallet();
+  const xpubUpsert = calls.find(
+    (call) => call.path === "/api/profiles/eth-xpub/upsert",
+  );
+  deepEqual(xpubUpsert, {
+    method: "POST",
+    path: "/api/profiles/eth-xpub/upsert",
+    body: {
+      name: "cold-watch",
+      project_account: 2,
+      provider_profile: "mainnet",
+      compartment_id: 1,
+      chain_id: 10,
+      default_destination_address: "0x8888888888888888888888888888888888888888",
+    },
+  });
+  equal(dom.el("walletImportXpubName").value, "");
+  equal(dom.el("walletImportXpubAccount").value, "0");
+
+  manager.setWalletImportTab("watch");
+  equal(dom.el("walletImportWatchForm").classList.contains("hidden"), false);
+  equal(dom.el("walletImportXpubForm").classList.contains("hidden"), true);
+  equal(dom.el("walletImportTabWatch").classList.contains("active"), true);
+
+  dom.el("walletImportWatchAddress").value =
+    "0x7777777777777777777777777777777777777777";
+  dom.el("walletImportWatchLabel").value = "client-vault";
+  await manager.importWatchAddress();
+  const watchUpsert = calls.find(
+    (call) => call.path === "/api/inventory/watch-addresses/upsert",
+  );
+  deepEqual(watchUpsert, {
+    method: "POST",
+    path: "/api/inventory/watch-addresses/upsert",
+    body: {
+      address: "0x7777777777777777777777777777777777777777",
+      label: "client-vault",
+      tags: [],
+      enabled: true,
+    },
+  });
+  equal(dom.el("walletImportWatchAddress").value, "");
+});
+
+test("wallet manager delete requires a two-step confirm and disarms on timeout", async () => {
+  const dom = installWalletManagerDom();
+  const timers: Array<() => void> = [];
+  const originalSetTimeout = globalThis.setTimeout;
+  const originalClearTimeout = globalThis.clearTimeout;
+  (globalThis as any).setTimeout = (handler: () => void) => {
+    timers.push(handler);
+    return timers.length;
+  };
+  (globalThis as any).clearTimeout = () => undefined;
+
+  try {
+    const calls: Array<{ method: string; path: string; body?: any }> = [];
+    const manager = createWalletManagerActions({
+      api: async (method, path, body) => {
+        calls.push({ method, path, body });
+        if (path === "/api/profiles/eth-seed") {
+          return { profiles: [walletManagerSeedProfile()] };
+        }
+        if (path === "/api/profiles/eth-xpub") {
+          return {
+            profiles: [
+              {
+                name: "watcher",
+                project_account: 0,
+                provider_profile: "mainnet",
+                compartment_id: 0,
+              },
+            ],
+          };
+        }
+        if (path === "/api/profiles/evm") {
+          return { profiles: [{ name: "mainnet", chain_id: 1 }] };
+        }
+        return { status: "ok" };
+      },
+      toast: () => undefined,
+    });
+
+    await manager.loadWalletManager();
+    const list = dom.el("walletManagerList");
+    ok(list.innerHTML.includes('data-action="deleteManagedWallet"'));
+    ok(!list.innerHTML.includes("Confirm delete"));
+
+    // First click arms only — nothing is deleted.
+    await manager.deleteManagedWallet("seed", "main");
+    equal(
+      calls.filter((call) => call.path.endsWith("/delete")).length,
+      0,
+    );
+    equal(list.innerHTML.split("Confirm delete").length - 1, 1);
+
+    // Clicking a different row re-arms for that row instead of deleting.
+    await manager.deleteManagedWallet("xpub", "watcher");
+    equal(
+      calls.filter((call) => call.path.endsWith("/delete")).length,
+      0,
+    );
+    equal(list.innerHTML.split("Confirm delete").length - 1, 1);
+
+    // Second click on the armed row executes the delete.
+    await manager.deleteManagedWallet("xpub", "watcher");
+    deepEqual(
+      calls.find((call) => call.path === "/api/profiles/eth-xpub/delete"),
+      {
+        method: "POST",
+        path: "/api/profiles/eth-xpub/delete",
+        body: { name: "watcher" },
+      },
+    );
+
+    // Timeout disarms a pending confirmation.
+    await manager.deleteManagedWallet("seed", "main");
+    equal(list.innerHTML.split("Confirm delete").length - 1, 1);
+    timers[timers.length - 1]();
+    equal(list.innerHTML.includes("Confirm delete"), false);
+    await manager.deleteManagedWallet("seed", "main");
+    equal(
+      calls.filter((call) => call.path === "/api/profiles/eth-seed/delete").length,
+      0,
+    );
+    await manager.deleteManagedWallet("seed", "main");
+    deepEqual(
+      calls.find((call) => call.path === "/api/profiles/eth-seed/delete"),
+      {
+        method: "POST",
+        path: "/api/profiles/eth-seed/delete",
+        body: { name: "main" },
+      },
+    );
+  } finally {
+    globalThis.setTimeout = originalSetTimeout;
+    globalThis.clearTimeout = originalClearTimeout;
+  }
+});
+
+test("wallet manager copy and receive-allocation flows hit clipboard and treasury", async () => {
+  const dom = installWalletManagerDom();
+  const calls: Array<{ method: string; path: string; body?: any }> = [];
+  const toasts: Array<{ message: string; type?: string }> = [];
+  let copied: string | null = null;
+  Object.defineProperty(globalThis, "navigator", {
+    configurable: true,
+    value: {
+      clipboard: {
+        writeText: async (value: string) => {
+          copied = value;
+        },
+      },
+    },
+  });
+  const manager = createWalletManagerActions({
+    api: async (method, path, body) => {
+      calls.push({ method, path, body });
+      if (path === "/api/treasury/receive-addresses/allocate") {
+        return {
+          status: "allocated",
+          allocation: {
+            address: "0x6666666666666666666666666666666666666666",
+          },
+        };
+      }
+      return {};
+    },
+    toast: (message, type) => toasts.push({ message, type }),
+  });
+
+  await manager.copyWalletAddress(
+    "0x1111111111111111111111111111111111111111",
+    "First receive address",
+  );
+  equal(copied, "0x1111111111111111111111111111111111111111");
+  deepEqual(toasts.pop(), {
+    message: "First receive address copied",
+    type: undefined,
+  });
+
+  manager.promptWalletReceiveAddress("main");
+  equal(dom.el("walletReceivePanel").classList.contains("hidden"), false);
+  equal(dom.el("walletReceiveTarget").textContent, "main");
+
+  await manager.allocateWalletReceiveAddress();
+  equal(
+    calls.filter((call) => call.path === "/api/treasury/receive-addresses/allocate")
+      .length,
+    0,
+  );
+  deepEqual(toasts.pop(), {
+    message: "Purpose is required (e.g. invoices)",
+    type: "error",
+  });
+
+  dom.el("walletReceivePurpose").value = "invoices";
+  dom.el("walletReceiveLabel").value = "client-a";
+  await manager.allocateWalletReceiveAddress();
+  deepEqual(
+    calls.find((call) => call.path === "/api/treasury/receive-addresses/allocate"),
+    {
+      method: "POST",
+      path: "/api/treasury/receive-addresses/allocate",
+      body: { wallet_profile: "main", purpose: "invoices", label: "client-a" },
+    },
+  );
+  equal(dom.el("walletReceivePanel").classList.contains("hidden"), true);
+  equal(dom.el("walletReceivePurpose").value, "");
+  ok(
+    toasts.some(
+      (entry) =>
+        entry.message ===
+        "Receive address allocated: 0x6666666666666666666666666666666666666666",
+    ),
+  );
 });

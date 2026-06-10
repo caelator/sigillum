@@ -25,7 +25,7 @@ Implemented and working in this repository:
 - `sigillum-core`: core traits, errors, file-backed vault, Argon2 helpers, wrapped-key helpers
 - `sigillum-api`: shared daemon request/response contract used by the daemon and async client
 - `sigillum-fido2`: FIDO2 registration/unlock support and Shamir-based shard handling
-- `sigillum-daemon`: local Axum daemon with embedded UI, compartment switching, passphrase/FIDO2 unlock, snapshot import/export, local audit feed, transit-style crypto endpoints, Ethereum stealth wallet helpers, provider-backed deposit monitoring, sweep orchestration, a treasury console (cross-wallet value/risk/plan roll-up), treasury policy guardrails (destination allowlist and native value caps enforced at plan generation and approval), and locally derived purpose-labeled receive-address allocations with rotation
+- `sigillum-daemon`: local Axum daemon with an embedded operator console (sidebar shell with a dark design system, wallet manager for creating wallets with server-generated one-time mnemonics and importing seed/xpub/watch wallets), compartment switching, passphrase/FIDO2 unlock, snapshot import/export, local audit feed, transit-style crypto endpoints, Ethereum stealth wallet helpers, provider-backed deposit monitoring, sweep orchestration, a treasury console (cross-wallet value/risk/plan roll-up), treasury policy guardrails (destination allowlist and native value caps enforced at plan generation and approval), and locally derived purpose-labeled receive-address allocations with rotation
 - `sigillum-client`: async client for the local daemon API, including session handling and snapshots
 - `sigillum-cli`: setup flows, local management commands, snapshot commands,
   daemon launcher, and daemon-backed JSON operator commands

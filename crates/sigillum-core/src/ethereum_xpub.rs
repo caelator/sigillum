@@ -8,6 +8,7 @@ use bip32::{ChildNumber, Prefix, XPrv, XPub};
 use bip39::{Language, Mnemonic};
 use sha3::{Digest, Keccak256};
 use thiserror::Error;
+use zeroize::Zeroizing;
 
 pub const ETHEREUM_XPUB_PURPOSE: u32 = 44;
 pub const ETHEREUM_XPUB_COIN_TYPE: u32 = 60;
@@ -26,6 +27,8 @@ pub enum EthereumXpubError {
     InvalidReceiveBranchXpub,
     #[error("invalid BIP-39 seed phrase")]
     InvalidMnemonic,
+    #[error("mnemonic word count must be 12 or 24")]
+    InvalidMnemonicWordCount,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -73,6 +76,30 @@ pub fn derive_ethereum_xpub_receive_branch_from_mnemonic(
 
 pub fn ethereum_mnemonic_word_count(mnemonic_phrase: &str) -> Result<usize, EthereumXpubError> {
     Ok(parse_mnemonic(mnemonic_phrase)?.word_count())
+}
+
+/// Generate a fresh BIP-39 English mnemonic phrase with exactly 12 or 24 words.
+///
+/// Entropy is sourced from the operating-system CSPRNG (16 bytes for 12 words,
+/// 32 bytes for 24 words). The entropy buffer is zeroized after encoding, and
+/// the phrase is returned inside [`Zeroizing`] so the caller owns the only
+/// long-lived copy and it is wiped from memory on drop.
+pub fn generate_ethereum_mnemonic(
+    word_count: usize,
+) -> Result<Zeroizing<String>, EthereumXpubError> {
+    use rand::RngCore;
+    use rand::rngs::OsRng;
+
+    let entropy_len = match word_count {
+        12 => 16,
+        24 => 32,
+        _ => return Err(EthereumXpubError::InvalidMnemonicWordCount),
+    };
+    let mut entropy = Zeroizing::new([0u8; 32]);
+    OsRng.fill_bytes(&mut entropy[..entropy_len]);
+    let mnemonic = Mnemonic::from_entropy_in(Language::English, &entropy[..entropy_len])
+        .map_err(|_| EthereumXpubError::InvalidMnemonic)?;
+    Ok(Zeroizing::new(mnemonic.to_string()))
 }
 
 pub fn derive_sigillum_ethereum_xpub_receive_address(
@@ -346,6 +373,37 @@ mod tests {
             derive_ethereum_xpub_receive_branch_from_mnemonic("abandon abandon", None, 0),
             Err(EthereumXpubError::InvalidMnemonic)
         );
+    }
+
+    #[test]
+    fn generated_mnemonics_have_requested_word_count_and_parse() {
+        for word_count in [12usize, 24usize] {
+            let phrase = generate_ethereum_mnemonic(word_count).expect("generate");
+            assert_eq!(
+                ethereum_mnemonic_word_count(&phrase).expect("word count"),
+                word_count
+            );
+            let export = derive_ethereum_xpub_receive_branch_from_mnemonic(&phrase, None, 0)
+                .expect("derive from generated phrase");
+            assert!(export.receive_xpub.starts_with("xpub"));
+        }
+    }
+
+    #[test]
+    fn generated_mnemonics_are_unique() {
+        let first = generate_ethereum_mnemonic(24).expect("first");
+        let second = generate_ethereum_mnemonic(24).expect("second");
+        assert_ne!(*first, *second);
+    }
+
+    #[test]
+    fn unsupported_mnemonic_word_counts_are_rejected() {
+        for word_count in [0usize, 11, 15, 18, 21, 23, 25] {
+            assert_eq!(
+                generate_ethereum_mnemonic(word_count).err(),
+                Some(EthereumXpubError::InvalidMnemonicWordCount)
+            );
+        }
     }
 
     #[test]

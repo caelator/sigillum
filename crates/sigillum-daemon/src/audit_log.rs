@@ -224,6 +224,14 @@ pub(crate) enum AuditEventSpec {
         provider_profile: String,
         word_count: usize,
     },
+    /// A seed wallet profile was created from a daemon-generated mnemonic.
+    /// Records metadata only — never any mnemonic or entropy material.
+    #[serde(rename = "profiles.eth_seed_wallet.create")]
+    ProfilesEthSeedWalletCreate {
+        name: String,
+        provider_profile: String,
+        word_count: usize,
+    },
     #[serde(rename = "profiles.eth_seed_wallet.delete")]
     ProfilesEthSeedWalletDelete { name: String },
     #[serde(rename = "snapshot.export")]
@@ -456,6 +464,7 @@ impl AuditEventSpec {
             Self::ProfilesEthXpubWalletUpsert { .. } => "profiles.eth_xpub_wallet.upsert",
             Self::ProfilesEthXpubWalletDelete { .. } => "profiles.eth_xpub_wallet.delete",
             Self::ProfilesEthSeedWalletUpsert { .. } => "profiles.eth_seed_wallet.upsert",
+            Self::ProfilesEthSeedWalletCreate { .. } => "profiles.eth_seed_wallet.create",
             Self::ProfilesEthSeedWalletDelete { .. } => "profiles.eth_seed_wallet.delete",
             Self::SnapshotExport { .. } => "snapshot.export",
             Self::SnapshotRestore { .. } => "snapshot.restore",
@@ -592,6 +601,11 @@ impl AuditEventSpec {
             } => json!({ "name": name, "provider_profile": provider_profile }),
             Self::ProfilesEthXpubWalletDelete { name } => json!({ "name": name }),
             Self::ProfilesEthSeedWalletUpsert {
+                name,
+                provider_profile,
+                word_count,
+            }
+            | Self::ProfilesEthSeedWalletCreate {
                 name,
                 provider_profile,
                 word_count,

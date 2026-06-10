@@ -534,6 +534,35 @@ fn test_eth_seed_wallet_profile_list_response_roundtrip() {
 }
 
 #[test]
+fn test_eth_seed_wallet_create_response_roundtrip() {
+    let resp = EthSeedWalletCreateResponse {
+        status: "created".to_string(),
+        mnemonic: "legal winner thank year wave sausage worth useful legal winner thank yellow"
+            .to_string(),
+        profile: EthSeedWalletProfile {
+            name: "fresh_seed".to_string(),
+            label: Some("Generated treasury wallet".to_string()),
+            project_account: 0,
+            provider_profile: "mainnet".to_string(),
+            compartment_id: 1,
+            chain_id: Some(1),
+            word_count: 12,
+            mnemonic_secret_key: "wallet.seed.fresh_seed.mnemonic".to_string(),
+            account_path: "m/44'/60'/0'".to_string(),
+            receive_path: "m/44'/60'/0'/0".to_string(),
+            receive_xpub: "xpub661MyMwAqRbcFexample".to_string(),
+            first_receive_address: "0x1111111111111111111111111111111111111111".to_string(),
+            default_destination_address: None,
+            control_xpub: Some("xpub661MyMwAqRbcFcontrol".to_string()),
+            sponsor_address: Some("0x2222222222222222222222222222222222222222".to_string()),
+            hot_address: Some("0x3333333333333333333333333333333333333333".to_string()),
+            treasury_address: Some("0x4444444444444444444444444444444444444444".to_string()),
+        },
+    };
+    roundtrip_test(resp);
+}
+
+#[test]
 fn test_eth_xpub_export_response_roundtrip() {
     let resp = EthXpubExportResponse {
         wallet_profile: "receive_tree".to_string(),

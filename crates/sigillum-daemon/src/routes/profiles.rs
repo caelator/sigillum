@@ -7,9 +7,10 @@ use axum::extract::State;
 use axum::http::HeaderMap;
 use axum::response::Response;
 use sigillum_api::{
-    EthSeedWalletProfileUpsertRequest, EthStealthSendErc20WithProfileRequest,
-    EthStealthSendWithProfileRequest, EthStealthWalletProfileUpsertRequest,
-    EthXpubWalletProfileUpsertRequest, EvmProfileDeleteRequest, EvmProviderProfileUpsertRequest,
+    EthSeedWalletCreateRequest, EthSeedWalletProfileUpsertRequest,
+    EthStealthSendErc20WithProfileRequest, EthStealthSendWithProfileRequest,
+    EthStealthWalletProfileUpsertRequest, EthXpubWalletProfileUpsertRequest,
+    EvmProfileDeleteRequest, EvmProviderProfileUpsertRequest,
 };
 
 use crate::AppState;
@@ -164,6 +165,23 @@ pub(crate) async fn eth_seed_wallet_profiles_upsert(
     service_response(
         service
             .upsert_eth_seed_wallet_profile(bearer_token(&headers).as_deref(), body)
+            .await,
+    )
+}
+
+pub(crate) async fn eth_seed_wallet_profiles_create(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Json(body): Json<EthSeedWalletCreateRequest>,
+) -> Response {
+    let body = match validated(Json(body)) {
+        Ok(b) => b,
+        Err(resp) => return resp,
+    };
+    let service = SigillumService::new(state);
+    service_response(
+        service
+            .create_eth_seed_wallet_profile(bearer_token(&headers).as_deref(), body)
             .await,
     )
 }

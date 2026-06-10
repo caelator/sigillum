@@ -2,926 +2,1043 @@
 </head>
 <body>
 
-<header>
-  <div class="brand-lockup">
-    <div class="brand-mark">S</div>
-    <div>
-      <div class="logo"><span>Sigillum</span> Local Control</div>
-      <div class="logo-sub">Local vault operations for access, secrets, profiles, deposits, queue work, recovery, and audit on this machine.</div>
-    </div>
-  </div>
-  <div class="header-right">
-    <div id="refreshMeta" class="refresh-meta" data-state="busy">syncing...</div>
-    <div id="compartmentBadge" class="compartment-badge hidden"></div>
-    <div id="statusBadge" class="status-badge status-locked">checking...</div>
-  </div>
-</header>
-
-<main>
-  <nav id="sectionNav" class="section-nav hidden" aria-label="Visible sections"></nav>
-
-  <!-- Status Card -->
-  <div class="card" id="statusCard" data-nav-label="Overview" data-workspace-section="overview">
-    <div class="hero-shell">
-      <div class="hero-copy">
-        <div class="eyebrow" id="statusEyebrow">Local vault daemon</div>
-        <h1 id="statusTitle">Bring your vault online</h1>
-        <p class="hero-summary" id="statusSummary">Create a vault, unlock it only when needed, and run every sensitive workflow locally on this machine.</p>
-        <div class="hero-actions">
-          <button class="btn-primary" id="heroPrimaryBtn" data-action="heroPrimaryAction">Open setup</button>
-          <button class="btn-ghost" id="heroSecondaryBtn" data-action="heroSecondaryAction">Compare setup options</button>
-        </div>
+<div class="app-shell">
+  <aside class="sidebar" aria-label="Workspace navigation">
+    <div class="sidebar-brand">
+      <div class="brand-mark" aria-hidden="true">S</div>
+      <div class="brand-text">
+        <div class="logo">SIGILLUM</div>
+        <div class="logo-sub">Treasury console</div>
       </div>
-      <div>
-        <div class="hero-mode">
-          <div class="hero-mode-kicker">Current state</div>
-          <div class="hero-mode-value" id="heroModeValue">Checking daemon state…</div>
-          <div class="hero-mode-detail" id="heroModeDetail">Status, next actions, and scope will appear here as soon as the daemon responds.</div>
-        </div>
-        <div class="stats hero-stats">
-          <div class="stat">
-            <div class="value" id="apiKeyCount">-</div>
-            <div class="label">API Keys</div>
+    </div>
+    <nav id="sectionNav" class="section-nav hidden" aria-label="Workspace sections"></nav>
+    <div class="sidebar-foot">
+      <div id="compartmentBadge" class="compartment-badge hidden"></div>
+      <div id="compSwitcher" class="comp-switcher hidden"></div>
+      <div id="statusBadge" class="status-badge status-locked">checking...</div>
+      <div id="lockForm" class="session-controls hidden">
+        <button class="btn-ghost btn-block" data-action="logoutSession">Log out session</button>
+        <button class="btn-danger btn-block" data-action="lock">Lock all compartments</button>
+      </div>
+    </div>
+  </aside>
+
+  <div class="workspace">
+    <div class="topbar">
+      <div class="topbar-heading">
+        <h1 id="topbarTitle">Sigillum</h1>
+        <p id="topbarSummary" class="topbar-summary">Local treasury daemon</p>
+      </div>
+      <div class="topbar-meta">
+        <div id="refreshMeta" class="refresh-meta" data-state="busy">syncing...</div>
+        <button class="btn-ghost btn-small" data-action="refreshWorkspace">Refresh</button>
+      </div>
+    </div>
+
+    <main>
+
+      <!-- Status / overview banner (focus headline in setup+locked, overview strip when unlocked) -->
+      <div class="card overview-card" id="statusCard">
+        <div class="overview-shell">
+          <div class="overview-copy">
+            <div class="eyebrow" id="statusEyebrow">Local vault daemon</div>
+            <h2 id="statusTitle">Bring your vault online</h2>
+            <p class="overview-summary" id="statusSummary">Create a vault, unlock it only when needed, and run every sensitive workflow locally on this machine.</p>
+            <div class="overview-actions">
+              <button class="btn-primary" id="heroPrimaryBtn" data-action="heroPrimaryAction">Open setup</button>
+              <button class="btn-ghost" id="heroSecondaryBtn" data-action="heroSecondaryAction">Compare setup options</button>
+            </div>
           </div>
-          <div class="stat">
-            <div class="value" id="secretCount">-</div>
-            <div class="label">Secrets</div>
+          <div class="overview-side">
+            <div class="hero-mode">
+              <div class="hero-mode-kicker">Current state</div>
+              <div class="hero-mode-value" id="heroModeValue">Checking daemon state…</div>
+              <div class="hero-mode-detail" id="heroModeDetail">Status, next actions, and scope will appear here as soon as the daemon responds.</div>
+            </div>
+            <div class="stats overview-stats">
+              <div class="stat">
+                <div class="value" id="apiKeyCount">-</div>
+                <div class="label">Connection keys</div>
+              </div>
+              <div class="stat">
+                <div class="value" id="secretCount">-</div>
+                <div class="label">Secrets</div>
+              </div>
+              <div class="stat">
+                <div class="value" id="compartmentCount">-</div>
+                <div class="label">Compartments</div>
+              </div>
+            </div>
           </div>
-          <div class="stat">
-            <div class="value" id="compartmentCount">-</div>
-            <div class="label">Compartments</div>
+        </div>
+        <div class="hero-context" id="statusContext"></div>
+      </div>
+
+      <!-- Setup Wizard (focused panel; sectionless so it is never section-gated) -->
+      <div class="card focus-card hidden" id="setupCard">
+        <div class="wizard-header">
+          <div class="wizard-intro">
+            <div class="eyebrow">Setup assistant</div>
+            <h2>Create a vault that matches how you work</h2>
+            <p class="helper-text">Choose a protection model, review what Sigillum will create, then finish with a guided hardware-key or passphrase flow.</p>
+          </div>
+          <div class="wizard-summary">
+            <div class="progress-pill" id="wizStagePill">Step 1 of 3</div>
+            <div class="wizard-stage-title" id="wizStageTitle">Choose a protection model</div>
+            <div class="wizard-stage-summary" id="wizStageSummary">Pick the setup pattern that matches how many compartments and hardware keys you want to manage.</div>
+            <div class="info-box" id="wizDeviceHint">Checking for attached FIDO2 devices on this machine…</div>
+            <div class="summary-actions">
+              <button class="btn-ghost btn-small" data-action="wizDetectDevice">Check hardware key again</button>
+            </div>
+            <div id="wizChecklist" class="checklist-list"></div>
+          </div>
+        </div>
+
+        <!-- Step 0: Choose preset -->
+        <div class="wizard-step active" id="wizStep0">
+          <p class="helper-text">Start with a recommended plan. The names describe how access is split, not how secrets are stored.</p>
+          <button class="method-btn recommended" data-action="wizPreset" data-arg0="secure">
+            <div class="method-title">Daily + Secure</div>
+            <div class="method-desc">Best for most people. One key unlocks everyday work, while the higher-trust secure lane requires two.</div>
+          </button>
+          <button class="method-btn" data-action="wizPreset" data-arg0="simple">
+            <div class="method-title">Single Compartment</div>
+            <div class="method-desc">Fastest setup for local testing or one operator. No separate high-trust lane until you add one later.</div>
+          </button>
+          <button class="method-btn" data-action="wizPreset" data-arg0="legacy">
+            <div class="method-title">Legacy / Estate Planning</div>
+            <div class="method-desc">More ceremony now, but clearer hot, cold, and legacy access layers for long-term recovery or shared custody.</div>
+          </button>
+          <button class="method-btn" data-action="wizPreset" data-arg0="custom">
+            <div class="method-title">Custom</div>
+            <div class="method-desc">You already know your compartment model and want exact threshold control.</div>
+          </button>
+          <button class="method-btn" data-action="wizPreset" data-arg0="passphrase">
+            <div class="method-title">Passphrase Only</div>
+            <div class="method-desc">Easiest start when this machine will not use hardware keys; weaker than hardware-key protection.</div>
+          </button>
+        </div>
+
+        <!-- Step 2a: Passphrase compartment setup -->
+        <div class="wizard-step" id="wizStepPassphrase">
+          <p class="helper-text">Create your first compartment and protect it with a strong passphrase. You can add more compartments and hardware keys later.</p>
+          <div class="form-row">
+            <input type="text" id="wizPLabel" placeholder="Compartment name (e.g. default)" value="default">
+          </div>
+          <div class="form-row">
+            <input type="password" id="wizPassphrase" placeholder="Create a passphrase (min 8 chars)">
+          </div>
+          <div class="form-row">
+            <input type="password" id="wizPassphraseConfirm" placeholder="Confirm passphrase">
+          </div>
+          <div class="form-row">
+            <button class="btn-ghost" data-action="wizBackToPresets">Back</button>
+            <button class="btn-primary" data-action="wizInitPassphrase">Create vault</button>
+          </div>
+        </div>
+
+        <!-- Step 2b: FIDO2 compartment confirm (presets already selected) -->
+        <div class="wizard-step" id="wizStepCompartments">
+          <p class="helper-text">Review the access layers Sigillum will create. Thresholds are how many distinct hardware keys unlock each compartment.</p>
+          <div id="wizCompList"></div>
+          <div class="form-row mt-12">
+            <button class="btn-ghost" data-action="wizBackToPresets">Back</button>
+            <button class="btn-primary" data-action="wizProceedFido2">Continue to key registration</button>
+          </div>
+        </div>
+
+        <!-- Step 2c: Custom compartments -->
+        <div class="wizard-step" id="wizStepCustomComps">
+          <p class="helper-text">Add each compartment you want Sigillum to create. Use thresholds to require more than one hardware key.</p>
+          <div id="wizCustomCompList"></div>
+          <div class="form-row">
+            <input type="text" id="wizCustomLabel" placeholder="Label">
+            <input type="number" id="wizCustomThreshold" placeholder="Threshold" min="1" class="input-narrow">
+            <button class="btn-ghost" data-action="wizAddCustomComp">Add compartment</button>
+          </div>
+          <div class="form-row mt-12">
+            <button class="btn-ghost" data-action="wizBackToPresets">Back</button>
+            <button class="btn-primary" id="wizCustomContinue" data-action="wizProceedFido2" disabled>Continue to key registration</button>
+          </div>
+        </div>
+
+        <!-- Step 3: FIDO2 PIN + label -->
+        <div class="wizard-step" id="wizStepFido2Pin">
+          <p class="helper-text">Register the first hardware key. Touch-only keys can leave the PIN field empty; enter a current PIN only if the authenticator requires one.</p>
+          <div class="form-row">
+            <input type="password" id="wizFido2Pin" placeholder="Current FIDO2 PIN if this key requires one">
+          </div>
+          <div class="form-row">
+            <input type="text" id="wizFido2Label" placeholder="Key label (e.g. yubikey-primary)">
+          </div>
+          <div class="form-row">
+            <button class="btn-ghost" data-action="wizBackFromFido2Pin">Back</button>
+            <button class="btn-primary" data-action="wizRegisterKey">Register primary hardware key</button>
+          </div>
+          <div class="info-box mt-14">
+            Brand-new hardware keys often ship without a FIDO2 PIN. Keep using touch-only keys, or set a PIN on the inserted key here if you want that extra gate.
+          </div>
+          <div class="form-row mt-12">
+            <input type="password" id="wizNewFido2Pin" placeholder="New PIN for this key (min 4 chars)">
+            <input type="password" id="wizNewFido2PinConfirm" placeholder="Confirm new PIN">
+            <button class="btn-ghost" data-action="wizSetNewPin">Set key PIN</button>
+          </div>
+          <p class="helper-text">Optional but recommended: one fallback passphrase that can locally unwrap every compartment if your hardware keys are unavailable.</p>
+          <div class="form-row">
+            <input type="password" id="wizFallbackPass" placeholder="Fallback passphrase (optional)">
+          </div>
+        </div>
+
+        <div class="wizard-step" id="wizStepAdditionalKeys">
+          <p class="helper-text" id="wizAdditionalKeysLead">This plan includes higher-threshold compartments, so Sigillum needs more than one enrolled hardware key before every access layer is usable.</p>
+          <div class="info-box" id="wizAdditionalKeyStatus">1 of 2 required hardware keys enrolled so far.</div>
+          <div class="form-row mt-12">
+            <input type="password" id="wizAdditionalKeyPin" placeholder="Current PIN for the inserted backup key (optional)">
+            <input type="text" id="wizAdditionalKeyLabel" placeholder="Backup key label (e.g. yubikey-backup)">
+            <button class="btn-primary" data-action="wizRegisterAdditionalKey">Register next hardware key</button>
+          </div>
+          <div class="info-box mt-14">
+            Brand-new backup key? Touch-only works too. Set its first FIDO2 PIN here only if you want that key to require one.
+          </div>
+          <div class="form-row mt-12">
+            <input type="password" id="wizAdditionalNewPin" placeholder="New PIN for inserted backup key">
+            <input type="password" id="wizAdditionalNewPinConfirm" placeholder="Confirm new PIN">
+            <button class="btn-ghost" data-action="wizSetAdditionalKeyPin">Set backup key PIN</button>
+          </div>
+          <p class="helper-text" id="wizAdditionalKeysNote">If you finish with fewer keys than the highest threshold, lower-threshold compartments work now, but stronger access layers stay unavailable until you enroll more keys.</p>
+          <div class="form-row">
+            <button class="btn-ghost" data-action="wizFinishForNow">Finish for now</button>
+          </div>
+        </div>
+
+        <!-- Step 4: Touch -->
+        <div class="wizard-step" id="wizStepTouch">
+          <div class="info-box pulse touch-prompt">
+            Touch your FIDO2 key now...
+          </div>
+        </div>
+
+        <!-- Step 5: Done -->
+        <div class="wizard-step" id="wizStepDone">
+          <div class="wiz-center">
+            <div class="wiz-done-mark">&#10003;</div>
+            <div class="wiz-done-title" id="wizDoneMsg">Setup Complete</div>
+            <p class="helper-text mt-8" id="wizDoneDetail">Your vault is ready.</p>
+          </div>
+        </div>
+
+        <div class="section-divider"></div>
+        <div class="section-title">Recover or start over</div>
+        <p class="helper-text">Restore a previously exported snapshot, or erase this machine&rsquo;s local Sigillum data and restart first-run setup.</p>
+        <div class="form-row">
+          <input type="file" id="setupRestoreFile" class="flex-1">
+          <input type="password" id="setupRestorePass" placeholder="Restore passphrase" class="flex-1">
+          <button class="btn-danger" data-action="restoreSetupSnapshot">Restore Snapshot</button>
+        </div>
+        <div class="form-row">
+          <input type="text" id="setupResetConfirm" placeholder="Type RESET LOCAL SIGILLUM DATA to start over">
+          <button class="btn-danger" data-action="resetLocalData" data-arg0="setupResetConfirm">Reset local setup</button>
+        </div>
+        <p class="card-note">Resetting removes the local Sigillum data directory on this machine. Restoring replaces it with the selected encrypted snapshot.</p>
+      </div>
+
+      <!-- Unlock / session card (focused panel when locked; sectionless) -->
+      <div class="card focus-card" id="authCard">
+        <h2 id="authTitle">Unlock this local session</h2>
+        <p class="helper-text" id="authLead">Unlock with the passphrase or hardware-key threshold you configured during setup. The session token stays only in this browser tab.</p>
+        <div id="unlockTabs" class="unlock-tabs hidden">
+          <button type="button" class="unlock-tab active" data-action="switchUnlockTab" data-arg0="passphrase">Passphrase</button>
+          <button type="button" class="unlock-tab" data-action="switchUnlockTab" data-arg0="fido2">Hardware Key</button>
+        </div>
+        <!-- Deniable passphrase unlock: just a password field, no hints -->
+        <div id="unlockPassphrase">
+          <div class="form-row">
+            <input type="password" id="passphrase" placeholder="Enter vault passphrase">
+            <button class="btn-primary" data-action="unlock">Unlock vault</button>
+          </div>
+        </div>
+        <!-- Deniable FIDO2 unlock: optional PIN + number, no compartment hints -->
+        <div id="unlockFido2" class="hidden">
+          <div class="form-row">
+            <input type="password" id="fido2Pin" placeholder="Current hardware-key PIN (optional)">
+            <input type="number" id="fido2TapCount" min="1" value="1" class="input-narrow" placeholder="Keys">
+            <button class="btn-primary" data-action="fido2Unlock">Unlock with hardware key</button>
+          </div>
+        </div>
+        <div id="authGuidance" class="info-box">Unlocking reveals the protected workspace only in this browser tab. The daemon keeps your local data on disk even while the session is locked.</div>
+        <div id="authRecovery">
+          <div class="section-divider"></div>
+          <div class="section-title">Recover this machine</div>
+          <p class="helper-text">If setup failed or this session got stranded, restore a snapshot or wipe only this machine&rsquo;s local Sigillum data.</p>
+          <div class="form-row">
+            <input type="file" id="authRestoreFile" class="flex-1">
+            <input type="password" id="authRestorePass" placeholder="Restore passphrase" class="flex-1">
+            <button class="btn-danger" data-action="restoreAuthSnapshot">Restore Snapshot</button>
+          </div>
+          <div class="form-row">
+            <input type="text" id="authResetConfirm" placeholder="Type RESET LOCAL SIGILLUM DATA to start over">
+            <button class="btn-danger" data-action="resetLocalData" data-arg0="authResetConfirm">Reset local data</button>
+          </div>
+          <p class="card-note">Restoring replaces local on-disk state. Resetting erases the local Sigillum data directory and returns to first-run setup.</p>
+        </div>
+      </div>
+
+      <!-- ───────────────────────── Treasury ───────────────────────── -->
+
+      <div class="card hidden" id="treasuryCard" data-workspace-section="treasury">
+        <div class="card-head">
+          <h2>Treasury</h2>
+          <div class="card-head-actions">
+            <button class="btn-ghost btn-small" data-action="refreshTreasuryOverview">Refresh Overview</button>
+          </div>
+        </div>
+        <p class="helper-text">Tracked addresses, per-chain balances, wallet groups, routing readiness, and outstanding risk and plan work.</p>
+
+        <div class="stats stat-tiles" id="treasuryOverviewStats"></div>
+        <p class="text-meta" id="treasuryGeneratedAt"></p>
+
+        <div class="section-divider"></div>
+        <div class="section-title">Chains</div>
+        <div id="treasuryChainList"></div>
+
+        <div class="section-divider"></div>
+        <div class="section-title">Wallet Groups</div>
+        <div id="treasuryGroupList"></div>
+
+        <div class="section-divider"></div>
+        <div class="section-title">Treasury Routing</div>
+        <div id="treasuryRoutingList"></div>
+
+        <div class="section-divider"></div>
+        <div class="section-title">Risk And Plans</div>
+        <div id="treasuryRiskPlanList"></div>
+
+        <div class="section-divider"></div>
+        <div class="section-title">Treasury Policy</div>
+        <p class="helper-text">Constrain consolidation plans with an allow-list of destinations, native value caps, and a simulation requirement.</p>
+        <div id="treasuryPolicyList"></div>
+        <div class="form-row">
+          <label class="checkbox-row">
+            <input type="checkbox" id="treasuryPolicyEnabled">
+            Policy enabled
+          </label>
+          <label class="checkbox-row">
+            <input type="checkbox" id="treasuryPolicyRequireSim" checked>
+            Require simulation
+          </label>
+        </div>
+        <textarea id="treasuryPolicyDestinations" placeholder="Allowed destinations, one per line: 0xADDRESS or 0xADDRESS:label"></textarea>
+        <div class="form-row">
+          <input type="text" id="treasuryPolicyMaxStepEth" placeholder="Max per-step native (ETH, optional)">
+          <input type="text" id="treasuryPolicyMaxPlanEth" placeholder="Max per-plan native (ETH, optional)">
+          <button class="btn-primary" data-action="updateTreasuryPolicy">Save Policy</button>
+        </div>
+
+        <div class="section-divider"></div>
+        <div class="section-title">Receive Addresses</div>
+        <p class="helper-text">Allocate a dedicated receive address per wallet profile and purpose; rotated addresses stay tracked as retired.</p>
+        <div id="treasuryReceiveList"></div>
+        <div class="form-row">
+          <input type="text" id="treasuryReceiveProfile" placeholder="Wallet profile">
+          <input type="text" id="treasuryReceivePurpose" placeholder="Purpose (e.g. invoices)">
+          <input type="text" id="treasuryReceiveLabel" placeholder="Label (optional)">
+          <button class="btn-primary" data-action="allocateTreasuryReceiveAddress">Allocate Address</button>
+        </div>
+      </div>
+
+      <div class="card hidden" id="nextStepCard" data-workspace-section="treasury">
+        <div class="card-head">
+          <h2 id="nextStepTitle">Finish the essentials before deeper operator work</h2>
+        </div>
+        <p class="helper-text" id="nextStepSummary">Sigillum keeps this guidance updated as the workspace becomes more complete.</p>
+        <div class="next-step-grid" id="nextStepList"></div>
+        <div class="card-actions">
+          <button class="btn-primary" id="nextStepPrimaryBtn" data-action="nextStepPrimaryAction">Open next step</button>
+          <button class="btn-ghost" id="nextStepSecondaryBtn" data-action="nextStepSecondaryAction">Open supporting section</button>
+        </div>
+        <div class="card-note" id="nextStepNote">This card suggests the next highest-leverage action.</div>
+      </div>
+
+      <!-- ───────────────────────── Wallets ───────────────────────── -->
+
+      <div class="card hidden" id="walletManagerCard" data-workspace-section="wallets">
+        <div class="card-head">
+          <h2>Wallets</h2>
+          <div class="card-head-actions">
+            <button class="btn-ghost btn-small" data-action="refreshWalletManager">Refresh List</button>
+          </div>
+        </div>
+        <p class="helper-text">Every signer and watch-only wallet in one place: create a fresh seed wallet, import existing material, allocate receive addresses, and retire profiles you no longer need.</p>
+
+        <div id="walletManagerList"></div>
+
+        <div id="walletReceivePanel" class="hidden">
+          <div class="section-title">New Receive Address</div>
+          <p class="helper-text">Allocate a dedicated receive address for <span id="walletReceiveTarget" class="mono"></span>. Purposes group allocations (e.g. invoices, donations) and rotated addresses stay tracked.</p>
+          <div class="form-row">
+            <input type="text" id="walletReceivePurpose" placeholder="Purpose (e.g. invoices)">
+            <input type="text" id="walletReceiveLabel" placeholder="Label (optional)">
+            <button class="btn-primary" data-action="allocateWalletReceiveAddress">Allocate Address</button>
+            <button class="btn-ghost" data-action="cancelWalletReceiveAddress">Cancel</button>
+          </div>
+        </div>
+
+        <div class="section-divider"></div>
+
+        <div class="section-title">Create A New Wallet</div>
+        <p class="helper-text">The daemon generates a fresh BIP-39 seed phrase, stores it as an encrypted vault secret, and shows you the phrase exactly once for backup.</p>
+        <div id="walletCreateForm">
+          <div class="form-row">
+            <input type="text" id="walletCreateName" placeholder="Wallet name (letters, digits, - and _)">
+            <input type="text" id="walletCreateLabel" placeholder="Display label (optional)">
+            <select id="walletCreateProvider"></select>
+          </div>
+          <p class="card-note hidden" id="walletCreateProviderHint">Add an RPC provider first — save one in the providers card below, then come back here.</p>
+          <div class="form-row">
+            <div class="segmented-tabs" role="radiogroup" aria-label="Seed phrase length">
+              <label class="segmented-tab"><input type="radio" id="walletCreateWords12" name="walletCreateWordCount" value="12">12 words</label>
+              <label class="segmented-tab"><input type="radio" id="walletCreateWords24" name="walletCreateWordCount" value="24" checked>24 words</label>
+            </div>
+            <button class="btn-primary" id="walletCreateSubmit" data-action="createWallet">Create Wallet</button>
+          </div>
+          <details class="advanced-fields">
+            <summary>Advanced</summary>
+            <div class="form-row mt-12">
+              <input type="number" id="walletCreateAccount" placeholder="Project account" value="0" class="input-mid">
+              <input type="number" id="walletCreateChainId" placeholder="Chain ID (optional)" class="input-mid">
+              <input type="text" id="walletCreateDestination" placeholder="Default destination address (optional)">
+            </div>
+            <div class="form-row">
+              <input type="password" id="walletCreatePassphrase" placeholder="BIP-39 passphrase (optional)">
+            </div>
+            <p class="card-note">A BIP-39 passphrase derives a different wallet from the same words. If you lose the passphrase, the seed phrase alone will not recover these funds.</p>
+          </details>
+        </div>
+        <div id="walletMnemonicReveal" class="mnemonic-reveal hidden" aria-live="polite"></div>
+
+        <div class="section-divider"></div>
+
+        <div class="section-title">Import An Existing Wallet</div>
+        <div class="segmented-tabs" id="walletImportTabs">
+          <button type="button" class="segmented-tab active" id="walletImportTabSeed" data-action="setWalletImportTab" data-arg0="seed">Seed phrase</button>
+          <button type="button" class="segmented-tab" id="walletImportTabXpub" data-action="setWalletImportTab" data-arg0="xpub">Watch-only xpub</button>
+          <button type="button" class="segmented-tab" id="walletImportTabWatch" data-action="setWalletImportTab" data-arg0="watch">Watch address</button>
+        </div>
+
+        <div id="walletImportSeedForm">
+          <p class="helper-text">Import a 12 or 24-word BIP-39 phrase as a signer wallet. The phrase is stored as an encrypted vault secret and cleared from this form on save or tab switch.</p>
+          <div class="form-row">
+            <input type="text" id="walletImportSeedName" placeholder="Wallet name">
+            <input type="text" id="walletImportSeedLabel" placeholder="Display label (optional)">
+            <select id="walletImportSeedProvider"></select>
+          </div>
+          <div class="form-row">
+            <textarea id="walletImportSeedMnemonic" placeholder="Seed phrase (12 or 24 words)"></textarea>
+          </div>
+          <div class="form-row">
+            <input type="password" id="walletImportSeedPassphrase" placeholder="BIP-39 passphrase (optional)">
+            <input type="number" id="walletImportSeedAccount" placeholder="Project account" value="0" class="input-mid">
+            <input type="number" id="walletImportSeedChainId" placeholder="Chain ID (optional)" class="input-mid">
+          </div>
+          <div class="form-row">
+            <input type="text" id="walletImportSeedDestination" placeholder="Default destination address (optional)">
+            <button class="btn-primary" data-action="importSeedWallet">Import Seed Wallet</button>
+          </div>
+        </div>
+
+        <div id="walletImportXpubForm" class="hidden">
+          <p class="helper-text">Save a watch-only xpub receive profile: deterministic receive addresses with no private key material on this machine.</p>
+          <div class="form-row">
+            <input type="text" id="walletImportXpubName" placeholder="Profile name">
+            <input type="number" id="walletImportXpubAccount" placeholder="Project account" value="0" class="input-mid">
+            <select id="walletImportXpubProvider"></select>
+          </div>
+          <div class="form-row">
+            <input type="number" id="walletImportXpubCompartmentId" placeholder="Compartment (optional)" class="input-wider">
+            <input type="number" id="walletImportXpubChainId" placeholder="Chain ID (optional)" class="input-mid">
+            <input type="text" id="walletImportXpubDestination" placeholder="Default destination address (optional)">
+          </div>
+          <div class="form-row">
+            <button class="btn-primary" data-action="importXpubWallet">Save Xpub Profile</button>
+          </div>
+        </div>
+
+        <div id="walletImportWatchForm" class="hidden">
+          <p class="helper-text">Track a single address with no keys at all. It lands in the inventory watch book and shows up in discovery scans and treasury balances.</p>
+          <div class="form-row">
+            <input type="text" id="walletImportWatchAddress" placeholder="Address (0x...)" class="mono">
+            <input type="text" id="walletImportWatchLabel" placeholder="Label (optional)">
+            <button class="btn-primary" data-action="importWatchAddress">Watch Address</button>
           </div>
         </div>
       </div>
-    </div>
-    <div class="hero-context" id="statusContext"></div>
-  </div>
 
-  <!-- Unlock / Lock Card -->
-  <div class="card" id="authCard" data-nav-label="Access" data-workspace-section="access">
-    <div class="eyebrow">Access</div>
-    <h2 id="authTitle">Unlock this local session</h2>
-    <p class="helper-text" id="authLead">Unlock with the passphrase or hardware-key threshold you configured during setup. Hardware-key touches are enough when the authenticator allows it; enter a current PIN only for keys that require one. The resulting session token stays only in this browser tab.</p>
-    <!-- Compartment switcher (only visible when multiple unlocked) -->
-    <div id="compSwitcher" class="comp-switcher hidden"></div>
-    <div id="unlockTabs" class="unlock-tabs hidden">
-      <button type="button" class="unlock-tab active" data-action="switchUnlockTab" data-arg0="passphrase">Passphrase</button>
-      <button type="button" class="unlock-tab" data-action="switchUnlockTab" data-arg0="fido2">Hardware Key</button>
-    </div>
-    <!-- Deniable passphrase unlock: just a password field, no hints -->
-    <div id="unlockPassphrase">
-      <div class="form-row">
-        <input type="password" id="passphrase" placeholder="Enter vault passphrase">
-        <button class="btn-primary" data-action="unlock">Unlock vault</button>
-      </div>
-    </div>
-    <!-- Deniable FIDO2 unlock: optional PIN + number, no compartment hints -->
-    <div id="unlockFido2" class="hidden">
-      <div class="form-row">
-        <input type="password" id="fido2Pin" placeholder="Current hardware-key PIN (optional)">
-        <input type="number" id="fido2TapCount" min="1" value="1" class="input-narrow" placeholder="Keys">
-        <button class="btn-primary" data-action="fido2Unlock">Unlock with hardware key</button>
-      </div>
-    </div>
-    <div id="authGuidance" class="info-box">Unlocking reveals the protected workspace only in this browser tab. The daemon keeps your local data on disk even while the session is locked.</div>
-    <div id="authRecovery">
-      <div class="section-divider"></div>
-      <div class="section-title">Recover this machine</div>
-      <p class="helper-text">If setup failed or this browser session got stranded, restore a snapshot or wipe only this machine’s local Sigillum data and start over.</p>
-      <div class="form-row">
-        <input type="file" id="authRestoreFile" style="flex:1;">
-        <input type="password" id="authRestorePass" placeholder="Restore passphrase" style="flex:1;">
-        <button class="btn-danger" data-action="restoreAuthSnapshot">Restore Snapshot</button>
-      </div>
-      <div class="form-row">
-        <input type="text" id="authResetConfirm" placeholder="Type RESET LOCAL SIGILLUM DATA to start over">
-        <button class="btn-danger" data-action="resetLocalData" data-arg0="authResetConfirm">Reset local data</button>
-      </div>
-      <p class="card-note">Restoring replaces local on-disk state. Resetting erases the local Sigillum data directory on this machine and returns you to first-run setup.</p>
-    </div>
-    <div id="lockForm" class="hidden">
-      <div class="form-row" style="margin-bottom:0;">
-        <button class="btn-ghost" data-action="logoutSession">Log Out Session</button>
-        <button class="btn-danger" data-action="lock">Lock All Compartments</button>
-      </div>
-    </div>
-  </div>
-
-  <!-- Setup Wizard -->
-  <div class="card hidden" id="setupCard" data-nav-label="Setup" data-workspace-section="access">
-    <div class="wizard-header">
-      <div>
-        <div class="eyebrow">Setup assistant</div>
-        <h2>Create a vault that matches how you work</h2>
-        <p class="helper-text">Choose a starting protection model, review what Sigillum will create, and finish with a guided hardware-key or passphrase flow. You can add more keys and compartments later.</p>
-      </div>
-      <div class="wizard-summary">
-        <div class="progress-pill" id="wizStagePill">Step 1 of 3</div>
-        <div class="wizard-stage-title" id="wizStageTitle">Choose a protection model</div>
-        <div class="wizard-stage-summary" id="wizStageSummary">Pick the setup pattern that matches how many compartments and hardware keys you want to manage.</div>
-        <div class="info-box" id="wizDeviceHint" style="margin-top:14px;">Checking for attached FIDO2 devices on this machine…</div>
-        <div class="summary-actions">
-          <button class="btn-ghost" data-action="wizDetectDevice">Check hardware key again</button>
+      <div class="card hidden" id="profilesCard" data-workspace-section="wallets">
+        <div class="card-head">
+          <h2>Providers and stealth wallets</h2>
         </div>
-        <div id="wizChecklist" class="checklist-list"></div>
-      </div>
-    </div>
+        <p class="helper-text">Save reusable provider settings, then bind stealth wallet labels to those providers for deposits, sweeps, and queue work.</p>
 
-    <!-- Step 0: Choose preset -->
-    <div class="wizard-step active" id="wizStep0">
-      <p>Start with a recommended plan. The names below describe how access is split, not how secrets are stored.</p>
-      <button class="method-btn recommended" data-action="wizPreset" data-arg0="secure">
-        <div class="method-title">Daily + Secure</div>
-        <div class="method-desc">Best for most people. One key unlocks everyday work, while the higher-trust secure lane requires two. You can add more keys later.</div>
-      </button>
-      <button class="method-btn" data-action="wizPreset" data-arg0="simple">
-        <div class="method-title">Single Compartment</div>
-        <div class="method-desc">Best for local testing or one operator who wants the fastest setup. Lowest ceremony now, but no separate high-trust lane until you add one later.</div>
-      </button>
-      <button class="method-btn" data-action="wizPreset" data-arg0="legacy">
-        <div class="method-title">Legacy / Estate Planning</div>
-        <div class="method-desc">Best for long-term recovery or shared custody. More setup ceremony now, but clearer hot, cold, and legacy access layers later.</div>
-      </button>
-      <button class="method-btn" data-action="wizPreset" data-arg0="custom">
-        <div class="method-title">Custom</div>
-        <div class="method-desc">Best when you already know your compartment model. You trade setup speed for exact threshold control.</div>
-      </button>
-      <button class="method-btn" data-action="wizPreset" data-arg0="passphrase">
-        <div class="method-title">Passphrase Only</div>
-        <div class="method-desc">Best when this machine will not use hardware keys. Easiest to start, but weaker than hardware-key protection.</div>
-      </button>
-    </div>
+        <div class="section-title">EVM Provider Profiles</div>
+        <div class="form-row">
+          <input type="text" id="providerName" placeholder="Profile name">
+          <input type="text" id="providerRpcUrl" placeholder="RPC URL">
+          <input type="number" id="providerChainId" placeholder="Chain ID" value="1" class="input-compact">
+        </div>
+        <div class="form-row">
+          <input type="text" id="providerAuthTokenKey" placeholder="Auth token key (optional)">
+          <input type="number" id="providerCompartmentId" placeholder="Compartment (optional)" class="input-wider">
+        </div>
+        <div class="form-row">
+          <input type="text" id="providerMaxPriorityFee" placeholder="Max priority fee hex (optional)">
+          <input type="text" id="providerMaxFee" placeholder="Max fee hex (optional)">
+        </div>
+        <div class="form-row">
+          <input type="number" id="providerNativeGasLimit" placeholder="Native gas limit (optional)">
+          <input type="number" id="providerErc20GasLimit" placeholder="ERC-20 gas limit (optional)">
+          <button class="btn-primary" data-action="upsertProviderProfile">Save Provider</button>
+        </div>
+        <div id="providerProfileList"></div>
 
-    <!-- Step 2a: Passphrase compartment setup -->
-    <div class="wizard-step" id="wizStepPassphrase">
-      <p>Create your first compartment and protect it with a strong passphrase. You can add more compartments and hardware keys later.</p>
-      <div class="form-row">
-        <input type="text" id="wizPLabel" placeholder="Compartment name (e.g. default)" value="default">
-      </div>
-      <div class="form-row">
-        <input type="password" id="wizPassphrase" placeholder="Create a passphrase (min 8 chars)">
-      </div>
-      <div class="form-row">
-        <input type="password" id="wizPassphraseConfirm" placeholder="Confirm passphrase">
-      </div>
-      <div class="form-row">
-        <button class="btn-ghost" data-action="wizBackToPresets">Back</button>
-        <button class="btn-primary" data-action="wizInitPassphrase">Create vault</button>
-      </div>
-    </div>
+        <div class="section-divider"></div>
 
-    <!-- Step 2b: FIDO2 compartment confirm (presets already selected) -->
-    <div class="wizard-step" id="wizStepCompartments">
-      <p>Review the access layers Sigillum will create. Thresholds refer to how many distinct hardware keys are needed to unlock each compartment.</p>
-      <div id="wizCompList"></div>
-      <div class="form-row" style="margin-top:12px;">
-        <button class="btn-ghost" data-action="wizBackToPresets">Back</button>
-        <button class="btn-primary" data-action="wizProceedFido2">Continue to key registration</button>
+        <div class="section-title">Stealth Wallet Profiles</div>
+        <div class="form-row">
+          <input type="text" id="walletProfileName" placeholder="Profile name">
+          <input type="text" id="walletLabel" placeholder="Wallet label">
+          <input type="text" id="walletShortName" placeholder="Short name (optional)">
+        </div>
+        <div class="form-row">
+          <select id="walletProviderProfile"></select>
+          <input type="number" id="walletCompartmentId" placeholder="Compartment (optional)" class="input-wider">
+          <input type="number" id="walletChainId" placeholder="Chain ID (optional)" class="input-mid">
+        </div>
+        <div class="form-row">
+          <input type="text" id="walletDefaultDestination" placeholder="Default destination address (optional)">
+          <button class="btn-primary" data-action="upsertWalletProfile">Save Wallet</button>
+        </div>
+        <div id="walletProfileList"></div>
       </div>
-    </div>
 
-    <!-- Step 2c: Custom compartments -->
-    <div class="wizard-step" id="wizStepCustomComps">
-      <p>Add each compartment you want Sigillum to create. Use thresholds to express which workflows should require more than one hardware key.</p>
-      <div id="wizCustomCompList"></div>
-      <div class="form-row">
-        <input type="text" id="wizCustomLabel" placeholder="Label">
-        <input type="number" id="wizCustomThreshold" placeholder="Threshold" min="1" class="input-narrow">
-        <button class="btn-ghost" data-action="wizAddCustomComp">Add compartment</button>
-      </div>
-      <div class="form-row" style="margin-top:12px;">
-        <button class="btn-ghost" data-action="wizBackToPresets">Back</button>
-        <button class="btn-primary" id="wizCustomContinue" data-action="wizProceedFido2" disabled>Continue to key registration</button>
-      </div>
-    </div>
+      <div class="card hidden" id="xpubCard" data-workspace-section="wallets">
+        <div class="card-head">
+          <h2>Receive wallets</h2>
+        </div>
+        <p class="helper-text">Export public receive branches from xpub profiles, import BIP-39 seed wallets, and preview derived receive addresses.</p>
 
-    <!-- Step 3: FIDO2 PIN + label -->
-    <div class="wizard-step" id="wizStepFido2Pin">
-      <p>Register the first hardware key for this vault. If the key works with touch alone, you can leave the PIN field empty. If the authenticator already requires a current PIN, enter it here before starting registration.</p>
-      <div class="form-row">
-        <input type="password" id="wizFido2Pin" placeholder="Current FIDO2 PIN if this key requires one">
-      </div>
-      <div class="form-row">
-        <input type="text" id="wizFido2Label" placeholder="Key label (e.g. yubikey-primary)">
-      </div>
-      <div class="form-row">
-        <button class="btn-ghost" data-action="wizBackFromFido2Pin">Back</button>
-        <button class="btn-primary" data-action="wizRegisterKey">Register primary hardware key</button>
-      </div>
-      <div class="info-box" style="margin-top:14px;">
-        Brand-new hardware keys often ship without a FIDO2 PIN. You can keep using touch-only hardware keys, or set a PIN on the inserted key here if you want that extra gate.
-      </div>
-      <div class="form-row" style="margin-top:12px;">
-        <input type="password" id="wizNewFido2Pin" placeholder="New PIN for this key (min 4 chars)">
-        <input type="password" id="wizNewFido2PinConfirm" placeholder="Confirm new PIN">
-        <button class="btn-ghost" data-action="wizSetNewPin">Set key PIN</button>
-      </div>
-      <p>Optional but recommended: set one fallback passphrase that can locally unwrap every compartment if your hardware keys are unavailable.</p>
-      <div class="form-row">
-        <input type="password" id="wizFallbackPass" placeholder="Fallback passphrase (optional)">
-      </div>
-    </div>
+        <div class="section-title">Xpub Receive Profiles</div>
+        <div class="form-row">
+          <input type="text" id="xpubProfileName" placeholder="Profile name">
+          <input type="number" id="xpubProjectAccount" placeholder="Project account" value="0" class="input-mid">
+          <select id="xpubProviderProfile"></select>
+        </div>
+        <div class="form-row">
+          <input type="number" id="xpubCompartmentId" placeholder="Compartment (optional)" class="input-wider">
+          <input type="number" id="xpubChainId" placeholder="Chain ID (optional)" class="input-mid">
+          <input type="text" id="xpubDefaultDestination" placeholder="Default destination address (optional)">
+        </div>
+        <div class="form-row">
+          <button class="btn-primary" data-action="upsertXpubWalletProfile">Save Xpub Profile</button>
+        </div>
+        <div id="xpubWalletProfileList"></div>
 
-    <div class="wizard-step" id="wizStepAdditionalKeys">
-      <p id="wizAdditionalKeysLead">This plan includes higher-threshold compartments, so Sigillum needs more than one enrolled hardware key before every access layer is usable.</p>
-      <div class="info-box" id="wizAdditionalKeyStatus">1 of 2 required hardware keys enrolled so far.</div>
-      <div class="form-row" style="margin-top:12px;">
-        <input type="password" id="wizAdditionalKeyPin" placeholder="Current PIN for the inserted backup key (optional)">
-        <input type="text" id="wizAdditionalKeyLabel" placeholder="Backup key label (e.g. yubikey-backup)">
-        <button class="btn-primary" data-action="wizRegisterAdditionalKey">Register next hardware key</button>
-      </div>
-      <div class="info-box" style="margin-top:14px;">
-        Brand-new backup key? Touch-only works too. Set its first FIDO2 PIN here only if you want that key to require one.
-      </div>
-      <div class="form-row" style="margin-top:12px;">
-        <input type="password" id="wizAdditionalNewPin" placeholder="New PIN for inserted backup key">
-        <input type="password" id="wizAdditionalNewPinConfirm" placeholder="Confirm new PIN">
-        <button class="btn-ghost" data-action="wizSetAdditionalKeyPin">Set backup key PIN</button>
-      </div>
-      <p id="wizAdditionalKeysNote">If you finish with fewer keys than the highest threshold, the lower-threshold compartments will work now, but the stronger access layers will stay unavailable until you enroll more keys later.</p>
-      <div class="form-row">
-        <button class="btn-ghost" data-action="wizFinishForNow">Finish for now</button>
-      </div>
-    </div>
+        <div class="section-divider"></div>
 
-    <!-- Step 4: Touch -->
-    <div class="wizard-step" id="wizStepTouch">
-      <div class="info-box pulse" style="text-align:center;font-size:16px;padding:24px;">
-        Touch your FIDO2 key now...
-      </div>
-    </div>
+        <div class="section-title">Seed Phrase Wallets</div>
+        <p class="helper-text">Import 12 or 24-word BIP-39 wallets for receive-tree visibility. The phrase is stored as an encrypted vault secret.</p>
+        <div class="form-row">
+          <input type="text" id="seedProfileName" placeholder="Profile name">
+          <input type="text" id="seedProfileLabel" placeholder="Display label (optional)">
+          <input type="number" id="seedProjectAccount" placeholder="Account" value="0" class="input-mid">
+        </div>
+        <div class="form-row">
+          <select id="seedProviderProfile"></select>
+          <input type="number" id="seedCompartmentId" placeholder="Compartment (optional)" class="input-wider">
+          <input type="number" id="seedChainId" placeholder="Chain ID (optional)" class="input-mid">
+        </div>
+        <div class="form-row">
+          <textarea id="seedMnemonic" placeholder="Seed phrase (12 or 24 words)"></textarea>
+        </div>
+        <div class="form-row">
+          <input type="password" id="seedMnemonicPassphrase" placeholder="BIP-39 passphrase (optional)">
+          <input type="text" id="seedDefaultDestination" placeholder="Default destination address (optional)">
+          <button class="btn-primary" data-action="upsertSeedWalletProfile">Import Seed Wallet</button>
+        </div>
+        <div id="seedWalletProfileList"></div>
 
-    <!-- Step 5: Done -->
-    <div class="wizard-step" id="wizStepDone">
-      <div class="wiz-center">
-        <div style="font-size:32px;margin-bottom:12px;color:var(--success);">&#10003;</div>
-        <div style="font-size:16px;font-weight:600;" id="wizDoneMsg">Setup Complete</div>
-        <p style="margin-top:8px;" id="wizDoneDetail">Your vault is ready.</p>
-      </div>
-    </div>
+        <div class="section-divider"></div>
 
-    <div class="section-divider"></div>
-    <div class="section-title">Recover or start over</div>
-    <p class="helper-text">If setup gets interrupted, you can restore a previously exported snapshot or erase this machine’s local Sigillum data and restart first-run setup.</p>
-    <div class="form-row">
-      <input type="file" id="setupRestoreFile" style="flex:1;">
-      <input type="password" id="setupRestorePass" placeholder="Restore passphrase" style="flex:1;">
-      <button class="btn-danger" data-action="restoreSetupSnapshot">Restore Snapshot</button>
-    </div>
-    <div class="form-row">
-      <input type="text" id="setupResetConfirm" placeholder="Type RESET LOCAL SIGILLUM DATA to start over">
-      <button class="btn-danger" data-action="resetLocalData" data-arg0="setupResetConfirm">Reset local setup</button>
-    </div>
-    <p class="card-note">Resetting removes the local Sigillum data directory on this machine. Restoring replaces it with the contents of the selected encrypted snapshot.</p>
+        <div class="section-title">Export Receive Branch</div>
+        <p class="helper-text">Export the public receive branch of a saved xpub profile; it derives receive addresses without private key material.</p>
+        <div class="form-row">
+          <select id="xpubPreviewProfile"></select>
+          <button class="btn-primary" data-action="exportSelectedXpubWallet">Export Xpub</button>
+        </div>
+        <div id="xpubExportResult" class="result-box hidden"></div>
+
+        <div class="section-divider"></div>
+
+        <div class="section-title">Preview Receive Addresses</div>
+        <p class="helper-text">Paste or reuse an exported receive-branch xpub, then derive the receive address at a specific index.</p>
+        <div class="form-row">
+          <input type="text" id="xpubReceiveXpub" placeholder="Receive-branch xpub" class="mono">
+          <input type="number" id="xpubPreviewIndex" placeholder="Index" value="0" class="input-mid">
+          <button class="btn-ghost" data-action="previewXpubReceiveAddress">Derive Address</button>
+        </div>
+        <div id="xpubPreviewResult" class="result-box hidden"></div>
+      </div>
+
+      <!-- ──────────────────────── Operations ─────────────────────── -->
+
+      <div class="card hidden" id="inventoryCard" data-workspace-section="operations">
+        <div class="card-head">
+          <h2>Wallet inventory</h2>
+          <div class="card-head-actions">
+            <button class="btn-ghost btn-small" data-action="exportInventoryReport">Export Report</button>
+          </div>
+        </div>
+        <p class="helper-text">Read-only discovery, stranded-value and risk findings, and dry-run consolidation plans before any queue work.</p>
+
+        <div class="section-title">Chain Profiles</div>
+        <div class="form-row">
+          <input type="text" id="chainProfileName" placeholder="Chain profile name">
+          <input type="text" id="chainProfileFamily" placeholder="Family (evm, bitcoin, solana)">
+          <input type="number" id="chainProfileId" placeholder="Chain ID (optional)" class="input-mid">
+        </div>
+        <div class="form-row">
+          <input type="text" id="chainProfileProvider" placeholder="Provider profile (optional)">
+          <input type="text" id="chainProfileNativeSymbol" placeholder="Native symbol (optional)">
+          <button class="btn-primary" data-action="upsertChainProfile">Save Chain</button>
+        </div>
+        <div id="chainProfileList"></div>
+
+        <div class="section-divider"></div>
+        <div class="section-title">EVM Discovery</div>
+        <div class="form-row">
+          <input type="text" id="inventoryWalletFamily" placeholder="Wallet family (optional)">
+          <input type="text" id="inventoryWalletProfile" placeholder="Wallet profile (optional)">
+          <input type="text" id="inventoryProviderProfile" placeholder="Provider profile (optional)">
+        </div>
+        <div class="form-row">
+          <input type="number" id="inventoryGapLimit" placeholder="Gap limit" value="20" class="input-mid">
+          <input type="number" id="inventoryMaxIndex" placeholder="Max index" value="200" class="input-mid">
+          <input type="text" id="inventoryTokenAddress" placeholder="ERC-20 token address (optional)">
+          <button class="btn-primary" data-action="scanInventoryEvm">Scan EVM</button>
+        </div>
+        <div class="form-row">
+          <input type="text" id="inventoryWatchAddress" placeholder="Watch address (optional)">
+          <input type="text" id="inventoryWatchLabel" placeholder="Watch label (optional)">
+          <label class="checkbox-row">
+            <input type="checkbox" id="inventoryIncludeWatchBook" checked>
+            Include saved watch book
+          </label>
+        </div>
+        <textarea id="inventoryWatchAddresses" placeholder="Bulk watch addresses, one per line: address[:label] or address,label"></textarea>
+        <div class="form-row">
+          <input type="text" id="watchBookAddress" placeholder="Saved watch address">
+          <input type="text" id="watchBookLabel" placeholder="Saved label">
+          <input type="text" id="watchBookTags" placeholder="Tags, comma-separated">
+          <label class="checkbox-row">
+            <input type="checkbox" id="watchBookEnabled" checked>
+            Enabled
+          </label>
+          <button class="btn-ghost" data-action="upsertWatchAddressBookEntry">Save Watch</button>
+          <button class="btn-ghost" data-action="upsertBulkWatchAddressBookEntries">Save Bulk</button>
+        </div>
+        <div id="watchAddressBookList"></div>
+        <div class="form-row">
+          <input type="text" id="inventoryTokenDiscoveryFromBlock" placeholder="ERC-20 discovery from block">
+          <input type="text" id="inventoryTokenDiscoveryToBlock" placeholder="ERC-20 discovery to block (optional)">
+          <input type="number" id="inventoryTokenDiscoveryLimit" placeholder="Token discovery limit" value="250" class="input-wide">
+          <label class="checkbox-row">
+            <input type="checkbox" id="inventoryDiscoverErc20Transfers">
+            Discover ERC-20 transfer logs
+          </label>
+        </div>
+        <div class="form-row">
+          <input type="text" id="inventoryAllowanceSpender" placeholder="Allowance spender address (optional)">
+          <input type="number" id="inventoryAllowanceLimit" placeholder="Allowance probe limit" value="250" class="input-wide">
+          <label class="checkbox-row">
+            <input type="checkbox" id="inventoryDiscoverErc20Allowances">
+            Probe ERC-20 allowances
+          </label>
+        </div>
+        <div class="form-row">
+          <input type="text" id="inventoryPermit2Contract" placeholder="Permit2 contract (default canonical)">
+          <input type="text" id="inventoryPermit2Spender" placeholder="Permit2 spender address">
+          <input type="number" id="inventoryPermit2AllowanceLimit" placeholder="Permit2 probe limit" value="250" class="input-wide">
+          <label class="checkbox-row">
+            <input type="checkbox" id="inventoryDiscoverPermit2Allowances">
+            Probe Permit2 allowances
+          </label>
+        </div>
+        <div class="form-row">
+          <input type="text" id="inventoryNftDiscoveryFromBlock" placeholder="NFT discovery from block">
+          <input type="text" id="inventoryNftDiscoveryToBlock" placeholder="NFT discovery to block (optional)">
+          <input type="number" id="inventoryNftDiscoveryLimit" placeholder="NFT discovery limit" value="100" class="input-wide">
+          <label class="checkbox-row">
+            <input type="checkbox" id="inventoryDiscoverErc721Transfers">
+            Discover ERC-721 transfers
+          </label>
+          <label class="checkbox-row">
+            <input type="checkbox" id="inventoryDiscoverErc1155Transfers">
+            Discover ERC-1155 transfers
+          </label>
+        </div>
+        <div class="form-row">
+          <input type="text" id="inventoryNftOperator" placeholder="NFT operator address (optional)">
+          <input type="number" id="inventoryNftOperatorApprovalLimit" placeholder="NFT approval probe limit" value="250" class="input-wide">
+          <label class="checkbox-row">
+            <input type="checkbox" id="inventoryDiscoverNftOperatorApprovals">
+            Probe NFT operator approvals
+          </label>
+        </div>
+        <div id="inventoryJobList"></div>
+        <div id="inventoryAddressList"></div>
+        <div id="inventoryHoldingList"></div>
+
+        <div class="section-divider"></div>
+        <div class="section-title">Risk And Plans</div>
+        <div class="form-row">
+          <input type="text" id="riskCatalogAddress" placeholder="Spender/operator address">
+          <input type="text" id="riskCatalogLabel" placeholder="Risk label">
+          <select id="riskCatalogLevel" class="input-mid">
+            <option value="trusted">trusted</option>
+            <option value="low">low</option>
+            <option value="medium">medium</option>
+            <option value="high">high</option>
+            <option value="critical">critical</option>
+          </select>
+        </div>
+        <div class="form-row">
+          <input type="text" id="riskCatalogNote" placeholder="Catalog note (optional)">
+          <button class="btn-ghost" data-action="upsertRiskCatalogEntry">Save Risk Label</button>
+        </div>
+        <div id="riskCatalogList"></div>
+        <div class="form-row">
+          <input type="text" id="planDestinationAddress" placeholder="Consolidation destination address">
+          <button class="btn-ghost" data-action="loadRiskFindings">Refresh Risks</button>
+          <button class="btn-primary" data-action="generateConsolidationPlan">Generate Plan</button>
+        </div>
+        <div id="riskFindingList"></div>
+        <div id="consolidationPlanList"></div>
+      </div>
+
+      <div class="card hidden" id="depositsCard" data-workspace-section="operations">
+        <div class="card-head">
+          <h2>Deposits</h2>
+        </div>
+        <p class="helper-text">Generate tracked deposit addresses from wallet profiles, refresh detected balances, and enqueue sweeps.</p>
+
+        <div class="section-title">Create Native Deposit</div>
+        <div class="form-row">
+          <select id="depositNativeWalletProfile"></select>
+          <input type="text" id="depositNativeExpected" placeholder="Expected value hex (optional)">
+          <input type="text" id="depositNativeMinSweep" placeholder="Min sweep value hex (optional)">
+        </div>
+        <div class="form-row">
+          <input type="text" id="depositNativeDestination" placeholder="Sweep destination (optional)">
+          <input type="text" id="depositNativeNote" placeholder="Note (optional)">
+          <label class="checkbox-row">
+            <input type="checkbox" id="depositNativeAutoQueue" checked>
+            Auto queue sweep
+          </label>
+          <button class="btn-primary" data-action="createNativeDeposit">Create Native</button>
+        </div>
+
+        <div class="section-divider"></div>
+
+        <div class="section-title">Create ERC-20 Deposit</div>
+        <div class="form-row">
+          <select id="depositErc20WalletProfile"></select>
+          <input type="text" id="depositErc20TokenAddress" placeholder="Token address">
+          <input type="text" id="depositErc20Expected" placeholder="Expected amount hex (optional)">
+        </div>
+        <div class="form-row">
+          <input type="text" id="depositErc20MinSweep" placeholder="Min sweep amount hex (optional)">
+          <input type="text" id="depositErc20Destination" placeholder="Sweep destination (optional)">
+          <input type="text" id="depositErc20Note" placeholder="Note (optional)">
+        </div>
+        <div class="form-row">
+          <label class="checkbox-row">
+            <input type="checkbox" id="depositErc20AutoQueue" checked>
+            Auto queue sweep
+          </label>
+          <button class="btn-primary" data-action="createErc20Deposit">Create ERC-20</button>
+        </div>
+
+        <div class="section-divider"></div>
+
+        <div class="section-title">Scan ERC-5564 Announcements</div>
+        <div class="form-row">
+          <select id="depositScanWalletProfile"></select>
+          <input type="text" id="depositScanFromBlock" placeholder="From block tag or 0x block">
+          <input type="text" id="depositScanToBlock" placeholder="To block (optional, latest)">
+          <input type="number" id="depositScanLimit" placeholder="Scan limit" value="1000" class="input-mid">
+        </div>
+        <div class="form-row">
+          <input type="text" id="depositScanTokenAddress" placeholder="Token address (optional)">
+          <input type="text" id="depositScanMinSweep" placeholder="Min sweep amount hex (optional)">
+          <input type="text" id="depositScanDestination" placeholder="Sweep destination (optional)">
+        </div>
+        <div class="form-row">
+          <input type="text" id="depositScanNote" placeholder="Note (optional)">
+          <label class="checkbox-row">
+            <input type="checkbox" id="depositScanAutoQueue" checked>
+            Auto queue sweep
+          </label>
+          <button class="btn-primary" data-action="scanEthStealthAnnouncements">Scan Announcements</button>
+        </div>
+
+        <div class="section-divider"></div>
+
+        <div class="section-title">Tracked Deposits</div>
+        <div class="form-row">
+          <input type="number" id="depositRefreshLimit" placeholder="Refresh limit" value="50" class="input-mid">
+          <label class="checkbox-row">
+            <input type="checkbox" id="depositRefreshAutoEnqueue" checked>
+            Auto enqueue sweeps
+          </label>
+          <button class="btn-ghost" data-action="refreshDepositRegistry">Refresh Deposits</button>
+        </div>
+        <div id="depositRefreshResult" class="result-box hidden"></div>
+        <div id="depositList"></div>
+      </div>
+
+      <div class="card hidden" id="queueCard" data-workspace-section="operations">
+        <div class="card-head">
+          <h2>Queue</h2>
+          <div class="card-head-actions">
+            <button class="btn-ghost btn-small" data-action="loadQueueJobs">Refresh Queue</button>
+          </div>
+        </div>
+        <p class="helper-text">Inspect queued sends and sweep jobs, then process a batch or rerun an individual job.</p>
+        <div class="form-row">
+          <input type="number" id="queueProcessLimit" placeholder="Process limit" value="20" class="input-mid">
+          <button class="btn-primary" data-action="processQueueBatch">Process Queue</button>
+        </div>
+        <p class="card-note">Processing executes pending local jobs immediately with the current daemon state.</p>
+        <div id="queueProcessResult" class="result-box hidden"></div>
+        <div id="queueList"></div>
+      </div>
+
+      <div class="card hidden" id="maintenanceCard" data-workspace-section="operations">
+        <div class="card-head">
+          <h2>Maintenance</h2>
+        </div>
+        <p class="helper-text">One local cycle: refresh deposits, auto-enqueue eligible sweeps, and drain the queue with current policy settings.</p>
+        <div class="form-row">
+          <input type="number" id="maintenanceDepositLimit" placeholder="Deposit refresh limit" value="50" class="input-wide">
+          <input type="number" id="maintenanceQueueLimit" placeholder="Queue process limit" value="20" class="input-wide">
+          <label class="checkbox-row">
+            <input type="checkbox" id="maintenanceAutoEnqueue" checked>
+            Auto enqueue sweeps
+          </label>
+          <button class="btn-primary" data-action="runMaintenanceCycle">Run Maintenance</button>
+        </div>
+        <div id="maintenanceResult" class="result-box hidden"></div>
+      </div>
+
+      <!-- ───────────────────────── Secrets ───────────────────────── -->
+
+      <div class="card" id="secretsCard" data-workspace-section="secrets">
+        <div class="card-head">
+          <h2>Encrypted secrets</h2>
+        </div>
+        <p class="helper-text">Values encrypted at rest; viewing or changing them requires an unlocked compartment.</p>
+        <div id="secretsLocked" class="hidden text-meta">
+          Vault is locked. Unlock to manage secrets.
+        </div>
+        <div id="secretsUnlocked">
+          <div class="form-row">
+            <input type="text" id="secretName" placeholder="Secret name">
+            <input type="password" id="secretValue" placeholder="Value">
+            <button class="btn-primary" data-action="setSecret">Store secret</button>
+          </div>
+          <ul class="key-list" id="secretList"></ul>
+        </div>
+      </div>
+
+      <div class="card" id="apiKeysCard" data-workspace-section="secrets">
+        <div class="card-head">
+          <h2>Connection keys</h2>
+        </div>
+        <p class="helper-text">RPC tokens and similar operational keys the daemon uses directly during workflows.</p>
+        <div class="form-row">
+          <input type="text" id="apiKeyName" placeholder="Key name">
+          <input type="password" id="apiKeyValue" placeholder="Value">
+          <button class="btn-primary" data-action="setApiKey">Store API key</button>
+        </div>
+        <ul class="key-list" id="apiKeyList"></ul>
+      </div>
+
+      <div class="card hidden" id="pushCard" data-workspace-section="secrets">
+        <div class="card-head">
+          <h2>Move a secret between compartments</h2>
+        </div>
+        <p class="helper-text">Copy a secret from one compartment to another; the copy is indistinguishable from manual entry.</p>
+        <div class="form-row">
+          <select id="pushFrom" class="input-wide"></select>
+          <select id="pushTo" class="input-wide"></select>
+        </div>
+        <div class="form-row">
+          <input type="text" id="pushKey" placeholder="Secret key name">
+          <input type="text" id="pushNewKey" placeholder="New name (optional)">
+        </div>
+        <div class="form-row">
+          <select id="pushTier" class="input-wide">
+            <option value="2">Tier 2 (encrypted)</option>
+            <option value="1">Tier 1 (API key)</option>
+          </select>
+          <button class="btn-primary" data-action="pushSecret">Push</button>
+        </div>
+      </div>
+
+      <div class="card hidden" id="compartmentCard" data-workspace-section="secrets">
+        <div class="card-head">
+          <h2>Unlocked compartments</h2>
+        </div>
+        <p class="helper-text">Compartments available in this session; switching changes which compartment new operations target.</p>
+        <div id="compartmentList"></div>
+      </div>
+
+      <!-- ───────────────────────── Security ──────────────────────── -->
+
+      <div class="card hidden" id="fido2Card" data-workspace-section="security">
+        <div class="card-head">
+          <h2>Hardware keys</h2>
+        </div>
+        <div id="fido2DeviceStatus" class="info-box">Checking for devices...</div>
+        <div id="fido2RegisterSection">
+          <p class="helper-text">Register another FIDO2 hardware key. All compartments must be unlocked first so Sigillum can safely reshare the vault material.</p>
+          <div class="info-box">
+            Fresh backup keys may not have a FIDO2 PIN yet. Touch-only enrollment works when the authenticator allows it.
+          </div>
+          <div class="form-row mt-12">
+            <input type="password" id="fido2NewPin" placeholder="New PIN for inserted key (min 4 chars)">
+            <input type="password" id="fido2NewPinConfirm" placeholder="Confirm new PIN">
+            <button class="btn-ghost" data-action="fido2SetNewPin">Set key PIN</button>
+          </div>
+          <div class="form-row">
+            <input type="password" id="fido2RegPin" placeholder="Current FIDO2 PIN if this key requires one">
+            <input type="text" id="fido2RegLabel" placeholder="Key label">
+            <button class="btn-primary" data-action="fido2Register">Register Key</button>
+          </div>
+          <div class="form-row-center">
+            <label class="checkbox-label">
+              <input type="checkbox" id="fido2Poison" data-action="togglePoisonWarning"> Poison key (duress)
+            </label>
+            <input type="text" id="fido2SkipKeys" placeholder="Skip keys (comma-separated labels)">
+          </div>
+          <div id="fido2PoisonWarning" class="hidden poison-warning">
+            This key will contain RANDOM shard data. Including it during unlock causes silent failure.
+            No data is destroyed. Exclude it and retry with real keys to unlock normally.
+          </div>
+        </div>
+        <div id="fido2KeyListSection" class="mt-14"></div>
+      </div>
+
+      <div class="card hidden" id="backupCard" data-workspace-section="security">
+        <div class="card-head">
+          <h2>Encrypted snapshots</h2>
+        </div>
+        <p class="helper-text">Export the local data directory as a passphrase-encrypted snapshot, or restore one. Restoring replaces on-disk state and logs you out.</p>
+        <div class="form-row">
+          <input type="password" id="backupExportPass" placeholder="Export passphrase (min 8 chars)">
+          <button class="btn-primary" data-action="exportSnapshot">Export Snapshot</button>
+        </div>
+        <div class="form-row">
+          <input type="file" id="backupRestoreFile" class="flex-1">
+          <input type="password" id="backupRestorePass" placeholder="Restore passphrase" class="flex-1">
+          <button class="btn-danger" data-action="restoreSnapshot">Restore Snapshot</button>
+        </div>
+        <p class="card-note">Exports create an encrypted file you can store elsewhere. Restores require a fresh unlock afterward.</p>
+        <div class="section-divider"></div>
+        <div class="section-title">Start over on this machine</div>
+        <p class="helper-text">Wipe the local Sigillum data directory and return this daemon to first-run setup.</p>
+        <div class="form-row">
+          <input type="text" id="backupResetConfirm" placeholder="Type RESET LOCAL SIGILLUM DATA to reset">
+          <button class="btn-danger" data-action="resetLocalData" data-arg0="backupResetConfirm">Reset local data</button>
+        </div>
+      </div>
+
+      <div class="card hidden" id="auditCard" data-workspace-section="security">
+        <div class="card-head">
+          <h2>Audit trail</h2>
+        </div>
+        <p class="helper-text">Recent local audit events from this daemon process and its persisted audit log.</p>
+        <div id="auditList" class="text-meta">No events yet.</div>
+      </div>
+
+      <!-- ────────────────────────── System ───────────────────────── -->
+
+      <div class="card hidden" id="diagCard" data-workspace-section="system">
+        <div class="card-head">
+          <h2>Diagnostics</h2>
+        </div>
+        <p class="helper-text">Low-level daemon health, queue, audit, and runtime policy details.</p>
+        <div class="stats stat-tiles" id="diagGrid">
+          <div class="stat"><div class="value">-</div><div class="label">Version</div></div>
+        </div>
+      </div>
+
+      <div class="card hidden" id="guideCard" data-workspace-section="system">
+        <div class="card-head">
+          <h2>What Sigillum does today</h2>
+        </div>
+        <p class="helper-text">A local vault plus an Ethereum operator console. Treat the workspace sections as distinct jobs, not one scrolling checklist.</p>
+        <div class="guide-grid">
+          <div class="guide-block">
+            <div class="guide-block-title">1. Treasury</div>
+            <p>Watch tracked balances, routing readiness, policy posture, and receive-address allocation in one roll-up.</p>
+          </div>
+          <div class="guide-block">
+            <div class="guide-block-title">2. Wallets</div>
+            <p>Save provider profiles, then choose a wallet family: stealth wallets for tracked deposits and queue work, or seed/xpub receive wallets for address visibility.</p>
+          </div>
+          <div class="guide-block">
+            <div class="guide-block-title">3. Operations</div>
+            <p>Run inventory discovery, tracked deposits, queue processing, and maintenance cycles. Operator workflows currently run on stealth wallets.</p>
+          </div>
+          <div class="guide-block">
+            <div class="guide-block-title">4. Secrets</div>
+            <p>Store connection keys and encrypted secrets, organize compartments, and move values between compartments when needed.</p>
+          </div>
+          <div class="guide-block">
+            <div class="guide-block-title">5. Security</div>
+            <p>Manage hardware keys, export encrypted snapshots, and inspect the audit trail before anything sensitive.</p>
+          </div>
+        </div>
+        <div class="section-divider"></div>
+        <div class="section-title">Shipped now vs later roadmap</div>
+        <div class="guide-grid">
+          <div class="guide-block">
+            <div class="guide-block-title">Available now</div>
+            <ul class="guide-list">
+              <li>Local passphrase and FIDO2 vault workflows</li>
+              <li>Flat connection-key and encrypted-secret storage</li>
+              <li>EVM provider profiles and stealth wallet profiles</li>
+              <li>Xpub receive-branch export and public address preview</li>
+              <li>Stealth deposits, queue processing, maintenance, snapshots, audit, and diagnostics</li>
+            </ul>
+          </div>
+          <div class="guide-block">
+            <div class="guide-block-title">Not implemented yet</div>
+            <ul class="guide-list">
+              <li>Xpub discovery, hidden sponsor or treasury branches, and xpub sweeping automation</li>
+              <li>Hierarchical secret or wallet tree browsing</li>
+              <li>Remote multi-host control and aggregated remote audit workflows</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </main>
+
+    <footer>
+      Sigillum local daemon &mdash; hardware-backed secret management &mdash;
+      <a href="https://github.com/caelator/sigillum">GitHub</a>
+    </footer>
   </div>
+</div>
 
-  <div class="card hidden" id="nextStepCard" data-workspace-section="overview">
-    <div class="eyebrow">Recommended next move</div>
-    <h2 id="nextStepTitle">Finish the essentials before deeper operator work</h2>
-    <p class="helper-text" id="nextStepSummary">Sigillum will keep this guidance updated as the workspace becomes more complete.</p>
-    <div class="next-step-grid" id="nextStepList"></div>
-    <div class="card-actions">
-      <button class="btn-primary" id="nextStepPrimaryBtn" data-action="nextStepPrimaryAction">Open next step</button>
-      <button class="btn-ghost" id="nextStepSecondaryBtn" data-action="nextStepSecondaryAction">Open supporting section</button>
-    </div>
-    <div class="card-note" id="nextStepNote">This card suggests the next highest-leverage action while leaving the rest of the operator surface available below.</div>
-  </div>
-
-  <div class="card hidden" id="guideCard" data-workspace-section="overview">
-    <div class="eyebrow">Operator guide</div>
-    <h2>What Sigillum does today</h2>
-    <p class="helper-text">
-      Sigillum is currently a local vault plus an Ethereum operator console. Use the workspace modes above as distinct jobs, not as a single scrolling checklist.
-    </p>
-    <div class="guide-grid">
-      <div class="guide-block">
-        <div class="guide-block-title">1. Access</div>
-        <p>Set up or unlock the local vault, then verify your recovery path before you do anything sensitive.</p>
-      </div>
-      <div class="guide-block">
-        <div class="guide-block-title">2. Vault</div>
-        <p>Store connection keys and encrypted secrets, organize compartments, and move values between compartments when needed.</p>
-      </div>
-      <div class="guide-block">
-        <div class="guide-block-title">3. Wallets</div>
-        <p>Save provider profiles, then choose a wallet family: stealth wallets for tracked deposits and queue work, or xpub receive wallets for public receive-tree export and address previews.</p>
-      </div>
-      <div class="guide-block">
-        <div class="guide-block-title">4. Operations</div>
-        <p>Run tracked deposits, queue processing, and maintenance. These operator workflows are currently implemented for stealth wallets.</p>
-      </div>
-      <div class="guide-block">
-        <div class="guide-block-title">5. Recovery</div>
-        <p>Manage hardware keys, export encrypted snapshots, inspect the audit trail, and verify daemon health from one place.</p>
-      </div>
-    </div>
-    <div class="section-divider"></div>
-    <div class="section-title">Shipped now vs later roadmap</div>
-    <div class="guide-grid">
-      <div class="guide-block">
-        <div class="guide-block-title">Available now</div>
-        <ul class="guide-list">
-          <li>Local passphrase and FIDO2 vault workflows</li>
-          <li>Flat connection-key and encrypted-secret storage</li>
-          <li>EVM provider profiles and stealth wallet profiles</li>
-          <li>Initial xpub receive-branch export and public address preview</li>
-          <li>Stealth deposits, queue processing, maintenance, snapshots, audit, and diagnostics</li>
-        </ul>
-      </div>
-      <div class="guide-block">
-        <div class="guide-block-title">Not implemented yet</div>
-        <ul class="guide-list">
-          <li>Xpub discovery, hidden sponsor or treasury branches, and xpub sweeping automation</li>
-          <li>Hierarchical secret or wallet tree browsing</li>
-          <li>Remote multi-host control and aggregated remote audit workflows</li>
-        </ul>
-      </div>
-    </div>
-  </div>
-
-  <!-- Compartment Management Card (only when unlocked) -->
-  <div class="card hidden" id="compartmentCard" data-nav-label="Compartments" data-workspace-section="vault">
-    <div class="eyebrow">Vault</div>
-    <h2>Unlocked compartments</h2>
-    <p class="helper-text">These are the compartments currently available in this browser session. Switching changes which compartment new operations target.</p>
-    <div id="compartmentList"></div>
-  </div>
-
-  <!-- Push-Down Card (only when all compartments unlocked) -->
-  <div class="card hidden" id="pushCard" data-nav-label="Push" data-workspace-section="vault">
-    <div class="eyebrow">Vault</div>
-    <h2>Move a secret between compartments</h2>
-    <p class="text-meta-sm" style="margin-bottom:12px;">
-      Copy a secret from one compartment to another. The copy is indistinguishable from manual entry.
-    </p>
-    <div class="form-row">
-      <select id="pushFrom" class="input-wide"></select>
-      <select id="pushTo" class="input-wide"></select>
-    </div>
-    <div class="form-row">
-      <input type="text" id="pushKey" placeholder="Secret key name">
-      <input type="text" id="pushNewKey" placeholder="New name (optional)">
-    </div>
-    <div class="form-row">
-      <select id="pushTier" class="input-wide">
-        <option value="2">Tier 2 (encrypted)</option>
-        <option value="1">Tier 1 (API key)</option>
-      </select>
-      <button class="btn-primary" data-action="pushSecret">Push</button>
-    </div>
-  </div>
-
-  <!-- API Keys Card -->
-  <div class="card" id="apiKeysCard" data-nav-label="API Keys" data-workspace-section="vault">
-    <div class="eyebrow">Vault</div>
-    <h2>Connection keys</h2>
-    <p class="helper-text">Store RPC tokens and similar operational keys that Sigillum needs to use directly during daemon workflows.</p>
-    <div class="form-row">
-      <input type="text" id="apiKeyName" placeholder="Key name">
-      <input type="password" id="apiKeyValue" placeholder="Value">
-      <button class="btn-primary" data-action="setApiKey">Store API key</button>
-    </div>
-    <ul class="key-list" id="apiKeyList"></ul>
-  </div>
-
-  <!-- Secrets Card -->
-  <div class="card" id="secretsCard" data-nav-label="Secrets" data-workspace-section="vault">
-    <div class="eyebrow">Vault</div>
-    <h2>Encrypted secrets</h2>
-    <p class="helper-text">Store values that should stay encrypted at rest and require an unlocked compartment to view or modify.</p>
-    <div id="secretsLocked" class="hidden text-meta">
-      Vault is locked. Unlock to manage secrets.
-    </div>
-    <div id="secretsUnlocked">
-      <div class="form-row">
-        <input type="text" id="secretName" placeholder="Secret name">
-        <input type="password" id="secretValue" placeholder="Value">
-        <button class="btn-primary" data-action="setSecret">Store secret</button>
-      </div>
-      <ul class="key-list" id="secretList"></ul>
-    </div>
-  </div>
-
-  <!-- Profiles Card -->
-  <div class="card hidden" id="profilesCard" data-nav-label="Profiles" data-workspace-section="wallets">
-    <div class="eyebrow">Wallets</div>
-    <h2>Providers and stealth wallets</h2>
-    <p class="helper-text">
-      Start by saving reusable provider settings, then bind stealth wallet labels to those providers.
-      Stealth wallets power tracked deposits, sweeps, queue jobs, and maintenance today.
-    </p>
-
-    <div class="section-title">EVM Provider Profiles</div>
-    <div class="form-row">
-      <input type="text" id="providerName" placeholder="Profile name">
-      <input type="text" id="providerRpcUrl" placeholder="RPC URL">
-      <input type="number" id="providerChainId" placeholder="Chain ID" value="1" class="input-compact">
-    </div>
-    <div class="form-row">
-      <input type="text" id="providerAuthTokenKey" placeholder="Auth token key (optional)">
-      <input type="number" id="providerCompartmentId" placeholder="Compartment (optional)" class="input-wider">
-    </div>
-    <div class="form-row">
-      <input type="text" id="providerMaxPriorityFee" placeholder="Max priority fee hex (optional)">
-      <input type="text" id="providerMaxFee" placeholder="Max fee hex (optional)">
-    </div>
-    <div class="form-row">
-      <input type="number" id="providerNativeGasLimit" placeholder="Native gas limit (optional)">
-      <input type="number" id="providerErc20GasLimit" placeholder="ERC-20 gas limit (optional)">
-      <button class="btn-primary" data-action="upsertProviderProfile">Save Provider</button>
-    </div>
-    <div id="providerProfileList"></div>
-
-    <div class="section-divider"></div>
-
-    <div class="section-title">Stealth Wallet Profiles</div>
-    <div class="form-row">
-      <input type="text" id="walletProfileName" placeholder="Profile name">
-      <input type="text" id="walletLabel" placeholder="Wallet label">
-      <input type="text" id="walletShortName" placeholder="Short name (optional)">
-    </div>
-    <div class="form-row">
-      <select id="walletProviderProfile"></select>
-      <input type="number" id="walletCompartmentId" placeholder="Compartment (optional)" class="input-wider">
-      <input type="number" id="walletChainId" placeholder="Chain ID (optional)" class="input-mid">
-    </div>
-    <div class="form-row">
-      <input type="text" id="walletDefaultDestination" placeholder="Default destination address (optional)">
-      <button class="btn-primary" data-action="upsertWalletProfile">Save Wallet</button>
-    </div>
-    <div id="walletProfileList"></div>
-  </div>
-
-  <div class="card hidden" id="xpubCard" data-nav-label="Xpub Wallets" data-workspace-section="wallets">
-    <div class="eyebrow">Wallets</div>
-    <h2>Xpub receive wallets</h2>
-    <p class="helper-text">
-      This initial xpub slice exports a public receive branch from a saved profile and previews derived receive addresses. It does not yet implement discovery, treasury branches, or sweeping automation.
-    </p>
-
-    <div class="section-title">Xpub Receive Profiles</div>
-    <div class="form-row">
-      <input type="text" id="xpubProfileName" placeholder="Profile name">
-      <input type="number" id="xpubProjectAccount" placeholder="Project account" value="0" class="input-mid">
-      <select id="xpubProviderProfile"></select>
-    </div>
-    <div class="form-row">
-      <input type="number" id="xpubCompartmentId" placeholder="Compartment (optional)" class="input-wider">
-      <input type="number" id="xpubChainId" placeholder="Chain ID (optional)" class="input-mid">
-      <input type="text" id="xpubDefaultDestination" placeholder="Default destination address (optional)">
-    </div>
-    <div class="form-row">
-      <button class="btn-primary" data-action="upsertXpubWalletProfile">Save Xpub Profile</button>
-    </div>
-    <div id="xpubWalletProfileList"></div>
-
-    <div class="section-divider"></div>
-
-    <div class="section-title">Seed Phrase Wallets</div>
-    <p class="helper-text">Import 12-word or 24-word BIP-39 Ethereum wallets for local receive-tree visibility. The phrase is stored as an encrypted vault secret; the profile list keeps only public receive metadata.</p>
-    <div class="form-row">
-      <input type="text" id="seedProfileName" placeholder="Profile name">
-      <input type="text" id="seedProfileLabel" placeholder="Display label (optional)">
-      <input type="number" id="seedProjectAccount" placeholder="Account" value="0" class="input-mid">
-    </div>
-    <div class="form-row">
-      <select id="seedProviderProfile"></select>
-      <input type="number" id="seedCompartmentId" placeholder="Compartment (optional)" class="input-wider">
-      <input type="number" id="seedChainId" placeholder="Chain ID (optional)" class="input-mid">
-    </div>
-    <div class="form-row">
-      <textarea id="seedMnemonic" placeholder="Seed phrase (12 or 24 words)"></textarea>
-    </div>
-    <div class="form-row">
-      <input type="password" id="seedMnemonicPassphrase" placeholder="BIP-39 passphrase (optional)">
-      <input type="text" id="seedDefaultDestination" placeholder="Default destination address (optional)">
-      <button class="btn-primary" data-action="upsertSeedWalletProfile">Import Seed Wallet</button>
-    </div>
-    <div id="seedWalletProfileList"></div>
-
-    <div class="section-divider"></div>
-
-    <div class="section-title">Export Receive Branch</div>
-    <p class="helper-text">Choose a saved xpub wallet profile to export its public receive branch. The exported xpub can derive receive addresses without touching private key material.</p>
-    <div class="form-row">
-      <select id="xpubPreviewProfile"></select>
-      <button class="btn-primary" data-action="exportSelectedXpubWallet">Export Xpub</button>
-    </div>
-    <div id="xpubExportResult" class="result-box hidden"></div>
-
-    <div class="section-divider"></div>
-
-    <div class="section-title">Preview Receive Addresses</div>
-    <p class="helper-text">Paste or reuse an exported receive-branch xpub, then derive a receive address at a specific index.</p>
-    <div class="form-row">
-      <input type="text" id="xpubReceiveXpub" placeholder="Receive-branch xpub">
-      <input type="number" id="xpubPreviewIndex" placeholder="Index" value="0" class="input-mid">
-      <button class="btn-ghost" data-action="previewXpubReceiveAddress">Derive Address</button>
-    </div>
-    <div id="xpubPreviewResult" class="result-box hidden"></div>
-  </div>
-
-  <!-- Treasury Card -->
-  <div class="card hidden" id="treasuryCard" data-nav-label="Treasury" data-workspace-section="operations">
-    <div class="eyebrow">Operations</div>
-    <h2>Treasury</h2>
-    <p class="helper-text">
-      Roll-up of tracked addresses, per-chain balances, wallet groups, routing readiness, and outstanding risk and plan work, plus treasury policy controls and receive-address allocation.
-    </p>
-
-    <div class="stats" id="treasuryOverviewStats"></div>
-    <p class="text-meta" id="treasuryGeneratedAt"></p>
-    <div class="form-row">
-      <button class="btn-ghost" data-action="refreshTreasuryOverview">Refresh Overview</button>
-    </div>
-
-    <div class="section-divider"></div>
-    <div class="section-title">Chains</div>
-    <div id="treasuryChainList"></div>
-
-    <div class="section-divider"></div>
-    <div class="section-title">Wallet Groups</div>
-    <div id="treasuryGroupList"></div>
-
-    <div class="section-divider"></div>
-    <div class="section-title">Treasury Routing</div>
-    <div id="treasuryRoutingList"></div>
-
-    <div class="section-divider"></div>
-    <div class="section-title">Risk And Plans</div>
-    <div id="treasuryRiskPlanList"></div>
-
-    <div class="section-divider"></div>
-    <div class="section-title">Treasury Policy</div>
-    <p class="helper-text">Constrain consolidation plans with an allow-list of destinations, native value caps, and a simulation requirement. Plans that violate the policy are flagged before any queue work.</p>
-    <div id="treasuryPolicyList"></div>
-    <div class="form-row">
-      <label class="checkbox-row">
-        <input type="checkbox" id="treasuryPolicyEnabled">
-        Policy enabled
-      </label>
-      <label class="checkbox-row">
-        <input type="checkbox" id="treasuryPolicyRequireSim" checked>
-        Require simulation
-      </label>
-    </div>
-    <textarea id="treasuryPolicyDestinations" placeholder="Allowed destinations, one per line: 0xADDRESS or 0xADDRESS:label"></textarea>
-    <div class="form-row">
-      <input type="text" id="treasuryPolicyMaxStepEth" placeholder="Max per-step native (ETH, optional)">
-      <input type="text" id="treasuryPolicyMaxPlanEth" placeholder="Max per-plan native (ETH, optional)">
-      <button class="btn-primary" data-action="updateTreasuryPolicy">Save Policy</button>
-    </div>
-
-    <div class="section-divider"></div>
-    <div class="section-title">Receive Addresses</div>
-    <p class="helper-text">Allocate a dedicated receive address per wallet profile and purpose, and rotate an address when it should stop being handed out. Rotated addresses stay tracked as retired.</p>
-    <div id="treasuryReceiveList"></div>
-    <div class="form-row">
-      <input type="text" id="treasuryReceiveProfile" placeholder="Wallet profile">
-      <input type="text" id="treasuryReceivePurpose" placeholder="Purpose (e.g. invoices)">
-      <input type="text" id="treasuryReceiveLabel" placeholder="Label (optional)">
-      <button class="btn-primary" data-action="allocateTreasuryReceiveAddress">Allocate Address</button>
-    </div>
-  </div>
-
-  <!-- Wallet Operations Card -->
-  <div class="card hidden" id="inventoryCard" data-nav-label="Inventory" data-workspace-section="operations">
-    <div class="eyebrow">Operations</div>
-    <h2>Wallet inventory</h2>
-    <p class="helper-text">
-      Run read-only discovery, inspect stranded value and risk findings, and generate dry-run consolidation plans before any queue work is allowed.
-    </p>
-
-    <div class="section-title">Chain Profiles</div>
-    <div class="form-row">
-      <input type="text" id="chainProfileName" placeholder="Chain profile name">
-      <input type="text" id="chainProfileFamily" placeholder="Family (evm, bitcoin, solana)">
-      <input type="number" id="chainProfileId" placeholder="Chain ID (optional)" class="input-mid">
-    </div>
-    <div class="form-row">
-      <input type="text" id="chainProfileProvider" placeholder="Provider profile (optional)">
-      <input type="text" id="chainProfileNativeSymbol" placeholder="Native symbol (optional)">
-      <button class="btn-primary" data-action="upsertChainProfile">Save Chain</button>
-    </div>
-    <div id="chainProfileList"></div>
-
-    <div class="section-divider"></div>
-    <div class="section-title">EVM Discovery</div>
-    <div class="form-row">
-      <input type="text" id="inventoryWalletFamily" placeholder="Wallet family (optional)">
-      <input type="text" id="inventoryWalletProfile" placeholder="Wallet profile (optional)">
-      <input type="text" id="inventoryProviderProfile" placeholder="Provider profile (optional)">
-    </div>
-    <div class="form-row">
-      <input type="number" id="inventoryGapLimit" placeholder="Gap limit" value="20" class="input-mid">
-      <input type="number" id="inventoryMaxIndex" placeholder="Max index" value="200" class="input-mid">
-      <input type="text" id="inventoryTokenAddress" placeholder="ERC-20 token address (optional)">
-      <button class="btn-primary" data-action="scanInventoryEvm">Scan EVM</button>
-    </div>
-    <div class="form-row">
-      <input type="text" id="inventoryWatchAddress" placeholder="Watch address (optional)">
-      <input type="text" id="inventoryWatchLabel" placeholder="Watch label (optional)">
-      <label class="checkbox-row">
-        <input type="checkbox" id="inventoryIncludeWatchBook" checked>
-        Include saved watch book
-      </label>
-    </div>
-    <textarea id="inventoryWatchAddresses" placeholder="Bulk watch addresses, one per line: address[:label] or address,label"></textarea>
-    <div class="form-row">
-      <input type="text" id="watchBookAddress" placeholder="Saved watch address">
-      <input type="text" id="watchBookLabel" placeholder="Saved label">
-      <input type="text" id="watchBookTags" placeholder="Tags, comma-separated">
-      <label class="checkbox-row">
-        <input type="checkbox" id="watchBookEnabled" checked>
-        Enabled
-      </label>
-      <button class="btn-ghost" data-action="upsertWatchAddressBookEntry">Save Watch</button>
-      <button class="btn-ghost" data-action="upsertBulkWatchAddressBookEntries">Save Bulk</button>
-    </div>
-    <div id="watchAddressBookList"></div>
-    <div class="form-row">
-      <input type="text" id="inventoryTokenDiscoveryFromBlock" placeholder="ERC-20 discovery from block">
-      <input type="text" id="inventoryTokenDiscoveryToBlock" placeholder="ERC-20 discovery to block (optional)">
-      <input type="number" id="inventoryTokenDiscoveryLimit" placeholder="Token discovery limit" value="250" class="input-wide">
-      <label class="checkbox-row">
-        <input type="checkbox" id="inventoryDiscoverErc20Transfers">
-        Discover ERC-20 transfer logs
-      </label>
-    </div>
-    <div class="form-row">
-      <input type="text" id="inventoryAllowanceSpender" placeholder="Allowance spender address (optional)">
-      <input type="number" id="inventoryAllowanceLimit" placeholder="Allowance probe limit" value="250" class="input-wide">
-      <label class="checkbox-row">
-        <input type="checkbox" id="inventoryDiscoverErc20Allowances">
-        Probe ERC-20 allowances
-      </label>
-    </div>
-    <div class="form-row">
-      <input type="text" id="inventoryPermit2Contract" placeholder="Permit2 contract (default canonical)">
-      <input type="text" id="inventoryPermit2Spender" placeholder="Permit2 spender address">
-      <input type="number" id="inventoryPermit2AllowanceLimit" placeholder="Permit2 probe limit" value="250" class="input-wide">
-      <label class="checkbox-row">
-        <input type="checkbox" id="inventoryDiscoverPermit2Allowances">
-        Probe Permit2 allowances
-      </label>
-    </div>
-    <div class="form-row">
-      <input type="text" id="inventoryNftDiscoveryFromBlock" placeholder="NFT discovery from block">
-      <input type="text" id="inventoryNftDiscoveryToBlock" placeholder="NFT discovery to block (optional)">
-      <input type="number" id="inventoryNftDiscoveryLimit" placeholder="NFT discovery limit" value="100" class="input-wide">
-      <label class="checkbox-row">
-        <input type="checkbox" id="inventoryDiscoverErc721Transfers">
-        Discover ERC-721 transfers
-      </label>
-      <label class="checkbox-row">
-        <input type="checkbox" id="inventoryDiscoverErc1155Transfers">
-        Discover ERC-1155 transfers
-      </label>
-    </div>
-    <div class="form-row">
-      <input type="text" id="inventoryNftOperator" placeholder="NFT operator address (optional)">
-      <input type="number" id="inventoryNftOperatorApprovalLimit" placeholder="NFT approval probe limit" value="250" class="input-wide">
-      <label class="checkbox-row">
-        <input type="checkbox" id="inventoryDiscoverNftOperatorApprovals">
-        Probe NFT operator approvals
-      </label>
-    </div>
-    <div id="inventoryJobList"></div>
-    <button class="btn-ghost" data-action="exportInventoryReport">Export Report</button>
-    <div id="inventoryAddressList"></div>
-    <div id="inventoryHoldingList"></div>
-
-    <div class="section-divider"></div>
-    <div class="section-title">Risk And Plans</div>
-    <div class="form-row">
-      <input type="text" id="riskCatalogAddress" placeholder="Spender/operator address">
-      <input type="text" id="riskCatalogLabel" placeholder="Risk label">
-      <select id="riskCatalogLevel" class="input-mid">
-        <option value="trusted">trusted</option>
-        <option value="low">low</option>
-        <option value="medium">medium</option>
-        <option value="high">high</option>
-        <option value="critical">critical</option>
-      </select>
-    </div>
-    <div class="form-row">
-      <input type="text" id="riskCatalogNote" placeholder="Catalog note (optional)">
-      <button class="btn-ghost" data-action="upsertRiskCatalogEntry">Save Risk Label</button>
-    </div>
-    <div id="riskCatalogList"></div>
-    <div class="form-row">
-      <input type="text" id="planDestinationAddress" placeholder="Consolidation destination address">
-      <button class="btn-ghost" data-action="loadRiskFindings">Refresh Risks</button>
-      <button class="btn-primary" data-action="generateConsolidationPlan">Generate Plan</button>
-    </div>
-    <div id="riskFindingList"></div>
-    <div id="consolidationPlanList"></div>
-  </div>
-
-  <!-- Deposits Card -->
-  <div class="card hidden" id="depositsCard" data-nav-label="Deposits" data-workspace-section="operations">
-    <div class="eyebrow">Operations</div>
-    <h2>Deposits</h2>
-    <p class="helper-text">
-      Generate tracked deposit addresses from wallet profiles, refresh detected balances, and enqueue
-      sweeps without leaving the local daemon.
-    </p>
-
-    <div class="section-title">Create Native Deposit</div>
-    <div class="form-row">
-      <select id="depositNativeWalletProfile"></select>
-      <input type="text" id="depositNativeExpected" placeholder="Expected value hex (optional)">
-      <input type="text" id="depositNativeMinSweep" placeholder="Min sweep value hex (optional)">
-    </div>
-    <div class="form-row">
-      <input type="text" id="depositNativeDestination" placeholder="Sweep destination (optional)">
-      <input type="text" id="depositNativeNote" placeholder="Note (optional)">
-      <label class="checkbox-row">
-        <input type="checkbox" id="depositNativeAutoQueue" checked>
-        Auto queue sweep
-      </label>
-      <button class="btn-primary" data-action="createNativeDeposit">Create Native</button>
-    </div>
-
-    <div class="section-divider"></div>
-
-    <div class="section-title">Create ERC-20 Deposit</div>
-    <div class="form-row">
-      <select id="depositErc20WalletProfile"></select>
-      <input type="text" id="depositErc20TokenAddress" placeholder="Token address">
-      <input type="text" id="depositErc20Expected" placeholder="Expected amount hex (optional)">
-    </div>
-    <div class="form-row">
-      <input type="text" id="depositErc20MinSweep" placeholder="Min sweep amount hex (optional)">
-      <input type="text" id="depositErc20Destination" placeholder="Sweep destination (optional)">
-      <input type="text" id="depositErc20Note" placeholder="Note (optional)">
-    </div>
-    <div class="form-row">
-      <label class="checkbox-row">
-        <input type="checkbox" id="depositErc20AutoQueue" checked>
-        Auto queue sweep
-      </label>
-      <button class="btn-primary" data-action="createErc20Deposit">Create ERC-20</button>
-    </div>
-
-    <div class="section-divider"></div>
-
-    <div class="section-title">Scan ERC-5564 Announcements</div>
-    <div class="form-row">
-      <select id="depositScanWalletProfile"></select>
-      <input type="text" id="depositScanFromBlock" placeholder="From block tag or 0x block">
-      <input type="text" id="depositScanToBlock" placeholder="To block (optional, latest)">
-      <input type="number" id="depositScanLimit" placeholder="Scan limit" value="1000" class="input-mid">
-    </div>
-    <div class="form-row">
-      <input type="text" id="depositScanTokenAddress" placeholder="Token address (optional)">
-      <input type="text" id="depositScanMinSweep" placeholder="Min sweep amount hex (optional)">
-      <input type="text" id="depositScanDestination" placeholder="Sweep destination (optional)">
-    </div>
-    <div class="form-row">
-      <input type="text" id="depositScanNote" placeholder="Note (optional)">
-      <label class="checkbox-row">
-        <input type="checkbox" id="depositScanAutoQueue" checked>
-        Auto queue sweep
-      </label>
-      <button class="btn-primary" data-action="scanEthStealthAnnouncements">Scan Announcements</button>
-    </div>
-
-    <div class="section-divider"></div>
-
-    <div class="form-row">
-      <input type="number" id="depositRefreshLimit" placeholder="Refresh limit" value="50" class="input-mid">
-      <label class="checkbox-row">
-        <input type="checkbox" id="depositRefreshAutoEnqueue" checked>
-        Auto enqueue sweeps
-      </label>
-      <button class="btn-ghost" data-action="refreshDepositRegistry">Refresh Deposits</button>
-    </div>
-    <div id="depositRefreshResult" class="result-box hidden"></div>
-    <div id="depositList"></div>
-  </div>
-
-  <!-- Queue Card -->
-  <div class="card hidden" id="queueCard" data-nav-label="Queue" data-workspace-section="operations">
-    <div class="eyebrow">Operations</div>
-    <h2>Queue</h2>
-    <p class="helper-text">
-      Inspect queued sends and sweep jobs, then process a batch or rerun an individual job.
-    </p>
-    <div class="form-row">
-      <input type="number" id="queueProcessLimit" placeholder="Process limit" value="20" class="input-mid">
-      <button class="btn-primary" data-action="processQueueBatch">Process Queue</button>
-      <button class="btn-ghost" data-action="loadQueueJobs">Refresh Queue</button>
-    </div>
-    <p class="card-note">Processing executes pending local jobs immediately with the current daemon state, then refreshes the list below.</p>
-    <div id="queueProcessResult" class="result-box hidden"></div>
-    <div id="queueList"></div>
-  </div>
-
-  <!-- Maintenance Card -->
-  <div class="card hidden" id="maintenanceCard" data-nav-label="Maintenance" data-workspace-section="operations">
-    <div class="eyebrow">Operations</div>
-    <h2>Maintenance</h2>
-    <p class="helper-text">
-      Run one local operator cycle that refreshes deposits, auto-enqueues eligible sweeps, and
-      drains the queue using the same policy settings the daemon already supports.
-    </p>
-    <div class="form-row">
-      <input type="number" id="maintenanceDepositLimit" placeholder="Deposit refresh limit" value="50" class="input-wide">
-      <input type="number" id="maintenanceQueueLimit" placeholder="Queue process limit" value="20" class="input-wide">
-      <label class="checkbox-row">
-        <input type="checkbox" id="maintenanceAutoEnqueue" checked>
-        Auto enqueue sweeps
-      </label>
-      <button class="btn-primary" data-action="runMaintenanceCycle">Run Maintenance</button>
-    </div>
-    <p class="card-note">A maintenance run refreshes deposits, auto-enqueues eligible sweeps, and processes queued jobs as one local operator cycle.</p>
-    <div id="maintenanceResult" class="result-box hidden"></div>
-  </div>
-
-  <!-- FIDO2 Management Card -->
-  <div class="card hidden" id="fido2Card" data-nav-label="FIDO2" data-workspace-section="recovery">
-    <div class="eyebrow">Recovery & Access</div>
-    <h2>Hardware keys</h2>
-    <div id="fido2DeviceStatus" class="info-box">Checking for devices...</div>
-    <div id="fido2RegisterSection">
-      <p class="text-meta" style="margin-bottom:10px;">
-        Register another FIDO2 hardware key. All compartments must be unlocked first so Sigillum can safely reshare the vault material.
-      </p>
-      <div class="info-box" style="margin-bottom:12px;">
-        Fresh backup keys may not have a FIDO2 PIN yet. Touch-only enrollment works when the authenticator allows it. Set a PIN here only if you want the inserted key to require one.
-      </div>
-      <div class="form-row">
-        <input type="password" id="fido2NewPin" placeholder="New PIN for inserted key (min 4 chars)">
-        <input type="password" id="fido2NewPinConfirm" placeholder="Confirm new PIN">
-        <button class="btn-ghost" data-action="fido2SetNewPin">Set key PIN</button>
-      </div>
-      <div class="form-row">
-        <input type="password" id="fido2RegPin" placeholder="Current FIDO2 PIN if this key requires one">
-        <input type="text" id="fido2RegLabel" placeholder="Key label">
-        <button class="btn-primary" data-action="fido2Register">Register Key</button>
-      </div>
-      <div class="form-row-center">
-        <label class="checkbox-label">
-          <input type="checkbox" id="fido2Poison" data-action="togglePoisonWarning"> Poison key (duress)
-        </label>
-        <input type="text" id="fido2SkipKeys" placeholder="Skip keys (comma-separated labels)">
-      </div>
-      <div id="fido2PoisonWarning" class="hidden poison-warning">
-        This key will contain RANDOM shard data. Including it during unlock causes silent failure.
-        No data is destroyed. Exclude it and retry with real keys to unlock normally.
-      </div>
-    </div>
-    <div id="fido2KeyListSection" style="margin-top:14px;"></div>
-  </div>
-
-  <!-- Snapshot Backup Card -->
-  <div class="card hidden" id="backupCard" data-nav-label="Snapshots" data-workspace-section="recovery">
-    <div class="eyebrow">Recovery & Access</div>
-    <h2>Encrypted snapshots</h2>
-    <p class="text-meta" style="margin-bottom:12px;">
-      Export the local Sigillum data directory as a passphrase-encrypted snapshot, or restore one.
-      Restoring replaces on-disk state and logs you out.
-    </p>
-    <div class="form-row">
-      <input type="password" id="backupExportPass" placeholder="Export passphrase (min 8 chars)">
-      <button class="btn-primary" data-action="exportSnapshot">Export Snapshot</button>
-    </div>
-    <div class="form-row">
-      <input type="file" id="backupRestoreFile" style="flex:1;">
-      <input type="password" id="backupRestorePass" placeholder="Restore passphrase" style="flex:1;">
-      <button class="btn-danger" data-action="restoreSnapshot">Restore Snapshot</button>
-    </div>
-    <p class="card-note">Exports create an encrypted file you can store elsewhere. Restores replace this daemon data directory and require a fresh unlock afterward.</p>
-    <div class="section-divider"></div>
-    <div class="section-title">Start over on this machine</div>
-    <p class="helper-text">Use this only when you intentionally want to wipe the local Sigillum data directory and return this daemon to first-run setup.</p>
-    <div class="form-row">
-      <input type="text" id="backupResetConfirm" placeholder="Type RESET LOCAL SIGILLUM DATA to reset">
-      <button class="btn-danger" data-action="resetLocalData" data-arg0="backupResetConfirm">Reset local data</button>
-    </div>
-  </div>
-
-  <!-- Audit Card -->
-  <div class="card hidden" id="auditCard" data-nav-label="Audit" data-workspace-section="recovery">
-    <div class="eyebrow">Recovery & Access</div>
-    <h2>Audit trail</h2>
-    <p class="helper-text">Recent local audit events from this daemon process and its persisted audit log.</p>
-    <div id="auditList" class="text-meta">No events yet.</div>
-  </div>
-
-  <!-- Diagnostics Card -->
-  <div class="card hidden" id="diagCard" data-nav-label="Diagnostics" data-workspace-section="recovery">
-    <div class="eyebrow">Recovery & Access</div>
-    <h2>Diagnostics</h2>
-    <p class="helper-text">Low-level daemon health, queue, audit, and runtime policy details for debugging and operations.</p>
-    <div class="stats" id="diagGrid">
-      <div class="stat"><div class="value">-</div><div class="label">Version</div></div>
-    </div>
-  </div>
-</main>
-
-<footer>
-  Sigillum local daemon &mdash; hardware-backed secret management &mdash;
-  <a href="https://github.com/caelator/sigillum">GitHub</a>
-</footer>
+<div id="toastStack" class="toast-stack" aria-live="polite"></div>

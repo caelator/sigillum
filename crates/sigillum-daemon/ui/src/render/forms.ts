@@ -24,7 +24,7 @@ export function renderEntityList<T>(
   const el = document.getElementById(containerId);
   if (!el) return;
   if (!items.length) {
-    el.innerHTML = '<p class="helper-text">' + esc(emptyMsg) + "</p>";
+    el.innerHTML = '<p class="empty-state">' + esc(emptyMsg) + "</p>";
     return;
   }
   let html = '<ul class="entity-list">';

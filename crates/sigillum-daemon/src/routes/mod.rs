@@ -346,6 +346,10 @@ fn profile_routes() -> AppRouter {
             post(profiles::eth_seed_wallet_profiles_upsert),
         )
         .route(
+            "/api/profiles/eth-seed/create",
+            post(profiles::eth_seed_wallet_profiles_create),
+        )
+        .route(
             "/api/profiles/eth-seed/delete",
             post(profiles::eth_seed_wallet_profiles_delete),
         )

@@ -459,6 +459,31 @@ impl Validate for crate::request::EthSeedWalletProfileUpsertRequest {
     }
 }
 
+impl Validate for crate::request::EthSeedWalletCreateRequest {
+    fn validate(&self) -> Result<(), String> {
+        check_len("name", &self.name, MAX_LABEL)?;
+        check_optional_len("label", &self.label, MAX_LABEL)?;
+        if let Some(word_count) = self.word_count
+            && word_count != 12
+            && word_count != 24
+        {
+            return Err("word_count must be 12 or 24".into());
+        }
+        check_optional_len(
+            "mnemonic_passphrase",
+            &self.mnemonic_passphrase,
+            MAX_PASSPHRASE,
+        )?;
+        check_len("provider_profile", &self.provider_profile, MAX_LABEL)?;
+        check_optional_len(
+            "default_destination_address",
+            &self.default_destination_address,
+            MAX_ADDRESS,
+        )?;
+        Ok(())
+    }
+}
+
 impl Validate for crate::request::EthXpubExportRequest {
     fn validate(&self) -> Result<(), String> {
         check_len("wallet_profile", &self.wallet_profile, MAX_LABEL)?;

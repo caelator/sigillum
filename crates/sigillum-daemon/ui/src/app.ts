@@ -1,6 +1,5 @@
 // @ts-nocheck
 
-import "./styles/app.css";
 import { clearSessionToken, requestWithSession } from "./api/session";
 import { handleActionEvent as handleDispatchedActionEvent } from "./actions/dispatcher";
 import {
@@ -25,6 +24,7 @@ import { createSessionActions } from "./views/session";
 import { createShellRenderer } from "./views/shell";
 import { createSetupWizard } from "./views/setup";
 import { createTreasuryActions } from "./views/treasury";
+import { createWalletManagerActions } from "./views/walletManager";
 import { createWalletActions } from "./views/wallets";
 
 const SETUP_RESET_CONFIRMATION = 'RESET LOCAL SIGILLUM DATA';
@@ -35,6 +35,7 @@ const OPERATOR_CARD_IDS = [
   'pushCard',
   'apiKeysCard',
   'secretsCard',
+  'walletManagerCard',
   'profilesCard',
   'xpubCard',
   'treasuryCard',
@@ -48,41 +49,42 @@ const OPERATOR_CARD_IDS = [
   'diagCard',
 ];
 const WORKSPACE_SECTION_KEY = 'sigillumWorkspaceSection';
+const DEFAULT_WORKSPACE_SECTION = 'treasury';
 const WORKSPACE_SECTIONS = [
   {
-    id: 'overview',
-    label: 'Overview',
-    summary: 'Product framing, current status, and the highest-leverage next move.',
-  },
-  {
-    id: 'access',
-    label: 'Access',
-    summary: 'Setup, unlock, session controls, and machine-level recovery.',
-  },
-  {
-    id: 'vault',
-    label: 'Vault',
-    summary: 'Compartments, connection keys, encrypted secrets, and secret movement.',
+    id: 'treasury',
+    label: 'Treasury',
+    summary: 'Tracked balances, wallet groups, routing readiness, policy, and receive addresses.',
   },
   {
     id: 'wallets',
     label: 'Wallets',
-    summary: 'Providers, stealth wallets, and xpub receive-wallet setup.',
+    summary: 'Provider endpoints, stealth wallets, and deterministic receive trees.',
   },
   {
     id: 'operations',
     label: 'Operations',
-    summary: 'Deposits, queue execution, and local maintenance cycles.',
+    summary: 'Inventory discovery, tracked deposits, queue execution, and maintenance cycles.',
   },
   {
-    id: 'recovery',
-    label: 'Recovery',
-    summary: 'Hardware keys, snapshots, audit trail, and diagnostics.',
+    id: 'secrets',
+    label: 'Secrets',
+    summary: 'Encrypted secrets, connection keys, compartments, and secret movement.',
+  },
+  {
+    id: 'security',
+    label: 'Security',
+    summary: 'Hardware keys, encrypted snapshots, and the local audit trail.',
+  },
+  {
+    id: 'system',
+    label: 'System',
+    summary: 'Daemon health, runtime policy, and the operator guide.',
   },
 ];
 let currentStatus = null;
 let currentUiMode = 'loading';
-let activeWorkspaceSection = 'overview';
+let activeWorkspaceSection = DEFAULT_WORKSPACE_SECTION;
 let refreshPromise = null;
 let refreshQueued = false;
 let lastApiKeys = [];
@@ -92,7 +94,7 @@ let nextStepSecondaryTarget = null;
 
 try {
   activeWorkspaceSection =
-    window.sessionStorage.getItem(WORKSPACE_SECTION_KEY) || 'overview';
+    window.sessionStorage.getItem(WORKSPACE_SECTION_KEY) || DEFAULT_WORKSPACE_SECTION;
 } catch (_) {}
 
 function setCardsHidden(ids, hidden) {
@@ -151,11 +153,14 @@ function storeWorkspaceSection(sectionId) {
 function ensureActiveWorkspaceSection() {
   const sections = availableWorkspaceSections();
   if (!sections.length) {
-    activeWorkspaceSection = 'overview';
+    activeWorkspaceSection = DEFAULT_WORKSPACE_SECTION;
     return;
   }
   if (!sections.some(section => section.id === activeWorkspaceSection)) {
-    activeWorkspaceSection = sections[0].id;
+    activeWorkspaceSection =
+      sections.some(section => section.id === DEFAULT_WORKSPACE_SECTION)
+        ? DEFAULT_WORKSPACE_SECTION
+        : sections[0].id;
     storeWorkspaceSection(activeWorkspaceSection);
   }
 }
@@ -171,6 +176,22 @@ function syncWorkspaceSections() {
   });
 }
 
+function syncTopbar() {
+  const titleEl = document.getElementById('topbarTitle');
+  const summaryEl = document.getElementById('topbarSummary');
+  if (!titleEl || !summaryEl) return;
+  const section = WORKSPACE_SECTIONS.find(
+    candidate => candidate.id === activeWorkspaceSection
+  );
+  if (currentUiMode === 'unlocked' && section) {
+    titleEl.textContent = section.label;
+    summaryEl.textContent = section.summary;
+    return;
+  }
+  titleEl.textContent = 'Sigillum';
+  summaryEl.textContent = 'Local treasury daemon';
+}
+
 function syncSectionNav() {
   const nav = document.getElementById('sectionNav');
   const main = document.querySelector('main');
@@ -182,21 +203,27 @@ function syncSectionNav() {
     nav.innerHTML = '';
     if (main) main.classList.remove('has-nav');
     syncWorkspaceSections();
+    syncTopbar();
     return;
   }
 
   ensureActiveWorkspaceSection();
-  nav.innerHTML = sections.map(section =>
-    '<button type="button" class="workspace-tab' +
-      (section.id === activeWorkspaceSection ? ' active' : '') +
-      '" data-action="selectWorkspaceSection" data-arg0="' + escAttr(section.id) + '">' +
-      '<strong>' + esc(section.label) + '</strong>' +
-      '<span>' + esc(section.summary) + '</span>' +
-    '</button>'
-  ).join('');
+  nav.innerHTML = sections.map(section => {
+    const isActive = section.id === activeWorkspaceSection;
+    return (
+      '<button type="button" class="nav-item' +
+        (isActive ? ' active' : '') +
+        '"' + (isActive ? ' aria-current="page"' : '') +
+        ' data-action="selectWorkspaceSection" data-arg0="' + escAttr(section.id) + '"' +
+        ' title="' + escAttr(section.summary) + '">' +
+        esc(section.label) +
+      '</button>'
+    );
+  }).join('');
   nav.classList.remove('hidden');
   if (main) main.classList.add('has-nav');
   syncWorkspaceSections();
+  syncTopbar();
 }
 
 function selectWorkspaceSection(sectionId) {
@@ -291,10 +318,10 @@ function updateNextStepCard() {
 
   let nextStep = {
     title: 'Choose the next concrete operation',
-    summary: 'The vault is live. Use the cards below to run maintenance, inspect queue work, review audit history, and verify local daemon health.',
+    summary: 'The vault is live. Run maintenance, inspect queue work, review audit history, and verify local daemon health from the workspace sections.',
     items: [
       { title: 'Operations', body: 'Maintenance refreshes deposits and drains queue work with the current local policy settings.' },
-      { title: 'Recovery', body: 'Snapshots, audit trail, and diagnostics help you validate and recover the local daemon state.' },
+      { title: 'Security & system', body: 'Snapshots, audit trail, and diagnostics help you validate and recover the local daemon state.' },
     ],
     primaryLabel: 'Open maintenance',
     primaryTarget: 'maintenanceCard',
@@ -453,19 +480,19 @@ function updateHeroState(mode, active, unlocked) {
   }
 
   const activeLabel = active ? (active.compartment_label || ('Compartment ' + active.compartment_id)) : 'No active compartment';
-  setText('statusEyebrow', 'Unlocked workspace');
-  setText('statusTitle', 'Local vault workspace');
-  setText('statusSummary', 'The vault is unlocked. Use the workspace modes above to move between overview, access, vault, wallets, operations, and recovery without losing your place in one long page.');
+  setText('statusEyebrow', 'Vault unlocked');
+  setText('statusTitle', 'Treasury workspace');
+  setText('statusSummary', 'Every operator surface on this machine is live. Use the sidebar to move between treasury, wallets, operations, secrets, security, and system.');
   setText('heroModeValue', activeLabel);
   setText('heroModeDetail', unlocked.length > 1
-    ? 'Multiple compartments are unlocked. Use the switcher in Access to choose which compartment new operations should target.'
+    ? 'Multiple compartments are unlocked. Use the sidebar switcher to choose which compartment new operations target.'
     : 'One compartment is unlocked in this session. Additional compartments appear when their thresholds are met.');
   primary.textContent = 'Open secrets';
-  secondary.textContent = 'Open profiles';
+  secondary.textContent = 'Open wallets';
   setTrustedHtml('statusContext', renderHeroContext([
     { title: 'Protected values', body: 'Use Encrypted Secrets for sensitive data and Connection Keys for values the daemon needs during operator workflows.' },
     { title: 'Wallet families', body: 'Stealth wallets drive deposits and queue workflows today, while xpub receive wallets export public receive branches and preview deterministic addresses.' },
-    { title: 'Operator loop', body: 'Deposits, queue, maintenance, snapshots, audit, and diagnostics now live in dedicated workspace modes instead of one scrolling operator page.' },
+    { title: 'Operator loop', body: 'Deposits, queue, maintenance, snapshots, audit, and diagnostics each live in a dedicated workspace section.' },
   ]));
 }
 
@@ -513,7 +540,8 @@ function toast(msg, type = 'success') {
   el.textContent = msg;
   el.setAttribute('role', 'status');
   el.setAttribute('aria-live', 'polite');
-  document.body.appendChild(el);
+  const stack = document.getElementById('toastStack');
+  (stack || document.body).appendChild(el);
   setTimeout(() => el.remove(), 3000);
 }
 
@@ -551,6 +579,11 @@ const walletActions = createWalletActions({
   toast,
   refresh: () => refresh(),
   copyText,
+});
+
+const walletManagerActions = createWalletManagerActions({
+  api,
+  toast,
 });
 
 const inventoryActions = createInventoryActions({
@@ -625,6 +658,7 @@ async function runRefreshCycle() {
     loadSecrets(),
     loadApiKeys(),
     walletActions.loadProfiles(),
+    walletManagerActions.loadWalletManager(),
     treasuryActions.loadTreasuryOverview(),
     inventoryActions.loadInventoryOperations(),
     operationsActions.loadDepositRegistry(),
@@ -1115,16 +1149,23 @@ async function loadDiagnostics() {
 
 const UI_ACTIONS = {
   allocateTreasuryReceiveAddress: treasuryActions.allocateTreasuryReceiveAddress,
+  allocateWalletReceiveAddress: walletManagerActions.allocateWalletReceiveAddress,
   approveConsolidationPlan: inventoryActions.approveConsolidationPlan,
   cancelDiscoveryJob: inventoryActions.cancelDiscoveryJob,
+  cancelWalletReceiveAddress: walletManagerActions.cancelWalletReceiveAddress,
+  confirmMnemonicSaved: walletManagerActions.confirmMnemonicSaved,
+  copyMnemonicPhrase: walletManagerActions.copyMnemonicPhrase,
   copyText,
+  copyWalletAddress: walletManagerActions.copyWalletAddress,
   createErc20Deposit: operationsActions.createErc20Deposit,
   createNativeDeposit: operationsActions.createNativeDeposit,
+  createWallet: walletManagerActions.createWallet,
   deleteApiKey,
   deleteChainProfile: inventoryActions.deleteChainProfile,
   deleteWatchAddressBookEntry: inventoryActions.deleteWatchAddressBookEntry,
   deleteRiskCatalogEntry: inventoryActions.deleteRiskCatalogEntry,
   deleteDeposit: operationsActions.deleteDeposit,
+  deleteManagedWallet: walletManagerActions.deleteManagedWallet,
   deleteProviderProfile: walletActions.deleteProviderProfile,
   deleteSecret,
   deleteSeedWalletProfile: walletActions.deleteSeedWalletProfile,
@@ -1144,6 +1185,9 @@ const UI_ACTIONS = {
   generateConsolidationPlan: inventoryActions.generateConsolidationPlan,
   heroPrimaryAction,
   heroSecondaryAction,
+  importSeedWallet: walletManagerActions.importSeedWallet,
+  importWatchAddress: walletManagerActions.importWatchAddress,
+  importXpubWallet: walletManagerActions.importXpubWallet,
   loadQueueJobs: operationsActions.loadQueueJobs,
   loadWatchAddressBookEntry: inventoryActions.loadWatchAddressBookEntry,
   loadRiskFindings: inventoryActions.loadRiskFindings,
@@ -1154,10 +1198,13 @@ const UI_ACTIONS = {
   previewXpubReceiveAddress: walletActions.previewXpubReceiveAddress,
   processQueueBatch: operationsActions.processQueueBatch,
   processQueueJob: operationsActions.processQueueJob,
+  promptWalletReceiveAddress: walletManagerActions.promptWalletReceiveAddress,
   pushSecret,
   refreshDepositRegistry: operationsActions.refreshDepositRegistry,
   refreshSingleDeposit: operationsActions.refreshSingleDeposit,
   refreshTreasuryOverview: treasuryActions.refreshTreasuryOverview,
+  refreshWalletManager: walletManagerActions.refreshWalletManager,
+  refreshWorkspace: () => refresh(),
   resetLocalData,
   restoreAuthSnapshot,
   restoreSetupSnapshot,
@@ -1173,6 +1220,7 @@ const UI_ACTIONS = {
   selectWorkspaceSection,
   setApiKey,
   setSecret,
+  setWalletImportTab: walletManagerActions.setWalletImportTab,
   switchCompartment,
   switchUnlockTab: fido2Actions.switchUnlockTab,
   toggleWatchAddressBookEntry: inventoryActions.toggleWatchAddressBookEntry,
@@ -1205,7 +1253,12 @@ function handleActionEvent(event) {
   handleDispatchedActionEvent(event, {
     actions: UI_ACTIONS,
     toast,
-    quietActions: ['selectWorkspaceSection', 'switchUnlockTab', 'togglePoisonWarning'],
+    quietActions: [
+      'selectWorkspaceSection',
+      'setWalletImportTab',
+      'switchUnlockTab',
+      'togglePoisonWarning',
+    ],
   });
 }
 

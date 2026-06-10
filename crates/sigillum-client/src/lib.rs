@@ -38,7 +38,7 @@ use secrecy::SecretString;
 use serde::de::DeserializeOwned;
 use sigillum_api::request::{
     BiometricEnrollRequest, BiometricUnlockRequest, CompartmentSwitchRequest,
-    DiscoveryJobMutationRequest, EthSeedWalletProfileUpsertRequest,
+    DiscoveryJobMutationRequest, EthSeedWalletCreateRequest, EthSeedWalletProfileUpsertRequest,
     EthStealthAnnouncementScanRequest, EthStealthCheckRequest, EthStealthDepositCreateErc20Request,
     EthStealthDepositCreateNativeRequest, EthStealthDepositDeleteRequest,
     EthStealthDepositEnqueueSweepRequest, EthStealthDepositRefreshRequest, EthStealthExportRequest,
@@ -63,9 +63,10 @@ pub use sigillum_api::response::{
     ConsolidationPlanExportSkippedStep, ConsolidationPlanListResponse,
     ConsolidationPlanMutationResponse, ConsolidationPlanStep, ConsolidationPlanSummary,
     DiagnosticsResponse, DiscoveryJobListResponse, DiscoveryJobMutationResponse, ErrorResponse,
-    EthSeedWalletProfile, EthSeedWalletProfileListResponse, EthSeedWalletProfileMutationResponse,
-    EthSignedTransactionResponse, EthStealthAnnouncementScanResponse, EthStealthCheckResponse,
-    EthStealthDeposit, EthStealthDepositEnqueueSweepResponse, EthStealthDepositListResponse,
+    EthSeedWalletCreateResponse, EthSeedWalletProfile, EthSeedWalletProfileListResponse,
+    EthSeedWalletProfileMutationResponse, EthSignedTransactionResponse,
+    EthStealthAnnouncementScanResponse, EthStealthCheckResponse, EthStealthDeposit,
+    EthStealthDepositEnqueueSweepResponse, EthStealthDepositListResponse,
     EthStealthDepositMutationResponse, EthStealthDepositRefreshResponse,
     EthStealthGenerateResponse, EthStealthMetaAddressResponse, EthStealthSendResponse,
     EthStealthSignResponse, EthStealthWalletProfile, EthStealthWalletProfileListResponse,
@@ -785,6 +786,22 @@ impl SigillumClient {
     ) -> Result<EthSeedWalletProfileMutationResponse, ClientError> {
         let builder = self
             .request(Method::POST, "/api/profiles/eth-seed/upsert")
+            .json(&request);
+        self.send(builder).await
+    }
+
+    /// Create a brand-new seed wallet profile from a daemon-generated BIP-39
+    /// mnemonic.
+    ///
+    /// The returned [`EthSeedWalletCreateResponse::mnemonic`] is delivered
+    /// exactly once for operator backup; the daemon keeps it only as an
+    /// encrypted vault secret and never audits it.
+    pub async fn create_eth_seed_wallet_profile(
+        &self,
+        request: EthSeedWalletCreateRequest,
+    ) -> Result<EthSeedWalletCreateResponse, ClientError> {
+        let builder = self
+            .request(Method::POST, "/api/profiles/eth-seed/create")
             .json(&request);
         self.send(builder).await
     }

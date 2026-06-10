@@ -423,6 +423,41 @@ fn test_eth_seed_wallet_profile_upsert_request_roundtrip() {
 }
 
 #[test]
+fn test_eth_seed_wallet_create_request_roundtrip() {
+    let req = EthSeedWalletCreateRequest {
+        name: "fresh_seed".to_string(),
+        label: Some("Generated treasury wallet".to_string()),
+        word_count: Some(12),
+        mnemonic_passphrase: Some("optional-passphrase".to_string()),
+        project_account: 0,
+        provider_profile: "mainnet".to_string(),
+        compartment_id: Some(1),
+        chain_id: Some(1),
+        default_destination_address: Some("0xdest".to_string()),
+    };
+    roundtrip_test(req);
+}
+
+#[test]
+fn test_eth_seed_wallet_create_request_minimal() {
+    let req = EthSeedWalletCreateRequest {
+        name: "fresh_seed".to_string(),
+        label: None,
+        word_count: None,
+        mnemonic_passphrase: None,
+        project_account: 0,
+        provider_profile: "mainnet".to_string(),
+        compartment_id: None,
+        chain_id: None,
+        default_destination_address: None,
+    };
+    let json = serde_json::to_string(&req).unwrap();
+    assert!(!json.contains("word_count"), "optional fields stay absent");
+    assert!(!json.contains("mnemonic"), "no mnemonic field on create");
+    roundtrip_test(req);
+}
+
+#[test]
 fn test_eth_stealth_send_erc20_transfer_request_roundtrip() {
     let req = EthStealthSendErc20TransferRequest {
         rpc_url: "https://rpc.example.com".to_string(),
