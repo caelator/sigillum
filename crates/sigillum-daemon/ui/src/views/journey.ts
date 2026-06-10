@@ -70,7 +70,34 @@ interface StatusChipSpec {
   tone: "neutral" | "warn" | "danger";
 }
 
-function statusChips(state: JourneyState): StatusChipSpec[] {
+export interface StripSelfCheckSummary {
+  status: string;
+  failCount: number;
+  warnCount: number;
+}
+
+function statusChips(
+  state: JourneyState,
+  selfCheck?: StripSelfCheckSummary | null,
+): StatusChipSpec[] {
+  const chips = baseStatusChips(state);
+  if (selfCheck) {
+    chips.push({
+      value: selfCheck.failCount + selfCheck.warnCount,
+      label: "Self-check issues",
+      targetCard: "diagCard",
+      tone:
+        selfCheck.status === "fail"
+          ? "danger"
+          : selfCheck.status === "warn"
+            ? "warn"
+            : "neutral",
+    });
+  }
+  return chips;
+}
+
+function baseStatusChips(state: JourneyState): StatusChipSpec[] {
   return [
     {
       value: state.providerCount,
@@ -106,6 +133,12 @@ export interface JourneyDeps {
   jumpToCard: (cardId: string) => void;
   /** Re-render the treasury card after a journey-triggered scan. */
   refreshTreasury: () => Promise<unknown> | unknown;
+  /**
+   * Throttled silent self-check (selfcheck.ts owns the TTL cache). The strip
+   * renders immediately without it, then re-renders when the summary lands —
+   * provider probes must never block the refresh cycle.
+   */
+  ensureSelfCheck?: () => Promise<StripSelfCheckSummary | null>;
 }
 
 export function createJourneyActions(deps: JourneyDeps) {
@@ -168,6 +201,9 @@ export function createJourneyActions(deps: JourneyDeps) {
     list.innerHTML = steps.map(renderJourneyStepRow).join("");
   }
 
+  let lastState: JourneyState | null = null;
+  let lastSelfCheck: StripSelfCheckSummary | null = null;
+
   function renderStatusStrip(state: JourneyState): void {
     const strip = document.getElementById("statusStrip");
     if (!strip) return;
@@ -177,7 +213,7 @@ export function createJourneyActions(deps: JourneyDeps) {
       strip.innerHTML = "";
       return;
     }
-    strip.innerHTML = statusChips(state)
+    strip.innerHTML = statusChips(state, lastSelfCheck)
       .map((chip) => {
         const toneClass =
           chip.tone === "warn"
@@ -234,8 +270,17 @@ export function createJourneyActions(deps: JourneyDeps) {
             (overview.risk?.critical_findings || 0)
           : 0,
       };
+      lastState = state;
       renderJourneyCard(state);
       renderStatusStrip(state);
+      // Ambient self-check: render the strip now, upgrade it when the
+      // (cached or fresh) summary resolves. Never blocks the refresh cycle.
+      if (deps.ensureSelfCheck) {
+        void deps.ensureSelfCheck().then((summary) => {
+          lastSelfCheck = summary;
+          if (lastState) renderStatusStrip(lastState);
+        });
+      }
     } catch (_) {}
   }
 

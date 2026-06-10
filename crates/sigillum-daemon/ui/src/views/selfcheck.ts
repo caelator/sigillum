@@ -82,9 +82,21 @@ function groupByDomain(checks: SelfCheckResult[]): DomainGroup[] {
   return groups;
 }
 
+export interface SelfCheckSummary {
+  status: string;
+  failCount: number;
+  warnCount: number;
+  atUnix: number;
+}
+
+/** Ambient surfaces re-check at most this often; explicit runs always probe. */
+export const SELF_CHECK_TTL_MS = 5 * 60_000;
+
 export function createSelfCheckActions(deps: SelfCheckDeps) {
   // Session-local only: results live here and in the DOM, never in storage.
   let lastResponse: SelfCheckRunResponse | null = null;
+  let lastRunAtMs = 0;
+  let inFlight: Promise<SelfCheckSummary | null> | null = null;
 
   function runButtons(): Element[] {
     const buttons: Element[] = [];
@@ -195,6 +207,7 @@ export function createSelfCheckActions(deps: SelfCheckDeps) {
         return;
       }
       lastResponse = r as SelfCheckRunResponse;
+      lastRunAtMs = Date.now();
       renderSelfCheckPanel();
       const counts = countByStatus(lastResponse.checks || []);
       if (lastResponse.status === "pass") {
@@ -213,8 +226,51 @@ export function createSelfCheckActions(deps: SelfCheckDeps) {
     }
   }
 
+  function lastSelfCheckSummary(): SelfCheckSummary | null {
+    if (!lastResponse) return null;
+    const counts = countByStatus(lastResponse.checks || []);
+    return {
+      status: lastResponse.status,
+      failCount: counts.fail,
+      warnCount: counts.warn,
+      atUnix: lastResponse.generated_at_unix,
+    };
+  }
+
+  /**
+   * Silent, throttled run for ambient surfaces (the topbar status strip).
+   * Self-check probes live RPC endpoints, so the periodic refresh cycle must
+   * never turn into provider probe traffic: results are cached for
+   * SELF_CHECK_TTL_MS and concurrent callers share one in-flight run.
+   * Failures of the call itself degrade to the previous summary (or null)
+   * rather than surfacing errors — the explicit Run buttons own loud paths.
+   */
+  async function ensureFreshSelfCheck(): Promise<SelfCheckSummary | null> {
+    if (lastResponse && Date.now() - lastRunAtMs < SELF_CHECK_TTL_MS) {
+      return lastSelfCheckSummary();
+    }
+    if (inFlight) return inFlight;
+    inFlight = (async () => {
+      try {
+        const r = await deps.api("POST", "/api/selfcheck/run", {});
+        if (r.error) return lastSelfCheckSummary();
+        lastResponse = r as SelfCheckRunResponse;
+        lastRunAtMs = Date.now();
+        renderSelfCheckPanel();
+        return lastSelfCheckSummary();
+      } catch (_) {
+        return lastSelfCheckSummary();
+      } finally {
+        inFlight = null;
+      }
+    })();
+    return inFlight;
+  }
+
   return {
     runSelfCheck,
     renderSelfCheckPanel,
+    ensureFreshSelfCheck,
+    lastSelfCheckSummary,
   };
 }

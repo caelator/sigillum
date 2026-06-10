@@ -626,16 +626,18 @@ const treasuryActions = createTreasuryActions({
   toast,
 });
 
+const selfCheckActions = createSelfCheckActions({
+  api,
+  toast,
+});
+
 const journeyActions = createJourneyActions({
   api,
   toast,
   jumpToCard,
   refreshTreasury: () => treasuryActions.loadTreasuryOverview(),
-});
-
-const selfCheckActions = createSelfCheckActions({
-  api,
-  toast,
+  // Throttled (5-min TTL) silent self-check feeding the status strip chip.
+  ensureSelfCheck: () => selfCheckActions.ensureFreshSelfCheck(),
 });
 
 const operationsActions = createOperationsActions({

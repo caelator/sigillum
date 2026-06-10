@@ -2195,6 +2195,96 @@ test("status strip chips carry values, warn/danger tones, and jump targets", asy
   equal(dom.el("statusStrip").innerHTML, "");
 });
 
+test("status strip gains a TTL-cached self-check chip", async () => {
+  const dom = installDom(["journeyList", "journeyProgress", "journeyComplete", "statusStrip"]);
+  document.body.dataset.mode = "unlocked";
+  const state: JourneyStubState = {
+    providers: [{ name: "mainnet" }],
+    seedProfiles: [{ name: "main" }],
+    xpubProfiles: [],
+    trackedAddressCount: 1,
+    reviewRequiredSteps: 0,
+    highFindings: 0,
+    criticalFindings: 0,
+    policy: { enabled: true },
+  };
+  let ensureCalls = 0;
+  let summary: { status: string; failCount: number; warnCount: number } | null = {
+    status: "fail",
+    failCount: 2,
+    warnCount: 1,
+  };
+  const journey = createJourneyActions({
+    api: journeyApiStub(state),
+    toast: () => undefined,
+    jumpToCard: () => undefined,
+    refreshTreasury: () => undefined,
+    ensureSelfCheck: async () => {
+      ensureCalls += 1;
+      return summary;
+    },
+  });
+
+  await journey.loadJourney();
+  // The ensure promise resolves on a microtask after render; flush it.
+  await Promise.resolve();
+  let html = dom.el("statusStrip").innerHTML;
+  ok(html.includes('<span class="status-chip-label">Self-check issues</span>'));
+  ok(html.includes('<span class="status-chip-value">3</span>'));
+  ok(html.includes('data-action="journeyJump" data-arg0="diagCard"'));
+  equal(html.split("status-chip-danger").length - 1, 1);
+  equal(ensureCalls, 1);
+
+  // A passing summary drops the tone but keeps the chip visible at zero.
+  summary = { status: "pass", failCount: 0, warnCount: 0 };
+  await journey.loadJourney();
+  await Promise.resolve();
+  html = dom.el("statusStrip").innerHTML;
+  ok(html.includes('<span class="status-chip-label">Self-check issues</span>'));
+  equal(html.split("status-chip-danger").length - 1, 0);
+  equal(ensureCalls, 2);
+});
+
+test("ensureFreshSelfCheck caches within TTL and shares in-flight runs", async () => {
+  installDom(["selfCheckSummary", "selfCheckList"]);
+  let posts = 0;
+  const actions = createSelfCheckActions({
+    api: async (method, path) => {
+      if (method === "POST" && path === "/api/selfcheck/run") {
+        posts += 1;
+        return {
+          status: "warn",
+          generated_at_unix: 1781125191,
+          checks: [
+            {
+              id: "policy:treasury",
+              domain: "policy",
+              subject: "treasury",
+              status: "warn",
+              detail: "No treasury policy configured — sweeps are unguarded",
+            },
+          ],
+        };
+      }
+      return {};
+    },
+    toast: () => undefined,
+  });
+
+  // Concurrent callers share one run; later callers hit the TTL cache.
+  const [first, second] = await Promise.all([
+    actions.ensureFreshSelfCheck(),
+    actions.ensureFreshSelfCheck(),
+  ]);
+  equal(posts, 1);
+  equal(first?.status, "warn");
+  equal(second?.warnCount, 1);
+  const third = await actions.ensureFreshSelfCheck();
+  equal(posts, 1);
+  equal(third?.failCount, 0);
+  equal(actions.lastSelfCheckSummary()?.status, "warn");
+});
+
 test("renderEntityList object empty state renders an actionable button", () => {
   const dom = installDom(["emptyWithArg", "emptyWithoutArg"]);
   renderEntityList(
