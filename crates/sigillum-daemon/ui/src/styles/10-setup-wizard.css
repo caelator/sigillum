@@ -1,0 +1,224 @@
+/* ── 16. Setup wizard ─────────────────────────────────────────────────────── */
+
+.wizard-header {
+  display: grid;
+  grid-template-columns: minmax(0, 1.15fr) minmax(240px, 1fr);
+  gap: var(--space-5);
+  align-items: start;
+  margin-bottom: var(--space-4);
+}
+
+.wizard-intro h2 {
+  margin-bottom: var(--space-2);
+}
+
+.wizard-summary {
+  padding: var(--space-4);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.progress-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 10px;
+  border-radius: 999px;
+  background: var(--accent-tint);
+  border: 1px solid rgba(91, 124, 250, 0.3);
+  color: var(--accent-text);
+  font-size: 11px;
+  font-weight: 650;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.wizard-stage-title {
+  margin-top: var(--space-3);
+  font-size: var(--fs-base);
+  font-weight: 650;
+}
+
+.wizard-stage-summary {
+  margin-top: var(--space-1);
+  font-size: var(--fs-xs);
+  color: var(--text-muted);
+  line-height: 1.55;
+}
+
+.summary-actions {
+  margin-top: var(--space-2);
+}
+
+.checklist-list {
+  margin-top: var(--space-3);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.checklist-item {
+  display: flex;
+  gap: 10px;
+  font-size: var(--fs-xs);
+  color: var(--text-muted);
+  line-height: 1.5;
+}
+
+.checklist-mark {
+  flex-shrink: 0;
+  width: 22px;
+  height: 22px;
+  display: grid;
+  place-items: center;
+  border-radius: 6px;
+  background: var(--surface-3);
+  border: 1px solid var(--border-strong);
+  color: var(--text-secondary);
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 650;
+}
+
+.wizard-step {
+  display: none;
+}
+
+.wizard-step.active {
+  display: block;
+  animation: step-in var(--t-med) backwards;
+}
+
+@keyframes step-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.method-btn {
+  display: block;
+  width: 100%;
+  margin-bottom: var(--space-2);
+  padding: var(--space-3) var(--space-4);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  text-align: left;
+  color: var(--text);
+  cursor: pointer;
+  transition: border-color var(--t-fast), background var(--t-fast),
+    transform var(--t-fast);
+}
+
+.method-btn:hover {
+  background: var(--surface-3);
+  border-color: var(--accent);
+}
+
+.method-btn:active {
+  transform: translateY(1px);
+}
+
+.method-btn.recommended {
+  border-color: rgba(91, 124, 250, 0.45);
+  background: linear-gradient(180deg, var(--accent-tint), transparent 80%),
+    var(--surface-2);
+}
+
+.method-btn.recommended .method-title::after {
+  content: "Recommended";
+  margin-left: var(--space-2);
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: var(--accent-tint-strong);
+  color: var(--accent-text);
+  font-size: 10px;
+  font-weight: 650;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  vertical-align: middle;
+}
+
+.method-title {
+  font-size: var(--fs-base);
+  font-weight: 650;
+}
+
+.method-desc {
+  margin-top: 3px;
+  font-size: var(--fs-xs);
+  color: var(--text-muted);
+  line-height: 1.55;
+}
+
+.wiz-comp-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: 9px var(--space-4);
+  margin-bottom: var(--space-2);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+
+.wiz-comp-label {
+  font-size: var(--fs-sm);
+  font-weight: 600;
+}
+
+.wiz-comp-threshold {
+  font-size: var(--fs-xs);
+  font-variant-numeric: tabular-nums;
+  color: var(--accent-text);
+  background: var(--accent-tint);
+  border: 1px solid rgba(91, 124, 250, 0.25);
+  border-radius: 999px;
+  padding: 1px 9px;
+  white-space: nowrap;
+}
+
+.touch-prompt {
+  text-align: center;
+  font-size: var(--fs-md);
+  padding: var(--space-6);
+}
+
+.pulse {
+  animation: pulse-box 1.4s ease-in-out infinite;
+}
+
+@keyframes pulse-box {
+  0%, 100% { box-shadow: 0 0 0 0 var(--accent-tint-strong); }
+  50% { box-shadow: 0 0 0 8px rgba(91, 124, 250, 0); }
+}
+
+.wiz-center {
+  text-align: center;
+  padding: var(--space-6) 0;
+}
+
+.wiz-done-mark {
+  width: 52px;
+  height: 52px;
+  margin: 0 auto var(--space-3);
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--success-tint);
+  border: 1px solid rgba(63, 185, 100, 0.4);
+  color: var(--success-text);
+  font-size: var(--fs-lg);
+  font-weight: 700;
+}
+
+.wiz-done-title {
+  font-size: var(--fs-md);
+  font-weight: 650;
+}

@@ -1,13 +1,19 @@
-use sigillum_api::{ConsolidationPlanStep, ConsolidationPlanSummary, WalletAssetHolding};
+use sigillum_api::{
+    ConsolidationPlanGenerateRequest, ConsolidationPlanStep, ConsolidationPlanSummary,
+    TreasuryPolicy, WalletAssetHolding,
+};
 use sigillum_core::decode_quantity_hex;
 
-use crate::service::helpers::random_id;
+use crate::inventory::WalletInventoryState;
+use crate::profiles::ProfileRegistry;
+use crate::service::helpers::{compare_u256, random_id};
 
 use super::allowance_discovery::DISCOVERY_SOURCE_ERC20_ALLOWANCE_PROBE;
 use super::claim_discovery::CLAIM_ADAPTER_MERKLE_DISTRIBUTOR_V1;
 use super::nft_approval_discovery::DISCOVERY_SOURCE_NFT_OPERATOR_APPROVAL_PROBE;
 use super::permit2_discovery::DISCOVERY_SOURCE_PERMIT2_ALLOWANCE_PROBE;
 use super::support::quantity_hex_is_nonzero;
+use super::treasury::{add_u256, policy_blockers_for_step};
 use super::{WALLET_FAMILY_ETH_SEED, WALLET_FAMILY_ETH_WATCH, WALLET_FAMILY_ETH_XPUB};
 
 pub(super) fn signer_status_for_holding(holding: &WalletAssetHolding) -> &'static str {
@@ -203,6 +209,141 @@ pub(super) fn summarize_plan_steps(steps: &[ConsolidationPlanStep]) -> Consolida
             .filter(|step| quantity_hex_is_nonzero(&step.amount_hex))
             .count(),
     }
+}
+
+pub(super) fn build_plan_steps(
+    state: &WalletInventoryState,
+    registry: &ProfileRegistry,
+    body: &ConsolidationPlanGenerateRequest,
+    destination_address: &Option<String>,
+) -> Vec<ConsolidationPlanStep> {
+    let mut steps = Vec::new();
+
+    for holding in state
+        .holdings
+        .iter()
+        .filter(|holding| quantity_hex_is_nonzero(&holding.amount_hex))
+        .filter(|holding| {
+            body.wallet_family
+                .as_deref()
+                .is_none_or(|family| family == holding.wallet_family)
+        })
+        .filter(|holding| {
+            body.wallet_profile
+                .as_deref()
+                .is_none_or(|profile| profile == holding.wallet_profile)
+        })
+        .filter(|holding| {
+            body.provider_profile
+                .as_deref()
+                .is_none_or(|profile| profile == holding.provider_profile)
+        })
+    {
+        let signer_status = signer_status_for_holding(holding);
+        if signer_status == "watch_only" && body.include_watch_only != Some(true) {
+            continue;
+        }
+        let step_destination = if destination_address.is_some() {
+            destination_address.clone()
+        } else if holding.wallet_family == WALLET_FAMILY_ETH_SEED {
+            if let Some(seed_profile) = registry
+                .eth_seed_wallets
+                .iter()
+                .find(|p| p.name == holding.wallet_profile)
+            {
+                if seed_profile.hot_address.is_some() && seed_profile.treasury_address.is_some() {
+                    let hot_addr = seed_profile.hot_address.as_ref().unwrap();
+                    let treasury_addr = seed_profile.treasury_address.as_ref().unwrap();
+                    let hot_balance = state
+                        .addresses
+                        .iter()
+                        .find(|addr| {
+                            addr.wallet_profile == holding.wallet_profile
+                                && addr.address == *hot_addr
+                        })
+                        .and_then(|addr| decode_quantity_hex(&addr.native_balance_wei_hex).ok())
+                        .unwrap_or([0u8; 32]);
+                    let target_refill = decode_quantity_hex("0xde0b6b3a7640000").unwrap(); // 1.0 ETH in wei
+                    if compare_u256(&hot_balance, &target_refill).is_lt() {
+                        Some(hot_addr.clone())
+                    } else {
+                        Some(treasury_addr.clone())
+                    }
+                } else {
+                    seed_profile.default_destination_address.clone()
+                }
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+        steps.push(plan_step_for_holding(
+            holding,
+            step_destination,
+            signer_status,
+        ));
+    }
+
+    steps
+}
+
+/// Extend a step with treasury policy blockers, mirroring planner semantics:
+/// any blocker forces blocked status and blocked risk level. Blockers are
+/// deduped because approval re-evaluates steps that generation already marked.
+pub(super) fn apply_policy_blockers_to_step(
+    policy: &TreasuryPolicy,
+    step: &mut ConsolidationPlanStep,
+) {
+    let policy_blockers = policy_blockers_for_step(
+        policy,
+        &step.action,
+        step.destination_address.as_deref(),
+        &step.asset_kind,
+        &step.amount_hex,
+    );
+    if policy_blockers.is_empty() {
+        return;
+    }
+    for blocker in policy_blockers {
+        if !step.blockers.contains(&blocker) {
+            step.blockers.push(blocker);
+        }
+    }
+    step.status = "blocked".into();
+    step.risk_level = "blocked".into();
+}
+
+/// Plan-level policy violations: currently only the native plan cap, summed
+/// over steps that can still move value. Blocked steps cannot execute, so
+/// they do not consume cap budget.
+pub(super) fn plan_policy_violations(
+    policy: &TreasuryPolicy,
+    steps: &[ConsolidationPlanStep],
+) -> Vec<String> {
+    let mut violations = Vec::new();
+    if !policy.enabled {
+        return violations;
+    }
+    if let Some(cap_hex) = policy.max_plan_native_wei_hex.as_deref() {
+        if let Ok(cap) = decode_quantity_hex(cap_hex) {
+            let mut total = [0u8; 32];
+            for step in steps.iter().filter(|step| {
+                step.status != "blocked"
+                    && step.asset_kind == "native"
+                    && step.action.starts_with("sweep")
+            }) {
+                total = add_u256(
+                    &total,
+                    &decode_quantity_hex(&step.amount_hex).unwrap_or([0u8; 32]),
+                );
+            }
+            if compare_u256(&total, &cap).is_gt() {
+                violations.push("exceeds_policy_plan_cap".into());
+            }
+        }
+    }
+    violations
 }
 
 #[cfg(test)]

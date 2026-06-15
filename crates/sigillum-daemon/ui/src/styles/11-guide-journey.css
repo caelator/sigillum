@@ -1,0 +1,311 @@
+/* ── 17. Guide & next-step content ────────────────────────────────────────── */
+
+.guide-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: var(--space-2);
+  margin-top: var(--space-3);
+}
+
+.guide-block {
+  padding: var(--space-3) var(--space-4);
+  background: var(--surface-2);
+  border: 1px solid var(--border-faint);
+  border-radius: var(--radius);
+  font-size: var(--fs-xs);
+  color: var(--text-muted);
+  line-height: 1.6;
+}
+
+.guide-block-title {
+  font-size: var(--fs-sm);
+  font-weight: 650;
+  color: var(--text-secondary);
+  margin-bottom: var(--space-1);
+}
+
+.guide-list {
+  list-style: disc;
+  padding-left: var(--space-4);
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.next-step-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: var(--space-2);
+  margin-top: var(--space-3);
+}
+
+.next-step-item {
+  padding: var(--space-3) var(--space-4);
+  background: var(--surface-2);
+  border: 1px solid var(--border-faint);
+  border-radius: var(--radius);
+  font-size: var(--fs-xs);
+  color: var(--text-muted);
+  line-height: 1.55;
+}
+
+.next-step-item strong {
+  display: block;
+  font-size: var(--fs-sm);
+  font-weight: 650;
+  color: var(--text-secondary);
+  margin-bottom: 2px;
+}
+
+/* ── 17b. Journey checklist, status chips & inline help ───────────────────── */
+
+/* Emphasized "what to do next" card */
+
+.journey-card {
+  border-left: 3px solid var(--accent);
+  background:
+    linear-gradient(90deg, var(--accent-tint), transparent 38%),
+    var(--surface);
+}
+
+.journey-list {
+  display: flex;
+  flex-direction: column;
+  margin-top: var(--space-3);
+}
+
+.journey-step {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+  padding: var(--space-3) 0;
+  border-bottom: 1px solid var(--border-faint);
+}
+
+.journey-step:first-child {
+  padding-top: 0;
+}
+
+.journey-step:last-child {
+  border-bottom: 0;
+  padding-bottom: 0;
+}
+
+.journey-step-num {
+  flex-shrink: 0;
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--accent);
+  border-radius: 50%;
+  color: var(--accent-text);
+  font-size: var(--fs-sm);
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+}
+
+.journey-step-body {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.journey-step-title {
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  color: var(--text);
+  line-height: 1.45;
+}
+
+.journey-step-hint {
+  margin-top: 2px;
+  font-size: var(--fs-xs);
+  color: var(--text-muted);
+  line-height: 1.5;
+}
+
+.journey-step-action {
+  margin-left: auto;
+  flex-shrink: 0;
+  align-self: center;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.journey-step-done .journey-step-num {
+  background: var(--success-tint);
+  border-color: var(--success);
+  color: var(--success-text);
+}
+
+.journey-step-done .journey-step-title {
+  opacity: 0.72;
+}
+
+.journey-step-check {
+  margin-left: 4px;
+  color: var(--success-text);
+  font-weight: 700;
+}
+
+.journey-step-check:empty::before {
+  content: "✓";
+}
+
+/* Glanceable status chips (compact key metrics under a heading) */
+
+.status-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin: var(--space-3) 0;
+}
+
+.status-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 28px;
+  padding: 0 var(--space-3);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--text);
+  font-size: var(--fs-xs);
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.status-chip[data-action] {
+  cursor: pointer;
+  transition: background var(--t-fast), border-color var(--t-fast);
+}
+
+.status-chip[data-action]:hover {
+  background: var(--surface-3);
+  border-color: var(--border-strong);
+}
+
+.status-chip-value {
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+}
+
+.status-chip-label {
+  font-size: 12px;
+  font-weight: 550;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.status-chip-warn {
+  background: var(--warning-tint);
+  border-color: rgba(224, 168, 60, 0.5);
+}
+
+.status-chip-warn .status-chip-value,
+.status-chip-warn .status-chip-label {
+  color: var(--warning-text);
+}
+
+.status-chip-danger {
+  background: var(--danger-tint);
+  border-color: rgba(229, 84, 79, 0.55);
+}
+
+.status-chip-danger .status-chip-value,
+.status-chip-danger .status-chip-label {
+  color: var(--danger-text);
+}
+
+/* Inline help: circled "?" with a pure-CSS tooltip read from data-tip.
+   Keyboard reachable (give it tabindex="0"); ✓ reduced-motion safe via the
+   global transition kill-switch in section 20. */
+
+.help-tip {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  margin-left: 3px;
+  padding: 0;
+  vertical-align: text-top;
+  background: transparent;
+  border: 1px solid var(--text-dim);
+  border-radius: 50%;
+  color: var(--text-muted);
+  font-family: var(--font);
+  font-size: 10px;
+  font-weight: 650;
+  line-height: 1;
+  letter-spacing: normal;
+  text-transform: none;
+  cursor: help;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.help-tip:hover,
+.help-tip:focus-visible {
+  border-color: var(--text-muted);
+  color: var(--text);
+}
+
+.help-tip:empty::before {
+  content: "?";
+}
+
+.help-tip::after {
+  content: attr(data-tip);
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 50%;
+  transform: translate(-50%, 4px);
+  z-index: 130;
+  width: max-content;
+  max-width: 280px;
+  padding: 7px 10px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-2);
+  color: var(--text);
+  font-family: var(--font);
+  font-size: 12.5px;
+  font-weight: 400;
+  line-height: 1.5;
+  letter-spacing: normal;
+  text-transform: none;
+  white-space: normal;
+  text-align: left;
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transition: opacity var(--t-fast), transform var(--t-fast),
+    visibility var(--t-fast);
+}
+
+.help-tip:hover::after,
+.help-tip:focus-visible::after {
+  opacity: 1;
+  visibility: visible;
+  transform: translate(-50%, 0);
+}
+
+/* Flip below when the tip would clip against the viewport / topbar */
+.help-tip[data-tip-down]::after {
+  bottom: auto;
+  top: calc(100% + 8px);
+  transform: translate(-50%, -4px);
+}
+
+.help-tip[data-tip-down]:hover::after,
+.help-tip[data-tip-down]:focus-visible::after {
+  transform: translate(-50%, 0);
+}

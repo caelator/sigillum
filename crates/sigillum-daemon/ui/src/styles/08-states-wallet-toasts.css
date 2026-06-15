@@ -1,0 +1,268 @@
+/* ── 12. Result / info / empty states ─────────────────────────────────────── */
+
+.result-box {
+  margin: var(--space-3) 0;
+  padding: var(--space-3) var(--space-4);
+  background: var(--bg);
+  border: 1px solid var(--border-strong);
+  border-left: 2px solid var(--accent);
+  border-radius: var(--radius-sm);
+  font-family: var(--mono);
+  font-size: var(--fs-xs);
+  font-variant-numeric: tabular-nums;
+  color: var(--text-secondary);
+  line-height: 1.7;
+  overflow-wrap: anywhere;
+}
+
+.info-box {
+  margin: var(--space-3) 0;
+  padding: 10px var(--space-4);
+  background: var(--info-tint);
+  border: 1px solid rgba(74, 163, 216, 0.28);
+  border-radius: var(--radius-sm);
+  font-size: var(--fs-xs);
+  color: var(--text-secondary);
+  line-height: 1.6;
+}
+
+.poison-warning {
+  margin: var(--space-3) 0;
+  padding: 10px var(--space-4);
+  background: var(--danger-tint);
+  border: 1px solid rgba(229, 84, 79, 0.4);
+  border-radius: var(--radius-sm);
+  font-size: var(--fs-xs);
+  color: var(--danger-text);
+  line-height: 1.6;
+}
+
+.empty-state {
+  margin: var(--space-2) 0;
+  padding: var(--space-6);
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius);
+  font-size: var(--fs-sm);
+  color: var(--text-muted);
+  text-align: center;
+  line-height: 1.55;
+}
+
+/* Ghost-style call to action inside an empty state */
+.empty-state-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: var(--control-h);
+  margin-top: var(--space-2);
+  padding: 0 var(--space-3);
+  background: transparent;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  line-height: 1;
+  white-space: nowrap;
+  cursor: pointer;
+  user-select: none;
+  -webkit-user-select: none;
+  transition: background var(--t-fast), border-color var(--t-fast),
+    color var(--t-fast);
+}
+
+.empty-state-action:hover:not(:disabled) {
+  background: var(--surface-2);
+  border-color: #4a5670;
+  color: var(--text);
+}
+
+/* ── 12b. Wallet manager (segmented tabs, advanced fields, mnemonic) ──────── */
+
+/* Generic segmented control — tab buttons or wrapped radio labels. */
+
+.segmented-tabs {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 2px;
+  padding: 2px;
+  margin-bottom: var(--space-3);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+
+.segmented-tab {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 26px;
+  padding: 0 var(--space-3);
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--text-muted);
+  font: inherit;
+  font-size: var(--fs-xs);
+  font-weight: 550;
+  white-space: nowrap;
+  cursor: pointer;
+  user-select: none;
+  -webkit-user-select: none;
+  transition: background var(--t-fast), color var(--t-fast);
+}
+
+.segmented-tab:hover {
+  color: var(--text);
+}
+
+.segmented-tab.active,
+.segmented-tab:has(input[type="radio"]:checked) {
+  background: var(--surface-3);
+  color: var(--text);
+  font-weight: 600;
+}
+
+.segmented-tab input[type="radio"] {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* Collapsible advanced fields inside dense forms. */
+
+.advanced-fields {
+  margin-bottom: var(--space-3);
+}
+
+.advanced-fields summary {
+  width: fit-content;
+  font-size: var(--fs-xs);
+  font-weight: 650;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+  cursor: pointer;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.advanced-fields summary:hover {
+  color: var(--text);
+}
+
+.advanced-fields[open] summary {
+  margin-bottom: var(--space-3);
+}
+
+/* While the one-time mnemonic is on screen the create form stays inert. */
+
+.form-disabled {
+  opacity: 0.55;
+  pointer-events: none;
+}
+
+/* One-time seed phrase reveal: numbered word grid + hard warning. */
+
+.mnemonic-reveal {
+  margin: var(--space-3) 0;
+  padding: var(--space-4);
+  background: var(--bg);
+  border: 1px solid rgba(229, 84, 79, 0.35);
+  border-radius: var(--radius);
+}
+
+.mnemonic-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(148px, 1fr));
+  gap: var(--space-2);
+  margin: var(--space-3) 0;
+  padding: 0;
+  list-style: none;
+}
+
+.mnemonic-word {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 6px 10px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-size: var(--fs-sm);
+  overflow-wrap: anywhere;
+}
+
+.mnemonic-index {
+  flex-shrink: 0;
+  min-width: 18px;
+  text-align: right;
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-dim);
+}
+
+.mnemonic-warning {
+  margin: var(--space-3) 0;
+  font-size: var(--fs-sm);
+  font-weight: 650;
+  color: var(--danger-text);
+}
+
+/* ── 13. Toasts ───────────────────────────────────────────────────────────── */
+
+.toast-stack {
+  position: fixed;
+  right: var(--space-6);
+  bottom: var(--space-6);
+  z-index: 120;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: var(--space-2);
+  pointer-events: none;
+  max-width: min(380px, calc(100vw - 48px));
+}
+
+.toast {
+  pointer-events: auto;
+  padding: 10px var(--space-4);
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-strong);
+  border-left: 3px solid var(--success);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-3);
+  font-size: var(--fs-sm);
+  color: var(--text);
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+  animation: toast-in var(--t-med) backwards;
+}
+
+.toast-success {
+  border-color: rgba(63, 185, 100, 0.45);
+  border-left-color: var(--success);
+}
+
+.toast-error {
+  border-color: rgba(229, 84, 79, 0.5);
+  border-left-color: var(--danger);
+}
+
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translateX(14px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}

@@ -1,6 +1,7 @@
 # Lessons
 
 - Validate embedded daemon UI changes in a real browser after CSP or interaction changes; passing tests alone does not prove the page is actually clickable.
+- Update `scripts/check-architecture.sh` in the same commit as any restructuring it encodes; the script fails fast, so one stale entry can mask every violation behind it (the operator-console rebuild left four line-cap violations and fourteen missing-file references undetected until the next full release-gate run).
 - Hide operator tools during first-run setup so the interface only shows the next meaningful action instead of overwhelming the user.
 - When the setup flow hits hardware-key failures, show recovery guidance in user terms instead of surfacing raw CTAP error text.
 - Do not surface raw CTAP or HID error strings in the daemon UI; FIDO2 failures need direct recovery guidance such as unplugging and reinserting the key when PIN auth is temporarily blocked.

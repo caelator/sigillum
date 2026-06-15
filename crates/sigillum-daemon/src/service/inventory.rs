@@ -24,15 +24,12 @@ use sigillum_api::{
     ChainProfile, ChainProfileDeleteRequest, ChainProfileListResponse,
     ChainProfileMutationResponse, ChainProfileUpsertRequest, ConsolidationPlan,
     ConsolidationPlanApproveRequest, ConsolidationPlanGenerateRequest,
-    ConsolidationPlanListResponse, ConsolidationPlanMutationResponse, ConsolidationPlanStep,
-    DiscoveryJobListResponse, DiscoveryJobMutationRequest, DiscoveryJobMutationResponse,
-    RiskFindingListResponse, TreasuryPolicy, WalletDiscoveryJob, WalletInventoryListResponse,
-    WalletInventoryScanRequest, WalletInventoryScanResponse, WatchAddressProbe,
+    ConsolidationPlanListResponse, ConsolidationPlanMutationResponse, DiscoveryJobListResponse,
+    DiscoveryJobMutationRequest, DiscoveryJobMutationResponse, RiskFindingListResponse,
+    WalletDiscoveryJob, WalletInventoryListResponse, WalletInventoryScanRequest,
+    WalletInventoryScanResponse, WatchAddressProbe,
 };
-use sigillum_core::{
-    decode_quantity_hex, derive_ethereum_address_from_control_xpub,
-    derive_ethereum_address_from_xpub,
-};
+use sigillum_core::{derive_ethereum_address_from_control_xpub, derive_ethereum_address_from_xpub};
 
 use crate::audit_log::AuditEventSpec;
 
@@ -42,20 +39,21 @@ use defi_discovery::defi_token_position_discovery_config;
 use nft_approval_discovery::nft_operator_approval_discovery_config;
 use nft_discovery::{erc721_transfer_discovery_config, erc1155_transfer_discovery_config};
 use permit2_discovery::permit2_allowance_discovery_config;
-use planner::{plan_step_for_holding, signer_status_for_holding, summarize_plan_steps};
+use planner::{
+    apply_policy_blockers_to_step, build_plan_steps, plan_policy_violations, summarize_plan_steps,
+};
 use risk::derive_inventory_risk_findings;
 use support::{
-    default_native_symbol, load_inventory_state, normalized_wallet_family, quantity_hex_is_nonzero,
+    default_native_symbol, load_inventory_state, normalized_wallet_family,
     record_inventory_observation, save_inventory_state, select_providers, trimmed_optional,
     trimmed_required, unique_strings, validated_gap_limit, validated_max_index,
 };
 use token_discovery::erc20_transfer_discovery_config;
-use treasury::{add_u256, policy_blockers_for_step};
 use wallet_selection::{DiscoveryWallet, select_discovery_wallets};
 use watch_discovery::select_watch_addresses;
 
 use super::evm::normalize_address;
-use super::helpers::{compare_u256, map_xpub_error, now_unix, random_id};
+use super::helpers::{map_xpub_error, now_unix, random_id};
 use super::{ServiceError, ServiceResult, SigillumService};
 
 const WALLET_FAMILY_ETH_SEED: &str = "eth-seed";
@@ -279,76 +277,9 @@ impl SigillumService {
         let registry = crate::profiles::load_profiles(&self.state.base_dir)
             .map_err(|error| ServiceError::internal(format!("Failed to load profiles: {error}")))?;
         let now = now_unix();
-        let destination_address = body.destination_address.and_then(trimmed_optional);
+        let destination_address = body.destination_address.clone().and_then(trimmed_optional);
         let policy = state.treasury_policy.clone();
-        let mut steps = Vec::new();
-
-        for holding in state
-            .holdings
-            .iter()
-            .filter(|holding| quantity_hex_is_nonzero(&holding.amount_hex))
-            .filter(|holding| {
-                body.wallet_family
-                    .as_deref()
-                    .is_none_or(|family| family == holding.wallet_family)
-            })
-            .filter(|holding| {
-                body.wallet_profile
-                    .as_deref()
-                    .is_none_or(|profile| profile == holding.wallet_profile)
-            })
-            .filter(|holding| {
-                body.provider_profile
-                    .as_deref()
-                    .is_none_or(|profile| profile == holding.provider_profile)
-            })
-        {
-            let signer_status = signer_status_for_holding(holding);
-            if signer_status == "watch_only" && body.include_watch_only != Some(true) {
-                continue;
-            }
-            let step_destination = if destination_address.is_some() {
-                destination_address.clone()
-            } else if holding.wallet_family == WALLET_FAMILY_ETH_SEED {
-                if let Some(seed_profile) = registry
-                    .eth_seed_wallets
-                    .iter()
-                    .find(|p| p.name == holding.wallet_profile)
-                {
-                    if seed_profile.hot_address.is_some() && seed_profile.treasury_address.is_some()
-                    {
-                        let hot_addr = seed_profile.hot_address.as_ref().unwrap();
-                        let treasury_addr = seed_profile.treasury_address.as_ref().unwrap();
-                        let hot_balance = state
-                            .addresses
-                            .iter()
-                            .find(|addr| {
-                                addr.wallet_profile == holding.wallet_profile
-                                    && addr.address == *hot_addr
-                            })
-                            .and_then(|addr| decode_quantity_hex(&addr.native_balance_wei_hex).ok())
-                            .unwrap_or([0u8; 32]);
-                        let target_refill = decode_quantity_hex("0xde0b6b3a7640000").unwrap(); // 1.0 ETH in wei
-                        if compare_u256(&hot_balance, &target_refill).is_lt() {
-                            Some(hot_addr.clone())
-                        } else {
-                            Some(treasury_addr.clone())
-                        }
-                    } else {
-                        seed_profile.default_destination_address.clone()
-                    }
-                } else {
-                    None
-                }
-            } else {
-                None
-            };
-            steps.push(plan_step_for_holding(
-                holding,
-                step_destination,
-                signer_status,
-            ));
-        }
+        let mut steps = build_plan_steps(&state, &registry, &body, &destination_address);
 
         // Policy runs after planning so planner blockers and policy verdicts
         // are both visible on each step, then the summary reflects the final
@@ -750,56 +681,4 @@ impl SigillumService {
             holdings: detected_holdings,
         })
     }
-}
-
-/// Extend a step with treasury policy blockers, mirroring planner semantics:
-/// any blocker forces blocked status and blocked risk level. Blockers are
-/// deduped because approval re-evaluates steps that generation already marked.
-fn apply_policy_blockers_to_step(policy: &TreasuryPolicy, step: &mut ConsolidationPlanStep) {
-    let policy_blockers = policy_blockers_for_step(
-        policy,
-        &step.action,
-        step.destination_address.as_deref(),
-        &step.asset_kind,
-        &step.amount_hex,
-    );
-    if policy_blockers.is_empty() {
-        return;
-    }
-    for blocker in policy_blockers {
-        if !step.blockers.contains(&blocker) {
-            step.blockers.push(blocker);
-        }
-    }
-    step.status = "blocked".into();
-    step.risk_level = "blocked".into();
-}
-
-/// Plan-level policy violations: currently only the native plan cap, summed
-/// over steps that can still move value. Blocked steps cannot execute, so
-/// they do not consume cap budget.
-fn plan_policy_violations(policy: &TreasuryPolicy, steps: &[ConsolidationPlanStep]) -> Vec<String> {
-    let mut violations = Vec::new();
-    if !policy.enabled {
-        return violations;
-    }
-    if let Some(cap_hex) = policy.max_plan_native_wei_hex.as_deref() {
-        if let Ok(cap) = decode_quantity_hex(cap_hex) {
-            let mut total = [0u8; 32];
-            for step in steps.iter().filter(|step| {
-                step.status != "blocked"
-                    && step.asset_kind == "native"
-                    && step.action.starts_with("sweep")
-            }) {
-                total = add_u256(
-                    &total,
-                    &decode_quantity_hex(&step.amount_hex).unwrap_or([0u8; 32]),
-                );
-            }
-            if compare_u256(&total, &cap).is_gt() {
-                violations.push("exceeds_policy_plan_cap".into());
-            }
-        }
-    }
-    violations
 }

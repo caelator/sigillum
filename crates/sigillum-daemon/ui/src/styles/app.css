@@ -1,0 +1,45 @@
+/* ═══════════════════════════════════════════════════════════════════════════
+   Sigillum daemon UI — authored stylesheet
+   ─────────────────────────────────────────────────────────────────────────────
+   Authored styles live in src/styles/* partials. This file aggregates them
+   via @import; `npm run build` (vite) bundles and minifies them into the
+   generated, checked-in src/styles.css, which the Rust host embeds with
+   include_str!.
+
+   Contents
+     1. Design tokens
+     2. Reset & base
+     3. App shell (sidebar / topbar / main / focus modes)
+     4. Sidebar chrome (brand, nav, badges, session controls)
+     5. Cards
+     6. Typography helpers & section structure
+     7. Buttons
+     8. Forms (inputs, selects, textareas, checkboxes, file)
+     9. Pills & badges
+    10. Stat tiles
+    11. Entity & key lists
+    12. Result / info / empty states
+    13. Toasts
+    14. Overview banner (statusCard)
+    15. Auth / focus panels
+    16. Setup wizard
+    17. Guide & next-step content
+    17b. Journey checklist, status chips & inline help
+    18. Pin modal
+    19. Utilities
+    20. Scrollbars, selection, motion & responsive
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+@import "./00-design-tokens.css";
+@import "./01-reset-base.css";
+@import "./02-app-shell.css";
+@import "./03-sidebar.css";
+@import "./04-cards-typography.css";
+@import "./05-buttons.css";
+@import "./06-forms.css";
+@import "./07-pills-stats-lists.css";
+@import "./08-states-wallet-toasts.css";
+@import "./09-overview-auth.css";
+@import "./10-setup-wizard.css";
+@import "./11-guide-journey.css";
+@import "./12-modal-utilities-responsive.css";

@@ -76,19 +76,19 @@ check_max_lines "crates/sigillum-client/src/queue.rs" 120
 check_max_lines "crates/sigillum-daemon/ui/src/app.js" 2500
 check_max_lines "crates/sigillum-daemon/ui/src/app.ts" 1500
 check_max_lines "crates/sigillum-daemon/ui/src/styles.css" 80
-check_max_lines "crates/sigillum-daemon/ui/src/styles/00-foundation-tokens.css" 120
-check_max_lines "crates/sigillum-daemon/ui/src/styles/01-foundation-base-layout.css" 220
-check_max_lines "crates/sigillum-daemon/ui/src/styles/02-foundation-forms.css" 120
-check_max_lines "crates/sigillum-daemon/ui/src/styles/03-foundation-components.css" 450
-check_max_lines "crates/sigillum-daemon/ui/src/styles/10-refresh-workspace.css" 500
-check_max_lines "crates/sigillum-daemon/ui/src/styles/11-refresh-forms.css" 120
-check_max_lines "crates/sigillum-daemon/ui/src/styles/12-refresh-components.css" 260
-check_max_lines "crates/sigillum-daemon/ui/src/styles/13-refresh-responsive.css" 120
-check_max_lines "crates/sigillum-daemon/ui/src/styles/20-console-workspace.css" 650
-check_max_lines "crates/sigillum-daemon/ui/src/styles/21-console-forms.css" 260
-check_max_lines "crates/sigillum-daemon/ui/src/styles/22-console-components.css" 260
-check_max_lines "crates/sigillum-daemon/ui/src/styles/23-console-responsive.css" 160
-check_max_lines "crates/sigillum-daemon/ui/src/styles/30-final-polish.css" 650
+check_max_lines "crates/sigillum-daemon/ui/src/styles/00-design-tokens.css" 120
+check_max_lines "crates/sigillum-daemon/ui/src/styles/01-reset-base.css" 90
+check_max_lines "crates/sigillum-daemon/ui/src/styles/02-app-shell.css" 150
+check_max_lines "crates/sigillum-daemon/ui/src/styles/03-sidebar.css" 310
+check_max_lines "crates/sigillum-daemon/ui/src/styles/04-cards-typography.css" 140
+check_max_lines "crates/sigillum-daemon/ui/src/styles/05-buttons.css" 160
+check_max_lines "crates/sigillum-daemon/ui/src/styles/06-forms.css" 210
+check_max_lines "crates/sigillum-daemon/ui/src/styles/07-pills-stats-lists.css" 310
+check_max_lines "crates/sigillum-daemon/ui/src/styles/08-states-wallet-toasts.css" 310
+check_max_lines "crates/sigillum-daemon/ui/src/styles/09-overview-auth.css" 230
+check_max_lines "crates/sigillum-daemon/ui/src/styles/10-setup-wizard.css" 260
+check_max_lines "crates/sigillum-daemon/ui/src/styles/11-guide-journey.css" 370
+check_max_lines "crates/sigillum-daemon/ui/src/styles/12-modal-utilities-responsive.css" 200
 check_max_lines "crates/sigillum-daemon/ui/src/styles/app.css" 80
 check_max_lines "docs/refactor-notes.md" 220
 
@@ -113,19 +113,19 @@ check_required_file "crates/sigillum-client/src/queue.rs"
 check_required_file "crates/sigillum-cli/src/daemon_api/queue.rs"
 check_required_file "crates/sigillum-daemon/ui/src/styles.d.ts"
 check_required_file "crates/sigillum-daemon/ui/src/styles/app.css"
-check_required_file "crates/sigillum-daemon/ui/src/styles/00-foundation-tokens.css"
-check_required_file "crates/sigillum-daemon/ui/src/styles/01-foundation-base-layout.css"
-check_required_file "crates/sigillum-daemon/ui/src/styles/02-foundation-forms.css"
-check_required_file "crates/sigillum-daemon/ui/src/styles/03-foundation-components.css"
-check_required_file "crates/sigillum-daemon/ui/src/styles/10-refresh-workspace.css"
-check_required_file "crates/sigillum-daemon/ui/src/styles/11-refresh-forms.css"
-check_required_file "crates/sigillum-daemon/ui/src/styles/12-refresh-components.css"
-check_required_file "crates/sigillum-daemon/ui/src/styles/13-refresh-responsive.css"
-check_required_file "crates/sigillum-daemon/ui/src/styles/20-console-workspace.css"
-check_required_file "crates/sigillum-daemon/ui/src/styles/21-console-forms.css"
-check_required_file "crates/sigillum-daemon/ui/src/styles/22-console-components.css"
-check_required_file "crates/sigillum-daemon/ui/src/styles/23-console-responsive.css"
-check_required_file "crates/sigillum-daemon/ui/src/styles/30-final-polish.css"
+check_required_file "crates/sigillum-daemon/ui/src/styles/00-design-tokens.css"
+check_required_file "crates/sigillum-daemon/ui/src/styles/01-reset-base.css"
+check_required_file "crates/sigillum-daemon/ui/src/styles/02-app-shell.css"
+check_required_file "crates/sigillum-daemon/ui/src/styles/03-sidebar.css"
+check_required_file "crates/sigillum-daemon/ui/src/styles/04-cards-typography.css"
+check_required_file "crates/sigillum-daemon/ui/src/styles/05-buttons.css"
+check_required_file "crates/sigillum-daemon/ui/src/styles/06-forms.css"
+check_required_file "crates/sigillum-daemon/ui/src/styles/07-pills-stats-lists.css"
+check_required_file "crates/sigillum-daemon/ui/src/styles/08-states-wallet-toasts.css"
+check_required_file "crates/sigillum-daemon/ui/src/styles/09-overview-auth.css"
+check_required_file "crates/sigillum-daemon/ui/src/styles/10-setup-wizard.css"
+check_required_file "crates/sigillum-daemon/ui/src/styles/11-guide-journey.css"
+check_required_file "crates/sigillum-daemon/ui/src/styles/12-modal-utilities-responsive.css"
 check_required_file "crates/sigillum-daemon/ui/src/api/session.ts"
 check_required_file "crates/sigillum-daemon/ui/src/actions/session.ts"
 check_required_file "crates/sigillum-daemon/ui/src/actions/dispatcher.ts"

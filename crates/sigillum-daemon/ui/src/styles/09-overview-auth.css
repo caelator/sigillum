@@ -1,0 +1,195 @@
+/* ── 14. Overview banner (statusCard) ─────────────────────────────────────── */
+
+.overview-shell {
+  display: grid;
+  grid-template-columns: minmax(0, 1.5fr) minmax(260px, 1fr);
+  gap: var(--space-6);
+  align-items: start;
+}
+
+.overview-summary {
+  font-size: var(--fs-sm);
+  color: var(--text-muted);
+  line-height: 1.6;
+  max-width: 60ch;
+  margin-top: var(--space-2);
+}
+
+.overview-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-top: var(--space-4);
+}
+
+.hero-mode {
+  padding: var(--space-3) var(--space-4);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.hero-mode-kicker {
+  font-size: 11px;
+  font-weight: 650;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+}
+
+.hero-mode-value {
+  margin-top: 3px;
+  font-size: var(--fs-md);
+  font-weight: 650;
+  letter-spacing: -0.01em;
+}
+
+.hero-mode-detail {
+  margin-top: 4px;
+  font-size: var(--fs-xs);
+  color: var(--text-muted);
+  line-height: 1.55;
+}
+
+.overview-stats {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin-bottom: 0;
+}
+
+.hero-context {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: var(--space-2);
+  margin-top: var(--space-4);
+}
+
+.hero-context:empty {
+  display: none;
+}
+
+.context-row {
+  padding: var(--space-3) var(--space-4);
+  background: var(--surface-2);
+  border: 1px solid var(--border-faint);
+  border-radius: var(--radius);
+  font-size: var(--fs-xs);
+  color: var(--text-muted);
+  line-height: 1.55;
+}
+
+.context-row strong {
+  display: block;
+  font-size: var(--fs-xs);
+  font-weight: 650;
+  color: var(--text-secondary);
+  margin-bottom: 2px;
+}
+
+/* Unlocked: compact overview banner */
+
+body[data-mode="unlocked"] .overview-card h2 {
+  font-size: var(--fs-lg);
+  letter-spacing: -0.015em;
+}
+
+body[data-mode="unlocked"] .overview-card .hero-context {
+  display: none;
+}
+
+/* Focus modes: statusCard renders as a centered headline, not a card */
+
+body:not([data-mode="unlocked"]) .overview-card {
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+  padding: 0 var(--space-2);
+  text-align: center;
+}
+
+body:not([data-mode="unlocked"]) .overview-card h2 {
+  font-size: var(--fs-xl);
+  letter-spacing: -0.02em;
+  line-height: 1.2;
+}
+
+body:not([data-mode="unlocked"]) .overview-card .overview-summary {
+  margin-left: auto;
+  margin-right: auto;
+}
+
+body:not([data-mode="unlocked"]) .overview-shell {
+  display: block;
+}
+
+body:not([data-mode="unlocked"]) .overview-side,
+body:not([data-mode="unlocked"]) .overview-actions {
+  display: none;
+}
+
+/* Locked and setup are focused flows. The overview hero only pushes the one
+   actionable panel below the fold, so it is removed outright and the unlock
+   or setup card becomes the first thing on screen. */
+body:not([data-mode="unlocked"]) #statusCard {
+  display: none;
+}
+
+body:not([data-mode="unlocked"]) .hero-context {
+  text-align: left;
+}
+
+body[data-mode="setup"] .hero-context {
+  display: none;
+}
+
+/* ── 15. Auth / focus panels ──────────────────────────────────────────────── */
+
+body:not([data-mode="unlocked"]) .focus-card {
+  box-shadow: var(--shadow-2);
+  border-color: var(--border-strong);
+}
+
+.field-hint {
+  margin: var(--space-2) 0 0;
+  font-size: var(--fs-xs);
+  color: var(--text-muted);
+}
+
+.field-error {
+  margin: var(--space-2) 0 0;
+  font-size: var(--fs-sm);
+  color: var(--danger);
+}
+
+.unlock-tabs {
+  display: inline-flex;
+  gap: 2px;
+  padding: 2px;
+  margin-bottom: var(--space-4);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+
+.unlock-tab {
+  height: 26px;
+  padding: 0 var(--space-3);
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--text-muted);
+  font: inherit;
+  font-size: var(--fs-xs);
+  font-weight: 550;
+  cursor: pointer;
+  transition: background var(--t-fast), color var(--t-fast);
+}
+
+.unlock-tab:hover {
+  color: var(--text);
+}
+
+.unlock-tab.active {
+  background: var(--surface-3);
+  color: var(--text);
+  font-weight: 600;
+}

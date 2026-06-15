@@ -1,0 +1,137 @@
+/* ── 7. Buttons ───────────────────────────────────────────────────────────── */
+
+button {
+  font: inherit;
+}
+
+.btn-primary,
+.btn-ghost,
+.btn-danger,
+.btn-success {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: var(--control-h);
+  padding: 0 var(--space-3);
+  border-radius: var(--radius-sm);
+  border: 1px solid transparent;
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  line-height: 1;
+  white-space: nowrap;
+  cursor: pointer;
+  user-select: none;
+  -webkit-user-select: none;
+  transition: background var(--t-fast), border-color var(--t-fast),
+    color var(--t-fast), transform var(--t-fast);
+}
+
+.btn-primary:active:not(:disabled),
+.btn-ghost:active:not(:disabled),
+.btn-danger:active:not(:disabled),
+.btn-success:active:not(:disabled) {
+  transform: translateY(1px);
+}
+
+.btn-primary {
+  background: var(--accent-fill);
+  color: #fff;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.14), var(--shadow-1);
+}
+
+.btn-primary:hover:not(:disabled) {
+  background: var(--accent-fill-hover);
+}
+
+.btn-primary:active:not(:disabled) {
+  background: var(--accent-fill-press);
+}
+
+.btn-ghost {
+  background: transparent;
+  border-color: var(--border-strong);
+  color: var(--text-secondary);
+}
+
+.btn-ghost:hover:not(:disabled) {
+  background: var(--surface-2);
+  border-color: #4a5670;
+  color: var(--text);
+}
+
+.btn-danger {
+  background: transparent;
+  border-color: rgba(229, 84, 79, 0.4);
+  color: var(--danger-text);
+}
+
+.btn-danger:hover:not(:disabled) {
+  background: var(--danger-tint);
+  border-color: rgba(229, 84, 79, 0.65);
+}
+
+.btn-success {
+  background: transparent;
+  border-color: rgba(63, 185, 100, 0.4);
+  color: var(--success-text);
+}
+
+.btn-success:hover:not(:disabled) {
+  background: var(--success-tint);
+  border-color: rgba(63, 185, 100, 0.65);
+}
+
+.btn-small {
+  height: 28px;
+  padding: 0 10px;
+  font-size: var(--fs-xs);
+}
+
+.btn-block {
+  width: 100%;
+}
+
+/* Disabled controls read as inert: dimmed, no hover response, blocked cursor */
+button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+button.is-busy {
+  position: relative;
+  color: transparent !important;
+}
+
+button.is-busy::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  margin: auto;
+  width: 13px;
+  height: 13px;
+  border-radius: 50%;
+  border: 2px solid rgba(255, 255, 255, 0.25);
+  border-top-color: var(--text);
+  animation: spin 700ms linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+/* Busy button: inline spinner before the label, input blocked while pending */
+.btn-busy {
+  pointer-events: none;
+}
+
+.btn-busy::before {
+  content: "";
+  width: 12px;
+  height: 12px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  animation: spin 700ms linear infinite;
+}

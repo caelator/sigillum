@@ -1,0 +1,174 @@
+/* ── 8. Forms ─────────────────────────────────────────────────────────────── */
+
+.form-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  margin-bottom: var(--space-3);
+}
+
+.form-row:last-child {
+  margin-bottom: 0;
+}
+
+.form-row-center {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+  margin-bottom: var(--space-3);
+}
+
+input[type="text"],
+input[type="password"],
+input[type="number"],
+select,
+textarea {
+  height: var(--control-h);
+  padding: 0 10px;
+  background: var(--bg);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.35);
+  color: var(--text);
+  font: inherit;
+  font-size: var(--fs-sm);
+  transition: border-color var(--t-fast), box-shadow var(--t-fast),
+    background var(--t-fast);
+}
+
+.form-row input[type="text"],
+.form-row input[type="password"],
+.form-row input[type="number"],
+.form-row select {
+  flex: 1 1 160px;
+  min-width: 0;
+}
+
+input::placeholder,
+textarea::placeholder {
+  color: var(--text-dim);
+  opacity: 1;
+}
+
+input[type="text"]:hover,
+input[type="password"]:hover,
+input[type="number"]:hover,
+select:hover,
+textarea:hover {
+  border-color: #4a5670;
+}
+
+input[type="text"]:focus,
+input[type="password"]:focus,
+input[type="number"]:focus,
+select:focus,
+textarea:focus {
+  border-color: var(--accent);
+  outline: 2px solid var(--accent-ring);
+  outline-offset: 2px;
+}
+
+/* Validation failure: red border + red ring, independent of focus/hover */
+input.input-invalid,
+input.input-invalid:hover,
+select.input-invalid,
+select.input-invalid:hover,
+textarea.input-invalid,
+textarea.input-invalid:hover {
+  border-color: var(--danger);
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.35),
+    0 0 0 2px rgba(229, 84, 79, 0.28);
+}
+
+input.input-invalid:focus,
+select.input-invalid:focus,
+textarea.input-invalid:focus {
+  border-color: var(--danger);
+  outline-color: rgba(229, 84, 79, 0.75);
+}
+
+textarea {
+  display: block;
+  width: 100%;
+  min-height: 76px;
+  height: auto;
+  padding: var(--space-2) 10px;
+  margin-bottom: var(--space-3);
+  resize: vertical;
+  line-height: 1.5;
+  font-family: var(--mono);
+  font-size: var(--fs-xs);
+}
+
+select {
+  appearance: none;
+  -webkit-appearance: none;
+  padding-right: 28px;
+  background-image:
+    linear-gradient(45deg, transparent 50%, #a8b3c4 50%),
+    linear-gradient(135deg, #a8b3c4 50%, transparent 50%);
+  background-position: calc(100% - 15px) 15px, calc(100% - 10px) 15px;
+  background-size: 5px 5px;
+  background-repeat: no-repeat;
+  cursor: pointer;
+}
+
+input[type="number"] {
+  font-variant-numeric: tabular-nums;
+}
+
+input[type="file"] {
+  font-size: var(--fs-xs);
+  color: var(--text-muted);
+}
+
+input[type="file"]::file-selector-button {
+  height: var(--control-h);
+  margin-right: 10px;
+  padding: 0 var(--space-3);
+  background: transparent;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: var(--fs-sm);
+  cursor: pointer;
+  transition: background var(--t-fast), color var(--t-fast);
+}
+
+input[type="file"]::file-selector-button:hover {
+  background: var(--surface-2);
+  color: var(--text);
+}
+
+input[type="checkbox"],
+input[type="radio"] {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+.checkbox-row,
+.checkbox-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: var(--fs-sm);
+  color: var(--text-secondary);
+  white-space: nowrap;
+  cursor: pointer;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+/* Width modifiers shared across dense operator forms */
+
+.input-compact { flex: 0 1 90px !important; }
+.input-narrow  { flex: 0 1 110px !important; }
+.input-mid     { flex: 0 1 150px !important; }
+.input-wide    { flex: 1 1 200px !important; }
+.input-wider   { flex: 0 1 220px !important; }

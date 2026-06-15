@@ -1,0 +1,120 @@
+/* ── 3. App shell ─────────────────────────────────────────────────────────── */
+
+.app-shell {
+  min-height: 100vh;
+}
+
+.sidebar {
+  position: fixed;
+  inset: 0 auto 0 0;
+  width: var(--sidebar-w);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  padding: var(--space-5) var(--space-3) var(--space-4);
+  background: var(--bg-deep);
+  border-right: 1px solid var(--border);
+  overflow-y: auto;
+  z-index: 40;
+}
+
+.workspace {
+  margin-left: var(--sidebar-w);
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+}
+
+.topbar {
+  position: sticky;
+  top: 0;
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  min-height: 64px;
+  padding: var(--space-3) var(--gutter);
+  background: rgba(11, 14, 20, 0.86);
+  -webkit-backdrop-filter: blur(10px);
+  backdrop-filter: blur(10px);
+  border-bottom: 1px solid var(--border);
+}
+
+.topbar-heading h1 {
+  font-size: var(--fs-lg);
+  font-weight: 650;
+  letter-spacing: -0.01em;
+  line-height: 1.3;
+}
+
+.topbar-summary {
+  font-size: var(--fs-xs);
+  color: var(--text-muted);
+  line-height: 1.4;
+  margin-top: 1px;
+}
+
+.topbar-meta {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  flex-shrink: 0;
+}
+
+main {
+  width: 100%;
+  max-width: var(--content-max);
+  margin: 0 auto;
+  padding: var(--gutter);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  flex: 1;
+}
+
+footer {
+  max-width: var(--content-max);
+  width: 100%;
+  margin: 0 auto;
+  padding: var(--space-4) var(--gutter) var(--space-6);
+  font-size: var(--fs-xs);
+  color: var(--text-dim);
+}
+
+/* Focus modes — setup / locked / first load: hide chrome, center the panel
+   over a subtle radial backdrop. */
+
+body:not([data-mode="unlocked"]) {
+  background:
+    radial-gradient(1100px 540px at 50% -180px, rgba(91, 124, 250, 0.09), transparent 65%),
+    radial-gradient(900px 520px at 85% 110%, rgba(74, 163, 216, 0.05), transparent 60%),
+    var(--bg);
+}
+
+body:not([data-mode="unlocked"]) .sidebar,
+body:not([data-mode="unlocked"]) .topbar {
+  display: none;
+}
+
+body:not([data-mode="unlocked"]) .workspace {
+  margin-left: 0;
+}
+
+body:not([data-mode="unlocked"]) main {
+  max-width: 560px;
+  padding-top: clamp(32px, 7vh, 96px);
+}
+
+body[data-mode="setup"] main {
+  max-width: 720px;
+}
+
+body:not([data-mode="unlocked"]) footer {
+  text-align: center;
+}
+
+/* Unlocked: the session card is superseded by sidebar session controls. */
+body[data-mode="unlocked"] #authCard {
+  display: none;
+}

@@ -1,0 +1,91 @@
+/* ── 1. Design tokens ─────────────────────────────────────────────────────── */
+
+:root {
+  color-scheme: dark;
+
+  /* Surfaces */
+  --bg: #0b0e14;
+  --bg-deep: #07090d;
+  --bg-elevated: #05070b;
+  --surface: #11151d;
+  --surface-2: #161b25;
+  --surface-3: #222a3a;
+  --surface-overlay: #1a2029;
+
+  /* Hairlines — bright enough to read card edges at arm's length */
+  --border: #2a3342;
+  --border-strong: #3a4456;
+  --border-faint: #232b3a;
+
+  /* Text — body ≈16.7:1, muted ≥7.5:1 on every surface (WCAG AA) */
+  --text: #f2f5fa;
+  --text-secondary: #c5cedd;
+  --text-muted: #a8b3c4;
+  --text-dim: #8a94ab;
+
+  /* Accent — electric indigo, used sparingly */
+  --accent: #5b7cfa;
+  --accent-hover: #7490fb;
+  --accent-press: #4a68e8;
+  --accent-text: #9eb1ff;
+  /* Solid fills that keep ≥4.5:1 with white label text */
+  --accent-fill: #4257d4;
+  --accent-fill-hover: #4e64e8;
+  --accent-fill-press: #3a4cc0;
+  --accent-tint: rgba(91, 124, 250, 0.12);
+  --accent-tint-strong: rgba(91, 124, 250, 0.22);
+  --accent-ring: rgba(116, 144, 251, 0.8);
+
+  /* Semantic */
+  --success: #3fb964;
+  --success-text: #6fd292;
+  --success-tint: rgba(63, 185, 100, 0.16);
+  --warning: #e0a83c;
+  --warning-text: #ecc06a;
+  --warning-tint: rgba(224, 168, 60, 0.16);
+  --danger: #e5544f;
+  --danger-text: #f08784;
+  --danger-tint: rgba(229, 84, 79, 0.15);
+  --info: #4aa3d8;
+  --info-text: #7fc1e8;
+  --info-tint: rgba(74, 163, 216, 0.15);
+
+  /* Radii */
+  --radius-sm: 6px;
+  --radius: 10px;
+  --radius-lg: 14px;
+
+  /* Spacing scale (4px base) */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+
+  /* Type */
+  --font: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, "Helvetica Neue", Arial, sans-serif;
+  --mono: ui-monospace, "SF Mono", "Cascadia Code", "JetBrains Mono", Menlo, Consolas, monospace;
+  --fs-xs: 13px;
+  --fs-sm: 14px;
+  --fs-base: 15px;
+  --fs-md: 17px;
+  --fs-lg: 21px;
+  --fs-xl: 30px;
+
+  /* Elevation */
+  --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow-2: 0 4px 16px rgba(0, 0, 0, 0.35);
+  --shadow-3: 0 12px 40px rgba(0, 0, 0, 0.45);
+
+  /* Layout */
+  --sidebar-w: 232px;
+  --content-max: 1200px;
+  --gutter: 24px;
+  --control-h: 36px;
+
+  /* Motion */
+  --t-fast: 130ms ease-out;
+  --t-med: 160ms ease-out;
+}

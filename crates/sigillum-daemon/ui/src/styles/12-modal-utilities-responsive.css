@@ -1,0 +1,169 @@
+/* ── 18. Pin modal (created at runtime by fido2.ts) ───────────────────────── */
+
+.pin-modal {
+  width: min(420px, calc(100vw - 48px));
+  box-shadow: var(--shadow-3);
+}
+
+.pin-modal h2 {
+  font-size: var(--fs-base);
+  font-weight: 600;
+  line-height: 1.5;
+  margin-bottom: var(--space-3);
+}
+
+/* ── 19. Utilities ────────────────────────────────────────────────────────── */
+
+.flex-1 { flex: 1 1 160px; min-width: 0; }
+.mt-8   { margin-top: var(--space-2); }
+.mt-12  { margin-top: var(--space-3); }
+.mt-14  { margin-top: 14px; }
+
+input.mono,
+textarea.mono {
+  font-family: var(--mono);
+  font-size: var(--fs-xs);
+}
+
+/* ── 20. Scrollbars, selection, motion & responsive ───────────────────────── */
+
+::selection {
+  background: rgba(91, 124, 250, 0.35);
+  color: var(--text);
+}
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-strong) transparent;
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--border-strong);
+  border: 3px solid transparent;
+  border-radius: 8px;
+  background-clip: content-box;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background-color: #4a5670;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* Users asking for more contrast get even stronger hairlines */
+@media (prefers-contrast: more) {
+  :root {
+    --border: #3a4456;
+    --border-strong: #4e5a70;
+    --border-faint: #2a3342;
+  }
+}
+
+@media (max-width: 960px) {
+  .sidebar {
+    position: static;
+    width: auto;
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-3);
+    padding: var(--space-3) var(--space-4);
+    border-right: 0;
+    border-bottom: 1px solid var(--border);
+    overflow: visible;
+  }
+
+  .sidebar-brand {
+    padding: 0;
+  }
+
+  .section-nav {
+    flex-direction: row;
+    flex-wrap: wrap;
+    gap: var(--space-1);
+    order: 3;
+    width: 100%;
+  }
+
+  .nav-item {
+    width: auto;
+    padding: 6px 12px;
+  }
+
+  .nav-item::before {
+    display: none;
+  }
+
+  .sidebar-foot {
+    margin-top: 0;
+    margin-left: auto;
+    flex-direction: row;
+    align-items: center;
+    border-top: 0;
+    padding-top: 0;
+  }
+
+  .session-controls {
+    flex-direction: row;
+    padding-top: 0;
+  }
+
+  .btn-block {
+    width: auto;
+  }
+
+  .workspace {
+    margin-left: 0;
+  }
+
+  .overview-shell,
+  .wizard-header {
+    grid-template-columns: 1fr;
+  }
+
+  .entity-list li {
+    flex-direction: column;
+  }
+
+  .entity-actions {
+    max-width: 100%;
+    justify-content: flex-start;
+  }
+}
+
+@media (max-width: 600px) {
+  main {
+    padding: var(--space-4);
+  }
+
+  .topbar {
+    padding: var(--space-3) var(--space-4);
+  }
+
+  .card {
+    padding: var(--space-4);
+  }
+
+  .section-divider {
+    margin-left: calc(-1 * var(--space-4));
+    margin-right: calc(-1 * var(--space-4));
+  }
+}

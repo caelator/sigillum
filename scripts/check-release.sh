@@ -101,6 +101,12 @@ run_step cargo check --workspace
 run_step cargo test --workspace
 run_step cargo clippy --workspace --all-targets -- -D warnings
 run_step ./scripts/check-runtime-smoke.sh
+if [[ "${SIGILLUM_SKIP_BROWSER_SMOKE:-0}" == "1" ]]; then
+  echo
+  echo "==> ./scripts/check-browser-smoke.sh (skipped by SIGILLUM_SKIP_BROWSER_SMOKE=1)"
+else
+  run_step ./scripts/check-browser-smoke.sh
+fi
 run_step cargo audit
 run_step cargo deny check
 run_git_diff_check

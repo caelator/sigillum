@@ -97,6 +97,13 @@ temporary daemon, checks the served UI shell, initializes a passphrase
 compartment, verifies vault write/read canaries, locks and unlocks it, verifies
 the canaries again, and runs `sigillum doctor` against both first-run and
 unlocked states.
+After the runtime smoke, the gate runs `scripts/check-browser-smoke.sh`, which
+starts another temporary daemon and drives a headless Chromium-family browser
+through setup-wizard passphrase initialization, the unlocked operator
+workspace, vault canary write/reveal, browser-session logout, and passphrase
+re-authentication, failing on any browser console or runtime error. It needs a
+local Chrome, Chromium, Brave, or Edge (override with `CHROME_BIN`); hosts
+without one can skip it with `SIGILLUM_SKIP_BROWSER_SMOKE=1`.
 For longer pre-production confidence, run `scripts/check-local-soak.sh` on the
 target host. Set `SIGILLUM_SOAK_SECONDS` and `SIGILLUM_SOAK_INTERVAL_SECONDS` to
 control duration and cadence; the harness repeatedly checks daemon status,
