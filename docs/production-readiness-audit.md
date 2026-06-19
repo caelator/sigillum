@@ -156,10 +156,10 @@ multi-host coordination, or arbitrary wallet discovery completeness.
 The explicit release scope is **Sigillum Local-First Operator Console v1**. It
 includes the local daemon, vault, CLI, session model, current wallet/inventory
 slices, and local-sidecar gateway preview. The comprehensive wallet-management
-roadmap is intentionally deferred from this readiness claim: deeper seed/xpub
-gap-limit discovery, rich NFT/DeFi/airdrop inventory, non-EVM chains, automated
-consolidation execution, and hosted or internet-facing wallet operations remain
-future product work.
+roadmap is intentionally deferred from this readiness claim: deeper xpub/custom
+derivation-path discovery, rich NFT/DeFi/airdrop inventory, non-EVM chains,
+automated consolidation execution, and hosted or internet-facing wallet
+operations remain future product work.
 
 ## Remaining Work Before A Broader Completion Claim
 

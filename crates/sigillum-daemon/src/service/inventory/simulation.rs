@@ -563,6 +563,8 @@ mod tests {
             chain_id: 1,
             address: "0x1111111111111111111111111111111111111111".into(),
             derivation_path: "m/44'/60'/0'/0/0".into(),
+            derivation_pattern: Some("project".into()),
+            account_index: Some(0),
             address_index: 0,
             activity_state: "funded".into(),
             native_balance_wei_hex: native_balance_wei_hex.into(),

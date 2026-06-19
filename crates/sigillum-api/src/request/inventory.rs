@@ -89,6 +89,16 @@ pub struct WalletInventoryScanRequest {
     pub wallet_profile: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub provider_profile: Option<String>,
+    /// Optional seed-wallet derivation pattern.
+    ///
+    /// `project` preserves the configured Sigillum profile account. `standard`
+    /// and `ledger_live` scan common Ethereum BIP-44 account branches
+    /// read-only, deriving public receive xpubs from the encrypted seed secret.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub derivation_pattern: Option<String>,
+    /// Number of account branches to scan for multi-account seed discovery.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub account_limit: Option<u32>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub watch_addresses: Vec<WatchAddressProbe>,
     #[serde(skip_serializing_if = "Option::is_none")]

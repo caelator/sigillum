@@ -202,8 +202,9 @@ What it intentionally does not do today:
   trusted claim candidates, standard Merkle claim preflight simulation,
   claim-contract risk findings, and local operator-managed
   spender/operator/claim-contract risk catalog overrides
-- seed/xpub gap-limit discovery, historical receive-address scanning, or
-  rich dormant-wallet classification with last-activity timestamps
+- historical receive-address discovery beyond the current EVM seed-account
+  receive-branch scanner and project-xpub gap-limit scanner, or rich
+  dormant-wallet classification with last-activity timestamps
 - full token registry/indexer scraping, full ERC-1155 batch/history coverage,
   NFT metadata and spam classification, Permit2 expiration-aware risk scoring,
   external spender/operator registries, queued execution for approval revokes,

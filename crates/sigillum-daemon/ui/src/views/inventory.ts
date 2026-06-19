@@ -149,6 +149,12 @@ export function createInventoryActions(deps: InventoryActionsDeps) {
         esc(address.wallet_profile) +
         " · chain=" +
         esc(String(address.chain_id)) +
+        (address.derivation_pattern
+          ? " · pattern=" + esc(address.derivation_pattern)
+          : "") +
+        (address.account_index !== undefined && address.account_index !== null
+          ? " · account=" + esc(String(address.account_index))
+          : "") +
         " · path=" +
         esc(address.derivation_path) +
         "<br>" +
@@ -494,6 +500,8 @@ export function createInventoryActions(deps: InventoryActionsDeps) {
       wallet_family: walletFamily,
       wallet_profile: optionalTextValue("inventoryWalletProfile"),
       provider_profile: optionalTextValue("inventoryProviderProfile"),
+      derivation_pattern: optionalTextValue("inventoryDerivationPattern"),
+      account_limit: optionalNumberValue("inventoryAccountLimit"),
       watch_addresses: watchAddresses,
       include_watch_book: input("inventoryIncludeWatchBook").checked,
       gap_limit: optionalNumberValue("inventoryGapLimit"),

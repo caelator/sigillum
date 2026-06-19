@@ -790,7 +790,7 @@ COMMANDS:
   profiles stealth <list|upsert|delete> [...]
   profiles eth-seed <list|create|delete> [...]  (create generates a new BIP-39 mnemonic and prints it exactly once)
   deposits <list|create-native|create-erc20|scan-announcements|refresh|enqueue-sweep|delete> [...]
-  inventory <list|chains|watch|scan-evm> [...]  (scan supports --watch-address, --watch-address-file, --include-watch-book)
+  inventory <list|chains|watch|scan-evm> [...]  (scan supports --watch-address, --watch-address-file, --include-watch-book, --derivation-pattern, --account-limit)
   discovery <jobs|scan-evm> [...]
   risk <list|catalog|catalog-upsert|catalog-delete> [...]
   plans <list|generate|approve|simulate|export> [...]

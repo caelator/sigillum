@@ -418,6 +418,8 @@ mod tests {
             profile: "archive".into(),
             receive_path: "m/44'/60'/0'/0".into(),
             receive_xpub: "xpub661MyMwAqRbcFexample".into(),
+            derivation_pattern: "project".into(),
+            account_index: 0,
         }
     }
 

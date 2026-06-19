@@ -27,7 +27,7 @@ use super::risk::derive_inventory_risk_findings;
 use super::support::{
     load_inventory_state, save_inventory_state, trimmed_optional, trimmed_required,
 };
-use super::wallet_selection::select_discovery_wallets;
+use super::wallet_selection::{SeedDerivationPattern, select_discovery_wallets};
 use super::{WALLET_FAMILY_ETH_SEED, WALLET_FAMILY_ETH_WATCH, WALLET_FAMILY_ETH_XPUB};
 
 const DEFAULT_NATIVE_SYMBOL: &str = "ETH";
@@ -535,6 +535,8 @@ impl SigillumService {
             &registry.eth_xpub_wallets,
             None,
             Some(wallet_profile),
+            SeedDerivationPattern::Project,
+            1,
         )?;
         let Some(wallet) = wallets.into_iter().next() else {
             return Err(ServiceError::not_found("Wallet profile not found."));
@@ -851,6 +853,8 @@ mod tests {
             chain_id: 1,
             address: "0x2222222222222222222222222222222222222222".into(),
             derivation_path: format!("m/44'/60'/0'/0/{address_index}"),
+            derivation_pattern: Some("project".into()),
+            account_index: Some(0),
             address_index,
             activity_state: "funded".into(),
             native_balance_wei_hex: "0x1".into(),

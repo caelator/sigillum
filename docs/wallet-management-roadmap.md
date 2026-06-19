@@ -40,7 +40,11 @@ Required discovery classes:
   provider profiles.
 - Historical account and receive-address discovery for imported seed wallets:
   standard Ethereum paths, common MetaMask/Ledger/Trezor patterns, project
-  account paths, and configurable gap limits.
+  account paths, and configurable gap limits. The first multi-account seed
+  discovery slice is implemented for EVM inventory scans with optional
+  `derivation_pattern` values of `project`, `standard`, or `ledger_live`;
+  `standard` and `ledger_live` derive read-only receive xpubs from the
+  encrypted seed secret and scan account branches up to `account_limit`.
 - Xpub receive branch discovery for public project wallets, including used
   address detection, balance checks, and gap-limit continuation.
 - Ad-hoc and saved EVM watch-address discovery for old exchange, hardware

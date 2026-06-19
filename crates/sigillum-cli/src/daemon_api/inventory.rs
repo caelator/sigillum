@@ -132,6 +132,8 @@ fn scan_evm(args: &[String]) {
         wallet_family: parse_flag(args, "--wallet-family"),
         wallet_profile: parse_flag(args, "--wallet-profile"),
         provider_profile: parse_flag(args, "--provider-profile"),
+        derivation_pattern: parse_flag(args, "--derivation-pattern"),
+        account_limit: parse_u32_flag(args, "--account-limit"),
         watch_addresses: parse_watch_address_probes(args),
         include_watch_book: flag_option(args, "--include-watch-book"),
         gap_limit: parse_u32_flag(args, "--gap-limit"),

@@ -228,6 +228,8 @@ pub(super) fn address_record(
         chain_id: context.provider.chain_id,
         address: context.address.to_string(),
         derivation_path: context.derivation_path.to_string(),
+        derivation_pattern: Some(context.wallet.derivation_pattern.clone()),
+        account_index: Some(context.wallet.account_index),
         address_index,
         activity_state: activity_state.to_string(),
         native_balance_wei_hex: native_balance_wei_hex.to_string(),

@@ -44,6 +44,8 @@ pub(super) fn select_watch_addresses(
                 profile: profile.clone(),
                 receive_path: format!("m/watch/{profile}"),
                 receive_xpub: String::new(),
+                derivation_pattern: "watch".into(),
+                account_index: 0,
             },
             address,
             address_index,

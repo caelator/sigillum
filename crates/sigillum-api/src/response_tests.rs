@@ -603,6 +603,8 @@ fn test_wallet_inventory_scan_response_roundtrip() {
         chain_id: 1,
         address: "0x1111111111111111111111111111111111111111".to_string(),
         derivation_path: "m/44'/60'/0'/0/0".to_string(),
+        derivation_pattern: Some("project".to_string()),
+        account_index: Some(0),
         address_index: 0,
         activity_state: "funded".to_string(),
         native_balance_wei_hex: "0x1".to_string(),

@@ -561,6 +561,10 @@ pub struct WalletInventoryAddress {
     pub chain_id: u64,
     pub address: String,
     pub derivation_path: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub derivation_pattern: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub account_index: Option<u32>,
     pub address_index: u32,
     pub activity_state: String,
     pub native_balance_wei_hex: String,
@@ -614,6 +618,10 @@ pub struct WalletDiscoveryCheckpoint {
     pub wallet_family: String,
     pub wallet_profile: String,
     pub provider_profile: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub derivation_pattern: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub account_index: Option<u32>,
     pub next_index: u32,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub last_scanned_index: Option<u32>,

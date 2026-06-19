@@ -77,6 +77,8 @@ export interface WalletDiscoveryCheckpoint {
   wallet_family: string;
   wallet_profile: string;
   provider_profile: string;
+  derivation_pattern?: string | null;
+  account_index?: number | null;
   next_index: number;
   last_scanned_index?: number | null;
   consecutive_empty: number;
@@ -122,6 +124,8 @@ export interface WalletInventoryAddress {
   chain_id: number;
   address: string;
   derivation_path: string;
+  derivation_pattern?: string | null;
+  account_index?: number | null;
   address_index: number;
   activity_state: string;
   native_balance_wei_hex: string;

@@ -1789,6 +1789,187 @@ async fn wallet_inventory_scan_records_seed_profile_native_holdings() {
 }
 
 #[tokio::test]
+async fn wallet_inventory_scan_discovers_standard_seed_accounts() {
+    let dir = TempDir::new().unwrap();
+    let (addr, handle) = spawn_daemon(dir.path().to_path_buf()).await;
+    let (rpc_addr, rpc_handle) = spawn_mock_evm_provider().await;
+    let client = reqwest::Client::new();
+
+    let init = post_json(
+        &client,
+        addr,
+        "/api/compartment/init",
+        json!({
+            "id": 0,
+            "label": "default",
+            "threshold": 1,
+            "passphrase": "correct horse battery staple",
+        }),
+        None,
+    )
+    .await;
+    let init_json: serde_json::Value = init.json().await.unwrap();
+    let token = init_json["session_token"].as_str().unwrap().to_string();
+
+    post_json(
+        &client,
+        addr,
+        "/api/api-keys/set",
+        json!({ "key": "alchemy", "value": "rpc-test-token" }),
+        Some(&token),
+    )
+    .await;
+
+    post_json(
+        &client,
+        addr,
+        "/api/profiles/evm/upsert",
+        json!({
+            "name": "mainnet",
+            "rpc_url": format!("http://{rpc_addr}/"),
+            "auth_token_key": "alchemy",
+            "chain_id": 1,
+        }),
+        Some(&token),
+    )
+    .await;
+
+    let seed = post_json(
+        &client,
+        addr,
+        "/api/profiles/eth-seed/upsert",
+        json!({
+            "name": "seed-main",
+            "label": "Seed main",
+            "mnemonic": "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about",
+            "project_account": 7,
+            "provider_profile": "mainnet",
+        }),
+        Some(&token),
+    )
+    .await;
+    assert_eq!(seed.status(), StatusCode::OK);
+
+    let scan = post_json(
+        &client,
+        addr,
+        "/api/inventory/scan/evm",
+        json!({
+            "wallet_family": "eth-seed",
+            "wallet_profile": "seed-main",
+            "provider_profile": "mainnet",
+            "derivation_pattern": "standard",
+            "account_limit": 2,
+            "gap_limit": 1,
+            "max_index": 0
+        }),
+        Some(&token),
+    )
+    .await;
+    let scan_status = scan.status();
+    let scan_json: serde_json::Value = scan.json().await.unwrap();
+    assert_eq!(scan_status, StatusCode::OK, "scan response: {scan_json}");
+    assert_eq!(scan_json["job"]["status"], "completed");
+    assert_eq!(scan_json["job"]["addresses_scanned"], 2);
+    assert_eq!(scan_json["job"]["active_addresses"], 2);
+    assert_eq!(scan_json["job"]["holdings_detected"], 2);
+
+    let addresses = scan_json["addresses"].as_array().unwrap();
+    assert_eq!(addresses.len(), 2);
+    assert!(addresses.iter().any(|address| {
+        address["derivation_pattern"] == "standard"
+            && address["account_index"] == 0
+            && address["address_index"] == 0
+            && address["derivation_path"] == "m/44'/60'/0'/0/0"
+    }));
+    assert!(addresses.iter().any(|address| {
+        address["derivation_pattern"] == "standard"
+            && address["account_index"] == 1
+            && address["address_index"] == 0
+            && address["derivation_path"] == "m/44'/60'/1'/0/0"
+    }));
+
+    let checkpoints = scan_json["job"]["checkpoints"].as_array().unwrap();
+    assert_eq!(checkpoints.len(), 2);
+    assert!(checkpoints.iter().any(|checkpoint| {
+        checkpoint["derivation_pattern"] == "standard"
+            && checkpoint["account_index"] == 0
+            && checkpoint["next_index"] == 1
+            && checkpoint["completed"] == true
+    }));
+    assert!(checkpoints.iter().any(|checkpoint| {
+        checkpoint["derivation_pattern"] == "standard"
+            && checkpoint["account_index"] == 1
+            && checkpoint["next_index"] == 1
+            && checkpoint["completed"] == true
+    }));
+
+    handle.abort();
+    rpc_handle.abort();
+}
+
+#[tokio::test]
+async fn wallet_inventory_scan_rejects_invalid_seed_derivation_controls() {
+    let dir = TempDir::new().unwrap();
+    let (addr, handle) = spawn_daemon(dir.path().to_path_buf()).await;
+    let client = reqwest::Client::new();
+
+    let init = post_json(
+        &client,
+        addr,
+        "/api/compartment/init",
+        json!({
+            "id": 0,
+            "label": "default",
+            "threshold": 1,
+            "passphrase": "correct horse battery staple",
+        }),
+        None,
+    )
+    .await;
+    let init_json: serde_json::Value = init.json().await.unwrap();
+    let token = init_json["session_token"].as_str().unwrap().to_string();
+
+    let invalid_pattern = post_json(
+        &client,
+        addr,
+        "/api/inventory/scan/evm",
+        json!({
+            "derivation_pattern": "custom"
+        }),
+        Some(&token),
+    )
+    .await;
+    let invalid_pattern_status = invalid_pattern.status();
+    let invalid_pattern_json: serde_json::Value = invalid_pattern.json().await.unwrap();
+    assert_eq!(
+        invalid_pattern_status,
+        StatusCode::BAD_REQUEST,
+        "invalid pattern response: {invalid_pattern_json}"
+    );
+
+    let invalid_limit = post_json(
+        &client,
+        addr,
+        "/api/inventory/scan/evm",
+        json!({
+            "account_limit": 11
+        }),
+        Some(&token),
+    )
+    .await;
+    let invalid_limit_status = invalid_limit.status();
+    let invalid_limit_json: serde_json::Value = invalid_limit.json().await.unwrap();
+    assert_eq!(
+        invalid_limit_status,
+        StatusCode::BAD_REQUEST,
+        "invalid account limit response: {invalid_limit_json}"
+    );
+
+    handle.abort();
+}
+
+#[tokio::test]
 async fn wallet_inventory_scan_records_ad_hoc_watch_addresses() {
     let dir = TempDir::new().unwrap();
     let (addr, handle) = spawn_daemon(dir.path().to_path_buf()).await;

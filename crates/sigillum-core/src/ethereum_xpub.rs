@@ -357,6 +357,28 @@ mod tests {
     }
 
     #[test]
+    fn mnemonic_receive_branch_exports_are_account_scoped() {
+        let twelve_word = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
+        let account_0 =
+            derive_ethereum_xpub_receive_branch_from_mnemonic(twelve_word, None, 0).unwrap();
+        let account_1 =
+            derive_ethereum_xpub_receive_branch_from_mnemonic(twelve_word, None, 1).unwrap();
+
+        assert_eq!(account_0.receive_path, "m/44'/60'/0'/0");
+        assert_eq!(account_1.receive_path, "m/44'/60'/1'/0");
+        assert_ne!(account_0.receive_xpub, account_1.receive_xpub);
+
+        let seed = mnemonic_seed(twelve_word, None).unwrap();
+        let account_1_private = derive_private_key_at_path(&seed, "m/44'/60'/1'/0/0").unwrap();
+        let account_1_public =
+            derive_ethereum_address_from_xpub(&account_1.receive_xpub, 0).unwrap();
+        assert_eq!(
+            ethereum_address_from_verifying_key(account_1_private.verifying_key()),
+            account_1_public.address
+        );
+    }
+
+    #[test]
     fn twenty_four_word_mnemonic_seed_phrase_is_supported() {
         let twenty_four_word = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon art";
         let export =

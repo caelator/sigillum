@@ -54,7 +54,10 @@ use support::{
     trimmed_required, unique_strings, validated_gap_limit, validated_max_index,
 };
 use token_discovery::erc20_transfer_discovery_config;
-use wallet_selection::{DiscoveryWallet, select_discovery_wallets};
+use wallet_selection::{
+    DERIVATION_PATTERN_PROJECT, DiscoveryWallet, SeedDerivationPattern, scan_account_limit,
+    select_discovery_wallets,
+};
 use watch_discovery::select_watch_addresses;
 
 use super::evm::normalize_address;
@@ -458,6 +461,9 @@ impl SigillumService {
             body.claim_candidate_limit,
         )?;
         let requested_family = normalized_wallet_family(body.wallet_family.as_deref())?;
+        let seed_derivation_pattern =
+            SeedDerivationPattern::parse(body.derivation_pattern.as_deref())?;
+        let account_limit = scan_account_limit(body.account_limit)?;
 
         let registry = crate::profiles::load_profiles(&self.state.base_dir).map_err(|error| {
             ServiceError::internal(format!("Failed to load profile registry: {error}"))
@@ -470,6 +476,8 @@ impl SigillumService {
             &registry.eth_xpub_wallets,
             requested_family.as_deref(),
             body.wallet_profile.as_deref(),
+            seed_derivation_pattern,
+            account_limit,
         )?;
         let _guard = self.state.operation_guard().await;
         let mut inventory = load_inventory_state(&self.state.base_dir)?;
@@ -619,7 +627,9 @@ impl SigillumService {
             sync_inventory_job(&mut inventory, &job);
             save_inventory_state(&self.state.base_dir, &inventory)?;
 
-            if wallet.family == WALLET_FAMILY_ETH_SEED {
+            if wallet.family == WALLET_FAMILY_ETH_SEED
+                && wallet.derivation_pattern == DERIVATION_PATTERN_PROJECT
+            {
                 if let Some(seed_profile) = registry
                     .eth_seed_wallets
                     .iter()

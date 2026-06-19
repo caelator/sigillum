@@ -575,6 +575,8 @@ fn test_wallet_inventory_scan_request_roundtrip() {
         wallet_family: Some("eth-seed".to_string()),
         wallet_profile: Some("seed-main".to_string()),
         provider_profile: Some("mainnet".to_string()),
+        derivation_pattern: Some("standard".to_string()),
+        account_limit: Some(3),
         watch_addresses: vec![WatchAddressProbe {
             address: "0x7777777777777777777777777777777777777777".to_string(),
             label: Some("old-ledger".to_string()),
