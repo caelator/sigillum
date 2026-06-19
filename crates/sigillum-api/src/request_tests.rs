@@ -547,10 +547,33 @@ fn test_eth_xpub_wallet_profile_upsert_request_roundtrip() {
         compartment_id: Some(2),
         chain_id: Some(1),
         external_receive_xpub: Some("xpub-imported".to_string()),
+        external_account_xpub: None,
         default_destination_address: Some("0xdestination".to_string()),
         execution_enabled: Some(false),
     };
     roundtrip_test(req);
+}
+
+#[test]
+fn test_eth_xpub_wallet_profile_upsert_rejects_mixed_external_xpubs() {
+    use crate::validation::Validate;
+
+    let req = EthXpubWalletProfileUpsertRequest {
+        name: "treasury_receive".to_string(),
+        project_account: 7,
+        provider_profile: "mainnet".to_string(),
+        compartment_id: Some(2),
+        chain_id: Some(1),
+        external_receive_xpub: Some("xpub-receive".to_string()),
+        external_account_xpub: Some("xpub-account".to_string()),
+        default_destination_address: None,
+        execution_enabled: Some(false),
+    };
+
+    assert_eq!(
+        req.validate().unwrap_err(),
+        "external_receive_xpub and external_account_xpub are mutually exclusive"
+    );
 }
 
 #[test]

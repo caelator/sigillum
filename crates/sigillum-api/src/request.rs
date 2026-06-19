@@ -522,6 +522,8 @@ pub struct EthXpubWalletProfileUpsertRequest {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub external_receive_xpub: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub external_account_xpub: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub default_destination_address: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub execution_enabled: Option<bool>,
@@ -546,7 +548,6 @@ pub struct EthSeedWalletProfileUpsertRequest {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub execution_enabled: Option<bool>,
 }
-
 /// Create a brand-new Ethereum seed-phrase wallet profile from a
 /// server-generated BIP-39 mnemonic.
 ///
@@ -814,7 +815,6 @@ pub enum GenerateStoreKind {
         separator: String,
     },
 }
-
 #[cfg(test)]
 #[path = "request_tests.rs"]
 mod tests;

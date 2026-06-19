@@ -1415,6 +1415,8 @@ function installWalletManagerDom() {
     "walletImportXpubCompartmentId",
     "walletImportXpubChainId",
     "walletImportXpubDestination",
+    "walletImportExternalReceiveXpub",
+    "walletImportExternalAccountXpub",
     "walletImportWatchAddress",
     "walletImportWatchLabel",
   ]);
@@ -1474,6 +1476,14 @@ test("wallet row meta helpers summarize identity, balances, and xpub display", (
     walletRowMeta(xpubProfile, [], null),
     "receive path m/44'/60'/3'/0\n" +
       "provider=base · chain=- · account=3\n" +
+      "balance=not scanned yet",
+  );
+  const accountXpubProfile = { ...xpubProfile, external_account_xpub: "xpub-account" };
+  equal(xpubDisplay(accountXpubProfile), "external receive path m/44'/60'/3'/0");
+  equal(
+    walletRowMeta(accountXpubProfile, [], null),
+    "external receive path m/44'/60'/3'/0\n" +
+      "provider=base · chain=- · account=3 · source=external account xpub\n" +
       "balance=not scanned yet",
   );
 });
@@ -1817,6 +1827,7 @@ test("wallet manager import tabs switch forms, scrub seed input, and post contra
   dom.el("walletImportXpubChainId").value = "10";
   dom.el("walletImportXpubDestination").value =
     "0x8888888888888888888888888888888888888888";
+  dom.el("walletImportExternalAccountXpub").value = "xpub-account";
   await manager.importXpubWallet();
   const xpubUpsert = calls.find(
     (call) => call.path === "/api/profiles/eth-xpub/upsert",
@@ -1830,11 +1841,13 @@ test("wallet manager import tabs switch forms, scrub seed input, and post contra
       provider_profile: "mainnet",
       compartment_id: 1,
       chain_id: 10,
+      external_account_xpub: "xpub-account",
       default_destination_address: "0x8888888888888888888888888888888888888888",
     },
   });
   equal(dom.el("walletImportXpubName").value, "");
   equal(dom.el("walletImportXpubAccount").value, "0");
+  equal(dom.el("walletImportExternalAccountXpub").value, "");
 
   manager.setWalletImportTab("watch");
   equal(dom.el("walletImportWatchForm").classList.contains("hidden"), false);

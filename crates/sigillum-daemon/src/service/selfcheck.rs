@@ -22,7 +22,7 @@ use sigillum_api::{
 };
 use sigillum_core::{
     SecretStore, VaultLifecycle, decode_quantity_hex, derive_ethereum_address_from_xpub,
-    derive_sigillum_ethereum_xpub_receive_branch,
+    derive_ethereum_receive_branch_from_account_xpub, derive_sigillum_ethereum_xpub_receive_branch,
 };
 
 use crate::audit_log::AuditEventSpec;
@@ -365,6 +365,20 @@ impl SigillumService {
         {
             return match derive_ethereum_address_from_xpub(xpub, 0) {
                 Ok(_) => VaultDerivation::Resolvable(xpub.to_string()),
+                Err(error) => VaultDerivation::Invalid(error.to_string()),
+            };
+        }
+        if let Some(xpub) = profile
+            .external_account_xpub
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+        {
+            return match derive_ethereum_receive_branch_from_account_xpub(
+                xpub,
+                profile.project_account,
+            ) {
+                Ok(export) => VaultDerivation::Resolvable(export.receive_xpub),
                 Err(error) => VaultDerivation::Invalid(error.to_string()),
             };
         }

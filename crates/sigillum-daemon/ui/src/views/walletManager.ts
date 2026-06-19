@@ -83,7 +83,8 @@ export function walletNativeBalanceFromGroups(
  * compartment when exported.
  */
 export function xpubDisplay(profile: EthXpubWalletProfile): string {
-  const source = profile.external_receive_xpub ? "external " : "";
+  const source =
+    profile.external_account_xpub || profile.external_receive_xpub ? "external " : "";
   return source + "receive path m/44'/60'/" + profile.project_account + "'/0";
 }
 
@@ -110,8 +111,10 @@ export function walletRowMeta(
     "account=" + profile.project_account,
   ];
   if (seed) facts.push("words=" + seed.word_count);
-  if (!seed && (profile as EthXpubWalletProfile).external_receive_xpub) {
-    facts.push("source=external xpub");
+  if (!seed) {
+    const xpub = profile as EthXpubWalletProfile;
+    if (xpub.external_account_xpub) facts.push("source=external account xpub");
+    else if (xpub.external_receive_xpub) facts.push("source=external receive xpub");
   }
   lines.push(facts.join(" · "));
   lines.push("balance=" + walletNativeBalanceFromGroups(profile.name, groups));
@@ -719,6 +722,8 @@ export function createWalletManagerActions(deps: WalletManagerDeps) {
     if (destination) body.default_destination_address = destination;
     const externalReceiveXpub = optionalTextValue("walletImportExternalReceiveXpub");
     if (externalReceiveXpub) body.external_receive_xpub = externalReceiveXpub;
+    const externalAccountXpub = optionalTextValue("walletImportExternalAccountXpub");
+    if (externalAccountXpub) body.external_account_xpub = externalAccountXpub;
 
     const r = await deps.api("POST", "/api/profiles/eth-xpub/upsert", body);
     if (r.error) {
@@ -730,6 +735,7 @@ export function createWalletManagerActions(deps: WalletManagerDeps) {
       "walletImportXpubCompartmentId",
       "walletImportXpubChainId",
       "walletImportExternalReceiveXpub",
+      "walletImportExternalAccountXpub",
       "walletImportXpubDestination",
     ]);
     const account = input("walletImportXpubAccount");

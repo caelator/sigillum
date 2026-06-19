@@ -25,6 +25,8 @@ pub enum EthereumXpubError {
     InvalidReceiveIndex,
     #[error("invalid receive-branch xpub")]
     InvalidReceiveBranchXpub,
+    #[error("invalid account-branch xpub")]
+    InvalidAccountBranchXpub,
     #[error("invalid BIP-39 seed phrase")]
     InvalidMnemonic,
     #[error("mnemonic word count must be 12 or 24")]
@@ -120,6 +122,47 @@ pub fn derive_ethereum_address_from_xpub(
         .map_err(|_| EthereumXpubError::InvalidReceiveBranchXpub)?;
     validate_receive_branch_xpub(&receive_xpub)?;
     derive_receive_address_from_xpub(&receive_xpub, index)
+}
+
+pub fn derive_ethereum_receive_branch_from_account_xpub(
+    account_xpub: &str,
+    project_account: u32,
+) -> Result<EthereumXpubReceiveExport, EthereumXpubError> {
+    let account_xpub = account_xpub
+        .parse::<XPub>()
+        .map_err(|_| EthereumXpubError::InvalidAccountBranchXpub)?;
+    validate_account_branch_xpub(&account_xpub, project_account)?;
+    let receive_xpub = account_xpub
+        .derive_child(receive_branch_child()?)
+        .map_err(|_| EthereumXpubError::InvalidAccountBranchXpub)?;
+    Ok(EthereumXpubReceiveExport {
+        project_account,
+        account_path: account_path(project_account),
+        receive_path: receive_path(project_account),
+        receive_xpub: receive_xpub.to_string(Prefix::XPUB).to_string(),
+    })
+}
+
+pub fn derive_ethereum_address_from_account_xpub(
+    account_xpub: &str,
+    project_account: u32,
+    index: u32,
+) -> Result<EthereumXpubReceiveAddress, EthereumXpubError> {
+    let export = derive_ethereum_receive_branch_from_account_xpub(account_xpub, project_account)?;
+    derive_ethereum_address_from_xpub(&export.receive_xpub, index)
+}
+
+pub fn derive_ethereum_account_xpub_from_mnemonic(
+    mnemonic_phrase: &str,
+    mnemonic_passphrase: Option<&str>,
+    project_account: u32,
+) -> Result<String, EthereumXpubError> {
+    let seed = mnemonic_seed(mnemonic_phrase, mnemonic_passphrase)?;
+    let account_xprv = derive_account_xprv(&seed, project_account)?;
+    Ok(account_xprv
+        .public_key()
+        .to_string(Prefix::XPUB)
+        .to_string())
 }
 
 fn mnemonic_seed(
@@ -285,6 +328,33 @@ fn validate_receive_branch_xpub(receive_xpub: &XPub) -> Result<(), EthereumXpubE
     Ok(())
 }
 
+fn validate_account_branch_xpub(
+    account_xpub: &XPub,
+    project_account: u32,
+) -> Result<(), EthereumXpubError> {
+    let attrs = account_xpub.attrs();
+    if attrs.depth != 3
+        || !attrs.child_number.is_hardened()
+        || attrs.child_number.index() != project_account
+        || attrs.parent_fingerprint == [0u8; 4]
+    {
+        return Err(EthereumXpubError::InvalidAccountBranchXpub);
+    }
+    Ok(())
+}
+
+fn account_path(project_account: u32) -> String {
+    format!("m/{ETHEREUM_XPUB_PURPOSE}'/{ETHEREUM_XPUB_COIN_TYPE}'/{project_account}'")
+}
+
+fn receive_path(project_account: u32) -> String {
+    format!(
+        "{}/{}",
+        account_path(project_account),
+        ETHEREUM_XPUB_RECEIVE_BRANCH
+    )
+}
+
 fn hardened_child(index: u32) -> Result<ChildNumber, EthereumXpubError> {
     ChildNumber::new(index, true).map_err(|_| EthereumXpubError::InvalidProjectAccount)
 }
@@ -342,6 +412,58 @@ mod tests {
             derive_ethereum_address_from_xpub(&account_xpub, 0),
             Err(EthereumXpubError::InvalidReceiveBranchXpub)
         );
+    }
+
+    #[test]
+    fn account_xpub_derives_matching_receive_branch() {
+        let receive_export =
+            derive_sigillum_ethereum_xpub_receive_branch(&[12u8; 32], 4).expect("receive");
+        let account_xpub = derive_account_xprv(&[12u8; 32], 4)
+            .expect("account")
+            .public_key()
+            .to_string(Prefix::XPUB)
+            .to_string();
+
+        let imported =
+            derive_ethereum_receive_branch_from_account_xpub(&account_xpub, 4).expect("import");
+        assert_eq!(imported, receive_export);
+        assert_eq!(
+            derive_ethereum_address_from_account_xpub(&account_xpub, 4, 8).expect("account"),
+            derive_ethereum_address_from_xpub(&receive_export.receive_xpub, 8).expect("receive")
+        );
+    }
+
+    #[test]
+    fn account_xpub_rejects_wrong_depth_and_account() {
+        let receive_export =
+            derive_sigillum_ethereum_xpub_receive_branch(&[13u8; 32], 2).expect("receive");
+        let account_xpub = derive_account_xprv(&[13u8; 32], 2)
+            .expect("account")
+            .public_key()
+            .to_string(Prefix::XPUB)
+            .to_string();
+
+        assert_eq!(
+            derive_ethereum_receive_branch_from_account_xpub(&receive_export.receive_xpub, 2),
+            Err(EthereumXpubError::InvalidAccountBranchXpub)
+        );
+        assert_eq!(
+            derive_ethereum_receive_branch_from_account_xpub(&account_xpub, 3),
+            Err(EthereumXpubError::InvalidAccountBranchXpub)
+        );
+    }
+
+    #[test]
+    fn mnemonic_exports_account_xpub_for_watch_only_import() {
+        let twelve_word = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
+        let account_xpub =
+            derive_ethereum_account_xpub_from_mnemonic(twelve_word, None, 1).unwrap();
+        let receive_from_account =
+            derive_ethereum_receive_branch_from_account_xpub(&account_xpub, 1).unwrap();
+        let receive_direct =
+            derive_ethereum_xpub_receive_branch_from_mnemonic(twelve_word, None, 1).unwrap();
+
+        assert_eq!(receive_from_account, receive_direct);
     }
 
     #[test]

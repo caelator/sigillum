@@ -11,7 +11,7 @@ use sigillum_api::{
     EvmProviderProfileListResponse, EvmProviderProfileMutationResponse,
     EvmProviderProfileUpsertRequest,
 };
-use sigillum_core::derive_ethereum_address_from_xpub;
+use sigillum_core::{derive_ethereum_address_from_account_xpub, derive_ethereum_address_from_xpub};
 
 use crate::audit_log::AuditEventSpec;
 
@@ -291,15 +291,31 @@ impl SigillumService {
             .map(str::trim)
             .filter(|value| !value.is_empty())
             .map(str::to_string);
+        let external_account_xpub = body
+            .external_account_xpub
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_string);
+        if external_receive_xpub.is_some() && external_account_xpub.is_some() {
+            return Err(ServiceError::bad_request(
+                "external_receive_xpub and external_account_xpub are mutually exclusive",
+            ));
+        }
         if let Some(xpub) = external_receive_xpub.as_deref() {
             derive_ethereum_address_from_xpub(xpub, 0).map_err(map_xpub_error)?;
         }
+        if let Some(xpub) = external_account_xpub.as_deref() {
+            derive_ethereum_address_from_account_xpub(xpub, body.project_account, 0)
+                .map_err(map_xpub_error)?;
+        }
 
-        let execution_enabled = if external_receive_xpub.is_some() {
-            false
-        } else {
-            body.execution_enabled.unwrap_or(false)
-        };
+        let execution_enabled =
+            if external_receive_xpub.is_some() || external_account_xpub.is_some() {
+                false
+            } else {
+                body.execution_enabled.unwrap_or(false)
+            };
 
         let profile = EthXpubWalletProfile {
             name: body.name,
@@ -308,6 +324,7 @@ impl SigillumService {
             compartment_id,
             chain_id: body.chain_id,
             external_receive_xpub,
+            external_account_xpub,
             default_destination_address: body.default_destination_address,
             execution_enabled,
         };
@@ -410,7 +427,10 @@ mod tests {
 
     use axum::http::StatusCode;
     use sigillum_api::EthXpubWalletProfileUpsertRequest;
-    use sigillum_core::derive_ethereum_xpub_receive_branch_from_mnemonic;
+    use sigillum_core::{
+        derive_ethereum_account_xpub_from_mnemonic,
+        derive_ethereum_xpub_receive_branch_from_mnemonic,
+    };
     use sigillum_fido2::config::CompartmentMeta;
     use tempfile::TempDir;
 
@@ -449,6 +469,7 @@ mod tests {
 
     fn xpub_upsert_request(
         external_receive_xpub: Option<String>,
+        external_account_xpub: Option<String>,
     ) -> EthXpubWalletProfileUpsertRequest {
         EthXpubWalletProfileUpsertRequest {
             name: "external-ledger".into(),
@@ -457,6 +478,7 @@ mod tests {
             compartment_id: Some(0),
             chain_id: Some(1),
             external_receive_xpub,
+            external_account_xpub,
             default_destination_address: None,
             execution_enabled: Some(true),
         }
@@ -483,7 +505,7 @@ mod tests {
         let response = service
             .upsert_eth_xpub_wallet_profile(
                 Some(&session),
-                xpub_upsert_request(Some(export.receive_xpub.clone())),
+                xpub_upsert_request(Some(export.receive_xpub.clone()), None),
             )
             .await
             .unwrap();
@@ -492,6 +514,37 @@ mod tests {
             response.profile.external_receive_xpub,
             Some(export.receive_xpub)
         );
+        assert!(!response.profile.execution_enabled);
+    }
+
+    #[tokio::test]
+    async fn imported_account_xpub_profile_forces_watch_only_execution() {
+        let dir = TempDir::new().unwrap();
+        let state = Arc::new(AppState::new(dir.path().to_path_buf()));
+        unlock_default_compartment(&state);
+        let session = state.create_session(Some(0));
+        let service = SigillumService::new(state);
+        save_profiles(
+            dir.path(),
+            &ProfileRegistry {
+                evm_providers: vec![provider_profile()],
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let account_xpub =
+            derive_ethereum_account_xpub_from_mnemonic(TEST_MNEMONIC, None, 0).unwrap();
+
+        let response = service
+            .upsert_eth_xpub_wallet_profile(
+                Some(&session),
+                xpub_upsert_request(None, Some(account_xpub.clone())),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.profile.external_receive_xpub, None);
+        assert_eq!(response.profile.external_account_xpub, Some(account_xpub));
         assert!(!response.profile.execution_enabled);
     }
 
@@ -514,12 +567,46 @@ mod tests {
         let error = service
             .upsert_eth_xpub_wallet_profile(
                 Some(&session),
-                xpub_upsert_request(Some("not-a-real-xpub".into())),
+                xpub_upsert_request(Some("not-a-real-xpub".into()), None),
             )
             .await
             .unwrap_err();
 
         assert_eq!(error.status(), StatusCode::BAD_REQUEST);
         assert_eq!(error.message(), "invalid receive-branch xpub");
+    }
+
+    #[tokio::test]
+    async fn imported_xpub_profile_rejects_mixed_external_sources() {
+        let dir = TempDir::new().unwrap();
+        let state = Arc::new(AppState::new(dir.path().to_path_buf()));
+        unlock_default_compartment(&state);
+        let session = state.create_session(Some(0));
+        let service = SigillumService::new(state);
+        save_profiles(
+            dir.path(),
+            &ProfileRegistry {
+                evm_providers: vec![provider_profile()],
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let receive =
+            derive_ethereum_xpub_receive_branch_from_mnemonic(TEST_MNEMONIC, None, 0).unwrap();
+        let account = derive_ethereum_account_xpub_from_mnemonic(TEST_MNEMONIC, None, 0).unwrap();
+
+        let error = service
+            .upsert_eth_xpub_wallet_profile(
+                Some(&session),
+                xpub_upsert_request(Some(receive.receive_xpub), Some(account)),
+            )
+            .await
+            .unwrap_err();
+
+        assert_eq!(error.status(), StatusCode::BAD_REQUEST);
+        assert_eq!(
+            error.message(),
+            "external_receive_xpub and external_account_xpub are mutually exclusive"
+        );
     }
 }

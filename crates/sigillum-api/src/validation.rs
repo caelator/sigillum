@@ -485,6 +485,24 @@ impl Validate for crate::request::EthXpubWalletProfileUpsertRequest {
             MAX_XPUB,
         )?;
         check_optional_len(
+            "external_account_xpub",
+            &self.external_account_xpub,
+            MAX_XPUB,
+        )?;
+        if self
+            .external_receive_xpub
+            .as_deref()
+            .is_some_and(|value| !value.trim().is_empty())
+            && self
+                .external_account_xpub
+                .as_deref()
+                .is_some_and(|value| !value.trim().is_empty())
+        {
+            return Err(
+                "external_receive_xpub and external_account_xpub are mutually exclusive".into(),
+            );
+        }
+        check_optional_len(
             "default_destination_address",
             &self.default_destination_address,
             MAX_ADDRESS,

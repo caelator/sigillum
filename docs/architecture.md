@@ -135,8 +135,9 @@ Current daemon behavior:
   receive profiles for internal EVM integration, with explicit compartment
   binding so queued work does not depend on the session's currently active
   compartment; xpub profiles can either use Sigillum's project-derived receive
-  branch or an imported external `external_receive_xpub` branch, which remains
-  watch-only and non-executable
+  branch, an imported external `external_receive_xpub` branch, or an imported
+  account-level `external_account_xpub` that is normalized into a receive
+  branch; imported xpub profiles remain watch-only and non-executable
 - keeps profile-backed send construction and provider/wallet lookup helpers in
   `service/profiles/sends.rs` and `service/profiles/resolution.rs`, leaving
   `profiles.rs` centered on profile CRUD and seed/xpub import handling
@@ -208,9 +209,9 @@ What it intentionally does not do today:
   claim-contract risk findings, and local operator-managed
   spender/operator/claim-contract risk catalog overrides
 - historical receive-address discovery beyond the current EVM seed-account
-  receive-branch scanner, project-xpub gap-limit scanner, and imported
-  receive-branch xpub scanner, or rich dormant-wallet classification with
-  last-activity timestamps
+  receive-branch scanner, project-xpub gap-limit scanner, imported
+  receive-branch xpub scanner, and imported account-level xpub scanner, or rich
+  dormant-wallet classification with last-activity timestamps
 - full token registry/indexer scraping, full ERC-1155 batch/history coverage,
   NFT metadata and spam classification, Permit2 expiration-aware risk scoring,
   external spender/operator registries, queued execution for approval revokes,

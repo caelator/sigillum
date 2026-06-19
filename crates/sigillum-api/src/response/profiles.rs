@@ -74,6 +74,11 @@ pub struct EthXpubWalletProfile {
     /// from the bound compartment master key.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub external_receive_xpub: Option<String>,
+    /// Imported account-level xpub for external watch-only wallets.
+    ///
+    /// Sigillum normalizes this to a receive branch before discovery.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub external_account_xpub: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub default_destination_address: Option<String>,
     #[serde(default)]

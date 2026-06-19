@@ -878,6 +878,22 @@ async fn xpub_profiles_export_and_derive_receive_addresses() {
     .await;
     assert_eq!(provider.status(), StatusCode::OK);
 
+    let mixed_external_profile = post_json(
+        &client,
+        addr,
+        "/api/profiles/eth-xpub/upsert",
+        json!({
+            "name": "mixed-external",
+            "project_account": 7,
+            "provider_profile": "mainnet",
+            "external_receive_xpub": "xpub-receive",
+            "external_account_xpub": "xpub-account",
+        }),
+        Some(&token),
+    )
+    .await;
+    assert_eq!(mixed_external_profile.status(), StatusCode::BAD_REQUEST);
+
     let xpub_profile = post_json(
         &client,
         addr,
@@ -3702,6 +3718,7 @@ async fn self_check_verifies_providers_wallets_policy_and_allocations() {
     )
     .await;
 
+    let test_mnemonic = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
     let seed = post_json(
         &client,
         addr,
@@ -3709,7 +3726,7 @@ async fn self_check_verifies_providers_wallets_policy_and_allocations() {
         json!({
             "name": "seed-main",
             "label": "Seed main",
-            "mnemonic": "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about",
+            "mnemonic": test_mnemonic,
             "project_account": 0,
             "provider_profile": "mainnet",
         }),
@@ -3717,6 +3734,23 @@ async fn self_check_verifies_providers_wallets_policy_and_allocations() {
     )
     .await;
     assert_eq!(seed.status(), StatusCode::OK);
+
+    let account_xpub =
+        sigillum_core::derive_ethereum_account_xpub_from_mnemonic(test_mnemonic, None, 0).unwrap();
+    let account_xpub_profile = post_json(
+        &client,
+        addr,
+        "/api/profiles/eth-xpub/upsert",
+        json!({
+            "name": "account-xpub",
+            "project_account": 0,
+            "provider_profile": "mainnet",
+            "external_account_xpub": account_xpub,
+        }),
+        Some(&token),
+    )
+    .await;
+    assert_eq!(account_xpub_profile.status(), StatusCode::OK);
 
     // Enabled policy with an empty allowlist must surface as a warning.
     let policy = post_json(
@@ -3740,6 +3774,20 @@ async fn self_check_verifies_providers_wallets_policy_and_allocations() {
     assert_eq!(allocate.status(), StatusCode::OK);
     let allocate_json: serde_json::Value = allocate.json().await.unwrap();
     let allocation_id = allocate_json["allocation"]["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let account_allocate = post_json(
+        &client,
+        addr,
+        "/api/treasury/receive-addresses/allocate",
+        json!({ "wallet_profile": "account-xpub", "purpose": "external-watch" }),
+        Some(&token),
+    )
+    .await;
+    assert_eq!(account_allocate.status(), StatusCode::OK);
+    let account_allocate_json: serde_json::Value = account_allocate.json().await.unwrap();
+    let account_allocation_id = account_allocate_json["allocation"]["id"]
         .as_str()
         .unwrap()
         .to_string();
@@ -3790,6 +3838,12 @@ async fn self_check_verifies_providers_wallets_policy_and_allocations() {
     assert_eq!(seed_check["domain"], "seed-wallet");
     assert_eq!(seed_check["subject"], "seed-main");
 
+    let account_xpub_check = find("xpub-wallet:account-xpub");
+    assert_eq!(
+        account_xpub_check["status"], "pass",
+        "account xpub check: {account_xpub_check}"
+    );
+
     let policy_check = find("policy:treasury");
     assert_eq!(policy_check["status"], "warn");
     assert_eq!(
@@ -3799,11 +3853,12 @@ async fn self_check_verifies_providers_wallets_policy_and_allocations() {
 
     let allocation_check = find(&format!("receive-allocation:{allocation_id}"));
     assert_eq!(allocation_check["status"], "pass");
+    let account_allocation_check = find(&format!("receive-allocation:{account_allocation_id}"));
+    assert_eq!(account_allocation_check["status"], "pass");
 
     // Unconfigured domains contribute no results.
     assert!(checks.iter().all(|check| {
-        !["xpub-wallet", "stealth-wallet", "watch-book", "fido2"]
-            .contains(&check["domain"].as_str().unwrap())
+        !["stealth-wallet", "watch-book", "fido2"].contains(&check["domain"].as_str().unwrap())
     }));
 
     // Domain filtering only runs the requested checks.
@@ -3845,12 +3900,21 @@ async fn self_check_verifies_providers_wallets_policy_and_allocations() {
     let orphaned_json: serde_json::Value = orphaned.json().await.unwrap();
     assert_eq!(orphaned_json["status"], "fail");
     let orphaned_checks = orphaned_json["checks"].as_array().unwrap();
-    assert_eq!(orphaned_checks.len(), 1);
-    assert_eq!(orphaned_checks[0]["status"], "fail");
+    assert_eq!(orphaned_checks.len(), 2);
+    let orphaned_seed = orphaned_checks
+        .iter()
+        .find(|check| check["id"] == format!("receive-allocation:{allocation_id}"))
+        .unwrap();
+    assert_eq!(orphaned_seed["status"], "fail");
     assert_eq!(
-        orphaned_checks[0]["detail"],
+        orphaned_seed["detail"],
         "Orphaned allocation — wallet profile deleted"
     );
+    let remaining_account_xpub = orphaned_checks
+        .iter()
+        .find(|check| check["id"] == format!("receive-allocation:{account_allocation_id}"))
+        .unwrap();
+    assert_eq!(remaining_account_xpub["status"], "pass");
 
     handle.abort();
     rpc_handle.abort();

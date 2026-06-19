@@ -2,7 +2,8 @@ use secrecy::ExposeSecret;
 use serde::Deserialize;
 use sigillum_api::{EthSeedWalletProfile, EthXpubWalletProfile};
 use sigillum_core::{
-    SecretStore, VaultLifecycle, derive_ethereum_xpub_receive_branch_from_mnemonic,
+    SecretStore, VaultLifecycle, derive_ethereum_receive_branch_from_account_xpub,
+    derive_ethereum_xpub_receive_branch_from_mnemonic,
     derive_sigillum_ethereum_xpub_receive_branch,
 };
 use zeroize::Zeroize;
@@ -139,6 +140,25 @@ pub(super) fn select_discovery_wallets(
                     derivation_pattern: DERIVATION_PATTERN_IMPORTED_XPUB.into(),
                     account_index: profile.project_account,
                 }
+            } else if let Some(account_xpub) = profile
+                .external_account_xpub
+                .as_deref()
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+            {
+                let export = derive_ethereum_receive_branch_from_account_xpub(
+                    account_xpub,
+                    profile.project_account,
+                )
+                .map_err(map_xpub_error)?;
+                DiscoveryWallet {
+                    family: WALLET_FAMILY_ETH_XPUB.into(),
+                    profile: profile.name.clone(),
+                    receive_path: export.receive_path,
+                    receive_xpub: export.receive_xpub,
+                    derivation_pattern: DERIVATION_PATTERN_IMPORTED_XPUB.into(),
+                    account_index: profile.project_account,
+                }
             } else {
                 let export = service.with_vault(profile.compartment_id, |vault| {
                     let master_key = vault
@@ -220,7 +240,10 @@ fn seed_account_discovery_wallets(
 mod tests {
     use std::sync::Arc;
 
-    use sigillum_core::derive_ethereum_xpub_receive_branch_from_mnemonic;
+    use sigillum_core::{
+        derive_ethereum_account_xpub_from_mnemonic,
+        derive_ethereum_xpub_receive_branch_from_mnemonic,
+    };
     use tempfile::TempDir;
 
     use super::*;
@@ -242,6 +265,7 @@ mod tests {
             compartment_id: 0,
             chain_id: Some(1),
             external_receive_xpub: Some(imported.receive_xpub.clone()),
+            external_account_xpub: None,
             default_destination_address: None,
             execution_enabled: false,
         };
@@ -260,6 +284,47 @@ mod tests {
         assert_eq!(wallets.len(), 1);
         assert_eq!(wallets[0].receive_xpub, imported.receive_xpub);
         assert_eq!(wallets[0].receive_path, imported.receive_path);
+        assert_eq!(
+            wallets[0].derivation_pattern,
+            DERIVATION_PATTERN_IMPORTED_XPUB
+        );
+    }
+
+    #[test]
+    fn imported_account_xpub_profile_selects_normalized_receive_branch() {
+        let dir = TempDir::new().unwrap();
+        let state = Arc::new(AppState::new(dir.path().to_path_buf()));
+        let service = SigillumService::new(state);
+        let account_xpub =
+            derive_ethereum_account_xpub_from_mnemonic(TEST_MNEMONIC, None, 0).unwrap();
+        let expected =
+            derive_ethereum_xpub_receive_branch_from_mnemonic(TEST_MNEMONIC, None, 0).unwrap();
+        let profile = EthXpubWalletProfile {
+            name: "external-ledger".into(),
+            project_account: 0,
+            provider_profile: "mainnet".into(),
+            compartment_id: 0,
+            chain_id: Some(1),
+            external_receive_xpub: None,
+            external_account_xpub: Some(account_xpub),
+            default_destination_address: None,
+            execution_enabled: false,
+        };
+
+        let wallets = select_discovery_wallets(
+            &service,
+            &[],
+            &[profile],
+            Some(WALLET_FAMILY_ETH_XPUB),
+            Some("external-ledger"),
+            SeedDerivationPattern::Project,
+            1,
+        )
+        .unwrap();
+
+        assert_eq!(wallets.len(), 1);
+        assert_eq!(wallets[0].receive_xpub, expected.receive_xpub);
+        assert_eq!(wallets[0].receive_path, expected.receive_path);
         assert_eq!(
             wallets[0].derivation_pattern,
             DERIVATION_PATTERN_IMPORTED_XPUB

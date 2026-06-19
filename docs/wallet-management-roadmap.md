@@ -50,9 +50,11 @@ Required discovery classes:
   balance checks, and gap-limit continuation. The first true imported-xpub
   slice is implemented for Ethereum receive-branch xpubs
   (`m/44'/60'/account'/0`) through the additive `external_receive_xpub`
-  profile field; these profiles are forced non-executable and remain
-  watch-only. Account-level xpub import and arbitrary custom xpub path
-  handling remain future work.
+  profile field. Ethereum account-level xpub import is also implemented through
+  `external_account_xpub`; Sigillum validates `m/44'/60'/account'` account
+  public keys, normalizes them into receive-branch xpubs for scanning, and
+  keeps them non-executable/watch-only. Arbitrary custom xpub path handling
+  remains future work.
 - Ad-hoc and saved EVM watch-address discovery for old exchange, hardware
   wallet, client, or externally found addresses. The first slices are
   implemented as bounded read-only `eth-watch` probes in EVM inventory scans,
