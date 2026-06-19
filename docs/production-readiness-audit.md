@@ -84,11 +84,15 @@ on hosts without a local browser via `SIGILLUM_SKIP_BROWSER_SMOKE=1`.
 
 The configurable reliability harness is `scripts/check-local-soak.sh`. A bounded
 local validation run passed with `SIGILLUM_SOAK_SECONDS=300`,
-`SIGILLUM_SOAK_INTERVAL_SECONDS=10`, and 28 full iterations. Production-style
-evidence should run the same harness for a longer target-host window, for
-example with `SIGILLUM_SOAK_SECONDS=3600`. When `SIGILLUM_SOAK_RECEIPT` is set,
-the harness writes a JSON receipt that records the commit, dirty-checkout state,
-host, timing, iteration count, doctor count, and checked surfaces.
+`SIGILLUM_SOAK_INTERVAL_SECONDS=10`, and 28 full iterations. A longer
+target-host run also passed on `mac-server` with
+`SIGILLUM_SOAK_SECONDS=3600`, `SIGILLUM_SOAK_INTERVAL_SECONDS=30`, and
+`SIGILLUM_SOAK_RECEIPT=target/readiness/local-soak-3600-d1fd325.json`.
+The receipt records a clean `main` checkout at
+`d1fd32570f461c77f47c736a011295cd49d70cc4`, Darwin `25.5.0`, 117 iterations,
+117 `sigillum doctor` runs, the daemon and gateway loopback URLs, and the
+checked surfaces: daemon status, vault API-key write/read canary, gateway
+health, and `sigillum doctor`.
 
 The local adversarial pass is now executable as `scripts/check-adversarial.sh`
 and wired into the release gate after the full workspace tests. It runs:
@@ -128,10 +132,10 @@ successfully with advisories, bans, licenses, and sources all accepted.
 | Rust workspace builds, tests, and lints | `cargo fmt --all --check`, `cargo check --workspace`, `cargo test --workspace`, and `cargo clippy --workspace --all-targets -- -D warnings` inside the release gate | Proven for current checkout |
 | Security and supply-chain baseline | `cargo audit` and `cargo deny check` inside the release gate | Proven for current checkout, with accepted duplicate dependency warnings |
 | Local daemon and gateway loopback integration behavior | Workspace integration tests pass outside the sandbox | Proven for current checkout in an unsandboxed local environment |
-| Target-host operational readiness | `sigillum doctor` passed in `scripts/check-runtime-smoke.sh` for first-run and unlocked temporary daemon states | Proven for repeatable isolated local proof; each target host still needs its own doctor result |
+| Target-host operational readiness | `sigillum doctor` passed in `scripts/check-runtime-smoke.sh` for first-run and unlocked temporary daemon states, and the `mac-server` 3600-second soak receipt recorded 117 doctor runs on a clean checkout | Proven for `mac-server`; each additional target host still needs its own doctor/soak receipt |
 | Runtime daemon lifecycle behavior | `scripts/check-runtime-smoke.sh` starts the daemon, verifies status, initializes a passphrase compartment, writes and reads vault canaries, locks, unlocks, lists compartments, and runs doctor | Proven for current checkout in an unsandboxed local environment |
 | Runtime browser/UI visual behavior | DOM smoke tests pass, the runtime smoke checks the served UI shell, and `scripts/check-browser-smoke.sh` repeatably drives a headless browser through setup, unlocked operator workspace, vault canary write/reveal, browser-session logout, passphrase re-authentication, and post-auth canary count checks against an isolated local daemon inside the release gate | Proven for current checkout as repeatable automation in an unsandboxed local environment with a Chromium-family browser |
-| Long-duration reliability | Recovery and crash tests pass, and `scripts/check-local-soak.sh` passed a bounded 300-second local daemon/gateway run with 28 iterations | Harness proven for current checkout; longer target-host soak evidence still needed |
+| Long-duration reliability | Recovery and crash tests pass, `scripts/check-local-soak.sh` passed a bounded 300-second local daemon/gateway run with 28 iterations, and a `mac-server` target-host run passed a 3600-second target with 117 iterations | Proven for the current local-first target host; broader host coverage and chaos testing remain future assurance work |
 | External security assurance | Code gates, audit, deny, local adversarial/fuzz gate, SSRF/local-boundary tests, and UI boundary tests pass | Local boundary pass proven for current checkout; independent external penetration test not performed |
 | Full wallet-management product roadmap | Existing docs and tests cover current local wallet, inventory, risk, and plan slices | Not complete; deeper discovery, DeFi/NFT metadata, broader non-EVM support, and richer consolidation execution remain roadmap work |
 
@@ -163,10 +167,9 @@ The active product objective remains larger than the current release gate. To
 claim Sigillum is fully operational and production ready without qualification,
 the project still needs:
 
-1. target-host `sigillum doctor` results for any real host being called ready
-2. a long-duration target-host daemon and gateway soak run, beyond the bounded
-   local harness validation
-3. an independent external penetration test if the claim expands beyond
+1. a target-host `sigillum doctor` and soak receipt for each additional host
+   being called ready beyond `mac-server`
+2. an independent external penetration test if the claim expands beyond
    source-verified local-first readiness
 
 Until those are complete, the accurate claim is narrower: the current source

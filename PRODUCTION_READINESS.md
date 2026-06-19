@@ -77,7 +77,8 @@ The main remaining limits are scope and assurance, not the current local-first b
   - no external penetration test
   - local adversarial/fuzz coverage is automated through
     `scripts/check-adversarial.sh`, but it is not an independent security audit
-  - no long-duration soak or chaos testing evidence yet
+  - a 3600-second target-host daemon/gateway soak passed on `mac-server`, but
+    broader host coverage and chaos testing are still future assurance work
 - Broader operator polish still remains after the new daemon-backed CLI surface.
 - The comprehensive wallet-management workstation remains a roadmap track.
   Current wallet and inventory slices are inside the local-first release
@@ -121,7 +122,8 @@ immediate move is:
 1. keep `./scripts/check-release.sh` enforced in CI across Ubuntu and macOS
 2. keep `./scripts/check-adversarial.sh` green and expand it when new API,
    gateway, or UI boundary surfaces are added
-3. expand higher-assurance testing around long-running recovery, gateway delivery, and browser/widget behavior
+3. expand higher-assurance testing beyond the current `mac-server` long soak,
+   especially recovery, gateway delivery, browser/widget behavior, and chaos runs
 4. close the remaining CLI/operator gaps for wallet/send flows and polish
 5. keep documentation and audits anchored to the local-on-your-computer boundary
 6. then begin `eth-xpub`
