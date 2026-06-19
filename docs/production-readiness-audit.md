@@ -163,11 +163,14 @@ non-executable and can feed the existing inventory gap scanner without local
 signing material. Imported receive xpubs can optionally carry a custom
 `external_receive_path`; Sigillum validates the BIP-32 syntax and xpub depth,
 uses the path in inventory/export/self-check evidence, and warns that the path
-is operator-asserted metadata. The comprehensive wallet-management roadmap is
-intentionally deferred from this readiness claim: custom account-level xpub
-paths, rich NFT/DeFi/airdrop inventory, non-EVM chains, automated consolidation
-execution, and hosted or internet-facing wallet operations remain future
-product work.
+is operator-asserted metadata. Imported account-level xpubs can likewise carry
+`external_account_path`; Sigillum validates the terminal hardened account path,
+derives the receive branch locally, uses the supplied path in inventory/export/
+self-check evidence, and keeps the wallet watch-only. The comprehensive
+wallet-management roadmap is intentionally deferred from this readiness claim:
+rich NFT/DeFi/airdrop inventory, non-EVM chains, automated consolidation
+execution, and hosted or internet-facing wallet operations remain future product
+work.
 
 ## Remaining Work Before A Broader Completion Claim
 

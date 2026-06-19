@@ -82,6 +82,9 @@ pub struct EthXpubWalletProfile {
     /// Sigillum normalizes this to a receive branch before discovery.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub external_account_xpub: Option<String>,
+    /// Operator-supplied BIP-32 path for an imported account xpub.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub external_account_path: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub default_destination_address: Option<String>,
     #[serde(default)]

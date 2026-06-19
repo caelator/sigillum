@@ -58,8 +58,11 @@ Required discovery classes:
   `external_receive_xpub`; Sigillum validates BIP-32 path syntax, checks the
   xpub depth matches the supplied path, uses that path in inventory/export/
   self-check evidence, and surfaces it as operator-asserted metadata because a
-  watch-only path cannot be cryptographically bound to an xpub. Custom
-  account-level xpub paths remain future work.
+  watch-only path cannot be cryptographically bound to an xpub. Custom imported
+  account-level paths are also implemented through `external_account_path`
+  paired with `external_account_xpub`; Sigillum validates the terminal hardened
+  account path, derives the receive branch locally, and keeps the profile
+  watch-only.
 - Ad-hoc and saved EVM watch-address discovery for old exchange, hardware
   wallet, client, or externally found addresses. The first slices are
   implemented as bounded read-only `eth-watch` probes in EVM inventory scans,

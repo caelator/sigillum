@@ -6,7 +6,6 @@
 //! eliminate duplication while preserving backward-compatible JSON serialization.
 use serde::{Deserialize, Serialize};
 // ── Shared domain types ─────────────────────────────────────────
-
 /// Reference to a specific stealth payment.
 ///
 /// A stealth meta-address holder publishes `(stealth_address, ephemeral_public_key)`
@@ -51,7 +50,6 @@ pub struct Eip1559Fees {
 }
 
 // ── Key/value primitives ────────────────────────────────────────
-
 /// Store or update a key-value pair in the active compartment.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct KeyValueRequest {
@@ -523,6 +521,8 @@ pub struct EthXpubWalletProfileUpsertRequest {
     pub external_receive_path: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub external_account_xpub: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub external_account_path: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub default_destination_address: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]

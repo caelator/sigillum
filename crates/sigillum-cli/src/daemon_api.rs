@@ -217,7 +217,7 @@ fn cmd_api_profiles(args: &[String]) {
             client.list_eth_xpub_wallet_profiles().await
         }),
         ("eth-xpub", "upsert") => {
-            const XPUB_USAGE: &str = "sigillum api profiles eth-xpub upsert --name <NAME> --provider-profile <PROFILE> [--project-account <N>] [--compartment-id <N>] [--chain-id <N>] [--external-receive-xpub <XPUB>] [--external-receive-path <PATH>] [--external-account-xpub <XPUB>] [--default-destination-address <ADDR>] [--execution-enabled|--execution-disabled]";
+            const XPUB_USAGE: &str = "sigillum api profiles eth-xpub upsert --name <NAME> --provider-profile <PROFILE> [--project-account <N>] [--compartment-id <N>] [--chain-id <N>] [--external-receive-xpub <XPUB>] [--external-receive-path <PATH>] [--external-account-xpub <XPUB>] [--external-account-path <PATH>] [--default-destination-address <ADDR>] [--execution-enabled|--execution-disabled]";
             let request = EthXpubWalletProfileUpsertRequest {
                 name: require_flag(args, "--name", XPUB_USAGE),
                 project_account: parse_u32_flag(args, "--project-account").unwrap_or(0),
@@ -227,6 +227,7 @@ fn cmd_api_profiles(args: &[String]) {
                 external_receive_xpub: parse_flag(args, "--external-receive-xpub"),
                 external_receive_path: parse_flag(args, "--external-receive-path"),
                 external_account_xpub: parse_flag(args, "--external-account-xpub"),
+                external_account_path: parse_flag(args, "--external-account-path"),
                 default_destination_address: parse_flag(args, "--default-destination-address"),
                 execution_enabled: bool_switch(args, "--execution-enabled", "--execution-disabled"),
             };

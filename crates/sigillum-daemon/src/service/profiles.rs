@@ -13,7 +13,8 @@ use sigillum_api::{
 };
 use sigillum_core::{
     derive_ethereum_address_from_account_xpub, derive_ethereum_address_from_imported_xpub,
-    derive_ethereum_address_from_xpub, validate_ethereum_imported_xpub_path,
+    derive_ethereum_address_from_xpub, derive_ethereum_receive_branch_from_account_xpub_with_path,
+    validate_ethereum_imported_xpub_path,
 };
 
 use crate::audit_log::AuditEventSpec;
@@ -306,9 +307,25 @@ impl SigillumService {
             .map(str::trim)
             .filter(|value| !value.is_empty())
             .map(str::to_string);
+        let external_account_path = body
+            .external_account_path
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_string);
         if external_receive_path.is_some() && external_receive_xpub.is_none() {
             return Err(ServiceError::bad_request(
                 "external_receive_path requires external_receive_xpub",
+            ));
+        }
+        if external_account_path.is_some() && external_account_xpub.is_none() {
+            return Err(ServiceError::bad_request(
+                "external_account_path requires external_account_xpub",
+            ));
+        }
+        if external_receive_path.is_some() && external_account_path.is_some() {
+            return Err(ServiceError::bad_request(
+                "external_receive_path and external_account_path are mutually exclusive",
             ));
         }
         if external_receive_xpub.is_some() && external_account_xpub.is_some() {
@@ -325,8 +342,19 @@ impl SigillumService {
             }
         }
         if let Some(xpub) = external_account_xpub.as_deref() {
-            derive_ethereum_address_from_account_xpub(xpub, body.project_account, 0)
+            if let Some(path) = external_account_path.as_deref() {
+                let export = derive_ethereum_receive_branch_from_account_xpub_with_path(
+                    xpub,
+                    path,
+                    body.project_account,
+                )
                 .map_err(map_xpub_error)?;
+                derive_ethereum_address_from_imported_xpub(&export.receive_xpub, 0)
+                    .map_err(map_xpub_error)?;
+            } else {
+                derive_ethereum_address_from_account_xpub(xpub, body.project_account, 0)
+                    .map_err(map_xpub_error)?;
+            }
         }
 
         let execution_enabled =
@@ -345,6 +373,7 @@ impl SigillumService {
             external_receive_xpub,
             external_receive_path,
             external_account_xpub,
+            external_account_path,
             default_destination_address: body.default_destination_address,
             execution_enabled,
         };

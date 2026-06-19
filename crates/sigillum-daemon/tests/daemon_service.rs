@@ -3969,7 +3969,7 @@ async fn self_check_verifies_providers_wallets_policy_and_allocations() {
         custom_xpub_check["detail"]
             .as_str()
             .unwrap()
-            .contains("external_receive_path is operator-asserted metadata")
+            .contains("external xpub path is operator-asserted metadata")
     );
 
     let policy_check = find("policy:treasury");

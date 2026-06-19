@@ -57,6 +57,7 @@ pub use ethereum_xpub::{
     derive_ethereum_address_from_account_xpub, derive_ethereum_address_from_control_xpub,
     derive_ethereum_address_from_imported_xpub, derive_ethereum_address_from_xpub,
     derive_ethereum_receive_branch_from_account_xpub,
+    derive_ethereum_receive_branch_from_account_xpub_with_path,
     derive_ethereum_xpub_control_branch_from_mnemonic,
     derive_ethereum_xpub_receive_branch_from_mnemonic, derive_private_key_at_path,
     derive_sigillum_ethereum_xpub_control_branch, derive_sigillum_ethereum_xpub_receive_address,

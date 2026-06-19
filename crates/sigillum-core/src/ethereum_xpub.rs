@@ -137,7 +137,15 @@ pub fn validate_ethereum_imported_xpub_path(
     let imported_xpub = imported_xpub
         .parse::<XPub>()
         .map_err(|_| EthereumXpubError::InvalidImportedXpub)?;
-    let path = parse_bip32_path(xpub_path)?;
+    validate_imported_xpub_path_depth(&imported_xpub, xpub_path, false)
+}
+
+fn validate_imported_xpub_path_depth(
+    imported_xpub: &XPub,
+    xpub_path: &str,
+    allow_terminal_hardened: bool,
+) -> Result<(), EthereumXpubError> {
+    let path = parse_bip32_path(xpub_path, allow_terminal_hardened)?;
     if usize::from(imported_xpub.attrs().depth) != path.len() {
         return Err(EthereumXpubError::XpubPathDepthMismatch);
     }
@@ -169,6 +177,27 @@ pub fn derive_ethereum_receive_branch_from_account_xpub(
         project_account,
         account_path: account_path(project_account),
         receive_path: receive_path(project_account),
+        receive_xpub: receive_xpub.to_string(Prefix::XPUB).to_string(),
+    })
+}
+
+pub fn derive_ethereum_receive_branch_from_account_xpub_with_path(
+    account_xpub: &str,
+    account_path: &str,
+    project_account: u32,
+) -> Result<EthereumXpubReceiveExport, EthereumXpubError> {
+    let account_xpub = account_xpub
+        .parse::<XPub>()
+        .map_err(|_| EthereumXpubError::InvalidImportedXpub)?;
+    validate_imported_xpub_path_depth(&account_xpub, account_path, true)?;
+    let account_path = account_path.trim();
+    let receive_xpub = account_xpub
+        .derive_child(receive_branch_child()?)
+        .map_err(|_| EthereumXpubError::InvalidAccountBranchXpub)?;
+    Ok(EthereumXpubReceiveExport {
+        project_account,
+        account_path: account_path.to_string(),
+        receive_path: format!("{account_path}/{ETHEREUM_XPUB_RECEIVE_BRANCH}"),
         receive_xpub: receive_xpub.to_string(Prefix::XPUB).to_string(),
     })
 }
@@ -373,7 +402,10 @@ fn validate_account_branch_xpub(
     Ok(())
 }
 
-fn parse_bip32_path(path: &str) -> Result<Vec<ChildNumber>, EthereumXpubError> {
+fn parse_bip32_path(
+    path: &str,
+    allow_terminal_hardened: bool,
+) -> Result<Vec<ChildNumber>, EthereumXpubError> {
     let path = path.trim();
     let mut parts = path.split('/');
     if parts.next() != Some("m") {
@@ -390,7 +422,7 @@ fn parse_bip32_path(path: &str) -> Result<Vec<ChildNumber>, EthereumXpubError> {
             return Err(EthereumXpubError::InvalidDerivationPath);
         }
         let is_hardened = part.ends_with('\'');
-        if is_hardened && offset + 1 == remaining.len() {
+        if is_hardened && offset + 1 == remaining.len() && !allow_terminal_hardened {
             return Err(EthereumXpubError::InvalidDerivationPath);
         }
         let index_str = if is_hardened {
@@ -533,6 +565,74 @@ mod tests {
             derive_ethereum_xpub_receive_branch_from_mnemonic(twelve_word, None, 1).unwrap();
 
         assert_eq!(receive_from_account, receive_direct);
+    }
+
+    #[test]
+    fn imported_account_xpub_with_custom_path_derives_receive_branch() {
+        let seed = [14u8; 32];
+        let account_path = "m/44'/60'/2'/9'";
+        let mut account_xprv = XPrv::new(seed).expect("root");
+        for child in parse_bip32_path(account_path, true).expect("path") {
+            account_xprv = account_xprv.derive_child(child).expect("child");
+        }
+        let account_xpub = account_xprv
+            .public_key()
+            .to_string(Prefix::XPUB)
+            .to_string();
+
+        let imported = derive_ethereum_receive_branch_from_account_xpub_with_path(
+            &account_xpub,
+            account_path,
+            99,
+        )
+        .expect("imported account");
+        let receive_xprv = account_xprv
+            .derive_child(receive_branch_child().expect("receive child"))
+            .expect("receive branch");
+
+        assert_eq!(imported.project_account, 99);
+        assert_eq!(imported.account_path, account_path);
+        assert_eq!(imported.receive_path, "m/44'/60'/2'/9'/0");
+        assert_eq!(
+            derive_ethereum_address_from_imported_xpub(&imported.receive_xpub, 4).expect("address"),
+            derive_receive_address_from_xpub(&receive_xprv.public_key(), 4).expect("direct")
+        );
+    }
+
+    #[test]
+    fn imported_account_xpub_path_rejects_bad_shape_and_depth_mismatch() {
+        let account_xpub = derive_account_xprv(&[15u8; 32], 2)
+            .expect("account")
+            .public_key()
+            .to_string(Prefix::XPUB)
+            .to_string();
+
+        assert_eq!(
+            derive_ethereum_receive_branch_from_account_xpub_with_path(
+                &account_xpub,
+                "44'/60'/2'",
+                2
+            ),
+            Err(EthereumXpubError::InvalidDerivationPath)
+        );
+        assert_eq!(
+            derive_ethereum_receive_branch_from_account_xpub_with_path(
+                &account_xpub,
+                "m/44'/60'/2'",
+                2
+            )
+            .expect("standard depth")
+            .receive_path,
+            "m/44'/60'/2'/0"
+        );
+        assert_eq!(
+            derive_ethereum_receive_branch_from_account_xpub_with_path(
+                &account_xpub,
+                "m/44'/60'/2'/0",
+                2
+            ),
+            Err(EthereumXpubError::XpubPathDepthMismatch)
+        );
     }
 
     #[test]

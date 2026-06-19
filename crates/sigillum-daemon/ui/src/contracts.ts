@@ -382,6 +382,7 @@ export interface EthXpubWalletProfile {
   external_receive_xpub?: string | null;
   external_receive_path?: string | null;
   external_account_xpub?: string | null;
+  external_account_path?: string | null;
   default_destination_address?: string | null;
   execution_enabled: boolean;
 }

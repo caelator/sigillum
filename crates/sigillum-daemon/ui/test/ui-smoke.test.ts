@@ -1418,6 +1418,7 @@ function installWalletManagerDom() {
     "walletImportExternalReceiveXpub",
     "walletImportExternalReceivePath",
     "walletImportExternalAccountXpub",
+    "walletImportExternalAccountPath",
     "walletImportWatchAddress",
     "walletImportWatchLabel",
   ]);
@@ -1479,10 +1480,22 @@ test("wallet row meta helpers summarize identity, balances, and xpub display", (
       "provider=base · chain=- · account=3\n" +
       "balance=not scanned yet",
   );
-  const accountXpubProfile = { ...xpubProfile, external_account_xpub: "xpub-account" };
-  equal(xpubDisplay(accountXpubProfile), "external receive path m/44'/60'/3'/0");
+  const accountXpubProfile = {
+    ...xpubProfile,
+    external_account_xpub: "xpub-account",
+    external_account_path: "m/44'/60'/8'",
+  };
+  equal(xpubDisplay(accountXpubProfile), "external account path m/44'/60'/8'/0");
   equal(
     walletRowMeta(accountXpubProfile, [], null),
+    "external account path m/44'/60'/8'/0\n" +
+      "provider=base · chain=- · account=3 · source=external custom account xpub\n" +
+      "balance=not scanned yet",
+  );
+  const defaultAccountXpubProfile = { ...xpubProfile, external_account_xpub: "xpub-account" };
+  equal(xpubDisplay(defaultAccountXpubProfile), "external receive path m/44'/60'/3'/0");
+  equal(
+    walletRowMeta(defaultAccountXpubProfile, [], null),
     "external receive path m/44'/60'/3'/0\n" +
       "provider=base · chain=- · account=3 · source=external account xpub\n" +
       "balance=not scanned yet",
@@ -1842,6 +1855,7 @@ test("wallet manager import tabs switch forms, scrub seed input, and post contra
     "0x8888888888888888888888888888888888888888";
   dom.el("walletImportExternalReceiveXpub").value = "xpub-receive";
   dom.el("walletImportExternalReceivePath").value = "m/44'/60'/9'/1";
+  dom.el("walletImportExternalAccountPath").value = "";
   await manager.importXpubWallet();
   const xpubUpsert = calls.find(
     (call) => call.path === "/api/profiles/eth-xpub/upsert",
@@ -1865,6 +1879,7 @@ test("wallet manager import tabs switch forms, scrub seed input, and post contra
   equal(dom.el("walletImportExternalReceiveXpub").value, "");
   equal(dom.el("walletImportExternalReceivePath").value, "");
   equal(dom.el("walletImportExternalAccountXpub").value, "");
+  equal(dom.el("walletImportExternalAccountPath").value, "");
 
   manager.setWalletImportTab("watch");
   equal(dom.el("walletImportWatchForm").classList.contains("hidden"), false);

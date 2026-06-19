@@ -5,6 +5,7 @@ use sigillum_core::{
     EthereumXpubError, EthereumXpubReceiveAddress, SecretStore, VaultLifecycle,
     derive_ethereum_address_from_imported_xpub, derive_ethereum_address_from_xpub,
     derive_ethereum_receive_branch_from_account_xpub,
+    derive_ethereum_receive_branch_from_account_xpub_with_path,
     derive_ethereum_xpub_receive_branch_from_mnemonic,
     derive_sigillum_ethereum_xpub_receive_branch,
 };
@@ -162,10 +163,23 @@ pub(super) fn select_discovery_wallets(
                 .map(str::trim)
                 .filter(|value| !value.is_empty())
             {
-                let export = derive_ethereum_receive_branch_from_account_xpub(
-                    account_xpub,
-                    profile.project_account,
-                )
+                let export = if let Some(path) = profile
+                    .external_account_path
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|value| !value.is_empty())
+                {
+                    derive_ethereum_receive_branch_from_account_xpub_with_path(
+                        account_xpub,
+                        path,
+                        profile.project_account,
+                    )
+                } else {
+                    derive_ethereum_receive_branch_from_account_xpub(
+                        account_xpub,
+                        profile.project_account,
+                    )
+                }
                 .map_err(map_xpub_error)?;
                 DiscoveryWallet {
                     family: WALLET_FAMILY_ETH_XPUB.into(),
@@ -284,6 +298,7 @@ mod tests {
             external_receive_xpub: Some(imported.receive_xpub.clone()),
             external_receive_path: None,
             external_account_xpub: None,
+            external_account_path: None,
             default_destination_address: None,
             execution_enabled: false,
         };
@@ -326,6 +341,7 @@ mod tests {
             external_receive_xpub: None,
             external_receive_path: None,
             external_account_xpub: Some(account_xpub),
+            external_account_path: None,
             default_destination_address: None,
             execution_enabled: false,
         };
@@ -351,6 +367,47 @@ mod tests {
     }
 
     #[test]
+    fn imported_account_xpub_custom_path_profile_selects_operator_path() {
+        let dir = TempDir::new().unwrap();
+        let state = Arc::new(AppState::new(dir.path().to_path_buf()));
+        let service = SigillumService::new(state);
+        let account_xpub =
+            derive_ethereum_account_xpub_from_mnemonic(TEST_MNEMONIC, None, 0).unwrap();
+        let profile = EthXpubWalletProfile {
+            name: "external-ledger".into(),
+            project_account: 99,
+            provider_profile: "mainnet".into(),
+            compartment_id: 0,
+            chain_id: Some(1),
+            external_receive_xpub: None,
+            external_receive_path: None,
+            external_account_xpub: Some(account_xpub),
+            external_account_path: Some("m/44'/60'/99'".into()),
+            default_destination_address: None,
+            execution_enabled: false,
+        };
+
+        let wallets = select_discovery_wallets(
+            &service,
+            &[],
+            &[profile],
+            Some(WALLET_FAMILY_ETH_XPUB),
+            Some("external-ledger"),
+            SeedDerivationPattern::Project,
+            1,
+        )
+        .unwrap();
+
+        assert_eq!(wallets.len(), 1);
+        assert_eq!(wallets[0].receive_path, "m/44'/60'/99'/0");
+        assert_eq!(wallets[0].account_index, 99);
+        assert_eq!(
+            wallets[0].derivation_pattern,
+            DERIVATION_PATTERN_IMPORTED_XPUB
+        );
+    }
+
+    #[test]
     fn imported_custom_path_xpub_profile_selects_operator_path() {
         let dir = TempDir::new().unwrap();
         let state = Arc::new(AppState::new(dir.path().to_path_buf()));
@@ -366,6 +423,7 @@ mod tests {
             external_receive_xpub: Some(imported.receive_xpub.clone()),
             external_receive_path: Some(imported.receive_path.clone()),
             external_account_xpub: None,
+            external_account_path: None,
             default_destination_address: None,
             execution_enabled: false,
         };

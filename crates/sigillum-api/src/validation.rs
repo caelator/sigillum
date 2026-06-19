@@ -43,6 +43,18 @@ fn check_vec_items_len(field: &str, items: &[String], max: usize) -> Result<(), 
 }
 
 fn check_optional_bip32_path(field: &str, value: &Option<String>) -> Result<(), String> {
+    check_optional_bip32_path_with_terminal_hardened(field, value, false)
+}
+
+fn check_optional_account_bip32_path(field: &str, value: &Option<String>) -> Result<(), String> {
+    check_optional_bip32_path_with_terminal_hardened(field, value, true)
+}
+
+fn check_optional_bip32_path_with_terminal_hardened(
+    field: &str,
+    value: &Option<String>,
+    allow_terminal_hardened: bool,
+) -> Result<(), String> {
     let Some(path) = value.as_deref().map(str::trim).filter(|v| !v.is_empty()) else {
         return Ok(());
     };
@@ -60,7 +72,7 @@ fn check_optional_bip32_path(field: &str, value: &Option<String>) -> Result<(), 
             return Err(format!("{field} contains an invalid child index"));
         }
         let is_hardened = part.ends_with('\'');
-        if is_hardened && offset + 1 == remaining.len() {
+        if is_hardened && offset + 1 == remaining.len() && !allow_terminal_hardened {
             return Err(format!("{field} must end at a public child branch"));
         }
         let index = if is_hardened {
@@ -527,6 +539,7 @@ impl Validate for crate::request::EthXpubWalletProfileUpsertRequest {
             &self.external_account_xpub,
             MAX_XPUB,
         )?;
+        check_optional_account_bip32_path("external_account_path", &self.external_account_path)?;
         let has_external_receive_path = self
             .external_receive_path
             .as_deref()
@@ -535,15 +548,26 @@ impl Validate for crate::request::EthXpubWalletProfileUpsertRequest {
             .external_receive_xpub
             .as_deref()
             .is_some_and(|value| !value.trim().is_empty());
+        let has_external_account_path = self
+            .external_account_path
+            .as_deref()
+            .is_some_and(|value| !value.trim().is_empty());
+        let has_external_account_xpub = self
+            .external_account_xpub
+            .as_deref()
+            .is_some_and(|value| !value.trim().is_empty());
         if has_external_receive_path && !has_external_receive_xpub {
             return Err("external_receive_path requires external_receive_xpub".into());
         }
-        if has_external_receive_xpub
-            && self
-                .external_account_xpub
-                .as_deref()
-                .is_some_and(|value| !value.trim().is_empty())
-        {
+        if has_external_account_path && !has_external_account_xpub {
+            return Err("external_account_path requires external_account_xpub".into());
+        }
+        if has_external_receive_path && has_external_account_path {
+            return Err(
+                "external_receive_path and external_account_path are mutually exclusive".into(),
+            );
+        }
+        if has_external_receive_xpub && has_external_account_xpub {
             return Err(
                 "external_receive_xpub and external_account_xpub are mutually exclusive".into(),
             );

@@ -23,6 +23,7 @@ use sigillum_api::{
 use sigillum_core::{
     SecretStore, VaultLifecycle, decode_quantity_hex, derive_ethereum_address_from_imported_xpub,
     derive_ethereum_address_from_xpub, derive_ethereum_receive_branch_from_account_xpub,
+    derive_ethereum_receive_branch_from_account_xpub_with_path,
     derive_sigillum_ethereum_xpub_receive_branch, validate_ethereum_imported_xpub_path,
 };
 
@@ -279,7 +280,7 @@ impl SigillumService {
             } => {
                 if operator_asserted_path {
                     warnings.push(
-                        "external_receive_path is operator-asserted metadata; xpub depth matches, but the path cannot be cryptographically bound to the imported xpub"
+                        "external xpub path is operator-asserted metadata; xpub depth matches, but the path cannot be cryptographically bound to the imported xpub"
                             .to_string(),
                     );
                 }
@@ -413,13 +414,26 @@ impl SigillumService {
             .map(str::trim)
             .filter(|value| !value.is_empty())
         {
-            return match derive_ethereum_receive_branch_from_account_xpub(
-                xpub,
-                profile.project_account,
-            ) {
-                Ok(export) => VaultDerivation::Resolvable {
+            let derivation = if let Some(path) = profile
+                .external_account_path
+                .as_deref()
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+            {
+                derive_ethereum_receive_branch_from_account_xpub_with_path(
+                    xpub,
+                    path,
+                    profile.project_account,
+                )
+                .map(|export| (export, true))
+            } else {
+                derive_ethereum_receive_branch_from_account_xpub(xpub, profile.project_account)
+                    .map(|export| (export, false))
+            };
+            return match derivation {
+                Ok((export, operator_asserted_path)) => VaultDerivation::Resolvable {
                     receive_xpub: export.receive_xpub,
-                    operator_asserted_path: false,
+                    operator_asserted_path,
                 },
                 Err(error) => VaultDerivation::Invalid(error.to_string()),
             };

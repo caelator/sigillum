@@ -460,6 +460,7 @@ fn test_eth_xpub_wallet_profile_roundtrip() {
         external_receive_xpub: Some("xpub-imported".to_string()),
         external_receive_path: Some("m/44'/60'/9'/1".to_string()),
         external_account_xpub: None,
+        external_account_path: None,
         default_destination_address: Some("0xdest".to_string()),
         execution_enabled: false,
     };
@@ -479,6 +480,7 @@ fn test_eth_xpub_wallet_profile_list_response_roundtrip() {
                 external_receive_xpub: None,
                 external_receive_path: None,
                 external_account_xpub: None,
+                external_account_path: None,
                 default_destination_address: None,
                 execution_enabled: false,
             },
@@ -491,6 +493,7 @@ fn test_eth_xpub_wallet_profile_list_response_roundtrip() {
                 external_receive_xpub: None,
                 external_receive_path: None,
                 external_account_xpub: Some("xpub-account".to_string()),
+                external_account_path: Some("m/44'/60'/15'".to_string()),
                 default_destination_address: Some("0xdest2".to_string()),
                 execution_enabled: true,
             },

@@ -494,6 +494,9 @@
             <textarea id="walletImportExternalAccountXpub" class="mono" placeholder="External account xpub (optional; m/44'/60'/account'; do not combine with receive xpub)"></textarea>
           </div>
           <div class="form-row">
+            <input type="text" id="walletImportExternalAccountPath" class="mono" placeholder="Custom account path for that xpub (optional; e.g. m/44'/60'/0')">
+          </div>
+          <div class="form-row">
             <button class="btn-primary" data-action="importXpubWallet">Save Xpub Profile</button>
           </div>
         </div>
@@ -580,6 +583,9 @@
         </div>
         <div class="form-row">
           <textarea id="xpubExternalAccountXpub" class="mono" placeholder="External account xpub (optional; m/44'/60'/account'; do not combine with receive xpub)"></textarea>
+        </div>
+        <div class="form-row">
+          <input type="text" id="xpubExternalAccountPath" class="mono" placeholder="Custom account path for that xpub (optional; e.g. m/44'/60'/0')">
         </div>
         <div class="form-row">
           <button class="btn-primary" data-action="upsertXpubWalletProfile">Save Xpub Profile</button>

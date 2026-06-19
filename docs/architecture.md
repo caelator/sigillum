@@ -212,12 +212,12 @@ What it intentionally does not do today:
 - historical receive-address discovery beyond the current EVM seed-account
   receive-branch scanner, project-xpub gap-limit scanner, imported
   receive-branch xpub scanner, imported custom receive-path xpub scanner, and
-  imported account-level xpub scanner, or rich dormant-wallet classification
-  with last-activity timestamps
+  imported account-level xpub scanner with optional custom account paths, or
+  rich dormant-wallet classification with last-activity timestamps
 - full token registry/indexer scraping, full ERC-1155 batch/history coverage,
   NFT metadata and spam classification, Permit2 expiration-aware risk scoring,
   external spender/operator registries, queued execution for approval revokes,
-  custom account-level xpub path normalization, NFT claim/swap/exit transaction
+  NFT claim/swap/exit transaction
   simulation, dynamic network fee estimation, protocol-specific DeFi exit
   adapters, or claim execution adapters for airdrops/rewards
 - queued execution of consolidation plans for discovered holdings outside the

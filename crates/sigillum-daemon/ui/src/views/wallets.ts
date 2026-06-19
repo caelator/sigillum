@@ -155,9 +155,12 @@ export function createWalletActions(deps: WalletActionsDeps) {
       "No xpub wallet profiles yet. Save one above when you want a public receive tree without exposing private key material.",
       (profile) => {
         const accountPath = "m/44'/60'/" + profile.project_account + "'";
-        const receivePath = profile.external_receive_path || accountPath + "/0";
+        const receivePath =
+          profile.external_receive_path || (profile.external_account_path ? profile.external_account_path + "/0" : accountPath + "/0");
         const source = profile.external_account_xpub
-          ? "external account xpub"
+          ? profile.external_account_path
+            ? "external custom account xpub"
+            : "external account xpub"
           : profile.external_receive_xpub
             ? profile.external_receive_path
               ? "external custom xpub"
@@ -446,6 +449,7 @@ export function createWalletActions(deps: WalletActionsDeps) {
       external_receive_xpub: optionalTextValue("xpubExternalReceiveXpub"),
       external_receive_path: optionalTextValue("xpubExternalReceivePath"),
       external_account_xpub: optionalTextValue("xpubExternalAccountXpub"),
+      external_account_path: optionalTextValue("xpubExternalAccountPath"),
       default_destination_address: optionalTextValue("xpubDefaultDestination"),
     });
     if (r.error) {
@@ -460,6 +464,7 @@ export function createWalletActions(deps: WalletActionsDeps) {
       "xpubExternalReceiveXpub",
       "xpubExternalReceivePath",
       "xpubExternalAccountXpub",
+      "xpubExternalAccountPath",
       "xpubDefaultDestination",
     ]);
     input("xpubProjectAccount").value = "0";
