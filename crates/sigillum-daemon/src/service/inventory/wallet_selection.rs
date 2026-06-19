@@ -15,6 +15,7 @@ use super::{WALLET_FAMILY_ETH_SEED, WALLET_FAMILY_ETH_XPUB};
 pub(super) const DERIVATION_PATTERN_PROJECT: &str = "project";
 pub(super) const DERIVATION_PATTERN_STANDARD: &str = "standard";
 pub(super) const DERIVATION_PATTERN_LEDGER_LIVE: &str = "ledger_live";
+pub(super) const DERIVATION_PATTERN_IMPORTED_XPUB: &str = "imported_xpub";
 
 const DEFAULT_ACCOUNT_LIMIT: u32 = 3;
 const MAX_ACCOUNT_LIMIT: u32 = 10;
@@ -124,28 +125,53 @@ pub(super) fn select_discovery_wallets(
             if requested_profile.is_some_and(|name| name != profile.name) {
                 continue;
             }
-            let export = service.with_vault(profile.compartment_id, |vault| {
-                let master_key = vault
-                    .extract_master_key()
-                    .ok_or_else(|| ServiceError::forbidden("Wallet compartment is locked."))?;
-                derive_sigillum_ethereum_xpub_receive_branch(
-                    master_key.as_ref(),
-                    profile.project_account,
-                )
-                .map_err(map_xpub_error)
-            })?;
-            wallets.push(DiscoveryWallet {
-                family: WALLET_FAMILY_ETH_XPUB.into(),
-                profile: profile.name.clone(),
-                receive_path: export.receive_path,
-                receive_xpub: export.receive_xpub,
-                derivation_pattern: DERIVATION_PATTERN_PROJECT.into(),
-                account_index: profile.project_account,
-            });
+            let wallet = if let Some(receive_xpub) = profile
+                .external_receive_xpub
+                .as_deref()
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+            {
+                DiscoveryWallet {
+                    family: WALLET_FAMILY_ETH_XPUB.into(),
+                    profile: profile.name.clone(),
+                    receive_path: eth_receive_path(profile.project_account),
+                    receive_xpub: receive_xpub.to_string(),
+                    derivation_pattern: DERIVATION_PATTERN_IMPORTED_XPUB.into(),
+                    account_index: profile.project_account,
+                }
+            } else {
+                let export = service.with_vault(profile.compartment_id, |vault| {
+                    let master_key = vault
+                        .extract_master_key()
+                        .ok_or_else(|| ServiceError::forbidden("Wallet compartment is locked."))?;
+                    derive_sigillum_ethereum_xpub_receive_branch(
+                        master_key.as_ref(),
+                        profile.project_account,
+                    )
+                    .map_err(map_xpub_error)
+                })?;
+                DiscoveryWallet {
+                    family: WALLET_FAMILY_ETH_XPUB.into(),
+                    profile: profile.name.clone(),
+                    receive_path: export.receive_path,
+                    receive_xpub: export.receive_xpub,
+                    derivation_pattern: DERIVATION_PATTERN_PROJECT.into(),
+                    account_index: profile.project_account,
+                }
+            };
+            wallets.push(wallet);
         }
     }
 
     Ok(wallets)
+}
+
+pub(in crate::service::inventory) fn eth_account_path(project_account: u32) -> String {
+    format!("m/44'/60'/{project_account}'")
+}
+
+pub(in crate::service::inventory) fn eth_receive_path(project_account: u32) -> String {
+    format!("{}/0", eth_account_path(project_account))
 }
 
 fn seed_account_discovery_wallets(
@@ -188,4 +214,55 @@ fn seed_account_discovery_wallets(
         }
         Ok(wallets)
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use sigillum_core::derive_ethereum_xpub_receive_branch_from_mnemonic;
+    use tempfile::TempDir;
+
+    use super::*;
+    use crate::AppState;
+
+    const TEST_MNEMONIC: &str = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
+
+    #[test]
+    fn imported_xpub_profile_selects_receive_branch_without_vault() {
+        let dir = TempDir::new().unwrap();
+        let state = Arc::new(AppState::new(dir.path().to_path_buf()));
+        let service = SigillumService::new(state);
+        let imported =
+            derive_ethereum_xpub_receive_branch_from_mnemonic(TEST_MNEMONIC, None, 0).unwrap();
+        let profile = EthXpubWalletProfile {
+            name: "external-ledger".into(),
+            project_account: 0,
+            provider_profile: "mainnet".into(),
+            compartment_id: 0,
+            chain_id: Some(1),
+            external_receive_xpub: Some(imported.receive_xpub.clone()),
+            default_destination_address: None,
+            execution_enabled: false,
+        };
+
+        let wallets = select_discovery_wallets(
+            &service,
+            &[],
+            &[profile],
+            Some(WALLET_FAMILY_ETH_XPUB),
+            Some("external-ledger"),
+            SeedDerivationPattern::Project,
+            1,
+        )
+        .unwrap();
+
+        assert_eq!(wallets.len(), 1);
+        assert_eq!(wallets[0].receive_xpub, imported.receive_xpub);
+        assert_eq!(wallets[0].receive_path, imported.receive_path);
+        assert_eq!(
+            wallets[0].derivation_pattern,
+            DERIVATION_PATTERN_IMPORTED_XPUB
+        );
+    }
 }

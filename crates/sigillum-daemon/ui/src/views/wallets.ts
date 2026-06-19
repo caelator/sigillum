@@ -156,6 +156,7 @@ export function createWalletActions(deps: WalletActionsDeps) {
       (profile) => {
         const accountPath = "m/44'/60'/" + profile.project_account + "'";
         const receivePath = accountPath + "/0";
+        const source = profile.external_receive_xpub ? "external receive xpub" : "Sigillum project xpub";
         return (
           '<li><div class="entity-main">' +
           '<div class="entity-title">' +
@@ -166,6 +167,8 @@ export function createWalletActions(deps: WalletActionsDeps) {
           esc(String(profile.project_account)) +
           " · provider=" +
           esc(profile.provider_profile) +
+          " · source=" +
+          esc(source) +
           "<br>" +
           "accountPath=" +
           esc(accountPath) +
@@ -434,6 +437,7 @@ export function createWalletActions(deps: WalletActionsDeps) {
       provider_profile: providerProfile,
       compartment_id: optionalNumberValue("xpubCompartmentId"),
       chain_id: optionalNumberValue("xpubChainId"),
+      external_receive_xpub: optionalTextValue("xpubExternalReceiveXpub"),
       default_destination_address: optionalTextValue("xpubDefaultDestination"),
     });
     if (r.error) {
@@ -445,6 +449,7 @@ export function createWalletActions(deps: WalletActionsDeps) {
       "xpubProfileName",
       "xpubCompartmentId",
       "xpubChainId",
+      "xpubExternalReceiveXpub",
       "xpubDefaultDestination",
     ]);
     input("xpubProjectAccount").value = "0";

@@ -45,8 +45,14 @@ Required discovery classes:
   `derivation_pattern` values of `project`, `standard`, or `ledger_live`;
   `standard` and `ledger_live` derive read-only receive xpubs from the
   encrypted seed secret and scan account branches up to `account_limit`.
-- Xpub receive branch discovery for public project wallets, including used
-  address detection, balance checks, and gap-limit continuation.
+- Xpub receive branch discovery for public project wallets and imported
+  external watch-only receive branches, including used address detection,
+  balance checks, and gap-limit continuation. The first true imported-xpub
+  slice is implemented for Ethereum receive-branch xpubs
+  (`m/44'/60'/account'/0`) through the additive `external_receive_xpub`
+  profile field; these profiles are forced non-executable and remain
+  watch-only. Account-level xpub import and arbitrary custom xpub path
+  handling remain future work.
 - Ad-hoc and saved EVM watch-address discovery for old exchange, hardware
   wallet, client, or externally found addresses. The first slices are
   implemented as bounded read-only `eth-watch` probes in EVM inventory scans,

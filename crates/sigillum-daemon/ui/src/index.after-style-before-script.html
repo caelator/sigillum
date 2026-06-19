@@ -485,6 +485,9 @@
             <input type="text" id="walletImportXpubDestination" placeholder="Default destination address (optional)">
           </div>
           <div class="form-row">
+            <textarea id="walletImportExternalReceiveXpub" class="mono" placeholder="External receive-branch xpub (optional; m/44'/60'/account'/0)"></textarea>
+          </div>
+          <div class="form-row">
             <button class="btn-primary" data-action="importXpubWallet">Save Xpub Profile</button>
           </div>
         </div>
@@ -562,6 +565,9 @@
           <input type="number" id="xpubCompartmentId" placeholder="Compartment (optional)" class="input-wider">
           <input type="number" id="xpubChainId" placeholder="Chain ID (optional)" class="input-mid">
           <input type="text" id="xpubDefaultDestination" placeholder="Default destination address (optional)">
+        </div>
+        <div class="form-row">
+          <textarea id="xpubExternalReceiveXpub" class="mono" placeholder="External receive-branch xpub (optional; m/44'/60'/account'/0)"></textarea>
         </div>
         <div class="form-row">
           <button class="btn-primary" data-action="upsertXpubWalletProfile">Save Xpub Profile</button>

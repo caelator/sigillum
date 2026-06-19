@@ -78,12 +78,13 @@ export function walletNativeBalanceFromGroups(
 }
 
 /**
- * Identity line for a watch-only xpub profile. The eth-xpub list contract
- * exposes no receive xpub or derived address, so the stable public identity
- * is the receive-branch derivation path.
+ * Identity line for a watch-only xpub profile. Imported xpub profiles expose
+ * a public receive branch; legacy profiles derive that branch from the local
+ * compartment when exported.
  */
 export function xpubDisplay(profile: EthXpubWalletProfile): string {
-  return "receive path m/44'/60'/" + profile.project_account + "'/0";
+  const source = profile.external_receive_xpub ? "external " : "";
+  return source + "receive path m/44'/60'/" + profile.project_account + "'/0";
 }
 
 /**
@@ -109,6 +110,9 @@ export function walletRowMeta(
     "account=" + profile.project_account,
   ];
   if (seed) facts.push("words=" + seed.word_count);
+  if (!seed && (profile as EthXpubWalletProfile).external_receive_xpub) {
+    facts.push("source=external xpub");
+  }
   lines.push(facts.join(" · "));
   lines.push("balance=" + walletNativeBalanceFromGroups(profile.name, groups));
   if (activeReceiveCount) {
@@ -713,6 +717,8 @@ export function createWalletManagerActions(deps: WalletManagerDeps) {
     if (chainId != null) body.chain_id = chainId;
     const destination = optionalTextValue("walletImportXpubDestination");
     if (destination) body.default_destination_address = destination;
+    const externalReceiveXpub = optionalTextValue("walletImportExternalReceiveXpub");
+    if (externalReceiveXpub) body.external_receive_xpub = externalReceiveXpub;
 
     const r = await deps.api("POST", "/api/profiles/eth-xpub/upsert", body);
     if (r.error) {
@@ -723,6 +729,7 @@ export function createWalletManagerActions(deps: WalletManagerDeps) {
       "walletImportXpubName",
       "walletImportXpubCompartmentId",
       "walletImportXpubChainId",
+      "walletImportExternalReceiveXpub",
       "walletImportXpubDestination",
     ]);
     const account = input("walletImportXpubAccount");

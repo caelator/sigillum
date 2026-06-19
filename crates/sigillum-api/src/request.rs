@@ -509,7 +509,6 @@ pub struct EthStealthWalletProfileUpsertRequest {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub execution_enabled: Option<bool>,
 }
-
 /// Create or update an xpub receive-wallet profile.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct EthXpubWalletProfileUpsertRequest {
@@ -521,11 +520,12 @@ pub struct EthXpubWalletProfileUpsertRequest {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub chain_id: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub external_receive_xpub: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub default_destination_address: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub execution_enabled: Option<bool>,
 }
-
 /// Import or update an Ethereum seed-phrase wallet profile.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct EthSeedWalletProfileUpsertRequest {

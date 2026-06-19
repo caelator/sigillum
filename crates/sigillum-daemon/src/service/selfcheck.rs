@@ -267,22 +267,7 @@ impl SigillumService {
             failures.push(missing_provider_detail(&profile.provider_profile));
         }
 
-        let derivation = self
-            .with_vault(profile.compartment_id, |vault| {
-                let Some(master_key) = vault.extract_master_key() else {
-                    return Ok(VaultDerivation::Locked);
-                };
-                Ok(
-                    match derive_sigillum_ethereum_xpub_receive_branch(
-                        master_key.as_ref(),
-                        profile.project_account,
-                    ) {
-                        Ok(export) => VaultDerivation::Resolvable(export.receive_xpub),
-                        Err(error) => VaultDerivation::Invalid(error.to_string()),
-                    },
-                )
-            })
-            .unwrap_or(VaultDerivation::Locked);
+        let derivation = self.resolve_xpub_wallet_derivation(profile);
         match derivation {
             VaultDerivation::Resolvable(_) => {}
             VaultDerivation::Locked => warnings.push(format!(
@@ -325,23 +310,7 @@ impl SigillumService {
                 .eth_xpub_wallets
                 .iter()
                 .find(|profile| profile.name == allocation.wallet_profile)
-                .map(|profile| {
-                    self.with_vault(profile.compartment_id, |vault| {
-                        let Some(master_key) = vault.extract_master_key() else {
-                            return Ok(VaultDerivation::Locked);
-                        };
-                        Ok(
-                            match derive_sigillum_ethereum_xpub_receive_branch(
-                                master_key.as_ref(),
-                                profile.project_account,
-                            ) {
-                                Ok(export) => VaultDerivation::Resolvable(export.receive_xpub),
-                                Err(error) => VaultDerivation::Invalid(error.to_string()),
-                            },
-                        )
-                    })
-                    .unwrap_or(VaultDerivation::Locked)
-                }),
+                .map(|profile| self.resolve_xpub_wallet_derivation(profile)),
             _ => None,
         };
 
@@ -385,6 +354,36 @@ impl SigillumService {
             &detail,
             None,
         )
+    }
+
+    fn resolve_xpub_wallet_derivation(&self, profile: &EthXpubWalletProfile) -> VaultDerivation {
+        if let Some(xpub) = profile
+            .external_receive_xpub
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+        {
+            return match derive_ethereum_address_from_xpub(xpub, 0) {
+                Ok(_) => VaultDerivation::Resolvable(xpub.to_string()),
+                Err(error) => VaultDerivation::Invalid(error.to_string()),
+            };
+        }
+
+        self.with_vault(profile.compartment_id, |vault| {
+            let Some(master_key) = vault.extract_master_key() else {
+                return Ok(VaultDerivation::Locked);
+            };
+            Ok(
+                match derive_sigillum_ethereum_xpub_receive_branch(
+                    master_key.as_ref(),
+                    profile.project_account,
+                ) {
+                    Ok(export) => VaultDerivation::Resolvable(export.receive_xpub),
+                    Err(error) => VaultDerivation::Invalid(error.to_string()),
+                },
+            )
+        })
+        .unwrap_or(VaultDerivation::Locked)
     }
 
     /// FIDO2 sanity: enough registered keys to satisfy the highest unlocked

@@ -68,6 +68,12 @@ pub struct EthXpubWalletProfile {
     pub compartment_id: usize,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub chain_id: Option<u64>,
+    /// Imported receive-branch xpub for external watch-only wallets.
+    ///
+    /// When omitted, the profile uses Sigillum's legacy project-derived xpub
+    /// from the bound compartment master key.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub external_receive_xpub: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub default_destination_address: Option<String>,
     #[serde(default)]

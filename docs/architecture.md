@@ -131,7 +131,12 @@ Current daemon behavior:
 - keeps wallet inventory discovery, risk derivation, and consolidation planning
   separated inside the daemon service so future asset/protocol adapters have
   explicit homes rather than accumulating in one inventory module
-- stores provider profiles and stealth wallet profiles for internal EVM integration, with explicit compartment binding so queued work does not depend on the session's currently active compartment
+- stores provider profiles, stealth wallet profiles, and Ethereum seed/xpub
+  receive profiles for internal EVM integration, with explicit compartment
+  binding so queued work does not depend on the session's currently active
+  compartment; xpub profiles can either use Sigillum's project-derived receive
+  branch or an imported external `external_receive_xpub` branch, which remains
+  watch-only and non-executable
 - keeps profile-backed send construction and provider/wallet lookup helpers in
   `service/profiles/sends.rs` and `service/profiles/resolution.rs`, leaving
   `profiles.rs` centered on profile CRUD and seed/xpub import handling
@@ -203,8 +208,9 @@ What it intentionally does not do today:
   claim-contract risk findings, and local operator-managed
   spender/operator/claim-contract risk catalog overrides
 - historical receive-address discovery beyond the current EVM seed-account
-  receive-branch scanner and project-xpub gap-limit scanner, or rich
-  dormant-wallet classification with last-activity timestamps
+  receive-branch scanner, project-xpub gap-limit scanner, and imported
+  receive-branch xpub scanner, or rich dormant-wallet classification with
+  last-activity timestamps
 - full token registry/indexer scraping, full ERC-1155 batch/history coverage,
   NFT metadata and spam classification, Permit2 expiration-aware risk scoring,
   external spender/operator registries, queued execution for approval revokes,

@@ -155,11 +155,14 @@ multi-host coordination, or arbitrary wallet discovery completeness.
 
 The explicit release scope is **Sigillum Local-First Operator Console v1**. It
 includes the local daemon, vault, CLI, session model, current wallet/inventory
-slices, and local-sidecar gateway preview. The comprehensive wallet-management
-roadmap is intentionally deferred from this readiness claim: deeper xpub/custom
-derivation-path discovery, rich NFT/DeFi/airdrop inventory, non-EVM chains,
-automated consolidation execution, and hosted or internet-facing wallet
-operations remain future product work.
+slices, and local-sidecar gateway preview. Ethereum receive-branch xpub profiles
+now support imported external watch-only public branches through
+`external_receive_xpub`; those profiles are non-executable and can feed the
+existing inventory gap scanner without local signing material. The comprehensive
+wallet-management roadmap is intentionally deferred from this readiness claim:
+account-level/custom-path xpub discovery, rich NFT/DeFi/airdrop inventory,
+non-EVM chains, automated consolidation execution, and hosted or
+internet-facing wallet operations remain future product work.
 
 ## Remaining Work Before A Broader Completion Claim
 

@@ -160,6 +160,7 @@ mod tests {
             provider_profile: "mainnet".into(),
             compartment_id: 0,
             chain_id: Some(1),
+            external_receive_xpub: None,
             default_destination_address: None,
             execution_enabled: false,
         });

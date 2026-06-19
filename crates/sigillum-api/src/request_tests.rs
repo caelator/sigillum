@@ -546,6 +546,7 @@ fn test_eth_xpub_wallet_profile_upsert_request_roundtrip() {
         provider_profile: "mainnet".to_string(),
         compartment_id: Some(2),
         chain_id: Some(1),
+        external_receive_xpub: Some("xpub-imported".to_string()),
         default_destination_address: Some("0xdestination".to_string()),
         execution_enabled: Some(false),
     };

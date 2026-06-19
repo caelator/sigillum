@@ -379,6 +379,7 @@ export interface EthXpubWalletProfile {
   provider_profile: string;
   compartment_id: number;
   chain_id?: number | null;
+  external_receive_xpub?: string | null;
   default_destination_address?: string | null;
   execution_enabled: boolean;
 }

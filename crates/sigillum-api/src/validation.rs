@@ -480,6 +480,11 @@ impl Validate for crate::request::EthXpubWalletProfileUpsertRequest {
         check_len("name", &self.name, MAX_LABEL)?;
         check_len("provider_profile", &self.provider_profile, MAX_LABEL)?;
         check_optional_len(
+            "external_receive_xpub",
+            &self.external_receive_xpub,
+            MAX_XPUB,
+        )?;
+        check_optional_len(
             "default_destination_address",
             &self.default_destination_address,
             MAX_ADDRESS,
