@@ -894,6 +894,54 @@ async fn xpub_profiles_export_and_derive_receive_addresses() {
     .await;
     assert_eq!(mixed_external_profile.status(), StatusCode::BAD_REQUEST);
 
+    let path_without_xpub = post_json(
+        &client,
+        addr,
+        "/api/profiles/eth-xpub/upsert",
+        json!({
+            "name": "path-without-xpub",
+            "project_account": 7,
+            "provider_profile": "mainnet",
+            "external_receive_path": "m/44'/60'/7'/1",
+        }),
+        Some(&token),
+    )
+    .await;
+    assert_eq!(path_without_xpub.status(), StatusCode::BAD_REQUEST);
+
+    let custom_export =
+        sigillum_core::derive_ethereum_xpub_control_branch_from_mnemonic(
+            "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about",
+            None,
+            7,
+        )
+        .unwrap();
+    let custom_xpub_profile = post_json(
+        &client,
+        addr,
+        "/api/profiles/eth-xpub/upsert",
+        json!({
+            "name": "custom-control",
+            "project_account": 99,
+            "provider_profile": "mainnet",
+            "external_receive_xpub": custom_export.receive_xpub.clone(),
+            "external_receive_path": custom_export.receive_path.clone(),
+            "execution_enabled": true,
+        }),
+        Some(&token),
+    )
+    .await;
+    assert_eq!(custom_xpub_profile.status(), StatusCode::OK);
+    let custom_xpub_profile_json: serde_json::Value = custom_xpub_profile.json().await.unwrap();
+    assert_eq!(
+        custom_xpub_profile_json["profile"]["external_receive_path"],
+        custom_export.receive_path
+    );
+    assert_eq!(
+        custom_xpub_profile_json["profile"]["execution_enabled"],
+        false
+    );
+
     let xpub_profile = post_json(
         &client,
         addr,
@@ -914,7 +962,14 @@ async fn xpub_profiles_export_and_derive_receive_addresses() {
     let list = get(&client, addr, "/api/profiles/eth-xpub", Some(&token)).await;
     assert_eq!(list.status(), StatusCode::OK);
     let list_json: serde_json::Value = list.json().await.unwrap();
-    assert_eq!(list_json["profiles"][0]["name"], "treasury-receive");
+    let profile_names: Vec<&str> = list_json["profiles"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|profile| profile["name"].as_str())
+        .collect();
+    assert!(profile_names.contains(&"custom-control"));
+    assert!(profile_names.contains(&"treasury-receive"));
 
     let export = post_json(
         &client,
@@ -932,6 +987,31 @@ async fn xpub_profiles_export_and_derive_receive_addresses() {
     assert_eq!(export_json["account_path"], "m/44'/60'/7'");
     assert_eq!(export_json["receive_path"], "m/44'/60'/7'/0");
     assert!(receive_xpub.starts_with("xpub"));
+
+    let custom_export_resp = post_json(
+        &client,
+        addr,
+        "/api/wallets/eth-xpub/export",
+        json!({ "wallet_profile": "custom-control" }),
+        Some(&token),
+    )
+    .await;
+    assert_eq!(custom_export_resp.status(), StatusCode::OK);
+    let custom_export_json: serde_json::Value = custom_export_resp.json().await.unwrap();
+    assert_eq!(custom_export_json["wallet_profile"], "custom-control");
+    assert_eq!(custom_export_json["project_account"], 99);
+    assert_eq!(
+        custom_export_json["account_path"],
+        custom_export.account_path
+    );
+    assert_eq!(
+        custom_export_json["receive_path"],
+        custom_export.receive_path
+    );
+    assert_eq!(
+        custom_export_json["receive_xpub"],
+        custom_export.receive_xpub
+    );
 
     let derive_zero = post_json(
         &client,
@@ -3752,6 +3832,25 @@ async fn self_check_verifies_providers_wallets_policy_and_allocations() {
     .await;
     assert_eq!(account_xpub_profile.status(), StatusCode::OK);
 
+    let custom_xpub_export =
+        sigillum_core::derive_ethereum_xpub_control_branch_from_mnemonic(test_mnemonic, None, 0)
+            .unwrap();
+    let custom_xpub_profile = post_json(
+        &client,
+        addr,
+        "/api/profiles/eth-xpub/upsert",
+        json!({
+            "name": "custom-xpub",
+            "project_account": 99,
+            "provider_profile": "mainnet",
+            "external_receive_xpub": custom_xpub_export.receive_xpub.clone(),
+            "external_receive_path": custom_xpub_export.receive_path.clone(),
+        }),
+        Some(&token),
+    )
+    .await;
+    assert_eq!(custom_xpub_profile.status(), StatusCode::OK);
+
     // Enabled policy with an empty allowlist must surface as a warning.
     let policy = post_json(
         &client,
@@ -3791,6 +3890,24 @@ async fn self_check_verifies_providers_wallets_policy_and_allocations() {
         .as_str()
         .unwrap()
         .to_string();
+    let custom_allocate = post_json(
+        &client,
+        addr,
+        "/api/treasury/receive-addresses/allocate",
+        json!({ "wallet_profile": "custom-xpub", "purpose": "custom-path" }),
+        Some(&token),
+    )
+    .await;
+    assert_eq!(custom_allocate.status(), StatusCode::OK);
+    let custom_allocate_json: serde_json::Value = custom_allocate.json().await.unwrap();
+    let custom_allocation_id = custom_allocate_json["allocation"]["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    assert_eq!(
+        custom_allocate_json["allocation"]["derivation_path"],
+        format!("{}/0", custom_xpub_export.receive_path)
+    );
 
     // Unknown domains are rejected before any checks run.
     let unknown = post_json(
@@ -3843,6 +3960,17 @@ async fn self_check_verifies_providers_wallets_policy_and_allocations() {
         account_xpub_check["status"], "pass",
         "account xpub check: {account_xpub_check}"
     );
+    let custom_xpub_check = find("xpub-wallet:custom-xpub");
+    assert_eq!(
+        custom_xpub_check["status"], "warn",
+        "custom xpub check: {custom_xpub_check}"
+    );
+    assert!(
+        custom_xpub_check["detail"]
+            .as_str()
+            .unwrap()
+            .contains("external_receive_path is operator-asserted metadata")
+    );
 
     let policy_check = find("policy:treasury");
     assert_eq!(policy_check["status"], "warn");
@@ -3855,6 +3983,8 @@ async fn self_check_verifies_providers_wallets_policy_and_allocations() {
     assert_eq!(allocation_check["status"], "pass");
     let account_allocation_check = find(&format!("receive-allocation:{account_allocation_id}"));
     assert_eq!(account_allocation_check["status"], "pass");
+    let custom_allocation_check = find(&format!("receive-allocation:{custom_allocation_id}"));
+    assert_eq!(custom_allocation_check["status"], "pass");
 
     // Unconfigured domains contribute no results.
     assert!(checks.iter().all(|check| {
@@ -3900,7 +4030,7 @@ async fn self_check_verifies_providers_wallets_policy_and_allocations() {
     let orphaned_json: serde_json::Value = orphaned.json().await.unwrap();
     assert_eq!(orphaned_json["status"], "fail");
     let orphaned_checks = orphaned_json["checks"].as_array().unwrap();
-    assert_eq!(orphaned_checks.len(), 2);
+    assert_eq!(orphaned_checks.len(), 3);
     let orphaned_seed = orphaned_checks
         .iter()
         .find(|check| check["id"] == format!("receive-allocation:{allocation_id}"))
@@ -3915,6 +4045,11 @@ async fn self_check_verifies_providers_wallets_policy_and_allocations() {
         .find(|check| check["id"] == format!("receive-allocation:{account_allocation_id}"))
         .unwrap();
     assert_eq!(remaining_account_xpub["status"], "pass");
+    let remaining_custom_xpub = orphaned_checks
+        .iter()
+        .find(|check| check["id"] == format!("receive-allocation:{custom_allocation_id}"))
+        .unwrap();
+    assert_eq!(remaining_custom_xpub["status"], "pass");
 
     handle.abort();
     rpc_handle.abort();

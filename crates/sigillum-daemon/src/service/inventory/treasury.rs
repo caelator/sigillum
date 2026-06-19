@@ -12,7 +12,7 @@ use sigillum_api::{
     TreasuryReceiveSummary, TreasuryRiskSummary, TreasuryRoutingStatus, WalletAssetHolding,
     WalletInventoryAddress,
 };
-use sigillum_core::{decode_quantity_hex, derive_ethereum_address_from_xpub};
+use sigillum_core::decode_quantity_hex;
 
 use crate::audit_log::AuditEventSpec;
 use crate::inventory::WalletInventoryState;
@@ -27,7 +27,9 @@ use super::risk::derive_inventory_risk_findings;
 use super::support::{
     load_inventory_state, save_inventory_state, trimmed_optional, trimmed_required,
 };
-use super::wallet_selection::{SeedDerivationPattern, select_discovery_wallets};
+use super::wallet_selection::{
+    SeedDerivationPattern, derive_discovery_wallet_address, select_discovery_wallets,
+};
 use super::{WALLET_FAMILY_ETH_SEED, WALLET_FAMILY_ETH_WATCH, WALLET_FAMILY_ETH_XPUB};
 
 const DEFAULT_NATIVE_SYMBOL: &str = "ETH";
@@ -552,8 +554,8 @@ impl SigillumService {
             return Err(ServiceError::bad_request("Receive index space exhausted."));
         }
 
-        let derived = derive_ethereum_address_from_xpub(&wallet.receive_xpub, next_index)
-            .map_err(map_xpub_error)?;
+        let derived =
+            derive_discovery_wallet_address(&wallet, next_index).map_err(map_xpub_error)?;
         let allocation = TreasuryReceiveAllocation {
             id: random_id(),
             wallet_family: wallet.family.clone(),

@@ -401,7 +401,7 @@ function updateNextStepCard() {
       primaryTarget: 'profilesCard',
       secondaryLabel: 'Read operator guide',
       secondaryTarget: 'guideCard',
-      note: 'Stealth is the current end-to-end operator path. Xpub is now available for receive-branch export and preview, but not yet for discovery or sweeping.',
+      note: 'Stealth is the current end-to-end operator path. Xpub profiles can feed read-only inventory discovery, while sweeping still requires a signer-backed wallet path.',
     };
   } else if (!hasStealthWalletProfiles && (hasXpubWalletProfiles || hasSeedWalletProfiles)) {
     nextStep = {

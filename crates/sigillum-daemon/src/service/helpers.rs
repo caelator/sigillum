@@ -83,6 +83,9 @@ pub(crate) fn map_xpub_error(error: EthereumXpubError) -> ServiceError {
         | EthereumXpubError::InvalidReceiveIndex
         | EthereumXpubError::InvalidReceiveBranchXpub
         | EthereumXpubError::InvalidAccountBranchXpub
+        | EthereumXpubError::InvalidImportedXpub
+        | EthereumXpubError::InvalidDerivationPath
+        | EthereumXpubError::XpubPathDepthMismatch
         | EthereumXpubError::InvalidMnemonic
         | EthereumXpubError::InvalidMnemonicWordCount => {
             ServiceError::bad_request(error.to_string())

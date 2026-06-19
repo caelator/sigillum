@@ -30,9 +30,9 @@ use serde::Serialize;
 use sigillum_api::request::{
     ConsolidationPlanApproveRequest, ConsolidationPlanExportRequest,
     ConsolidationPlanGenerateRequest, ConsolidationPlanSimulateRequest, EthSeedWalletCreateRequest,
-    EthStealthWalletProfileUpsertRequest, EvmProviderProfileUpsertRequest, EvmProviderRef,
-    Fido2UnlockRequest, MaintenanceRunRequest, RiskCatalogDeleteRequest, RiskCatalogUpsertRequest,
-    SelfCheckRunRequest,
+    EthStealthWalletProfileUpsertRequest, EthXpubWalletProfileUpsertRequest,
+    EvmProviderProfileUpsertRequest, EvmProviderRef, Fido2UnlockRequest, MaintenanceRunRequest,
+    RiskCatalogDeleteRequest, RiskCatalogUpsertRequest, SelfCheckRunRequest,
 };
 use sigillum_client::{ClientError, SigillumClient};
 use url::Url;
@@ -120,11 +120,11 @@ pub fn cmd_api(args: &[String]) {
     }
 }
 
-/// Dispatch `sigillum api profiles <evm|stealth|eth-seed> <list|upsert|create|delete>`.
+/// Dispatch `sigillum api profiles <evm|stealth|eth-xpub|eth-seed> <list|upsert|create|delete>`.
 fn cmd_api_profiles(args: &[String]) {
     if args.len() < 3 {
         eprintln!(
-            "Usage: sigillum api profiles <evm|stealth|eth-seed> <list|upsert|create|delete> [...]"
+            "Usage: sigillum api profiles <evm|stealth|eth-xpub|eth-seed> <list|upsert|create|delete> [...]"
         );
         process::exit(1);
     }
@@ -213,6 +213,37 @@ fn cmd_api_profiles(args: &[String]) {
                 client.delete_eth_stealth_wallet_profile(&name).await
             });
         }
+        ("eth-xpub", "list") => run_api_command(args, true, |client| async move {
+            client.list_eth_xpub_wallet_profiles().await
+        }),
+        ("eth-xpub", "upsert") => {
+            const XPUB_USAGE: &str = "sigillum api profiles eth-xpub upsert --name <NAME> --provider-profile <PROFILE> [--project-account <N>] [--compartment-id <N>] [--chain-id <N>] [--external-receive-xpub <XPUB>] [--external-receive-path <PATH>] [--external-account-xpub <XPUB>] [--default-destination-address <ADDR>] [--execution-enabled|--execution-disabled]";
+            let request = EthXpubWalletProfileUpsertRequest {
+                name: require_flag(args, "--name", XPUB_USAGE),
+                project_account: parse_u32_flag(args, "--project-account").unwrap_or(0),
+                provider_profile: require_flag(args, "--provider-profile", XPUB_USAGE),
+                compartment_id: parse_usize_flag(args, "--compartment-id"),
+                chain_id: parse_u64_flag(args, "--chain-id"),
+                external_receive_xpub: parse_flag(args, "--external-receive-xpub"),
+                external_receive_path: parse_flag(args, "--external-receive-path"),
+                external_account_xpub: parse_flag(args, "--external-account-xpub"),
+                default_destination_address: parse_flag(args, "--default-destination-address"),
+                execution_enabled: bool_switch(args, "--execution-enabled", "--execution-disabled"),
+            };
+            run_api_command(args, true, move |client| async move {
+                client.upsert_eth_xpub_wallet_profile(request).await
+            });
+        }
+        ("eth-xpub", "delete") => {
+            let name = require_flag(
+                args,
+                "--name",
+                "sigillum api profiles eth-xpub delete --name <NAME>",
+            );
+            run_api_command(args, true, move |client| async move {
+                client.delete_eth_xpub_wallet_profile(&name).await
+            });
+        }
         ("eth-seed", "list") => run_api_command(args, true, |client| async move {
             client.list_eth_seed_wallet_profiles().await
         }),
@@ -246,7 +277,7 @@ fn cmd_api_profiles(args: &[String]) {
         }
         _ => {
             eprintln!(
-                "Usage: sigillum api profiles <evm|stealth|eth-seed> <list|upsert|create|delete> [...]"
+                "Usage: sigillum api profiles <evm|stealth|eth-xpub|eth-seed> <list|upsert|create|delete> [...]"
             );
             process::exit(1);
         }
@@ -788,6 +819,7 @@ COMMANDS:
   selfcheck [--domain <DOMAIN>]...  (domains: provider, seed-wallet, xpub-wallet, stealth-wallet, watch-book, policy, receive-allocation, fido2; default: all)
   profiles evm <list|upsert|delete> [...]
   profiles stealth <list|upsert|delete> [...]
+  profiles eth-xpub <list|upsert|delete> [...]
   profiles eth-seed <list|create|delete> [...]  (create generates a new BIP-39 mnemonic and prints it exactly once)
   deposits <list|create-native|create-erc20|scan-announcements|refresh|enqueue-sweep|delete> [...]
   inventory <list|chains|watch|scan-evm> [...]  (scan supports --watch-address, --watch-address-file, --include-watch-book, --derivation-pattern, --account-limit)

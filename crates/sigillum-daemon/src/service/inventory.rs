@@ -31,7 +31,7 @@ use sigillum_api::{
     WalletDiscoveryJob, WalletInventoryListResponse, WalletInventoryScanRequest,
     WalletInventoryScanResponse, WatchAddressProbe,
 };
-use sigillum_core::{derive_ethereum_address_from_control_xpub, derive_ethereum_address_from_xpub};
+use sigillum_core::derive_ethereum_address_from_control_xpub;
 
 use crate::audit_log::AuditEventSpec;
 
@@ -55,8 +55,8 @@ use support::{
 };
 use token_discovery::erc20_transfer_discovery_config;
 use wallet_selection::{
-    DERIVATION_PATTERN_PROJECT, DiscoveryWallet, SeedDerivationPattern, scan_account_limit,
-    select_discovery_wallets,
+    DERIVATION_PATTERN_PROJECT, DiscoveryWallet, SeedDerivationPattern,
+    derive_discovery_wallet_address, scan_account_limit, select_discovery_wallets,
 };
 use watch_discovery::select_watch_addresses;
 
@@ -549,8 +549,8 @@ impl SigillumService {
                 (0, 0)
             };
             while index <= max_index && empty_run < gap_limit {
-                let derived = derive_ethereum_address_from_xpub(&wallet.receive_xpub, index)
-                    .map_err(map_xpub_error)?;
+                let derived =
+                    derive_discovery_wallet_address(wallet, index).map_err(map_xpub_error)?;
                 let derivation_path = format!("{}/{index}", wallet.receive_path);
                 let mut index_has_activity = false;
 

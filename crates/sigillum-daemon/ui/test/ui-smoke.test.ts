@@ -1416,6 +1416,7 @@ function installWalletManagerDom() {
     "walletImportXpubChainId",
     "walletImportXpubDestination",
     "walletImportExternalReceiveXpub",
+    "walletImportExternalReceivePath",
     "walletImportExternalAccountXpub",
     "walletImportWatchAddress",
     "walletImportWatchLabel",
@@ -1484,6 +1485,18 @@ test("wallet row meta helpers summarize identity, balances, and xpub display", (
     walletRowMeta(accountXpubProfile, [], null),
     "external receive path m/44'/60'/3'/0\n" +
       "provider=base · chain=- · account=3 · source=external account xpub\n" +
+      "balance=not scanned yet",
+  );
+  const customXpubProfile = {
+    ...xpubProfile,
+    external_receive_xpub: "xpub-custom",
+    external_receive_path: "m/44'/60'/3'/1",
+  };
+  equal(xpubDisplay(customXpubProfile), "external receive path m/44'/60'/3'/1");
+  equal(
+    walletRowMeta(customXpubProfile, [], null),
+    "external receive path m/44'/60'/3'/1\n" +
+      "provider=base · chain=- · account=3 · source=external custom xpub\n" +
       "balance=not scanned yet",
   );
 });
@@ -1827,7 +1840,8 @@ test("wallet manager import tabs switch forms, scrub seed input, and post contra
   dom.el("walletImportXpubChainId").value = "10";
   dom.el("walletImportXpubDestination").value =
     "0x8888888888888888888888888888888888888888";
-  dom.el("walletImportExternalAccountXpub").value = "xpub-account";
+  dom.el("walletImportExternalReceiveXpub").value = "xpub-receive";
+  dom.el("walletImportExternalReceivePath").value = "m/44'/60'/9'/1";
   await manager.importXpubWallet();
   const xpubUpsert = calls.find(
     (call) => call.path === "/api/profiles/eth-xpub/upsert",
@@ -1841,12 +1855,15 @@ test("wallet manager import tabs switch forms, scrub seed input, and post contra
       provider_profile: "mainnet",
       compartment_id: 1,
       chain_id: 10,
-      external_account_xpub: "xpub-account",
+      external_receive_xpub: "xpub-receive",
+      external_receive_path: "m/44'/60'/9'/1",
       default_destination_address: "0x8888888888888888888888888888888888888888",
     },
   });
   equal(dom.el("walletImportXpubName").value, "");
   equal(dom.el("walletImportXpubAccount").value, "0");
+  equal(dom.el("walletImportExternalReceiveXpub").value, "");
+  equal(dom.el("walletImportExternalReceivePath").value, "");
   equal(dom.el("walletImportExternalAccountXpub").value, "");
 
   manager.setWalletImportTab("watch");

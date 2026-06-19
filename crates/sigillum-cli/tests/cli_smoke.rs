@@ -169,6 +169,17 @@ fn api_profiles_evm_upsert_missing_flags_exits_nonzero() {
 }
 
 #[test]
+fn api_profiles_eth_xpub_upsert_missing_flags_exits_nonzero() {
+    let output = run(&["api", "profiles", "eth-xpub", "upsert"]);
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("--name") || stderr.contains("Usage"),
+        "should mention required flags"
+    );
+}
+
+#[test]
 fn api_deposits_missing_subcommand_exits_nonzero() {
     let output = run(&["api", "deposits"]);
     assert!(!output.status.success());

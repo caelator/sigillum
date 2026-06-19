@@ -160,10 +160,14 @@ now support imported external watch-only public branches through
 `external_receive_xpub`, and Ethereum account-level xpub profiles support
 `external_account_xpub` normalized into receive branches; those profiles are
 non-executable and can feed the existing inventory gap scanner without local
-signing material. The comprehensive wallet-management roadmap is intentionally
-deferred from this readiness claim: arbitrary custom-path xpub discovery, rich
-NFT/DeFi/airdrop inventory, non-EVM chains, automated consolidation execution,
-and hosted or internet-facing wallet operations remain future product work.
+signing material. Imported receive xpubs can optionally carry a custom
+`external_receive_path`; Sigillum validates the BIP-32 syntax and xpub depth,
+uses the path in inventory/export/self-check evidence, and warns that the path
+is operator-asserted metadata. The comprehensive wallet-management roadmap is
+intentionally deferred from this readiness claim: custom account-level xpub
+paths, rich NFT/DeFi/airdrop inventory, non-EVM chains, automated consolidation
+execution, and hosted or internet-facing wallet operations remain future
+product work.
 
 ## Remaining Work Before A Broader Completion Claim
 

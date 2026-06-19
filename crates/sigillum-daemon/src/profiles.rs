@@ -161,6 +161,7 @@ mod tests {
             compartment_id: 0,
             chain_id: Some(1),
             external_receive_xpub: None,
+            external_receive_path: None,
             external_account_xpub: None,
             default_destination_address: None,
             execution_enabled: false,

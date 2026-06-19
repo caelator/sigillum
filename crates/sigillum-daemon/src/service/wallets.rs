@@ -51,11 +51,15 @@ impl SigillumService {
             .map(str::trim)
             .filter(|value| !value.is_empty())
         {
+            let receive_path = profile
+                .external_receive_path
+                .clone()
+                .unwrap_or_else(|| eth_receive_path(profile.project_account));
             EthXpubExportResponse {
                 wallet_profile: profile.name.clone(),
                 project_account: profile.project_account,
-                account_path: eth_account_path(profile.project_account),
-                receive_path: eth_receive_path(profile.project_account),
+                account_path: parent_derivation_path(&receive_path),
+                receive_path,
                 receive_xpub: receive_xpub.to_string(),
             }
         } else if let Some(account_xpub) = profile
@@ -442,6 +446,12 @@ fn eth_receive_path(project_account: u32) -> String {
     format!("{}/0", eth_account_path(project_account))
 }
 
+fn parent_derivation_path(path: &str) -> String {
+    path.rsplit_once('/')
+        .map(|(parent, _)| parent.to_string())
+        .unwrap_or_else(|| path.to_string())
+}
+
 #[cfg(test)]
 mod tests {
     use std::sync::Arc;
@@ -454,6 +464,7 @@ mod tests {
     };
     use sigillum_core::{
         derive_ethereum_account_xpub_from_mnemonic,
+        derive_ethereum_xpub_control_branch_from_mnemonic,
         derive_ethereum_xpub_receive_branch_from_mnemonic,
     };
     use sigillum_fido2::config::CompartmentMeta;
@@ -680,6 +691,7 @@ mod tests {
                     compartment_id: 1,
                     chain_id: Some(1),
                     external_receive_xpub: None,
+                    external_receive_path: None,
                     external_account_xpub: None,
                     default_destination_address: None,
                     execution_enabled: false,
@@ -734,6 +746,7 @@ mod tests {
                     compartment_id: 0,
                     chain_id: Some(1),
                     external_receive_xpub: None,
+                    external_receive_path: None,
                     external_account_xpub: None,
                     default_destination_address: None,
                     execution_enabled: false,
@@ -790,6 +803,7 @@ mod tests {
                     compartment_id: 0,
                     chain_id: Some(1),
                     external_receive_xpub: Some(imported.receive_xpub.clone()),
+                    external_receive_path: None,
                     external_account_xpub: None,
                     default_destination_address: None,
                     execution_enabled: false,
@@ -848,6 +862,7 @@ mod tests {
                     compartment_id: 0,
                     chain_id: Some(1),
                     external_receive_xpub: None,
+                    external_receive_path: None,
                     external_account_xpub: Some(account_xpub),
                     default_destination_address: None,
                     execution_enabled: false,
@@ -869,5 +884,62 @@ mod tests {
         assert_eq!(export.account_path, expected.account_path);
         assert_eq!(export.receive_path, expected.receive_path);
         assert_eq!(export.receive_xpub, expected.receive_xpub);
+    }
+
+    #[test]
+    fn xpub_export_returns_imported_custom_path() {
+        let dir = TempDir::new().unwrap();
+        let state = Arc::new(AppState::new(dir.path().to_path_buf()));
+        state.unlock_compartment(0, [7u8; 32], meta(0, 1, "default"));
+        let session = state.create_session(Some(0));
+        let service = SigillumService::new(state);
+        let imported =
+            derive_ethereum_xpub_control_branch_from_mnemonic(TEST_MNEMONIC, None, 0).unwrap();
+
+        save_profiles(
+            dir.path(),
+            &ProfileRegistry {
+                evm_providers: vec![EvmProviderProfile {
+                    name: "mainnet".into(),
+                    rpc_url: "http://127.0.0.1:8545".into(),
+                    auth_token_key: None,
+                    compartment_id: 0,
+                    chain_id: 1,
+                    max_priority_fee_per_gas_hex: None,
+                    max_fee_per_gas_hex: None,
+                    native_gas_limit: None,
+                    erc20_gas_limit: None,
+                }],
+                eth_stealth_wallets: vec![],
+                eth_xpub_wallets: vec![EthXpubWalletProfile {
+                    name: "external-control".into(),
+                    project_account: 99,
+                    provider_profile: "mainnet".into(),
+                    compartment_id: 0,
+                    chain_id: Some(1),
+                    external_receive_xpub: Some(imported.receive_xpub.clone()),
+                    external_receive_path: Some(imported.receive_path.clone()),
+                    external_account_xpub: None,
+                    default_destination_address: None,
+                    execution_enabled: false,
+                }],
+                ..Default::default()
+            },
+        )
+        .unwrap();
+
+        let export = service
+            .eth_xpub_export(
+                Some(&session),
+                EthXpubExportRequest {
+                    wallet_profile: "external-control".into(),
+                },
+            )
+            .unwrap();
+
+        assert_eq!(export.project_account, 99);
+        assert_eq!(export.account_path, imported.account_path);
+        assert_eq!(export.receive_path, imported.receive_path);
+        assert_eq!(export.receive_xpub, imported.receive_xpub);
     }
 }

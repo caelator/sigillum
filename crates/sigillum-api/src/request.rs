@@ -4,9 +4,7 @@
 //! Shared field groups are extracted into reusable structs (`StealthPaymentRef`,
 //! `EvmProviderRef`, `Eip1559Fees`) and composed via `#[serde(flatten)]` to
 //! eliminate duplication while preserving backward-compatible JSON serialization.
-
 use serde::{Deserialize, Serialize};
-
 // ── Shared domain types ─────────────────────────────────────────
 
 /// Reference to a specific stealth payment.
@@ -521,6 +519,8 @@ pub struct EthXpubWalletProfileUpsertRequest {
     pub chain_id: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub external_receive_xpub: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub external_receive_path: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub external_account_xpub: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]

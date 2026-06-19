@@ -135,9 +135,10 @@ Current daemon behavior:
   receive profiles for internal EVM integration, with explicit compartment
   binding so queued work does not depend on the session's currently active
   compartment; xpub profiles can either use Sigillum's project-derived receive
-  branch, an imported external `external_receive_xpub` branch, or an imported
-  account-level `external_account_xpub` that is normalized into a receive
-  branch; imported xpub profiles remain watch-only and non-executable
+  branch, an imported external `external_receive_xpub` branch with optional
+  operator-supplied `external_receive_path`, or an imported account-level
+  `external_account_xpub` that is normalized into a receive branch; imported
+  xpub profiles remain watch-only and non-executable
 - keeps profile-backed send construction and provider/wallet lookup helpers in
   `service/profiles/sends.rs` and `service/profiles/resolution.rs`, leaving
   `profiles.rs` centered on profile CRUD and seed/xpub import handling
@@ -210,14 +211,15 @@ What it intentionally does not do today:
   spender/operator/claim-contract risk catalog overrides
 - historical receive-address discovery beyond the current EVM seed-account
   receive-branch scanner, project-xpub gap-limit scanner, imported
-  receive-branch xpub scanner, and imported account-level xpub scanner, or rich
-  dormant-wallet classification with last-activity timestamps
+  receive-branch xpub scanner, imported custom receive-path xpub scanner, and
+  imported account-level xpub scanner, or rich dormant-wallet classification
+  with last-activity timestamps
 - full token registry/indexer scraping, full ERC-1155 batch/history coverage,
   NFT metadata and spam classification, Permit2 expiration-aware risk scoring,
   external spender/operator registries, queued execution for approval revokes,
-  NFT claim/swap/exit transaction simulation, dynamic network fee estimation,
-  protocol-specific DeFi exit adapters, or claim execution adapters for
-  airdrops/rewards
+  custom account-level xpub path normalization, NFT claim/swap/exit transaction
+  simulation, dynamic network fee estimation, protocol-specific DeFi exit
+  adapters, or claim execution adapters for airdrops/rewards
 - queued execution of consolidation plans for discovered holdings outside the
   current stealth deposit sweep flow; consolidation plan exports are the current
   execution handoff boundary

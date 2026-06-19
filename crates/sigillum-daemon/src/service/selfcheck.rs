@@ -21,8 +21,9 @@ use sigillum_api::{
     TreasuryReceiveAllocation, WatchAddressBookEntry,
 };
 use sigillum_core::{
-    SecretStore, VaultLifecycle, decode_quantity_hex, derive_ethereum_address_from_xpub,
-    derive_ethereum_receive_branch_from_account_xpub, derive_sigillum_ethereum_xpub_receive_branch,
+    SecretStore, VaultLifecycle, decode_quantity_hex, derive_ethereum_address_from_imported_xpub,
+    derive_ethereum_address_from_xpub, derive_ethereum_receive_branch_from_account_xpub,
+    derive_sigillum_ethereum_xpub_receive_branch, validate_ethereum_imported_xpub_path,
 };
 
 use crate::audit_log::AuditEventSpec;
@@ -67,7 +68,10 @@ enum VaultSecretPresence {
 /// Whether a wallet's derivation material could be resolved from the vault.
 enum VaultDerivation {
     Locked,
-    Resolvable(String),
+    Resolvable {
+        receive_xpub: String,
+        operator_asserted_path: bool,
+    },
     Invalid(String),
 }
 
@@ -269,7 +273,17 @@ impl SigillumService {
 
         let derivation = self.resolve_xpub_wallet_derivation(profile);
         match derivation {
-            VaultDerivation::Resolvable(_) => {}
+            VaultDerivation::Resolvable {
+                operator_asserted_path,
+                ..
+            } => {
+                if operator_asserted_path {
+                    warnings.push(
+                        "external_receive_path is operator-asserted metadata; xpub depth matches, but the path cannot be cryptographically bound to the imported xpub"
+                            .to_string(),
+                    );
+                }
+            }
             VaultDerivation::Locked => warnings.push(format!(
                 "Vault locked for compartment {} — derivation material not verifiable",
                 profile.compartment_id
@@ -305,7 +319,10 @@ impl SigillumService {
                 .eth_seed_wallets
                 .iter()
                 .find(|profile| profile.name == allocation.wallet_profile)
-                .map(|profile| VaultDerivation::Resolvable(profile.receive_xpub.clone())),
+                .map(|profile| VaultDerivation::Resolvable {
+                    receive_xpub: profile.receive_xpub.clone(),
+                    operator_asserted_path: false,
+                }),
             WALLET_FAMILY_ETH_XPUB => registry
                 .eth_xpub_wallets
                 .iter()
@@ -330,8 +347,11 @@ impl SigillumService {
                 STATUS_FAIL,
                 format!("Derivation material unresolvable: {error}"),
             ),
-            Some(VaultDerivation::Resolvable(xpub)) => {
-                match derive_ethereum_address_from_xpub(&xpub, allocation.address_index) {
+            Some(VaultDerivation::Resolvable { receive_xpub, .. }) => {
+                match derive_ethereum_address_from_imported_xpub(
+                    &receive_xpub,
+                    allocation.address_index,
+                ) {
                     Ok(derived) if derived.address.eq_ignore_ascii_case(&allocation.address) => (
                         STATUS_PASS,
                         format!(
@@ -363,8 +383,27 @@ impl SigillumService {
             .map(str::trim)
             .filter(|value| !value.is_empty())
         {
+            if let Some(path) = profile
+                .external_receive_path
+                .as_deref()
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+            {
+                return match validate_ethereum_imported_xpub_path(xpub, path)
+                    .and_then(|_| derive_ethereum_address_from_imported_xpub(xpub, 0))
+                {
+                    Ok(_) => VaultDerivation::Resolvable {
+                        receive_xpub: xpub.to_string(),
+                        operator_asserted_path: true,
+                    },
+                    Err(error) => VaultDerivation::Invalid(error.to_string()),
+                };
+            }
             return match derive_ethereum_address_from_xpub(xpub, 0) {
-                Ok(_) => VaultDerivation::Resolvable(xpub.to_string()),
+                Ok(_) => VaultDerivation::Resolvable {
+                    receive_xpub: xpub.to_string(),
+                    operator_asserted_path: false,
+                },
                 Err(error) => VaultDerivation::Invalid(error.to_string()),
             };
         }
@@ -378,7 +417,10 @@ impl SigillumService {
                 xpub,
                 profile.project_account,
             ) {
-                Ok(export) => VaultDerivation::Resolvable(export.receive_xpub),
+                Ok(export) => VaultDerivation::Resolvable {
+                    receive_xpub: export.receive_xpub,
+                    operator_asserted_path: false,
+                },
                 Err(error) => VaultDerivation::Invalid(error.to_string()),
             };
         }
@@ -392,7 +434,10 @@ impl SigillumService {
                     master_key.as_ref(),
                     profile.project_account,
                 ) {
-                    Ok(export) => VaultDerivation::Resolvable(export.receive_xpub),
+                    Ok(export) => VaultDerivation::Resolvable {
+                        receive_xpub: export.receive_xpub,
+                        operator_asserted_path: false,
+                    },
                     Err(error) => VaultDerivation::Invalid(error.to_string()),
                 },
             )

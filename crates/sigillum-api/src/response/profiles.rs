@@ -74,6 +74,9 @@ pub struct EthXpubWalletProfile {
     /// from the bound compartment master key.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub external_receive_xpub: Option<String>,
+    /// Operator-supplied BIP-32 path for an imported receive xpub.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub external_receive_path: Option<String>,
     /// Imported account-level xpub for external watch-only wallets.
     ///
     /// Sigillum normalizes this to a receive branch before discovery.

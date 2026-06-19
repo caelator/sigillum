@@ -380,6 +380,7 @@ export interface EthXpubWalletProfile {
   compartment_id: number;
   chain_id?: number | null;
   external_receive_xpub?: string | null;
+  external_receive_path?: string | null;
   external_account_xpub?: string | null;
   default_destination_address?: string | null;
   execution_enabled: boolean;

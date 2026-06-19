@@ -42,6 +42,42 @@ fn check_vec_items_len(field: &str, items: &[String], max: usize) -> Result<(), 
     Ok(())
 }
 
+fn check_optional_bip32_path(field: &str, value: &Option<String>) -> Result<(), String> {
+    let Some(path) = value.as_deref().map(str::trim).filter(|v| !v.is_empty()) else {
+        return Ok(());
+    };
+    check_len(field, path, MAX_DERIVATION_PATH)?;
+    let mut parts = path.split('/');
+    if parts.next() != Some("m") {
+        return Err(format!("{field} must start with m/"));
+    }
+    let remaining: Vec<&str> = parts.collect();
+    if remaining.is_empty() {
+        return Err(format!("{field} must include at least one child index"));
+    }
+    for (offset, part) in remaining.iter().enumerate() {
+        if part.is_empty() || part.trim() != *part {
+            return Err(format!("{field} contains an invalid child index"));
+        }
+        let is_hardened = part.ends_with('\'');
+        if is_hardened && offset + 1 == remaining.len() {
+            return Err(format!("{field} must end at a public child branch"));
+        }
+        let index = if is_hardened {
+            &part[..part.len() - 1]
+        } else {
+            part
+        };
+        if index.is_empty() || !index.chars().all(|c| c.is_ascii_digit()) {
+            return Err(format!("{field} contains an invalid child index"));
+        }
+        index
+            .parse::<u32>()
+            .map_err(|_| format!("{field} contains an invalid child index"))?;
+    }
+    Ok(())
+}
+
 // ── Field-specific limits ───────────────────────────────────────────
 
 const MAX_PASSPHRASE: usize = 1024;
@@ -53,6 +89,7 @@ const MAX_PIN: usize = 64;
 const MAX_ADDRESS: usize = 128;
 const MAX_META_ADDRESS: usize = 256;
 const MAX_XPUB: usize = 512;
+const MAX_DERIVATION_PATH: usize = 128;
 const MAX_MNEMONIC: usize = 2048;
 const MAX_SNAPSHOT_HEX: usize = 10_000_000;
 const MAX_NOTE: usize = 1024;
@@ -484,15 +521,24 @@ impl Validate for crate::request::EthXpubWalletProfileUpsertRequest {
             &self.external_receive_xpub,
             MAX_XPUB,
         )?;
+        check_optional_bip32_path("external_receive_path", &self.external_receive_path)?;
         check_optional_len(
             "external_account_xpub",
             &self.external_account_xpub,
             MAX_XPUB,
         )?;
-        if self
+        let has_external_receive_path = self
+            .external_receive_path
+            .as_deref()
+            .is_some_and(|value| !value.trim().is_empty());
+        let has_external_receive_xpub = self
             .external_receive_xpub
             .as_deref()
-            .is_some_and(|value| !value.trim().is_empty())
+            .is_some_and(|value| !value.trim().is_empty());
+        if has_external_receive_path && !has_external_receive_xpub {
+            return Err("external_receive_path requires external_receive_xpub".into());
+        }
+        if has_external_receive_xpub
             && self
                 .external_account_xpub
                 .as_deref()

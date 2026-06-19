@@ -53,8 +53,13 @@ Required discovery classes:
   profile field. Ethereum account-level xpub import is also implemented through
   `external_account_xpub`; Sigillum validates `m/44'/60'/account'` account
   public keys, normalizes them into receive-branch xpubs for scanning, and
-  keeps them non-executable/watch-only. Arbitrary custom xpub path handling
-  remains future work.
+  keeps them non-executable/watch-only. Custom imported receive-xpub paths are
+  implemented through `external_receive_path` paired with
+  `external_receive_xpub`; Sigillum validates BIP-32 path syntax, checks the
+  xpub depth matches the supplied path, uses that path in inventory/export/
+  self-check evidence, and surfaces it as operator-asserted metadata because a
+  watch-only path cannot be cryptographically bound to an xpub. Custom
+  account-level xpub paths remain future work.
 - Ad-hoc and saved EVM watch-address discovery for old exchange, hardware
   wallet, client, or externally found addresses. The first slices are
   implemented as bounded read-only `eth-watch` probes in EVM inventory scans,

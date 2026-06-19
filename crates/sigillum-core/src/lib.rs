@@ -55,12 +55,13 @@ pub use ethereum_xpub::{
     ETHEREUM_XPUB_RECEIVE_BRANCH, EthereumXpubError, EthereumXpubReceiveAddress,
     EthereumXpubReceiveExport, derive_ethereum_account_xpub_from_mnemonic,
     derive_ethereum_address_from_account_xpub, derive_ethereum_address_from_control_xpub,
-    derive_ethereum_address_from_xpub, derive_ethereum_receive_branch_from_account_xpub,
+    derive_ethereum_address_from_imported_xpub, derive_ethereum_address_from_xpub,
+    derive_ethereum_receive_branch_from_account_xpub,
     derive_ethereum_xpub_control_branch_from_mnemonic,
     derive_ethereum_xpub_receive_branch_from_mnemonic, derive_private_key_at_path,
     derive_sigillum_ethereum_xpub_control_branch, derive_sigillum_ethereum_xpub_receive_address,
     derive_sigillum_ethereum_xpub_receive_branch, ethereum_mnemonic_word_count,
-    generate_ethereum_mnemonic,
+    generate_ethereum_mnemonic, validate_ethereum_imported_xpub_path,
 };
 pub use protected_secret::PinnedSecretBytes;
 pub use traits::{SecretStore, VaultLifecycle};

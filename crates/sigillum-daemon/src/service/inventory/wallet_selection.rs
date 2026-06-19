@@ -2,7 +2,9 @@ use secrecy::ExposeSecret;
 use serde::Deserialize;
 use sigillum_api::{EthSeedWalletProfile, EthXpubWalletProfile};
 use sigillum_core::{
-    SecretStore, VaultLifecycle, derive_ethereum_receive_branch_from_account_xpub,
+    EthereumXpubError, EthereumXpubReceiveAddress, SecretStore, VaultLifecycle,
+    derive_ethereum_address_from_imported_xpub, derive_ethereum_address_from_xpub,
+    derive_ethereum_receive_branch_from_account_xpub,
     derive_ethereum_xpub_receive_branch_from_mnemonic,
     derive_sigillum_ethereum_xpub_receive_branch,
 };
@@ -16,7 +18,7 @@ use super::{WALLET_FAMILY_ETH_SEED, WALLET_FAMILY_ETH_XPUB};
 pub(super) const DERIVATION_PATTERN_PROJECT: &str = "project";
 pub(super) const DERIVATION_PATTERN_STANDARD: &str = "standard";
 pub(super) const DERIVATION_PATTERN_LEDGER_LIVE: &str = "ledger_live";
-pub(super) const DERIVATION_PATTERN_IMPORTED_XPUB: &str = "imported_xpub";
+pub(in crate::service::inventory) const DERIVATION_PATTERN_IMPORTED_XPUB: &str = "imported_xpub";
 
 const DEFAULT_ACCOUNT_LIMIT: u32 = 3;
 const MAX_ACCOUNT_LIMIT: u32 = 10;
@@ -66,6 +68,17 @@ pub(super) fn scan_account_limit(value: Option<u32>) -> ServiceResult<u32> {
         )));
     }
     Ok(limit)
+}
+
+pub(in crate::service::inventory) fn derive_discovery_wallet_address(
+    wallet: &DiscoveryWallet,
+    index: u32,
+) -> Result<EthereumXpubReceiveAddress, EthereumXpubError> {
+    if wallet.derivation_pattern == DERIVATION_PATTERN_IMPORTED_XPUB {
+        derive_ethereum_address_from_imported_xpub(&wallet.receive_xpub, index)
+    } else {
+        derive_ethereum_address_from_xpub(&wallet.receive_xpub, index)
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -135,7 +148,10 @@ pub(super) fn select_discovery_wallets(
                 DiscoveryWallet {
                     family: WALLET_FAMILY_ETH_XPUB.into(),
                     profile: profile.name.clone(),
-                    receive_path: eth_receive_path(profile.project_account),
+                    receive_path: profile
+                        .external_receive_path
+                        .clone()
+                        .unwrap_or_else(|| eth_receive_path(profile.project_account)),
                     receive_xpub: receive_xpub.to_string(),
                     derivation_pattern: DERIVATION_PATTERN_IMPORTED_XPUB.into(),
                     account_index: profile.project_account,
@@ -242,6 +258,7 @@ mod tests {
 
     use sigillum_core::{
         derive_ethereum_account_xpub_from_mnemonic,
+        derive_ethereum_xpub_control_branch_from_mnemonic,
         derive_ethereum_xpub_receive_branch_from_mnemonic,
     };
     use tempfile::TempDir;
@@ -265,6 +282,7 @@ mod tests {
             compartment_id: 0,
             chain_id: Some(1),
             external_receive_xpub: Some(imported.receive_xpub.clone()),
+            external_receive_path: None,
             external_account_xpub: None,
             default_destination_address: None,
             execution_enabled: false,
@@ -306,6 +324,7 @@ mod tests {
             compartment_id: 0,
             chain_id: Some(1),
             external_receive_xpub: None,
+            external_receive_path: None,
             external_account_xpub: Some(account_xpub),
             default_destination_address: None,
             execution_enabled: false,
@@ -328,6 +347,47 @@ mod tests {
         assert_eq!(
             wallets[0].derivation_pattern,
             DERIVATION_PATTERN_IMPORTED_XPUB
+        );
+    }
+
+    #[test]
+    fn imported_custom_path_xpub_profile_selects_operator_path() {
+        let dir = TempDir::new().unwrap();
+        let state = Arc::new(AppState::new(dir.path().to_path_buf()));
+        let service = SigillumService::new(state);
+        let imported =
+            derive_ethereum_xpub_control_branch_from_mnemonic(TEST_MNEMONIC, None, 0).unwrap();
+        let profile = EthXpubWalletProfile {
+            name: "external-control".into(),
+            project_account: 99,
+            provider_profile: "mainnet".into(),
+            compartment_id: 0,
+            chain_id: Some(1),
+            external_receive_xpub: Some(imported.receive_xpub.clone()),
+            external_receive_path: Some(imported.receive_path.clone()),
+            external_account_xpub: None,
+            default_destination_address: None,
+            execution_enabled: false,
+        };
+
+        let wallets = select_discovery_wallets(
+            &service,
+            &[],
+            &[profile],
+            Some(WALLET_FAMILY_ETH_XPUB),
+            Some("external-control"),
+            SeedDerivationPattern::Project,
+            1,
+        )
+        .unwrap();
+
+        assert_eq!(wallets.len(), 1);
+        assert_eq!(wallets[0].receive_xpub, imported.receive_xpub);
+        assert_eq!(wallets[0].receive_path, imported.receive_path);
+        assert_eq!(wallets[0].account_index, 99);
+        assert_eq!(
+            derive_discovery_wallet_address(&wallets[0], 3).unwrap(),
+            derive_ethereum_address_from_imported_xpub(&imported.receive_xpub, 3).unwrap()
         );
     }
 }
