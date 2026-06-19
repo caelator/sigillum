@@ -23,6 +23,11 @@ pub(crate) struct AuditQuery {
     key: Option<String>,
 }
 
+#[derive(Deserialize)]
+pub(crate) struct AuditVerifyQuery {
+    scope: Option<String>,
+}
+
 pub(crate) async fn audit_recent(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
@@ -57,4 +62,14 @@ pub(crate) async fn audit_run(
     };
     let service = SigillumService::new(state);
     service_response(service.record_run_audit(bearer_token(&headers).as_deref(), body))
+}
+
+pub(crate) async fn audit_verify(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Query(query): Query<AuditVerifyQuery>,
+) -> Response {
+    let service = SigillumService::new(state);
+    let scope = query.scope.unwrap_or_else(|| "daemon".into());
+    service_response(service.audit_verify(bearer_token(&headers).as_deref(), &scope))
 }

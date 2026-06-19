@@ -512,6 +512,7 @@ mod tests {
         GatewayConfig {
             daemon_url: "http://127.0.0.1:9743".into(),
             daemon_session_token: None,
+            daemon_capability_token: None,
             database_url: "sqlite::memory:".into(),
             bind_addr: "127.0.0.1:8443".parse().expect("bind addr"),
             poll_interval_secs: 30,

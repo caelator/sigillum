@@ -7,8 +7,8 @@ use axum::extract::State;
 use axum::http::HeaderMap;
 use axum::response::Response;
 use sigillum_api::{
-    EthStealthSendErc20TransferRequest, EthStealthSendTransferRequest, EvmRpcBalanceRequest,
-    EvmRpcBroadcastRequest, EvmRpcErc20BalanceRequest, EvmRpcNonceRequest,
+    EthStealthSendErc20TransferRequest, EthStealthSendTransferRequest, EvmFeeEstimateRequest,
+    EvmRpcBalanceRequest, EvmRpcBroadcastRequest, EvmRpcErc20BalanceRequest, EvmRpcNonceRequest,
 };
 
 use crate::AppState;
@@ -80,6 +80,23 @@ pub(crate) async fn evm_broadcast(
     service_response(
         service
             .evm_broadcast(bearer_token(&headers).as_deref(), body)
+            .await,
+    )
+}
+
+pub(crate) async fn evm_estimate_fees(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Json(body): Json<EvmFeeEstimateRequest>,
+) -> Response {
+    let body = match validated(Json(body)) {
+        Ok(b) => b,
+        Err(resp) => return resp,
+    };
+    let service = SigillumService::new(state);
+    service_response(
+        service
+            .evm_estimate_fees(bearer_token(&headers).as_deref(), body)
             .await,
     )
 }

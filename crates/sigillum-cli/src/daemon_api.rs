@@ -197,6 +197,7 @@ fn cmd_api_profiles(args: &[String]) {
                 compartment_id: parse_usize_flag(args, "--compartment-id"),
                 chain_id: parse_u64_flag(args, "--chain-id"),
                 default_destination_address: parse_flag(args, "--default-destination-address"),
+                execution_enabled: bool_switch(args, "--execution-enabled", "--execution-disabled"),
             };
             run_api_command(args, true, move |client| async move {
                 client.upsert_eth_stealth_wallet_profile(request).await
@@ -227,6 +228,7 @@ fn cmd_api_profiles(args: &[String]) {
                 compartment_id: parse_usize_flag(args, "--compartment-id"),
                 chain_id: parse_u64_flag(args, "--chain-id"),
                 default_destination_address: parse_flag(args, "--default-destination-address"),
+                execution_enabled: bool_switch(args, "--execution-enabled", "--execution-disabled"),
             };
             run_api_command(args, true, move |client| async move {
                 client.create_eth_seed_wallet_profile(request).await

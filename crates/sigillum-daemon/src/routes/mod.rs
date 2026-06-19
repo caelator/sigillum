@@ -40,7 +40,9 @@ mod wallets;
 
 use std::sync::Arc;
 
+use axum::extract::{Request, State};
 use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
+use axum::middleware::Next;
 use axum::response::{Html, IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
@@ -88,6 +90,7 @@ pub(crate) fn err(status: StatusCode, msg: &str) -> Response {
             status,
             Json(ErrorResponse {
                 error: msg.to_string(),
+                action: None,
             }),
         )
             .into_response(),
@@ -104,7 +107,16 @@ where
 {
     match result {
         Ok(payload) => ok_json(json!(payload)),
-        Err(error) => err(error.status(), error.message()),
+        Err(error) => sec_headers(
+            (
+                error.status(),
+                Json(ErrorResponse {
+                    error: error.message().to_string(),
+                    action: error.action().map(str::to_owned),
+                }),
+            )
+                .into_response(),
+        ),
     }
 }
 
@@ -198,7 +210,24 @@ async fn serve_ui() -> Response {
 }
 
 pub fn api_router() -> AppRouter {
-    Router::new().route("/", get(serve_ui)).merge(api_routes())
+    Router::new()
+        .route("/api/health", get(lifecycle::get_health))
+        .route("/", get(serve_ui))
+        .merge(api_routes())
+}
+
+pub(crate) async fn startup_gate(
+    State(state): State<Arc<AppState>>,
+    req: Request,
+    next: Next,
+) -> Response {
+    if req.uri().path() == "/api/health" || state.startup_ready() {
+        return next.run(req).await;
+    }
+    err(
+        StatusCode::SERVICE_UNAVAILABLE,
+        "Startup recovery is not ready.",
+    )
 }
 
 fn api_routes() -> AppRouter {
@@ -225,6 +254,10 @@ fn lifecycle_routes() -> AppRouter {
         .route("/api/unlock", post(lifecycle::post_unlock))
         .route("/api/lock", post(lifecycle::post_lock))
         .route("/api/session/revoke", post(lifecycle::post_revoke_session))
+        .route(
+            "/api/auth/capability",
+            post(lifecycle::post_capability_session),
+        )
 }
 
 fn biometric_routes() -> AppRouter {
@@ -243,6 +276,7 @@ fn system_routes() -> AppRouter {
         .route("/api/selfcheck/run", post(diagnostics::selfcheck_run))
         .route("/api/maintenance/run", post(maintenance::run_maintenance))
         .route("/api/audit", get(audit::audit_recent))
+        .route("/api/audit/verify", get(audit::audit_verify))
         .route("/api/audit/run", post(audit::audit_run))
         .route("/api/setup/reset", post(backup::setup_reset))
         .route("/api/backup/export", post(backup::backup_export))
@@ -298,6 +332,7 @@ fn evm_routes() -> AppRouter {
         .route("/api/evm/balance", post(evm::evm_balance))
         .route("/api/evm/erc20-balance", post(evm::evm_erc20_balance))
         .route("/api/evm/broadcast", post(evm::evm_broadcast))
+        .route("/api/evm/fees/estimate", post(evm::evm_estimate_fees))
 }
 
 fn profile_routes() -> AppRouter {

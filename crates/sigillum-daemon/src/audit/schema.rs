@@ -8,6 +8,10 @@ CREATE TABLE IF NOT EXISTS audit_events (
     event_json TEXT NOT NULL,
     source TEXT,
     source_line INTEGER,
+    chain_scope TEXT,
+    prev_mac TEXT,
+    mac TEXT,
+    verification_status TEXT NOT NULL DEFAULT 'legacy',
     UNIQUE(source, source_line)
 );
 
@@ -17,6 +21,8 @@ CREATE INDEX IF NOT EXISTS idx_audit_events_kind
     ON audit_events(kind);
 CREATE INDEX IF NOT EXISTS idx_audit_events_key_name
     ON audit_events(key_name);
+CREATE INDEX IF NOT EXISTS idx_audit_events_chain_scope
+    ON audit_events(chain_scope, id);
 
 CREATE TABLE IF NOT EXISTS audit_meta (
     key TEXT PRIMARY KEY,

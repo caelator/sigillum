@@ -34,6 +34,7 @@ mod error;
 mod ethereum_stealth;
 mod ethereum_xpub;
 pub mod payload;
+mod protected_secret;
 mod traits;
 pub mod unlock;
 
@@ -59,6 +60,7 @@ pub use ethereum_xpub::{
     derive_sigillum_ethereum_xpub_receive_branch, ethereum_mnemonic_word_count,
     generate_ethereum_mnemonic,
 };
+pub use protected_secret::PinnedSecretBytes;
 pub use traits::{SecretStore, VaultLifecycle};
 pub use unlock::provider::{
     Fido2UnlockProvider, PassphraseUnlockProvider, TouchIdUnlockProvider, UnlockProvider,

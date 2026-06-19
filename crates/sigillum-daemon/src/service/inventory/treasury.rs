@@ -17,7 +17,10 @@ use sigillum_core::{decode_quantity_hex, derive_ethereum_address_from_xpub};
 use crate::audit_log::AuditEventSpec;
 use crate::inventory::WalletInventoryState;
 use crate::service::evm::normalize_address;
-use crate::service::helpers::{compare_u256, map_xpub_error, now_unix, random_id};
+use crate::service::helpers::{map_xpub_error, now_unix, random_id};
+use crate::service::transaction_policy::{
+    TransactionPolicyCheck, TransactionPolicyKind, transaction_policy_actions,
+};
 use crate::service::{ServiceError, ServiceResult, SigillumService};
 
 use super::risk::derive_inventory_risk_findings;
@@ -385,6 +388,7 @@ impl SigillumService {
                 body.max_plan_native_wei_hex,
             )?,
             require_simulation: body.require_simulation.unwrap_or(true),
+            allow_raw_digest_signing: body.allow_raw_digest_signing.unwrap_or(false),
             created_at_unix: state
                 .treasury_policy
                 .as_ref()
@@ -639,35 +643,26 @@ pub(super) fn policy_blockers_for_step(
     asset_kind: &str,
     amount_hex: &str,
 ) -> Vec<String> {
-    let mut blockers = Vec::new();
-    if !policy.enabled {
-        return blockers;
+    if !action.starts_with("sweep") && action != "raw_digest" {
+        return Vec::new();
     }
-    if action.starts_with("sweep") {
-        if let Some(destination) = destination_address {
-            // An enabled policy with an empty allowlist blocks every routed
-            // sweep: the operator asked for review-first routing but has not
-            // approved any destination yet.
-            let allowlisted = policy
-                .allowed_destinations
-                .iter()
-                .any(|allowed| allowed.address.eq_ignore_ascii_case(destination));
-            if !allowlisted {
-                blockers.push("destination_not_allowlisted".into());
-            }
-        }
-    }
-    if asset_kind == "native" {
-        if let Some(cap_hex) = policy.max_step_native_wei_hex.as_deref() {
-            if let Ok(cap) = decode_quantity_hex(cap_hex) {
-                let amount = decode_quantity_hex(amount_hex).unwrap_or([0u8; 32]);
-                if compare_u256(&amount, &cap).is_gt() {
-                    blockers.push("exceeds_policy_step_cap".into());
-                }
-            }
-        }
-    }
-    blockers
+    let kind = if action == "raw_digest" {
+        TransactionPolicyKind::RawDigest
+    } else {
+        TransactionPolicyKind::RoutedTransfer
+    };
+    transaction_policy_actions(
+        policy,
+        TransactionPolicyCheck {
+            kind,
+            destination_address,
+            asset_kind,
+            amount_hex,
+        },
+    )
+    .into_iter()
+    .map(|action| action.as_str().to_string())
+    .collect()
 }
 
 #[cfg(test)]
@@ -703,6 +698,7 @@ mod tests {
             max_step_native_wei_hex: Some("0xde0b6b3a7640000".into()),
             max_plan_native_wei_hex: None,
             require_simulation: true,
+            allow_raw_digest_signing: false,
             created_at_unix: 1,
             updated_at_unix: 2,
         }
@@ -742,7 +738,7 @@ mod tests {
             "erc20",
             "0x1",
         );
-        assert_eq!(blockers, vec!["destination_not_allowlisted".to_string()]);
+        assert_eq!(blockers, vec!["block_destination".to_string()]);
     }
 
     #[test]
@@ -754,7 +750,7 @@ mod tests {
             "native",
             "0xde0b6b3a7640001",
         );
-        assert_eq!(blockers, vec!["exceeds_policy_step_cap".to_string()]);
+        assert_eq!(blockers, vec!["block_step_cap".to_string()]);
     }
 
     #[test]
@@ -769,8 +765,8 @@ mod tests {
         assert_eq!(
             blockers,
             vec![
-                "destination_not_allowlisted".to_string(),
-                "exceeds_policy_step_cap".to_string(),
+                "block_destination".to_string(),
+                "block_step_cap".to_string(),
             ]
         );
     }
@@ -818,7 +814,7 @@ mod tests {
             "native",
             "0x1",
         );
-        assert_eq!(blockers, vec!["destination_not_allowlisted".to_string()]);
+        assert_eq!(blockers, vec!["block_destination".to_string()]);
     }
 
     fn sample_allocation(

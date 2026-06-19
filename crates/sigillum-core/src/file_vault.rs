@@ -8,7 +8,7 @@
 //!
 //! The two-tier design reflects different threat models: API keys may be acceptable to store
 //! in plaintext for convenience, while long-lived secrets require encryption. The master key
-//! is stored in memory wrapped in `Mutex<Option<Zeroizing<[u8;32]>>>` and is `None` when locked,
+//! is stored in memory wrapped in `Mutex<Option<PinnedSecretBytes>>` and is `None` when locked,
 //! preventing any Tier 2 operations until unlocked.
 //!
 //! ## Key Invariants
@@ -17,8 +17,8 @@
 //!   and data loss on crash.
 //! - **Serialized updates**: A `write_lock` Mutex serializes all read-modify-write operations,
 //!   preventing concurrent writes that could lose data.
-//! - **Secure key storage**: The master key uses `Zeroizing<[u8;32]>` to ensure memory is
-//!   wiped on drop. The key is never exposed outside the Mutex.
+//! - **Secure key storage**: The master key uses `PinnedSecretBytes` to prefer mlocked
+//!   memory and zeroize on drop. The key is never exposed outside the Mutex.
 //! - **Locked state**: When the master key is `None`, all Tier 2 operations return
 //!   `Err(VaultError::Locked)` to enforce explicit unlock before access.
 //!
@@ -40,7 +40,7 @@ use zeroize::Zeroize;
 use zeroize::Zeroizing;
 
 use crate::utils::atomic_write;
-use crate::{SecretStore, VaultError, VaultLifecycle};
+use crate::{PinnedSecretBytes, SecretStore, VaultError, VaultLifecycle};
 
 /// Configuration for the file-backed vault.
 pub struct VaultConfig {
@@ -67,7 +67,7 @@ impl Default for VaultConfig {
 
 /// File-backed vault with AES-256-GCM encryption.
 ///
-/// Master key is held in a `Mutex<Option<Zeroizing<[u8; 32]>>>`.
+/// Master key is held in a `Mutex<Option<PinnedSecretBytes>>`.
 /// When `None`, the vault is locked and Tier 2 operations return
 /// `None` or `Err(VaultError::Locked)`.
 ///
@@ -75,7 +75,7 @@ impl Default for VaultConfig {
 /// `write_lock` to prevent concurrent-write data loss (B3).
 pub struct FileVault {
     config: VaultConfig,
-    master_key: Mutex<Option<Zeroizing<[u8; 32]>>>,
+    master_key: Mutex<Option<PinnedSecretBytes>>,
     /// Serializes all file write operations to prevent read-modify-write races.
     write_lock: Mutex<()>,
 }
@@ -115,7 +115,7 @@ impl FileVault {
         F: FnOnce(&[u8; 32]) -> T,
     {
         let mk = self.master_key.lock().unwrap_or_else(|e| e.into_inner());
-        mk.as_ref().map(|key| f(key))
+        mk.as_ref().and_then(|key| key.with_array_32(f))
     }
 
     // ── Path helpers ──────────────────────────────────────────────
@@ -308,7 +308,7 @@ impl SecretStore for FileVault {
 impl VaultLifecycle for FileVault {
     fn load_master_key(&self, key: [u8; 32]) {
         let mut mk = self.master_key.lock().unwrap_or_else(|e| e.into_inner());
-        *mk = Some(Zeroizing::new(key));
+        *mk = Some(PinnedSecretBytes::from_array_32_lossy(key));
     }
 
     fn zeroize_master_key(&self) {

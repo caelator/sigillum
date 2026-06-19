@@ -22,6 +22,24 @@ pub fn cmd_audit(args: &[String]) {
         process::exit(1);
     });
 
+    if args.first().is_some_and(|arg| arg == "verify") {
+        let scope = args
+            .get(1)
+            .filter(|value| !value.starts_with("--"))
+            .map(String::as_str);
+        let report = runtime
+            .block_on(client.audit_verify(scope))
+            .unwrap_or_else(|error| {
+                eprintln!("failed to verify audit chain: {error}");
+                process::exit(1);
+            });
+        println!(
+            "scope={} status={} verified={} broken={} legacy={}",
+            report.scope, report.status, report.verified, report.broken, report.legacy
+        );
+        return;
+    }
+
     let events = runtime
         .block_on(client.audit_events_query(query))
         .unwrap_or_else(|error| {

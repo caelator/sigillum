@@ -10,6 +10,7 @@ use crate::service::helpers::{compare_u256, random_id};
 
 use super::allowance_discovery::DISCOVERY_SOURCE_ERC20_ALLOWANCE_PROBE;
 use super::claim_discovery::CLAIM_ADAPTER_MERKLE_DISTRIBUTOR_V1;
+use super::defi_adapters::supported_defi_exit_adapter;
 use super::nft_approval_discovery::DISCOVERY_SOURCE_NFT_OPERATOR_APPROVAL_PROBE;
 use super::permit2_discovery::DISCOVERY_SOURCE_PERMIT2_ALLOWANCE_PROBE;
 use super::support::quantity_hex_is_nonzero;
@@ -69,7 +70,17 @@ pub(super) fn plan_step_for_holding(
             blockers.push("unsupported_nft_standard".into());
         }
     } else if holding.asset_kind == "defi" {
-        blockers.push("requires_protocol_adapter".into());
+        if holding.asset_address.is_none() {
+            blockers.push("missing_asset_contract".into());
+        }
+        if holding.protocol_address.is_none() {
+            blockers.push("missing_protocol_contract".into());
+        }
+        match holding.claim_adapter.as_deref() {
+            Some(adapter) if supported_defi_exit_adapter(adapter) => {}
+            Some(_) => blockers.push("unsupported_protocol_adapter".into()),
+            None => blockers.push("requires_protocol_adapter".into()),
+        }
     } else if matches!(holding.asset_kind.as_str(), "airdrop" | "reward") {
         push_claim_reward_blockers(holding, &mut blockers);
     }
@@ -371,6 +382,9 @@ mod tests {
             claim_adapter: None,
             claim_index_hex: None,
             claim_proof: Vec::new(),
+            metadata_uri: None,
+            metadata_name: None,
+            spam_label: None,
             amount_hex: "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff".into(),
             source: source.into(),
             status: "detected".into(),

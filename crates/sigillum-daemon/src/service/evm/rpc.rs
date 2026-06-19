@@ -95,6 +95,27 @@ impl ProviderRpcClient {
         parse_quantity_u256(&value)
     }
 
+    pub(super) async fn latest_base_fee_per_gas(&self) -> ServiceResult<[u8; 32]> {
+        let value = self
+            .request(1, "eth_feeHistory", json!(["0x1", "latest", []]))
+            .await?;
+        let base_fee = value
+            .get("baseFeePerGas")
+            .and_then(Value::as_array)
+            .and_then(|fees| fees.last())
+            .ok_or_else(|| {
+                ServiceError::internal("Invalid provider response: missing baseFeePerGas")
+            })?;
+        parse_quantity_u256(base_fee)
+    }
+
+    pub(super) async fn max_priority_fee_per_gas(&self) -> ServiceResult<[u8; 32]> {
+        let value = self
+            .request(1, "eth_maxPriorityFeePerGas", json!([]))
+            .await?;
+        parse_quantity_u256(&value)
+    }
+
     pub(super) async fn get_logs(
         &self,
         address: &str,

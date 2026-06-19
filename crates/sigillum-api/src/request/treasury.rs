@@ -31,6 +31,8 @@ pub struct TreasuryPolicyUpdateRequest {
     pub max_plan_native_wei_hex: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub require_simulation: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub allow_raw_digest_signing: Option<bool>,
 }
 
 /// Allocate a fresh purpose-labeled receive address from a wallet profile.

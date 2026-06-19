@@ -9,8 +9,9 @@ use secrecy::ExposeSecret;
 use serde_json::Value;
 use sigillum_api::{
     EthStealthSendErc20TransferRequest, EthStealthSendResponse, EthStealthSendTransferRequest,
-    EvmRpcBalanceRequest, EvmRpcBalanceResponse, EvmRpcBroadcastRequest, EvmRpcBroadcastResponse,
-    EvmRpcErc20BalanceRequest, EvmRpcErc20BalanceResponse, EvmRpcNonceRequest, EvmRpcNonceResponse,
+    EvmFeeEstimateRequest, EvmFeeEstimateResponse, EvmRpcBalanceRequest, EvmRpcBalanceResponse,
+    EvmRpcBroadcastRequest, EvmRpcBroadcastResponse, EvmRpcErc20BalanceRequest,
+    EvmRpcErc20BalanceResponse, EvmRpcNonceRequest, EvmRpcNonceResponse,
 };
 use sigillum_core::{
     EthereumEip1559Erc20Transfer, EthereumEip1559Transfer, SecretStore, VaultLifecycle,
@@ -21,32 +22,22 @@ use sigillum_core::{
 use crate::audit_log::AuditEventSpec;
 
 use super::helpers::{decode_optional_view_tag, map_wallet_error};
+use super::transaction_policy::{TransactionPolicyCheck, TransactionPolicyKind};
 use super::{ServiceError, ServiceResult, SigillumService};
 
+mod fees;
+mod observations;
 mod preflight;
 mod rpc;
 
+use fees::estimate_eip1559_fees;
+use observations::fetch_balance_observation;
+pub(super) use observations::{EvmBalanceObservation, EvmBalanceObservationPlan};
 pub(in crate::service) use preflight::EvmContractCallPreflight;
 pub(super) use rpc::EvmLogEntry;
 use rpc::ProviderRpcClient;
 
 // ── Type Definitions ──────────────────────────────────────────────────────
-
-#[derive(Clone, Debug)]
-pub(super) struct EvmBalanceObservationPlan {
-    pub deposit_index: usize,
-    pub provider_compartment_id: usize,
-    pub provider: sigillum_api::EvmProviderProfile,
-    pub owner_address: String,
-    pub token_address: Option<String>,
-}
-
-#[derive(Clone, Debug)]
-pub(super) struct EvmBalanceObservation {
-    pub deposit_index: usize,
-    pub native_balance_wei_hex: String,
-    pub observed_amount_hex: String,
-}
 
 pub(super) struct Permit2AllowanceProbe<'a> {
     pub(super) permit2_address: &'a str,
@@ -154,6 +145,21 @@ impl SigillumService {
         })
     }
 
+    pub(crate) async fn evm_estimate_fees(
+        &self,
+        token: Option<&str>,
+        body: EvmFeeEstimateRequest,
+    ) -> ServiceResult<EvmFeeEstimateResponse> {
+        let token = self.require_session(token)?;
+        let rpc = self.resolve_provider_rpc_client(
+            token,
+            &body.provider.rpc_url,
+            body.provider.compartment_id,
+            body.provider.auth_token_key.as_deref(),
+        )?;
+        estimate_eip1559_fees(&rpc, body.chain_id, body.gas_limit.unwrap_or(21_000)).await
+    }
+
     // ── Stealth Transfers ─────────────────────────────────────────────────
 
     pub(crate) async fn eth_stealth_send_transfer(
@@ -162,6 +168,12 @@ impl SigillumService {
         body: EthStealthSendTransferRequest,
     ) -> ServiceResult<EthStealthSendResponse> {
         let token = self.require_session(token)?;
+        self.authorize_transaction_policy(TransactionPolicyCheck {
+            kind: TransactionPolicyKind::RoutedTransfer,
+            destination_address: Some(&body.destination_address),
+            asset_kind: "native",
+            amount_hex: &body.value_wei_hex,
+        })?;
         let active_compartment_id = self
             .state
             .active_compartment_id_for(token)
@@ -259,6 +271,12 @@ impl SigillumService {
         body: EthStealthSendErc20TransferRequest,
     ) -> ServiceResult<EthStealthSendResponse> {
         let token = self.require_session(token)?;
+        self.authorize_transaction_policy(TransactionPolicyCheck {
+            kind: TransactionPolicyKind::RoutedTransfer,
+            destination_address: Some(&body.recipient_address),
+            asset_kind: "erc20",
+            amount_hex: &body.amount_hex,
+        })?;
         let active_compartment_id = self
             .state
             .active_compartment_id_for(token)
@@ -659,34 +677,6 @@ impl SigillumService {
             }),
         }
     }
-}
-
-// ── Balance Observation Helpers ───────────────────────────────────────────
-
-async fn fetch_balance_observation(
-    rpc: ProviderRpcClient,
-    plan: EvmBalanceObservationPlan,
-) -> ServiceResult<EvmBalanceObservation> {
-    let (native_balance_wei_hex, observed_amount_hex) =
-        if let Some(token_address) = plan.token_address.as_deref() {
-            let (native_balance, token_balance) = rpc
-                .get_native_and_erc20_balance(&plan.owner_address, token_address, "latest")
-                .await?;
-            (
-                encode_quantity_u256(&native_balance),
-                encode_quantity_u256(&token_balance),
-            )
-        } else {
-            let native_balance = rpc.get_balance(&plan.owner_address, "latest").await?;
-            let native_balance_wei_hex = encode_quantity_u256(&native_balance);
-            (native_balance_wei_hex.clone(), native_balance_wei_hex)
-        };
-
-    Ok(EvmBalanceObservation {
-        deposit_index: plan.deposit_index,
-        native_balance_wei_hex,
-        observed_amount_hex,
-    })
 }
 
 // ── Address & Encoding Utilities ──────────────────────────────────────────

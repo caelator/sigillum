@@ -6,6 +6,7 @@ CREATE TABLE IF NOT EXISTS projects (
     name        TEXT NOT NULL UNIQUE,            -- human-readable project name
     api_key_hash TEXT NOT NULL,                  -- SHA-256 hash of the API key
     wallet_profile TEXT NOT NULL,                -- Sigillum stealth wallet profile name
+    scopes_json TEXT NOT NULL DEFAULT '["payments:create","payments:read","payments:list","payments:cancel","webhooks:read"]',
     webhook_url TEXT,                            -- URL to POST webhook events
     webhook_secret TEXT,                         -- HMAC secret for signing webhooks
     created_at  TEXT NOT NULL DEFAULT (datetime('now')),

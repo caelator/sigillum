@@ -101,6 +101,23 @@ impl SigillumService {
         Ok(AuditResponse { events })
     }
 
+    pub(crate) fn audit_verify(
+        &self,
+        token: Option<&str>,
+        scope: &str,
+    ) -> ServiceResult<sigillum_api::AuditVerifyReport> {
+        let _ = self.require_session(token)?;
+        self.state.verify_audit_chain(scope).map_err(|error| {
+            if error.kind() == std::io::ErrorKind::PermissionDenied {
+                ServiceError::locked(error.to_string())
+            } else if error.kind() == std::io::ErrorKind::InvalidInput {
+                ServiceError::bad_request(error.to_string())
+            } else {
+                ServiceError::internal(format!("Failed to verify audit chain: {error}"))
+            }
+        })
+    }
+
     pub(crate) fn diagnostics(&self, token: Option<&str>) -> ServiceResult<DiagnosticsResponse> {
         let _ = self.require_session(token)?;
         let queue = crate::queue_store::load_queue(&self.state.base_dir)

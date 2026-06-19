@@ -136,6 +136,7 @@ fn scan_evm(args: &[String]) {
         include_watch_book: flag_option(args, "--include-watch-book"),
         gap_limit: parse_u32_flag(args, "--gap-limit"),
         max_index: parse_u32_flag(args, "--max-index"),
+        resume_from_latest_checkpoint: flag_option(args, "--resume-from-latest-checkpoint"),
         token_addresses: parse_multi_flag(args, "--token-address"),
         block_tag: parse_flag(args, "--block-tag"),
         discover_erc20_transfers: flag_option(args, "--discover-erc20-transfers"),

@@ -3,6 +3,7 @@
 //! Queues, processes, and tracks Ethereum stealth transfers and deposit
 //! sweeps with deferred execution and retry logic.
 
+mod authorization;
 mod payloads;
 mod processing;
 mod state;
@@ -110,6 +111,8 @@ impl SigillumService {
         audit_kind: AuditQueueJobKind,
     ) -> ServiceResult<QueueEnqueueResponse> {
         let token = self.require_session(token)?;
+        authorization::require_queue_execution_enabled(self, &payload)?;
+        authorization::authorize_queue_payload_policy(self, &payload)?;
         let now = now_unix();
         let job = payloads::queued_job(random_id(), now, payload);
 

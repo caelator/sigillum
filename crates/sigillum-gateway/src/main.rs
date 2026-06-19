@@ -55,11 +55,17 @@ async fn main() {
         .expect("Failed to connect to database");
 
     let daemon = Arc::new(SigillumClient::new(&config.daemon_url));
-    if let Some(token) = config.daemon_session_token.as_ref() {
+    if let Some(token) = config.daemon_capability_token.as_ref() {
         daemon.set_session_token(token.clone());
+        tracing::info!("Using SIGILLUM_DAEMON_CAPABILITY_TOKEN for daemon calls");
+    } else if let Some(token) = config.daemon_session_token.as_ref() {
+        daemon.set_session_token(token.clone());
+        tracing::warn!(
+            "Using full daemon session token; configure SIGILLUM_DAEMON_CAPABILITY_TOKEN to reduce gateway scope"
+        );
     } else {
         tracing::warn!(
-            "No SIGILLUM_DAEMON_SESSION_TOKEN configured; authenticated gateway operations will fail until a daemon session token is provided"
+            "No daemon token configured; authenticated gateway operations will fail until SIGILLUM_DAEMON_CAPABILITY_TOKEN or SIGILLUM_DAEMON_SESSION_TOKEN is provided"
         );
     }
     tracing::info!("Daemon URL: {}", config.daemon_url);

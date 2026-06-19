@@ -39,6 +39,7 @@ use crate::audit_log::{AuditEventSpec, AuditQueueJobKind};
 use super::helpers::{
     compare_u256, is_zero_u256, map_wallet_error, multiply_u256_u64, now_unix, random_id,
 };
+use super::transaction_policy::{TransactionPolicyCheck, TransactionPolicyKind};
 use super::{ServiceError, ServiceResult, SigillumService};
 
 const DEFAULT_ANNOUNCEMENT_SCAN_LIMIT: usize = 1_000;
@@ -168,7 +169,7 @@ impl SigillumService {
         &self,
         token: Option<&str>,
     ) -> ServiceResult<EthStealthDepositListResponse> {
-        let _ = self.require_session(token)?;
+        let _ = self.require_scope(token, super::capability_scopes::DEPOSITS_READ)?;
         let deposits = crate::deposits::load_deposits(&self.state.base_dir)
             .map_err(|error| ServiceError::internal(format!("Failed to load deposits: {error}")))?;
         Ok(EthStealthDepositListResponse {
@@ -181,7 +182,10 @@ impl SigillumService {
         token: Option<&str>,
         body: EthStealthAnnouncementScanRequest,
     ) -> ServiceResult<EthStealthAnnouncementScanResponse> {
-        let token = self.require_session(token)?;
+        let token = self.require_scope(token, super::capability_scopes::DEPOSITS_CREATE)?;
+        if body.auto_queue_sweep.unwrap_or(false) {
+            self.require_scope(Some(token), super::capability_scopes::QUEUE_ENQUEUE_SWEEP)?;
+        }
         let from_block = normalize_log_block_tag(&body.from_block, "from_block")?;
         let to_block = body
             .to_block
@@ -340,7 +344,10 @@ impl SigillumService {
         token: Option<&str>,
         body: EthStealthDepositCreateNativeRequest,
     ) -> ServiceResult<EthStealthDepositMutationResponse> {
-        let token = self.require_session(token)?;
+        let token = self.require_scope(token, super::capability_scopes::DEPOSITS_CREATE)?;
+        if body.auto_queue_sweep.unwrap_or(false) {
+            self.require_scope(Some(token), super::capability_scopes::QUEUE_ENQUEUE_SWEEP)?;
+        }
         let (provider, wallet) = self.resolve_wallet_profile(&body.wallet_profile)?;
         validate_optional_quantity(body.expected_value_wei_hex.as_deref(), "expected_value_wei")?;
         validate_optional_quantity(
@@ -378,7 +385,7 @@ impl SigillumService {
         token: Option<&str>,
         body: EthStealthDepositCreateErc20Request,
     ) -> ServiceResult<EthStealthDepositMutationResponse> {
-        let token = self.require_session(token)?;
+        let token = self.require_scope(token, super::capability_scopes::DEPOSITS_DELETE)?;
         let (provider, wallet) = self.resolve_wallet_profile(&body.wallet_profile)?;
         validate_optional_quantity(body.expected_amount_hex.as_deref(), "expected_amount")?;
         validate_optional_quantity(body.min_sweep_amount_hex.as_deref(), "min_sweep_amount")?;
@@ -502,7 +509,7 @@ impl SigillumService {
         token: Option<&str>,
         body: EthStealthDepositDeleteRequest,
     ) -> ServiceResult<EthStealthDepositMutationResponse> {
-        let token = self.require_session(token)?;
+        let token = self.require_scope(token, super::capability_scopes::DEPOSITS_DELETE)?;
         let _guard = self.state.operation_guard().await;
         let mut state = crate::deposits::load_deposits(&self.state.base_dir)
             .map_err(|error| ServiceError::internal(format!("Failed to load deposits: {error}")))?;
@@ -535,7 +542,10 @@ impl SigillumService {
         token: Option<&str>,
         body: EthStealthDepositRefreshRequest,
     ) -> ServiceResult<EthStealthDepositRefreshResponse> {
-        let token = self.require_session(token)?;
+        let token = self.require_scope(token, super::capability_scopes::DEPOSITS_REFRESH)?;
+        if body.auto_enqueue.unwrap_or(false) {
+            self.require_scope(Some(token), super::capability_scopes::QUEUE_ENQUEUE_SWEEP)?;
+        }
         let _guard = self.state.operation_guard().await;
         let mut deposits = crate::deposits::load_deposits(&self.state.base_dir)
             .map_err(|error| ServiceError::internal(format!("Failed to load deposits: {error}")))?;
@@ -649,6 +659,12 @@ impl SigillumService {
                     "ERC-20 deposit requires sweep_destination_address or wallet default destination.",
                 )
             })?;
+            self.authorize_transaction_policy(TransactionPolicyCheck {
+                kind: TransactionPolicyKind::RoutedTransfer,
+                destination_address: Some(&recipient_address),
+                asset_kind: "erc20",
+                amount_hex: deposit.min_sweep_amount_hex.as_deref().unwrap_or("0x0"),
+            })?;
             QueueJob {
                 id: random_id(),
                 state: "queued".into(),
@@ -692,6 +708,12 @@ impl SigillumService {
                     "Native deposit requires sweep_destination_address or wallet default destination.",
                 ));
             }
+            self.authorize_transaction_policy(TransactionPolicyCheck {
+                kind: TransactionPolicyKind::RoutedTransfer,
+                destination_address: Some(&destination_address),
+                asset_kind: "native",
+                amount_hex: deposit.min_sweep_amount_hex.as_deref().unwrap_or("0x0"),
+            })?;
             QueueJob {
                 id: random_id(),
                 state: "queued".into(),

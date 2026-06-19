@@ -14,10 +14,11 @@
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use serde_json::{Value, json};
+use std::sync::Arc;
 use tempfile::TempDir;
 use tower::util::ServiceExt;
 
-use sigillum_daemon::build_router;
+use sigillum_daemon::{AppState, build_router};
 
 // ============================================================================
 // H4: Route Handler Integration Tests
@@ -25,9 +26,14 @@ use sigillum_daemon::build_router;
 
 /// Helper to build test app with isolated temp state.
 fn test_app() -> (axum::Router, TempDir) {
-    let dir = TempDir::new().unwrap();
-    let (app, _state) = build_router(dir.path().to_path_buf(), 0);
+    let (app, _state, dir) = test_app_with_state();
     (app, dir)
+}
+
+fn test_app_with_state() -> (axum::Router, Arc<AppState>, TempDir) {
+    let dir = TempDir::new().unwrap();
+    let (app, state) = build_router(dir.path().to_path_buf(), 0);
+    (app, state, dir)
 }
 
 /// Helper to make a GET request to the test app.
@@ -111,6 +117,24 @@ async fn test_get_status_invalid_token() {
     assert_eq!(body["unlocked_compartments"], json!([]));
 }
 
+#[tokio::test]
+async fn startup_health_stays_open_while_non_health_routes_are_gated() {
+    let (app, state, _dir) = test_app_with_state();
+    state.mark_startup_failed("boom");
+
+    let (health_status, health_body) = get_request(&app, "/api/health", None).await;
+    assert_eq!(health_status, StatusCode::OK);
+    assert_eq!(health_body["status"], json!("starting"));
+    assert_eq!(health_body["startup_error"], json!("boom"));
+
+    let (status_status, status_body) = get_request(&app, "/api/status", None).await;
+    assert_eq!(status_status, StatusCode::SERVICE_UNAVAILABLE);
+    assert_eq!(
+        status_body["error"],
+        json!("Startup recovery is not ready.")
+    );
+}
+
 /// POST /api/unlock with wrong passphrase returns 401.
 #[tokio::test]
 async fn test_post_unlock_wrong_passphrase() {
@@ -152,6 +176,59 @@ async fn test_post_compartment_init_returns_token() {
         .and_then(|v| v.as_str())
         .expect("session_token field missing");
     assert!(!token.is_empty());
+}
+
+#[tokio::test]
+async fn capability_session_enforces_route_scopes() {
+    let (mut app, _dir) = test_app();
+
+    let (init_status, init_body) = post_request(
+        &mut app,
+        "/api/compartment/init",
+        json!({
+            "id": 0,
+            "label": "default",
+            "threshold": 1,
+            "passphrase": "test-passphrase-123"
+        }),
+        None,
+    )
+    .await;
+    assert_eq!(
+        init_status,
+        StatusCode::OK,
+        "init should succeed: {init_body:?}"
+    );
+    let full_token = init_body["session_token"].as_str().unwrap();
+
+    let (mint_status, mint_body) = post_request(
+        &mut app,
+        "/api/auth/capability",
+        json!({
+            "scopes": ["wallet_profiles:read"],
+            "ttl_secs": 60
+        }),
+        Some(full_token),
+    )
+    .await;
+    assert_eq!(
+        mint_status,
+        StatusCode::OK,
+        "mint should succeed: {mint_body:?}"
+    );
+    let scoped_token = mint_body["session_token"].as_str().unwrap();
+
+    let (wallet_status, _wallet_body) =
+        get_request(&app, "/api/profiles/eth-stealth", Some(scoped_token)).await;
+    assert_eq!(wallet_status, StatusCode::OK);
+
+    let (provider_status, provider_body) =
+        get_request(&app, "/api/profiles/evm", Some(scoped_token)).await;
+    assert_eq!(provider_status, StatusCode::FORBIDDEN);
+    assert_eq!(
+        provider_body["error"],
+        json!("Missing daemon capability scope: evm_providers:read")
+    );
 }
 
 /// After init, GET /api/status with valid token returns unlocked status.

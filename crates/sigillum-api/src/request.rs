@@ -98,6 +98,14 @@ pub struct PassphraseRequest {
     pub passphrase: String,
 }
 
+/// Mint a scoped daemon token from an existing full session.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct CapabilitySessionRequest {
+    pub scopes: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ttl_secs: Option<u64>,
+}
+
 /// Register or replace the biometric verifier for the currently unlocked compartment.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct BiometricEnrollRequest {
@@ -392,6 +400,16 @@ pub struct EvmRpcBroadcastRequest {
     pub raw_transaction_hex: String,
 }
 
+/// Estimate EIP-1559 fees from an EVM JSON-RPC provider.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct EvmFeeEstimateRequest {
+    #[serde(flatten)]
+    pub provider: EvmProviderRef,
+    pub chain_id: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub gas_limit: Option<u64>,
+}
+
 /// Sign and optionally broadcast a native ETH transfer from a stealth address.
 ///
 /// This is the "full-control" variant — the caller provides explicit RPC
@@ -488,6 +506,8 @@ pub struct EthStealthWalletProfileUpsertRequest {
     pub chain_id: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub default_destination_address: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub execution_enabled: Option<bool>,
 }
 
 /// Create or update an xpub receive-wallet profile.
@@ -502,6 +522,8 @@ pub struct EthXpubWalletProfileUpsertRequest {
     pub chain_id: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub default_destination_address: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub execution_enabled: Option<bool>,
 }
 
 /// Import or update an Ethereum seed-phrase wallet profile.
@@ -521,6 +543,8 @@ pub struct EthSeedWalletProfileUpsertRequest {
     pub chain_id: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub default_destination_address: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub execution_enabled: Option<bool>,
 }
 
 /// Create a brand-new Ethereum seed-phrase wallet profile from a
@@ -549,6 +573,8 @@ pub struct EthSeedWalletCreateRequest {
     pub chain_id: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub default_destination_address: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub execution_enabled: Option<bool>,
 }
 
 /// Export the receive-branch xpub for a saved xpub wallet profile.
@@ -591,6 +617,8 @@ pub struct EthStealthSendWithProfileRequest {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub gas_limit: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub estimate_fees: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub broadcast: Option<bool>,
 }
 
@@ -607,6 +635,8 @@ pub struct EthStealthSendErc20WithProfileRequest {
     pub nonce: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub gas_limit: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub estimate_fees: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub broadcast: Option<bool>,
 }

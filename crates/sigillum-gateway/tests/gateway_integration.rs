@@ -111,6 +111,38 @@ async fn project_creation_requires_admin_token()
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn project_scope_update_blocks_missing_payment_scope()
+-> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let stub = StubDaemon::spawn(default_stub_config()).await?;
+    let mut gateway = GatewayHarness::spawn(&stub.base_url(), "admin-secret", 0).await?;
+    gateway.wait_until_ready().await?;
+
+    let project = create_project(&gateway, "payments-mainnet", Some("admin-secret")).await?;
+    let project_id = project["id"].as_str().unwrap();
+    let api_key = project["api_key"].as_str().unwrap();
+
+    let update = gateway
+        .request_json(
+            Method::PATCH,
+            &format!("/api/v1/projects/{project_id}/scopes"),
+            json!({ "scopes": ["payments:read"] }),
+            Some("admin-secret"),
+        )
+        .await;
+    assert_eq!(update.status(), reqwest::StatusCode::OK);
+    let update_body: Value = update.json().await?;
+    assert_eq!(update_body["scopes"], json!(["payments:read"]));
+
+    let (status, body) = create_payment(&gateway, api_key, 1, Some("idem-scope")).await?;
+    assert_eq!(status, reqwest::StatusCode::FORBIDDEN);
+    assert_eq!(body["error"], json!("missing_scope"));
+    assert_eq!(body["required"], json!("payments:create"));
+    assert_eq!(stub.counts().native_deposit_calls, 0);
+
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn project_creation_rejects_unknown_wallet_profile()
 -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let stub = StubDaemon::spawn(default_stub_config()).await?;

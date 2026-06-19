@@ -764,6 +764,7 @@ mod tests {
             sponsor_address: None,
             hot_address: None,
             treasury_address: None,
+            execution_enabled: false,
         }
     }
 
@@ -863,6 +864,7 @@ mod tests {
             max_step_native_wei_hex: None,
             max_plan_native_wei_hex: None,
             require_simulation: true,
+            allow_raw_digest_signing: false,
             created_at_unix: 1,
             updated_at_unix: 2,
         }
@@ -962,6 +964,7 @@ mod tests {
             compartment_id: 0,
             chain_id: None,
             default_destination_address: Some("0x9999999999999999999999999999999999999999".into()),
+            execution_enabled: false,
         };
         assert_eq!(check_stealth_wallet(&registry, &good).status, "pass");
 

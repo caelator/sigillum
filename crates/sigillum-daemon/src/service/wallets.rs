@@ -25,6 +25,7 @@ use crate::audit_log::AuditEventSpec;
 use super::helpers::{
     decode_fixed_hex, decode_optional_view_tag, map_wallet_error, map_xpub_error,
 };
+use super::transaction_policy::{TransactionPolicyCheck, TransactionPolicyKind};
 use super::{ServiceError, ServiceResult, SigillumService};
 
 impl SigillumService {
@@ -209,6 +210,12 @@ impl SigillumService {
         body: EthStealthSignRequest,
     ) -> ServiceResult<EthStealthSignResponse> {
         let token = self.require_session(token)?;
+        self.authorize_transaction_policy(TransactionPolicyCheck {
+            kind: TransactionPolicyKind::RawDigest,
+            destination_address: None,
+            asset_kind: "raw_digest",
+            amount_hex: "0x0",
+        })?;
         let wallet = body.wallet;
         let view_tag = decode_optional_view_tag(body.stealth.view_tag_hex.as_deref())?;
         let stealth_address = body.stealth.stealth_address;
@@ -257,6 +264,12 @@ impl SigillumService {
         body: EthStealthSignTransferRequest,
     ) -> ServiceResult<EthSignedTransactionResponse> {
         let token = self.require_session(token)?;
+        self.authorize_transaction_policy(TransactionPolicyCheck {
+            kind: TransactionPolicyKind::RoutedTransfer,
+            destination_address: Some(&body.destination_address),
+            asset_kind: "native",
+            amount_hex: &body.value_wei_hex,
+        })?;
         let wallet = body.wallet;
         let view_tag = decode_optional_view_tag(body.stealth.view_tag_hex.as_deref())?;
         let max_priority_fee_per_gas = decode_quantity_hex(&body.fees.max_priority_fee_per_gas_hex)
@@ -321,6 +334,12 @@ impl SigillumService {
         body: EthStealthSignErc20TransferRequest,
     ) -> ServiceResult<EthSignedTransactionResponse> {
         let token = self.require_session(token)?;
+        self.authorize_transaction_policy(TransactionPolicyCheck {
+            kind: TransactionPolicyKind::RoutedTransfer,
+            destination_address: Some(&body.recipient_address),
+            asset_kind: "erc20",
+            amount_hex: &body.amount_hex,
+        })?;
         let wallet = body.wallet;
         let view_tag = decode_optional_view_tag(body.stealth.view_tag_hex.as_deref())?;
         let max_priority_fee_per_gas = decode_quantity_hex(&body.fees.max_priority_fee_per_gas_hex)
@@ -388,13 +407,15 @@ mod tests {
     use sigillum_api::{
         EthStealthCheckRequest, EthStealthExportRequest, EthStealthGenerateRequest,
         EthStealthSignErc20TransferRequest, EthStealthSignRequest, EthStealthSignTransferRequest,
-        EthXpubExportRequest, EthXpubWalletProfile, EvmProviderProfile,
+        EthXpubExportRequest, EthXpubWalletProfile, EvmProviderProfile, StealthPaymentRef,
+        TreasuryAllowedDestination, TreasuryPolicy,
     };
     use sigillum_fido2::config::CompartmentMeta;
     use tempfile::TempDir;
 
     use super::*;
     use crate::AppState;
+    use crate::inventory::{WalletInventoryState, save_wallet_inventory};
     use crate::profiles::{ProfileRegistry, save_profiles};
 
     fn meta(id: usize, threshold: usize, label: &str) -> CompartmentMeta {
@@ -403,6 +424,14 @@ mod tests {
             label: label.into(),
             threshold,
             passphrase_mode: None,
+        }
+    }
+
+    fn payment_ref(payment: &EthStealthGenerateResponse) -> StealthPaymentRef {
+        StealthPaymentRef {
+            stealth_address: payment.stealth_address.clone(),
+            ephemeral_public_key_hex: payment.ephemeral_public_key_hex.clone(),
+            view_tag_hex: Some(payment.view_tag_hex.clone()),
         }
     }
 
@@ -516,6 +545,63 @@ mod tests {
     }
 
     #[test]
+    fn enabled_policy_rejects_raw_digest_signing_by_default() {
+        let dir = TempDir::new().unwrap();
+        let state = Arc::new(AppState::new(dir.path().to_path_buf()));
+        state.unlock_compartment(0, [7u8; 32], meta(0, 1, "default"));
+        let session = state.create_session(Some(0));
+        let service = SigillumService::new(state);
+
+        let meta = service
+            .eth_stealth_export(
+                Some(&session),
+                EthStealthExportRequest {
+                    wallet: "payments".into(),
+                    short_name: Some("eth".into()),
+                },
+            )
+            .unwrap();
+        let payment = service
+            .eth_stealth_generate(EthStealthGenerateRequest {
+                stealth_meta_address: meta.stealth_meta_address,
+                ephemeral_private_key_hex: Some(hex::encode([3u8; 32])),
+            })
+            .unwrap();
+
+        save_wallet_inventory(
+            dir.path(),
+            &WalletInventoryState {
+                treasury_policy: Some(TreasuryPolicy {
+                    enabled: true,
+                    allowed_destinations: Vec::<TreasuryAllowedDestination>::new(),
+                    max_step_native_wei_hex: None,
+                    max_plan_native_wei_hex: None,
+                    require_simulation: true,
+                    allow_raw_digest_signing: false,
+                    created_at_unix: 1,
+                    updated_at_unix: 1,
+                }),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+
+        let error = service
+            .eth_stealth_sign(
+                Some(&session),
+                EthStealthSignRequest {
+                    wallet: "payments".into(),
+                    stealth: payment_ref(&payment),
+                    digest_hex: hex::encode([9u8; 32]),
+                },
+            )
+            .unwrap_err();
+
+        assert_eq!(error.message(), "policy_violation");
+        assert_eq!(error.action(), Some("block_raw_digest"));
+    }
+
+    #[test]
     fn xpub_export_requires_active_compartment_match() {
         let dir = TempDir::new().unwrap();
         let state = Arc::new(AppState::new(dir.path().to_path_buf()));
@@ -546,6 +632,7 @@ mod tests {
                     compartment_id: 1,
                     chain_id: Some(1),
                     default_destination_address: None,
+                    execution_enabled: false,
                 }],
                 ..Default::default()
             },
@@ -597,6 +684,7 @@ mod tests {
                     compartment_id: 0,
                     chain_id: Some(1),
                     default_destination_address: None,
+                    execution_enabled: false,
                 }],
                 ..Default::default()
             },

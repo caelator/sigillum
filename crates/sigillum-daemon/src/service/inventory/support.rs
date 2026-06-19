@@ -1,5 +1,6 @@
 use sigillum_api::{
-    EvmProviderProfile, WalletAssetHolding, WalletDiscoveryJob, WalletInventoryAddress,
+    EvmProviderProfile, NftMetadataCacheEntry, WalletAssetHolding, WalletDiscoveryJob,
+    WalletInventoryAddress,
 };
 
 use crate::service::helpers::random_id;
@@ -79,7 +80,11 @@ pub(super) fn record_inventory_observation(
     }
 
     upsert_address(&mut inventory.addresses, observation.address.clone());
-    for holding in observation.holdings {
+    for mut holding in observation.holdings {
+        if let Some(spam_label) = conservative_nft_spam_label(&holding) {
+            holding.spam_label = Some(spam_label.to_string());
+            upsert_nft_metadata_cache(&mut inventory.nft_metadata_cache, &holding, spam_label);
+        }
         if quantity_hex_is_nonzero(&holding.amount_hex) {
             upsert_holding(&mut inventory.holdings, holding.clone());
             detected_holdings.push(holding);
@@ -88,6 +93,51 @@ pub(super) fn record_inventory_observation(
         }
     }
     scanned_addresses.push(observation.address);
+}
+
+fn conservative_nft_spam_label(holding: &WalletAssetHolding) -> Option<&'static str> {
+    if !matches!(holding.asset_kind.as_str(), "erc721" | "erc1155" | "nft") {
+        return None;
+    }
+    if !quantity_hex_is_nonzero(&holding.amount_hex) {
+        return None;
+    }
+    Some("unverified_nft_metadata")
+}
+
+fn upsert_nft_metadata_cache(
+    cache: &mut Vec<NftMetadataCacheEntry>,
+    holding: &WalletAssetHolding,
+    spam_label: &str,
+) {
+    let (Some(contract_address), Some(token_id_hex)) = (
+        holding.asset_address.as_ref(),
+        holding.token_id_hex.as_ref(),
+    ) else {
+        return;
+    };
+    let next = NftMetadataCacheEntry {
+        chain_id: holding.chain_id,
+        contract_address: contract_address.clone(),
+        token_id_hex: token_id_hex.clone(),
+        metadata_uri: holding.metadata_uri.clone(),
+        name: holding.metadata_name.clone(),
+        spam_label: spam_label.to_string(),
+        updated_at_unix: holding.last_checked_at_unix,
+    };
+    if let Some(existing) = cache.iter_mut().find(|existing| {
+        existing.chain_id == next.chain_id
+            && existing
+                .contract_address
+                .eq_ignore_ascii_case(&next.contract_address)
+            && existing
+                .token_id_hex
+                .eq_ignore_ascii_case(&next.token_id_hex)
+    }) {
+        *existing = next;
+    } else {
+        cache.push(next);
+    }
 }
 
 pub(super) fn trimmed_required(field: &str, value: &str) -> ServiceResult<String> {
@@ -328,6 +378,9 @@ fn holding_record_full(
         claim_adapter: parts.claim.adapter,
         claim_index_hex: parts.claim.index_hex,
         claim_proof: parts.claim.proof,
+        metadata_uri: None,
+        metadata_name: None,
+        spam_label: None,
         amount_hex: parts.amount_hex.to_string(),
         source: parts.source.into(),
         status: if quantity_hex_is_nonzero(parts.amount_hex) {

@@ -3,7 +3,7 @@ use std::net::{SocketAddr, TcpListener};
 use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 
 use axum::extract::State;
@@ -14,7 +14,7 @@ use axum::{Json, Router};
 use rusqlite::OptionalExtension;
 use serde_json::{Value, json};
 use tempfile::TempDir;
-use tokio::sync::oneshot;
+use tokio::sync::{OwnedMutexGuard, oneshot};
 use tokio::time::sleep;
 
 #[derive(Clone, Debug, Default)]
@@ -166,6 +166,7 @@ impl Drop for StubDaemon {
 pub struct GatewayHarness {
     child: Child,
     tempdir: TempDir,
+    _suite_guard: OwnedMutexGuard<()>,
     pub base_url: String,
     pub db_path: PathBuf,
     pub client: reqwest::Client,
@@ -177,6 +178,7 @@ impl GatewayHarness {
         admin_key: &str,
         rate_limit_rps: u64,
     ) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
+        let suite_guard = gateway_suite_lock().clone().lock_owned().await;
         let tempdir = TempDir::new()?;
         let db_path = tempdir.path().join("gateway.db");
         let port = pick_free_port()?;
@@ -203,6 +205,7 @@ impl GatewayHarness {
         let harness = Self {
             child,
             tempdir,
+            _suite_guard: suite_guard,
             base_url,
             db_path,
             client: reqwest::Client::builder()
@@ -316,6 +319,11 @@ fn pick_free_port() -> Result<u16, Box<dyn std::error::Error + Send + Sync>> {
     let port = listener.local_addr()?.port();
     drop(listener);
     Ok(port)
+}
+
+fn gateway_suite_lock() -> &'static Arc<tokio::sync::Mutex<()>> {
+    static LOCK: OnceLock<Arc<tokio::sync::Mutex<()>>> = OnceLock::new();
+    LOCK.get_or_init(|| Arc::new(tokio::sync::Mutex::new(())))
 }
 
 async fn status() -> Json<Value> {

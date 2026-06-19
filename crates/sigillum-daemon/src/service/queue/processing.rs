@@ -105,6 +105,7 @@ impl SigillumService {
                             destination_address: destination_address.clone(),
                             nonce: *nonce,
                             gas_limit: *gas_limit,
+                            estimate_fees: None,
                             broadcast: Some(true),
                         },
                     )
@@ -135,6 +136,7 @@ impl SigillumService {
                             amount_hex: amount_hex.clone(),
                             nonce: *nonce,
                             gas_limit: *gas_limit,
+                            estimate_fees: None,
                             broadcast: Some(true),
                         },
                     )

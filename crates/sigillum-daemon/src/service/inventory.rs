@@ -1,7 +1,9 @@
 //! Wallet inventory and read-only discovery operations.
 
 mod allowance_discovery;
+mod checkpoints;
 mod claim_discovery;
+mod defi_adapters;
 mod defi_discovery;
 mod export;
 mod nft_approval_discovery;
@@ -34,6 +36,9 @@ use sigillum_core::{derive_ethereum_address_from_control_xpub, derive_ethereum_a
 use crate::audit_log::AuditEventSpec;
 
 use allowance_discovery::erc20_allowance_discovery_config;
+use checkpoints::{
+    ScanCheckpointProgress, latest_resume_checkpoint, sync_inventory_job, update_scan_checkpoint,
+};
 use claim_discovery::claim_candidate_discovery_config;
 use defi_discovery::defi_token_position_discovery_config;
 use nft_approval_discovery::nft_operator_approval_discovery_config;
@@ -81,6 +86,7 @@ impl SigillumService {
             jobs: state.jobs,
             addresses: state.addresses,
             holdings: state.holdings,
+            nft_metadata_cache: state.nft_metadata_cache,
         })
     }
 
@@ -516,17 +522,24 @@ impl SigillumService {
             addresses_scanned: 0,
             active_addresses: 0,
             holdings_detected: 0,
+            checkpoints: Vec::new(),
             started_at_unix,
             completed_at_unix: None,
             last_error: None,
         };
+        inventory.jobs.push(job.clone());
+        save_inventory_state(&self.state.base_dir, &inventory)?;
 
         let mut scanned_addresses = Vec::new();
         let mut detected_holdings = Vec::new();
 
         for wallet in &wallets {
-            let mut empty_run = 0u32;
-            let mut index = 0u32;
+            let (mut index, mut empty_run) = if body.resume_from_latest_checkpoint.unwrap_or(false)
+            {
+                latest_resume_checkpoint(&inventory.jobs, wallet, &providers).unwrap_or((0, 0))
+            } else {
+                (0, 0)
+            };
             while index <= max_index && empty_run < gap_limit {
                 let derived = derive_ethereum_address_from_xpub(&wallet.receive_xpub, index)
                     .map_err(map_xpub_error)?;
@@ -571,8 +584,40 @@ impl SigillumService {
                 } else {
                     empty_run += 1;
                 }
+                for provider in &providers {
+                    update_scan_checkpoint(
+                        &mut job.checkpoints,
+                        wallet,
+                        provider,
+                        ScanCheckpointProgress {
+                            next_index: index.saturating_add(1),
+                            last_scanned_index: Some(index),
+                            consecutive_empty: empty_run,
+                            completed: false,
+                            updated_at_unix: now_unix(),
+                        },
+                    );
+                }
+                sync_inventory_job(&mut inventory, &job);
+                save_inventory_state(&self.state.base_dir, &inventory)?;
                 index += 1;
             }
+            for provider in &providers {
+                update_scan_checkpoint(
+                    &mut job.checkpoints,
+                    wallet,
+                    provider,
+                    ScanCheckpointProgress {
+                        next_index: index,
+                        last_scanned_index: index.checked_sub(1),
+                        consecutive_empty: empty_run,
+                        completed: true,
+                        updated_at_unix: now_unix(),
+                    },
+                );
+            }
+            sync_inventory_job(&mut inventory, &job);
+            save_inventory_state(&self.state.base_dir, &inventory)?;
 
             if wallet.family == WALLET_FAMILY_ETH_SEED {
                 if let Some(seed_profile) = registry
@@ -659,10 +704,8 @@ impl SigillumService {
 
         job.status = "completed".into();
         job.completed_at_unix = Some(now_unix());
-        inventory.jobs.push(job.clone());
-        crate::inventory::save_wallet_inventory(&self.state.base_dir, &inventory).map_err(
-            |error| ServiceError::internal(format!("Failed to save wallet inventory: {error}")),
-        )?;
+        sync_inventory_job(&mut inventory, &job);
+        save_inventory_state(&self.state.base_dir, &inventory)?;
 
         self.record_audit(
             self.state.active_compartment_id_for(token),

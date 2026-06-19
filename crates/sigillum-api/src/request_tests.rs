@@ -418,6 +418,7 @@ fn test_eth_seed_wallet_profile_upsert_request_roundtrip() {
             compartment_id: Some(1),
             chain_id: Some(1),
             default_destination_address: Some("0xdest".to_string()),
+            execution_enabled: Some(false),
         };
     roundtrip_test(req);
 }
@@ -434,6 +435,7 @@ fn test_eth_seed_wallet_create_request_roundtrip() {
         compartment_id: Some(1),
         chain_id: Some(1),
         default_destination_address: Some("0xdest".to_string()),
+        execution_enabled: Some(false),
     };
     roundtrip_test(req);
 }
@@ -450,6 +452,7 @@ fn test_eth_seed_wallet_create_request_minimal() {
         compartment_id: None,
         chain_id: None,
         default_destination_address: None,
+        execution_enabled: None,
     };
     let json = serde_json::to_string(&req).unwrap();
     assert!(!json.contains("word_count"), "optional fields stay absent");
@@ -530,6 +533,7 @@ fn test_eth_xpub_wallet_profile_upsert_request_roundtrip() {
         compartment_id: Some(2),
         chain_id: Some(1),
         default_destination_address: Some("0xdestination".to_string()),
+        execution_enabled: Some(false),
     };
     roundtrip_test(req);
 }
@@ -564,6 +568,7 @@ fn test_wallet_inventory_scan_request_roundtrip() {
         include_watch_book: Some(true),
         gap_limit: Some(20),
         max_index: Some(200),
+        resume_from_latest_checkpoint: Some(true),
         token_addresses: vec!["0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48".to_string()],
         block_tag: Some("latest".to_string()),
         discover_erc20_transfers: Some(true),
@@ -716,6 +721,7 @@ fn test_eth_stealth_send_with_profile_request_roundtrip() {
         destination_address: Some("0xdest".to_string()),
         nonce: Some(5),
         gas_limit: Some(21000),
+        estimate_fees: Some(true),
         broadcast: Some(true),
     };
     roundtrip_test(req);
@@ -735,6 +741,7 @@ fn test_eth_stealth_send_erc20_with_profile_request_roundtrip() {
         amount_hex: "0x64".to_string(),
         nonce: None,
         gas_limit: Some(100000),
+        estimate_fees: Some(false),
         broadcast: None,
     };
     roundtrip_test(req);
@@ -893,6 +900,7 @@ fn test_treasury_policy_update_request_full() {
         max_step_native_wei_hex: Some("0xde0b6b3a7640000".to_string()),
         max_plan_native_wei_hex: Some("0x1bc16d674ec80000".to_string()),
         require_simulation: Some(false),
+        allow_raw_digest_signing: Some(true),
     };
     roundtrip_test(req);
 }
@@ -905,6 +913,7 @@ fn test_treasury_policy_update_request_minimal() {
         max_step_native_wei_hex: None,
         max_plan_native_wei_hex: None,
         require_simulation: None,
+        allow_raw_digest_signing: None,
     };
     roundtrip_test(req);
 }

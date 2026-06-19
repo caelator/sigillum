@@ -52,6 +52,7 @@ struct SeedWalletProfileMaterial {
     compartment_id: usize,
     chain_id: Option<u64>,
     default_destination_address: Option<String>,
+    execution_enabled: bool,
 }
 
 impl SigillumService {
@@ -95,6 +96,7 @@ impl SigillumService {
                     compartment_id,
                     chain_id: body.chain_id,
                     default_destination_address: body.default_destination_address,
+                    execution_enabled: body.execution_enabled.unwrap_or(false),
                 },
                 SeedWalletWriteMode::Upsert,
             )
@@ -141,6 +143,7 @@ impl SigillumService {
                     compartment_id,
                     chain_id: body.chain_id,
                     default_destination_address: body.default_destination_address,
+                    execution_enabled: body.execution_enabled.unwrap_or(false),
                 },
                 SeedWalletWriteMode::CreateOnly,
             )
@@ -263,6 +266,7 @@ impl SigillumService {
             sponsor_address: Some(sponsor_address),
             hot_address: Some(hot_address),
             treasury_address: Some(treasury_address),
+            execution_enabled: material.execution_enabled,
         };
 
         upsert_named(&mut registry.eth_seed_wallets, profile.clone(), |item| {

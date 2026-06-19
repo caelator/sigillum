@@ -7,6 +7,7 @@ use super::allowance_discovery::{
     DISCOVERY_SOURCE_ERC20_ALLOWANCE_PROBE, Erc20AllowanceDiscoveryConfig,
 };
 use super::claim_discovery::{ClaimCandidateDiscoveryConfig, claim_candidate_source};
+use super::defi_adapters::adapter_for_protocol;
 use super::defi_discovery::{DefiTokenPositionDiscoveryConfig, defi_token_probe_source};
 use super::nft_approval_discovery::{
     DISCOVERY_SOURCE_NFT_OPERATOR_APPROVAL_PROBE, NftOperatorApprovalDiscoveryConfig,
@@ -247,7 +248,7 @@ impl SigillumService {
                 if quantity_hex_is_nonzero(&position.amount_hex) {
                     activity_state = "funded";
                 }
-                holdings.push(holding_record_with_protocol_counterparty(
+                let mut holding = holding_record_with_protocol_counterparty(
                     &record_context,
                     "defi",
                     Some(position.token_address),
@@ -255,7 +256,10 @@ impl SigillumService {
                     None,
                     &position.amount_hex,
                     &defi_token_probe_source(&position.protocol),
-                ));
+                );
+                holding.claim_adapter =
+                    adapter_for_protocol(&position.protocol).map(str::to_string);
+                holdings.push(holding);
             }
         }
 
@@ -448,6 +452,9 @@ mod tests {
             claim_adapter: None,
             claim_index_hex: None,
             claim_proof: Vec::new(),
+            metadata_uri: None,
+            metadata_name: None,
+            spam_label: None,
             amount_hex: amount_hex.into(),
             source: "test".into(),
             status: "detected".into(),

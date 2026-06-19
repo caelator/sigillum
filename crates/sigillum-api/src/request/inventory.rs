@@ -97,6 +97,8 @@ pub struct WalletInventoryScanRequest {
     pub gap_limit: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub max_index: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub resume_from_latest_checkpoint: Option<bool>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub token_addresses: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]

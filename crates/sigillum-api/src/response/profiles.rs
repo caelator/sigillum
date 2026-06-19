@@ -44,6 +44,8 @@ pub struct EthStealthWalletProfile {
     pub chain_id: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub default_destination_address: Option<String>,
+    #[serde(default)]
+    pub execution_enabled: bool,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -68,6 +70,8 @@ pub struct EthXpubWalletProfile {
     pub chain_id: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub default_destination_address: Option<String>,
+    #[serde(default)]
+    pub execution_enabled: bool,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -108,6 +112,8 @@ pub struct EthSeedWalletProfile {
     pub hot_address: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub treasury_address: Option<String>,
+    #[serde(default)]
+    pub execution_enabled: bool,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]

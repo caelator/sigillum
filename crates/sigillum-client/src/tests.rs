@@ -176,6 +176,33 @@ async fn audit_route(
     )
 }
 
+async fn audit_verify_route(
+    headers: HeaderMap,
+    query: axum::extract::Query<std::collections::HashMap<String, String>>,
+) -> (StatusCode, Json<serde_json::Value>) {
+    let auth = headers
+        .get(header::AUTHORIZATION)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("");
+    if auth != "Bearer test-token" {
+        return (
+            StatusCode::UNAUTHORIZED,
+            Json(json!({ "error": "missing auth" })),
+        );
+    }
+    assert_eq!(query.0.get("scope").map(String::as_str), Some("daemon"));
+    (
+        StatusCode::OK,
+        Json(json!({
+            "scope": "daemon",
+            "status": "verified",
+            "verified": 3,
+            "broken": 0,
+            "legacy": 1,
+        })),
+    )
+}
+
 async fn revoke_session_route(headers: HeaderMap) -> (StatusCode, Json<serde_json::Value>) {
     let auth = headers
         .get(header::AUTHORIZATION)
@@ -1118,6 +1145,7 @@ async fn spawn_test_server() -> SocketAddr {
         .route("/api/api-keys", get(api_keys))
         .route("/api/secrets/resolve-batch", post(resolve_batch_route))
         .route("/api/audit", get(audit_route))
+        .route("/api/audit/verify", get(audit_verify_route))
         .route("/api/audit/run", post(audit_run_route))
         .route("/api/diagnostics", get(diagnostics_route))
         .route("/api/maintenance/run", post(maintenance_run_route))
@@ -1261,6 +1289,21 @@ async fn audit_events_reads_recent_feed() {
     assert_eq!(events.len(), 1);
     assert_eq!(events[0].kind, "secret.set");
     assert_eq!(events[0].compartment_id, Some(0));
+}
+
+#[tokio::test]
+#[cfg_attr(target_os = "macos", ignore = "sandbox blocks loopback bind")]
+async fn audit_verify_reads_chain_report() {
+    let addr = spawn_test_server().await;
+    let client = SigillumClient::new(format!("http://{addr}"));
+    client.set_session_token("test-token");
+
+    let report = client.audit_verify(Some("daemon")).await.unwrap();
+    assert_eq!(report.scope, "daemon");
+    assert_eq!(report.status, "verified");
+    assert_eq!(report.verified, 3);
+    assert_eq!(report.broken, 0);
+    assert_eq!(report.legacy, 1);
 }
 
 #[tokio::test]
@@ -1610,6 +1653,7 @@ async fn profile_and_queue_helpers_roundtrip_response_shapes() {
             compartment_id: Some(0),
             chain_id: Some(1),
             default_destination_address: Some("0x1111111111111111111111111111111111111111".into()),
+            execution_enabled: Some(false),
         })
         .await
         .unwrap();
@@ -1627,6 +1671,7 @@ async fn profile_and_queue_helpers_roundtrip_response_shapes() {
             destination_address: None,
             nonce: None,
             gas_limit: None,
+            estimate_fees: None,
             broadcast: Some(false),
         })
         .await
@@ -1648,6 +1693,7 @@ async fn profile_and_queue_helpers_roundtrip_response_shapes() {
             destination_address: None,
             nonce: None,
             gas_limit: None,
+            estimate_fees: None,
             broadcast: None,
         })
         .await

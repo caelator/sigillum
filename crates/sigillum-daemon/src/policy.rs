@@ -36,6 +36,9 @@ const DEFAULT_QUEUE_RETRY_MAX_DELAY_SECS: u64 = 300;
 const DEFAULT_PROVIDER_BALANCE_OBSERVATION_CONCURRENCY: usize = 8;
 const MAX_PROVIDER_BALANCE_OBSERVATION_CONCURRENCY: usize = 64;
 const MAX_QUEUE_RETRY_EXPONENT: u32 = 16;
+const DEFAULT_IDLE_LOCK_SECS: u64 = 900;
+const DEFAULT_IDLE_LOCK_DRAIN_SECS: u64 = 60;
+const MAX_IDLE_LOCK_DRAIN_SECS: u64 = 300;
 
 /// Runtime policy configuration with validated limits.
 ///
@@ -62,6 +65,12 @@ pub struct RuntimePolicy {
     pub queue_retry_max_delay_secs: u64,
     /// Maximum number of concurrent balance observation requests. Clamped to [1, 64].
     pub provider_balance_observation_concurrency: usize,
+    /// Idle session duration before unlocked custody state drains and locks.
+    pub idle_lock_secs: u64,
+    /// Observability deadline while waiting for in-flight guarded operations.
+    pub idle_lock_drain_secs: u64,
+    /// Optional force-lock deadline. Zero means never force-zeroize in-flight work.
+    pub idle_lock_force_after_secs: u64,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -75,6 +84,9 @@ struct RuntimePolicyOverrides {
     queue_retry_base_delay_secs: Option<u64>,
     queue_retry_max_delay_secs: Option<u64>,
     provider_balance_observation_concurrency: Option<usize>,
+    idle_lock_secs: Option<u64>,
+    idle_lock_drain_secs: Option<u64>,
+    idle_lock_force_after_secs: Option<u64>,
 }
 
 impl Default for RuntimePolicy {
@@ -126,6 +138,15 @@ impl RuntimePolicy {
                 "SIGILLUM_PROVIDER_BALANCE_OBSERVATION_CONCURRENCY" => {
                     overrides.provider_balance_observation_concurrency = value.parse().ok();
                 }
+                "SIGILLUM_IDLE_LOCK_SECS" => {
+                    overrides.idle_lock_secs = value.parse().ok();
+                }
+                "SIGILLUM_IDLE_LOCK_DRAIN_SECS" => {
+                    overrides.idle_lock_drain_secs = value.parse().ok();
+                }
+                "SIGILLUM_IDLE_LOCK_FORCE_AFTER_SECS" => {
+                    overrides.idle_lock_force_after_secs = value.parse().ok();
+                }
                 _ => {}
             }
         }
@@ -173,6 +194,15 @@ impl RuntimePolicy {
             .provider_balance_observation_concurrency
             .unwrap_or(DEFAULT_PROVIDER_BALANCE_OBSERVATION_CONCURRENCY)
             .clamp(1, MAX_PROVIDER_BALANCE_OBSERVATION_CONCURRENCY);
+        let idle_lock_secs = overrides
+            .idle_lock_secs
+            .unwrap_or(DEFAULT_IDLE_LOCK_SECS)
+            .max(1);
+        let idle_lock_drain_secs = overrides
+            .idle_lock_drain_secs
+            .unwrap_or(DEFAULT_IDLE_LOCK_DRAIN_SECS)
+            .clamp(1, MAX_IDLE_LOCK_DRAIN_SECS);
+        let idle_lock_force_after_secs = overrides.idle_lock_force_after_secs.unwrap_or(0);
 
         Self {
             queue_default_process_limit,
@@ -184,6 +214,9 @@ impl RuntimePolicy {
             queue_retry_base_delay_secs,
             queue_retry_max_delay_secs,
             provider_balance_observation_concurrency,
+            idle_lock_secs,
+            idle_lock_drain_secs,
+            idle_lock_force_after_secs,
         }
     }
 
@@ -223,6 +256,9 @@ impl RuntimePolicy {
             queue_retry_base_delay_secs: self.queue_retry_base_delay_secs,
             queue_retry_max_delay_secs: self.queue_retry_max_delay_secs,
             provider_balance_observation_concurrency: self.provider_balance_observation_concurrency,
+            idle_lock_secs: self.idle_lock_secs,
+            idle_lock_drain_secs: self.idle_lock_drain_secs,
+            idle_lock_force_after_secs: self.idle_lock_force_after_secs,
         }
     }
 }
@@ -244,6 +280,9 @@ mod tests {
         assert_eq!(policy.queue_retry_base_delay_secs, 5);
         assert_eq!(policy.queue_retry_max_delay_secs, 300);
         assert_eq!(policy.provider_balance_observation_concurrency, 8);
+        assert_eq!(policy.idle_lock_secs, 900);
+        assert_eq!(policy.idle_lock_drain_secs, 60);
+        assert_eq!(policy.idle_lock_force_after_secs, 0);
     }
 
     #[test]
@@ -258,6 +297,9 @@ mod tests {
             ("SIGILLUM_QUEUE_RETRY_BASE_DELAY_SECS", "30"),
             ("SIGILLUM_QUEUE_RETRY_MAX_DELAY_SECS", "10"),
             ("SIGILLUM_PROVIDER_BALANCE_OBSERVATION_CONCURRENCY", "999"),
+            ("SIGILLUM_IDLE_LOCK_SECS", "0"),
+            ("SIGILLUM_IDLE_LOCK_DRAIN_SECS", "999"),
+            ("SIGILLUM_IDLE_LOCK_FORCE_AFTER_SECS", "45"),
         ]);
 
         assert_eq!(policy.queue_default_process_limit, 20);
@@ -268,6 +310,9 @@ mod tests {
         assert_eq!(policy.audit_max_limit, 5);
         assert_eq!(policy.queue_retry_base_delay_secs, 30);
         assert_eq!(policy.queue_retry_max_delay_secs, 30);
+        assert_eq!(policy.idle_lock_secs, 1);
+        assert_eq!(policy.idle_lock_drain_secs, 300);
+        assert_eq!(policy.idle_lock_force_after_secs, 45);
         assert_eq!(policy.provider_balance_observation_concurrency, 64);
     }
 

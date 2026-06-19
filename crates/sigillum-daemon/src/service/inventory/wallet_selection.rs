@@ -7,11 +7,11 @@ use crate::service::{ServiceError, ServiceResult, SigillumService};
 use super::{WALLET_FAMILY_ETH_SEED, WALLET_FAMILY_ETH_XPUB};
 
 #[derive(Clone, Debug)]
-pub(super) struct DiscoveryWallet {
-    pub(super) family: String,
-    pub(super) profile: String,
-    pub(super) receive_path: String,
-    pub(super) receive_xpub: String,
+pub(in crate::service::inventory) struct DiscoveryWallet {
+    pub(in crate::service::inventory) family: String,
+    pub(in crate::service::inventory) profile: String,
+    pub(in crate::service::inventory) receive_path: String,
+    pub(in crate::service::inventory) receive_xpub: String,
 }
 
 pub(super) fn select_discovery_wallets(

@@ -152,6 +152,7 @@ mod tests {
             compartment_id: 0,
             chain_id: Some(1),
             default_destination_address: None,
+            execution_enabled: false,
         });
         registry.eth_xpub_wallets.push(EthXpubWalletProfile {
             name: "project-main".into(),
@@ -160,6 +161,7 @@ mod tests {
             compartment_id: 0,
             chain_id: Some(1),
             default_destination_address: None,
+            execution_enabled: false,
         });
         registry.eth_seed_wallets.push(EthSeedWalletProfile {
             name: "seed-main".into(),
@@ -179,6 +181,7 @@ mod tests {
             sponsor_address: None,
             hot_address: None,
             treasury_address: None,
+            execution_enabled: false,
         });
 
         save_profiles(dir.path(), &registry).unwrap();

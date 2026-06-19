@@ -1366,6 +1366,7 @@ function walletManagerSeedProfile(): EthSeedWalletProfile {
     provider_profile: "mainnet",
     compartment_id: 0,
     chain_id: 1,
+    execution_enabled: false,
     word_count: 24,
     mnemonic_secret_key: "wallet.eth-seed.main.mnemonic",
     account_path: "m/44'/60'/0'",
@@ -1466,6 +1467,7 @@ test("wallet row meta helpers summarize identity, balances, and xpub display", (
     project_account: 3,
     provider_profile: "base",
     compartment_id: 0,
+    execution_enabled: false,
   };
   equal(xpubDisplay(xpubProfile), "receive path m/44'/60'/3'/0");
   equal(

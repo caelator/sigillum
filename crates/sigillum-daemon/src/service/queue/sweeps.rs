@@ -96,6 +96,7 @@ impl SigillumService {
                     destination_address: Some(destination_address),
                     nonce: None,
                     gas_limit: Some(gas_limit),
+                    estimate_fees: None,
                     broadcast: Some(true),
                 },
             )
@@ -180,6 +181,7 @@ impl SigillumService {
                     amount_hex,
                     nonce: None,
                     gas_limit: Some(gas_limit),
+                    estimate_fees: None,
                     broadcast: Some(true),
                 },
             )

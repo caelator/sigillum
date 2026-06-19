@@ -148,6 +148,8 @@ pub struct TreasuryPolicy {
     /// Defaults to true: simulation stays mandatory unless explicitly waived.
     #[serde(default = "default_require_simulation")]
     pub require_simulation: bool,
+    #[serde(default)]
+    pub allow_raw_digest_signing: bool,
     pub created_at_unix: u64,
     pub updated_at_unix: u64,
 }

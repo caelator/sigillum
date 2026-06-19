@@ -18,7 +18,10 @@ use tokio::sync::Mutex;
 use tower_http::cors::{AllowOrigin, CorsLayer};
 use tower_http::limit::RequestBodyLimitLayer;
 
-use crate::auth::{require_admin_key, require_api_key};
+use crate::auth::{
+    require_admin_key, require_api_key, require_payments_cancel, require_payments_create,
+    require_payments_list, require_payments_read,
+};
 use crate::state::AppState;
 
 const RATE_LIMIT_BUCKET_TTL: Duration = Duration::from_secs(10 * 60);
@@ -86,6 +89,10 @@ pub fn build_router(state: AppState) -> Router {
     // ── Admin routes (admin API key required — S1) ─────────────────
     let admin = Router::new()
         .route("/api/v1/projects", post(projects::create_project))
+        .route(
+            "/api/v1/projects/{id}/scopes",
+            axum::routing::patch(projects::update_project_scopes),
+        )
         .layer(middleware::from_fn_with_state(
             state.clone(),
             require_admin_key,
@@ -93,13 +100,27 @@ pub fn build_router(state: AppState) -> Router {
 
     // ── Authenticated routes (project API key required) ────────────
     let authenticated = Router::new()
-        .route("/api/v1/projects/{id}", get(projects::get_project))
-        .route("/api/v1/payments", post(payments::create_payment))
-        .route("/api/v1/payments", get(payments::list_payments))
-        .route("/api/v1/payments/{id}", get(payments::get_payment))
+        .route(
+            "/api/v1/projects/{id}",
+            get(projects::get_project).route_layer(middleware::from_fn(require_payments_read)),
+        )
+        .route(
+            "/api/v1/payments",
+            post(payments::create_payment)
+                .route_layer(middleware::from_fn(require_payments_create)),
+        )
+        .route(
+            "/api/v1/payments",
+            get(payments::list_payments).route_layer(middleware::from_fn(require_payments_list)),
+        )
+        .route(
+            "/api/v1/payments/{id}",
+            get(payments::get_payment).route_layer(middleware::from_fn(require_payments_read)),
+        )
         .route(
             "/api/v1/payments/{id}/cancel",
-            post(payments::cancel_payment),
+            post(payments::cancel_payment)
+                .route_layer(middleware::from_fn(require_payments_cancel)),
         )
         .layer(middleware::from_fn_with_state(
             state.clone(),

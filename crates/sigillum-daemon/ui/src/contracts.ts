@@ -1,5 +1,6 @@
 export interface ErrorResponse {
   error: string;
+  action?: string;
 }
 
 export interface ActiveCompartment {
@@ -66,9 +67,31 @@ export interface WalletDiscoveryJob {
   kind: string;
   status: string;
   source: string;
+  checkpoints?: WalletDiscoveryCheckpoint[];
   created_at_unix: number;
   updated_at_unix: number;
   failure_reason?: string | null;
+}
+
+export interface WalletDiscoveryCheckpoint {
+  wallet_family: string;
+  wallet_profile: string;
+  provider_profile: string;
+  next_index: number;
+  last_scanned_index?: number | null;
+  consecutive_empty: number;
+  completed: boolean;
+  updated_at_unix: number;
+}
+
+export interface NftMetadataCacheEntry {
+  chain_id: number;
+  contract_address: string;
+  token_id_hex: string;
+  metadata_uri?: string | null;
+  name?: string | null;
+  spam_label: string;
+  updated_at_unix: number;
 }
 
 export interface RiskFinding {
@@ -353,6 +376,7 @@ export interface EthXpubWalletProfile {
   compartment_id: number;
   chain_id?: number | null;
   default_destination_address?: string | null;
+  execution_enabled: boolean;
 }
 
 export interface EthSeedWalletProfile {
@@ -373,6 +397,7 @@ export interface EthSeedWalletProfile {
   sponsor_address?: string | null;
   hot_address?: string | null;
   treasury_address?: string | null;
+  execution_enabled: boolean;
 }
 
 export interface EthSeedWalletCreateResponse {

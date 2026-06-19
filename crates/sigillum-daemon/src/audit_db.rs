@@ -1,9 +1,11 @@
 use std::path::Path;
 use std::time::Duration;
 
+use hmac::{Hmac, Mac};
 use rusqlite::types::Value as SqlValue;
 use rusqlite::{Connection, OptionalExtension, params, params_from_iter};
-use sigillum_api::AuditEvent as PublicAuditEvent;
+use sha2::Sha256;
+use sigillum_api::{AuditEvent as PublicAuditEvent, AuditVerifyReport};
 
 use crate::audit::schema::AUDIT_SCHEMA_SQL;
 use crate::audit_log::StoredAuditEvent;
@@ -34,12 +36,24 @@ pub(crate) fn open_database(path: &Path) -> Result<Connection, std::io::Error> {
     connection
         .execute_batch(AUDIT_SCHEMA_SQL)
         .map_err(to_io_error)?;
+    migrate_chain_columns(&connection)?;
     Ok(connection)
 }
 
+#[allow(dead_code)]
 pub(crate) fn append_event(path: &Path, event: &StoredAuditEvent) -> Result<(), std::io::Error> {
     let connection = open_database(path)?;
     insert_event(&connection, event, None, None)
+}
+
+pub(crate) fn append_event_chained(
+    path: &Path,
+    event: &StoredAuditEvent,
+    chain_scope: &str,
+    key: &[u8; 32],
+) -> Result<(), std::io::Error> {
+    let connection = open_database(path)?;
+    insert_event_chained(&connection, event, None, None, chain_scope, key)
 }
 
 pub(crate) fn query_events(
@@ -148,6 +162,188 @@ pub(crate) fn insert_event(
                 source,
                 source_line
             ],
+        )
+        .map_err(to_io_error)?;
+    Ok(())
+}
+
+pub(crate) fn insert_event_chained(
+    connection: &Connection,
+    event: &StoredAuditEvent,
+    source: Option<&str>,
+    source_line: Option<i64>,
+    chain_scope: &str,
+    key: &[u8; 32],
+) -> Result<(), std::io::Error> {
+    let public_event = event.to_public_event();
+    let serialized_event = serde_json::to_string(&public_event).map_err(|error| {
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            format!("failed to serialize audit event: {error}"),
+        )
+    })?;
+    let prev_mac = latest_mac(connection, chain_scope)?;
+    let mac = event_mac(key, prev_mac.as_deref(), &serialized_event)?;
+    connection
+        .execute(
+            "INSERT OR IGNORE INTO audit_events(
+                created_at_unix,
+                kind,
+                compartment_id,
+                key_name,
+                event_json,
+                source,
+                source_line,
+                chain_scope,
+                prev_mac,
+                mac,
+                verification_status
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, 'legacy')",
+            params![
+                public_event.created_at_unix as i64,
+                public_event.kind,
+                public_event.compartment_id.map(|value| value as i64),
+                event.spec.indexed_key(),
+                serialized_event,
+                source,
+                source_line,
+                chain_scope,
+                prev_mac,
+                mac,
+            ],
+        )
+        .map_err(to_io_error)?;
+    Ok(())
+}
+
+pub(crate) fn verify_chain(
+    path: &Path,
+    chain_scope: &str,
+    key: &[u8; 32],
+) -> Result<AuditVerifyReport, std::io::Error> {
+    let connection = open_database(path)?;
+    let legacy = connection
+        .query_row(
+            "SELECT COUNT(*) FROM audit_events WHERE chain_scope IS NULL OR mac IS NULL",
+            [],
+            |row| row.get::<_, i64>(0),
+        )
+        .map_err(to_io_error)? as usize;
+
+    let mut statement = connection
+        .prepare(
+            "SELECT id, event_json, prev_mac, mac
+             FROM audit_events
+             WHERE chain_scope = ?1 AND mac IS NOT NULL
+             ORDER BY id ASC",
+        )
+        .map_err(to_io_error)?;
+    let rows = statement
+        .query_map(params![chain_scope], |row| {
+            Ok((
+                row.get::<_, i64>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, Option<String>>(2)?,
+                row.get::<_, String>(3)?,
+            ))
+        })
+        .map_err(to_io_error)?;
+
+    let mut expected_prev: Option<String> = None;
+    let mut verified = 0usize;
+    let mut broken = 0usize;
+    for row in rows {
+        let (id, event_json, prev_mac, mac) = row.map_err(to_io_error)?;
+        let expected_mac = event_mac(key, expected_prev.as_deref(), &event_json)?;
+        let row_ok = prev_mac == expected_prev && mac == expected_mac;
+        let status = if row_ok {
+            verified += 1;
+            "verified"
+        } else {
+            broken += 1;
+            "broken"
+        };
+        connection
+            .execute(
+                "UPDATE audit_events SET verification_status = ?1 WHERE id = ?2",
+                params![status, id],
+            )
+            .map_err(to_io_error)?;
+        expected_prev = Some(mac);
+    }
+
+    Ok(AuditVerifyReport {
+        scope: chain_scope.into(),
+        status: if broken == 0 { "verified" } else { "broken" }.into(),
+        verified,
+        broken,
+        legacy,
+    })
+}
+
+fn latest_mac(
+    connection: &Connection,
+    chain_scope: &str,
+) -> Result<Option<String>, std::io::Error> {
+    connection
+        .query_row(
+            "SELECT mac FROM audit_events
+             WHERE chain_scope = ?1 AND mac IS NOT NULL
+             ORDER BY id DESC LIMIT 1",
+            params![chain_scope],
+            |row| row.get::<_, String>(0),
+        )
+        .optional()
+        .map_err(to_io_error)
+}
+
+fn event_mac(
+    key: &[u8; 32],
+    prev_mac: Option<&str>,
+    event_json: &str,
+) -> Result<String, std::io::Error> {
+    let mut mac = Hmac::<Sha256>::new_from_slice(key).map_err(|error| {
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            format!("invalid audit HMAC key: {error}"),
+        )
+    })?;
+    mac.update(prev_mac.unwrap_or("").as_bytes());
+    mac.update(b"\n");
+    mac.update(event_json.as_bytes());
+    Ok(hex::encode(mac.finalize().into_bytes()))
+}
+
+fn migrate_chain_columns(connection: &Connection) -> Result<(), std::io::Error> {
+    let mut statement = connection
+        .prepare("PRAGMA table_info(audit_events)")
+        .map_err(to_io_error)?;
+    let columns = statement
+        .query_map([], |row| row.get::<_, String>(1))
+        .map_err(to_io_error)?
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .map_err(to_io_error)?;
+    for (column, definition) in [
+        ("chain_scope", "TEXT"),
+        ("prev_mac", "TEXT"),
+        ("mac", "TEXT"),
+        ("verification_status", "TEXT NOT NULL DEFAULT 'legacy'"),
+    ] {
+        if !columns.iter().any(|existing| existing == column) {
+            connection
+                .execute(
+                    &format!("ALTER TABLE audit_events ADD COLUMN {column} {definition}"),
+                    [],
+                )
+                .map_err(to_io_error)?;
+        }
+    }
+    connection
+        .execute(
+            "UPDATE audit_events
+             SET verification_status = 'legacy'
+             WHERE verification_status IS NULL OR verification_status = ''",
+            [],
         )
         .map_err(to_io_error)?;
     Ok(())

@@ -2,7 +2,7 @@
 
 import "./styles/app.css";
 
-import { clearSessionToken, requestWithSession } from "./api/session";
+import { clearSessionToken, readSessionToken, requestWithSession } from "./api/session";
 import { handleActionEvent as handleDispatchedActionEvent } from "./actions/dispatcher";
 import {
   setHiddenById as setHidden,
@@ -673,7 +673,9 @@ const shellRenderer = createShellRenderer({
 });
 
 async function runRefreshCycle() {
+  const sessionTokenAtStart = readSessionToken();
   const s = await api('GET', '/api/status');
+  const sessionTokenAfterStatus = readSessionToken();
   currentStatus = s;
   const active = s.active_compartment;
   const unlocked = s.unlocked_compartments || [];
@@ -691,6 +693,10 @@ async function runRefreshCycle() {
   setHidden('authCard', false);
 
   if (mode === 'locked') {
+    if (!sessionTokenAtStart && sessionTokenAfterStatus) {
+      refreshQueued = true;
+      return;
+    }
     shellRenderer.applyLockedUi();
     syncSectionNav();
     fido2Actions.showUnlockTabs();

@@ -8,9 +8,9 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 use sigillum_api::{
-    ChainProfile, ConsolidationPlan, RiskCatalogEntry, RiskFinding, TreasuryPolicy,
-    TreasuryReceiveAllocation, WalletAssetHolding, WalletDiscoveryJob, WalletInventoryAddress,
-    WatchAddressBookEntry,
+    ChainProfile, ConsolidationPlan, NftMetadataCacheEntry, RiskCatalogEntry, RiskFinding,
+    TreasuryPolicy, TreasuryReceiveAllocation, WalletAssetHolding, WalletDiscoveryJob,
+    WalletInventoryAddress, WatchAddressBookEntry,
 };
 
 use crate::json_store::{JsonDocument, JsonSchema};
@@ -27,6 +27,8 @@ pub struct WalletInventoryState {
     pub addresses: Vec<WalletInventoryAddress>,
     #[serde(default)]
     pub holdings: Vec<WalletAssetHolding>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub nft_metadata_cache: Vec<NftMetadataCacheEntry>,
     #[serde(default)]
     pub risk_catalog: Vec<RiskCatalogEntry>,
     #[serde(default)]
@@ -40,7 +42,7 @@ pub struct WalletInventoryState {
 }
 
 impl JsonDocument for WalletInventoryState {
-    const SCHEMA: JsonSchema = JsonSchema::new("sigillum.wallet-inventory", 9);
+    const SCHEMA: JsonSchema = JsonSchema::new("sigillum.wallet-inventory", 10);
 
     fn from_enveloped_json(
         path: &std::path::Path,
@@ -48,7 +50,7 @@ impl JsonDocument for WalletInventoryState {
         data: serde_json::Value,
     ) -> Result<Self, std::io::Error> {
         match version {
-            1..=9 => serde_json::from_value(data).map_err(|error| {
+            1..=10 => serde_json::from_value(data).map_err(|error| {
                 std::io::Error::new(
                     std::io::ErrorKind::InvalidData,
                     format!(
@@ -109,6 +111,7 @@ mod tests {
             addresses_scanned: 1,
             active_addresses: 1,
             holdings_detected: 1,
+            checkpoints: Vec::new(),
             started_at_unix: 1,
             completed_at_unix: Some(2),
             last_error: None,
@@ -186,6 +189,9 @@ mod tests {
             claim_adapter: None,
             claim_index_hex: None,
             claim_proof: Vec::new(),
+            metadata_uri: None,
+            metadata_name: None,
+            spam_label: None,
             amount_hex: "0x1".into(),
             source: "local-rpc".into(),
             status: "detected".into(),
@@ -232,6 +238,7 @@ mod tests {
             max_step_native_wei_hex: Some("0xde0b6b3a7640000".into()),
             max_plan_native_wei_hex: None,
             require_simulation: true,
+            allow_raw_digest_signing: false,
             created_at_unix: 1,
             updated_at_unix: 2,
         }
@@ -312,7 +319,7 @@ mod tests {
             serde_json::from_slice(&std::fs::read(wallet_inventory_path(dir.path())).unwrap())
                 .unwrap();
         assert_eq!(saved["schema"], json!("sigillum.wallet-inventory"));
-        assert_eq!(saved["schema_version"], json!(9));
+        assert_eq!(saved["schema_version"], json!(10));
         assert!(saved["data"]["chain_profiles"].is_array());
         assert!(saved["data"]["watch_address_book"].is_array());
         assert!(saved["data"]["jobs"].is_array());

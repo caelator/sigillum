@@ -42,6 +42,28 @@ pub struct CreateProjectRequest {
     pub webhook_url: Option<String>,
 }
 
+#[derive(Debug, Deserialize)]
+pub struct UpdateProjectScopesRequest {
+    pub scopes: Vec<String>,
+}
+
+fn validate_project_scopes(scopes: &[String]) -> Result<(), GatewayError> {
+    if scopes.is_empty() {
+        return Err(GatewayError::BadRequest("scopes must not be empty".into()));
+    }
+    for scope in scopes {
+        if !db::DEFAULT_PROJECT_SCOPES
+            .iter()
+            .any(|known| scope == known)
+        {
+            return Err(GatewayError::BadRequest(format!(
+                "unknown project scope '{scope}'"
+            )));
+        }
+    }
+    Ok(())
+}
+
 /// `POST /api/v1/projects` — register a new project (admin auth required).
 ///
 /// Returns the generated API key (shown only once).
@@ -96,6 +118,7 @@ pub async fn create_project(
     Ok(Json(json!({
         "id": id,
         "name": body.name,
+        "scopes": db::default_project_scopes(),
         "api_key": api_key,
         "webhook_secret": webhook_secret,
         "message": "Save the api_key — it cannot be retrieved again."
@@ -123,7 +146,28 @@ pub async fn get_project(
         "id": project.id,
         "name": project.name,
         "wallet_profile": project.wallet_profile,
+        "scopes": project.scopes,
         "webhook_url": project.webhook_url,
         "created_at": project.created_at,
+    })))
+}
+
+pub async fn update_project_scopes(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Json(body): Json<UpdateProjectScopesRequest>,
+) -> Result<Json<Value>, GatewayError> {
+    validate_project_scopes(&body.scopes)?;
+    let project = db::update_project_scopes(&state.db, &id, &body.scopes)
+        .await?
+        .ok_or_else(|| GatewayError::NotFound(format!("project {id} not found")))?;
+    state.project_cache.invalidate().await;
+
+    Ok(Json(json!({
+        "id": project.id,
+        "name": project.name,
+        "wallet_profile": project.wallet_profile,
+        "scopes": project.scopes,
+        "updated_at": project.updated_at,
     })))
 }

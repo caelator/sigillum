@@ -16,6 +16,9 @@ pub enum GatewayError {
     #[error("Unauthorized")]
     Unauthorized,
 
+    #[error("Missing project scope: {0}")]
+    MissingScope(String),
+
     #[error("Conflict: {0}")]
     Conflict(String),
 
@@ -32,6 +35,10 @@ impl IntoResponse for GatewayError {
             GatewayError::NotFound(msg) => (StatusCode::NOT_FOUND, msg.clone()),
             GatewayError::BadRequest(msg) => (StatusCode::BAD_REQUEST, msg.clone()),
             GatewayError::Unauthorized => (StatusCode::UNAUTHORIZED, "Unauthorized".into()),
+            GatewayError::MissingScope(scope) => {
+                let body = json!({ "error": "missing_scope", "required": scope });
+                return (StatusCode::FORBIDDEN, axum::Json(body)).into_response();
+            }
             GatewayError::Conflict(msg) => (StatusCode::CONFLICT, msg.clone()),
             GatewayError::Daemon(err) => {
                 tracing::error!("Daemon communication error: {err}");

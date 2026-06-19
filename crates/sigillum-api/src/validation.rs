@@ -60,6 +60,9 @@ const MAX_ID: usize = 256;
 const MAX_ENV_NAME: usize = 256;
 const MAX_TOKEN_ADDRESSES: usize = 128;
 const MAX_CLAIM_PROOF_WORDS: usize = 64;
+const MAX_CAPABILITY_SCOPES: usize = 32;
+const MAX_CAPABILITY_SCOPE: usize = 128;
+const MAX_CAPABILITY_TTL_SECS: u64 = 24 * 60 * 60;
 
 // ── Validation implementations ──────────────────────────────────────
 
@@ -114,6 +117,36 @@ impl Validate for crate::request::KeyOnlyRequest {
 impl Validate for crate::request::PassphraseRequest {
     fn validate(&self) -> Result<(), String> {
         check_len("passphrase", &self.passphrase, MAX_PASSPHRASE)?;
+        Ok(())
+    }
+}
+
+impl Validate for crate::request::CapabilitySessionRequest {
+    fn validate(&self) -> Result<(), String> {
+        if self.scopes.is_empty() {
+            return Err("scopes must not be empty".into());
+        }
+        if self.scopes.len() > MAX_CAPABILITY_SCOPES {
+            return Err(format!(
+                "scopes exceeds maximum length of {MAX_CAPABILITY_SCOPES} items"
+            ));
+        }
+        check_vec_items_len("scopes", &self.scopes, MAX_CAPABILITY_SCOPE)?;
+        for scope in &self.scopes {
+            if !scope
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || matches!(b, b':' | b'-' | b'_'))
+            {
+                return Err(format!("invalid capability scope '{scope}'"));
+            }
+        }
+        if let Some(ttl_secs) = self.ttl_secs {
+            if ttl_secs == 0 || ttl_secs > MAX_CAPABILITY_TTL_SECS {
+                return Err(format!(
+                    "ttl_secs must be between 1 and {MAX_CAPABILITY_TTL_SECS}"
+                ));
+            }
+        }
         Ok(())
     }
 }
@@ -355,6 +388,19 @@ impl Validate for crate::request::EvmRpcBroadcastRequest {
     fn validate(&self) -> Result<(), String> {
         self.provider.validate()?;
         check_len("raw_transaction_hex", &self.raw_transaction_hex, MAX_HEX)?;
+        Ok(())
+    }
+}
+
+impl Validate for crate::request::EvmFeeEstimateRequest {
+    fn validate(&self) -> Result<(), String> {
+        self.provider.validate()?;
+        if self.chain_id == 0 {
+            return Err("chain_id must be >= 1".to_string());
+        }
+        if matches!(self.gas_limit, Some(0)) {
+            return Err("gas_limit must be >= 1".to_string());
+        }
         Ok(())
     }
 }

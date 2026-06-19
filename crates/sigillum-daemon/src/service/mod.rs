@@ -45,6 +45,7 @@ mod queue;
 mod recovery;
 mod secrets;
 mod selfcheck;
+pub(crate) mod transaction_policy;
 mod transit;
 pub(crate) mod unlock;
 mod wallets;
@@ -58,6 +59,31 @@ use crate::audit_log::AuditEventSpec;
 use crate::operations::{OperationGuard, PendingOperationSpec};
 
 pub(crate) use error::{ServiceError, ServiceResult};
+
+pub(crate) mod capability_scopes {
+    pub const WALLET_PROFILES_READ: &str = "wallet_profiles:read";
+    pub const EVM_PROVIDERS_READ: &str = "evm_providers:read";
+    pub const DEPOSITS_CREATE: &str = "deposits:create";
+    pub const DEPOSITS_READ: &str = "deposits:read";
+    pub const DEPOSITS_DELETE: &str = "deposits:delete";
+    pub const DEPOSITS_REFRESH: &str = "deposits:refresh";
+    pub const QUEUE_ENQUEUE_SWEEP: &str = "queue:enqueue-sweep";
+
+    pub fn is_known(scope: &str) -> bool {
+        matches!(
+            scope,
+            WALLET_PROFILES_READ
+                | EVM_PROVIDERS_READ
+                | DEPOSITS_CREATE
+                | DEPOSITS_READ
+                | DEPOSITS_DELETE
+                | DEPOSITS_REFRESH
+                | QUEUE_ENQUEUE_SWEEP
+        )
+    }
+}
+
+const DEFAULT_CAPABILITY_SESSION_TTL_SECS: u64 = 60 * 60;
 
 /// Façade over all vault operations.
 ///
@@ -76,6 +102,9 @@ impl SigillumService {
 
     /// Verify that the request carries a valid session token, returning a reference to it.
     fn require_session<'a>(&self, token: Option<&'a str>) -> ServiceResult<&'a str> {
+        if self.state.is_locking() {
+            return Err(ServiceError::locked("Daemon is locking."));
+        }
         match token {
             Some(token) if self.state.verify_token(token) => Ok(token),
             _ => Err(ServiceError::unauthorized(
@@ -84,8 +113,37 @@ impl SigillumService {
         }
     }
 
+    fn require_full_session<'a>(&self, token: Option<&'a str>) -> ServiceResult<&'a str> {
+        let token = self.require_session(token)?;
+        if self.state.session_is_full(token) {
+            Ok(token)
+        } else {
+            Err(ServiceError::forbidden(
+                "A full daemon session is required for this operation.",
+            ))
+        }
+    }
+
+    fn require_scope<'a>(
+        &self,
+        token: Option<&'a str>,
+        scope: &'static str,
+    ) -> ServiceResult<&'a str> {
+        let token = self.require_session(token)?;
+        if self.state.session_has_scope(token, scope) {
+            Ok(token)
+        } else {
+            Err(ServiceError::forbidden(format!(
+                "Missing daemon capability scope: {scope}"
+            )))
+        }
+    }
+
     /// Optionally verify a session token without rejecting unauthenticated callers.
     fn optional_session<'a>(&self, token: Option<&'a str>) -> Option<&'a str> {
+        if self.state.is_locking() {
+            return None;
+        }
         token.filter(|candidate| self.state.verify_token(candidate))
     }
 

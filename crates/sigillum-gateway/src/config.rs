@@ -11,6 +11,8 @@ pub struct GatewayConfig {
     pub daemon_url: String,
     /// Pre-established Sigillum daemon bearer session token for authenticated calls.
     pub daemon_session_token: Option<String>,
+    /// Preferred scoped daemon capability token for gateway calls.
+    pub daemon_capability_token: Option<String>,
     /// SQLite database path (default: `gateway.db`).
     pub database_url: String,
     /// Gateway bind address (default: `127.0.0.1:8443`).
@@ -87,6 +89,9 @@ impl GatewayConfig {
             daemon_session_token: std::env::var("SIGILLUM_DAEMON_SESSION_TOKEN")
                 .ok()
                 .or_else(|| std::env::var("SIGILLUM_SESSION_TOKEN").ok())
+                .filter(|value| !value.trim().is_empty()),
+            daemon_capability_token: std::env::var("SIGILLUM_DAEMON_CAPABILITY_TOKEN")
+                .ok()
                 .filter(|value| !value.trim().is_empty()),
             database_url: std::env::var("GATEWAY_DATABASE_URL")
                 .unwrap_or_else(|_| "sqlite:gateway.db".into()),

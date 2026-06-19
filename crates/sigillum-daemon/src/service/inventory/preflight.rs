@@ -5,6 +5,7 @@ use crate::service::evm::normalize_address;
 use crate::service::{ServiceError, ServiceResult};
 
 use super::claim_discovery::CLAIM_ADAPTER_MERKLE_DISTRIBUTOR_V1;
+use super::defi_adapters::DEFI_EXIT_ADAPTER_AAVE_V3_WITHDRAW;
 
 const ERC20_APPROVE_SELECTOR: &str = "095ea7b3";
 const ERC20_TRANSFER_SELECTOR: &str = "a9059cbb";
@@ -200,6 +201,42 @@ pub(super) fn prepare_plan_step_preflight(
                 ],
             }))
         }
+        "exit_defi_position" => {
+            let adapter = step
+                .claim_adapter
+                .as_deref()
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .ok_or_else(|| {
+                    ServiceError::bad_request("defi exit adapter is required for simulation")
+                })?;
+            if adapter != DEFI_EXIT_ADAPTER_AAVE_V3_WITHDRAW {
+                return Ok(PlanStepPreflight::Unsupported {
+                    evidence: vec![
+                        format!("unsupported_defi_exit_adapter={adapter}"),
+                        "reason=no_local_defi_exit_builder_for_adapter".into(),
+                    ],
+                });
+            }
+            let pool = required_address("Aave V3 pool", step.protocol_address.as_deref())?;
+            let asset = required_address("Aave underlying asset", step.asset_address.as_deref())?;
+            let amount = required_quantity("withdraw amount", &step.amount_hex)?;
+            let recipient = required_address("withdraw recipient", Some(step.address.as_str()))?;
+            let data_hex = aave_v3_withdraw_call_data(&asset, &amount, &recipient)?;
+            Ok(PlanStepPreflight::Call(PlanStepPreflightCall {
+                label: "aaveV3.withdraw(asset,amount,to)",
+                target_address: pool,
+                data_hex,
+                value_hex: None,
+                evidence: vec![
+                    "prepared_call=aave_v3.withdraw(asset,amount,to)".into(),
+                    format!("defi_exit_adapter={DEFI_EXIT_ADAPTER_AAVE_V3_WITHDRAW}"),
+                    format!("asset={asset}"),
+                    format!("recipient={recipient}"),
+                    format!("amount={amount}"),
+                ],
+            }))
+        }
         action => Ok(PlanStepPreflight::Unsupported {
             evidence: vec![
                 format!("unsupported_action={action}"),
@@ -297,6 +334,20 @@ fn merkle_claim_call_data(
         encoded_quantity_arg(CLAIM_PROOF_OFFSET_HEX, "claim proof offset")?,
         encoded_quantity_arg(&format!("0x{:x}", proof.len()), "claim proof length")?,
         proof_words
+    ))
+}
+
+fn aave_v3_withdraw_call_data(
+    asset_address: &str,
+    amount_hex: &str,
+    recipient_address: &str,
+) -> ServiceResult<String> {
+    Ok(format!(
+        "0x{}{}{}{}",
+        function_selector_hex("withdraw(address,uint256,address)"),
+        encoded_address_arg(asset_address)?,
+        encoded_quantity_arg(amount_hex, "withdraw amount")?,
+        encoded_address_arg(recipient_address)?
     ))
 }
 
@@ -579,6 +630,32 @@ mod tests {
         step.protocol_address = None;
         let error = prepare_plan_step_preflight(&step).unwrap_err();
         assert!(error.to_string().contains("Permit2 contract"));
+    }
+
+    #[test]
+    fn prepares_aave_v3_withdraw_call_data() {
+        let mut step = sample_step("exit_defi_position");
+        step.asset_kind = "defi".into();
+        step.asset_address = Some("0x4d5f47fa6a74757f35c14fd3a6ef8e3c9bc514e8".into());
+        step.protocol_address = Some("0x87870bca3f3fd6335c3f4ce8392d69350b4fa4e2".into());
+        step.claim_adapter = Some(DEFI_EXIT_ADAPTER_AAVE_V3_WITHDRAW.into());
+        step.amount_hex = "0xf4240".into();
+
+        let prepared = prepare_plan_step_preflight(&step).unwrap();
+        let PlanStepPreflight::Call(call) = prepared else {
+            panic!("expected call");
+        };
+        assert_eq!(
+            call.target_address,
+            "0x87870bca3f3fd6335c3f4ce8392d69350b4fa4e2"
+        );
+        assert!(call.data_hex.starts_with(&format!(
+            "0x{}",
+            function_selector_hex("withdraw(address,uint256,address)")
+        )));
+        assert!(call.evidence.iter().any(|item| {
+            item == &format!("defi_exit_adapter={DEFI_EXIT_ADAPTER_AAVE_V3_WITHDRAW}")
+        }));
     }
 
     #[test]

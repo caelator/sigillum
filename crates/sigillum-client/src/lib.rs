@@ -56,10 +56,10 @@ use sigillum_api::request::{
 };
 pub use sigillum_api::response::Fido2StatusResponse as DaemonFido2Status;
 pub use sigillum_api::response::{
-    ActiveCompartment, AuditEvent as DaemonAuditEvent, BiometricChallengeResponse,
-    BiometricEnrollResponse, ChainProfile, ChainProfileListResponse, ChainProfileMutationResponse,
-    CompartmentInfo, CompartmentListResponse, ConsolidationPlan, ConsolidationPlanExportBundle,
-    ConsolidationPlanExportCall, ConsolidationPlanExportResponse,
+    ActiveCompartment, AuditEvent as DaemonAuditEvent, AuditVerifyReport,
+    BiometricChallengeResponse, BiometricEnrollResponse, ChainProfile, ChainProfileListResponse,
+    ChainProfileMutationResponse, CompartmentInfo, CompartmentListResponse, ConsolidationPlan,
+    ConsolidationPlanExportBundle, ConsolidationPlanExportCall, ConsolidationPlanExportResponse,
     ConsolidationPlanExportSkippedStep, ConsolidationPlanListResponse,
     ConsolidationPlanMutationResponse, ConsolidationPlanStep, ConsolidationPlanSummary,
     DiagnosticsResponse, DiscoveryJobListResponse, DiscoveryJobMutationResponse, ErrorResponse,
@@ -442,6 +442,19 @@ impl SigillumClient {
             .send::<sigillum_api::response::AuditResponse>(builder)
             .await?
             .events)
+    }
+
+    pub async fn audit_verify(
+        &self,
+        scope: Option<&str>,
+    ) -> Result<AuditVerifyReport, ClientError> {
+        let mut path = "/api/audit/verify".to_string();
+        if let Some(scope) = scope {
+            path.push_str("?scope=");
+            path.push_str(&urlencoding::encode(scope));
+        }
+        let builder = self.request(Method::GET, &path);
+        self.send(builder).await
     }
 
     pub async fn diagnostics(&self) -> Result<DiagnosticsResponse, ClientError> {

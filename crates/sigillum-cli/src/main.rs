@@ -97,7 +97,7 @@ COMMANDS:
     get <KEY>         Retrieve a Tier 2 secret
     delete <KEY>      Delete a Tier 2 secret
     list              List all keys (both tiers)
-    audit             Query audit events through the daemon API
+    audit             Query audit events; use `audit verify [scope]` for MAC chains
     doctor            Check local daemon, data dir, session, audit DB, and env
     generate          Generate passwords, passphrases, or TOTPs
     run               Inject resolved secrets into a child process
@@ -127,7 +127,8 @@ COMMANDS:
       status                 Show FIDO2 status
       unlock --taps <N>      Unlock via FIDO2 (cascading)
 
-    daemon [--port N] Start HTTP daemon (default: localhost:9743)
+    daemon [--port N] [--force-daemon-lock]
+                      Start HTTP daemon (default: localhost:9743)
     api <CMD>         Talk to the local daemon API with JSON output
       selfcheck [--domain <D>]...  Verify configured providers, wallets, and policy
 
@@ -1254,6 +1255,7 @@ fn fido2_status(mgr: &Fido2Manager) {
 /// for compartment management, secret CRUD, FIDO2 operations, and unlock persistence.
 fn cmd_daemon(args: &[String]) {
     let mut port: u16 = 9743;
+    let mut force_daemon_lock = false;
 
     let mut i = 0;
     while i < args.len() {
@@ -1264,6 +1266,9 @@ fn cmd_daemon(args: &[String]) {
                     eprintln!("Invalid port number.");
                     process::exit(1);
                 });
+            }
+            "--force-daemon-lock" => {
+                force_daemon_lock = true;
             }
             _ => {
                 eprintln!("Unknown daemon flag: {}", args[i]);
@@ -1281,7 +1286,8 @@ fn cmd_daemon(args: &[String]) {
         process::exit(1);
     });
 
-    if let Err(e) = rt.block_on(sigillum_daemon::run(addr, base_dir)) {
+    let options = sigillum_daemon::DaemonRunOptions { force_daemon_lock };
+    if let Err(e) = rt.block_on(sigillum_daemon::run_with_options(addr, base_dir, options)) {
         eprintln!("Daemon error: {e}");
         process::exit(1);
     }

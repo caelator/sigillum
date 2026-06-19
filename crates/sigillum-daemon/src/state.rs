@@ -20,12 +20,16 @@
 
 use std::collections::{HashMap, VecDeque};
 use std::fmt;
-use std::path::{Path, PathBuf};
+use std::io;
+use std::path::PathBuf;
 use std::sync::Mutex;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
+use hkdf::Hkdf;
 use rand::RngCore;
 use rand::rngs::OsRng;
+use serde::Serialize;
+use sha2::Sha256;
 use sigillum_api::AuditEvent;
 use sigillum_core::{FileVault, VaultConfig, VaultLifecycle, recover_snapshot_restore};
 use sigillum_fido2::Fido2Manager;
@@ -33,6 +37,13 @@ use sigillum_fido2::config::CompartmentMeta;
 use subtle::ConstantTimeEq;
 use tokio::sync::Mutex as AsyncMutex;
 use zeroize::Zeroizing;
+
+mod recovery_files;
+#[cfg(test)]
+mod tests;
+
+pub(crate) use recovery_files::recover_compartment_replacements;
+use recovery_files::{restore_stashed_ops_dir, stash_snapshot_placeholder_ops};
 
 use crate::audit_db::AuditQuery;
 use crate::audit_log::{AuditEventSpec, StoredAuditEvent};
@@ -121,17 +132,24 @@ struct BiometricChallengeState {
     issued_at: Instant,
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug)]
 struct SessionState {
     active_compartment_id: Option<usize>,
     created_at: Instant,
+    expires_at: Instant,
+    last_activity: Instant,
+    scopes: Option<Vec<String>>,
 }
 
 impl Default for SessionState {
     fn default() -> Self {
+        let now = Instant::now();
         Self {
             active_compartment_id: None,
-            created_at: Instant::now(),
+            created_at: now,
+            expires_at: now + SESSION_TTL,
+            last_activity: now,
+            scopes: None,
         }
     }
 }
@@ -143,7 +161,7 @@ struct UnlockThrottle {
     last_failure: Option<Instant>,
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize)]
 pub struct StartupRecoverySummary {
     pub interrupted_operation_count: usize,
     pub recovered_operation_count: usize,
@@ -173,7 +191,16 @@ pub struct AppState {
     unlock_throttle: ResilientMutex<UnlockThrottle>,
     /// Startup-time reconciliation summary for observability.
     startup_recovery: ResilientMutex<StartupRecoverySummary>,
+    startup_ready: ResilientMutex<bool>,
+    startup_error: ResilientMutex<Option<String>>,
+    lock_state: ResilientMutex<LockState>,
     biometric_challenges: ResilientMutex<VecDeque<BiometricChallengeState>>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum LockState {
+    Ready,
+    Locking,
 }
 
 impl AppState {
@@ -210,6 +237,9 @@ impl AppState {
             operation_lock: AsyncMutex::new(()),
             unlock_throttle: ResilientMutex::new(UnlockThrottle::default()),
             startup_recovery: ResilientMutex::new(StartupRecoverySummary::default()),
+            startup_ready: ResilientMutex::new(false),
+            startup_error: ResilientMutex::new(None),
+            lock_state: ResilientMutex::new(LockState::Ready),
             biometric_challenges: ResilientMutex::new(VecDeque::new()),
         }
     }
@@ -233,6 +263,26 @@ impl AppState {
     #[must_use]
     pub fn runtime_policy(&self) -> RuntimePolicy {
         self.runtime_policy
+    }
+
+    #[must_use]
+    pub fn startup_ready(&self) -> bool {
+        *self.startup_ready.lock()
+    }
+
+    #[must_use]
+    pub fn startup_error(&self) -> Option<String> {
+        self.startup_error.lock().clone()
+    }
+
+    pub fn mark_startup_ready(&self) {
+        *self.startup_ready.lock() = true;
+        *self.startup_error.lock() = None;
+    }
+
+    pub fn mark_startup_failed(&self, error: impl Into<String>) {
+        *self.startup_ready.lock() = false;
+        *self.startup_error.lock() = Some(error.into());
     }
 
     fn session_key_for(
@@ -276,6 +326,28 @@ impl AppState {
         self.operation_lock.lock().await
     }
 
+    #[must_use]
+    pub fn is_locking(&self) -> bool {
+        *self.lock_state.lock() == LockState::Locking
+    }
+
+    #[must_use]
+    pub fn begin_locking(&self) -> bool {
+        if !self.is_unlocked() {
+            return false;
+        }
+        let mut state = self.lock_state.lock();
+        if *state == LockState::Locking {
+            return false;
+        }
+        *state = LockState::Locking;
+        true
+    }
+
+    pub fn finish_locking(&self) {
+        *self.lock_state.lock() = LockState::Ready;
+    }
+
     pub fn salt_path(&self, id: usize) -> PathBuf {
         self.compartment_dir(id).join("passphrase.salt")
     }
@@ -290,6 +362,10 @@ impl AppState {
 
     pub fn audit_db_path(&self) -> PathBuf {
         self.base_dir.join("audit.db")
+    }
+
+    pub fn audit_key_path(&self) -> PathBuf {
+        self.base_dir.join("audit.key")
     }
 
     pub fn biometric_enrollment_path(&self) -> PathBuf {
@@ -443,7 +519,31 @@ impl AppState {
     /// Enforces a maximum session count ([`MAX_SESSIONS`]) and evicts
     /// expired sessions before allocating a new one.
     pub fn create_session(&self, preferred_active: Option<usize>) -> String {
+        self.create_session_inner(preferred_active, None, SESSION_TTL)
+            .0
+    }
+
+    pub fn create_capability_session(
+        &self,
+        preferred_active: Option<usize>,
+        scopes: Vec<String>,
+        ttl: Duration,
+    ) -> (String, u64) {
+        self.create_session_inner(preferred_active, Some(scopes), ttl)
+    }
+
+    fn create_session_inner(
+        &self,
+        preferred_active: Option<usize>,
+        scopes: Option<Vec<String>>,
+        ttl: Duration,
+    ) -> (String, u64) {
         let active = preferred_active.or_else(|| self.default_active_compartment_id());
+        let expires_at_unix = SystemTime::now()
+            .checked_add(ttl)
+            .and_then(|time| time.duration_since(UNIX_EPOCH).ok())
+            .unwrap_or_default()
+            .as_secs();
 
         loop {
             let mut bytes = [0u8; 32];
@@ -453,7 +553,8 @@ impl AppState {
             let mut sessions = self.sessions.lock();
 
             // Evict expired sessions.
-            sessions.retain(|_, s| s.created_at.elapsed() < SESSION_TTL);
+            let now = Instant::now();
+            sessions.retain(|_, s| now < s.expires_at);
 
             // If still at capacity, evict the oldest session.
             if sessions.len() >= MAX_SESSIONS {
@@ -471,10 +572,13 @@ impl AppState {
                     token.clone(),
                     SessionState {
                         active_compartment_id: active,
-                        created_at: Instant::now(),
+                        created_at: now,
+                        expires_at: now + ttl,
+                        last_activity: now,
+                        scopes: scopes.clone(),
                     },
                 );
-                return token;
+                return (token, expires_at_unix);
             }
         }
     }
@@ -546,14 +650,78 @@ impl AppState {
         drop(vaults);
         self.unlocked.lock().clear();
         self.sessions.lock().clear();
+        self.finish_locking();
     }
 
     /// Verify a candidate token against the stored session token.
     pub fn verify_token(&self, candidate: &str) -> bool {
+        if self.is_locking() {
+            return false;
+        }
+        let idle_lock_secs = self.runtime_policy.idle_lock_secs;
+        let mut sessions = self.sessions.lock();
+        let now = Instant::now();
+        sessions.retain(|_, state| now < state.expires_at);
+        let Some(session_key) = Self::session_key_for(&sessions, candidate) else {
+            return false;
+        };
+        let Some(session) = sessions.get_mut(&session_key) else {
+            return false;
+        };
+        if session.last_activity.elapsed() >= Duration::from_secs(idle_lock_secs) {
+            sessions.remove(&session_key);
+            return false;
+        }
+        session.last_activity = Instant::now();
+        true
+    }
+
+    #[must_use]
+    pub fn idle_lock_due(&self) -> bool {
+        if self.is_locking() {
+            return false;
+        }
+        self.idle_lock_due_after_drain()
+    }
+
+    #[must_use]
+    pub fn idle_lock_due_after_drain(&self) -> bool {
+        if !self.is_unlocked() {
+            return false;
+        }
+        let idle_lock_secs = self.runtime_policy.idle_lock_secs;
+        let mut sessions = self.sessions.lock();
+        let now = Instant::now();
+        sessions.retain(|_, state| now < state.expires_at);
+        if sessions.is_empty() {
+            return true;
+        }
+        sessions
+            .values()
+            .all(|state| state.last_activity.elapsed() >= Duration::from_secs(idle_lock_secs))
+    }
+
+    #[must_use]
+    pub fn session_has_scope(&self, candidate: &str, scope: &str) -> bool {
         let sessions = self.sessions.lock();
-        sessions.iter().any(|(stored, state)| {
-            state.created_at.elapsed() < SESSION_TTL && Self::token_matches(stored, candidate)
-        })
+        sessions
+            .iter()
+            .find(|(stored, _)| Self::token_matches(stored, candidate))
+            .is_some_and(|(_, state)| {
+                state
+                    .scopes
+                    .as_ref()
+                    .is_none_or(|scopes| scopes.iter().any(|candidate| candidate == scope))
+            })
+    }
+
+    #[must_use]
+    pub fn session_is_full(&self, candidate: &str) -> bool {
+        let sessions = self.sessions.lock();
+        sessions
+            .iter()
+            .find(|(stored, _)| Self::token_matches(stored, candidate))
+            .is_some_and(|(_, state)| state.scopes.is_none())
     }
 
     /// Invalidate all active sessions (e.g. after credential rotation).
@@ -640,7 +808,8 @@ impl AppState {
             spec,
         };
         let path = self.audit_db_path();
-        crate::audit_db::append_event(&path, &event)
+        let (scope, key) = self.audit_chain_scope_and_key(compartment_id)?;
+        crate::audit_db::append_event_chained(&path, &event, &scope, &key)
     }
 
     pub(crate) fn read_audit_events(
@@ -656,228 +825,95 @@ impl AppState {
             },
         )
     }
-}
 
-fn stash_snapshot_placeholder_ops(base_dir: &Path) -> Result<Option<PathBuf>, std::io::Error> {
-    let rollback = snapshot_temp_path(base_dir, "rollback");
-    if !rollback.exists() || !snapshot_placeholder_dir(base_dir)? {
-        return Ok(None);
+    pub(crate) fn verify_audit_chain(
+        &self,
+        scope: &str,
+    ) -> Result<sigillum_api::AuditVerifyReport, std::io::Error> {
+        let key = self.audit_key_for_scope(scope)?;
+        crate::audit_db::verify_chain(&self.audit_db_path(), scope, &key)
     }
 
-    let ops_dir = base_dir.join(".ops");
-    if !ops_dir.exists() {
-        return Ok(None);
-    }
-
-    let preserved_ops = snapshot_temp_path(base_dir, "ops-preserved");
-    if preserved_ops.exists() {
-        std::fs::remove_dir_all(&preserved_ops)?;
-    }
-    std::fs::rename(&ops_dir, &preserved_ops)?;
-    std::fs::remove_dir_all(base_dir)?;
-    Ok(Some(preserved_ops))
-}
-
-fn restore_stashed_ops_dir(base_dir: &Path, preserved_ops: &Path) -> Result<(), std::io::Error> {
-    if !preserved_ops.exists() {
-        return Ok(());
-    }
-    std::fs::create_dir_all(base_dir)?;
-    let target = base_dir.join(".ops");
-    if target.exists() {
-        std::fs::remove_dir_all(&target)?;
-    }
-    std::fs::rename(preserved_ops, target)
-}
-
-fn snapshot_placeholder_dir(base_dir: &Path) -> Result<bool, std::io::Error> {
-    let mut entries = match std::fs::read_dir(base_dir) {
-        Ok(entries) => entries,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
-        Err(error) => return Err(error),
-    };
-
-    entries.try_fold(true, |is_placeholder, entry| {
-        let entry = entry?;
-        Ok(is_placeholder && entry.file_name() == ".ops")
-    })
-}
-
-fn snapshot_temp_path(base_dir: &Path, suffix: &str) -> PathBuf {
-    let parent = base_dir.parent().unwrap_or(Path::new("."));
-    let name = base_dir
-        .file_name()
-        .map(|name| name.to_string_lossy().into_owned())
-        .unwrap_or_else(|| "sigillum".into());
-    parent.join(format!(".{name}.{suffix}"))
-}
-
-pub(crate) fn recover_compartment_replacements(base_dir: &Path) -> Result<(), std::io::Error> {
-    let compartments_dir = base_dir.join("compartments");
-    let entries = match std::fs::read_dir(&compartments_dir) {
-        Ok(entries) => entries.collect::<Result<Vec<_>, _>>()?,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
-        Err(error) => return Err(error),
-    };
-
-    let mut compartment_ids = std::collections::BTreeSet::new();
-    for entry in entries {
-        let name = entry.file_name();
-        let name = name.to_string_lossy();
-        let candidate = name
-            .split('.')
-            .next()
-            .and_then(|prefix| prefix.parse::<usize>().ok());
-        if let Some(id) = candidate {
-            compartment_ids.insert(id);
-        }
-    }
-
-    for id in compartment_ids {
-        let live = compartments_dir.join(id.to_string());
-        let replacement = live.with_extension("replacing");
-        let rollback = live.with_extension("rollback");
-        if live.exists() {
-            if rollback.exists() {
-                std::fs::remove_dir_all(&rollback)?;
+    fn audit_chain_scope_and_key(
+        &self,
+        compartment_id: Option<usize>,
+    ) -> Result<(String, [u8; 32]), std::io::Error> {
+        match compartment_id {
+            Some(id) => {
+                let scope = format!("compartment:{id}");
+                let key = self.compartment_audit_key(id)?;
+                Ok((scope, key))
             }
-            if replacement.exists() {
-                std::fs::remove_dir_all(&replacement)?;
+            None => Ok(("daemon".into(), self.daemon_audit_key()?)),
+        }
+    }
+
+    fn audit_key_for_scope(&self, scope: &str) -> Result<[u8; 32], std::io::Error> {
+        if scope == "daemon" {
+            return self.daemon_audit_key();
+        }
+        let id = scope
+            .strip_prefix("compartment:")
+            .and_then(|value| value.parse::<usize>().ok())
+            .ok_or_else(|| {
+                io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "audit scope must be daemon or compartment:<id>",
+                )
+            })?;
+        self.compartment_audit_key(id)
+    }
+
+    fn daemon_audit_key(&self) -> Result<[u8; 32], std::io::Error> {
+        let path = self.audit_key_path();
+        match std::fs::read(&path) {
+            Ok(bytes) if bytes.len() == 32 => {
+                let mut key = [0u8; 32];
+                key.copy_from_slice(&bytes);
+                Ok(key)
             }
-            continue;
-        }
-        if rollback.exists() {
-            if replacement.exists() {
-                let _ = std::fs::remove_dir_all(&replacement);
+            Ok(_) => Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "audit.key must contain 32 bytes",
+            )),
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {
+                if let Some(parent) = path.parent() {
+                    std::fs::create_dir_all(parent)?;
+                }
+                let mut key = [0u8; 32];
+                OsRng.fill_bytes(&mut key);
+                std::fs::write(&path, key)?;
+                #[cfg(unix)]
+                {
+                    use std::os::unix::fs::PermissionsExt;
+                    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))?;
+                }
+                Ok(key)
             }
-            std::fs::rename(&rollback, &live)?;
-            continue;
-        }
-        if replacement.exists() {
-            std::fs::rename(&replacement, &live)?;
+            Err(error) => Err(error),
         }
     }
 
-    Ok(())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use tempfile::TempDir;
-
-    fn meta(id: usize, threshold: usize, label: &str) -> CompartmentMeta {
-        CompartmentMeta {
-            id,
-            label: label.into(),
-            threshold,
-            passphrase_mode: None,
-        }
-    }
-
-    #[test]
-    fn sessions_track_active_compartments_independently() {
-        let dir = TempDir::new().unwrap();
-        let state = AppState::new(dir.path().to_path_buf());
-
-        state.unlock_compartment(0, [1u8; 32], meta(0, 1, "daily"));
-        state.unlock_compartment(1, [2u8; 32], meta(1, 2, "secure"));
-
-        let session_a = state.create_session(Some(0));
-        let session_b = state.create_session(Some(0));
-
-        state.switch_active_for(&session_a, 1).unwrap();
-
-        assert_eq!(state.active_compartment_id_for(&session_a), Some(1));
-        assert_eq!(state.active_compartment_id_for(&session_b), Some(0));
-    }
-
-    #[test]
-    fn removing_active_compartment_repoints_sessions() {
-        let dir = TempDir::new().unwrap();
-        let state = AppState::new(dir.path().to_path_buf());
-
-        state.unlock_compartment(0, [1u8; 32], meta(0, 1, "daily"));
-        state.unlock_compartment(1, [2u8; 32], meta(1, 2, "secure"));
-
-        let session = state.create_session(Some(1));
-        state.remove_compartment(1);
-
-        assert_eq!(state.active_compartment_id_for(&session), Some(0));
-    }
-
-    #[test]
-    fn lock_all_clears_sessions_and_vault_instances() {
-        let dir = TempDir::new().unwrap();
-        let state = AppState::new(dir.path().to_path_buf());
-
-        state.unlock_compartment(0, [1u8; 32], meta(0, 1, "daily"));
-        let session = state.create_session(Some(0));
-
-        assert!(state.verify_token(&session));
-        assert!(state.with_vault(0, |_| true).is_some());
-
-        state.lock_all();
-
-        assert!(!state.verify_token(&session));
-        assert!(state.with_vault(0, |_| true).is_none());
-        assert!(!state.is_unlocked());
-    }
-
-    #[test]
-    fn audit_log_roundtrip_and_limit() {
-        let dir = TempDir::new().unwrap();
-        let state = AppState::new(dir.path().to_path_buf());
-
-        state
-            .record_audit_event(
-                Some(0),
-                AuditEventSpec::UnlockPassphrase {
-                    compartment_ids: vec![0],
-                    count: 1,
-                },
-            )
-            .unwrap();
-        state
-            .record_audit_event(
-                Some(0),
-                AuditEventSpec::SecretSet {
-                    key: "db_pass".into(),
-                },
-            )
-            .unwrap();
-        state
-            .record_audit_event(
-                None,
-                AuditEventSpec::SnapshotExport {
-                    file_count: 4,
-                    total_bytes: 128,
-                },
-            )
-            .unwrap();
-
-        let events = state
-            .read_audit_events(AuditQuery {
-                tail: 2,
-                kind: None,
-                since: None,
-                key: None,
-            })
-            .unwrap();
-        assert_eq!(events.len(), 2);
-        assert_eq!(events[0].kind, "snapshot.export");
-        assert_eq!(events[1].kind, "secret.set");
-        assert_eq!(events[0].details["total_bytes"], serde_json::json!(128));
-    }
-
-    #[test]
-    fn startup_recovery_summary_defaults_to_zero() {
-        let dir = TempDir::new().unwrap();
-        let state = AppState::new(dir.path().to_path_buf());
-
-        assert_eq!(
-            state.startup_recovery_summary(),
-            StartupRecoverySummary::default()
-        );
+    fn compartment_audit_key(&self, id: usize) -> Result<[u8; 32], std::io::Error> {
+        let master_key = {
+            let vaults = self.vaults.lock();
+            vaults
+                .get(&id)
+                .and_then(|vault| vault.extract_master_key())
+                .ok_or_else(|| {
+                    io::Error::new(
+                        io::ErrorKind::PermissionDenied,
+                        "compartment audit verification requires an unlocked compartment",
+                    )
+                })?
+        };
+        let hkdf = Hkdf::<Sha256>::new(None, master_key.as_ref());
+        let mut key = [0u8; 32];
+        hkdf.expand(
+            format!("sigillum/audit-hmac/v1/compartment:{id}").as_bytes(),
+            &mut key,
+        )
+        .map_err(|_| io::Error::other("failed to derive audit HMAC key"))?;
+        Ok(key)
     }
 }

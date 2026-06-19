@@ -7,6 +7,25 @@ use rusqlite::{Connection, OptionalExtension, params};
 
 use crate::error::GatewayError;
 
+pub const DEFAULT_PROJECT_SCOPES: &[&str] = &[
+    "payments:create",
+    "payments:read",
+    "payments:list",
+    "payments:cancel",
+    "webhooks:read",
+];
+
+pub fn default_project_scopes() -> Vec<String> {
+    DEFAULT_PROJECT_SCOPES
+        .iter()
+        .map(|scope| (*scope).to_string())
+        .collect()
+}
+
+fn default_project_scopes_json() -> String {
+    serde_json::to_string(DEFAULT_PROJECT_SCOPES).expect("default scopes serialize")
+}
+
 /// Lightweight cloneable database handle for the local sidecar.
 #[derive(Clone)]
 pub struct SqlitePool {
@@ -38,6 +57,7 @@ pub mod row {
         pub name: String,
         pub api_key_hash: String,
         pub wallet_profile: String,
+        pub scopes: Vec<String>,
         pub webhook_url: Option<String>,
         pub webhook_secret: Option<String>,
         pub created_at: String,
@@ -46,11 +66,15 @@ pub mod row {
 
     impl Project {
         pub(super) fn from_row(row: &Row<'_>) -> rusqlite::Result<Self> {
+            let scopes_json: String = row.get("scopes_json")?;
+            let scopes = serde_json::from_str(&scopes_json)
+                .unwrap_or_else(|_| super::default_project_scopes());
             Ok(Self {
                 id: row.get("id")?,
                 name: row.get("name")?,
                 api_key_hash: row.get("api_key_hash")?,
                 wallet_profile: row.get("wallet_profile")?,
+                scopes,
                 webhook_url: row.get("webhook_url")?,
                 webhook_secret: row.get("webhook_secret")?,
                 created_at: row.get("created_at")?,
@@ -151,8 +175,31 @@ pub async fn connect(database_url: &str) -> Result<SqlitePool, GatewayError> {
 
     connection.execute_batch("PRAGMA journal_mode=WAL;")?;
     connection.execute_batch(include_str!("../schema.sql"))?;
+    migrate_project_scopes(&connection)?;
 
     Ok(SqlitePool::new(connection))
+}
+
+fn migrate_project_scopes(connection: &Connection) -> Result<(), rusqlite::Error> {
+    let has_scopes = {
+        let mut statement = connection.prepare("PRAGMA table_info(projects)")?;
+        let columns = statement.query_map([], |row| row.get::<_, String>(1))?;
+        columns
+            .collect::<rusqlite::Result<Vec<_>>>()?
+            .iter()
+            .any(|column| column == "scopes_json")
+    };
+    if !has_scopes {
+        connection.execute(
+            "ALTER TABLE projects ADD COLUMN scopes_json TEXT NOT NULL DEFAULT '[]'",
+            [],
+        )?;
+    }
+    connection.execute(
+        "UPDATE projects SET scopes_json = ? WHERE scopes_json IS NULL OR scopes_json = '' OR scopes_json = '[]'",
+        params![default_project_scopes_json()],
+    )?;
+    Ok(())
 }
 
 fn sqlite_database_path(database_url: &str) -> Option<PathBuf> {
@@ -199,10 +246,41 @@ pub async fn insert_project(
 ) -> Result<(), GatewayError> {
     let connection = pool.connection();
     connection.execute(
-        "INSERT INTO projects (id, name, api_key_hash, wallet_profile, webhook_url, webhook_secret) VALUES (?, ?, ?, ?, ?, ?)",
-        params![id, name, api_key_hash, wallet_profile, webhook_url, webhook_secret],
+        "INSERT INTO projects (id, name, api_key_hash, wallet_profile, scopes_json, webhook_url, webhook_secret) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        params![
+            id,
+            name,
+            api_key_hash,
+            wallet_profile,
+            default_project_scopes_json(),
+            webhook_url,
+            webhook_secret
+        ],
     )?;
     Ok(())
+}
+
+pub async fn update_project_scopes(
+    pool: &SqlitePool,
+    id: &str,
+    scopes: &[String],
+) -> Result<Option<row::Project>, GatewayError> {
+    let scopes_json = serde_json::to_string(scopes)
+        .map_err(|error| GatewayError::BadRequest(format!("invalid scopes: {error}")))?;
+    let connection = pool.connection();
+    let updated = connection.execute(
+        "UPDATE projects SET scopes_json = ?, updated_at = datetime('now') WHERE id = ?",
+        params![scopes_json, id],
+    )?;
+    if updated == 0 {
+        return Ok(None);
+    }
+    let project = connection
+        .query_row("SELECT * FROM projects WHERE id = ?", params![id], |row| {
+            row::Project::from_row(row)
+        })
+        .optional()?;
+    Ok(project)
 }
 
 pub async fn find_project_by_id(

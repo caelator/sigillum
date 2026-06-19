@@ -35,6 +35,12 @@ async fn spawn_mock_evm_provider() -> (SocketAddr, tokio::task::JoinHandle<()>) 
             "eth_chainId" => json!("0x1"),
             "eth_getTransactionCount" => json!("0x7"),
             "eth_getBalance" => json!("0xde0b6b3a7640000"),
+            "eth_feeHistory" => json!({
+                "oldestBlock": "0x1",
+                "baseFeePerGas": ["0x3b9aca00", "0x3b9aca00"],
+                "gasUsedRatio": [0.5]
+            }),
+            "eth_maxPriorityFeePerGas" => json!("0x59682f00"),
             "eth_call" => {
                 let to = request["params"][0]["to"]
                     .as_str()
@@ -697,6 +703,28 @@ async fn evm_provider_routes_and_stealth_send_flow_work_with_internal_auth_resol
     let stealth_address = generate_json["stealth_address"].as_str().unwrap();
     let provider_url = format!("http://{rpc_addr}/");
 
+    let fee_estimate = post_json(
+        &client,
+        addr,
+        "/api/evm/fees/estimate",
+        json!({
+            "rpc_url": provider_url.clone(),
+            "auth_token_key": "alchemy",
+            "chain_id": 1,
+            "gas_limit": 21000,
+        }),
+        Some(&token),
+    )
+    .await;
+    assert_eq!(fee_estimate.status(), StatusCode::OK);
+    let fee_json: serde_json::Value = fee_estimate.json().await.unwrap();
+    assert_eq!(
+        fee_json["fees"]["max_priority_fee_per_gas_hex"],
+        "0x59682f00"
+    );
+    assert_eq!(fee_json["fees"]["max_fee_per_gas_hex"], "0xd09dc300");
+    assert_eq!(fee_json["estimated_gas_cost_wei_hex"], "0x42d90d641800");
+
     let nonce = post_json(
         &client,
         addr,
@@ -1347,6 +1375,7 @@ async fn profile_backed_send_and_queue_flow_persist_internal_configuration() {
             "short_name": "eth",
             "provider_profile": "mainnet",
             "default_destination_address": "0x1111111111111111111111111111111111111111",
+            "execution_enabled": true,
         }),
         Some(&token),
     )
@@ -1386,6 +1415,42 @@ async fn profile_backed_send_and_queue_flow_persist_internal_configuration() {
     )
     .await;
     let generate_json: serde_json::Value = generate.json().await.unwrap();
+
+    let disabled_wallet_profile = post_json(
+        &client,
+        addr,
+        "/api/profiles/eth-stealth/upsert",
+        json!({
+            "name": "payments-disabled",
+            "wallet": "payments",
+            "short_name": "eth",
+            "provider_profile": "mainnet",
+            "default_destination_address": "0x1111111111111111111111111111111111111111"
+        }),
+        Some(&token),
+    )
+    .await;
+    assert_eq!(disabled_wallet_profile.status(), StatusCode::OK);
+    let disabled_enqueue = post_json(
+        &client,
+        addr,
+        "/api/queue/enqueue/eth-stealth-transfer",
+        json!({
+            "wallet_profile": "payments-disabled",
+            "stealth_address": generate_json["stealth_address"],
+            "ephemeral_public_key_hex": generate_json["ephemeral_public_key_hex"],
+            "view_tag_hex": generate_json["view_tag_hex"],
+            "value_wei_hex": "0x1"
+        }),
+        Some(&token),
+    )
+    .await;
+    assert_eq!(disabled_enqueue.status(), StatusCode::FORBIDDEN);
+    let disabled_enqueue_json: serde_json::Value = disabled_enqueue.json().await.unwrap();
+    assert_eq!(
+        disabled_enqueue_json["error"],
+        "Wallet profile execution is disabled."
+    );
 
     let send = post_json(
         &client,
@@ -2084,6 +2149,19 @@ async fn wallet_inventory_scan_discovers_erc20_tokens_from_transfer_logs() {
     assert_eq!(scan_json["job"]["status"], "completed");
     assert_eq!(scan_json["job"]["addresses_scanned"], 4);
     assert_eq!(scan_json["job"]["holdings_detected"], 22);
+    assert!(
+        scan_json["job"]["checkpoints"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|checkpoint| {
+                checkpoint["wallet_family"] == "eth-seed"
+                    && checkpoint["wallet_profile"] == "seed-main"
+                    && checkpoint["provider_profile"] == "mainnet"
+                    && checkpoint["next_index"] == 1
+                    && checkpoint["completed"] == true
+            })
+    );
     let scan_addresses = scan_json["addresses"].as_array().unwrap();
     assert!(scan_addresses.iter().any(|address| {
         let classifications = address["classifications"].as_array().unwrap();
@@ -2131,6 +2209,7 @@ async fn wallet_inventory_scan_discovers_erc20_tokens_from_transfer_logs() {
                 == "0x000000000000000000000000000000000000000000000000000000000000007b"
             && holding["amount_hex"] == "0x1"
             && holding["source"] == "erc721-transfer-log"
+            && holding["spam_label"] == "unverified_nft_metadata"
     }));
     assert!(holdings.iter().any(|holding| {
         holding["asset_kind"] == "erc1155"
@@ -2139,6 +2218,17 @@ async fn wallet_inventory_scan_discovers_erc20_tokens_from_transfer_logs() {
                 == "0x000000000000000000000000000000000000000000000000000000000000007b"
             && holding["amount_hex"] == "0x2a"
             && holding["source"] == "erc1155-transfer-log"
+            && holding["spam_label"] == "unverified_nft_metadata"
+    }));
+    let inventory = get(&client, addr, "/api/inventory/wallets", Some(&token)).await;
+    assert_eq!(inventory.status(), StatusCode::OK);
+    let inventory_json: serde_json::Value = inventory.json().await.unwrap();
+    let nft_cache = inventory_json["nft_metadata_cache"].as_array().unwrap();
+    assert!(nft_cache.iter().any(|entry| {
+        entry["contract_address"] == "0x1234500000000000000000000000000000000000"
+            && entry["token_id_hex"]
+                == "0x000000000000000000000000000000000000000000000000000000000000007b"
+            && entry["spam_label"] == "unverified_nft_metadata"
     }));
     assert!(holdings.iter().any(|holding| {
         holding["asset_kind"] == "approval"
@@ -2288,12 +2378,12 @@ async fn wallet_inventory_scan_discovers_erc20_tokens_from_transfer_logs() {
             && step["asset_kind"] == "defi"
             && step["asset_address"] == "0x4d5f47fa6a74757f35c14fd3a6ef8e3c9bc514e8"
             && step["protocol_address"] == "0x87870bca3f3fd6335c3f4ce8392d69350b4fa4e2"
-            && step["status"] == "blocked"
+            && step["claim_adapter"] == "aave-v3-withdraw"
+            && step["status"] == "review_required"
+            && step["simulation_status"] == "required"
             && step["blockers"]
                 .as_array()
-                .unwrap()
-                .iter()
-                .any(|blocker| blocker == "requires_protocol_adapter")
+                .is_none_or(|blockers| blockers.is_empty())
     }));
     assert!(steps.iter().any(|step| {
         step["action"] == "claim_reward"
@@ -2966,7 +3056,7 @@ async fn treasury_policy_routes_enforce_consolidation_guardrails() {
                 .as_array()
                 .unwrap()
                 .iter()
-                .any(|blocker| blocker == "destination_not_allowlisted")
+                .any(|blocker| blocker == "block_destination")
     }));
 
     // Allowlisted destination: no policy blockers, plan stays reviewable.
@@ -3028,7 +3118,7 @@ async fn treasury_policy_routes_enforce_consolidation_guardrails() {
                 .as_array()
                 .unwrap()
                 .iter()
-                .any(|blocker| blocker == "destination_not_allowlisted")
+                .any(|blocker| blocker == "block_destination")
     }));
 
     // Plan cap: reviewable native sweeps sum above the cap, so the plan is
@@ -3114,7 +3204,7 @@ async fn treasury_policy_routes_enforce_consolidation_guardrails() {
                         .as_array()
                         .unwrap()
                         .iter()
-                        .any(|blocker| blocker == "exceeds_policy_step_cap")
+                        .any(|blocker| blocker == "block_step_cap")
             })
     );
 

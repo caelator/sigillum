@@ -12,6 +12,7 @@ fn roundtrip_test<T: Serialize + for<'de> Deserialize<'de> + PartialEq + std::fm
 fn test_error_response_roundtrip() {
     let resp = ErrorResponse {
         error: "Something went wrong".to_string(),
+        action: None,
     };
     roundtrip_test(resp);
 }
@@ -414,6 +415,7 @@ fn test_eth_stealth_wallet_profile_roundtrip() {
         compartment_id: 1,
         chain_id: Some(1),
         default_destination_address: Some("0xdest".to_string()),
+        execution_enabled: false,
     };
     roundtrip_test(profile);
 }
@@ -430,6 +432,7 @@ fn test_eth_stealth_wallet_profile_list_response_roundtrip() {
                 compartment_id: 1,
                 chain_id: Some(1),
                 default_destination_address: None,
+                execution_enabled: false,
             },
             EthStealthWalletProfile {
                 name: "wallet2".to_string(),
@@ -439,6 +442,7 @@ fn test_eth_stealth_wallet_profile_list_response_roundtrip() {
                 compartment_id: 2,
                 chain_id: Some(5),
                 default_destination_address: Some("0xdest2".to_string()),
+                execution_enabled: true,
             },
         ],
     };
@@ -454,6 +458,7 @@ fn test_eth_xpub_wallet_profile_roundtrip() {
         compartment_id: 1,
         chain_id: Some(1),
         default_destination_address: Some("0xdest".to_string()),
+        execution_enabled: false,
     };
     roundtrip_test(profile);
 }
@@ -469,6 +474,7 @@ fn test_eth_xpub_wallet_profile_list_response_roundtrip() {
                 compartment_id: 1,
                 chain_id: Some(1),
                 default_destination_address: None,
+                execution_enabled: false,
             },
             EthXpubWalletProfile {
                 name: "project_b".to_string(),
@@ -477,6 +483,7 @@ fn test_eth_xpub_wallet_profile_list_response_roundtrip() {
                 compartment_id: 2,
                 chain_id: Some(5),
                 default_destination_address: Some("0xdest2".to_string()),
+                execution_enabled: true,
             },
         ],
     };
@@ -503,6 +510,7 @@ fn test_eth_seed_wallet_profile_roundtrip() {
         sponsor_address: Some("0x2222222222222222222222222222222222222222".to_string()),
         hot_address: Some("0x3333333333333333333333333333333333333333".to_string()),
         treasury_address: Some("0x4444444444444444444444444444444444444444".to_string()),
+        execution_enabled: false,
     };
     roundtrip_test(profile);
 }
@@ -528,6 +536,7 @@ fn test_eth_seed_wallet_profile_list_response_roundtrip() {
             sponsor_address: None,
             hot_address: None,
             treasury_address: None,
+            execution_enabled: false,
         }],
     };
     roundtrip_test(resp);
@@ -557,6 +566,7 @@ fn test_eth_seed_wallet_create_response_roundtrip() {
             sponsor_address: Some("0x2222222222222222222222222222222222222222".to_string()),
             hot_address: Some("0x3333333333333333333333333333333333333333".to_string()),
             treasury_address: Some("0x4444444444444444444444444444444444444444".to_string()),
+            execution_enabled: false,
         },
     };
     roundtrip_test(resp);
@@ -618,6 +628,9 @@ fn test_wallet_inventory_scan_response_roundtrip() {
         claim_adapter: None,
         claim_index_hex: None,
         claim_proof: Vec::new(),
+        metadata_uri: None,
+        metadata_name: None,
+        spam_label: None,
         amount_hex: "0x1".to_string(),
         source: "local-rpc".to_string(),
         status: "detected".to_string(),
@@ -636,6 +649,7 @@ fn test_wallet_inventory_scan_response_roundtrip() {
         addresses_scanned: 1,
         active_addresses: 1,
         holdings_detected: 1,
+        checkpoints: Vec::new(),
         started_at_unix: 1,
         completed_at_unix: Some(2),
         last_error: None,
@@ -1134,6 +1148,17 @@ fn test_audit_event_roundtrip() {
 }
 
 #[test]
+fn test_audit_verify_report_roundtrip() {
+    roundtrip_test(AuditVerifyReport {
+        scope: "daemon".to_string(),
+        status: "verified".to_string(),
+        verified: 3,
+        broken: 0,
+        legacy: 1,
+    });
+}
+
+#[test]
 fn test_fido2_status_response_roundtrip() {
     let resp = Fido2StatusResponse {
         enabled: true,
@@ -1418,6 +1443,7 @@ fn sample_treasury_policy() -> TreasuryPolicy {
         max_step_native_wei_hex: Some("0xde0b6b3a7640000".to_string()),
         max_plan_native_wei_hex: Some("0x1bc16d674ec80000".to_string()),
         require_simulation: true,
+        allow_raw_digest_signing: false,
         created_at_unix: 1,
         updated_at_unix: 2,
     }
@@ -1438,6 +1464,7 @@ fn test_treasury_policy_responses_roundtrip() {
             max_step_native_wei_hex: None,
             max_plan_native_wei_hex: None,
             require_simulation: false,
+            allow_raw_digest_signing: false,
             created_at_unix: 1,
             updated_at_unix: 3,
         },

@@ -61,6 +61,11 @@ pub(super) fn cmd_api_treasury(args: &[String]) {
                     "--require-simulation",
                     "--no-require-simulation",
                 ),
+                allow_raw_digest_signing: bool_switch(
+                    args,
+                    "--allow-raw-digest-signing",
+                    "--disallow-raw-digest-signing",
+                ),
             };
             run_api_command(args, true, move |client| async move {
                 client.update_treasury_policy(request).await

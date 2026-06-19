@@ -15,12 +15,16 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sigillum_core::{ETHEREUM_STEALTH_SCHEME_ID, SnapshotSummary};
 
+use crate::request::Eip1559Fees;
+
 // ── Lifecycle ───────────────────────────────────
 
 /// Standard error envelope returned for non-2xx responses.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ErrorResponse {
     pub error: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub action: Option<String>,
 }
 
 /// Summary of the currently active compartment within a session.
@@ -77,6 +81,14 @@ pub struct UnlockResponse {
     pub unlocked_compartments: Vec<UnlockedCompartment>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub active_compartment_id: Option<usize>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct CapabilitySessionResponse {
+    pub status: String,
+    pub session_token: String,
+    pub scopes: Vec<String>,
+    pub expires_at_unix: u64,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -238,6 +250,15 @@ pub struct AuditResponse {
     pub events: Vec<AuditEvent>,
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct AuditVerifyReport {
+    pub scope: String,
+    pub status: String,
+    pub verified: usize,
+    pub broken: usize,
+    pub legacy: usize,
+}
+
 // ── Diagnostics ────────────────────────────────
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
@@ -251,6 +272,9 @@ pub struct RuntimePolicyResponse {
     pub queue_retry_base_delay_secs: u64,
     pub queue_retry_max_delay_secs: u64,
     pub provider_balance_observation_concurrency: usize,
+    pub idle_lock_secs: u64,
+    pub idle_lock_drain_secs: u64,
+    pub idle_lock_force_after_secs: u64,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -497,6 +521,14 @@ pub struct EvmRpcBroadcastResponse {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct EvmFeeEstimateResponse {
+    pub fees: Eip1559Fees,
+    pub gas_limit: u64,
+    pub estimated_gas_cost_wei_hex: String,
+    pub source: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct EthStealthSendResponse {
     pub wallet: String,
     pub kind: String,
@@ -564,11 +596,30 @@ pub struct WalletAssetHolding {
     pub claim_index_hex: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub claim_proof: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub metadata_uri: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub metadata_name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub spam_label: Option<String>,
     pub amount_hex: String,
     pub source: String,
     pub status: String,
     pub first_seen_at_unix: u64,
     pub last_checked_at_unix: u64,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct WalletDiscoveryCheckpoint {
+    pub wallet_family: String,
+    pub wallet_profile: String,
+    pub provider_profile: String,
+    pub next_index: u32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_scanned_index: Option<u32>,
+    pub consecutive_empty: u32,
+    pub completed: bool,
+    pub updated_at_unix: u64,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -587,6 +638,8 @@ pub struct WalletDiscoveryJob {
     pub addresses_scanned: usize,
     pub active_addresses: usize,
     pub holdings_detected: usize,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub checkpoints: Vec<WalletDiscoveryCheckpoint>,
     pub started_at_unix: u64,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub completed_at_unix: Option<u64>,
@@ -595,10 +648,25 @@ pub struct WalletDiscoveryJob {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct NftMetadataCacheEntry {
+    pub chain_id: u64,
+    pub contract_address: String,
+    pub token_id_hex: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub metadata_uri: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    pub spam_label: String,
+    pub updated_at_unix: u64,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct WalletInventoryListResponse {
     pub jobs: Vec<WalletDiscoveryJob>,
     pub addresses: Vec<WalletInventoryAddress>,
     pub holdings: Vec<WalletAssetHolding>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub nft_metadata_cache: Vec<NftMetadataCacheEntry>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]

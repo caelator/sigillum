@@ -3,9 +3,12 @@
 //! Manages passphrase-based unlock of compartments with salt derivation,
 //! master key verification, and session-based access control.
 
-use sigillum_api::request::PassphraseRequest;
+use std::time::Duration;
+
+use sigillum_api::request::{CapabilitySessionRequest, PassphraseRequest};
 use sigillum_api::response::{
-    LockResponse, SessionRevokeResponse, UnlockResponse, UnlockedCompartment,
+    CapabilitySessionResponse, LockResponse, SessionRevokeResponse, UnlockResponse,
+    UnlockedCompartment,
 };
 use sigillum_core::VaultLifecycle;
 use sigillum_core::utils::{derive_key_with_salt, load_wrapped_master_key};
@@ -15,7 +18,10 @@ use zeroize::Zeroizing;
 
 use crate::audit_log::AuditEventSpec;
 
-use super::{ServiceError, ServiceResult, SigillumService};
+use super::{
+    DEFAULT_CAPABILITY_SESSION_TTL_SECS, ServiceError, ServiceResult, SigillumService,
+    capability_scopes,
+};
 
 impl SigillumService {
     pub(crate) async fn unlock_with_passphrase(
@@ -37,12 +43,17 @@ impl SigillumService {
         let passphrase = Zeroizing::new(body.passphrase);
         super::helpers::require_valid_passphrase(&passphrase)?;
 
-        let _guard = self.state.operation_guard().await;
+        if let Some(response) = self.reauthenticate_unlocked_passphrase(passphrase.as_str())? {
+            return Ok(response);
+        }
+
         let mut unlocked_metas = Vec::new();
 
-        for (id, master_key, meta) in
-            scan_passphrase_matches(self.state.base_dir.clone(), passphrase.as_str()).await?
-        {
+        let passphrase_matches =
+            scan_passphrase_matches(self.state.base_dir.clone(), passphrase.as_str()).await?;
+        let _guard = self.state.operation_guard().await;
+
+        for (id, master_key, meta) in passphrase_matches {
             self.state.ensure_vault(id);
             let verified = self.state.with_vault(id, |vault| {
                 vault.load_master_key(master_key);
@@ -65,6 +76,44 @@ impl SigillumService {
             ));
         }
 
+        self.passphrase_unlock_response(unlocked_metas)
+    }
+
+    fn reauthenticate_unlocked_passphrase(
+        &self,
+        passphrase: &str,
+    ) -> ServiceResult<Option<UnlockResponse>> {
+        if !self.state.is_unlocked() {
+            return Ok(None);
+        }
+
+        let mut matched_metas = Vec::new();
+        for (meta, loaded_master_key) in self.state.extract_all_master_keys_with_meta() {
+            let salt = match std::fs::read(self.state.salt_path(meta.id)) {
+                Ok(salt) if salt.len() == 32 => salt,
+                _ => continue,
+            };
+            let wrap_key = derive_key_with_salt(passphrase, &salt);
+            let Some(unwrapped_master_key) =
+                load_wrapped_master_key(&wrap_key, &self.state.wrapped_key_path(meta.id))
+            else {
+                continue;
+            };
+            if unwrapped_master_key.as_ref() == loaded_master_key.as_ref() {
+                matched_metas.push(meta);
+            }
+        }
+
+        if matched_metas.is_empty() {
+            return Ok(None);
+        }
+        Ok(Some(self.passphrase_unlock_response(matched_metas)?))
+    }
+
+    fn passphrase_unlock_response(
+        &self,
+        unlocked_metas: Vec<sigillum_fido2::config::CompartmentMeta>,
+    ) -> ServiceResult<UnlockResponse> {
         self.state.reset_unlock_throttle();
         let token = self.state.create_session(None);
         let ids: Vec<usize> = unlocked_metas.iter().map(|meta| meta.id).collect();
@@ -117,6 +166,34 @@ impl SigillumService {
         Ok(SessionRevokeResponse {
             status: "revoked".into(),
             requires_reauth: true,
+        })
+    }
+
+    pub(crate) fn mint_capability_session(
+        &self,
+        token: Option<&str>,
+        body: CapabilitySessionRequest,
+    ) -> ServiceResult<CapabilitySessionResponse> {
+        let token = self.require_full_session(token)?;
+        let unknown = body
+            .scopes
+            .iter()
+            .find(|scope| !capability_scopes::is_known(scope));
+        if let Some(scope) = unknown {
+            return Err(ServiceError::bad_request(format!(
+                "Unknown daemon capability scope: {scope}"
+            )));
+        }
+        let ttl = Duration::from_secs(body.ttl_secs.unwrap_or(DEFAULT_CAPABILITY_SESSION_TTL_SECS));
+        let active = self.state.active_compartment_id_for(token);
+        let (session_token, expires_at_unix) =
+            self.state
+                .create_capability_session(active, body.scopes.clone(), ttl);
+        Ok(CapabilitySessionResponse {
+            status: "minted".into(),
+            session_token,
+            scopes: body.scopes,
+            expires_at_unix,
         })
     }
 }

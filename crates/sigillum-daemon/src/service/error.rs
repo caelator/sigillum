@@ -14,6 +14,7 @@
 //! - **400 Bad Request**: Client-supplied invalid input or malformed requests
 //! - **401 Unauthorized**: Missing or invalid authentication credentials
 //! - **403 Forbidden**: Valid credentials but insufficient permissions (locked vault)
+//! - **423 Locked**: The daemon is actively draining unlocked state
 //! - **404 Not Found**: Requested resource or vault initialization state not available
 //! - **409 Conflict**: Operation conflicts with current system state
 //! - **500 Internal Server Error**: Unexpected I/O, cryptographic, or serialization failures
@@ -29,6 +30,7 @@ pub(crate) type ServiceResult<T> = Result<T, ServiceError>;
 pub(crate) struct ServiceError {
     status: StatusCode,
     message: String,
+    action: Option<String>,
 }
 
 impl fmt::Display for ServiceError {
@@ -61,6 +63,7 @@ impl ServiceError {
         Self {
             status,
             message: message.into(),
+            action: None,
         }
     }
 
@@ -74,6 +77,18 @@ impl ServiceError {
 
     pub(crate) fn forbidden(message: impl Into<String>) -> Self {
         Self::new(StatusCode::FORBIDDEN, message)
+    }
+
+    pub(crate) fn policy_violation(action: impl Into<String>) -> Self {
+        Self {
+            status: StatusCode::FORBIDDEN,
+            message: "policy_violation".into(),
+            action: Some(action.into()),
+        }
+    }
+
+    pub(crate) fn locked(message: impl Into<String>) -> Self {
+        Self::new(StatusCode::LOCKED, message)
     }
 
     pub(crate) fn not_found(message: impl Into<String>) -> Self {
@@ -98,5 +113,9 @@ impl ServiceError {
 
     pub(crate) fn message(&self) -> &str {
         &self.message
+    }
+
+    pub(crate) fn action(&self) -> Option<&str> {
+        self.action.as_deref()
     }
 }

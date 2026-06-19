@@ -14,7 +14,7 @@ use sigillum_api::{
 
 use crate::audit_log::AuditEventSpec;
 
-use super::{ServiceError, ServiceResult, SigillumService};
+use super::{ServiceError, ServiceResult, SigillumService, capability_scopes};
 
 mod resolution;
 mod seed_wallets;
@@ -27,7 +27,7 @@ impl SigillumService {
         &self,
         token: Option<&str>,
     ) -> ServiceResult<EvmProviderProfileListResponse> {
-        let _ = self.require_session(token)?;
+        let _ = self.require_scope(token, capability_scopes::EVM_PROVIDERS_READ)?;
         let registry = crate::profiles::load_profiles(&self.state.base_dir).map_err(|error| {
             ServiceError::internal(format!("Failed to load profile registry: {error}"))
         })?;
@@ -144,7 +144,7 @@ impl SigillumService {
         &self,
         token: Option<&str>,
     ) -> ServiceResult<EthStealthWalletProfileListResponse> {
-        let _ = self.require_session(token)?;
+        let _ = self.require_scope(token, capability_scopes::WALLET_PROFILES_READ)?;
         let registry = crate::profiles::load_profiles(&self.state.base_dir).map_err(|error| {
             ServiceError::internal(format!("Failed to load profile registry: {error}"))
         })?;
@@ -189,6 +189,7 @@ impl SigillumService {
             compartment_id,
             chain_id: body.chain_id,
             default_destination_address: body.default_destination_address,
+            execution_enabled: body.execution_enabled.unwrap_or(false),
         };
 
         upsert_named(&mut registry.eth_stealth_wallets, profile.clone(), |item| {
@@ -289,6 +290,7 @@ impl SigillumService {
             compartment_id,
             chain_id: body.chain_id,
             default_destination_address: body.default_destination_address,
+            execution_enabled: body.execution_enabled.unwrap_or(false),
         };
 
         upsert_named(&mut registry.eth_xpub_wallets, profile.clone(), |item| {

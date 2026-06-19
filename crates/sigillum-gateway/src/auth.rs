@@ -124,6 +124,38 @@ pub async fn require_api_key(
     Ok(next.run(req).await)
 }
 
+async fn require_scope(
+    scope: &'static str,
+    req: Request,
+    next: Next,
+) -> Result<Response, GatewayError> {
+    let project = req
+        .extensions()
+        .get::<Project>()
+        .ok_or(GatewayError::Unauthorized)?;
+    if project.scopes.iter().any(|candidate| candidate == scope) {
+        Ok(next.run(req).await)
+    } else {
+        Err(GatewayError::MissingScope(scope.into()))
+    }
+}
+
+pub async fn require_payments_create(req: Request, next: Next) -> Result<Response, GatewayError> {
+    require_scope("payments:create", req, next).await
+}
+
+pub async fn require_payments_read(req: Request, next: Next) -> Result<Response, GatewayError> {
+    require_scope("payments:read", req, next).await
+}
+
+pub async fn require_payments_list(req: Request, next: Next) -> Result<Response, GatewayError> {
+    require_scope("payments:list", req, next).await
+}
+
+pub async fn require_payments_cancel(req: Request, next: Next) -> Result<Response, GatewayError> {
+    require_scope("payments:cancel", req, next).await
+}
+
 /// Axum middleware that validates the admin API key for protected management endpoints.
 pub async fn require_admin_key(
     State(state): State<AppState>,
