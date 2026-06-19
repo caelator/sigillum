@@ -86,7 +86,9 @@ The configurable reliability harness is `scripts/check-local-soak.sh`. A bounded
 local validation run passed with `SIGILLUM_SOAK_SECONDS=300`,
 `SIGILLUM_SOAK_INTERVAL_SECONDS=10`, and 28 full iterations. Production-style
 evidence should run the same harness for a longer target-host window, for
-example with `SIGILLUM_SOAK_SECONDS=3600`.
+example with `SIGILLUM_SOAK_SECONDS=3600`. When `SIGILLUM_SOAK_RECEIPT` is set,
+the harness writes a JSON receipt that records the commit, dirty-checkout state,
+host, timing, iteration count, doctor count, and checked surfaces.
 
 The local adversarial pass is now executable as `scripts/check-adversarial.sh`
 and wired into the release gate after the full workspace tests. It runs:

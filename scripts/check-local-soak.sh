@@ -13,10 +13,134 @@ GATEWAY_URL="http://127.0.0.1:${GATEWAY_PORT}"
 BASE_DIR="$(mktemp -d "${TMPDIR:-/tmp}/sigillum-local-soak.XXXXXX")"
 DAEMON_LOG="${BASE_DIR}/daemon.log"
 GATEWAY_LOG="${BASE_DIR}/gateway.log"
+RECEIPT_PATH="${SIGILLUM_SOAK_RECEIPT:-}"
+KEEP_ARTIFACTS="${SIGILLUM_SOAK_KEEP_ARTIFACTS:-0}"
+HOST_NAME="$(hostname 2>/dev/null || echo unknown)"
+HOST_OS="$(uname -s 2>/dev/null || echo unknown) $(uname -r 2>/dev/null || echo unknown)"
+GIT_COMMIT="$(git rev-parse HEAD 2>/dev/null || echo unknown)"
+GIT_BRANCH="$(git branch --show-current 2>/dev/null || echo unknown)"
+if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+  if [[ -n "$(git status --porcelain)" ]]; then
+    GIT_DIRTY="true"
+  else
+    GIT_DIRTY="false"
+  fi
+else
+  GIT_DIRTY="unknown"
+fi
 DAEMON_PID=""
 GATEWAY_PID=""
 SESSION_TOKEN=""
 PASSPHRASE="local-soak-passphrase-123"
+HARNESS_START_EPOCH=""
+HARNESS_START_ISO=""
+SOAK_START_EPOCH=""
+SOAK_START_ISO=""
+ITERATIONS=0
+DOCTOR_RUNS=0
+RECEIPT_WRITTEN=0
+
+write_receipt() {
+  local status="$1"
+  local failure_reason="${2:-}"
+  if [[ -z "${RECEIPT_PATH}" ]]; then
+    return 0
+  fi
+
+  mkdir -p "$(dirname "${RECEIPT_PATH}")"
+
+  local finished_epoch
+  local finished_iso
+  local duration_seconds
+  finished_epoch="$(date +%s)"
+  finished_iso="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+  if [[ -n "${HARNESS_START_EPOCH}" ]]; then
+    duration_seconds=$((finished_epoch - HARNESS_START_EPOCH))
+  else
+    duration_seconds=0
+  fi
+
+  SIGILLUM_SOAK_RECEIPT_PATH="${RECEIPT_PATH}" \
+  SIGILLUM_SOAK_RECEIPT_STATUS="${status}" \
+  SIGILLUM_SOAK_RECEIPT_FAILURE="${failure_reason}" \
+  SIGILLUM_SOAK_RECEIPT_HOST="${HOST_NAME}" \
+  SIGILLUM_SOAK_RECEIPT_HOST_OS="${HOST_OS}" \
+  SIGILLUM_SOAK_RECEIPT_COMMIT="${GIT_COMMIT}" \
+  SIGILLUM_SOAK_RECEIPT_BRANCH="${GIT_BRANCH}" \
+  SIGILLUM_SOAK_RECEIPT_DIRTY="${GIT_DIRTY}" \
+  SIGILLUM_SOAK_RECEIPT_DAEMON_URL="${DAEMON_URL}" \
+  SIGILLUM_SOAK_RECEIPT_GATEWAY_URL="${GATEWAY_URL}" \
+  SIGILLUM_SOAK_RECEIPT_SOAK_SECONDS="${SOAK_SECONDS}" \
+  SIGILLUM_SOAK_RECEIPT_INTERVAL_SECONDS="${INTERVAL_SECONDS}" \
+  SIGILLUM_SOAK_RECEIPT_STARTED_AT="${HARNESS_START_ISO}" \
+  SIGILLUM_SOAK_RECEIPT_SOAK_STARTED_AT="${SOAK_START_ISO}" \
+  SIGILLUM_SOAK_RECEIPT_FINISHED_AT="${finished_iso}" \
+  SIGILLUM_SOAK_RECEIPT_DURATION_SECONDS="${duration_seconds}" \
+  SIGILLUM_SOAK_RECEIPT_ITERATIONS="${ITERATIONS}" \
+  SIGILLUM_SOAK_RECEIPT_DOCTOR_RUNS="${DOCTOR_RUNS}" \
+  SIGILLUM_SOAK_RECEIPT_KEEP_ARTIFACTS="${KEEP_ARTIFACTS}" \
+  SIGILLUM_SOAK_RECEIPT_BASE_DIR="${BASE_DIR}" \
+  SIGILLUM_SOAK_RECEIPT_DAEMON_LOG="${DAEMON_LOG}" \
+  SIGILLUM_SOAK_RECEIPT_GATEWAY_LOG="${GATEWAY_LOG}" \
+    node -e '
+const fs = require("fs");
+const path = process.env.SIGILLUM_SOAK_RECEIPT_PATH;
+const number = (name) => {
+  const value = Number(process.env[name] || "0");
+  return Number.isFinite(value) ? value : 0;
+};
+const keepArtifacts = process.env.SIGILLUM_SOAK_RECEIPT_KEEP_ARTIFACTS === "1";
+const dirtyValue = process.env.SIGILLUM_SOAK_RECEIPT_DIRTY;
+const data = {
+  schema_version: 1,
+  kind: "sigillum.local_soak",
+  status: process.env.SIGILLUM_SOAK_RECEIPT_STATUS,
+  failure_reason: process.env.SIGILLUM_SOAK_RECEIPT_FAILURE || null,
+  repo: {
+    commit: process.env.SIGILLUM_SOAK_RECEIPT_COMMIT,
+    branch: process.env.SIGILLUM_SOAK_RECEIPT_BRANCH,
+    dirty: dirtyValue === "true" ? true : dirtyValue === "false" ? false : null,
+  },
+  host: {
+    name: process.env.SIGILLUM_SOAK_RECEIPT_HOST,
+    os: process.env.SIGILLUM_SOAK_RECEIPT_HOST_OS,
+  },
+  urls: {
+    daemon: process.env.SIGILLUM_SOAK_RECEIPT_DAEMON_URL,
+    gateway: process.env.SIGILLUM_SOAK_RECEIPT_GATEWAY_URL,
+  },
+  configured: {
+    soak_seconds: number("SIGILLUM_SOAK_RECEIPT_SOAK_SECONDS"),
+    interval_seconds: number("SIGILLUM_SOAK_RECEIPT_INTERVAL_SECONDS"),
+  },
+  timing: {
+    started_at_utc: process.env.SIGILLUM_SOAK_RECEIPT_STARTED_AT || null,
+    soak_started_at_utc: process.env.SIGILLUM_SOAK_RECEIPT_SOAK_STARTED_AT || null,
+    finished_at_utc: process.env.SIGILLUM_SOAK_RECEIPT_FINISHED_AT,
+    duration_seconds: number("SIGILLUM_SOAK_RECEIPT_DURATION_SECONDS"),
+  },
+  evidence: {
+    iterations: number("SIGILLUM_SOAK_RECEIPT_ITERATIONS"),
+    doctor_runs: number("SIGILLUM_SOAK_RECEIPT_DOCTOR_RUNS"),
+    checks: [
+      "daemon_status",
+      "vault_api_key_write_read",
+      "gateway_health",
+      "sigillum_doctor",
+    ],
+  },
+  artifacts: keepArtifacts
+    ? {
+        base_dir: process.env.SIGILLUM_SOAK_RECEIPT_BASE_DIR,
+        daemon_log: process.env.SIGILLUM_SOAK_RECEIPT_DAEMON_LOG,
+        gateway_log: process.env.SIGILLUM_SOAK_RECEIPT_GATEWAY_LOG,
+      }
+    : null,
+};
+fs.writeFileSync(path, `${JSON.stringify(data, null, 2)}\n`);
+' || true
+  RECEIPT_WRITTEN=1
+}
 
 cleanup() {
   for pid in "${GATEWAY_PID}" "${DAEMON_PID}"; do
@@ -25,9 +149,21 @@ cleanup() {
       wait "${pid}" >/dev/null 2>&1 || true
     fi
   done
-  rm -rf "${BASE_DIR}"
+  if [[ "${KEEP_ARTIFACTS}" == "1" ]]; then
+    echo "local soak artifacts kept at ${BASE_DIR}"
+  else
+    rm -rf "${BASE_DIR}"
+  fi
 }
-trap cleanup EXIT
+
+on_exit() {
+  local status="$?"
+  if [[ "${status}" -ne 0 && "${RECEIPT_WRITTEN}" != "1" ]]; then
+    write_receipt "failed" "script exited with status ${status}"
+  fi
+  cleanup
+}
+trap on_exit EXIT
 
 fail() {
   echo "local soak failed: $*" >&2
@@ -37,6 +173,7 @@ fail() {
       tail -n 80 "${log}" >&2 || true
     fi
   done
+  write_receipt "failed" "$*"
   exit 1
 }
 
@@ -126,9 +263,13 @@ wait_for_url() {
 }
 
 run_doctor() {
-  SIGILLUM_BASE_DIR="${BASE_DIR}" \
+  if SIGILLUM_BASE_DIR="${BASE_DIR}" \
     SIGILLUM_SESSION_TOKEN="${SESSION_TOKEN}" \
-    cargo run -p sigillum-cli --quiet -- doctor --url "${DAEMON_URL}" >/dev/null
+    cargo run -p sigillum-cli --quiet -- doctor --url "${DAEMON_URL}" >/dev/null; then
+    DOCTOR_RUNS=$((DOCTOR_RUNS + 1))
+  else
+    fail "sigillum doctor failed"
+  fi
 }
 
 start_daemon() {
@@ -218,17 +359,20 @@ if ! [[ "${INTERVAL_SECONDS}" =~ ^[0-9]+$ ]] || [[ "${INTERVAL_SECONDS}" -lt 1 ]
   fail "SIGILLUM_SOAK_INTERVAL_SECONDS must be a positive integer"
 fi
 
+HARNESS_START_EPOCH="$(date +%s)"
+HARNESS_START_ISO="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+
 start_daemon
 initialize_daemon
 start_gateway
 
 echo "==> soaking daemon and gateway for ${SOAK_SECONDS}s (interval ${INTERVAL_SECONDS}s)"
-start_epoch="$(date +%s)"
-deadline=$((start_epoch + SOAK_SECONDS))
-iteration=0
+SOAK_START_EPOCH="$(date +%s)"
+SOAK_START_ISO="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+deadline=$((SOAK_START_EPOCH + SOAK_SECONDS))
 while :; do
-  iteration=$((iteration + 1))
-  soak_iteration "${iteration}"
+  ITERATIONS=$((ITERATIONS + 1))
+  soak_iteration "${ITERATIONS}"
 
   now="$(date +%s)"
   if [[ "${now}" -ge "${deadline}" ]]; then
@@ -237,4 +381,9 @@ while :; do
   sleep "${INTERVAL_SECONDS}"
 done
 
-echo "local soak checks passed (${iteration} iteration(s), ${SOAK_SECONDS}s target)"
+write_receipt "passed"
+
+echo "local soak checks passed (${ITERATIONS} iteration(s), ${SOAK_SECONDS}s target)"
+if [[ -n "${RECEIPT_PATH}" ]]; then
+  echo "local soak receipt written to ${RECEIPT_PATH}"
+fi

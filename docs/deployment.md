@@ -107,7 +107,12 @@ without one can skip it with `SIGILLUM_SKIP_BROWSER_SMOKE=1`.
 For longer pre-production confidence, run `scripts/check-local-soak.sh` on the
 target host. Set `SIGILLUM_SOAK_SECONDS` and `SIGILLUM_SOAK_INTERVAL_SECONDS` to
 control duration and cadence; the harness repeatedly checks daemon status,
-gateway health, vault write/read canaries, and `sigillum doctor`.
+gateway health, vault write/read canaries, and `sigillum doctor`. Set
+`SIGILLUM_SOAK_RECEIPT=target/readiness/local-soak.json` to write a durable JSON
+receipt with the commit, dirty-checkout state, host, timing, iteration count,
+doctor count, and checked surfaces. Set `SIGILLUM_SOAK_KEEP_ARTIFACTS=1` only
+when you need daemon/gateway logs for investigation, because that keeps the
+temporary harness directory on disk.
 
 ## Operational Notes
 
