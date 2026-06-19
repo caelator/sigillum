@@ -249,6 +249,9 @@ impl Validate for crate::request::CompartmentInitRequest {
     fn validate(&self) -> Result<(), String> {
         check_len("passphrase", &self.passphrase, MAX_PASSPHRASE)?;
         check_optional_len("label", &self.label, MAX_LABEL)?;
+        if self.threshold == Some(0) {
+            return Err("threshold must be >= 1".into());
+        }
         Ok(())
     }
 }

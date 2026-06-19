@@ -1,10 +1,11 @@
 # Production Readiness Audit
 
-**Date:** June 4, 2026 (updated June 12, 2026)
+**Date:** June 4, 2026 (updated June 19, 2026)
 **Scope:** local-first, single-host Sigillum source checkout and local-sidecar
 gateway boundary
-**Verdict:** source release gate passed; broader production completeness remains
-bounded by the open gaps below
+**Verdict:** source release gate passed for Sigillum Local-First Operator
+Console v1; broader production completeness remains bounded by the open gaps
+below
 
 ## Evidence Snapshot
 
@@ -18,10 +19,14 @@ The gate covers:
 - Cargo metadata resolution
 - architecture guardrails and file-size/module-boundary budgets
 - daemon UI dependency install, TypeScript typecheck, DOM smoke tests including
-  setup-wizard passphrase initialization coverage, and Vite build
+  setup-wizard passphrase initialization coverage, npm high-severity advisory
+  audit, and Vite build
 - generated daemon UI asset freshness for `app.js` and `styles.css`
 - Rust formatting, workspace check, workspace tests, and clippy with warnings
   denied
+- local adversarial/fuzz pass through `scripts/check-adversarial.sh`, covering
+  core property tests, daemon HTTP boundary rejection cases, CLI adversarial
+  smoke, gateway security/integration checks, and daemon UI DOM boundary tests
 - real local daemon runtime smoke for first-run status, served UI shell,
   passphrase compartment initialization, lock/unlock, compartment listing, and
   `sigillum doctor`
@@ -78,9 +83,35 @@ Protocol, captures a screenshot and DOM snapshot on failure, and can be skipped
 on hosts without a local browser via `SIGILLUM_SKIP_BROWSER_SMOKE=1`.
 
 The configurable reliability harness is `scripts/check-local-soak.sh`. A bounded
-local validation run passed with `SIGILLUM_SOAK_SECONDS=20` and five full
-iterations. Production-style evidence should run the same harness for a longer
-target-host window, for example with `SIGILLUM_SOAK_SECONDS=3600`.
+local validation run passed with `SIGILLUM_SOAK_SECONDS=300`,
+`SIGILLUM_SOAK_INTERVAL_SECONDS=10`, and 28 full iterations. Production-style
+evidence should run the same harness for a longer target-host window, for
+example with `SIGILLUM_SOAK_SECONDS=3600`.
+
+The local adversarial pass is now executable as `scripts/check-adversarial.sh`
+and wired into the release gate after the full workspace tests. It runs:
+
+- `cargo test -p sigillum-core --test fuzz_boundaries` with 256 proptest cases
+  by default, configurable through `SIGILLUM_ADVERSARIAL_PROPTEST_CASES`
+- `cargo test -p sigillum-daemon --test adversarial_api`, covering malformed
+  JSON, unexpected content types, empty bodies, missing or malformed bearer
+  tokens, invalid compartment setup values, and bad EVM address/hex inputs at
+  the HTTP route boundary
+- `cargo test -p sigillum-cli --test cli_smoke`, including adversarial command
+  parsing and `sigillum doctor` no-daemon behavior
+- `cargo test -p sigillum-gateway --test gateway_tests` for auth hashing,
+  HMAC signing, constant-time comparison, amount/address validation, and SSRF
+  URL rejection cases
+- `cargo test -p sigillum-gateway --test gateway_integration` for local-sidecar
+  auth, idempotency, scope, rate-limit, rollback, and daemon-side-effect
+  boundaries
+- `npm --prefix crates/sigillum-daemon/ui test` for typed DOM boundary tests,
+  stale-token clearing, setup/unlock/logout flows, dispatcher argument coercion,
+  invalid value formatting, wallet/treasury forms, and self-check rendering
+
+This is a local adversarial/fuzz pass for the current single-host product
+boundary. It is not a replacement for an independent penetration test, and it
+does not claim internet-facing or hosted-service assurance.
 
 `cargo deny check` currently emits duplicate-version warnings and exits
 successfully with advisories, bans, licenses, and sources all accepted.
@@ -91,15 +122,15 @@ successfully with advisories, bans, licenses, and sources all accepted.
 | --- | --- | --- |
 | Build and dependency graph resolve | `cargo metadata --no-deps --format-version 1` inside `./scripts/check-release.sh` | Proven for current checkout |
 | Architecture stays within professional boundaries | `./scripts/check-architecture.sh` inside the release gate | Proven for current checkout |
-| Daemon UI compiles and tested source matches generated assets | `npm ci`, `npm run typecheck`, `npm test`, `npm run build`, plus generated asset freshness in the release gate | Proven for current checkout |
+| Daemon UI compiles and tested source matches generated assets | `npm ci`, `npm audit --audit-level=high`, `npm run typecheck`, `npm test`, `npm run build`, plus generated asset freshness in the release gate | Proven for current checkout |
 | Rust workspace builds, tests, and lints | `cargo fmt --all --check`, `cargo check --workspace`, `cargo test --workspace`, and `cargo clippy --workspace --all-targets -- -D warnings` inside the release gate | Proven for current checkout |
 | Security and supply-chain baseline | `cargo audit` and `cargo deny check` inside the release gate | Proven for current checkout, with accepted duplicate dependency warnings |
 | Local daemon and gateway loopback integration behavior | Workspace integration tests pass outside the sandbox | Proven for current checkout in an unsandboxed local environment |
 | Target-host operational readiness | `sigillum doctor` passed in `scripts/check-runtime-smoke.sh` for first-run and unlocked temporary daemon states | Proven for repeatable isolated local proof; each target host still needs its own doctor result |
 | Runtime daemon lifecycle behavior | `scripts/check-runtime-smoke.sh` starts the daemon, verifies status, initializes a passphrase compartment, writes and reads vault canaries, locks, unlocks, lists compartments, and runs doctor | Proven for current checkout in an unsandboxed local environment |
 | Runtime browser/UI visual behavior | DOM smoke tests pass, the runtime smoke checks the served UI shell, and `scripts/check-browser-smoke.sh` repeatably drives a headless browser through setup, unlocked operator workspace, vault canary write/reveal, browser-session logout, passphrase re-authentication, and post-auth canary count checks against an isolated local daemon inside the release gate | Proven for current checkout as repeatable automation in an unsandboxed local environment with a Chromium-family browser |
-| Long-duration reliability | Recovery and crash tests pass, and `scripts/check-local-soak.sh` passed a bounded local daemon/gateway run | Harness proven for current checkout; longer target-host soak evidence still needed |
-| External security assurance | Code gates, audit, deny, and SSRF/local-boundary tests pass | Not fully proven; no external penetration test or broad fuzzing campaign yet |
+| Long-duration reliability | Recovery and crash tests pass, and `scripts/check-local-soak.sh` passed a bounded 300-second local daemon/gateway run with 28 iterations | Harness proven for current checkout; longer target-host soak evidence still needed |
+| External security assurance | Code gates, audit, deny, local adversarial/fuzz gate, SSRF/local-boundary tests, and UI boundary tests pass | Local boundary pass proven for current checkout; independent external penetration test not performed |
 | Full wallet-management product roadmap | Existing docs and tests cover current local wallet, inventory, risk, and plan slices | Not complete; deeper discovery, DeFi/NFT metadata, broader non-EVM support, and richer consolidation execution remain roadmap work |
 
 ## Release Boundary
@@ -116,6 +147,14 @@ documented product boundary:
 The gate does not prove internet-facing readiness, hosted service safety,
 multi-host coordination, or arbitrary wallet discovery completeness.
 
+The explicit release scope is **Sigillum Local-First Operator Console v1**. It
+includes the local daemon, vault, CLI, session model, current wallet/inventory
+slices, and local-sidecar gateway preview. The comprehensive wallet-management
+roadmap is intentionally deferred from this readiness claim: deeper seed/xpub
+gap-limit discovery, rich NFT/DeFi/airdrop inventory, non-EVM chains, automated
+consolidation execution, and hosted or internet-facing wallet operations remain
+future product work.
+
 ## Remaining Work Before A Broader Completion Claim
 
 The active product objective remains larger than the current release gate. To
@@ -125,10 +164,8 @@ the project still needs:
 1. target-host `sigillum doctor` results for any real host being called ready
 2. a long-duration target-host daemon and gateway soak run, beyond the bounded
    local harness validation
-3. a documented fuzzing or adversarial test pass across the daemon API,
-   gateway, and UI boundary
-4. a decision on whether open wallet-management roadmap items are required for
-   the specific release scope or explicitly deferred
+3. an independent external penetration test if the claim expands beyond
+   source-verified local-first readiness
 
 Until those are complete, the accurate claim is narrower: the current source
 checkout passes the local-first release gate, and the docs identify the

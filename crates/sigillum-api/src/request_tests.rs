@@ -199,6 +199,20 @@ fn test_compartment_init_request_roundtrip() {
 }
 
 #[test]
+fn test_compartment_init_rejects_zero_threshold() {
+    use crate::validation::Validate;
+
+    let req = CompartmentInitRequest {
+        id: 1,
+        passphrase: "init_pass".to_string(),
+        label: Some("new_label".to_string()),
+        threshold: Some(0),
+    };
+
+    assert!(req.validate().unwrap_err().contains("threshold"));
+}
+
+#[test]
 fn test_secrets_push_request_roundtrip() {
     let req = SecretsPushRequest {
         from_compartment: 1,

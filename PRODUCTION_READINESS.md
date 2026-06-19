@@ -1,6 +1,6 @@
 # Sigillum — Production Readiness
 
-**Date:** June 4, 2026
+**Date:** June 4, 2026 (updated June 19, 2026)
 **Current Verdict:** The target is local-first single-host readiness; internet-facing and remote-platform scope is explicitly unsupported
 
 ## Summary
@@ -11,7 +11,7 @@ core, CLI, and the `sigillum-gateway` sidecar:
 
 - the workspace needs to stay green on the executable `./scripts/check-release.sh`
   gate, including metadata, architecture guardrails, daemon UI checks, tests,
-  fmt, clippy, runtime smoke, audit, and deny
+  adversarial/fuzz checks, fmt, clippy, runtime smoke, npm/Rust audits, and deny
 - clean-clone reproducibility depends on the committed `Cargo.lock`, Rust
   `1.88.0`, crates.io dependencies, and no local vendored SQLite patch
 - Rust `1.88.0` supersedes the earlier `1.85.0` target because the current
@@ -33,6 +33,13 @@ That does **not** mean the project is aiming toward a remote, multi-tenant, or
 internet-facing deployment. The green bar here is explicitly the single-machine
 operator model described in the README and deployment guide, because that is the
 intended product boundary.
+
+The release scope is **Sigillum Local-First Operator Console v1**. That scope
+includes the local daemon, vault, CLI, session model, current wallet/inventory
+slices, and local-sidecar gateway preview. It explicitly does not include the
+full wallet-management roadmap: deeper seed/xpub gap-limit discovery, rich
+NFT/DeFi/airdrop inventory, non-EVM chains, automated consolidation execution,
+and internet-facing or hosted wallet operations remain future product work.
 
 ## What Is Ready
 
@@ -68,9 +75,14 @@ The main remaining limits are scope and assurance, not the current local-first b
   - no claim that the gateway is an internet-ready boundary because that is not the intended direction
 - The current bar is based on code audit plus workspace verification gates.
   - no external penetration test
-  - no fuzzing campaign across the gateway/UI boundary
+  - local adversarial/fuzz coverage is automated through
+    `scripts/check-adversarial.sh`, but it is not an independent security audit
   - no long-duration soak or chaos testing evidence yet
 - Broader operator polish still remains after the new daemon-backed CLI surface.
+- The comprehensive wallet-management workstation remains a roadmap track.
+  Current wallet and inventory slices are inside the local-first release
+  boundary, but broader discovery, NFT/DeFi/airdrop, non-EVM, and automated
+  consolidation claims are deferred.
 
 ## Structural Readiness Gates
 
@@ -78,7 +90,8 @@ Sigillum should only be treated as release-ready for a given scope when all of
 these are true:
 
 1. `./scripts/check-release.sh` passes from a clean checkout with the pinned
-   Rust toolchain, committed daemon UI assets, and local daemon runtime smoke.
+   Rust toolchain, committed daemon UI assets, adversarial/fuzz checks, and
+   local daemon runtime smoke.
 2. The API, daemon route, client surface, and docs all match.
 3. The feature has an operator surface or an explicit API-only decision.
 4. Persistence and restart behavior are explicit and tested.
@@ -106,7 +119,9 @@ The next work should still avoid speculative new product scope first. The right
 immediate move is:
 
 1. keep `./scripts/check-release.sh` enforced in CI across Ubuntu and macOS
-2. expand higher-assurance testing around long-running recovery, gateway delivery, and browser/widget behavior
-3. close the remaining CLI/operator gaps for wallet/send flows and polish
-4. keep documentation and audits anchored to the local-on-your-computer boundary
-5. then begin `eth-xpub`
+2. keep `./scripts/check-adversarial.sh` green and expand it when new API,
+   gateway, or UI boundary surfaces are added
+3. expand higher-assurance testing around long-running recovery, gateway delivery, and browser/widget behavior
+4. close the remaining CLI/operator gaps for wallet/send flows and polish
+5. keep documentation and audits anchored to the local-on-your-computer boundary
+6. then begin `eth-xpub`

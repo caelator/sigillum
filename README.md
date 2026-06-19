@@ -18,6 +18,11 @@ optional local-sidecar gateway for payment previews. It is intended to stay a
 local-on-your-computer system rather than evolve into an internet-facing remote
 secret-management platform.
 
+The current release boundary is Sigillum Local-First Operator Console v1. The
+larger wallet-management workstation roadmap, including deeper wallet discovery,
+NFT/DeFi/airdrop inventory, non-EVM support, and automated consolidation, is
+future product scope rather than part of the current readiness claim.
+
 ## Current Scope
 
 Implemented and working in this repository:

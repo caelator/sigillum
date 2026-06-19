@@ -193,8 +193,9 @@ Deliverables:
   - snapshot restore
   - compartment replacement/recovery
   - deposit and queue crash recovery
-- Add fuzz/property-style coverage for high-risk serialization and cryptographic
-  boundary logic.
+- Keep `scripts/check-adversarial.sh` green and expand its fuzz/property-style
+  coverage as new high-risk API, gateway, UI, serialization, and cryptographic
+  boundaries are added.
 - Add a tighter release checklist for docs, tests, migrations, and local upgrade
   compatibility.
 

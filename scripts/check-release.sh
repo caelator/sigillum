@@ -92,6 +92,7 @@ snapshot_generated_assets
 run_cargo_metadata
 run_step ./scripts/check-architecture.sh
 run_step npm --prefix crates/sigillum-daemon/ui ci --ignore-scripts
+run_step npm --prefix crates/sigillum-daemon/ui audit --audit-level=high
 run_step npm --prefix crates/sigillum-daemon/ui run typecheck
 run_step npm --prefix crates/sigillum-daemon/ui test
 run_step npm --prefix crates/sigillum-daemon/ui run build
@@ -99,6 +100,7 @@ verify_generated_assets_unchanged
 run_step cargo fmt --all --check
 run_step cargo check --workspace
 run_step cargo test --workspace
+run_step ./scripts/check-adversarial.sh
 run_step cargo clippy --workspace --all-targets -- -D warnings
 run_step ./scripts/check-runtime-smoke.sh
 if [[ "${SIGILLUM_SKIP_BROWSER_SMOKE:-0}" == "1" ]]; then
