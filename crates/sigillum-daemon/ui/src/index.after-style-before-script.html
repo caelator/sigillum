@@ -256,6 +256,16 @@
               <div class="tp-head">Export a stealth receive address</div>
               <div class="tp-body">Generate a one-time stealth address to receive funds privately, so deposits cannot be linked to a single published address.</div>
             </div>
+            <div class="trust-point">
+              <div class="tp-head">Protect payer privacy on sweeps</div>
+              <div class="tp-body">Block consolidations and sweeps that would publicly link your payers (fail-closed). This covers addresses that would land in the same destination (single-hop common-recipient linkage). You can route each payer to a distinct destination, and you can change this anytime in Treasury policy.</div>
+              <p class="card-note mt-8">Scope: detects when different payers would sweep to the SAME destination. It does NOT cover gas-funding linkage, amount or timing correlation, downstream re-merging of per-party destinations, or multi-hop flows &mdash; keep per-party destinations separate.</p>
+              <div class="form-row">
+                <button class="btn-primary" data-action="wizEnableLinkageProtection">Enable protection</button>
+                <button class="btn-ghost" data-action="wizDeclineLinkageProtection">Decide later</button>
+              </div>
+              <p class="helper-text hidden" id="wizLinkageChoiceStatus"></p>
+            </div>
           </div>
         </div>
 
@@ -400,6 +410,7 @@
             Block cross-party linkage (fail-closed)
           </label>
         </div>
+        <p class="field-hint">Scope: blocks when different payers would sweep to the SAME destination. It does NOT cover gas-funding linkage, amount/timing correlation, downstream re-merging of per-party destinations, or multi-hop flows &mdash; keep per-party destinations separate.</p>
         <textarea id="treasuryPolicyDestinations" placeholder="Allowed destinations, one per line: 0xADDRESS or 0xADDRESS:label"></textarea>
         <div class="form-row">
           <input type="text" id="treasuryPolicyMaxStepEth" placeholder="Max per-step native (ETH, optional)">

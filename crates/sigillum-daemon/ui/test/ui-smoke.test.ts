@@ -267,6 +267,7 @@ test("setup wizard passphrase path validates and initializes a local vault", asy
     "wizPassphraseConfirm",
     "wizDoneMsg",
     "wizDoneDetail",
+    "wizLinkageChoiceStatus",
   ]);
   const calls: Array<{ method: string; path: string; body?: any }> = [];
   const toasts: Array<{ message: string; type?: string }> = [];
@@ -337,6 +338,71 @@ test("setup wizard passphrase path validates and initializes a local vault", asy
   } finally {
     globalThis.setTimeout = originalSetTimeout;
   }
+});
+
+test("setup wizard enables payer-linkage protection from done step", async () => {
+  const dom = installDom(["wizLinkageChoiceStatus"]);
+  dom.el("wizLinkageChoiceStatus").classList.add("hidden");
+  const calls: Array<{ method: string; path: string; body?: any }> = [];
+  const toasts: Array<{ message: string; type?: string }> = [];
+
+  const wizard = createSetupWizard({
+    api: async (method, path, body) => {
+      calls.push({ method, path, body });
+      return {};
+    },
+    toast: (message, type) => toasts.push({ message, type }),
+    refresh: () => undefined,
+    submitNewFido2Pin: async () => undefined,
+    friendlyFidoError: (message) => String(message),
+  });
+
+  await wizard.wizEnableLinkageProtection();
+
+  deepEqual(calls, [
+    {
+      method: "POST",
+      path: "/api/treasury/policy/update",
+      body: { enabled: false, block_cross_party_linkage: true },
+    },
+  ]);
+  equal(dom.el("wizLinkageChoiceStatus").classList.contains("hidden"), false);
+  ok((dom.el("wizLinkageChoiceStatus").textContent || "").length > 0);
+  deepEqual(toasts.pop(), {
+    message: "Payer-linkage protection enabled",
+    type: undefined,
+  });
+});
+
+test("setup wizard can defer payer-linkage protection without policy update", () => {
+  const dom = installDom(["wizLinkageChoiceStatus"]);
+  dom.el("wizLinkageChoiceStatus").classList.add("hidden");
+  const calls: Array<{ method: string; path: string; body?: any }> = [];
+  const toasts: Array<{ message: string; type?: string }> = [];
+
+  const wizard = createSetupWizard({
+    api: async (method, path, body) => {
+      calls.push({ method, path, body });
+      return {};
+    },
+    toast: (message, type) => toasts.push({ message, type }),
+    refresh: () => undefined,
+    submitNewFido2Pin: async () => undefined,
+    friendlyFidoError: (message) => String(message),
+  });
+
+  wizard.wizDeclineLinkageProtection();
+
+  equal(
+    calls.some((call) => call.path === "/api/treasury/policy/update"),
+    false,
+  );
+  equal(dom.el("wizLinkageChoiceStatus").classList.contains("hidden"), false);
+  ok((dom.el("wizLinkageChoiceStatus").textContent || "").length > 0);
+  deepEqual(toasts.pop(), {
+    message: "You can enable payer-linkage protection later in Treasury policy.",
+    type: undefined,
+  });
 });
 
 test("queue and inventory renderers produce reviewable DOM summaries", () => {
@@ -456,6 +522,7 @@ test("queue and inventory renderers produce reviewable DOM summaries", () => {
   ok(dom.el("consolidationPlanList").innerHTML.includes("Safe JSON"));
   ok(dom.el("consolidationPlanList").innerHTML.includes("Call JSON"));
   ok(dom.el("consolidationPlanList").innerHTML.includes("would link payers"));
+  ok(dom.el("consolidationPlanList").innerHTML.includes("Scope: flags payers"));
   ok(
     dom
       .el("consolidationPlanList")

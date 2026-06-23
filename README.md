@@ -225,6 +225,40 @@ On top of that, the daemon now includes:
 
 This means the current boundary is no longer “sign only.” Sigillum can now keep provider credentials internal, monitor deposit balances, sign locally, and optionally broadcast without exposing private wallet material to upstream web services.
 
+## Privacy Model — Scope and Limitations
+
+Sigillum is designed for a **solo operator** who receives funds from many parties
+and does not want those payers tied together. Its linkage protection is built for
+**public on-chain analysis and the payers themselves**. It is explicitly *not*
+hardened against a well-resourced adversary correlating timing, amounts, and IPs,
+nor against malware already running on your machine.
+
+**What linkage protection covers.** When consolidating (HD plan) or sweeping
+stealth deposits, Sigillum detects when funds belonging to *different* payers
+would land at the **same destination address** — the dominant
+"common-recipient" clustering signal on Ethereum's account model. It surfaces
+this as a warning, supports routing each payer to a **distinct** destination, and
+— when the `block_cross_party_linkage` treasury policy is enabled (a fail-closed
+opt-in offered during onboarding) — **blocks** any consolidation step or stealth
+sweep that would link payers. This is enforced at plan generation, at approval,
+and at sweep enqueue.
+
+**What it does NOT cover** (operator discipline required):
+
+- **Gas funding.** Funding a fresh receive address's gas from a shared/known
+  address links them. Fund per-payer gas from per-payer sources.
+- **Amount and timing correlation.** Out of scope for this threat model.
+- **Downstream re-merging.** Sigillum checks one hop. If you later move
+  per-payer destinations into one address, they re-link. Keep them separate.
+- **Multi-hop flows** through intermediaries.
+
+**Other privacy costs, surfaced in the UI.** RPC provider calls (balance refresh,
+inventory scans) reveal the queried addresses and your IP to the configured
+endpoint — prefer your own node or a dedicated/partitioned endpoint. The local
+daemon listens on a loopback TCP port; any local process can reach the API, gated
+by the per-session bearer token (held only in the desktop webview) and an unlock
+throttle.
+
 ## Web UI
 
 The embedded UI currently supports:

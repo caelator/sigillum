@@ -475,6 +475,7 @@ export function createInventoryActions(deps: InventoryActionsDeps) {
         const linkageBanner = linkageFindings.length
           ? '<div class="plan-linkage-banner"><strong>Privacy: this plan would link payers</strong><br>' +
             esc(linkageFindings.join(" | ")) +
+            '<br><span class="linkage-warning">Scope: flags payers that would sweep to the same destination. Does not cover gas-funding links, amount/timing correlation, downstream re-merging, or multi-hop flows — keep per-party destinations separate.</span>' +
             "</div>"
           : "";
         const safeAddressInput =

@@ -571,6 +571,39 @@ export function createSetupWizard(deps: SetupWizardDeps) {
     wizCompleteFido2Setup();
   }
 
+  function showLinkageChoiceStatus(message: string): void {
+    const status = document.getElementById("wizLinkageChoiceStatus");
+    if (!status) return;
+    status.textContent = message;
+    status.classList.remove("hidden");
+  }
+
+  async function wizEnableLinkageProtection(): Promise<void> {
+    try {
+      const r = await deps.api("POST", "/api/treasury/policy/update", {
+        enabled: false,
+        block_cross_party_linkage: true,
+      });
+      if (r.error) {
+        deps.toast(r.error, "error");
+        return;
+      }
+      showLinkageChoiceStatus(
+        "Payer-linkage protection is on. Sweeps that would link different payers to the same destination are now blocked. Adjust anytime in Treasury policy.",
+      );
+      deps.toast("Payer-linkage protection enabled");
+    } catch (e: any) {
+      deps.toast(String(e?.message ?? e), "error");
+    }
+  }
+
+  function wizDeclineLinkageProtection(): void {
+    showLinkageChoiceStatus(
+      "Left off for now. You can enable payer-linkage protection later in Treasury policy.",
+    );
+    deps.toast("You can enable payer-linkage protection later in Treasury policy.");
+  }
+
   return {
     reset,
     updateWizardChrome,
@@ -583,6 +616,8 @@ export function createSetupWizard(deps: SetupWizardDeps) {
     wizProceedFido2,
     wizBackFromFido2Pin,
     wizAddCustomComp,
+    wizDeclineLinkageProtection,
+    wizEnableLinkageProtection,
     wizRegisterKey,
     wizSetNewPin,
     wizSetAdditionalKeyPin,

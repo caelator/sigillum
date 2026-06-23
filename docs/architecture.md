@@ -241,6 +241,29 @@ What it intentionally does not do today:
   current stealth deposit sweep flow; consolidation plan exports are the current
   execution handoff boundary
 
+## Privacy & Linkage Model
+
+The receiving/treasury model centers on keeping payers unlinkable. Receive
+allocations and stealth deposits attribute to a first-class `Counterparty`, and
+consolidation is linkage-aware: `analyze_plan_linkage` (HD planner) and
+`detect_stealth_sweep_linkage` (stealth sweeps) flag when funds for *different*
+payers would route to the **same destination** — the single-hop common-recipient
+heuristic on Ethereum's account model. The identity model is conservative: a
+tagged party is one identity and each unattributed address is its own distinct
+identity, so the analysis never produces a false negative (two tagged payers to
+one destination are always caught) at the cost of possible false positives. When
+the `block_cross_party_linkage` treasury policy is enabled (an explicit
+fail-closed opt-in surfaced in onboarding, default off), warnings become hard
+blockers at plan generation, approval, and stealth-sweep enqueue.
+
+This protection is deliberately scoped to **single-hop, destination-axis**
+linkage. It does not model gas-funding linkage, amount/timing correlation,
+downstream re-merging of per-party destinations, or multi-hop flows, and RPC
+provider calls expose queried addresses to the configured endpoint. The full
+threat model and operator-discipline requirements are documented in the README's
+"Privacy Model — Scope and Limitations" section; the claim is intentionally not
+an unconditional unlinkability guarantee.
+
 ## Architectural Priorities
 
 The next clean architecture step is not adding more crates. It is tightening invariants around the existing local system:
