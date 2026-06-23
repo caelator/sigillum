@@ -316,6 +316,10 @@ mod tests {
                 .provider_balance_observation_concurrency,
             8
         );
+        assert_eq!(
+            diagnostics.runtime_policy.receiving_refresh_address_cap,
+            200
+        );
         assert_eq!(diagnostics.eth_stealth_deposit_count, 0);
         assert_eq!(diagnostics.funded_eth_stealth_deposit_count, 0);
     }

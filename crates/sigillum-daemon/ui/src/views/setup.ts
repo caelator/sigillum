@@ -57,6 +57,17 @@ const WIZARD_CHROME: Record<
   string,
   { pill: string; title: string; summary: string; checklist: string[] }
 > = {
+  wizStepWelcome: {
+    pill: "Welcome",
+    title: "Before you create a vault",
+    summary:
+      "A short orientation so you know exactly what Sigillum is and where your data lives before anything is created.",
+    checklist: [
+      "Confirm this is the machine you want to operate from.",
+      "Decide whether you will use hardware keys, a passphrase, or both.",
+      "Have any FIDO2 hardware key nearby if you plan to enroll one.",
+    ],
+  },
   wizStep0: {
     pill: "Step 1 of 3",
     title: "Choose a protection model",
@@ -247,6 +258,10 @@ export function createSetupWizard(deps: SetupWizardDeps) {
     setTextById("wizStageTitle", meta.title);
     setTextById("wizStageSummary", meta.summary);
     setTrustedHtmlById("wizChecklist", renderChecklist(meta.checklist || []));
+  }
+
+  function wizGetStarted(): void {
+    wizShowStep("wizStep0");
   }
 
   function wizBackToPresets(): void {
@@ -563,6 +578,7 @@ export function createSetupWizard(deps: SetupWizardDeps) {
     wizPreset,
     wizBackToPresets,
     wizDetectDevice,
+    wizGetStarted,
     wizInitPassphrase,
     wizProceedFido2,
     wizBackFromFido2Pin,

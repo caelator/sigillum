@@ -4,6 +4,10 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use sigillum_api::{
+    Counterparty, CounterpartyCreateRequest, CounterpartyDeleteRequest, CounterpartyListResponse,
+    CounterpartyMutationResponse, CounterpartyUpdateRequest, EthStealthDeposit,
+    EthStealthDepositRefreshRequest, EvmProviderProfile, ReceivingCoverage, ReceivingItem,
+    ReceivingOverviewResponse, ReceivingPartyGroup, ReceivingRefreshResponse, ReceivingTotals,
     TreasuryAllowedDestination, TreasuryChainSummary, TreasuryGroupSummary,
     TreasuryOverviewResponse, TreasuryPlanSummary, TreasuryPolicy, TreasuryPolicyMutationResponse,
     TreasuryPolicyResponse, TreasuryPolicyUpdateRequest, TreasuryReceiveAllocateRequest,
@@ -15,6 +19,7 @@ use sigillum_api::{
 use sigillum_core::decode_quantity_hex;
 
 use crate::audit_log::AuditEventSpec;
+use crate::deposits::DepositState;
 use crate::inventory::WalletInventoryState;
 use crate::service::evm::normalize_address;
 use crate::service::helpers::{map_xpub_error, now_unix, random_id};
@@ -25,16 +30,22 @@ use crate::service::{ServiceError, ServiceResult, SigillumService};
 
 use super::risk::derive_inventory_risk_findings;
 use super::support::{
-    load_inventory_state, save_inventory_state, trimmed_optional, trimmed_required,
+    load_inventory_state, quantity_hex_is_nonzero, save_inventory_state, select_providers,
+    trimmed_optional, trimmed_required, upsert_address,
 };
 use super::wallet_selection::{
     SeedDerivationPattern, derive_discovery_wallet_address, select_discovery_wallets,
 };
-use super::{WALLET_FAMILY_ETH_SEED, WALLET_FAMILY_ETH_WATCH, WALLET_FAMILY_ETH_XPUB};
+use super::{
+    DISCOVERY_SOURCE_LOCAL_RPC, WALLET_FAMILY_ETH_SEED, WALLET_FAMILY_ETH_WATCH,
+    WALLET_FAMILY_ETH_XPUB,
+};
 
 const DEFAULT_NATIVE_SYMBOL: &str = "ETH";
 const RECEIVE_STATUS_ACTIVE: &str = "active";
 const RECEIVE_STATUS_RETIRED: &str = "retired";
+const RECEIVING_LINKAGE_WARNING: &str =
+    "Sweeping here would link this payer with another party. Set a distinct per-party sweep destination.";
 /// Absurdly large but bounded: receive indices beyond this point indicate a
 /// runaway caller, not a treasury that genuinely needs a million addresses.
 const MAX_RECEIVE_INDEX: u32 = 1_000_000;
@@ -85,6 +96,10 @@ fn balance_is_nonzero(value: &[u8; 32]) -> bool {
     value.iter().any(|byte| *byte != 0)
 }
 
+fn usize_to_u32_count(value: usize) -> u32 {
+    value.min(u32::MAX as usize) as u32
+}
+
 fn has_classification(address: &WalletInventoryAddress, classification: &str) -> bool {
     address
         .classifications
@@ -123,6 +138,260 @@ fn classify_holding(group: &mut GroupAccumulator, holding: &WalletAssetHolding) 
         "approval" => group.approval_exposure_count += 1,
         _ => {}
     }
+}
+
+fn build_receiving_overview(
+    state: &WalletInventoryState,
+    deposits: &DepositState,
+    now: u64,
+) -> ReceivingOverviewResponse {
+    let mut balances_by_address: BTreeMap<String, [u8; 32]> = BTreeMap::new();
+    for address in &state.addresses {
+        let balance = decode_quantity_hex(&address.native_balance_wei_hex).unwrap_or([0u8; 32]);
+        let total = balances_by_address
+            .entry(address.address.to_ascii_lowercase())
+            .or_insert([0u8; 32]);
+        let current = *total;
+        *total = add_u256(&current, &balance);
+    }
+
+    let known_party_ids: BTreeSet<String> =
+        state.parties.iter().map(|party| party.id.clone()).collect();
+    let mut items_by_party_id: BTreeMap<String, Vec<ReceivingItem>> = BTreeMap::new();
+    let mut unassigned_items: Vec<ReceivingItem> = Vec::new();
+    let mut hd_count = 0u32;
+
+    for allocation in state
+        .receive_allocations
+        .iter()
+        .filter(|allocation| allocation.status == RECEIVE_STATUS_ACTIVE)
+    {
+        hd_count += 1;
+        let item = hd_receiving_item(allocation, &balances_by_address);
+        let resolved_counterparty_id = item
+            .counterparty_id
+            .as_ref()
+            .filter(|counterparty_id| known_party_ids.contains(*counterparty_id))
+            .cloned();
+        if let Some(counterparty_id) = resolved_counterparty_id {
+            items_by_party_id
+                .entry(counterparty_id)
+                .or_default()
+                .push(item);
+        } else {
+            unassigned_items.push(item);
+        }
+    }
+
+    let stealth_linkage_warnings =
+        receiving_linkage_warning_deposit_ids(&deposits.eth_stealth, &state.parties);
+    let mut stealth_count = 0u32;
+    for deposit in &deposits.eth_stealth {
+        stealth_count += 1;
+        let mut item = stealth_receiving_item(deposit);
+        if stealth_linkage_warnings.contains(&deposit.id) {
+            item.linkage_warning = Some(RECEIVING_LINKAGE_WARNING.into());
+        }
+        let resolved_counterparty_id = item
+            .counterparty_id
+            .as_ref()
+            .filter(|counterparty_id| known_party_ids.contains(*counterparty_id))
+            .cloned();
+        if let Some(counterparty_id) = resolved_counterparty_id {
+            items_by_party_id
+                .entry(counterparty_id)
+                .or_default()
+                .push(item);
+        } else {
+            unassigned_items.push(item);
+        }
+    }
+
+    let mut groups = Vec::new();
+    for party in &state.parties {
+        if let Some(items) = items_by_party_id.remove(&party.id) {
+            groups.push(receiving_party_group(Some(party.clone()), items));
+        }
+    }
+    if !unassigned_items.is_empty() {
+        groups.push(receiving_party_group(None, unassigned_items));
+    }
+
+    let mut item_count = 0u32;
+    let mut addresses_with_known_balance = 0u32;
+    let mut native_total = [0u8; 32];
+    for group in &groups {
+        item_count += group.item_count;
+        addresses_with_known_balance +=
+            group.items.iter().filter(|item| item.balance_known).count() as u32;
+        native_total = add_u256(&native_total, &decoded_balance(&group.native_total_wei_hex));
+    }
+
+    ReceivingOverviewResponse {
+        generated_at_unix: now,
+        include_retired: false,
+        groups,
+        totals: ReceivingTotals {
+            item_count,
+            hd_count,
+            stealth_count,
+            native_total_wei_hex: encode_quantity_hex(&native_total),
+        },
+        coverage: ReceivingCoverage {
+            addresses_total: item_count,
+            addresses_with_known_balance,
+            note: "Balances reflect the last persisted inventory/deposit scan; live refresh arrives in increment B2.".into(),
+        },
+    }
+}
+
+fn receiving_linkage_warning_deposit_ids(
+    deposits: &[EthStealthDeposit],
+    parties: &[Counterparty],
+) -> BTreeSet<String> {
+    let mut bucket_by_deposit_id: BTreeMap<String, String> = BTreeMap::new();
+    let mut identities_by_bucket: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
+
+    for deposit in deposits {
+        let Some(bucket) = stealth_dashboard_destination_bucket(deposit, parties) else {
+            continue;
+        };
+        identities_by_bucket
+            .entry(bucket.clone())
+            .or_default()
+            .insert(stealth_dashboard_identity_key(deposit));
+        bucket_by_deposit_id.insert(deposit.id.clone(), bucket);
+    }
+
+    bucket_by_deposit_id
+        .into_iter()
+        .filter_map(|(deposit_id, bucket)| {
+            identities_by_bucket
+                .get(&bucket)
+                .is_some_and(|identities| identities.len() > 1)
+                .then_some(deposit_id)
+        })
+        .collect()
+}
+
+fn stealth_dashboard_destination_bucket(
+    deposit: &EthStealthDeposit,
+    parties: &[Counterparty],
+) -> Option<String> {
+    if let Some(destination) = trimmed_str(deposit.sweep_destination_address.as_deref()) {
+        return Some(format!(
+            "destination:{}",
+            normalize_stealth_dashboard_linkage_key(destination)
+        ));
+    }
+
+    if let Some(counterparty_id) = trimmed_str(deposit.counterparty_id.as_deref()) {
+        return parties
+            .iter()
+            .find(|party| party.id.as_str() == counterparty_id)
+            .and_then(|party| trimmed_str(party.sweep_destination_address.as_deref()))
+            .map(|destination| {
+                format!(
+                    "destination:{}",
+                    normalize_stealth_dashboard_linkage_key(destination)
+                )
+            });
+    }
+
+    trimmed_str(Some(&deposit.wallet_profile)).map(|profile| format!("wallet_profile:{profile}"))
+}
+
+fn stealth_dashboard_identity_key(deposit: &EthStealthDeposit) -> String {
+    trimmed_str(deposit.counterparty_id.as_deref())
+        .map(|id| format!("counterparty:{id}"))
+        .unwrap_or_else(|| {
+            format!(
+                "unattributed:{}",
+                normalize_stealth_dashboard_linkage_key(&deposit.stealth_address)
+            )
+        })
+}
+
+fn normalize_stealth_dashboard_linkage_key(value: &str) -> String {
+    value.trim().to_ascii_lowercase()
+}
+
+fn trimmed_str(value: Option<&str>) -> Option<&str> {
+    value.map(str::trim).filter(|value| !value.is_empty())
+}
+
+fn hd_receiving_item(
+    allocation: &TreasuryReceiveAllocation,
+    balances_by_address: &BTreeMap<String, [u8; 32]>,
+) -> ReceivingItem {
+    let balance = balances_by_address.get(&allocation.address.to_ascii_lowercase());
+    let (balance_known, balance_native_wei_hex) = match balance {
+        Some(balance) => (true, Some(encode_quantity_hex(balance))),
+        None => (false, None),
+    };
+
+    ReceivingItem {
+        source_type: "hd".into(),
+        address: allocation.address.clone(),
+        // Increment B1 is EVM mainnet only; allocations do not yet persist chain_id.
+        chain_id: 1,
+        derivation_path: Some(allocation.derivation_path.clone()),
+        purpose: Some(allocation.purpose.clone()),
+        label: allocation.label.clone(),
+        counterparty_id: allocation.counterparty_id.clone(),
+        linkage_warning: None,
+        balance_native_wei_hex,
+        balance_known,
+        status: allocation.status.clone(),
+        created_at_unix: allocation.created_at_unix,
+    }
+}
+
+fn stealth_receiving_item(deposit: &EthStealthDeposit) -> ReceivingItem {
+    ReceivingItem {
+        source_type: "stealth".into(),
+        address: deposit.stealth_address.clone(),
+        chain_id: 1,
+        derivation_path: None,
+        purpose: None,
+        label: deposit.note.clone(),
+        counterparty_id: deposit.counterparty_id.clone(),
+        linkage_warning: None,
+        balance_native_wei_hex: Some(
+            deposit
+                .observed_native_balance_wei_hex
+                .clone()
+                .unwrap_or_else(|| "0x0".to_string()),
+        ),
+        balance_known: true,
+        status: deposit.status.clone(),
+        created_at_unix: deposit.created_at_unix,
+    }
+}
+
+fn receiving_party_group(
+    counterparty: Option<Counterparty>,
+    items: Vec<ReceivingItem>,
+) -> ReceivingPartyGroup {
+    let native_total = receiving_items_native_total(&items);
+    ReceivingPartyGroup {
+        counterparty,
+        item_count: items.len() as u32,
+        native_total_wei_hex: encode_quantity_hex(&native_total),
+        items,
+    }
+}
+
+fn receiving_items_native_total(items: &[ReceivingItem]) -> [u8; 32] {
+    let mut total = [0u8; 32];
+    for item in items {
+        if item.balance_known {
+            if let Some(balance) = item.balance_native_wei_hex.as_deref() {
+                total = add_u256(&total, &decoded_balance(balance));
+            }
+        }
+    }
+    total
 }
 
 impl SigillumService {
@@ -340,6 +609,196 @@ impl SigillumService {
         })
     }
 
+    pub(crate) fn receiving_overview(
+        &self,
+        token: Option<&str>,
+    ) -> ServiceResult<sigillum_api::ReceivingOverviewResponse> {
+        let _ = self.require_session(token)?;
+        let state = load_inventory_state(&self.state.base_dir)?;
+        let deposits = crate::deposits::load_deposits(&self.state.base_dir)
+            .map_err(|error| ServiceError::internal(format!("Failed to load deposits: {error}")))?;
+
+        Ok(build_receiving_overview(&state, &deposits, now_unix()))
+    }
+
+    pub(crate) async fn refresh_receiving_balances(
+        &self,
+        token: Option<&str>,
+    ) -> ServiceResult<ReceivingRefreshResponse> {
+        let token =
+            self.require_scope(token, crate::service::capability_scopes::DEPOSITS_REFRESH)?;
+        let _guard = self.state.operation_guard().await;
+        let registry = crate::profiles::load_profiles(&self.state.base_dir).map_err(|error| {
+            ServiceError::internal(format!("Failed to load profile registry: {error}"))
+        })?;
+        let providers = if registry.evm_providers.is_empty() {
+            Vec::new()
+        } else {
+            select_providers(&registry.evm_providers, None)?
+        };
+        let mut inventory = load_inventory_state(&self.state.base_dir)?;
+        let mut seen_addresses = BTreeSet::new();
+        let mut active_allocations = Vec::new();
+        for allocation in inventory
+            .receive_allocations
+            .iter()
+            .filter(|allocation| allocation.status == RECEIVE_STATUS_ACTIVE)
+        {
+            let normalized_address = normalize_address(&allocation.address)?;
+            if seen_addresses.insert(normalized_address.clone()) {
+                let mut allocation = allocation.clone();
+                allocation.address = normalized_address;
+                active_allocations.push(allocation);
+            }
+        }
+
+        let addresses_requested = usize_to_u32_count(active_allocations.len());
+        let cap = self.state.runtime_policy().receiving_refresh_address_cap;
+        let addresses_skipped = active_allocations.len().saturating_sub(cap);
+        active_allocations.truncate(cap);
+
+        let mut errors = Vec::new();
+        let mut provider_error_count = 0usize;
+        let mut refreshed_addresses = BTreeSet::new();
+        if !providers.is_empty() {
+            let limit = self
+                .state
+                .runtime_policy()
+                .provider_balance_observation_concurrency
+                .max(1);
+            let mut work_items: Vec<(TreasuryReceiveAllocation, EvmProviderProfile)> = Vec::new();
+            for allocation in &active_allocations {
+                for provider in &providers {
+                    work_items.push((allocation.clone(), provider.clone()));
+                }
+            }
+
+            for chunk in work_items.chunks(limit) {
+                for (allocation, provider) in chunk {
+                    match self
+                        .evm_native_balance_for_provider(
+                            provider.compartment_id,
+                            provider,
+                            &allocation.address,
+                            "latest",
+                        )
+                        .await
+                    {
+                        Ok(native_balance_wei_hex) => {
+                            let now = now_unix();
+                            let activity_state = if quantity_hex_is_nonzero(&native_balance_wei_hex)
+                            {
+                                "funded"
+                            } else {
+                                "empty"
+                            };
+                            upsert_address(
+                                &mut inventory.addresses,
+                                WalletInventoryAddress {
+                                    id: random_id(),
+                                    wallet_family: allocation.wallet_family.clone(),
+                                    wallet_profile: allocation.wallet_profile.clone(),
+                                    provider_profile: provider.name.clone(),
+                                    chain_id: provider.chain_id,
+                                    address: allocation.address.clone(),
+                                    derivation_path: allocation.derivation_path.clone(),
+                                    derivation_pattern: None,
+                                    account_index: None,
+                                    address_index: allocation.address_index,
+                                    activity_state: activity_state.into(),
+                                    native_balance_wei_hex,
+                                    transaction_count: 0,
+                                    classifications: Vec::new(),
+                                    source: DISCOVERY_SOURCE_LOCAL_RPC.into(),
+                                    first_seen_at_unix: now,
+                                    last_checked_at_unix: now,
+                                },
+                            );
+                            refreshed_addresses.insert(allocation.address.to_ascii_lowercase());
+                        }
+                        Err(error) => {
+                            provider_error_count += 1;
+                            errors.push(format!(
+                                "provider={} chain={} address={}: {}",
+                                provider.name, provider.chain_id, allocation.address, error
+                            ));
+                        }
+                    }
+                }
+            }
+        }
+        save_inventory_state(&self.state.base_dir, &inventory)?;
+
+        let stealth_result: ServiceResult<()> = async {
+            let mut deposits =
+                crate::deposits::load_deposits(&self.state.base_dir).map_err(|error| {
+                    ServiceError::internal(format!("Failed to load deposits: {error}"))
+                })?;
+            let mut queue =
+                crate::queue_store::load_queue(&self.state.base_dir).map_err(|error| {
+                    ServiceError::internal(format!("Failed to load queue: {error}"))
+                })?;
+            self.refresh_eth_stealth_deposits_state(
+                token,
+                &mut deposits,
+                &mut queue,
+                EthStealthDepositRefreshRequest {
+                    id: None,
+                    limit: None,
+                    auto_enqueue: Some(false),
+                },
+            )
+            .await?;
+            crate::queue_store::save_queue(&self.state.base_dir, &queue).map_err(|error| {
+                ServiceError::internal(format!("Failed to save queue: {error}"))
+            })?;
+            crate::deposits::save_deposits(&self.state.base_dir, &deposits).map_err(|error| {
+                ServiceError::internal(format!("Failed to save deposits: {error}"))
+            })?;
+            Ok(())
+        }
+        .await;
+        let stealth_refreshed = match stealth_result {
+            Ok(()) => true,
+            Err(error) => {
+                errors.push(format!("stealth refresh failed: {error}"));
+                false
+            }
+        };
+
+        let addresses_refreshed = usize_to_u32_count(refreshed_addresses.len());
+        let addresses_skipped = usize_to_u32_count(addresses_skipped);
+        let provider_status =
+            if providers.is_empty() || (provider_error_count > 0 && addresses_refreshed == 0) {
+                "no_provider"
+            } else if provider_error_count > 0 {
+                "partial"
+            } else {
+                "ok"
+            }
+            .to_string();
+
+        self.record_audit(
+            self.state.active_compartment_id_for(token),
+            AuditEventSpec::ReceivingRefreshBalances {
+                addresses_requested,
+                addresses_refreshed,
+                addresses_skipped,
+                stealth_refreshed,
+            },
+        )?;
+
+        Ok(ReceivingRefreshResponse {
+            generated_at_unix: now_unix(),
+            addresses_requested,
+            addresses_refreshed,
+            addresses_skipped,
+            stealth_refreshed,
+            provider_status,
+            errors,
+        })
+    }
+
     pub(crate) fn get_treasury_policy(
         &self,
         token: Option<&str>,
@@ -391,6 +850,7 @@ impl SigillumService {
             )?,
             require_simulation: body.require_simulation.unwrap_or(true),
             allow_raw_digest_signing: body.allow_raw_digest_signing.unwrap_or(false),
+            block_cross_party_linkage: body.block_cross_party_linkage.unwrap_or(false),
             created_at_unix: state
                 .treasury_policy
                 .as_ref()
@@ -427,6 +887,138 @@ impl SigillumService {
         })
     }
 
+    pub(crate) fn list_parties(
+        &self,
+        token: Option<&str>,
+    ) -> ServiceResult<CounterpartyListResponse> {
+        let _ = self.require_session(token)?;
+        let state = load_inventory_state(&self.state.base_dir)?;
+        Ok(CounterpartyListResponse {
+            parties: state.parties,
+        })
+    }
+
+    pub(crate) async fn create_party(
+        &self,
+        token: Option<&str>,
+        body: CounterpartyCreateRequest,
+    ) -> ServiceResult<CounterpartyMutationResponse> {
+        let token = self.require_session(token)?;
+        let _guard = self.state.operation_guard().await;
+        let name = trimmed_required("name", &body.name)?;
+        let note = body.note.and_then(trimmed_optional);
+        let sweep_destination_address = body
+            .sweep_destination_address
+            .and_then(trimmed_optional)
+            .map(|address| normalize_address(&address))
+            .transpose()?;
+
+        let mut state = load_inventory_state(&self.state.base_dir)?;
+        let party = Counterparty {
+            id: random_id(),
+            name,
+            note,
+            sweep_destination_address,
+            created_at_unix: now_unix(),
+        };
+        state.parties.push(party.clone());
+        save_inventory_state(&self.state.base_dir, &state)?;
+
+        self.record_audit(
+            self.state.active_compartment_id_for(token),
+            AuditEventSpec::TreasuryPartyCreate {
+                name: party.name.clone(),
+            },
+        )?;
+
+        Ok(CounterpartyMutationResponse {
+            status: "created".into(),
+            party: Some(party),
+        })
+    }
+
+    pub(crate) async fn update_party(
+        &self,
+        token: Option<&str>,
+        body: CounterpartyUpdateRequest,
+    ) -> ServiceResult<CounterpartyMutationResponse> {
+        let _ = self.require_session(token)?;
+        let _guard = self.state.operation_guard().await;
+        let id = body.id.trim().to_string();
+        let name = trimmed_required("name", &body.name)?;
+        let note = body.note.and_then(trimmed_optional);
+        // Omitted keeps the stored destination; an explicit blank clears it.
+        let sweep_destination_address = body
+            .sweep_destination_address
+            .map(|value| {
+                let value = value.trim();
+                if value.is_empty() {
+                    Ok(None)
+                } else {
+                    normalize_address(value).map(Some)
+                }
+            })
+            .transpose()?;
+
+        let mut state = load_inventory_state(&self.state.base_dir)?;
+        let Some(party) = state
+            .parties
+            .iter_mut()
+            .find(|party| party.id.as_str() == id.as_str())
+        else {
+            return Err(ServiceError::not_found("Counterparty not found."));
+        };
+        party.name = name;
+        party.note = note;
+        if let Some(sweep_destination_address) = sweep_destination_address {
+            party.sweep_destination_address = sweep_destination_address;
+        }
+        let updated = party.clone();
+        save_inventory_state(&self.state.base_dir, &state)?;
+
+        Ok(CounterpartyMutationResponse {
+            status: "updated".into(),
+            party: Some(updated),
+        })
+    }
+
+    pub(crate) async fn delete_party(
+        &self,
+        token: Option<&str>,
+        body: CounterpartyDeleteRequest,
+    ) -> ServiceResult<CounterpartyMutationResponse> {
+        let token = self.require_session(token)?;
+        let _guard = self.state.operation_guard().await;
+        let id = body.id.trim().to_string();
+
+        let mut state = load_inventory_state(&self.state.base_dir)?;
+        let Some(position) = state
+            .parties
+            .iter()
+            .position(|party| party.id.as_str() == id.as_str())
+        else {
+            return Err(ServiceError::not_found("Counterparty not found."));
+        };
+        let name = state.parties[position].name.clone();
+        for allocation in &mut state.receive_allocations {
+            if allocation.counterparty_id.as_deref() == Some(id.as_str()) {
+                allocation.counterparty_id = None;
+            }
+        }
+        state.parties.remove(position);
+        save_inventory_state(&self.state.base_dir, &state)?;
+
+        self.record_audit(
+            self.state.active_compartment_id_for(token),
+            AuditEventSpec::TreasuryPartyDelete { name },
+        )?;
+
+        Ok(CounterpartyMutationResponse {
+            status: "deleted".into(),
+            party: None,
+        })
+    }
+
     /// Allocate a fresh purpose-labeled receive address for a wallet profile.
     ///
     /// Privacy: derivation is pure local xpub math — no provider or network
@@ -446,8 +1038,22 @@ impl SigillumService {
         let label = body.label.and_then(trimmed_optional);
 
         let mut state = load_inventory_state(&self.state.base_dir)?;
-        let allocation =
-            self.issue_receive_allocation(&mut state, &wallet_profile, purpose, label)?;
+        let counterparty_id = body.counterparty_id.and_then(trimmed_optional);
+        let counterparty_name = if let Some(id) = counterparty_id.as_deref() {
+            let Some(party) = state.parties.iter().find(|party| party.id.as_str() == id) else {
+                return Err(ServiceError::not_found("Counterparty not found."));
+            };
+            Some(party.name.clone())
+        } else {
+            None
+        };
+        let allocation = self.issue_receive_allocation(
+            &mut state,
+            &wallet_profile,
+            purpose,
+            label,
+            counterparty_id,
+        )?;
         save_inventory_state(&self.state.base_dir, &state)?;
 
         self.record_audit(
@@ -457,6 +1063,12 @@ impl SigillumService {
                 purpose: allocation.purpose.clone(),
             },
         )?;
+        if let Some(name) = counterparty_name {
+            self.record_audit(
+                self.state.active_compartment_id_for(token),
+                AuditEventSpec::TreasuryReceiveBind { name },
+            )?;
+        }
 
         Ok(TreasuryReceiveAllocationMutationResponse {
             status: "allocated".into(),
@@ -498,15 +1110,34 @@ impl SigillumService {
         let wallet_profile = existing.wallet_profile.clone();
         let purpose = existing.purpose.clone();
         let label = existing.label.clone();
+        let counterparty_id = existing.counterparty_id.clone();
+        let counterparty_name = counterparty_id.as_deref().and_then(|id| {
+            state
+                .parties
+                .iter()
+                .find(|party| party.id.as_str() == id)
+                .map(|party| party.name.clone())
+        });
 
-        let allocation =
-            self.issue_receive_allocation(&mut state, &wallet_profile, purpose, label)?;
+        let allocation = self.issue_receive_allocation(
+            &mut state,
+            &wallet_profile,
+            purpose,
+            label,
+            counterparty_id,
+        )?;
         save_inventory_state(&self.state.base_dir, &state)?;
 
         self.record_audit(
             self.state.active_compartment_id_for(token),
             AuditEventSpec::TreasuryReceiveRotate { id: allocation_id },
         )?;
+        if let Some(name) = counterparty_name {
+            self.record_audit(
+                self.state.active_compartment_id_for(token),
+                AuditEventSpec::TreasuryReceiveBind { name },
+            )?;
+        }
 
         Ok(TreasuryReceiveAllocationMutationResponse {
             status: "rotated".into(),
@@ -528,6 +1159,7 @@ impl SigillumService {
         wallet_profile: &str,
         purpose: String,
         label: Option<String>,
+        counterparty_id: Option<String>,
     ) -> ServiceResult<TreasuryReceiveAllocation> {
         let registry = crate::profiles::load_profiles(&self.state.base_dir)
             .map_err(|error| ServiceError::internal(format!("Failed to load profiles: {error}")))?;
@@ -568,6 +1200,7 @@ impl SigillumService {
             status: RECEIVE_STATUS_ACTIVE.into(),
             created_at_unix: now_unix(),
             retired_at_unix: None,
+            counterparty_id,
         };
         state.receive_allocations.push(allocation.clone());
         Ok(allocation)
@@ -692,6 +1325,227 @@ mod tests {
         assert_eq!(encode_quantity_hex(&value), "0xde0b6b3a7640000");
     }
 
+    #[test]
+    fn build_receiving_overview_groups_active_hd_and_stealth_deposits() {
+        let party = Counterparty {
+            id: "party_1".into(),
+            name: "Acme Labs".into(),
+            note: None,
+            sweep_destination_address: None,
+            created_at_unix: 1,
+        };
+        let named_address = "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+        let unresolved_address = "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+        let untagged_stealth_address = "0xcccccccccccccccccccccccccccccccccccccccc";
+        let retired_address = "0xdddddddddddddddddddddddddddddddddddddddd";
+        let tagged_stealth_address = "0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee";
+        let state = WalletInventoryState {
+            parties: vec![party],
+            addresses: vec![
+                receiving_inventory_address("named_a", named_address, "0x1"),
+                receiving_inventory_address("named_b", &named_address.to_ascii_uppercase(), "0x2"),
+            ],
+            receive_allocations: vec![
+                receiving_allocation(
+                    "alloc_named",
+                    named_address,
+                    RECEIVE_STATUS_ACTIVE,
+                    Some("party_1"),
+                    10,
+                ),
+                receiving_allocation(
+                    "alloc_unresolved",
+                    unresolved_address,
+                    RECEIVE_STATUS_ACTIVE,
+                    Some("missing_party"),
+                    11,
+                ),
+                receiving_allocation(
+                    "alloc_retired",
+                    retired_address,
+                    RECEIVE_STATUS_RETIRED,
+                    Some("party_1"),
+                    12,
+                ),
+            ],
+            ..WalletInventoryState::default()
+        };
+        let deposits = DepositState {
+            eth_stealth: vec![
+                receiving_stealth_deposit("dep_1", untagged_stealth_address, Some("0x4"), None),
+                receiving_stealth_deposit(
+                    "dep_2",
+                    tagged_stealth_address,
+                    Some("0x5"),
+                    Some("party_1"),
+                ),
+            ],
+        };
+
+        let overview = build_receiving_overview(&state, &deposits, 123);
+
+        assert_eq!(overview.generated_at_unix, 123);
+        assert!(!overview.include_retired);
+        assert_eq!(overview.groups.len(), 2);
+
+        let named = &overview.groups[0];
+        assert_eq!(named.counterparty.as_ref().unwrap().id, "party_1");
+        assert_eq!(named.item_count, 2);
+        assert_eq!(named.native_total_wei_hex, "0x8");
+        assert_eq!(named.items[0].source_type, "hd");
+        assert_eq!(named.items[0].counterparty_id.as_deref(), Some("party_1"));
+        assert!(named.items[0].balance_known);
+        assert_eq!(
+            named.items[0].balance_native_wei_hex.as_deref(),
+            Some("0x3")
+        );
+        let tagged_stealth = named
+            .items
+            .iter()
+            .find(|item| item.address == tagged_stealth_address)
+            .expect("tagged stealth item");
+        assert_eq!(tagged_stealth.source_type, "stealth");
+        assert_eq!(tagged_stealth.counterparty_id.as_deref(), Some("party_1"));
+        assert!(tagged_stealth.balance_known);
+        assert_eq!(
+            tagged_stealth.balance_native_wei_hex.as_deref(),
+            Some("0x5")
+        );
+
+        let unassigned = &overview.groups[1];
+        assert!(unassigned.counterparty.is_none());
+        assert_eq!(unassigned.item_count, 2);
+        assert_eq!(unassigned.native_total_wei_hex, "0x4");
+
+        let unresolved = unassigned
+            .items
+            .iter()
+            .find(|item| item.address == unresolved_address)
+            .expect("unresolved HD item");
+        assert_eq!(unresolved.source_type, "hd");
+        assert_eq!(unresolved.counterparty_id.as_deref(), Some("missing_party"));
+        assert!(!unresolved.balance_known);
+        assert!(unresolved.balance_native_wei_hex.is_none());
+
+        let stealth = unassigned
+            .items
+            .iter()
+            .find(|item| item.address == untagged_stealth_address)
+            .expect("untagged stealth item");
+        assert_eq!(stealth.source_type, "stealth");
+        assert!(stealth.balance_known);
+        assert_eq!(stealth.balance_native_wei_hex.as_deref(), Some("0x4"));
+        assert_eq!(stealth.label.as_deref(), Some("stealth note"));
+        assert!(stealth.counterparty_id.is_none());
+
+        assert!(
+            !overview
+                .groups
+                .iter()
+                .flat_map(|group| group.items.iter())
+                .any(|item| item.address == retired_address)
+        );
+        assert_eq!(overview.totals.item_count, 4);
+        assert_eq!(overview.totals.hd_count, 2);
+        assert_eq!(overview.totals.stealth_count, 2);
+        assert_eq!(overview.totals.native_total_wei_hex, "0xc");
+        assert_eq!(overview.coverage.addresses_total, 4);
+        assert_eq!(overview.coverage.addresses_with_known_balance, 3);
+    }
+
+    #[test]
+    fn build_receiving_overview_warns_for_cross_party_stealth_sweep_destinations() {
+        let destination = "0x9999999999999999999999999999999999999999";
+        let parties = vec![
+            Counterparty {
+                id: "party_1".into(),
+                name: "Acme Labs".into(),
+                note: None,
+                sweep_destination_address: None,
+                created_at_unix: 1,
+            },
+            Counterparty {
+                id: "party_2".into(),
+                name: "Beta Labs".into(),
+                note: None,
+                sweep_destination_address: None,
+                created_at_unix: 2,
+            },
+        ];
+        let mut party_one_deposit = receiving_stealth_deposit(
+            "dep_1",
+            "0x1111111111111111111111111111111111111111",
+            Some("0x1"),
+            Some("party_1"),
+        );
+        party_one_deposit.sweep_destination_address = Some(destination.into());
+        let mut party_two_deposit = receiving_stealth_deposit(
+            "dep_2",
+            "0x2222222222222222222222222222222222222222",
+            Some("0x2"),
+            Some("party_2"),
+        );
+        party_two_deposit.sweep_destination_address = Some(destination.into());
+        let state = WalletInventoryState {
+            parties,
+            ..WalletInventoryState::default()
+        };
+        let deposits = DepositState {
+            eth_stealth: vec![party_one_deposit, party_two_deposit],
+        };
+
+        let overview = build_receiving_overview(&state, &deposits, 123);
+        let warnings: Vec<_> = overview
+            .groups
+            .iter()
+            .flat_map(|group| group.items.iter())
+            .map(|item| item.linkage_warning.as_deref())
+            .collect();
+        assert_eq!(
+            warnings,
+            vec![Some(RECEIVING_LINKAGE_WARNING), Some(RECEIVING_LINKAGE_WARNING)]
+        );
+
+        let same_party = Counterparty {
+            id: "party_same".into(),
+            name: "Same Party".into(),
+            note: None,
+            sweep_destination_address: None,
+            created_at_unix: 1,
+        };
+        let mut first_same_party_deposit = receiving_stealth_deposit(
+            "dep_3",
+            "0x3333333333333333333333333333333333333333",
+            Some("0x3"),
+            Some("party_same"),
+        );
+        first_same_party_deposit.sweep_destination_address = Some(destination.into());
+        let mut second_same_party_deposit = receiving_stealth_deposit(
+            "dep_4",
+            "0x4444444444444444444444444444444444444444",
+            Some("0x4"),
+            Some("party_same"),
+        );
+        second_same_party_deposit.sweep_destination_address = Some(destination.into());
+        let same_party_overview = build_receiving_overview(
+            &WalletInventoryState {
+                parties: vec![same_party],
+                ..WalletInventoryState::default()
+            },
+            &DepositState {
+                eth_stealth: vec![first_same_party_deposit, second_same_party_deposit],
+            },
+            123,
+        );
+
+        assert!(same_party_overview.groups.iter().all(|group| {
+            group
+                .items
+                .iter()
+                .all(|item| item.linkage_warning.is_none())
+        }));
+    }
+
     fn sample_policy() -> TreasuryPolicy {
         TreasuryPolicy {
             enabled: true,
@@ -703,6 +1557,7 @@ mod tests {
             max_plan_native_wei_hex: None,
             require_simulation: true,
             allow_raw_digest_signing: false,
+            block_cross_party_linkage: false,
             created_at_unix: 1,
             updated_at_unix: 2,
         }
@@ -839,6 +1694,7 @@ mod tests {
             status: status.into(),
             created_at_unix: 1,
             retired_at_unix: None,
+            counterparty_id: None,
         }
     }
 
@@ -865,6 +1721,93 @@ mod tests {
             source: "local-rpc".into(),
             first_seen_at_unix: 1,
             last_checked_at_unix: 2,
+        }
+    }
+
+    fn receiving_allocation(
+        id: &str,
+        address: &str,
+        status: &str,
+        counterparty_id: Option<&str>,
+        created_at_unix: u64,
+    ) -> TreasuryReceiveAllocation {
+        TreasuryReceiveAllocation {
+            id: id.into(),
+            wallet_family: "eth-xpub".into(),
+            wallet_profile: "mainnet-xpub".into(),
+            address: address.into(),
+            derivation_path: "m/44'/60'/0'/0/0".into(),
+            address_index: 0,
+            purpose: "invoice".into(),
+            label: Some(format!("label-{id}")),
+            status: status.into(),
+            created_at_unix,
+            retired_at_unix: (status == RECEIVE_STATUS_RETIRED).then_some(created_at_unix + 1),
+            counterparty_id: counterparty_id.map(str::to_string),
+        }
+    }
+
+    fn receiving_inventory_address(
+        id: &str,
+        address: &str,
+        balance: &str,
+    ) -> WalletInventoryAddress {
+        WalletInventoryAddress {
+            id: id.into(),
+            wallet_family: "eth-xpub".into(),
+            wallet_profile: "mainnet-xpub".into(),
+            provider_profile: "mainnet".into(),
+            chain_id: 1,
+            address: address.into(),
+            derivation_path: "m/44'/60'/0'/0/0".into(),
+            derivation_pattern: Some("project".into()),
+            account_index: Some(0),
+            address_index: 0,
+            activity_state: "funded".into(),
+            native_balance_wei_hex: balance.into(),
+            transaction_count: 0,
+            classifications: Vec::new(),
+            source: "persisted-test".into(),
+            first_seen_at_unix: 1,
+            last_checked_at_unix: 2,
+        }
+    }
+
+    fn receiving_stealth_deposit(
+        id: &str,
+        address: &str,
+        balance: Option<&str>,
+        counterparty_id: Option<&str>,
+    ) -> EthStealthDeposit {
+        EthStealthDeposit {
+            id: id.into(),
+            status: "detected".into(),
+            asset_kind: "native".into(),
+            wallet_profile: "mainnet-xpub".into(),
+            wallet_compartment_id: 0,
+            provider_compartment_id: 0,
+            wallet: "mainnet-xpub".into(),
+            short_name: "eth".into(),
+            stealth_meta_address: "st:eth:example".into(),
+            stealth_address: address.into(),
+            ephemeral_public_key_hex: "0x02".into(),
+            view_tag_hex: "0xaa".into(),
+            announcement: None,
+            token_address: None,
+            expected_amount_hex: None,
+            observed_amount_hex: None,
+            observed_native_balance_wei_hex: balance.map(str::to_string),
+            auto_queue_sweep: false,
+            sweep_destination_address: None,
+            min_sweep_amount_hex: None,
+            queue_job_id: None,
+            queue_job_state: None,
+            note: Some("stealth note".into()),
+            created_at_unix: 20,
+            updated_at_unix: 21,
+            last_checked_at_unix: None,
+            broadcast_transaction_hash_hex: None,
+            counterparty_id: counterparty_id.map(str::to_string),
         }
     }
 

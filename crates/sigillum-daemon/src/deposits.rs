@@ -73,6 +73,7 @@ mod tests {
             updated_at_unix: 1,
             last_checked_at_unix: None,
             broadcast_transaction_hash_hex: None,
+            counterparty_id: None,
         }
     }
 

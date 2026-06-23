@@ -45,6 +45,8 @@ pub struct EthStealthDeposit {
     pub last_checked_at_unix: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub broadcast_transaction_hash_hex: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub counterparty_id: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -85,4 +87,6 @@ pub struct EthStealthDepositEnqueueSweepResponse {
     pub status: String,
     pub deposit: EthStealthDeposit,
     pub job: QueueJob,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub linkage_warning: Option<String>,
 }

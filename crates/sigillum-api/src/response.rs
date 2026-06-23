@@ -272,6 +272,7 @@ pub struct RuntimePolicyResponse {
     pub queue_retry_base_delay_secs: u64,
     pub queue_retry_max_delay_secs: u64,
     pub provider_balance_observation_concurrency: usize,
+    pub receiving_refresh_address_cap: usize,
     pub idle_lock_secs: u64,
     pub idle_lock_drain_secs: u64,
     pub idle_lock_force_after_secs: u64,
@@ -820,6 +821,8 @@ pub struct ConsolidationPlanStep {
     pub risk_level: String,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub blockers: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub linkage_warnings: Vec<String>,
     pub auto_eligible: bool,
     pub approved: bool,
 }
@@ -837,6 +840,10 @@ pub struct ConsolidationPlan {
     /// Step-level violations live in each step's `blockers` instead.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub policy_violations: Vec<String>,
+    /// Plan-wide cross-payer linkage findings (privacy): destinations that
+    /// would publicly link multiple distinct payers via a shared recipient.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub linkage_findings: Vec<String>,
     pub steps: Vec<ConsolidationPlanStep>,
 }
 

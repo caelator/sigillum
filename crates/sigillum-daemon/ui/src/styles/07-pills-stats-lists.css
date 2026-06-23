@@ -159,6 +159,25 @@
   overflow-wrap: anywhere;
 }
 
+.plan-linkage-banner {
+  margin-top: var(--space-2);
+  padding: 8px 10px;
+  background: var(--warning-tint);
+  border: 1px solid rgba(224, 168, 60, 0.4);
+  border-left: 3px solid var(--warning);
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  font-size: var(--fs-xs);
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+
+.plan-linkage-banner strong,
+.linkage-warning {
+  color: var(--warning-text);
+  font-weight: 650;
+}
+
 .entity-actions {
   display: flex;
   flex-wrap: wrap;

@@ -1,8 +1,11 @@
 import type {
   ChainProfile,
   ConsolidationPlan,
+  ConsolidationPlanGenerateRequest,
   ConsolidationPlanExportResponse,
   ConsolidationPlanStep,
+  Counterparty,
+  PartyDestination,
   RiskCatalogEntry,
   RiskFinding,
   WatchAddressBookEntry,
@@ -44,6 +47,19 @@ export function inventoryNeedsOperatorReview(view: InventoryViewModel): boolean 
   );
 }
 
+export function blockerLabel(code: string): string {
+  switch (code) {
+    case "missing_party_destination":
+      return "no destination set for this payer";
+    case "missing_destination":
+      return "no destination set";
+    case "cross_party_linkage":
+      return "Destination shared with another payer";
+    default:
+      return code;
+  }
+}
+
 export interface InventoryActionsDeps {
   api: (method: string, path: string, body?: unknown) => Promise<any>;
   toast: (message: string, type?: string) => void;
@@ -60,6 +76,128 @@ function input(id: string): HTMLInputElement {
 }
 
 export function createInventoryActions(deps: InventoryActionsDeps) {
+  let planRoutingListenerBound = false;
+  let planPartyDestinationInputIds: string[] = [];
+
+  function planRoutingStrategy(): "single" | "per_party" {
+    const routingEl = document.getElementById(
+      "planRoutingStrategy",
+    ) as HTMLSelectElement | null;
+    return routingEl?.value === "per_party" ? "per_party" : "single";
+  }
+
+  function setHidden(el: HTMLElement | null, hidden: boolean): void {
+    if (!el) return;
+    el.hidden = hidden;
+    if (hidden) el.setAttribute("hidden", "");
+    else el.removeAttribute("hidden");
+  }
+
+  function bindPlanRoutingSelect(): void {
+    if (planRoutingListenerBound) return;
+    const routingEl = document.getElementById(
+      "planRoutingStrategy",
+    ) as HTMLSelectElement | null;
+    if (!routingEl) return;
+    routingEl.addEventListener("change", () => {
+      void renderPlanPartyDestinations();
+    });
+    planRoutingListenerBound = true;
+  }
+
+  async function renderPlanPartyDestinations(): Promise<void> {
+    const routingStrategy = planRoutingStrategy();
+    const showPerParty = routingStrategy === "per_party";
+    const container = document.getElementById("planPartyDestinations");
+    const hint = document.getElementById("planPerPartyHint");
+
+    setHidden(container, !showPerParty);
+    setHidden(hint, !showPerParty);
+    if (!container) return;
+    if (!showPerParty) {
+      planPartyDestinationInputIds = [];
+      container.innerHTML = "";
+      return;
+    }
+
+    try {
+      const r = await deps.api("GET", "/api/treasury/parties");
+      if (r.error) {
+        planPartyDestinationInputIds = [];
+        container.innerHTML = "";
+        return;
+      }
+      const parties = (r.parties || []) as Counterparty[];
+      planPartyDestinationInputIds = parties.map((party) => "planPartyDest_" + party.id);
+      container.innerHTML = parties
+        .map((party) => {
+          const id = "planPartyDest_" + party.id;
+          const name = party.name || party.id;
+          return (
+            '<div class="form-row">' +
+            '<label class="checkbox-row" for="' +
+            escAttr(id) +
+            '">' +
+            esc(name) +
+            "</label>" +
+            '<input type="text" id="' +
+            escAttr(id) +
+            '" data-counterparty-id="' +
+            escAttr(party.id) +
+            '" placeholder="Destination for ' +
+            escAttr(name) +
+            '" class="input-wide">' +
+            "</div>"
+          );
+        })
+        .join("");
+    } catch (_) {
+      planPartyDestinationInputIds = [];
+      container.innerHTML = "";
+    }
+  }
+
+  function collectPlanPartyDestinations(): PartyDestination[] {
+    const container = document.getElementById("planPartyDestinations");
+    const inputs: HTMLInputElement[] = [];
+    if (
+      container &&
+      typeof (
+        container as HTMLElement & {
+          querySelectorAll?: HTMLElement["querySelectorAll"];
+        }
+      ).querySelectorAll === "function"
+    ) {
+      inputs.push(
+        ...Array.from(
+          container.querySelectorAll<HTMLInputElement>(
+            "input[data-counterparty-id]",
+          ),
+        ),
+      );
+    }
+    if (!inputs.length) {
+      planPartyDestinationInputIds.forEach((inputId) => {
+        const inputEl = document.getElementById(inputId) as HTMLInputElement | null;
+        if (inputEl) inputs.push(inputEl);
+      });
+    }
+    return inputs
+      .map((inputEl) => {
+        const counterpartyId =
+          inputEl.dataset.counterpartyId ||
+          inputEl.getAttribute("data-counterparty-id") ||
+          inputEl.id.replace(/^planPartyDest_/, "");
+        return {
+          counterparty_id: counterpartyId,
+          destination_address: inputEl.value.trim(),
+        };
+      })
+      .filter((destination) =>
+        Boolean(destination.counterparty_id && destination.destination_address),
+      );
+  }
+
   function renderChainProfiles(profiles: any[]): void {
     renderEntityList(
       "chainProfileList",
@@ -333,12 +471,20 @@ export function createInventoryActions(deps: InventoryActionsDeps) {
       "No consolidation plans generated yet.",
       (plan) => {
         const summary = plan.summary;
+        const linkageFindings = plan.linkage_findings || [];
+        const linkageBanner = linkageFindings.length
+          ? '<div class="plan-linkage-banner"><strong>Privacy: this plan would link payers</strong><br>' +
+            esc(linkageFindings.join(" | ")) +
+            "</div>"
+          : "";
         const safeAddressInput =
           '<input type="text" class="input-wide plan-safe-address" data-plan-safe-address placeholder="Safe address" autocomplete="off">';
         const stepLines = (plan.steps || [])
           .slice(0, 8)
           .map((step: ConsolidationPlanStep) => {
             const evidence = (step.simulation_evidence || []).join(" | ");
+            const linkageWarnings = step.linkage_warnings || [];
+            const blockers = (step.blockers || []).map(blockerLabel).join(", ");
             return (
               '<div class="entity-meta">' +
               esc(step.action) +
@@ -361,8 +507,13 @@ export function createInventoryActions(deps: InventoryActionsDeps) {
               " · simulation=" +
               esc(step.simulation_status || "not_run") +
               " · blockers=" +
-              esc((step.blockers || []).join(", ") || "-") +
+              esc(blockers || "-") +
               (evidence ? "<br>evidence=" + esc(evidence) : "") +
+              (linkageWarnings.length
+                ? '<br><span class="linkage-warning">privacy: ' +
+                  esc(linkageWarnings.join(", ")) +
+                  "</span>"
+                : "") +
               "</div>"
             );
           })
@@ -386,6 +537,7 @@ export function createInventoryActions(deps: InventoryActionsDeps) {
           " · executable=" +
           esc(String(summary.executable_steps || 0)) +
           "</div>" +
+          linkageBanner +
           stepLines +
           "</div>" +
           '<div class="entity-actions">' +
@@ -411,6 +563,8 @@ export function createInventoryActions(deps: InventoryActionsDeps) {
   }
 
   async function loadInventoryOperations(): Promise<void> {
+    bindPlanRoutingSelect();
+    void renderPlanPartyDestinations();
     try {
       const [chains, watchBook, inventory, catalog, risks, plans] = await Promise.all([
         deps.api("GET", "/api/inventory/chains"),
@@ -697,11 +851,21 @@ export function createInventoryActions(deps: InventoryActionsDeps) {
   }
 
   async function generateConsolidationPlan(): Promise<void> {
-    const r = await deps.api("POST", "/api/plans/consolidation/generate", {
+    const routingEl = document.getElementById(
+      "planRoutingStrategy",
+    ) as HTMLSelectElement | null;
+    const routingStrategy = routingEl?.value === "per_party" ? "per_party" : "single";
+    const partyDestinations =
+      routingStrategy === "per_party" ? collectPlanPartyDestinations() : [];
+    const body: ConsolidationPlanGenerateRequest = {
       destination_address: optionalTextValue("planDestinationAddress"),
       include_watch_only: true,
       auto_queue_low_risk: false,
-    });
+      routing_strategy: routingStrategy,
+    };
+    if (routingStrategy === "per_party") body.party_destinations = partyDestinations;
+
+    const r = await deps.api("POST", "/api/plans/consolidation/generate", body);
     if (r.error) {
       deps.toast(r.error, "error");
       return;
@@ -796,6 +960,7 @@ export function createInventoryActions(deps: InventoryActionsDeps) {
     renderRiskCatalog,
     renderRiskFindings,
     renderConsolidationPlans,
+    renderPlanPartyDestinations,
     loadInventoryOperations,
     upsertChainProfile,
     deleteChainProfile,

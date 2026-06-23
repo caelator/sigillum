@@ -32,7 +32,7 @@ use sigillum_api::request::{
     ConsolidationPlanGenerateRequest, ConsolidationPlanSimulateRequest, EthSeedWalletCreateRequest,
     EthStealthWalletProfileUpsertRequest, EthXpubWalletProfileUpsertRequest,
     EvmProviderProfileUpsertRequest, EvmProviderRef, Fido2UnlockRequest, MaintenanceRunRequest,
-    RiskCatalogDeleteRequest, RiskCatalogUpsertRequest, SelfCheckRunRequest,
+    PartyDestination, RiskCatalogDeleteRequest, RiskCatalogUpsertRequest, SelfCheckRunRequest,
 };
 use sigillum_client::{ClientError, SigillumClient};
 use url::Url;
@@ -41,6 +41,7 @@ mod deposits;
 mod inventory;
 mod inventory_args;
 mod queue;
+mod receiving;
 mod treasury;
 
 const DEFAULT_DAEMON_BASE_URL: &str = "http://127.0.0.1:9743";
@@ -108,6 +109,7 @@ pub fn cmd_api(args: &[String]) {
         "discovery" => cmd_api_discovery(args),
         "risk" => cmd_api_risk(args),
         "plans" => cmd_api_plans(args),
+        "receiving" => receiving::cmd_api_receiving(args),
         "treasury" => treasury::cmd_api_treasury(args),
         "queue" => queue::cmd_api_queue(args),
         "maintenance" => cmd_api_maintenance(args),
@@ -417,6 +419,21 @@ fn cmd_api_plans(args: &[String]) {
             client.list_consolidation_plans().await
         }),
         "generate" => {
+            let party_destinations = parse_multi_flag(args, "--party-destination")
+                .into_iter()
+                .map(|value| match value.split_once('=') {
+                    Some((counterparty_id, destination_address)) => PartyDestination {
+                        counterparty_id: counterparty_id.to_string(),
+                        destination_address: destination_address.to_string(),
+                    },
+                    None => {
+                        eprintln!(
+                            "Usage: sigillum api plans generate --party-destination <counterparty_id>=<address>"
+                        );
+                        process::exit(1);
+                    }
+                })
+                .collect();
             let request = ConsolidationPlanGenerateRequest {
                 destination_address: parse_flag(args, "--destination-address"),
                 wallet_family: parse_flag(args, "--wallet-family"),
@@ -424,6 +441,8 @@ fn cmd_api_plans(args: &[String]) {
                 provider_profile: parse_flag(args, "--provider-profile"),
                 include_watch_only: flag_option(args, "--include-watch-only"),
                 auto_queue_low_risk: flag_option(args, "--auto-queue-low-risk"),
+                routing_strategy: parse_flag(args, "--routing-strategy"),
+                party_destinations,
             };
             run_api_command(args, true, move |client| async move {
                 client.generate_consolidation_plan(request).await
@@ -827,7 +846,8 @@ COMMANDS:
   discovery <jobs|scan-evm> [...]
   risk <list|catalog|catalog-upsert|catalog-delete> [...]
   plans <list|generate|approve|simulate|export> [...]
-  treasury <overview|policy|policy-update|receive-list|receive-allocate|receive-rotate> [...]
+  receiving <overview|refresh-balances|tag-deposit> [...]
+  treasury <overview|policy|policy-update|receive-list|receive-allocate|receive-rotate|parties> [...]
   queue <list|process> [...]
   maintenance run [...]
 

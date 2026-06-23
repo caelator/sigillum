@@ -379,6 +379,13 @@ pub(crate) enum AuditEventSpec {
         addresses: usize,
         holdings: usize,
     },
+    #[serde(rename = "receiving.refresh_balances")]
+    ReceivingRefreshBalances {
+        addresses_requested: u32,
+        addresses_refreshed: u32,
+        addresses_skipped: u32,
+        stealth_refreshed: bool,
+    },
     #[serde(rename = "wallet_inventory.chain_profile.upsert")]
     WalletInventoryChainProfileUpsert { name: String, chain_family: String },
     #[serde(rename = "wallet_inventory.chain_profile.delete")]
@@ -426,6 +433,12 @@ pub(crate) enum AuditEventSpec {
     },
     #[serde(rename = "treasury.receive.rotate")]
     TreasuryReceiveRotate { id: String },
+    #[serde(rename = "treasury.party.create")]
+    TreasuryPartyCreate { name: String },
+    #[serde(rename = "treasury.party.delete")]
+    TreasuryPartyDelete { name: String },
+    #[serde(rename = "treasury.receive.bind")]
+    TreasuryReceiveBind { name: String },
     /// An operator-initiated self-check pass over configured subsystems.
     /// Records only aggregate counts — never check subjects or details.
     #[serde(rename = "selfcheck.run")]
@@ -504,6 +517,7 @@ impl AuditEventSpec {
             }
             Self::MaintenanceRun { .. } => "maintenance.run",
             Self::WalletInventoryScan { .. } => "wallet_inventory.scan",
+            Self::ReceivingRefreshBalances { .. } => "receiving.refresh_balances",
             Self::WalletInventoryChainProfileUpsert { .. } => {
                 "wallet_inventory.chain_profile.upsert"
             }
@@ -528,6 +542,9 @@ impl AuditEventSpec {
             Self::TreasuryPolicyUpdate { .. } => "treasury.policy.update",
             Self::TreasuryReceiveAllocate { .. } => "treasury.receive.allocate",
             Self::TreasuryReceiveRotate { .. } => "treasury.receive.rotate",
+            Self::TreasuryPartyCreate { .. } => "treasury.party.create",
+            Self::TreasuryPartyDelete { .. } => "treasury.party.delete",
+            Self::TreasuryReceiveBind { .. } => "treasury.receive.bind",
             Self::SelfCheckRun { .. } => "selfcheck.run",
             Self::RunComplete { .. } => "run.complete",
         }
@@ -805,6 +822,17 @@ impl AuditEventSpec {
                 "addresses": addresses,
                 "holdings": holdings,
             }),
+            Self::ReceivingRefreshBalances {
+                addresses_requested,
+                addresses_refreshed,
+                addresses_skipped,
+                stealth_refreshed,
+            } => json!({
+                "addresses_requested": addresses_requested,
+                "addresses_refreshed": addresses_refreshed,
+                "addresses_skipped": addresses_skipped,
+                "stealth_refreshed": stealth_refreshed,
+            }),
             Self::DepositsEthStealthAnnouncementScan {
                 wallet_profile,
                 provider_profile,
@@ -875,6 +903,9 @@ impl AuditEventSpec {
                 purpose,
             } => json!({ "wallet_profile": wallet_profile, "purpose": purpose }),
             Self::TreasuryReceiveRotate { id } => json!({ "id": id }),
+            Self::TreasuryPartyCreate { name }
+            | Self::TreasuryPartyDelete { name }
+            | Self::TreasuryReceiveBind { name } => json!({ "name": name }),
             Self::SelfCheckRun { checks, failures } => {
                 json!({ "checks": checks, "failures": failures })
             }
@@ -1296,6 +1327,16 @@ impl AuditEventSpec {
                     holdings: details.holdings,
                 })
             }
+            "receiving.refresh_balances" => {
+                let details =
+                    parse_legacy_details::<ReceivingRefreshBalancesDetails>(path, &kind, details)?;
+                Ok(Self::ReceivingRefreshBalances {
+                    addresses_requested: details.addresses_requested,
+                    addresses_refreshed: details.addresses_refreshed,
+                    addresses_skipped: details.addresses_skipped,
+                    stealth_refreshed: details.stealth_refreshed,
+                })
+            }
             "wallet_inventory.chain_profile.upsert" => {
                 let details = parse_legacy_details::<WalletInventoryChainProfileUpsertDetails>(
                     path, &kind, details,
@@ -1360,6 +1401,18 @@ impl AuditEventSpec {
                     exported: details.exported,
                     skipped: details.skipped,
                 })
+            }
+            "treasury.party.create" => {
+                let details = parse_legacy_details::<NamedAuditDetails>(path, &kind, details)?;
+                Ok(Self::TreasuryPartyCreate { name: details.name })
+            }
+            "treasury.party.delete" => {
+                let details = parse_legacy_details::<NamedAuditDetails>(path, &kind, details)?;
+                Ok(Self::TreasuryPartyDelete { name: details.name })
+            }
+            "treasury.receive.bind" => {
+                let details = parse_legacy_details::<NamedAuditDetails>(path, &kind, details)?;
+                Ok(Self::TreasuryReceiveBind { name: details.name })
             }
             "run.complete" => {
                 let details = parse_legacy_details::<RunCompleteDetails>(path, &kind, details)?;

@@ -353,6 +353,7 @@ mod tests {
             simulation_evidence: Vec::new(),
             risk_level: "low".into(),
             blockers: Vec::new(),
+            linkage_warnings: Vec::new(),
             auto_eligible: false,
             approved: false,
         };

@@ -23,6 +23,7 @@ import { createFido2Actions } from "./views/fido2";
 import { createInventoryActions } from "./views/inventory";
 import { createJourneyActions } from "./views/journey";
 import { createOperationsActions } from "./views/operations";
+import { createReceivingActions } from "./views/receiving";
 import { createSelfCheckActions } from "./views/selfcheck";
 import { createSessionActions } from "./views/session";
 import { createShellRenderer } from "./views/shell";
@@ -43,6 +44,7 @@ const OPERATOR_CARD_IDS = [
   'walletManagerCard',
   'profilesCard',
   'xpubCard',
+  'receivingCard',
   'treasuryCard',
   'inventoryCard',
   'depositsCard',
@@ -54,8 +56,13 @@ const OPERATOR_CARD_IDS = [
   'diagCard',
 ];
 const WORKSPACE_SECTION_KEY = 'sigillumWorkspaceSection';
-const DEFAULT_WORKSPACE_SECTION = 'treasury';
+const DEFAULT_WORKSPACE_SECTION = 'receiving';
 const WORKSPACE_SECTIONS = [
+  {
+    id: 'receiving',
+    label: 'Receiving',
+    summary: 'Active receive addresses and stealth deposits, grouped by counterparty.',
+  },
   {
     id: 'treasury',
     label: 'Treasury',
@@ -279,6 +286,10 @@ function focusWalletCreate() {
 
 function focusTreasuryReceive() {
   jumpToField('treasuryCard', 'treasuryReceivePurpose');
+}
+
+function focusTreasuryParty() {
+  jumpToField('treasuryCard', 'treasuryPartyName');
 }
 
 function focusWatchBook() {
@@ -628,6 +639,13 @@ const treasuryActions = createTreasuryActions({
   toast,
 });
 
+const receivingActions = createReceivingActions({
+  api,
+  toast,
+  jumpToField,
+  jumpToCard,
+});
+
 const selfCheckActions = createSelfCheckActions({
   api,
   toast,
@@ -711,6 +729,7 @@ async function runRefreshCycle() {
     walletActions.loadProfiles(),
     walletManagerActions.loadWalletManager(),
     journeyActions.loadJourney(),
+    receivingActions.loadReceivingOverview(),
     treasuryActions.loadTreasuryOverview(),
     inventoryActions.loadInventoryOperations(),
     operationsActions.loadDepositRegistry(),
@@ -1211,6 +1230,8 @@ const UI_ACTIONS = {
   copyMnemonicPhrase: walletManagerActions.copyMnemonicPhrase,
   copyText,
   copyWalletAddress: walletManagerActions.copyWalletAddress,
+  createTreasuryParty: treasuryActions.createTreasuryParty,
+  clearTreasuryPartySweepDest: treasuryActions.clearTreasuryPartySweepDest,
   createErc20Deposit: operationsActions.createErc20Deposit,
   createNativeDeposit: operationsActions.createNativeDeposit,
   createWallet: walletManagerActions.createWallet,
@@ -1223,6 +1244,7 @@ const UI_ACTIONS = {
   deleteProviderProfile: walletActions.deleteProviderProfile,
   deleteSecret,
   deleteSeedWalletProfile: walletActions.deleteSeedWalletProfile,
+  deleteTreasuryParty: treasuryActions.deleteTreasuryParty,
   deleteWalletProfile: walletActions.deleteWalletProfile,
   deleteXpubWalletProfile: walletActions.deleteXpubWalletProfile,
   enqueueDepositSweep: operationsActions.enqueueDepositSweep,
@@ -1236,6 +1258,9 @@ const UI_ACTIONS = {
   fido2RemoveKey: fido2Actions.fido2RemoveKey,
   fido2SetNewPin: fido2Actions.fido2SetNewPin,
   fido2Unlock: fido2Actions.fido2Unlock,
+  focusReceivingAllocate: receivingActions.focusReceivingAllocate,
+  focusReceivingStealth: receivingActions.focusReceivingStealth,
+  focusTreasuryParty,
   focusTreasuryReceive,
   focusWalletCreate,
   focusWatchBook,
@@ -1261,6 +1286,8 @@ const UI_ACTIONS = {
   pushSecret,
   quickAddWalletProvider: walletManagerActions.quickAddWalletProvider,
   refreshDepositRegistry: operationsActions.refreshDepositRegistry,
+  refreshReceivingBalances: () => receivingActions.refreshReceivingBalances(),
+  refreshReceivingOverview: () => receivingActions.loadReceivingOverview(),
   refreshSingleDeposit: operationsActions.refreshSingleDeposit,
   refreshTreasuryOverview: treasuryActions.refreshTreasuryOverview,
   refreshWalletManager: walletManagerActions.refreshWalletManager,
@@ -1290,9 +1317,11 @@ const UI_ACTIONS = {
   setWalletImportTab: walletManagerActions.setWalletImportTab,
   switchCompartment,
   switchUnlockTab: fido2Actions.switchUnlockTab,
+  tagStealthDeposit: receivingActions.tagStealthDeposit,
   toggleWatchAddressBookEntry: inventoryActions.toggleWatchAddressBookEntry,
   togglePoisonWarning: fido2Actions.togglePoisonWarning,
   unlock: sessionActions.unlock,
+  updateTreasuryPartySweepDest: treasuryActions.updateTreasuryPartySweepDest,
   updateTreasuryPolicy: treasuryActions.updateTreasuryPolicy,
   upsertChainProfile: inventoryActions.upsertChainProfile,
   upsertBulkWatchAddressBookEntries: inventoryActions.upsertBulkWatchAddressBookEntries,
@@ -1307,6 +1336,7 @@ const UI_ACTIONS = {
   wizBackToPresets: setupWizard.wizBackToPresets,
   wizDetectDevice: setupWizard.wizDetectDevice,
   wizFinishForNow: setupWizard.wizFinishForNow,
+  wizGetStarted: setupWizard.wizGetStarted,
   wizInitPassphrase: setupWizard.wizInitPassphrase,
   wizPreset: setupWizard.wizPreset,
   wizProceedFido2: setupWizard.wizProceedFido2,
@@ -1321,6 +1351,9 @@ function handleActionEvent(event) {
     actions: UI_ACTIONS,
     toast,
     quietActions: [
+      'focusReceivingAllocate',
+      'focusReceivingStealth',
+      'focusTreasuryParty',
       'focusTreasuryReceive',
       'focusWalletCreate',
       'focusWatchBook',
@@ -1328,6 +1361,7 @@ function handleActionEvent(event) {
       'selectWorkspaceSection',
       'setWalletImportTab',
       'switchUnlockTab',
+      'tagStealthDeposit',
       'togglePoisonWarning',
     ],
   });
@@ -1351,6 +1385,7 @@ document.addEventListener('visibilitychange', () => {
 });
 
 document.addEventListener('click', handleActionEvent);
+document.addEventListener('change', handleActionEvent);
 window.addEventListener('beforeunload', clearRefreshTimer);
 
 function enhanceUiChrome() {

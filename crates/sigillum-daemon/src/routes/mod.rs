@@ -514,6 +514,18 @@ fn inventory_routes() -> AppRouter {
             post(inventory::export_consolidation_plan),
         )
         .route("/api/treasury/overview", get(inventory::treasury_overview))
+        .route(
+            "/api/receiving/overview",
+            get(inventory::receiving_overview),
+        )
+        .route(
+            "/api/receiving/refresh-balances",
+            post(inventory::refresh_receiving_balances),
+        )
+        .route(
+            "/api/receiving/deposits/tag",
+            post(deposits::tag_eth_stealth_deposit),
+        )
         .route("/api/treasury/policy", get(inventory::get_treasury_policy))
         .route(
             "/api/treasury/policy/update",
@@ -530,6 +542,18 @@ fn inventory_routes() -> AppRouter {
         .route(
             "/api/treasury/receive-addresses/rotate",
             post(inventory::rotate_treasury_receive_address),
+        )
+        .route(
+            "/api/treasury/parties",
+            get(inventory::list_treasury_parties).post(inventory::create_treasury_party),
+        )
+        .route(
+            "/api/treasury/parties/update",
+            post(inventory::update_treasury_party),
+        )
+        .route(
+            "/api/treasury/parties/delete",
+            post(inventory::delete_treasury_party),
         )
 }
 

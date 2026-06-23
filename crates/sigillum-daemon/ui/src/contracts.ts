@@ -170,6 +170,7 @@ export interface ConsolidationPlanStep {
   simulation_evidence?: string[];
   risk_level: string;
   blockers: string[];
+  linkage_warnings?: string[];
   auto_eligible: boolean;
   approved: boolean;
 }
@@ -183,6 +184,23 @@ export interface ConsolidationPlan {
   summary: ConsolidationPlanSummary;
   steps: ConsolidationPlanStep[];
   policy_violations?: string[];
+  linkage_findings?: string[];
+}
+
+export interface PartyDestination {
+  counterparty_id: string;
+  destination_address: string;
+}
+
+export interface ConsolidationPlanGenerateRequest {
+  destination_address?: string | null;
+  wallet_family?: string | null;
+  wallet_profile?: string | null;
+  provider_profile?: string | null;
+  include_watch_only?: boolean | null;
+  auto_queue_low_risk?: boolean | null;
+  routing_strategy?: string | null;
+  party_destinations?: PartyDestination[];
 }
 
 export interface ConsolidationPlanExportCall {
@@ -330,6 +348,7 @@ export interface TreasuryPolicy {
   max_step_native_wei_hex?: string | null;
   max_plan_native_wei_hex?: string | null;
   require_simulation: boolean;
+  block_cross_party_linkage?: boolean;
   created_at_unix: number;
   updated_at_unix: number;
 }
@@ -340,6 +359,7 @@ export interface TreasuryPolicyUpdateRequest {
   max_step_native_wei_hex?: string | null;
   max_plan_native_wei_hex?: string | null;
   require_simulation?: boolean | null;
+  block_cross_party_linkage?: boolean | null;
 }
 
 export interface TreasuryReceiveAllocation {
@@ -354,6 +374,73 @@ export interface TreasuryReceiveAllocation {
   status: string;
   created_at_unix: number;
   retired_at_unix?: number | null;
+  counterparty_id?: string | null;
+}
+
+export interface Counterparty {
+  id: string;
+  name: string;
+  note?: string | null;
+  sweep_destination_address?: string | null;
+  created_at_unix: number;
+}
+
+export interface ReceivingItem {
+  source_type: string;
+  address: string;
+  chain_id: number;
+  derivation_path?: string | null;
+  purpose?: string | null;
+  label?: string | null;
+  counterparty_id?: string | null;
+  linkage_warning?: string | null;
+  balance_native_wei_hex?: string | null;
+  balance_known: boolean;
+  status: string;
+  created_at_unix: number;
+}
+
+export interface ReceivingPartyGroup {
+  counterparty?: Counterparty | null;
+  item_count: number;
+  native_total_wei_hex: string;
+  items: ReceivingItem[];
+}
+
+export interface ReceivingTotals {
+  item_count: number;
+  hd_count: number;
+  stealth_count: number;
+  native_total_wei_hex: string;
+}
+
+export interface ReceivingCoverage {
+  addresses_total: number;
+  addresses_with_known_balance: number;
+  note: string;
+}
+
+export interface ReceivingOverviewResponse {
+  generated_at_unix: number;
+  include_retired: boolean;
+  groups: ReceivingPartyGroup[];
+  totals: ReceivingTotals;
+  coverage: ReceivingCoverage;
+}
+
+export interface ReceivingRefreshResponse {
+  generated_at_unix: number;
+  addresses_requested: number;
+  addresses_refreshed: number;
+  addresses_skipped: number;
+  stealth_refreshed: boolean;
+  provider_status: string;
+  errors: string[];
+}
+
+export interface ReceivingDepositTagRequest {
+  deposit_id: string;
+  counterparty_id?: string | null;
 }
 
 export type SelfCheckStatus = "pass" | "warn" | "fail";

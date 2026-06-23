@@ -95,8 +95,28 @@
           </div>
         </div>
 
+        <!-- Welcome: Trust orientation -->
+        <div class="wizard-step active" id="wizStepWelcome">
+          <p class="helper-text">Sigillum is a local-first operator console for your Ethereum treasury. A quick orientation before you create a vault.</p>
+          <div class="trust-point">
+            <div class="tp-head">Everything runs on this machine</div>
+            <div class="tp-body">The daemon listens only on loopback, and your private keys never leave this computer. No account, no cloud, no telemetry.</div>
+          </div>
+          <div class="trust-point">
+            <div class="tp-head">Your data is an encrypted vault on this disk</div>
+            <div class="tp-body">State lives in an encrypted vault under ~/.sigillum that only you can unlock. You can snapshot and back it up whenever you want.</div>
+          </div>
+          <div class="trust-point">
+            <div class="tp-head">Privacy is built in, but you choose your providers</div>
+            <div class="tp-body">Stealth one-time receive addresses keep deposits unlinkable. Any RPC provider you add later can see the addresses you query through it, so you choose and can partition providers.</div>
+          </div>
+          <div class="form-row mt-12">
+            <button class="btn-primary" data-action="wizGetStarted">Get started</button>
+          </div>
+        </div>
+
         <!-- Step 0: Choose preset -->
-        <div class="wizard-step active" id="wizStep0">
+        <div class="wizard-step" id="wizStep0">
           <p class="helper-text">Start with a recommended plan. The names describe how access is split, not how secrets are stored.</p>
           <button class="method-btn recommended" data-action="wizPreset" data-arg0="secure">
             <div class="method-title">Daily + Secure</div>
@@ -226,6 +246,17 @@
             <div class="wiz-done-title" id="wizDoneMsg">Setup Complete</div>
             <p class="helper-text mt-8" id="wizDoneDetail">Your vault is ready.</p>
           </div>
+          <div class="next-up">
+            <div class="next-up-title">What is next</div>
+            <div class="trust-point">
+              <div class="tp-head">Add an RPC provider</div>
+              <div class="tp-body">Unlock, open Wallets, and save an RPC provider so Sigillum can read balances and broadcast. Mind the privacy note when you choose one.</div>
+            </div>
+            <div class="trust-point">
+              <div class="tp-head">Export a stealth receive address</div>
+              <div class="tp-body">Generate a one-time stealth address to receive funds privately, so deposits cannot be linked to a single published address.</div>
+            </div>
+          </div>
         </div>
 
         <div class="section-divider"></div>
@@ -302,6 +333,25 @@
         <div id="journeyList" class="journey-list" aria-live="polite"></div>
       </div>
 
+      <div class="card hidden" id="receivingCard" data-workspace-section="receiving">
+        <div class="card-kicker">Private receiving</div>
+        <div class="card-head">
+          <h2>Receiving</h2>
+          <div class="card-head-actions">
+            <button class="btn-ghost btn-small" data-action="refreshReceivingOverview">Refresh</button>
+            <button class="btn-ghost btn-small" data-action="refreshReceivingBalances">Refresh balances</button>
+          </div>
+        </div>
+        <p class="helper-text">Every active receive address and stealth deposit, grouped by counterparty. Read-only snapshot from the last persisted scan; live balance refresh arrives in increment B2.</p>
+        <p class="text-meta">Refreshing queries your configured RPC provider for each address, so the provider can see those addresses.</p>
+        <div class="stats stat-tiles" id="receivingOverviewStats"></div>
+        <p class="text-meta" id="receivingCoverage"></p>
+        <div class="card-head-actions" id="receivingQuickActions"></div>
+        <div class="section-divider"></div>
+        <div class="section-title">By counterparty</div>
+        <div id="receivingGroupList"></div>
+      </div>
+
       <div class="card hidden" id="treasuryCard" data-workspace-section="treasury">
         <div class="card-kicker">Where is the money</div>
         <div class="card-head">
@@ -345,6 +395,10 @@
             <input type="checkbox" id="treasuryPolicyRequireSim" checked>
             Require simulation
           </label>
+          <label class="checkbox-row">
+            <input type="checkbox" id="treasuryPolicyBlockLinkage">
+            Block cross-party linkage (fail-closed)
+          </label>
         </div>
         <textarea id="treasuryPolicyDestinations" placeholder="Allowed destinations, one per line: 0xADDRESS or 0xADDRESS:label"></textarea>
         <div class="form-row">
@@ -361,7 +415,20 @@
           <input type="text" id="treasuryReceiveProfile" placeholder="Wallet profile">
           <input type="text" id="treasuryReceivePurpose" placeholder="Purpose (e.g. invoices)">
           <input type="text" id="treasuryReceiveLabel" placeholder="Label (optional)">
+          <select id="treasuryReceiveParty">
+            <option value="">No party (optional)</option>
+          </select>
           <button class="btn-primary" data-action="allocateTreasuryReceiveAddress">Allocate Address</button>
+        </div>
+        <div class="section-divider"></div>
+        <div class="section-title">Counterparties</div>
+        <p class="helper-text">Track payers as first-class parties so you can hand each a dedicated receive address.</p>
+        <div id="treasuryPartyList"></div>
+        <div class="form-row">
+          <input type="text" id="treasuryPartyName" placeholder="Party name">
+          <input type="text" id="treasuryPartyNote" placeholder="Note (optional)">
+          <input type="text" id="treasuryPartySweepDestination" placeholder="Sweep destination (optional)">
+          <button class="btn-primary" data-action="createTreasuryParty">Add Party</button>
         </div>
       </div>
 
@@ -518,6 +585,7 @@
         <p class="helper-text">Save reusable provider settings, then bind stealth wallet labels to those providers for deposits, sweeps, and queue work.</p>
 
         <div class="section-title">RPC Providers <span class="help-tip" tabindex="0" data-tip="The endpoint Sigillum uses to read balances and broadcast transactions &mdash; your own node or any endpoint you trust.">?</span></div>
+        <p class="privacy-note"><strong>Privacy cost:</strong> the RPC endpoint you enter here can see every wallet address Sigillum queries through it, and the IP it is queried from. Prefer your own node or a private, dedicated endpoint, and consider partitioning providers across wallets so no single endpoint sees your whole treasury.</p>
         <div class="form-row">
           <input type="text" id="providerName" placeholder="Profile name">
           <input type="text" id="providerRpcUrl" placeholder="RPC URL">
@@ -770,6 +838,15 @@
           <button class="btn-ghost" data-action="upsertRiskCatalogEntry">Save Risk Label</button>
         </div>
         <div id="riskCatalogList"></div>
+        <div class="form-row">
+          <label class="checkbox-row" for="planRoutingStrategy">Routing</label>
+          <select id="planRoutingStrategy" class="input-wide">
+            <option value="single">Single destination</option>
+            <option value="per_party">Per-party (isolate payers)</option>
+          </select>
+        </div>
+        <p class="helper-text" id="planPerPartyHint" hidden>Per-party routing sends each payer's holdings to its own destination so consolidation does not link payers. The single destination below is used only for unattributed holdings (your own hot/change addresses).</p>
+        <div id="planPartyDestinations" hidden></div>
         <div class="form-row">
           <input type="text" id="planDestinationAddress" placeholder="Consolidation destination address">
           <button class="btn-ghost" data-action="loadRiskFindings">Refresh Risks</button>

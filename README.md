@@ -146,6 +146,17 @@ When the gateway needs authenticated daemon operations, provide a pre-
 established local daemon session token through `SIGILLUM_DAEMON_SESSION_TOKEN`
 or `SIGILLUM_SESSION_TOKEN`.
 
+### Desktop app
+
+`sigillum-desktop` is a Tauri v2 shell that runs the Sigillum daemon in-process
+and shows the existing web console in a native window. Launch it with
+`cargo run -p sigillum-desktop`. It uses the same data directory as the CLI
+(`~/.sigillum` by default) and honors `SIGILLUM_BASE_DIR`. The shell adds a
+single-instance guard, native menus with clipboard shortcuts, persisted window
+geometry, and a system tray with live lock state and a "Lock now" action.
+Closing the window auto-locks and hides to the tray; quitting zeroizes keys
+before exit.
+
 ### First-time setup
 
 ```bash

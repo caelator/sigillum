@@ -213,6 +213,13 @@ pub struct RiskCatalogDeleteRequest {
     pub address: String,
 }
 
+/// One per-party destination override for per-party routing.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct PartyDestination {
+    pub counterparty_id: String,
+    pub destination_address: String,
+}
+
 /// Generate a dry-run consolidation plan from the current inventory.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ConsolidationPlanGenerateRequest {
@@ -228,6 +235,10 @@ pub struct ConsolidationPlanGenerateRequest {
     pub include_watch_only: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub auto_queue_low_risk: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub routing_strategy: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub party_destinations: Vec<PartyDestination>,
 }
 
 /// Approve reviewable consolidation plan steps.

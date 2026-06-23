@@ -1,10 +1,12 @@
 use reqwest::Method;
 use sigillum_api::request::{
+    CounterpartyCreateRequest, CounterpartyDeleteRequest, CounterpartyUpdateRequest,
     TreasuryPolicyUpdateRequest, TreasuryReceiveAllocateRequest, TreasuryReceiveRotateRequest,
 };
 use sigillum_api::response::{
-    TreasuryOverviewResponse, TreasuryPolicyMutationResponse, TreasuryPolicyResponse,
-    TreasuryReceiveAllocationListResponse, TreasuryReceiveAllocationMutationResponse,
+    CounterpartyListResponse, CounterpartyMutationResponse, TreasuryOverviewResponse,
+    TreasuryPolicyMutationResponse, TreasuryPolicyResponse, TreasuryReceiveAllocationListResponse,
+    TreasuryReceiveAllocationMutationResponse,
 };
 
 use crate::{ClientError, SigillumClient};
@@ -53,6 +55,41 @@ impl SigillumClient {
     ) -> Result<TreasuryReceiveAllocationMutationResponse, ClientError> {
         let builder = self
             .request(Method::POST, "/api/treasury/receive-addresses/rotate")
+            .json(&request);
+        self.send(builder).await
+    }
+
+    pub async fn list_parties(&self) -> Result<CounterpartyListResponse, ClientError> {
+        let builder = self.request(Method::GET, "/api/treasury/parties");
+        self.send(builder).await
+    }
+
+    pub async fn create_party(
+        &self,
+        request: CounterpartyCreateRequest,
+    ) -> Result<CounterpartyMutationResponse, ClientError> {
+        let builder = self
+            .request(Method::POST, "/api/treasury/parties")
+            .json(&request);
+        self.send(builder).await
+    }
+
+    pub async fn update_party(
+        &self,
+        request: CounterpartyUpdateRequest,
+    ) -> Result<CounterpartyMutationResponse, ClientError> {
+        let builder = self
+            .request(Method::POST, "/api/treasury/parties/update")
+            .json(&request);
+        self.send(builder).await
+    }
+
+    pub async fn delete_party(
+        &self,
+        request: CounterpartyDeleteRequest,
+    ) -> Result<CounterpartyMutationResponse, ClientError> {
+        let builder = self
+            .request(Method::POST, "/api/treasury/parties/delete")
             .json(&request);
         self.send(builder).await
     }

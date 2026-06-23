@@ -8,8 +8,8 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 use sigillum_api::{
-    ChainProfile, ConsolidationPlan, NftMetadataCacheEntry, RiskCatalogEntry, RiskFinding,
-    TreasuryPolicy, TreasuryReceiveAllocation, WalletAssetHolding, WalletDiscoveryJob,
+    ChainProfile, ConsolidationPlan, Counterparty, NftMetadataCacheEntry, RiskCatalogEntry,
+    RiskFinding, TreasuryPolicy, TreasuryReceiveAllocation, WalletAssetHolding, WalletDiscoveryJob,
     WalletInventoryAddress, WatchAddressBookEntry,
 };
 
@@ -39,6 +39,8 @@ pub struct WalletInventoryState {
     pub treasury_policy: Option<TreasuryPolicy>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub receive_allocations: Vec<TreasuryReceiveAllocation>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub parties: Vec<Counterparty>,
 }
 
 impl JsonDocument for WalletInventoryState {
@@ -227,6 +229,7 @@ mod tests {
             status: "active".into(),
             created_at_unix: 1,
             retired_at_unix: None,
+            counterparty_id: None,
         }
     }
 
@@ -241,6 +244,7 @@ mod tests {
             max_plan_native_wei_hex: None,
             require_simulation: true,
             allow_raw_digest_signing: false,
+            block_cross_party_linkage: false,
             created_at_unix: 1,
             updated_at_unix: 2,
         }

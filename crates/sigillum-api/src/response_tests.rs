@@ -783,6 +783,7 @@ fn test_wallet_operations_response_roundtrips() {
         simulation_evidence: vec!["preflight not available".to_string()],
         risk_level: "blocked".to_string(),
         blockers: vec!["signing_not_implemented".to_string()],
+        linkage_warnings: Vec::new(),
         auto_eligible: false,
         approved: false,
     };
@@ -801,6 +802,7 @@ fn test_wallet_operations_response_roundtrips() {
             value_items: 1,
         },
         policy_violations: Vec::new(),
+        linkage_findings: Vec::new(),
         steps: vec![step],
     };
     roundtrip_test(ConsolidationPlanListResponse {
@@ -901,6 +903,7 @@ fn test_eth_stealth_deposit_roundtrip() {
         updated_at_unix: 1000001,
         last_checked_at_unix: Some(1000002),
         broadcast_transaction_hash_hex: None,
+        counterparty_id: None,
     };
     roundtrip_test(deposit);
 }
@@ -1417,6 +1420,7 @@ fn sample_receive_allocation() -> TreasuryReceiveAllocation {
         status: "active".to_string(),
         created_at_unix: 10,
         retired_at_unix: None,
+        counterparty_id: None,
     }
 }
 
@@ -1429,6 +1433,10 @@ fn test_treasury_receive_allocation_responses_roundtrip() {
         retired_at_unix: Some(11),
         ..sample_receive_allocation()
     });
+    roundtrip_test(TreasuryReceiveAllocation {
+        counterparty_id: Some("cp_1".into()),
+        ..sample_receive_allocation()
+    });
     roundtrip_test(TreasuryReceiveAllocationListResponse {
         allocations: vec![sample_receive_allocation()],
     });
@@ -1438,6 +1446,59 @@ fn test_treasury_receive_allocation_responses_roundtrip() {
     roundtrip_test(TreasuryReceiveAllocationMutationResponse {
         status: "allocated".to_string(),
         allocation: sample_receive_allocation(),
+    });
+    roundtrip_test(ReceivingRefreshResponse {
+        generated_at_unix: 99,
+        addresses_requested: 3,
+        addresses_refreshed: 2,
+        addresses_skipped: 1,
+        stealth_refreshed: true,
+        provider_status: "partial".to_string(),
+        errors: vec!["mainnet 0xabc: timeout".to_string()],
+    });
+}
+
+#[test]
+fn test_counterparty_responses_roundtrip() {
+    roundtrip_test(Counterparty {
+        id: "cp_1".into(),
+        name: "Acme Corp".into(),
+        note: Some("net-30".into()),
+        sweep_destination_address: Some("0x1111111111111111111111111111111111111111".into()),
+        created_at_unix: 5,
+    });
+    roundtrip_test(Counterparty {
+        id: "cp_2".into(),
+        name: "Beta LLC".into(),
+        note: None,
+        sweep_destination_address: None,
+        created_at_unix: 6,
+    });
+    roundtrip_test(CounterpartyListResponse {
+        parties: vec![Counterparty {
+            id: "cp_1".into(),
+            name: "Acme Corp".into(),
+            note: None,
+            sweep_destination_address: None,
+            created_at_unix: 5,
+        }],
+    });
+    roundtrip_test(CounterpartyListResponse {
+        parties: Vec::new(),
+    });
+    roundtrip_test(CounterpartyMutationResponse {
+        status: "created".into(),
+        party: Some(Counterparty {
+            id: "cp_1".into(),
+            name: "Acme Corp".into(),
+            note: None,
+            sweep_destination_address: None,
+            created_at_unix: 5,
+        }),
+    });
+    roundtrip_test(CounterpartyMutationResponse {
+        status: "deleted".into(),
+        party: None,
     });
 }
 
@@ -1458,6 +1519,7 @@ fn sample_treasury_policy() -> TreasuryPolicy {
         max_plan_native_wei_hex: Some("0x1bc16d674ec80000".to_string()),
         require_simulation: true,
         allow_raw_digest_signing: false,
+        block_cross_party_linkage: false,
         created_at_unix: 1,
         updated_at_unix: 2,
     }
@@ -1479,6 +1541,7 @@ fn test_treasury_policy_responses_roundtrip() {
             max_plan_native_wei_hex: None,
             require_simulation: false,
             allow_raw_digest_signing: false,
+            block_cross_party_linkage: false,
             created_at_unix: 1,
             updated_at_unix: 3,
         },
@@ -1492,6 +1555,7 @@ fn test_treasury_policy_require_simulation_defaults_true() {
         serde_json::from_str(r#"{"enabled":true,"created_at_unix":1,"updated_at_unix":2}"#)
             .unwrap();
     assert!(policy.require_simulation);
+    assert!(!policy.block_cross_party_linkage);
     assert!(policy.allowed_destinations.is_empty());
 }
 
@@ -1512,6 +1576,7 @@ fn test_consolidation_plan_policy_violations_roundtrip() {
             value_items: 0,
         },
         policy_violations: vec!["exceeds_policy_plan_cap".to_string()],
+        linkage_findings: Vec::new(),
         steps: Vec::new(),
     };
     roundtrip_test(base.clone());
