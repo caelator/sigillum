@@ -100,8 +100,10 @@ these are true:
 
 ## Current Plan Of Record
 
-The structural roadmap lives in
-[docs/catchup-plan.md](./docs/catchup-plan.md).
+The active execution plan for the 1.0 release lives in
+[docs/release-1.0-plan.md](./docs/release-1.0-plan.md). The earlier structural
+roadmap in [docs/catchup-plan.md](./docs/catchup-plan.md) remains the
+background reference; its open Phase 1–2 items are absorbed into the 1.0 plan.
 
 The current execution order is:
 
