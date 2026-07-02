@@ -1455,3 +1455,9 @@ Phase H — Ship
   (explicit enable with fail-closed copy, or defer with pointer to Treasury
   policy). No doc gaps found. Pre-existing `cargo fmt` drift in 4 files fixed
   mechanically in the same pass.
+- 2026-07-02 A2-prep: pre-existing red baseline fixed before PR — 3 clippy
+  errors (params-struct refactor in `deposits.rs`, struct-literal test init in
+  `planner.rs`, via codex-exec); `quinn-proto` bumped 0.11.14→0.11.15
+  (RUSTSEC-2026-0185); RUSTSEC-2026-0194/0195 (quick-xml via plist←tauri, no
+  upstream fix available) temporarily ignored in `.cargo/audit.toml` +
+  `deny.toml` with removal notes — see production-readiness-audit.md.
