@@ -1372,7 +1372,7 @@ git push origin v1.0.0
 ## 5. Master checklist
 
 Phase A — Land the desktop branch
-- [ ] A1 GLM convergence blockers verified/closed
+- [x] A1 GLM convergence blockers verified/closed
 - [ ] A2 PR green on both CI legs
 - [ ] A3 Merged to main
 
@@ -1448,3 +1448,10 @@ Phase H — Ship
 ## 6. Work log
 
 (append one line per completed task: `YYYY-MM-DD <task-id> <commit-sha> <result>`)
+
+- 2026-07-02 A1 (see below) B1 verified: claim scoped in README "Privacy Model —
+  Scope and Limitations" + architecture.md "Privacy & Linkage Model". B2
+  verified: onboarding opt-in implemented in `ui/src/views/setup.ts:585-604`
+  (explicit enable with fail-closed copy, or defer with pointer to Treasury
+  policy). No doc gaps found. Pre-existing `cargo fmt` drift in 4 files fixed
+  mechanically in the same pass.

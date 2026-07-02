@@ -6,8 +6,7 @@ use sigillum_api::request::ReceivingDepositTagRequest;
 
 use super::{has_flag, parse_flag, require_flag, run_api_command};
 
-const USAGE: &str =
-    "sigillum api receiving <overview|refresh-balances|tag-deposit> [--deposit-id <ID> [--counterparty-id <ID> | --clear]]";
+const USAGE: &str = "sigillum api receiving <overview|refresh-balances|tag-deposit> [--deposit-id <ID> [--counterparty-id <ID> | --clear]]";
 
 pub(super) fn cmd_api_receiving(args: &[String]) {
     if args.len() < 2 {

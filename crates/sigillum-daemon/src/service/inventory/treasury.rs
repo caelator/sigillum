@@ -44,8 +44,7 @@ use super::{
 const DEFAULT_NATIVE_SYMBOL: &str = "ETH";
 const RECEIVE_STATUS_ACTIVE: &str = "active";
 const RECEIVE_STATUS_RETIRED: &str = "retired";
-const RECEIVING_LINKAGE_WARNING: &str =
-    "Sweeping here would link this payer with another party. Set a distinct per-party sweep destination.";
+const RECEIVING_LINKAGE_WARNING: &str = "Sweeping here would link this payer with another party. Set a distinct per-party sweep destination.";
 /// Absurdly large but bounded: receive indices beyond this point indicate a
 /// runaway caller, not a treasury that genuinely needs a million addresses.
 const MAX_RECEIVE_INDEX: u32 = 1_000_000;
@@ -1503,7 +1502,10 @@ mod tests {
             .collect();
         assert_eq!(
             warnings,
-            vec![Some(RECEIVING_LINKAGE_WARNING), Some(RECEIVING_LINKAGE_WARNING)]
+            vec![
+                Some(RECEIVING_LINKAGE_WARNING),
+                Some(RECEIVING_LINKAGE_WARNING)
+            ]
         );
 
         let same_party = Counterparty {

@@ -2188,7 +2188,10 @@ async fn receiving_overview_parses_totals_and_coverage() {
     assert_eq!(response.totals.stealth_count, 1);
     assert_eq!(response.coverage.addresses_total, 2);
     assert_eq!(response.coverage.addresses_with_known_balance, 2);
-    assert_eq!(response.groups[0].items[1].linkage_warning.as_deref(), Some("shared sweep destination"));
+    assert_eq!(
+        response.groups[0].items[1].linkage_warning.as_deref(),
+        Some("shared sweep destination")
+    );
 }
 
 #[tokio::test]

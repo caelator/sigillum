@@ -125,7 +125,11 @@ fn cmd_api_treasury_parties(args: &[String], usage: &str) {
     }
 
     match args[2].as_str() {
-        "list" => run_api_command(args, true, |client| async move { client.list_parties().await }),
+        "list" => run_api_command(
+            args,
+            true,
+            |client| async move { client.list_parties().await },
+        ),
         "create" => {
             let request = CounterpartyCreateRequest {
                 name: require_flag(args, "--name", usage),
