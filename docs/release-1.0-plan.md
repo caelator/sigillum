@@ -1461,3 +1461,12 @@ Phase H — Ship
   (RUSTSEC-2026-0185); RUSTSEC-2026-0194/0195 (quick-xml via plist←tauri, no
   upstream fix available) temporarily ignored in `.cargo/audit.toml` +
   `deny.toml` with removal notes — see production-readiness-audit.md.
+- 2026-07-02 A2: Ubuntu CI caught a real desktop-branch bug the macOS legs
+  cannot see — stale diagnostics fixture in `sigillum-client/src/tests.rs`
+  missing the three new `idle_lock_*` DTO fields. Root cause of the blind
+  spot: all client loopback tests carry
+  `#[cfg_attr(target_os = "macos", ignore = "sandbox blocks loopback bind")]`,
+  a blanket platform skip — macOS CI runners CAN bind loopback, so the skip
+  should be sandbox-detecting, not platform-blanket. **Follow-up queued for
+  Phase B (B4 scope):** replace the blanket macOS ignore with a runtime
+  sandbox probe so macOS CI exercises these tests too.

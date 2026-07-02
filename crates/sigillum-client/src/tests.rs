@@ -268,7 +268,10 @@ async fn diagnostics_route(headers: HeaderMap) -> (StatusCode, Json<serde_json::
                 "queue_retry_base_delay_secs": 5,
                 "queue_retry_max_delay_secs": 300,
                 "provider_balance_observation_concurrency": 8,
-                "receiving_refresh_address_cap": 200
+                "receiving_refresh_address_cap": 200,
+                "idle_lock_secs": 900,
+                "idle_lock_drain_secs": 60,
+                "idle_lock_force_after_secs": 0
             },
             "eth_stealth_deposit_count": 1,
             "funded_eth_stealth_deposit_count": 1,
@@ -1667,6 +1670,9 @@ async fn diagnostics_reads_operational_metadata() {
         8
     );
     assert_eq!(response.runtime_policy.receiving_refresh_address_cap, 200);
+    assert_eq!(response.runtime_policy.idle_lock_secs, 900);
+    assert_eq!(response.runtime_policy.idle_lock_drain_secs, 60);
+    assert_eq!(response.runtime_policy.idle_lock_force_after_secs, 0);
     assert_eq!(response.eth_stealth_deposit_count, 1);
     assert_eq!(response.funded_eth_stealth_deposit_count, 1);
 }
