@@ -1076,15 +1076,17 @@ mod tests {
         let acme_address = "0xaAaAaAaAaAaAaAaAaAaAaAaAaAaAaAaAaAaAaAaA";
         let bob_address = "0xbBbBBBBbbBBBbbbBbbBbbbbBBbBbbbbBbBbbBBbB";
         let destination = "0x9999999999999999999999999999999999999999";
-        let mut state = WalletInventoryState::default();
-        state.parties = vec![
-            sample_party("party_acme", "Acme"),
-            sample_party("party_bob", "Bob"),
-        ];
-        state.receive_allocations = vec![
-            sample_receive_allocation(acme_address, Some("party_acme")),
-            sample_receive_allocation(bob_address, Some("party_bob")),
-        ];
+        let state = WalletInventoryState {
+            parties: vec![
+                sample_party("party_acme", "Acme"),
+                sample_party("party_bob", "Bob"),
+            ],
+            receive_allocations: vec![
+                sample_receive_allocation(acme_address, Some("party_acme")),
+                sample_receive_allocation(bob_address, Some("party_bob")),
+            ],
+            ..Default::default()
+        };
         let mut steps = vec![
             sample_sweep_step(acme_address, destination),
             sample_sweep_step(bob_address, destination),
@@ -1109,12 +1111,14 @@ mod tests {
         let first_address = "0x1111111111111111111111111111111111111111";
         let second_address = "0x2222222222222222222222222222222222222222";
         let destination = "0x9999999999999999999999999999999999999999";
-        let mut state = WalletInventoryState::default();
-        state.parties = vec![sample_party("party_acme", "Acme")];
-        state.receive_allocations = vec![
-            sample_receive_allocation(first_address, Some("party_acme")),
-            sample_receive_allocation(second_address, Some("party_acme")),
-        ];
+        let state = WalletInventoryState {
+            parties: vec![sample_party("party_acme", "Acme")],
+            receive_allocations: vec![
+                sample_receive_allocation(first_address, Some("party_acme")),
+                sample_receive_allocation(second_address, Some("party_acme")),
+            ],
+            ..Default::default()
+        };
         let mut steps = vec![
             sample_sweep_step(first_address, destination),
             sample_sweep_step(second_address, destination),

@@ -961,13 +961,15 @@ impl SigillumService {
 
             let (provider, wallet) = self.resolve_wallet_profile(&deposit.wallet_profile)?;
             let (enqueue, linkage_warning) = self.enqueue_deposit_sweep_job(
-                token,
-                deposit,
-                &all_deposits,
-                &wallet,
-                &provider,
+                DepositSweepJobParams {
+                    token,
+                    deposit: &*deposit,
+                    other_deposits: &all_deposits,
+                    wallet: &wallet,
+                    provider: &provider,
+                    strict_destination: true,
+                },
                 &mut queue,
-                true,
             )?;
             deposit.queue_job_id = Some(enqueue.job.id.clone());
             deposit.queue_job_state = Some(enqueue.job.state.clone());
@@ -996,19 +998,33 @@ impl SigillumService {
             linkage_warning: deposit_snapshot.2,
         })
     }
+}
 
-    // ── Sweep Job Construction ────────────────────────────────────────────
+// ── Sweep Job Construction ────────────────────────────────────────────────
 
+struct DepositSweepJobParams<'a> {
+    token: &'a str,
+    deposit: &'a EthStealthDeposit,
+    other_deposits: &'a [EthStealthDeposit],
+    wallet: &'a sigillum_api::EthStealthWalletProfile,
+    provider: &'a sigillum_api::EvmProviderProfile,
+    strict_destination: bool,
+}
+
+impl SigillumService {
     fn enqueue_deposit_sweep_job(
         &self,
-        token: &str,
-        deposit: &EthStealthDeposit,
-        other_deposits: &[EthStealthDeposit],
-        wallet: &sigillum_api::EthStealthWalletProfile,
-        provider: &sigillum_api::EvmProviderProfile,
+        params: DepositSweepJobParams<'_>,
         queue: &mut crate::queue_store::QueueState,
-        strict_destination: bool,
     ) -> ServiceResult<(QueueEnqueueResponse, Option<String>)> {
+        let DepositSweepJobParams {
+            token,
+            deposit,
+            other_deposits,
+            wallet,
+            provider,
+            strict_destination,
+        } = params;
         let inventory =
             crate::inventory::load_wallet_inventory(&self.state.base_dir).map_err(|error| {
                 ServiceError::internal(format!("Failed to load wallet inventory: {error}"))
@@ -1243,13 +1259,15 @@ impl SigillumService {
                 .unwrap_or(false);
             if auto_enqueue && deposit.auto_queue_sweep && !has_active_job && min_ready {
                 let enqueue_result = self.enqueue_deposit_sweep_job(
-                    token,
-                    deposit,
-                    &all_deposits,
-                    &plan.wallet,
-                    &plan.provider,
+                    DepositSweepJobParams {
+                        token,
+                        deposit: &*deposit,
+                        other_deposits: &all_deposits,
+                        wallet: &plan.wallet,
+                        provider: &plan.provider,
+                        strict_destination: false,
+                    },
                     queue,
-                    false,
                 );
                 if let Ok((enqueue_result, _linkage_warning)) = enqueue_result {
                     queued += 1;
