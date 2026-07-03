@@ -1,6 +1,6 @@
 # Production Readiness Audit
 
-**Date:** June 4, 2026 (updated June 19, 2026)
+**Date:** June 4, 2026 (updated July 3, 2026)
 **Scope:** local-first, single-host Sigillum source checkout and local-sidecar
 gateway boundary
 **Verdict:** source release gate passed for Sigillum Local-First Operator
@@ -36,6 +36,10 @@ The gate covers:
   a real local daemon through setup-wizard passphrase initialization, unlocked
   operator workspace, canary write/reveal, browser-session logout, and
   passphrase re-authentication, failing on any browser console or runtime error
+- desktop compile and bundle smoke through `scripts/check-desktop.sh`, which
+  always builds `sigillum-desktop` and, on macOS, runs a debug Tauri bundle
+  build, asserts `.app` and `.dmg` outputs, and verifies the `.app` carries a
+  code signature
 - configurable local daemon/gateway soak harness for repeated daemon status,
   vault write/read canaries, gateway health, and `sigillum doctor`
 - RustSec advisory scan through `cargo audit`
@@ -81,6 +85,15 @@ daemon, drives a headless Chromium-family browser through the same setup,
 vault-canary, logout, and re-authentication workflow over the Chrome DevTools
 Protocol, captures a screenshot and DOM snapshot on failure, and can be skipped
 on hosts without a local browser via `SIGILLUM_SKIP_BROWSER_SMOKE=1`.
+
+The desktop bundle proof is now repeatable as `scripts/check-desktop.sh`, wired
+into the release gate after the browser smoke. It always compiles
+`sigillum-desktop` with the locked dependency graph. On macOS, it also runs
+`cargo tauri build --debug`, requires the debug `.app` and `.dmg` artifacts,
+and verifies the `.app` is code-signed. The macOS bundle portion can be skipped
+with `SIGILLUM_SKIP_DESKTOP_BUNDLE=1` only when the host cannot build Tauri
+bundles; non-macOS hosts print an explicit bundle-skip line after the compile
+check.
 
 The configurable reliability harness is `scripts/check-local-soak.sh`. A bounded
 local validation run passed with `SIGILLUM_SOAK_SECONDS=300`,
@@ -144,6 +157,7 @@ on each release-gate run (`cargo update -p plist`).
 | Target-host operational readiness | `sigillum doctor` passed in `scripts/check-runtime-smoke.sh` for first-run and unlocked temporary daemon states, and the `mac-server` 3600-second soak receipt recorded 117 doctor runs on a clean checkout | Proven for `mac-server`; each additional target host still needs its own doctor/soak receipt |
 | Runtime daemon lifecycle behavior | `scripts/check-runtime-smoke.sh` starts the daemon, verifies status, initializes a passphrase compartment, writes and reads vault canaries, locks, unlocks, lists compartments, and runs doctor | Proven for current checkout in an unsandboxed local environment |
 | Runtime browser/UI visual behavior | DOM smoke tests pass, the runtime smoke checks the served UI shell, and `scripts/check-browser-smoke.sh` repeatably drives a headless browser through setup, unlocked operator workspace, vault canary write/reveal, browser-session logout, passphrase re-authentication, and post-auth canary count checks against an isolated local daemon inside the release gate | Proven for current checkout as repeatable automation in an unsandboxed local environment with a Chromium-family browser |
+| Desktop app bundle readiness | `scripts/check-desktop.sh` always compiles `sigillum-desktop`; on macOS it runs a debug Tauri bundle build, asserts `.app` and `.dmg` artifacts, and verifies the `.app` code signature | Proven for current checkout on macOS; non-macOS release-gate legs compile the desktop crate and explicitly skip bundle packaging |
 | Long-duration reliability | Recovery and crash tests pass, `scripts/check-local-soak.sh` passed a bounded 300-second local daemon/gateway run with 28 iterations, and a `mac-server` target-host run passed a 3600-second target with 117 iterations | Proven for the current local-first target host; broader host coverage and chaos testing remain future assurance work |
 | External security assurance | Code gates, audit, deny, local adversarial/fuzz gate, SSRF/local-boundary tests, and UI boundary tests pass | Local boundary pass proven for current checkout; independent external penetration test not performed |
 | Full wallet-management product roadmap | Existing docs and tests cover current local wallet, inventory, risk, and plan slices | Not complete; deeper discovery, DeFi/NFT metadata, broader non-EVM support, and richer consolidation execution remain roadmap work |

@@ -97,6 +97,12 @@ The build writes, under the workspace root:
 - `target/release/bundle/macos/Sigillum.app`
 - `target/release/bundle/dmg/Sigillum_<version>_<arch>.dmg`
 
+The release gate runs `scripts/check-desktop.sh` for repeatable desktop
+coverage. It always compiles `sigillum-desktop`; on macOS it also runs
+`cargo tauri build --debug`, requires the debug `.app` and `.dmg`, and verifies
+the app bundle has a code signature. Set `SIGILLUM_SKIP_DESKTOP_BUNDLE=1` only
+on macOS hosts that cannot build Tauri bundles.
+
 ### Verify the download before opening
 
 Compare the `.dmg` checksum with the release `SHA256SUMS` file:

@@ -109,6 +109,7 @@ if [[ "${SIGILLUM_SKIP_BROWSER_SMOKE:-0}" == "1" ]]; then
 else
   run_step ./scripts/check-browser-smoke.sh
 fi
+run_step ./scripts/check-desktop.sh
 run_step cargo audit
 run_step cargo deny check
 run_git_diff_check
