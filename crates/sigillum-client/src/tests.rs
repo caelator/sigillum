@@ -15,6 +15,17 @@ use super::*;
 #[derive(Clone)]
 struct TestState;
 
+#[test]
+fn constructor_normalizes_base_url_without_session_token() {
+    let client = SigillumClient::new("http://127.0.0.1:3200///");
+
+    assert_eq!(client.session_token(), None);
+    assert_eq!(
+        normalize_base_url("http://127.0.0.1:3200///".to_string()),
+        "http://127.0.0.1:3200"
+    );
+}
+
 async fn unlock() -> Json<serde_json::Value> {
     Json(json!({
         "status": "unlocked",

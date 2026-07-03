@@ -4321,6 +4321,7 @@ name = "sigillum"
 version = "0.1.0"
 dependencies = [
  "sigillum-core",
+ "tempfile",
 ]
 
 [[package]]
@@ -4524,6 +4525,7 @@ name = "sigillum-server"
 version = "0.1.0"
 dependencies = [
  "sigillum-daemon",
+ "tempfile",
 ]
 
 [[package]]
