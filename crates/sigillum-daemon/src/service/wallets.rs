@@ -651,6 +651,7 @@ mod tests {
                     max_plan_native_wei_hex: None,
                     require_simulation: true,
                     allow_raw_digest_signing: false,
+                    block_cross_party_linkage: false,
                     created_at_unix: 1,
                     updated_at_unix: 1,
                 }),

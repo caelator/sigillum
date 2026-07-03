@@ -109,6 +109,30 @@ pub async fn run_with_options(
     base_dir: PathBuf,
     options: DaemonRunOptions,
 ) -> Result<(), Box<dyn std::error::Error>> {
+    run_inner(addr, base_dir, options, |_state, _handle| {}).await
+}
+
+pub async fn run_with_handle<F>(
+    addr: SocketAddr,
+    base_dir: PathBuf,
+    options: DaemonRunOptions,
+    on_ready: F,
+) -> Result<(), Box<dyn std::error::Error>>
+where
+    F: FnOnce(Arc<AppState>, tokio::runtime::Handle) + Send + 'static,
+{
+    run_inner(addr, base_dir, options, on_ready).await
+}
+
+async fn run_inner<F>(
+    addr: SocketAddr,
+    base_dir: PathBuf,
+    options: DaemonRunOptions,
+    on_ready: F,
+) -> Result<(), Box<dyn std::error::Error>>
+where
+    F: FnOnce(Arc<AppState>, tokio::runtime::Handle) + Send + 'static,
+{
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()
@@ -123,6 +147,7 @@ pub async fn run_with_options(
 
     let listener = tokio::net::TcpListener::bind(addr).await?;
     tracing::info!("sigillum daemon listening on http://{addr}");
+    on_ready(state.clone(), tokio::runtime::Handle::current());
 
     let shutdown_state = state.clone();
     axum::serve(listener, app)

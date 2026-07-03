@@ -1,0 +1,16 @@
+[advisories]
+# Temporary, scoped exceptions — remove when upstream ships fixes.
+#
+# RUSTSEC-2026-0194 / RUSTSEC-2026-0195: quick-xml 0.39.x DoS advisories
+# (quadratic duplicate-attribute check; unbounded namespace allocation).
+# Pulled in via plist 1.9.0 <- tauri 2.x (sigillum-desktop). The plist path
+# parses only trusted, app-owned bundle files on macOS; no untrusted XML
+# reaches quick-xml in this workspace. plist 1.9.0 is the newest release and
+# does not yet admit quick-xml >= 0.41 (advisories published 2026-06-29).
+# Revisit: `cargo update -p plist && cargo audit` on each release-gate run;
+# tracked in docs/release-1.0-plan.md work log (2026-07-02) and
+# docs/production-readiness-audit.md.
+ignore = [
+    "RUSTSEC-2026-0194",
+    "RUSTSEC-2026-0195",
+]

@@ -42,6 +42,34 @@ fn check_vec_items_len(field: &str, items: &[String], max: usize) -> Result<(), 
     Ok(())
 }
 
+fn check_eth_address(field: &str, value: &str) -> Result<(), String> {
+    check_len(field, value, MAX_ADDRESS)?;
+    let raw = value
+        .strip_prefix("0x")
+        .or_else(|| value.strip_prefix("0X"))
+        .unwrap_or(value);
+    if raw.len() != 40 || !raw.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        return Err(format!(
+            "{field} must be a valid ethereum address (optional 0x prefix plus 40 hex characters)"
+        ));
+    }
+    Ok(())
+}
+
+fn check_optional_eth_address(field: &str, value: &Option<String>) -> Result<(), String> {
+    if let Some(v) = value {
+        check_eth_address(field, v)?;
+    }
+    Ok(())
+}
+
+fn check_vec_eth_addresses(field: &str, items: &[String]) -> Result<(), String> {
+    for (i, item) in items.iter().enumerate() {
+        check_eth_address(&format!("{field}[{i}]"), item)?;
+    }
+    Ok(())
+}
+
 fn check_optional_bip32_path(field: &str, value: &Option<String>) -> Result<(), String> {
     check_optional_bip32_path_with_terminal_hardened(field, value, false)
 }
@@ -117,7 +145,7 @@ const MAX_CAPABILITY_TTL_SECS: u64 = 24 * 60 * 60;
 
 impl Validate for crate::request::StealthPaymentRef {
     fn validate(&self) -> Result<(), String> {
-        check_len("stealth_address", &self.stealth_address, MAX_ADDRESS)?;
+        check_eth_address("stealth_address", &self.stealth_address)?;
         check_len(
             "ephemeral_public_key_hex",
             &self.ephemeral_public_key_hex,
@@ -386,11 +414,7 @@ impl Validate for crate::request::EthStealthSignTransferRequest {
         check_len("wallet", &self.wallet, MAX_LABEL)?;
         self.stealth.validate()?;
         self.fees.validate()?;
-        check_len(
-            "destination_address",
-            &self.destination_address,
-            MAX_ADDRESS,
-        )?;
+        check_eth_address("destination_address", &self.destination_address)?;
         check_len("value_wei_hex", &self.value_wei_hex, MAX_HEX)?;
         Ok(())
     }
@@ -401,8 +425,8 @@ impl Validate for crate::request::EthStealthSignErc20TransferRequest {
         check_len("wallet", &self.wallet, MAX_LABEL)?;
         self.stealth.validate()?;
         self.fees.validate()?;
-        check_len("token_address", &self.token_address, MAX_ADDRESS)?;
-        check_len("recipient_address", &self.recipient_address, MAX_ADDRESS)?;
+        check_eth_address("token_address", &self.token_address)?;
+        check_eth_address("recipient_address", &self.recipient_address)?;
         check_len("amount_hex", &self.amount_hex, MAX_HEX)?;
         Ok(())
     }
@@ -411,7 +435,7 @@ impl Validate for crate::request::EthStealthSignErc20TransferRequest {
 impl Validate for crate::request::EvmRpcNonceRequest {
     fn validate(&self) -> Result<(), String> {
         self.provider.validate()?;
-        check_len("address", &self.address, MAX_ADDRESS)?;
+        check_eth_address("address", &self.address)?;
         check_optional_len("block_tag", &self.block_tag, MAX_LABEL)?;
         Ok(())
     }
@@ -420,7 +444,7 @@ impl Validate for crate::request::EvmRpcNonceRequest {
 impl Validate for crate::request::EvmRpcBalanceRequest {
     fn validate(&self) -> Result<(), String> {
         self.provider.validate()?;
-        check_len("address", &self.address, MAX_ADDRESS)?;
+        check_eth_address("address", &self.address)?;
         check_optional_len("block_tag", &self.block_tag, MAX_LABEL)?;
         Ok(())
     }
@@ -429,8 +453,8 @@ impl Validate for crate::request::EvmRpcBalanceRequest {
 impl Validate for crate::request::EvmRpcErc20BalanceRequest {
     fn validate(&self) -> Result<(), String> {
         self.provider.validate()?;
-        check_len("token_address", &self.token_address, MAX_ADDRESS)?;
-        check_len("owner_address", &self.owner_address, MAX_ADDRESS)?;
+        check_eth_address("token_address", &self.token_address)?;
+        check_eth_address("owner_address", &self.owner_address)?;
         check_optional_len("block_tag", &self.block_tag, MAX_LABEL)?;
         Ok(())
     }
@@ -464,11 +488,7 @@ impl Validate for crate::request::EthStealthSendTransferRequest {
         check_len("wallet", &self.wallet, MAX_LABEL)?;
         self.stealth.validate()?;
         self.fees.validate()?;
-        check_len(
-            "destination_address",
-            &self.destination_address,
-            MAX_ADDRESS,
-        )?;
+        check_eth_address("destination_address", &self.destination_address)?;
         check_len("value_wei_hex", &self.value_wei_hex, MAX_HEX)?;
         Ok(())
     }
@@ -481,8 +501,8 @@ impl Validate for crate::request::EthStealthSendErc20TransferRequest {
         check_len("wallet", &self.wallet, MAX_LABEL)?;
         self.stealth.validate()?;
         self.fees.validate()?;
-        check_len("token_address", &self.token_address, MAX_ADDRESS)?;
-        check_len("recipient_address", &self.recipient_address, MAX_ADDRESS)?;
+        check_eth_address("token_address", &self.token_address)?;
+        check_eth_address("recipient_address", &self.recipient_address)?;
         check_len("amount_hex", &self.amount_hex, MAX_HEX)?;
         Ok(())
     }
@@ -515,10 +535,9 @@ impl Validate for crate::request::EthStealthWalletProfileUpsertRequest {
         check_len("wallet", &self.wallet, MAX_LABEL)?;
         check_optional_len("short_name", &self.short_name, MAX_LABEL)?;
         check_len("provider_profile", &self.provider_profile, MAX_LABEL)?;
-        check_optional_len(
+        check_optional_eth_address(
             "default_destination_address",
             &self.default_destination_address,
-            MAX_ADDRESS,
         )?;
         Ok(())
     }
@@ -572,10 +591,9 @@ impl Validate for crate::request::EthXpubWalletProfileUpsertRequest {
                 "external_receive_xpub and external_account_xpub are mutually exclusive".into(),
             );
         }
-        check_optional_len(
+        check_optional_eth_address(
             "default_destination_address",
             &self.default_destination_address,
-            MAX_ADDRESS,
         )?;
         Ok(())
     }
@@ -592,10 +610,9 @@ impl Validate for crate::request::EthSeedWalletProfileUpsertRequest {
             MAX_PASSPHRASE,
         )?;
         check_len("provider_profile", &self.provider_profile, MAX_LABEL)?;
-        check_optional_len(
+        check_optional_eth_address(
             "default_destination_address",
             &self.default_destination_address,
-            MAX_ADDRESS,
         )?;
         Ok(())
     }
@@ -617,10 +634,9 @@ impl Validate for crate::request::EthSeedWalletCreateRequest {
             MAX_PASSPHRASE,
         )?;
         check_len("provider_profile", &self.provider_profile, MAX_LABEL)?;
-        check_optional_len(
+        check_optional_eth_address(
             "default_destination_address",
             &self.default_destination_address,
-            MAX_ADDRESS,
         )?;
         Ok(())
     }
@@ -701,37 +717,35 @@ impl Validate for crate::request::WalletInventoryScanRequest {
                 "watch_addresses exceeds maximum length of {MAX_TOKEN_ADDRESSES} items"
             ));
         }
-        check_vec_items_len("token_addresses", &self.token_addresses, MAX_ADDRESS)?;
-        check_vec_items_len(
+        if self.nft_operator_addresses.len() > MAX_TOKEN_ADDRESSES {
+            return Err(format!(
+                "nft_operator_addresses exceeds maximum length of {MAX_TOKEN_ADDRESSES} items"
+            ));
+        }
+        check_vec_eth_addresses("token_addresses", &self.token_addresses)?;
+        check_vec_eth_addresses(
             "allowance_spender_addresses",
             &self.allowance_spender_addresses,
-            MAX_ADDRESS,
         )?;
-        check_vec_items_len(
+        check_vec_eth_addresses(
             "permit2_contract_addresses",
             &self.permit2_contract_addresses,
-            MAX_ADDRESS,
         )?;
-        check_vec_items_len(
-            "permit2_spender_addresses",
-            &self.permit2_spender_addresses,
-            MAX_ADDRESS,
-        )?;
+        check_vec_eth_addresses("permit2_spender_addresses", &self.permit2_spender_addresses)?;
+        check_vec_eth_addresses("nft_operator_addresses", &self.nft_operator_addresses)?;
         for (index, probe) in self.defi_token_probes.iter().enumerate() {
             check_len(
                 &format!("defi_token_probes[{index}].protocol"),
                 &probe.protocol,
                 MAX_LABEL,
             )?;
-            check_len(
+            check_eth_address(
                 &format!("defi_token_probes[{index}].token_address"),
                 &probe.token_address,
-                MAX_ADDRESS,
             )?;
-            check_optional_len(
+            check_optional_eth_address(
                 &format!("defi_token_probes[{index}].protocol_address"),
                 &probe.protocol_address,
-                MAX_ADDRESS,
             )?;
         }
         for (index, probe) in self.claim_candidate_probes.iter().enumerate() {
@@ -745,20 +759,17 @@ impl Validate for crate::request::WalletInventoryScanRequest {
                 &probe.protocol,
                 MAX_LABEL,
             )?;
-            check_len(
+            check_eth_address(
                 &format!("claim_candidate_probes[{index}].claimant_address"),
                 &probe.claimant_address,
-                MAX_ADDRESS,
             )?;
-            check_len(
+            check_eth_address(
                 &format!("claim_candidate_probes[{index}].claim_contract_address"),
                 &probe.claim_contract_address,
-                MAX_ADDRESS,
             )?;
-            check_len(
+            check_eth_address(
                 &format!("claim_candidate_probes[{index}].asset_address"),
                 &probe.asset_address,
-                MAX_ADDRESS,
             )?;
             check_len(
                 &format!("claim_candidate_probes[{index}].amount_hex"),
@@ -792,11 +803,7 @@ impl Validate for crate::request::WalletInventoryScanRequest {
             )?;
         }
         for (index, probe) in self.watch_addresses.iter().enumerate() {
-            check_len(
-                &format!("watch_addresses[{index}].address"),
-                &probe.address,
-                MAX_ADDRESS,
-            )?;
+            check_eth_address(&format!("watch_addresses[{index}].address"), &probe.address)?;
             check_optional_len(
                 &format!("watch_addresses[{index}].label"),
                 &probe.label,
@@ -809,7 +816,7 @@ impl Validate for crate::request::WalletInventoryScanRequest {
 
 impl Validate for crate::request::WatchAddressBookUpsertRequest {
     fn validate(&self) -> Result<(), String> {
-        check_len("address", &self.address, MAX_ADDRESS)?;
+        check_eth_address("address", &self.address)?;
         check_optional_len("label", &self.label, MAX_LABEL)?;
         if self.tags.len() > MAX_TOKEN_ADDRESSES {
             return Err(format!(
@@ -823,7 +830,7 @@ impl Validate for crate::request::WatchAddressBookUpsertRequest {
 
 impl Validate for crate::request::WatchAddressBookDeleteRequest {
     fn validate(&self) -> Result<(), String> {
-        check_len("address", &self.address, MAX_ADDRESS)?;
+        check_eth_address("address", &self.address)?;
         Ok(())
     }
 }
@@ -856,7 +863,7 @@ impl Validate for crate::request::DiscoveryJobMutationRequest {
 
 impl Validate for crate::request::RiskCatalogUpsertRequest {
     fn validate(&self) -> Result<(), String> {
-        check_len("address", &self.address, MAX_ADDRESS)?;
+        check_eth_address("address", &self.address)?;
         check_optional_len("label", &self.label, MAX_LABEL)?;
         check_len("risk_level", &self.risk_level, MAX_LABEL)?;
         if self.notes.len() > MAX_TOKEN_ADDRESSES {
@@ -871,21 +878,44 @@ impl Validate for crate::request::RiskCatalogUpsertRequest {
 
 impl Validate for crate::request::RiskCatalogDeleteRequest {
     fn validate(&self) -> Result<(), String> {
-        check_len("address", &self.address, MAX_ADDRESS)?;
+        check_eth_address("address", &self.address)?;
         Ok(())
     }
 }
 
 impl Validate for crate::request::ConsolidationPlanGenerateRequest {
     fn validate(&self) -> Result<(), String> {
-        check_optional_len(
-            "destination_address",
-            &self.destination_address,
-            MAX_ADDRESS,
-        )?;
+        check_optional_eth_address("destination_address", &self.destination_address)?;
         check_optional_len("wallet_family", &self.wallet_family, MAX_LABEL)?;
         check_optional_len("wallet_profile", &self.wallet_profile, MAX_LABEL)?;
         check_optional_len("provider_profile", &self.provider_profile, MAX_LABEL)?;
+        if let Some(strategy) = self.routing_strategy.as_deref() {
+            let strategy = strategy.trim();
+            if strategy != "single" && strategy != "per_party" {
+                return Err("routing_strategy must be one of: single, per_party".into());
+            }
+        }
+        for (index, dest) in self.party_destinations.iter().enumerate() {
+            if dest.counterparty_id.trim().is_empty() {
+                return Err(format!(
+                    "party_destinations[{index}].counterparty_id must not be empty"
+                ));
+            }
+            check_len(
+                &format!("party_destinations[{index}].counterparty_id"),
+                &dest.counterparty_id,
+                MAX_ID,
+            )?;
+            if dest.destination_address.trim().is_empty() {
+                return Err(format!(
+                    "party_destinations[{index}].destination_address must not be empty"
+                ));
+            }
+            check_eth_address(
+                &format!("party_destinations[{index}].destination_address"),
+                &dest.destination_address,
+            )?;
+        }
         Ok(())
     }
 }
@@ -911,7 +941,7 @@ impl Validate for crate::request::ConsolidationPlanExportRequest {
         check_len("plan_id", &self.plan_id, MAX_ID)?;
         check_vec_items_len("step_ids", &self.step_ids, MAX_ID)?;
         check_optional_len("format", &self.format, MAX_LABEL)?;
-        check_optional_len("safe_address", &self.safe_address, MAX_ADDRESS)?;
+        check_optional_eth_address("safe_address", &self.safe_address)?;
         Ok(())
     }
 }
@@ -927,10 +957,9 @@ impl Validate for crate::request::TreasuryPolicyUpdateRequest {
                     "allowed_destinations[{index}].address must not be empty"
                 ));
             }
-            check_len(
+            check_eth_address(
                 &format!("allowed_destinations[{index}].address"),
                 &destination.address,
-                MAX_ADDRESS,
             )?;
             check_optional_len(
                 &format!("allowed_destinations[{index}].label"),
@@ -963,6 +992,7 @@ impl Validate for crate::request::TreasuryReceiveAllocateRequest {
         }
         check_len("purpose", &self.purpose, MAX_LABEL)?;
         check_optional_len("label", &self.label, MAX_LABEL)?;
+        check_optional_len("counterparty_id", &self.counterparty_id, MAX_ID)?;
         Ok(())
     }
 }
@@ -974,16 +1004,52 @@ impl Validate for crate::request::TreasuryReceiveRotateRequest {
     }
 }
 
+impl Validate for crate::request::CounterpartyCreateRequest {
+    fn validate(&self) -> Result<(), String> {
+        if self.name.trim().is_empty() {
+            return Err("name must not be empty".into());
+        }
+        check_len("name", &self.name, MAX_LABEL)?;
+        check_optional_len("note", &self.note, MAX_NOTE)?;
+        check_optional_eth_address("sweep_destination_address", &self.sweep_destination_address)?;
+        Ok(())
+    }
+}
+
+impl Validate for crate::request::CounterpartyUpdateRequest {
+    fn validate(&self) -> Result<(), String> {
+        check_len("id", &self.id, MAX_ID)?;
+        if self.name.trim().is_empty() {
+            return Err("name must not be empty".into());
+        }
+        check_len("name", &self.name, MAX_LABEL)?;
+        check_optional_len("note", &self.note, MAX_NOTE)?;
+        check_optional_eth_address("sweep_destination_address", &self.sweep_destination_address)?;
+        Ok(())
+    }
+}
+
+impl Validate for crate::request::CounterpartyDeleteRequest {
+    fn validate(&self) -> Result<(), String> {
+        check_len("id", &self.id, MAX_ID)?;
+        Ok(())
+    }
+}
+
+impl Validate for crate::request::ReceivingDepositTagRequest {
+    fn validate(&self) -> Result<(), String> {
+        check_len("deposit_id", &self.deposit_id, MAX_ID)?;
+        check_optional_len("counterparty_id", &self.counterparty_id, MAX_ID)?;
+        Ok(())
+    }
+}
+
 impl Validate for crate::request::EthStealthSendWithProfileRequest {
     fn validate(&self) -> Result<(), String> {
         check_len("wallet_profile", &self.wallet_profile, MAX_LABEL)?;
         self.stealth.validate()?;
         check_len("value_wei_hex", &self.value_wei_hex, MAX_HEX)?;
-        check_optional_len(
-            "destination_address",
-            &self.destination_address,
-            MAX_ADDRESS,
-        )?;
+        check_optional_eth_address("destination_address", &self.destination_address)?;
         Ok(())
     }
 }
@@ -992,8 +1058,8 @@ impl Validate for crate::request::EthStealthSendErc20WithProfileRequest {
     fn validate(&self) -> Result<(), String> {
         check_len("wallet_profile", &self.wallet_profile, MAX_LABEL)?;
         self.stealth.validate()?;
-        check_len("token_address", &self.token_address, MAX_ADDRESS)?;
-        check_len("recipient_address", &self.recipient_address, MAX_ADDRESS)?;
+        check_eth_address("token_address", &self.token_address)?;
+        check_eth_address("recipient_address", &self.recipient_address)?;
         check_len("amount_hex", &self.amount_hex, MAX_HEX)?;
         Ok(())
     }
@@ -1003,11 +1069,7 @@ impl Validate for crate::request::QueueEthStealthNativeSweepRequest {
     fn validate(&self) -> Result<(), String> {
         check_len("wallet_profile", &self.wallet_profile, MAX_LABEL)?;
         self.stealth.validate()?;
-        check_optional_len(
-            "destination_address",
-            &self.destination_address,
-            MAX_ADDRESS,
-        )?;
+        check_optional_eth_address("destination_address", &self.destination_address)?;
         check_optional_len("min_value_wei_hex", &self.min_value_wei_hex, MAX_HEX)?;
         Ok(())
     }
@@ -1017,8 +1079,8 @@ impl Validate for crate::request::QueueEthStealthErc20SweepRequest {
     fn validate(&self) -> Result<(), String> {
         check_len("wallet_profile", &self.wallet_profile, MAX_LABEL)?;
         self.stealth.validate()?;
-        check_len("token_address", &self.token_address, MAX_ADDRESS)?;
-        check_optional_len("recipient_address", &self.recipient_address, MAX_ADDRESS)?;
+        check_eth_address("token_address", &self.token_address)?;
+        check_optional_eth_address("recipient_address", &self.recipient_address)?;
         check_optional_len("min_amount_hex", &self.min_amount_hex, MAX_HEX)?;
         Ok(())
     }
@@ -1032,11 +1094,7 @@ impl Validate for crate::request::EthStealthDepositCreateNativeRequest {
             &self.expected_value_wei_hex,
             MAX_HEX,
         )?;
-        check_optional_len(
-            "sweep_destination_address",
-            &self.sweep_destination_address,
-            MAX_ADDRESS,
-        )?;
+        check_optional_eth_address("sweep_destination_address", &self.sweep_destination_address)?;
         check_optional_len(
             "min_sweep_value_wei_hex",
             &self.min_sweep_value_wei_hex,
@@ -1055,13 +1113,9 @@ impl Validate for crate::request::EthStealthDepositCreateNativeRequest {
 impl Validate for crate::request::EthStealthDepositCreateErc20Request {
     fn validate(&self) -> Result<(), String> {
         check_len("wallet_profile", &self.wallet_profile, MAX_LABEL)?;
-        check_len("token_address", &self.token_address, MAX_ADDRESS)?;
+        check_eth_address("token_address", &self.token_address)?;
         check_optional_len("expected_amount_hex", &self.expected_amount_hex, MAX_HEX)?;
-        check_optional_len(
-            "sweep_destination_address",
-            &self.sweep_destination_address,
-            MAX_ADDRESS,
-        )?;
+        check_optional_eth_address("sweep_destination_address", &self.sweep_destination_address)?;
         check_optional_len("min_sweep_amount_hex", &self.min_sweep_amount_hex, MAX_HEX)?;
         check_optional_len("note", &self.note, MAX_NOTE)?;
         check_optional_len(
@@ -1092,12 +1146,8 @@ impl Validate for crate::request::EthStealthAnnouncementScanRequest {
         check_len("wallet_profile", &self.wallet_profile, MAX_LABEL)?;
         check_len("from_block", &self.from_block, MAX_LABEL)?;
         check_optional_len("to_block", &self.to_block, MAX_LABEL)?;
-        check_optional_len("token_address", &self.token_address, MAX_ADDRESS)?;
-        check_optional_len(
-            "sweep_destination_address",
-            &self.sweep_destination_address,
-            MAX_ADDRESS,
-        )?;
+        check_optional_eth_address("token_address", &self.token_address)?;
+        check_optional_eth_address("sweep_destination_address", &self.sweep_destination_address)?;
         check_optional_len("min_sweep_amount_hex", &self.min_sweep_amount_hex, MAX_HEX)?;
         check_optional_len("note", &self.note, MAX_NOTE)?;
         Ok(())

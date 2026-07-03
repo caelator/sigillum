@@ -17,6 +17,7 @@ import {
 import { computeJourneySteps, createJourneyActions } from "../src/views/journey";
 import { createOperationsActions } from "../src/views/operations";
 import { pillClass } from "../src/render/html";
+import { createReceivingActions } from "../src/views/receiving";
 import { createSelfCheckActions, formatClockTime } from "../src/views/selfcheck";
 import { createSessionActions } from "../src/views/session";
 import { createSetupWizard } from "../src/views/setup";
@@ -36,6 +37,8 @@ import {
 import type {
   EthSeedWalletProfile,
   EthXpubWalletProfile,
+  ReceivingOverviewResponse,
+  ReceivingRefreshResponse,
   SelfCheckRunResponse,
   TreasuryGroupSummary,
   TreasuryOverviewResponse,
@@ -63,6 +66,7 @@ test("shell renderer applies setup, locked, and unlocked DOM state", () => {
     "walletManagerCard",
     "profilesCard",
     "xpubCard",
+    "receivingCard",
     "treasuryCard",
     "inventoryCard",
     "depositsCard",
@@ -120,6 +124,7 @@ test("shell renderer applies setup, locked, and unlocked DOM state", () => {
   equal(mode, "unlocked");
   equal(document.body.dataset.mode, "unlocked");
   equal(dom.el("pushCard").classList.contains("hidden"), false);
+  equal(dom.el("receivingCard").classList.contains("hidden"), false);
   equal(dom.el("treasuryCard").classList.contains("hidden"), false);
   equal(dom.el("walletManagerCard").classList.contains("hidden"), false);
   ok(calls.includes("push-selectors"));
@@ -262,6 +267,7 @@ test("setup wizard passphrase path validates and initializes a local vault", asy
     "wizPassphraseConfirm",
     "wizDoneMsg",
     "wizDoneDetail",
+    "wizLinkageChoiceStatus",
   ]);
   const calls: Array<{ method: string; path: string; body?: any }> = [];
   const toasts: Array<{ message: string; type?: string }> = [];
@@ -332,6 +338,71 @@ test("setup wizard passphrase path validates and initializes a local vault", asy
   } finally {
     globalThis.setTimeout = originalSetTimeout;
   }
+});
+
+test("setup wizard enables payer-linkage protection from done step", async () => {
+  const dom = installDom(["wizLinkageChoiceStatus"]);
+  dom.el("wizLinkageChoiceStatus").classList.add("hidden");
+  const calls: Array<{ method: string; path: string; body?: any }> = [];
+  const toasts: Array<{ message: string; type?: string }> = [];
+
+  const wizard = createSetupWizard({
+    api: async (method, path, body) => {
+      calls.push({ method, path, body });
+      return {};
+    },
+    toast: (message, type) => toasts.push({ message, type }),
+    refresh: () => undefined,
+    submitNewFido2Pin: async () => undefined,
+    friendlyFidoError: (message) => String(message),
+  });
+
+  await wizard.wizEnableLinkageProtection();
+
+  deepEqual(calls, [
+    {
+      method: "POST",
+      path: "/api/treasury/policy/update",
+      body: { enabled: false, block_cross_party_linkage: true },
+    },
+  ]);
+  equal(dom.el("wizLinkageChoiceStatus").classList.contains("hidden"), false);
+  ok((dom.el("wizLinkageChoiceStatus").textContent || "").length > 0);
+  deepEqual(toasts.pop(), {
+    message: "Payer-linkage protection enabled",
+    type: undefined,
+  });
+});
+
+test("setup wizard can defer payer-linkage protection without policy update", () => {
+  const dom = installDom(["wizLinkageChoiceStatus"]);
+  dom.el("wizLinkageChoiceStatus").classList.add("hidden");
+  const calls: Array<{ method: string; path: string; body?: any }> = [];
+  const toasts: Array<{ message: string; type?: string }> = [];
+
+  const wizard = createSetupWizard({
+    api: async (method, path, body) => {
+      calls.push({ method, path, body });
+      return {};
+    },
+    toast: (message, type) => toasts.push({ message, type }),
+    refresh: () => undefined,
+    submitNewFido2Pin: async () => undefined,
+    friendlyFidoError: (message) => String(message),
+  });
+
+  wizard.wizDeclineLinkageProtection();
+
+  equal(
+    calls.some((call) => call.path === "/api/treasury/policy/update"),
+    false,
+  );
+  equal(dom.el("wizLinkageChoiceStatus").classList.contains("hidden"), false);
+  ok((dom.el("wizLinkageChoiceStatus").textContent || "").length > 0);
+  deepEqual(toasts.pop(), {
+    message: "You can enable payer-linkage protection later in Treasury policy.",
+    type: undefined,
+  });
 });
 
 test("queue and inventory renderers produce reviewable DOM summaries", () => {
@@ -413,6 +484,7 @@ test("queue and inventory renderers produce reviewable DOM summaries", () => {
       },
       created_at_unix: 1,
       updated_at_unix: 2,
+      linkage_findings: ["Destination 0xdeadbe... links 2 payers: Acme, Bob"],
       steps: [
         {
           id: "step-1",
@@ -434,6 +506,7 @@ test("queue and inventory renderers produce reviewable DOM summaries", () => {
           simulation_evidence: ["rpc_method=eth_call"],
           risk_level: "high",
           blockers: [],
+          linkage_warnings: ["shared destination links this payer with: Bob"],
           auto_eligible: false,
           approved: false,
         },
@@ -448,6 +521,13 @@ test("queue and inventory renderers produce reviewable DOM summaries", () => {
   ok(dom.el("consolidationPlanList").innerHTML.includes("exportConsolidationPlan"));
   ok(dom.el("consolidationPlanList").innerHTML.includes("Safe JSON"));
   ok(dom.el("consolidationPlanList").innerHTML.includes("Call JSON"));
+  ok(dom.el("consolidationPlanList").innerHTML.includes("would link payers"));
+  ok(dom.el("consolidationPlanList").innerHTML.includes("Scope: flags payers"));
+  ok(
+    dom
+      .el("consolidationPlanList")
+      .innerHTML.includes("shared destination links this payer with: Bob"),
+  );
 });
 
 test("inventory actions export consolidation manifests as downloads", async () => {
@@ -486,6 +566,66 @@ test("inventory actions export consolidation manifests as downloads", async () =
   equal(download?.filename, "sigillum-plan-1-call_manifest.json");
   equal(download?.payload.exported_steps, 2);
   ok(toasts.some((message) => message.includes("Exported 2 step(s); skipped 1")));
+});
+
+test("inventory consolidation generate submits per-party destinations", async () => {
+  const dom = installDom([
+    "planDestinationAddress",
+    "planRoutingStrategy",
+    "planPartyDestinations",
+    "planPerPartyHint",
+    "planPartyDest_party_acme",
+  ]);
+  const calls: Array<{ method: string; path: string; body?: any }> = [];
+  const toasts: string[] = [];
+  const inventory = createInventoryActions({
+    api: async (method, path, body) => {
+      calls.push({ method, path, body });
+      if (method === "GET" && path === "/api/treasury/parties") {
+        return {
+          parties: [{ id: "party_acme", name: "Acme", created_at_unix: 1 }],
+        };
+      }
+      if (method === "POST" && path === "/api/plans/consolidation/generate") {
+        return { status: "generated" };
+      }
+      return {};
+    },
+    toast: (message) => toasts.push(message),
+    downloadJson: () => undefined,
+  });
+
+  dom.el("planRoutingStrategy").value = "per_party";
+  await inventory.renderPlanPartyDestinations();
+  ok(dom.el("planPartyDestinations").innerHTML.includes("Destination for Acme"));
+
+  dom.el("planDestinationAddress").value =
+    "0x9999999999999999999999999999999999999999";
+  dom.el("planPartyDest_party_acme").value =
+    "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+
+  await inventory.generateConsolidationPlan();
+
+  const generate = calls.find(
+    (call) => call.path === "/api/plans/consolidation/generate",
+  );
+  deepEqual(generate, {
+    method: "POST",
+    path: "/api/plans/consolidation/generate",
+    body: {
+      destination_address: "0x9999999999999999999999999999999999999999",
+      include_watch_only: true,
+      auto_queue_low_risk: false,
+      routing_strategy: "per_party",
+      party_destinations: [
+        {
+          counterparty_id: "party_acme",
+          destination_address: "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        },
+      ],
+    },
+  });
+  ok(toasts.includes("Dry-run consolidation plan generated"));
 });
 
 test("inventory scan sends optional EVM watch-address probes", async () => {
@@ -807,6 +947,8 @@ test("treasury overview loader renders tiles, chains, groups, routing, and risk"
     "treasuryRiskPlanList",
     "treasuryPolicyList",
     "treasuryReceiveList",
+    "treasuryPartyList",
+    "treasuryReceiveParty",
   ]);
   const overview: TreasuryOverviewResponse = {
     generated_at_unix: 1717900000,
@@ -909,6 +1051,7 @@ test("treasury overview loader renders tiles, chains, groups, routing, and risk"
   deepEqual(calls, [
     "GET /api/treasury/overview",
     "GET /api/treasury/policy",
+    "GET /api/treasury/parties",
     "GET /api/treasury/receive-addresses",
   ]);
   ok(dom.el("treasuryOverviewStats").innerHTML.includes("Tracked Addresses"));
@@ -918,6 +1061,8 @@ test("treasury overview loader renders tiles, chains, groups, routing, and risk"
   ok(dom.el("treasuryGeneratedAt").textContent.startsWith("Updated "));
   ok(dom.el("treasuryPolicyList").innerHTML.includes("No treasury policy configured yet."));
   ok(dom.el("treasuryReceiveList").innerHTML.includes("No receive allocations yet."));
+  ok(dom.el("treasuryPartyList").innerHTML.includes("No counterparties yet."));
+  ok(dom.el("treasuryReceiveParty").innerHTML.includes("No party (optional)"));
 
   ok(dom.el("treasuryChainList").innerHTML.includes("chain 1 · ETH"));
   ok(dom.el("treasuryChainList").innerHTML.includes("addresses=3/5 funded"));
@@ -968,6 +1113,299 @@ test("treasury overview loader renders tiles, chains, groups, routing, and risk"
   await failing.refreshTreasuryOverview();
   deepEqual(toasts.pop(), {
     message: "treasury overview unavailable",
+    type: "error",
+  });
+});
+
+test("receiving overview renders party groups, hd and stealth items, and balance states", async () => {
+  const dom = installDom([
+    "receivingOverviewStats",
+    "receivingCoverage",
+    "receivingQuickActions",
+    "receivingGroupList",
+  ]);
+  const overview: ReceivingOverviewResponse = {
+    generated_at_unix: 1717900000,
+    include_retired: false,
+    groups: [
+      {
+        counterparty: {
+          id: "party-acme",
+          name: "Acme",
+          note: "Vendor",
+          created_at_unix: 1717800000,
+        },
+        item_count: 1,
+        native_total_wei_hex: "0xde0b6b3a7640000",
+        items: [
+          {
+            source_type: "hd",
+            address: "0x1111111111111111111111111111111111111111",
+            chain_id: 1,
+            derivation_path: "m/44'/60'/0'/0/5",
+            purpose: "invoices",
+            label: "June",
+            counterparty_id: "party-acme",
+            balance_native_wei_hex: "0xde0b6b3a7640000",
+            balance_known: true,
+            status: "active",
+            created_at_unix: 1717900000,
+          },
+        ],
+      },
+      {
+        counterparty: null,
+        item_count: 2,
+        native_total_wei_hex: "0xa688906bd8b0000",
+        items: [
+          {
+            source_type: "hd",
+            address: "0x2222222222222222222222222222222222222222",
+            chain_id: 1,
+            derivation_path: "m/44'/60'/0'/0/6",
+            purpose: "intake",
+            label: null,
+            counterparty_id: null,
+            balance_native_wei_hex: null,
+            balance_known: false,
+            status: "active",
+            created_at_unix: 1717900100,
+          },
+          {
+            source_type: "stealth",
+            address: "0x3333333333333333333333333333333333333333",
+            chain_id: 1,
+            purpose: "private deposit",
+            label: "scan result",
+            counterparty_id: null,
+            balance_native_wei_hex: "0xa688906bd8b0000",
+            balance_known: true,
+            status: "observed",
+            created_at_unix: 1717900200,
+          },
+        ],
+      },
+    ],
+    totals: {
+      item_count: 3,
+      hd_count: 2,
+      stealth_count: 1,
+      native_total_wei_hex: "0x18493fba64ef0000",
+    },
+    coverage: {
+      addresses_total: 3,
+      addresses_with_known_balance: 2,
+      note: "persisted balances only",
+    },
+  };
+  const calls: string[] = [];
+  const receiving = createReceivingActions({
+    api: async (method, path) => {
+      calls.push(method + " " + path);
+      if (path === "/api/treasury/parties") return { parties: [] };
+      if (path === "/api/deposits/eth-stealth") return { deposits: [] };
+      return overview;
+    },
+    toast: () => undefined,
+    jumpToField: () => undefined,
+    jumpToCard: () => undefined,
+  });
+
+  await receiving.loadReceivingOverview();
+
+  deepEqual(calls, [
+    "GET /api/receiving/overview",
+    "GET /api/treasury/parties",
+    "GET /api/deposits/eth-stealth",
+  ]);
+  ok(dom.el("receivingOverviewStats").innerHTML.includes("HD Addresses"));
+  ok(dom.el("receivingOverviewStats").innerHTML.includes("Stealth Deposits"));
+  ok(dom.el("receivingGroupList").innerHTML.includes("Acme"));
+  ok(dom.el("receivingGroupList").innerHTML.includes("Unassigned"));
+  ok(
+    dom
+      .el("receivingGroupList")
+      .innerHTML.includes("balance unknown — refresh in B2"),
+  );
+  ok(dom.el("receivingGroupList").innerHTML.includes("copyText"));
+});
+
+test("receiving stealth tag posts deposit id then reloads overview", async () => {
+  const dom = installDom([
+    "receivingOverviewStats",
+    "receivingCoverage",
+    "receivingQuickActions",
+    "receivingGroupList",
+  ]);
+  const stealthAddress = "0x3333333333333333333333333333333333333333";
+  const overview: ReceivingOverviewResponse = {
+    generated_at_unix: 1717900000,
+    include_retired: false,
+    groups: [
+      {
+        counterparty: null,
+        item_count: 1,
+        native_total_wei_hex: "0x5",
+        items: [
+          {
+            source_type: "stealth",
+            address: stealthAddress,
+            chain_id: 1,
+            purpose: null,
+            label: "scan result",
+            counterparty_id: null,
+            balance_native_wei_hex: "0x5",
+            balance_known: true,
+            status: "observed",
+            created_at_unix: 1717900200,
+          },
+        ],
+      },
+    ],
+    totals: {
+      item_count: 1,
+      hd_count: 0,
+      stealth_count: 1,
+      native_total_wei_hex: "0x5",
+    },
+    coverage: {
+      addresses_total: 1,
+      addresses_with_known_balance: 1,
+      note: "persisted balances only",
+    },
+  };
+  const calls: Array<{ method: string; path: string; body?: unknown }> = [];
+  const toasts: Array<{ message: string; type?: string }> = [];
+  const receiving = createReceivingActions({
+    api: async (method, path, body) => {
+      calls.push({ method, path, body });
+      if (method === "GET" && path === "/api/receiving/overview") return overview;
+      if (method === "GET" && path === "/api/treasury/parties") {
+        return {
+          parties: [{ id: "party-acme", name: "Acme", created_at_unix: 1 }],
+        };
+      }
+      if (method === "GET" && path === "/api/deposits/eth-stealth") {
+        return { deposits: [{ id: "dep-1", stealth_address: stealthAddress }] };
+      }
+      if (method === "POST" && path === "/api/receiving/deposits/tag") {
+        return { status: "tagged" };
+      }
+      return {};
+    },
+    toast: (message, type) => toasts.push({ message, type }),
+    jumpToField: () => undefined,
+    jumpToCard: () => undefined,
+  });
+
+  await receiving.loadReceivingOverview();
+  const selectEl = dom.document.createElement("select");
+  selectEl.value = "party-acme";
+  await receiving.tagStealthDeposit(stealthAddress, selectEl);
+
+  const postIndex = calls.findIndex(
+    (call) => call.method === "POST" && call.path === "/api/receiving/deposits/tag",
+  );
+  ok(postIndex > 0);
+  deepEqual(calls[postIndex], {
+    method: "POST",
+    path: "/api/receiving/deposits/tag",
+    body: { deposit_id: "dep-1", counterparty_id: "party-acme" },
+  });
+  deepEqual(calls[postIndex + 1], {
+    method: "GET",
+    path: "/api/receiving/overview",
+    body: undefined,
+  });
+  deepEqual(toasts.pop(), { message: "Counterparty updated", type: undefined });
+});
+
+test("receiving balance refresh posts, reloads overview, and handles no-provider", async () => {
+  installDom([
+    "receivingOverviewStats",
+    "receivingCoverage",
+    "receivingQuickActions",
+    "receivingGroupList",
+  ]);
+  const overview: ReceivingOverviewResponse = {
+    generated_at_unix: 1717900000,
+    include_retired: false,
+    groups: [],
+    totals: {
+      item_count: 0,
+      hd_count: 0,
+      stealth_count: 0,
+      native_total_wei_hex: "0x0",
+    },
+    coverage: {
+      addresses_total: 0,
+      addresses_with_known_balance: 0,
+      note: "persisted balances only",
+    },
+  };
+  const okRefresh: ReceivingRefreshResponse = {
+    generated_at_unix: 1717900100,
+    addresses_requested: 2,
+    addresses_refreshed: 2,
+    addresses_skipped: 0,
+    stealth_refreshed: true,
+    provider_status: "ok",
+    errors: [],
+  };
+  const calls: string[] = [];
+  const receiving = createReceivingActions({
+    api: async (method, path) => {
+      calls.push(method + " " + path);
+      if (path === "/api/receiving/refresh-balances") return okRefresh;
+      if (path === "/api/treasury/parties") return { parties: [] };
+      if (path === "/api/deposits/eth-stealth") return { deposits: [] };
+      return overview;
+    },
+    toast: () => undefined,
+    jumpToField: () => undefined,
+    jumpToCard: () => undefined,
+  });
+
+  await receiving.refreshReceivingBalances();
+
+  deepEqual(calls, [
+    "POST /api/receiving/refresh-balances",
+    "GET /api/receiving/overview",
+    "GET /api/treasury/parties",
+    "GET /api/deposits/eth-stealth",
+  ]);
+
+  const noProviderCalls: string[] = [];
+  const toasts: Array<{ message: string; type?: string }> = [];
+  const noProviderRefresh: ReceivingRefreshResponse = {
+    ...okRefresh,
+    addresses_refreshed: 0,
+    stealth_refreshed: false,
+    provider_status: "no_provider",
+  };
+  const noProvider = createReceivingActions({
+    api: async (method, path) => {
+      noProviderCalls.push(method + " " + path);
+      if (path === "/api/receiving/refresh-balances") return noProviderRefresh;
+      if (path === "/api/treasury/parties") return { parties: [] };
+      if (path === "/api/deposits/eth-stealth") return { deposits: [] };
+      return overview;
+    },
+    toast: (message, type) => toasts.push({ message, type }),
+    jumpToField: () => undefined,
+    jumpToCard: () => undefined,
+  });
+
+  await noProvider.refreshReceivingBalances();
+
+  deepEqual(noProviderCalls, [
+    "POST /api/receiving/refresh-balances",
+    "GET /api/receiving/overview",
+    "GET /api/treasury/parties",
+    "GET /api/deposits/eth-stealth",
+  ]);
+  deepEqual(toasts[0], {
+    message: "Configure an RPC provider before refreshing receiving balances.",
     type: "error",
   });
 });
@@ -1208,6 +1646,7 @@ test("treasury policy save validates caps and submits the parsed update request"
       max_step_native_wei_hex: "0x" + (1500000000000000000n).toString(16),
       max_plan_native_wei_hex: null,
       require_simulation: false,
+      block_cross_party_linkage: false,
     },
   });
   deepEqual(toasts.pop(), { message: "Treasury policy saved", type: undefined });
@@ -1217,12 +1656,41 @@ test("treasury policy save validates caps and submits the parsed update request"
   ok(calls.some((call) => call.path === "/api/treasury/overview"));
 });
 
+test("treasury policy save persists cross-party linkage block toggle", async () => {
+  const dom = installDom([
+    "treasuryPolicyEnabled",
+    "treasuryPolicyRequireSim",
+    "treasuryPolicyBlockLinkage",
+    "treasuryPolicyDestinations",
+    "treasuryPolicyMaxStepEth",
+    "treasuryPolicyMaxPlanEth",
+  ]);
+  const calls: Array<{ method: string; path: string; body?: any }> = [];
+  const treasury = createTreasuryActions({
+    api: async (method, path, body) => {
+      calls.push({ method, path, body });
+      if (path === "/api/treasury/policy/update") {
+        return { status: "updated", policy: null };
+      }
+      return {};
+    },
+    toast: () => undefined,
+  });
+
+  dom.el("treasuryPolicyBlockLinkage").checked = true;
+  await treasury.updateTreasuryPolicy();
+
+  const update = calls.find((call) => call.path === "/api/treasury/policy/update");
+  equal(update?.body.block_cross_party_linkage, true);
+});
+
 test("treasury receive allocate and rotate dispatch api calls with toasts", async () => {
   const dom = installDom([
     "treasuryReceiveList",
     "treasuryReceiveProfile",
     "treasuryReceivePurpose",
     "treasuryReceiveLabel",
+    "treasuryReceiveParty",
   ]);
   const calls: Array<{ method: string; path: string; body?: any }> = [];
   const toasts: Array<{ message: string; type?: string }> = [];
@@ -1250,6 +1718,17 @@ test("treasury receive allocate and rotate dispatch api calls with toasts", asyn
       if (path === "/api/treasury/receive-addresses") {
         return { allocations: [allocation] };
       }
+      if (path === "/api/treasury/parties") {
+        return {
+          parties: [
+            {
+              id: "party-1",
+              name: "Client One",
+              created_at_unix: 1717900000,
+            },
+          ],
+        };
+      }
       return {};
     },
     toast: (message, type) => toasts.push({ message, type }),
@@ -1265,6 +1744,9 @@ test("treasury receive allocate and rotate dispatch api calls with toasts", asyn
   dom.el("treasuryReceiveProfile").value = "archive";
   dom.el("treasuryReceivePurpose").value = "donations";
   dom.el("treasuryReceiveLabel").value = "fundraiser";
+  dom.el("treasuryReceiveParty").innerHTML =
+    '<option value="">No party (optional)</option><option value="party-1">Client One</option>';
+  dom.el("treasuryReceiveParty").value = "party-1";
 
   let pending: Promise<unknown> = Promise.resolve();
   const allocateButton = dom.el("allocateBtn", "BUTTON");
@@ -1284,11 +1766,17 @@ test("treasury receive allocate and rotate dispatch api calls with toasts", asyn
   deepEqual(allocateCall, {
     method: "POST",
     path: "/api/treasury/receive-addresses/allocate",
-    body: { wallet_profile: "archive", purpose: "donations", label: "fundraiser" },
+    body: {
+      wallet_profile: "archive",
+      purpose: "donations",
+      label: "fundraiser",
+      counterparty_id: "party-1",
+    },
   });
   equal(dom.el("treasuryReceiveProfile").value, "");
   equal(dom.el("treasuryReceivePurpose").value, "");
   equal(dom.el("treasuryReceiveLabel").value, "");
+  equal(dom.el("treasuryReceiveParty").value, "");
   deepEqual(toasts.pop(), {
     message: "Receive address allocated: 0x6666666666666666666666666666666666666666",
     type: undefined,

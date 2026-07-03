@@ -10,6 +10,7 @@ use sigillum_api::{
     EthStealthAnnouncementScanRequest, EthStealthDepositCreateErc20Request,
     EthStealthDepositCreateNativeRequest, EthStealthDepositDeleteRequest,
     EthStealthDepositEnqueueSweepRequest, EthStealthDepositRefreshRequest,
+    ReceivingDepositTagRequest,
 };
 
 use crate::AppState;
@@ -89,6 +90,23 @@ pub(crate) async fn delete_eth_stealth_deposit(
     service_response(
         service
             .delete_eth_stealth_deposit(bearer_token(&headers).as_deref(), body)
+            .await,
+    )
+}
+
+pub(crate) async fn tag_eth_stealth_deposit(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Json(body): Json<ReceivingDepositTagRequest>,
+) -> Response {
+    let body = match validated(Json(body)) {
+        Ok(b) => b,
+        Err(resp) => return resp,
+    };
+    let service = SigillumService::new(state);
+    service_response(
+        service
+            .tag_eth_stealth_deposit(bearer_token(&headers).as_deref(), body)
             .await,
     )
 }

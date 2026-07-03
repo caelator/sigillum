@@ -317,6 +317,7 @@ mod tests {
             updated_at_unix: 2,
             last_checked_at_unix: Some(2),
             broadcast_transaction_hash_hex: None,
+            counterparty_id: None,
         }
     }
 

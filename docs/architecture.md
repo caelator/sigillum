@@ -15,6 +15,23 @@ Sigillum is currently a local Rust workspace with one strong implementation path
 `sigillum-sdk` and `sigillum-server` still exist in the workspace, but the repo's
 product direction remains local-on-your-computer rather than hosted or internet-facing.
 
+`sigillum-desktop` is a Tauri v2 desktop shell for the same local boundary: it
+starts `sigillum-daemon` in-process through `run_with_handle` on a background
+Tokio runtime, chooses an ephemeral loopback port, waits for the daemon to
+accept TCP connections, and then opens a native WKWebView window at
+`http://127.0.0.1:<port>/`. The webview navigates directly to the daemon origin
+so the existing same-origin CSP remains intact; the crate does not serve UI
+assets through `tauri://`, inject tokens, or create a separate frontend surface.
+`run_with_handle` is an additive variant of `run_with_options` that passes the
+launcher the daemon's `Arc<AppState>` plus its Tokio runtime handle once the
+listener is bound, so the shell can drive lock state in-process without a new
+HTTP auth surface. On top of that the shell adds a single-instance guard
+(avoiding a second daemon contending for the per-data-dir lock), native menus
+with working clipboard items, persisted window geometry, and a system tray that
+shows live lock state and a "Lock now" action. Closing the window auto-locks
+(via `AppState::lock_now`) and hides to the tray; quitting zeroizes keys before
+exit.
+
 ## Dependency Direction
 
 ```text
@@ -223,6 +240,29 @@ What it intentionally does not do today:
 - queued execution of consolidation plans for discovered holdings outside the
   current stealth deposit sweep flow; consolidation plan exports are the current
   execution handoff boundary
+
+## Privacy & Linkage Model
+
+The receiving/treasury model centers on keeping payers unlinkable. Receive
+allocations and stealth deposits attribute to a first-class `Counterparty`, and
+consolidation is linkage-aware: `analyze_plan_linkage` (HD planner) and
+`detect_stealth_sweep_linkage` (stealth sweeps) flag when funds for *different*
+payers would route to the **same destination** — the single-hop common-recipient
+heuristic on Ethereum's account model. The identity model is conservative: a
+tagged party is one identity and each unattributed address is its own distinct
+identity, so the analysis never produces a false negative (two tagged payers to
+one destination are always caught) at the cost of possible false positives. When
+the `block_cross_party_linkage` treasury policy is enabled (an explicit
+fail-closed opt-in surfaced in onboarding, default off), warnings become hard
+blockers at plan generation, approval, and stealth-sweep enqueue.
+
+This protection is deliberately scoped to **single-hop, destination-axis**
+linkage. It does not model gas-funding linkage, amount/timing correlation,
+downstream re-merging of per-party destinations, or multi-hop flows, and RPC
+provider calls expose queried addresses to the configured endpoint. The full
+threat model and operator-discipline requirements are documented in the README's
+"Privacy Model — Scope and Limitations" section; the claim is intentionally not
+an unconditional unlinkability guarantee.
 
 ## Architectural Priorities
 

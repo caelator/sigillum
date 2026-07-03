@@ -5,8 +5,9 @@ use axum::routing::{get, post};
 use axum::{Json, Router};
 use serde_json::json;
 use sigillum_api::request::{
-    Eip1559Fees, EvmProviderRef, QueueEthStealthErc20SweepRequest,
-    QueueEthStealthNativeSweepRequest, QueueEthStealthTransferRequest, QueueProcessRequest,
+    CounterpartyCreateRequest, CounterpartyDeleteRequest, CounterpartyUpdateRequest, Eip1559Fees,
+    EvmProviderRef, QueueEthStealthErc20SweepRequest, QueueEthStealthNativeSweepRequest,
+    QueueEthStealthTransferRequest, QueueProcessRequest, ReceivingDepositTagRequest,
 };
 
 use super::*;
@@ -266,7 +267,11 @@ async fn diagnostics_route(headers: HeaderMap) -> (StatusCode, Json<serde_json::
                 "audit_max_limit": 200,
                 "queue_retry_base_delay_secs": 5,
                 "queue_retry_max_delay_secs": 300,
-                "provider_balance_observation_concurrency": 8
+                "provider_balance_observation_concurrency": 8,
+                "receiving_refresh_address_cap": 200,
+                "idle_lock_secs": 900,
+                "idle_lock_drain_secs": 60,
+                "idle_lock_force_after_secs": 0
             },
             "eth_stealth_deposit_count": 1,
             "funded_eth_stealth_deposit_count": 1,
@@ -1021,6 +1026,248 @@ async fn deposits_enqueue_sweep_route(
     )
 }
 
+async fn treasury_parties_list_route(headers: HeaderMap) -> (StatusCode, Json<serde_json::Value>) {
+    let auth = headers
+        .get(header::AUTHORIZATION)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("");
+    if auth != "Bearer test-token" {
+        return (
+            StatusCode::UNAUTHORIZED,
+            Json(json!({ "error": "missing auth" })),
+        );
+    }
+    (
+        StatusCode::OK,
+        Json(json!({
+            "parties": [{
+                "id": "party-1",
+                "name": "Acme Treasury",
+                "note": "ops",
+                "sweep_destination_address": "0x1111111111111111111111111111111111111111",
+                "created_at_unix": 10
+            }]
+        })),
+    )
+}
+
+async fn treasury_parties_create_route(
+    headers: HeaderMap,
+    Json(body): Json<serde_json::Value>,
+) -> (StatusCode, Json<serde_json::Value>) {
+    let auth = headers
+        .get(header::AUTHORIZATION)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("");
+    if auth != "Bearer test-token" {
+        return (
+            StatusCode::UNAUTHORIZED,
+            Json(json!({ "error": "missing auth" })),
+        );
+    }
+    (
+        StatusCode::OK,
+        Json(json!({
+            "status": "created",
+            "party": {
+                "id": "party-created",
+                "name": body["name"],
+                "note": body.get("note"),
+                "sweep_destination_address": body.get("sweep_destination_address"),
+                "created_at_unix": 11
+            }
+        })),
+    )
+}
+
+async fn treasury_parties_update_route(
+    headers: HeaderMap,
+    Json(body): Json<serde_json::Value>,
+) -> (StatusCode, Json<serde_json::Value>) {
+    let auth = headers
+        .get(header::AUTHORIZATION)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("");
+    if auth != "Bearer test-token" {
+        return (
+            StatusCode::UNAUTHORIZED,
+            Json(json!({ "error": "missing auth" })),
+        );
+    }
+    (
+        StatusCode::OK,
+        Json(json!({
+            "status": "updated",
+            "party": {
+                "id": body["id"],
+                "name": body["name"],
+                "note": body.get("note"),
+                "sweep_destination_address": body.get("sweep_destination_address"),
+                "created_at_unix": 12
+            }
+        })),
+    )
+}
+
+async fn treasury_parties_delete_route(
+    headers: HeaderMap,
+    Json(body): Json<serde_json::Value>,
+) -> (StatusCode, Json<serde_json::Value>) {
+    let auth = headers
+        .get(header::AUTHORIZATION)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("");
+    if auth != "Bearer test-token" {
+        return (
+            StatusCode::UNAUTHORIZED,
+            Json(json!({ "error": "missing auth" })),
+        );
+    }
+    assert_eq!(body["id"], "party-1");
+    (
+        StatusCode::OK,
+        Json(json!({
+            "status": "deleted",
+            "party": null
+        })),
+    )
+}
+
+async fn receiving_overview_route(headers: HeaderMap) -> (StatusCode, Json<serde_json::Value>) {
+    let auth = headers
+        .get(header::AUTHORIZATION)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("");
+    if auth != "Bearer test-token" {
+        return (
+            StatusCode::UNAUTHORIZED,
+            Json(json!({ "error": "missing auth" })),
+        );
+    }
+    (
+        StatusCode::OK,
+        Json(json!({
+            "generated_at_unix": 20,
+            "include_retired": false,
+            "groups": [{
+                "counterparty": {
+                    "id": "party-1",
+                    "name": "Acme Treasury",
+                    "note": null,
+                    "sweep_destination_address": "0x1111111111111111111111111111111111111111",
+                    "created_at_unix": 10
+                },
+                "item_count": 2,
+                "native_total_wei_hex": "0x3",
+                "items": [{
+                    "source_type": "hd",
+                    "address": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                    "chain_id": 1,
+                    "derivation_path": "m/44'/60'/0'/0/0",
+                    "purpose": "invoice",
+                    "label": "invoice-1",
+                    "counterparty_id": "party-1",
+                    "linkage_warning": null,
+                    "balance_native_wei_hex": "0x1",
+                    "balance_known": true,
+                    "status": "active",
+                    "created_at_unix": 21
+                }, {
+                    "source_type": "stealth",
+                    "address": "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                    "chain_id": 1,
+                    "counterparty_id": "party-1",
+                    "linkage_warning": "shared sweep destination",
+                    "balance_native_wei_hex": "0x2",
+                    "balance_known": true,
+                    "status": "pending",
+                    "created_at_unix": 22
+                }]
+            }],
+            "totals": {
+                "item_count": 2,
+                "hd_count": 1,
+                "stealth_count": 1,
+                "native_total_wei_hex": "0x3"
+            },
+            "coverage": {
+                "addresses_total": 2,
+                "addresses_with_known_balance": 2,
+                "note": "all balances fresh"
+            }
+        })),
+    )
+}
+
+async fn receiving_refresh_balances_route(
+    headers: HeaderMap,
+) -> (StatusCode, Json<serde_json::Value>) {
+    let auth = headers
+        .get(header::AUTHORIZATION)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("");
+    if auth != "Bearer test-token" {
+        return (
+            StatusCode::UNAUTHORIZED,
+            Json(json!({ "error": "missing auth" })),
+        );
+    }
+    (
+        StatusCode::OK,
+        Json(json!({
+            "generated_at_unix": 23,
+            "addresses_requested": 2,
+            "addresses_refreshed": 2,
+            "addresses_skipped": 0,
+            "stealth_refreshed": true,
+            "provider_status": "ok",
+            "errors": []
+        })),
+    )
+}
+
+async fn receiving_deposits_tag_route(
+    headers: HeaderMap,
+    Json(body): Json<serde_json::Value>,
+) -> (StatusCode, Json<serde_json::Value>) {
+    let auth = headers
+        .get(header::AUTHORIZATION)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("");
+    if auth != "Bearer test-token" {
+        return (
+            StatusCode::UNAUTHORIZED,
+            Json(json!({ "error": "missing auth" })),
+        );
+    }
+    assert_eq!(body["deposit_id"], "dep-1");
+    (
+        StatusCode::OK,
+        Json(json!({
+            "status": "tagged",
+            "deposit": {
+                "id": body["deposit_id"],
+                "status": "pending",
+                "asset_kind": "native",
+                "wallet_profile": "payments-mainnet",
+                "wallet_compartment_id": 0,
+                "provider_compartment_id": 0,
+                "wallet": "payments",
+                "short_name": "eth",
+                "stealth_meta_address": "st:eth:0x1234",
+                "stealth_address": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "ephemeral_public_key_hex": "03".repeat(33),
+                "view_tag_hex": "01",
+                "auto_queue_sweep": true,
+                "sweep_destination_address": "0x1111111111111111111111111111111111111111",
+                "created_at_unix": 1,
+                "updated_at_unix": 24,
+                "counterparty_id": body.get("counterparty_id")
+            }
+        })),
+    )
+}
+
 async fn queue_list_route(headers: HeaderMap) -> (StatusCode, Json<serde_json::Value>) {
     let auth = headers
         .get(header::AUTHORIZATION)
@@ -1214,6 +1461,27 @@ async fn spawn_test_server() -> SocketAddr {
             "/api/deposits/eth-stealth/enqueue-sweep",
             post(deposits_enqueue_sweep_route),
         )
+        .route(
+            "/api/treasury/parties",
+            get(treasury_parties_list_route).post(treasury_parties_create_route),
+        )
+        .route(
+            "/api/treasury/parties/update",
+            post(treasury_parties_update_route),
+        )
+        .route(
+            "/api/treasury/parties/delete",
+            post(treasury_parties_delete_route),
+        )
+        .route("/api/receiving/overview", get(receiving_overview_route))
+        .route(
+            "/api/receiving/refresh-balances",
+            post(receiving_refresh_balances_route),
+        )
+        .route(
+            "/api/receiving/deposits/tag",
+            post(receiving_deposits_tag_route),
+        )
         .route("/api/queue/jobs", get(queue_list_route))
         .route(
             "/api/queue/enqueue/eth-stealth-transfer",
@@ -1401,6 +1669,10 @@ async fn diagnostics_reads_operational_metadata() {
             .provider_balance_observation_concurrency,
         8
     );
+    assert_eq!(response.runtime_policy.receiving_refresh_address_cap, 200);
+    assert_eq!(response.runtime_policy.idle_lock_secs, 900);
+    assert_eq!(response.runtime_policy.idle_lock_drain_secs, 60);
+    assert_eq!(response.runtime_policy.idle_lock_force_after_secs, 0);
     assert_eq!(response.eth_stealth_deposit_count, 1);
     assert_eq!(response.funded_eth_stealth_deposit_count, 1);
 }
@@ -1832,4 +2104,130 @@ async fn profile_and_queue_helpers_roundtrip_response_shapes() {
         .unwrap();
     assert_eq!(maintenance.status, "ok");
     assert_eq!(maintenance.succeeded, 1);
+}
+
+#[tokio::test]
+#[cfg_attr(target_os = "macos", ignore = "sandbox blocks loopback bind")]
+async fn list_parties_parses_parties() {
+    let addr = spawn_test_server().await;
+    let client = SigillumClient::new(format!("http://{addr}"));
+    client.set_session_token("test-token");
+
+    let response = client.list_parties().await.unwrap();
+    assert_eq!(response.parties.len(), 1);
+    assert_eq!(response.parties[0].id, "party-1");
+    assert_eq!(response.parties[0].name, "Acme Treasury");
+    assert_eq!(
+        response.parties[0].sweep_destination_address.as_deref(),
+        Some("0x1111111111111111111111111111111111111111")
+    );
+}
+
+#[tokio::test]
+#[cfg_attr(target_os = "macos", ignore = "sandbox blocks loopback bind")]
+async fn create_party_echoes_name() {
+    let addr = spawn_test_server().await;
+    let client = SigillumClient::new(format!("http://{addr}"));
+    client.set_session_token("test-token");
+
+    let response = client
+        .create_party(CounterpartyCreateRequest {
+            name: "New Payer".into(),
+            note: Some("invoice rail".into()),
+            sweep_destination_address: Some("0x2222222222222222222222222222222222222222".into()),
+        })
+        .await
+        .unwrap();
+    assert_eq!(response.status, "created");
+    assert_eq!(response.party.unwrap().name, "New Payer");
+}
+
+#[tokio::test]
+#[cfg_attr(target_os = "macos", ignore = "sandbox blocks loopback bind")]
+async fn update_party_parses_mutation() {
+    let addr = spawn_test_server().await;
+    let client = SigillumClient::new(format!("http://{addr}"));
+    client.set_session_token("test-token");
+
+    let response = client
+        .update_party(CounterpartyUpdateRequest {
+            id: "party-1".into(),
+            name: "Updated Payer".into(),
+            note: None,
+            sweep_destination_address: Some("0x3333333333333333333333333333333333333333".into()),
+        })
+        .await
+        .unwrap();
+    let party = response.party.unwrap();
+    assert_eq!(response.status, "updated");
+    assert_eq!(party.id, "party-1");
+    assert_eq!(party.name, "Updated Payer");
+}
+
+#[tokio::test]
+#[cfg_attr(target_os = "macos", ignore = "sandbox blocks loopback bind")]
+async fn delete_party_echoes_status() {
+    let addr = spawn_test_server().await;
+    let client = SigillumClient::new(format!("http://{addr}"));
+    client.set_session_token("test-token");
+
+    let response = client
+        .delete_party(CounterpartyDeleteRequest {
+            id: "party-1".into(),
+        })
+        .await
+        .unwrap();
+    assert_eq!(response.status, "deleted");
+    assert!(response.party.is_none());
+}
+
+#[tokio::test]
+#[cfg_attr(target_os = "macos", ignore = "sandbox blocks loopback bind")]
+async fn receiving_overview_parses_totals_and_coverage() {
+    let addr = spawn_test_server().await;
+    let client = SigillumClient::new(format!("http://{addr}"));
+    client.set_session_token("test-token");
+
+    let response = client.receiving_overview().await.unwrap();
+    assert_eq!(response.totals.item_count, 2);
+    assert_eq!(response.totals.hd_count, 1);
+    assert_eq!(response.totals.stealth_count, 1);
+    assert_eq!(response.coverage.addresses_total, 2);
+    assert_eq!(response.coverage.addresses_with_known_balance, 2);
+    assert_eq!(
+        response.groups[0].items[1].linkage_warning.as_deref(),
+        Some("shared sweep destination")
+    );
+}
+
+#[tokio::test]
+#[cfg_attr(target_os = "macos", ignore = "sandbox blocks loopback bind")]
+async fn refresh_receiving_balances_parses_provider_status() {
+    let addr = spawn_test_server().await;
+    let client = SigillumClient::new(format!("http://{addr}"));
+    client.set_session_token("test-token");
+
+    let response = client.refresh_receiving_balances().await.unwrap();
+    assert_eq!(response.provider_status, "ok");
+    assert_eq!(response.addresses_refreshed, 2);
+    assert!(response.stealth_refreshed);
+}
+
+#[tokio::test]
+#[cfg_attr(target_os = "macos", ignore = "sandbox blocks loopback bind")]
+async fn tag_stealth_deposit_posts_deposit_id_and_parses_status() {
+    let addr = spawn_test_server().await;
+    let client = SigillumClient::new(format!("http://{addr}"));
+    client.set_session_token("test-token");
+
+    let response = client
+        .tag_stealth_deposit(ReceivingDepositTagRequest {
+            deposit_id: "dep-1".into(),
+            counterparty_id: Some("party-1".into()),
+        })
+        .await
+        .unwrap();
+    assert_eq!(response.status, "tagged");
+    assert_eq!(response.deposit.id, "dep-1");
+    assert_eq!(response.deposit.counterparty_id.as_deref(), Some("party-1"));
 }

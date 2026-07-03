@@ -115,6 +115,18 @@ select {
   cursor: pointer;
 }
 
+.select-inline {
+  height: 28px;
+  min-width: 150px;
+  max-width: 220px;
+  padding: 0 28px 0 10px;
+  background-color: var(--bg);
+  border-color: var(--border-strong);
+  color: var(--text);
+  font-size: var(--fs-xs);
+  line-height: 1;
+}
+
 input[type="number"] {
   font-variant-numeric: tabular-nums;
 }

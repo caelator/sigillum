@@ -103,14 +103,16 @@ api_post() {
 }
 
 wait_for_daemon() {
-  for _ in {1..80}; do
+  # 240 x 0.5s = 120s ceiling: cold CI runners need headroom; warm hosts
+  # pass on the first few probes either way.
+  for _ in {1..240}; do
     if curl -fsS "${URL}/api/status" >/dev/null 2>&1; then
       return
     fi
     if ! kill -0 "${DAEMON_PID}" >/dev/null 2>&1; then
       fail "daemon exited before becoming ready"
     fi
-    sleep 0.25
+    sleep 0.5
   done
   fail "daemon did not become ready at ${URL}"
 }
@@ -149,6 +151,12 @@ return data.key === '${SECRET_NAME}' &&
 require_command cargo
 require_command curl
 require_command node
+
+echo "==> building sigillum-cli for runtime smoke"
+# Build before launching: `cargo run --quiet` compiles silently into the
+# daemon log, which can eat the entire readiness window on cold runners
+# and leaves an empty log when it times out.
+cargo build -p sigillum-cli
 
 echo "==> starting sigillum daemon runtime smoke on ${URL}"
 SIGILLUM_BASE_DIR="${BASE_DIR}" \

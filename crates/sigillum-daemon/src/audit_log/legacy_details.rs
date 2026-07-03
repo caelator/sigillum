@@ -256,6 +256,14 @@ pub(super) struct WalletInventoryScanDetails {
 }
 
 #[derive(Clone, Debug, Deserialize)]
+pub(super) struct ReceivingRefreshBalancesDetails {
+    pub(super) addresses_requested: u32,
+    pub(super) addresses_refreshed: u32,
+    pub(super) addresses_skipped: u32,
+    pub(super) stealth_refreshed: bool,
+}
+
+#[derive(Clone, Debug, Deserialize)]
 pub(super) struct WalletInventoryChainProfileUpsertDetails {
     pub(super) name: String,
     pub(super) chain_family: String,

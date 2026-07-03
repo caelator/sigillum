@@ -1,4 +1,5 @@
 import type {
+  Counterparty,
   TreasuryAllowedDestination,
   TreasuryChainSummary,
   TreasuryGroupSummary,
@@ -93,12 +94,28 @@ function nativeAmount(
   return symbol ? amount + " " + symbol : amount;
 }
 
+function shortAddress(value: string): string {
+  const trimmed = value.trim();
+  if (trimmed.startsWith("0x") && trimmed.length > 14) {
+    return trimmed.slice(0, 6) + "..." + trimmed.slice(-4);
+  }
+  return trimmed.length > 24 ? trimmed.slice(0, 12) + "..." + trimmed.slice(-6) : trimmed;
+}
+
 export interface TreasuryActionsDeps {
   api: (method: string, path: string, body?: unknown) => Promise<any>;
   toast: (message: string, type?: string) => void;
 }
 
 export function createTreasuryActions(deps: TreasuryActionsDeps) {
+  let treasuryParties: Counterparty[] = [];
+
+  function partyNameById(id: string | null | undefined): string | undefined {
+    if (!id) return undefined;
+    const p = treasuryParties.find((x) => x.id === id);
+    return p ? p.name : undefined;
+  }
+
   function renderTreasuryChains(
     chains: TreasuryChainSummary[],
   ): void {
@@ -333,6 +350,8 @@ export function createTreasuryActions(deps: TreasuryActionsDeps) {
           esc(capAsEth(current.max_plan_native_wei_hex)) +
           " · requireSimulation=" +
           esc(String(current.require_simulation)) +
+          " · blockCrossPartyLinkage=" +
+          esc(String(Boolean(current.block_cross_party_linkage))) +
           " · updated=" +
           esc(formatTs(current.updated_at_unix)) +
           "</div></div></li>"
@@ -356,6 +375,7 @@ export function createTreasuryActions(deps: TreasuryActionsDeps) {
             policy.max_step_native_wei_hex || null,
             policy.max_plan_native_wei_hex || null,
             policy.require_simulation,
+            policy.block_cross_party_linkage,
           ]
         : null,
     );
@@ -366,6 +386,10 @@ export function createTreasuryActions(deps: TreasuryActionsDeps) {
     if (enabledEl) enabledEl.checked = policy ? policy.enabled : false;
     const requireSimEl = input("treasuryPolicyRequireSim");
     if (requireSimEl) requireSimEl.checked = policy ? policy.require_simulation : true;
+    const blockLinkageEl = input("treasuryPolicyBlockLinkage");
+    if (blockLinkageEl) {
+      blockLinkageEl.checked = policy ? Boolean(policy.block_cross_party_linkage) : false;
+    }
     const destinationsEl = input("treasuryPolicyDestinations");
     if (destinationsEl) {
       destinationsEl.value = policy
@@ -412,6 +436,10 @@ export function createTreasuryActions(deps: TreasuryActionsDeps) {
         " · purpose=" +
         esc(allocation.purpose) +
         (allocation.label ? " · label=" + esc(allocation.label) : "") +
+        (allocation.counterparty_id
+          ? " · party=" +
+            esc(partyNameById(allocation.counterparty_id) || allocation.counterparty_id)
+          : "") +
         "<br>" +
         "path=" +
         esc(allocation.derivation_path) +
@@ -427,6 +455,78 @@ export function createTreasuryActions(deps: TreasuryActionsDeps) {
           : "") +
         "</li>",
     );
+  }
+
+  function renderTreasuryParties(parties: Counterparty[]): void {
+    renderEntityList(
+      "treasuryPartyList",
+      parties,
+      {
+        message:
+          "No counterparties yet. Add a payer to hand out dedicated receive addresses.",
+        actionLabel: "Add a party",
+        action: "focusTreasuryParty",
+      },
+      (party) =>
+        '<li><div class="entity-main">' +
+        '<div class="entity-title">' +
+        esc(party.name) +
+        "</div>" +
+        '<div class="entity-meta">' +
+        (party.note ? esc(party.note) + "<br>" : "") +
+        (party.sweep_destination_address
+          ? "sweep &rarr; " + esc(shortAddress(party.sweep_destination_address)) + "<br>"
+          : "") +
+        "created=" +
+        esc(formatTs(party.created_at_unix)) +
+        "</div></div>" +
+        '<div class="entity-actions">' +
+        '<input type="text" class="mono input-wider" placeholder="Sweep destination" value="' +
+        escAttr(party.sweep_destination_address || "") +
+        '" data-party-sweep-dest-input="' +
+        escAttr(party.id) +
+        '">' +
+        '<button class="btn-ghost" data-action="updateTreasuryPartySweepDest" data-arg0="' +
+        escAttr(party.id) +
+        '" data-self="append">Save dest</button>' +
+        '<button class="btn-ghost" data-action="clearTreasuryPartySweepDest" data-arg0="' +
+        escAttr(party.id) +
+        '">Clear</button>' +
+        '<button class="btn-ghost" data-action="deleteTreasuryParty" data-arg0="' +
+        escAttr(party.id) +
+        '">Delete</button>' +
+        "</div>" +
+        "</li>",
+    );
+  }
+
+  async function loadTreasuryParties(): Promise<void> {
+    try {
+      const r = await deps.api("GET", "/api/treasury/parties");
+      if (r.error) return;
+      treasuryParties = (r.parties || []) as Counterparty[];
+      renderTreasuryParties(treasuryParties);
+      const select = document.getElementById(
+        "treasuryReceiveParty",
+      ) as HTMLSelectElement | null;
+      if (select) {
+        const previous = select.value;
+        let html = '<option value="">No party (optional)</option>';
+        treasuryParties.forEach((party) => {
+          html +=
+            '<option value="' +
+            escAttr(party.id) +
+            '">' +
+            esc(party.name) +
+            "</option>";
+        });
+        select.innerHTML = html;
+        select.value =
+          previous && treasuryParties.some((party) => party.id === previous)
+            ? previous
+            : "";
+      }
+    } catch (_) {}
   }
 
   async function loadTreasuryOverviewOnly(): Promise<void> {
@@ -461,6 +561,7 @@ export function createTreasuryActions(deps: TreasuryActionsDeps) {
     await Promise.all([
       loadTreasuryOverviewOnly(),
       loadTreasuryPolicy(),
+      loadTreasuryParties(),
       loadTreasuryReceiveAddresses(),
     ]);
   }
@@ -473,7 +574,11 @@ export function createTreasuryActions(deps: TreasuryActionsDeps) {
     }
     renderTreasuryOverview(r as TreasuryOverviewResponse);
     deps.toast("Treasury overview refreshed");
-    void Promise.all([loadTreasuryPolicy(), loadTreasuryReceiveAddresses()]);
+    void Promise.all([
+      loadTreasuryPolicy(),
+      loadTreasuryParties(),
+      loadTreasuryReceiveAddresses(),
+    ]);
   }
 
   function markInvalid(id: string, invalid: boolean): void {
@@ -512,6 +617,7 @@ export function createTreasuryActions(deps: TreasuryActionsDeps) {
       max_step_native_wei_hex: maxStepWeiHex,
       max_plan_native_wei_hex: maxPlanWeiHex,
       require_simulation: Boolean(input("treasuryPolicyRequireSim")?.checked),
+      block_cross_party_linkage: Boolean(input("treasuryPolicyBlockLinkage")?.checked),
     };
     const saveButton = document.querySelector(
       '[data-action="updateTreasuryPolicy"]',
@@ -541,22 +647,39 @@ export function createTreasuryActions(deps: TreasuryActionsDeps) {
       return;
     }
     const label = optionalTextValue("treasuryReceiveLabel");
-    const body: { wallet_profile: string; purpose: string; label?: string } = {
+    const partyId =
+      (document.getElementById("treasuryReceiveParty") as HTMLSelectElement | null)
+        ?.value || "";
+    const body: {
+      wallet_profile: string;
+      purpose: string;
+      label?: string;
+      counterparty_id?: string;
+    } = {
       wallet_profile: walletProfile,
       purpose,
     };
     if (label) body.label = label;
+    if (partyId) body.counterparty_id = partyId;
     const r = await deps.api("POST", "/api/treasury/receive-addresses/allocate", body);
     if (r.error) {
       deps.toast(r.error, "error");
       return;
     }
     clearFields(["treasuryReceiveProfile", "treasuryReceivePurpose", "treasuryReceiveLabel"]);
+    const partySelect = document.getElementById(
+      "treasuryReceiveParty",
+    ) as HTMLSelectElement | null;
+    if (partySelect) partySelect.value = "";
     const allocation = r.allocation as TreasuryReceiveAllocation | undefined;
     deps.toast(
       "Receive address allocated" + (allocation?.address ? ": " + allocation.address : ""),
     );
-    void Promise.all([loadTreasuryReceiveAddresses(), loadTreasuryOverviewOnly()]);
+    void Promise.all([
+      loadTreasuryParties(),
+      loadTreasuryReceiveAddresses(),
+      loadTreasuryOverviewOnly(),
+    ]);
   }
 
   async function rotateTreasuryReceiveAddress(allocationId: string): Promise<void> {
@@ -568,17 +691,138 @@ export function createTreasuryActions(deps: TreasuryActionsDeps) {
       return;
     }
     deps.toast("Receive address rotated");
-    void Promise.all([loadTreasuryReceiveAddresses(), loadTreasuryOverviewOnly()]);
+    void Promise.all([
+      loadTreasuryParties(),
+      loadTreasuryReceiveAddresses(),
+      loadTreasuryOverviewOnly(),
+    ]);
+  }
+
+  async function createTreasuryParty(): Promise<void> {
+    const name = textValue("treasuryPartyName");
+    if (!name) {
+      deps.toast("Party name is required", "error");
+      return;
+    }
+    const note = optionalTextValue("treasuryPartyNote");
+    const sweepDestination = optionalTextValue("treasuryPartySweepDestination");
+    const body: { name: string; note?: string; sweep_destination_address?: string } = { name };
+    if (note) body.note = note;
+    if (sweepDestination) body.sweep_destination_address = sweepDestination;
+    const r = await deps.api("POST", "/api/treasury/parties", body);
+    if (r.error) {
+      deps.toast(r.error, "error");
+      return;
+    }
+    clearFields(["treasuryPartyName", "treasuryPartyNote", "treasuryPartySweepDestination"]);
+    deps.toast("Counterparty added");
+    await loadTreasuryParties();
+    await loadTreasuryReceiveAddresses();
+  }
+
+  function partyUpdateBody(
+    party: Counterparty,
+    sweepDestination: string,
+  ): { id: string; name: string; note?: string; sweep_destination_address: string } {
+    const body: {
+      id: string;
+      name: string;
+      note?: string;
+      sweep_destination_address: string;
+    } = {
+      id: party.id,
+      name: party.name,
+      sweep_destination_address: sweepDestination,
+    };
+    if (party.note) body.note = party.note;
+    return body;
+  }
+
+  function partySweepDestinationInput(controlEl: unknown): HTMLInputElement | null {
+    if (controlEl instanceof HTMLInputElement) return controlEl;
+    if (!(controlEl instanceof Element)) return null;
+    return controlEl
+      .closest("li")
+      ?.querySelector<HTMLInputElement>("input[data-party-sweep-dest-input]") || null;
+  }
+
+  async function updateTreasuryPartySweepDest(
+    partyId: string,
+    controlEl?: unknown,
+  ): Promise<void> {
+    const party = treasuryParties.find((candidate) => candidate.id === partyId);
+    if (!party) {
+      deps.toast("Counterparty not found", "error");
+      return;
+    }
+    const inputEl = partySweepDestinationInput(controlEl);
+    if (!inputEl) {
+      deps.toast("Sweep destination input unavailable", "error");
+      return;
+    }
+    const sweepDestination = inputEl.value.trim();
+    if (!sweepDestination) {
+      deps.toast("Enter a sweep destination or use Clear", "error");
+      return;
+    }
+    const r = await deps.api(
+      "POST",
+      "/api/treasury/parties/update",
+      partyUpdateBody(party, sweepDestination),
+    );
+    if (r.error) {
+      deps.toast(r.error, "error");
+      return;
+    }
+    deps.toast("Sweep destination saved");
+    await Promise.all([loadTreasuryParties(), loadTreasuryReceiveAddresses()]);
+  }
+
+  async function clearTreasuryPartySweepDest(partyId: string): Promise<void> {
+    const party = treasuryParties.find((candidate) => candidate.id === partyId);
+    if (!party) {
+      deps.toast("Counterparty not found", "error");
+      return;
+    }
+    const r = await deps.api(
+      "POST",
+      "/api/treasury/parties/update",
+      partyUpdateBody(party, ""),
+    );
+    if (r.error) {
+      deps.toast(r.error, "error");
+      return;
+    }
+    deps.toast("Sweep destination cleared");
+    await Promise.all([loadTreasuryParties(), loadTreasuryReceiveAddresses()]);
+  }
+
+  async function deleteTreasuryParty(partyId: string): Promise<void> {
+    const r = await deps.api("POST", "/api/treasury/parties/delete", {
+      id: partyId,
+    });
+    if (r.error) {
+      deps.toast(r.error, "error");
+      return;
+    }
+    deps.toast("Counterparty deleted");
+    await Promise.all([loadTreasuryParties(), loadTreasuryReceiveAddresses()]);
   }
 
   return {
     renderTreasuryOverview,
     renderTreasuryPolicy,
     renderTreasuryReceiveAllocations,
+    renderTreasuryParties,
     loadTreasuryOverview,
+    loadTreasuryParties,
     refreshTreasuryOverview,
     updateTreasuryPolicy,
     allocateTreasuryReceiveAddress,
     rotateTreasuryReceiveAddress,
+    createTreasuryParty,
+    updateTreasuryPartySweepDest,
+    clearTreasuryPartySweepDest,
+    deleteTreasuryParty,
   };
 }

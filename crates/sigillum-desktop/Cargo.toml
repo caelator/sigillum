@@ -1,0 +1,24 @@
+[package]
+name = "sigillum-desktop"
+description = "Native desktop shell for the Sigillum local daemon console"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "sigillum-desktop"
+path = "src/main.rs"
+
+[dependencies]
+sigillum-daemon = { workspace = true }
+tokio = { workspace = true }
+dirs = { workspace = true }
+tauri = { version = "2", features = ["tray-icon"] }
+tauri-plugin-single-instance = "2"
+tauri-plugin-window-state = "2"
+
+[build-dependencies]
+tauri-build = "2"

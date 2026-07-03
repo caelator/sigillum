@@ -9,7 +9,8 @@ use axum::response::Response;
 use sigillum_api::{
     ChainProfileDeleteRequest, ChainProfileUpsertRequest, ConsolidationPlanApproveRequest,
     ConsolidationPlanExportRequest, ConsolidationPlanGenerateRequest,
-    ConsolidationPlanSimulateRequest, DiscoveryJobMutationRequest, RiskCatalogDeleteRequest,
+    ConsolidationPlanSimulateRequest, CounterpartyCreateRequest, CounterpartyDeleteRequest,
+    CounterpartyUpdateRequest, DiscoveryJobMutationRequest, RiskCatalogDeleteRequest,
     RiskCatalogUpsertRequest, TreasuryPolicyUpdateRequest, TreasuryReceiveAllocateRequest,
     TreasuryReceiveRotateRequest, WalletInventoryScanRequest, WatchAddressBookDeleteRequest,
     WatchAddressBookUpsertRequest,
@@ -237,6 +238,26 @@ pub(crate) async fn treasury_overview(
     service_response(service.treasury_overview(bearer_token(&headers).as_deref()))
 }
 
+pub(crate) async fn receiving_overview(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+) -> Response {
+    let service = SigillumService::new(state);
+    service_response(service.receiving_overview(bearer_token(&headers).as_deref()))
+}
+
+pub(crate) async fn refresh_receiving_balances(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+) -> Response {
+    let service = SigillumService::new(state);
+    service_response(
+        service
+            .refresh_receiving_balances(bearer_token(&headers).as_deref())
+            .await,
+    )
+}
+
 pub(crate) async fn get_treasury_policy(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
@@ -300,6 +321,65 @@ pub(crate) async fn rotate_treasury_receive_address(
     service_response(
         service
             .rotate_treasury_receive_address(bearer_token(&headers).as_deref(), body)
+            .await,
+    )
+}
+
+pub(crate) async fn list_treasury_parties(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+) -> Response {
+    let service = SigillumService::new(state);
+    service_response(service.list_parties(bearer_token(&headers).as_deref()))
+}
+
+pub(crate) async fn create_treasury_party(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Json(body): Json<CounterpartyCreateRequest>,
+) -> Response {
+    let body = match validated(Json(body)) {
+        Ok(b) => b,
+        Err(resp) => return resp,
+    };
+    let service = SigillumService::new(state);
+    service_response(
+        service
+            .create_party(bearer_token(&headers).as_deref(), body)
+            .await,
+    )
+}
+
+pub(crate) async fn update_treasury_party(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Json(body): Json<CounterpartyUpdateRequest>,
+) -> Response {
+    let body = match validated(Json(body)) {
+        Ok(b) => b,
+        Err(resp) => return resp,
+    };
+    let service = SigillumService::new(state);
+    service_response(
+        service
+            .update_party(bearer_token(&headers).as_deref(), body)
+            .await,
+    )
+}
+
+pub(crate) async fn delete_treasury_party(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Json(body): Json<CounterpartyDeleteRequest>,
+) -> Response {
+    let body = match validated(Json(body)) {
+        Ok(b) => b,
+        Err(resp) => return resp,
+    };
+    let service = SigillumService::new(state);
+    service_response(
+        service
+            .delete_party(bearer_token(&headers).as_deref(), body)
             .await,
     )
 }

@@ -1,3 +1,5 @@
+use std::collections::BTreeMap;
+
 use sigillum_api::{
     ConsolidationPlanGenerateRequest, ConsolidationPlanStep, ConsolidationPlanSummary,
     TreasuryPolicy, WalletAssetHolding,
@@ -125,6 +127,7 @@ pub(super) fn plan_step_for_holding(
             "blocked".into()
         },
         blockers,
+        linkage_warnings: Vec::new(),
         auto_eligible: false,
         approved: false,
     }
@@ -229,6 +232,41 @@ pub(super) fn build_plan_steps(
     destination_address: &Option<String>,
 ) -> Vec<ConsolidationPlanStep> {
     let mut steps = Vec::new();
+    let per_party = body.routing_strategy.as_deref().map(str::trim) == Some("per_party");
+    let address_to_party: BTreeMap<String, String> = if per_party {
+        state
+            .receive_allocations
+            .iter()
+            .filter_map(|allocation| {
+                allocation.counterparty_id.as_ref().map(|counterparty_id| {
+                    (
+                        normalize_linkage_address(&allocation.address),
+                        counterparty_id.clone(),
+                    )
+                })
+            })
+            .collect()
+    } else {
+        BTreeMap::new()
+    };
+    let party_to_destination: BTreeMap<String, String> = if per_party {
+        body.party_destinations
+            .iter()
+            .filter_map(|destination| {
+                let destination_address = destination.destination_address.trim();
+                if destination_address.is_empty() {
+                    None
+                } else {
+                    Some((
+                        destination.counterparty_id.trim().to_string(),
+                        destination_address.to_string(),
+                    ))
+                }
+            })
+            .collect()
+    } else {
+        BTreeMap::new()
+    };
 
     for holding in state
         .holdings
@@ -254,49 +292,83 @@ pub(super) fn build_plan_steps(
         if signer_status == "watch_only" && body.include_watch_only != Some(true) {
             continue;
         }
-        let step_destination = if destination_address.is_some() {
-            destination_address.clone()
-        } else if holding.wallet_family == WALLET_FAMILY_ETH_SEED {
-            if let Some(seed_profile) = registry
-                .eth_seed_wallets
-                .iter()
-                .find(|p| p.name == holding.wallet_profile)
-            {
-                if seed_profile.hot_address.is_some() && seed_profile.treasury_address.is_some() {
-                    let hot_addr = seed_profile.hot_address.as_ref().unwrap();
-                    let treasury_addr = seed_profile.treasury_address.as_ref().unwrap();
-                    let hot_balance = state
-                        .addresses
-                        .iter()
-                        .find(|addr| {
-                            addr.wallet_profile == holding.wallet_profile
-                                && addr.address == *hot_addr
-                        })
-                        .and_then(|addr| decode_quantity_hex(&addr.native_balance_wei_hex).ok())
-                        .unwrap_or([0u8; 32]);
-                    let target_refill = decode_quantity_hex("0xde0b6b3a7640000").unwrap(); // 1.0 ETH in wei
-                    if compare_u256(&hot_balance, &target_refill).is_lt() {
-                        Some(hot_addr.clone())
-                    } else {
-                        Some(treasury_addr.clone())
-                    }
-                } else {
-                    seed_profile.default_destination_address.clone()
+        let (step_destination, missing_party_destination) = if per_party {
+            let party = address_to_party.get(&normalize_linkage_address(&holding.address));
+            if let Some(party_id) = party {
+                match party_to_destination.get(party_id) {
+                    Some(destination) => (Some(destination.clone()), false),
+                    None => (None, true),
                 }
             } else {
-                None
+                (
+                    resolve_default_destination(state, registry, holding, destination_address),
+                    false,
+                )
             }
         } else {
-            None
+            (
+                resolve_default_destination(state, registry, holding, destination_address),
+                false,
+            )
         };
-        steps.push(plan_step_for_holding(
-            holding,
-            step_destination,
-            signer_status,
-        ));
+        let mut step = plan_step_for_holding(holding, step_destination, signer_status);
+        if missing_party_destination && step.action.starts_with("sweep") {
+            if !step
+                .blockers
+                .iter()
+                .any(|blocker| blocker == "missing_party_destination")
+            {
+                step.blockers.push("missing_party_destination".into());
+            }
+            step.status = "blocked".into();
+            step.risk_level = "blocked".into();
+        }
+        steps.push(step);
     }
 
     steps
+}
+
+fn resolve_default_destination(
+    state: &WalletInventoryState,
+    registry: &ProfileRegistry,
+    holding: &WalletAssetHolding,
+    destination_address: &Option<String>,
+) -> Option<String> {
+    if destination_address.is_some() {
+        destination_address.clone()
+    } else if holding.wallet_family == WALLET_FAMILY_ETH_SEED {
+        if let Some(seed_profile) = registry
+            .eth_seed_wallets
+            .iter()
+            .find(|p| p.name == holding.wallet_profile)
+        {
+            if seed_profile.hot_address.is_some() && seed_profile.treasury_address.is_some() {
+                let hot_addr = seed_profile.hot_address.as_ref().unwrap();
+                let treasury_addr = seed_profile.treasury_address.as_ref().unwrap();
+                let hot_balance = state
+                    .addresses
+                    .iter()
+                    .find(|addr| {
+                        addr.wallet_profile == holding.wallet_profile && addr.address == *hot_addr
+                    })
+                    .and_then(|addr| decode_quantity_hex(&addr.native_balance_wei_hex).ok())
+                    .unwrap_or([0u8; 32]);
+                let target_refill = decode_quantity_hex("0xde0b6b3a7640000").unwrap(); // 1.0 ETH in wei
+                if compare_u256(&hot_balance, &target_refill).is_lt() {
+                    Some(hot_addr.clone())
+                } else {
+                    Some(treasury_addr.clone())
+                }
+            } else {
+                seed_profile.default_destination_address.clone()
+            }
+        } else {
+            None
+        }
+    } else {
+        None
+    }
 }
 
 /// Extend a step with treasury policy blockers, mirroring planner semantics:
@@ -323,6 +395,21 @@ pub(super) fn apply_policy_blockers_to_step(
     }
     step.status = "blocked".into();
     step.risk_level = "blocked".into();
+}
+
+/// Fail-closed pass: convert every step that the linkage analyzer warned on
+/// into a hard block, mirroring apply_policy_blockers_to_step semantics.
+pub(super) fn apply_linkage_blockers(steps: &mut [ConsolidationPlanStep]) {
+    for step in steps.iter_mut() {
+        if step.linkage_warnings.is_empty() {
+            continue;
+        }
+        if !step.blockers.iter().any(|b| b == "cross_party_linkage") {
+            step.blockers.push("cross_party_linkage".into());
+        }
+        step.status = "blocked".into();
+        step.risk_level = "blocked".into();
+    }
 }
 
 /// Plan-level policy violations: currently only the native plan cap, summed
@@ -357,9 +444,141 @@ pub(super) fn plan_policy_violations(
     violations
 }
 
+#[derive(Clone, Debug)]
+struct LinkageIdentity {
+    key: String,
+    label: String,
+}
+
+/// Detect common-recipient privacy linkage without changing plan execution.
+pub(super) fn analyze_plan_linkage(
+    state: &WalletInventoryState,
+    steps: &mut [ConsolidationPlanStep],
+) -> Vec<String> {
+    let mut counterparty_by_address = BTreeMap::new();
+    for allocation in &state.receive_allocations {
+        if let Some(counterparty_id) = allocation.counterparty_id.as_deref() {
+            counterparty_by_address.insert(
+                normalize_linkage_address(&allocation.address),
+                counterparty_id.to_string(),
+            );
+        }
+    }
+
+    let party_name_by_id: BTreeMap<String, String> = state
+        .parties
+        .iter()
+        .map(|party| (party.id.clone(), party.name.clone()))
+        .collect();
+
+    let mut steps_by_destination: BTreeMap<String, Vec<(usize, LinkageIdentity)>> = BTreeMap::new();
+    for (index, step) in steps.iter().enumerate() {
+        if !step.action.starts_with("sweep") {
+            continue;
+        }
+        let Some(destination_address) = step.destination_address.as_deref() else {
+            continue;
+        };
+        let destination_key = normalize_linkage_address(destination_address);
+        if destination_key.is_empty() {
+            continue;
+        }
+        steps_by_destination
+            .entry(destination_key)
+            .or_default()
+            .push((
+                index,
+                linkage_identity_for_step(step, &counterparty_by_address, &party_name_by_id),
+            ));
+    }
+
+    let mut findings = Vec::new();
+    for (destination, entries) in steps_by_destination {
+        let mut labels_by_identity = BTreeMap::new();
+        for (_, identity) in &entries {
+            labels_by_identity
+                .entry(identity.key.clone())
+                .or_insert_with(|| identity.label.clone());
+        }
+        if labels_by_identity.len() < 2 {
+            continue;
+        }
+
+        let mut all_labels: Vec<String> = labels_by_identity.values().cloned().collect();
+        all_labels.sort();
+        findings.push(format!(
+            "Destination {} links {} payers: {}",
+            short_form(&destination, 10),
+            labels_by_identity.len(),
+            all_labels.join(", ")
+        ));
+
+        for (index, identity) in &entries {
+            let mut others: Vec<String> = labels_by_identity
+                .iter()
+                .filter_map(|(key, label)| {
+                    if key == &identity.key {
+                        None
+                    } else {
+                        Some(label.clone())
+                    }
+                })
+                .collect();
+            others.sort();
+            let warning = format!(
+                "shared destination links this payer with: {}",
+                others.join(", ")
+            );
+            if !steps[*index].linkage_warnings.contains(&warning) {
+                steps[*index].linkage_warnings.push(warning);
+            }
+        }
+    }
+
+    findings
+}
+
+fn linkage_identity_for_step(
+    step: &ConsolidationPlanStep,
+    counterparty_by_address: &BTreeMap<String, String>,
+    party_name_by_id: &BTreeMap<String, String>,
+) -> LinkageIdentity {
+    let source_address = normalize_linkage_address(&step.address);
+    if let Some(counterparty_id) = counterparty_by_address.get(&source_address) {
+        return LinkageIdentity {
+            key: format!("counterparty:{counterparty_id}"),
+            label: party_name_by_id
+                .get(counterparty_id)
+                .cloned()
+                .unwrap_or_else(|| short_form(counterparty_id, 12)),
+        };
+    }
+
+    LinkageIdentity {
+        key: format!("unattributed:{source_address}"),
+        label: format!("unattributed ({})", short_form(&source_address, 10)),
+    }
+}
+
+fn normalize_linkage_address(address: &str) -> String {
+    address.trim().to_lowercase()
+}
+
+fn short_form(value: &str, max_chars: usize) -> String {
+    let value = value.trim();
+    let mut chars = value.chars();
+    let short: String = chars.by_ref().take(max_chars).collect();
+    if chars.next().is_some() {
+        format!("{short}...")
+    } else {
+        value.to_string()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use sigillum_api::{Counterparty, PartyDestination, TreasuryReceiveAllocation};
 
     fn sample_holding(
         asset_kind: &str,
@@ -390,6 +609,68 @@ mod tests {
             status: "detected".into(),
             first_seen_at_unix: 1,
             last_checked_at_unix: 2,
+        }
+    }
+
+    fn sample_receive_allocation(
+        address: &str,
+        counterparty_id: Option<&str>,
+    ) -> TreasuryReceiveAllocation {
+        TreasuryReceiveAllocation {
+            id: format!("alloc_{}", short_form(address, 6)),
+            wallet_family: WALLET_FAMILY_ETH_SEED.into(),
+            wallet_profile: "seed-main".into(),
+            address: address.into(),
+            derivation_path: "m/44'/60'/0'/0/5".into(),
+            address_index: 5,
+            purpose: "counterparty".into(),
+            label: None,
+            status: "active".into(),
+            created_at_unix: 1,
+            retired_at_unix: None,
+            counterparty_id: counterparty_id.map(str::to_string),
+        }
+    }
+
+    fn sample_party(id: &str, name: &str) -> Counterparty {
+        Counterparty {
+            id: id.into(),
+            name: name.into(),
+            note: None,
+            sweep_destination_address: None,
+            created_at_unix: 1,
+        }
+    }
+
+    fn sample_sweep_step(address: &str, destination_address: &str) -> ConsolidationPlanStep {
+        let mut holding = sample_holding("native", "native-balance", None);
+        holding.address = address.into();
+        holding.asset_address = None;
+        holding.amount_hex = "0x1".into();
+        plan_step_for_holding(&holding, Some(destination_address.into()), "available")
+    }
+
+    fn sample_native_holding_at(address: &str) -> WalletAssetHolding {
+        let mut holding = sample_holding("native", "native-balance", None);
+        holding.address = address.into();
+        holding.asset_address = None;
+        holding.amount_hex = "0x1".into();
+        holding
+    }
+
+    fn sample_plan_request(
+        destination_address: Option<&str>,
+        party_destinations: Vec<PartyDestination>,
+    ) -> ConsolidationPlanGenerateRequest {
+        ConsolidationPlanGenerateRequest {
+            destination_address: destination_address.map(str::to_string),
+            wallet_family: None,
+            wallet_profile: None,
+            provider_profile: None,
+            include_watch_only: None,
+            auto_queue_low_risk: None,
+            routing_strategy: Some("per_party".into()),
+            party_destinations,
         }
     }
 
@@ -581,5 +862,310 @@ mod tests {
         assert_eq!(step.status, "blocked");
         assert_eq!(step.simulation_status, "not_run");
         assert!(step.blockers.contains(&"requires_protocol_adapter".into()));
+    }
+
+    #[test]
+    fn build_plan_steps_per_party_routes_party_with_mapping_to_its_destination() {
+        let source_address = "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+        let destination = "0xdddddddddddddddddddddddddddddddddddddddd";
+        let state = WalletInventoryState {
+            holdings: vec![sample_native_holding_at(source_address)],
+            receive_allocations: vec![sample_receive_allocation(
+                source_address,
+                Some("party_acme"),
+            )],
+            parties: vec![sample_party("party_acme", "Acme")],
+            ..Default::default()
+        };
+        let body = sample_plan_request(
+            None,
+            vec![PartyDestination {
+                counterparty_id: "party_acme".into(),
+                destination_address: destination.into(),
+            }],
+        );
+
+        let steps = build_plan_steps(&state, &ProfileRegistry::default(), &body, &None);
+
+        assert_eq!(steps.len(), 1);
+        assert_eq!(steps[0].action, "sweep_native");
+        assert_eq!(steps[0].destination_address.as_deref(), Some(destination));
+        assert_eq!(steps[0].status, "review_required");
+        assert!(steps[0].blockers.is_empty());
+    }
+
+    #[test]
+    fn build_plan_steps_per_party_blocks_party_without_mapping() {
+        let source_address = "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+        let state = WalletInventoryState {
+            holdings: vec![sample_native_holding_at(source_address)],
+            receive_allocations: vec![sample_receive_allocation(
+                source_address,
+                Some("party_acme"),
+            )],
+            parties: vec![sample_party("party_acme", "Acme")],
+            ..Default::default()
+        };
+        let body = sample_plan_request(None, Vec::new());
+
+        let steps = build_plan_steps(&state, &ProfileRegistry::default(), &body, &None);
+
+        assert_eq!(steps.len(), 1);
+        assert_eq!(steps[0].action, "sweep_native");
+        assert_eq!(steps[0].destination_address, None);
+        assert!(steps[0].blockers.contains(&"missing_destination".into()));
+        assert!(
+            steps[0]
+                .blockers
+                .contains(&"missing_party_destination".into())
+        );
+        assert_eq!(steps[0].status, "blocked");
+        assert_eq!(steps[0].risk_level, "blocked");
+    }
+
+    #[test]
+    fn build_plan_steps_per_party_unattributed_uses_global_destination() {
+        let source_address = "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+        let destination = "0x9999999999999999999999999999999999999999";
+        let state = WalletInventoryState {
+            holdings: vec![sample_native_holding_at(source_address)],
+            receive_allocations: Vec::new(),
+            ..Default::default()
+        };
+        let body = sample_plan_request(Some(destination), Vec::new());
+        let destination_address = body.destination_address.clone();
+
+        let steps = build_plan_steps(
+            &state,
+            &ProfileRegistry::default(),
+            &body,
+            &destination_address,
+        );
+
+        assert_eq!(steps.len(), 1);
+        assert_eq!(steps[0].destination_address.as_deref(), Some(destination));
+        assert_eq!(steps[0].status, "review_required");
+    }
+
+    #[test]
+    fn per_party_distinct_destinations_have_no_linkage_findings() {
+        let acme_address = "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+        let bob_address = "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+        let acme_destination = "0x1111111111111111111111111111111111111111";
+        let bob_destination = "0x2222222222222222222222222222222222222222";
+        let state = WalletInventoryState {
+            holdings: vec![
+                sample_native_holding_at(acme_address),
+                sample_native_holding_at(bob_address),
+            ],
+            receive_allocations: vec![
+                sample_receive_allocation(acme_address, Some("party_acme")),
+                sample_receive_allocation(bob_address, Some("party_bob")),
+            ],
+            parties: vec![
+                sample_party("party_acme", "Acme"),
+                sample_party("party_bob", "Bob"),
+            ],
+            ..Default::default()
+        };
+        let body = sample_plan_request(
+            None,
+            vec![
+                PartyDestination {
+                    counterparty_id: "party_acme".into(),
+                    destination_address: acme_destination.into(),
+                },
+                PartyDestination {
+                    counterparty_id: "party_bob".into(),
+                    destination_address: bob_destination.into(),
+                },
+            ],
+        );
+        let mut steps = build_plan_steps(&state, &ProfileRegistry::default(), &body, &None);
+
+        let findings = analyze_plan_linkage(&state, &mut steps);
+
+        assert!(findings.is_empty());
+        assert!(steps.iter().all(|step| step.linkage_warnings.is_empty()));
+    }
+
+    #[test]
+    fn per_party_same_destination_for_two_parties_yields_linkage_findings() {
+        let acme_address = "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+        let bob_address = "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+        let destination = "0x9999999999999999999999999999999999999999";
+        let state = WalletInventoryState {
+            holdings: vec![
+                sample_native_holding_at(acme_address),
+                sample_native_holding_at(bob_address),
+            ],
+            receive_allocations: vec![
+                sample_receive_allocation(acme_address, Some("party_acme")),
+                sample_receive_allocation(bob_address, Some("party_bob")),
+            ],
+            parties: vec![
+                sample_party("party_acme", "Acme"),
+                sample_party("party_bob", "Bob"),
+            ],
+            ..Default::default()
+        };
+        let body = sample_plan_request(
+            None,
+            vec![
+                PartyDestination {
+                    counterparty_id: "party_acme".into(),
+                    destination_address: destination.into(),
+                },
+                PartyDestination {
+                    counterparty_id: "party_bob".into(),
+                    destination_address: destination.into(),
+                },
+            ],
+        );
+        let mut steps = build_plan_steps(&state, &ProfileRegistry::default(), &body, &None);
+
+        let findings = analyze_plan_linkage(&state, &mut steps);
+
+        assert!(!findings.is_empty());
+        assert!(steps.iter().all(|step| !step.linkage_warnings.is_empty()));
+    }
+
+    #[test]
+    fn apply_linkage_blockers_hard_blocks_warned_steps() {
+        let acme_address = "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+        let bob_address = "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+        let unrelated_address = "0xcccccccccccccccccccccccccccccccccccccccc";
+        let shared_destination = "0x9999999999999999999999999999999999999999";
+        let state = WalletInventoryState {
+            receive_allocations: vec![
+                sample_receive_allocation(acme_address, Some("party_acme")),
+                sample_receive_allocation(bob_address, Some("party_bob")),
+            ],
+            parties: vec![
+                sample_party("party_acme", "Acme"),
+                sample_party("party_bob", "Bob"),
+            ],
+            ..Default::default()
+        };
+        let mut steps = vec![
+            sample_sweep_step(acme_address, shared_destination),
+            sample_sweep_step(bob_address, shared_destination),
+            sample_sweep_step(
+                unrelated_address,
+                "0x8888888888888888888888888888888888888888",
+            ),
+        ];
+
+        let findings = analyze_plan_linkage(&state, &mut steps);
+        apply_linkage_blockers(&mut steps);
+
+        assert!(!findings.is_empty());
+        for step in &steps[..2] {
+            assert!(step.blockers.contains(&"cross_party_linkage".into()));
+            assert_eq!(step.status, "blocked");
+            assert_eq!(step.risk_level, "blocked");
+        }
+        assert!(steps[2].linkage_warnings.is_empty());
+        assert!(!steps[2].blockers.contains(&"cross_party_linkage".into()));
+        assert_eq!(steps[2].status, "review_required");
+        assert_eq!(steps[2].risk_level, "low");
+    }
+
+    #[test]
+    fn analyze_plan_linkage_warns_for_two_distinct_parties_to_one_destination() {
+        let acme_address = "0xaAaAaAaAaAaAaAaAaAaAaAaAaAaAaAaAaAaAaAaA";
+        let bob_address = "0xbBbBBBBbbBBBbbbBbbBbbbbBBbBbbbbBbBbbBBbB";
+        let destination = "0x9999999999999999999999999999999999999999";
+        let state = WalletInventoryState {
+            parties: vec![
+                sample_party("party_acme", "Acme"),
+                sample_party("party_bob", "Bob"),
+            ],
+            receive_allocations: vec![
+                sample_receive_allocation(acme_address, Some("party_acme")),
+                sample_receive_allocation(bob_address, Some("party_bob")),
+            ],
+            ..Default::default()
+        };
+        let mut steps = vec![
+            sample_sweep_step(acme_address, destination),
+            sample_sweep_step(bob_address, destination),
+        ];
+
+        let findings = analyze_plan_linkage(&state, &mut steps);
+
+        assert_eq!(findings.len(), 1);
+        assert!(findings[0].contains("Destination 0x99999999... links 2 payers"));
+        assert!(findings[0].contains("Acme"));
+        assert!(findings[0].contains("Bob"));
+        assert_eq!(steps[0].linkage_warnings.len(), 1);
+        assert!(steps[0].linkage_warnings[0].contains("Bob"));
+        assert!(!steps[0].linkage_warnings[0].contains("Acme"));
+        assert_eq!(steps[1].linkage_warnings.len(), 1);
+        assert!(steps[1].linkage_warnings[0].contains("Acme"));
+        assert!(!steps[1].linkage_warnings[0].contains("Bob"));
+    }
+
+    #[test]
+    fn analyze_plan_linkage_does_not_warn_for_one_party_with_multiple_sources() {
+        let first_address = "0x1111111111111111111111111111111111111111";
+        let second_address = "0x2222222222222222222222222222222222222222";
+        let destination = "0x9999999999999999999999999999999999999999";
+        let state = WalletInventoryState {
+            parties: vec![sample_party("party_acme", "Acme")],
+            receive_allocations: vec![
+                sample_receive_allocation(first_address, Some("party_acme")),
+                sample_receive_allocation(second_address, Some("party_acme")),
+            ],
+            ..Default::default()
+        };
+        let mut steps = vec![
+            sample_sweep_step(first_address, destination),
+            sample_sweep_step(second_address, destination),
+        ];
+
+        let findings = analyze_plan_linkage(&state, &mut steps);
+
+        assert!(findings.is_empty());
+        assert!(steps.iter().all(|step| step.linkage_warnings.is_empty()));
+    }
+
+    #[test]
+    fn analyze_plan_linkage_treats_unattributed_addresses_as_distinct_identities() {
+        let first_address = "0x3333333333333333333333333333333333333333";
+        let second_address = "0x4444444444444444444444444444444444444444";
+        let destination = "0x9999999999999999999999999999999999999999";
+        let state = WalletInventoryState::default();
+        let mut steps = vec![
+            sample_sweep_step(first_address, destination),
+            sample_sweep_step(second_address, destination),
+        ];
+
+        let findings = analyze_plan_linkage(&state, &mut steps);
+
+        assert_eq!(findings.len(), 1);
+        assert!(findings[0].contains("links 2 payers"));
+        assert!(findings[0].contains("unattributed (0x33333333...)"));
+        assert!(findings[0].contains("unattributed (0x44444444...)"));
+        assert_eq!(steps[0].linkage_warnings.len(), 1);
+        assert!(steps[0].linkage_warnings[0].contains("0x44444444..."));
+        assert_eq!(steps[1].linkage_warnings.len(), 1);
+        assert!(steps[1].linkage_warnings[0].contains("0x33333333..."));
+    }
+
+    #[test]
+    fn analyze_plan_linkage_does_not_warn_for_same_unattributed_source_twice() {
+        let address = "0x5555555555555555555555555555555555555555";
+        let destination = "0x9999999999999999999999999999999999999999";
+        let state = WalletInventoryState::default();
+        let mut steps = vec![
+            sample_sweep_step(address, destination),
+            sample_sweep_step(address, destination),
+        ];
+
+        let findings = analyze_plan_linkage(&state, &mut steps);
+
+        assert!(findings.is_empty());
+        assert!(steps.iter().all(|step| step.linkage_warnings.is_empty()));
     }
 }

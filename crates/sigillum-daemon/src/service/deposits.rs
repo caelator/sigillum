@@ -16,17 +16,18 @@
 //! [`DepositBlueprint`] and [`SigillumService::persist_new_deposit`] to
 //! avoid structural duplication while keeping the public API surface clean.
 
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 
 use sha3::{Digest, Keccak256};
 use sigillum_api::{
-    EthStealthAnnouncementPayload, EthStealthAnnouncementScanRequest,
+    Counterparty, EthStealthAnnouncementPayload, EthStealthAnnouncementScanRequest,
     EthStealthAnnouncementScanResponse, EthStealthDeposit, EthStealthDepositCreateErc20Request,
     EthStealthDepositCreateNativeRequest, EthStealthDepositDeleteRequest,
     EthStealthDepositEnqueueSweepRequest, EthStealthDepositEnqueueSweepResponse,
     EthStealthDepositListResponse, EthStealthDepositMutationResponse,
     EthStealthDepositRefreshRequest, EthStealthDepositRefreshResponse, EthStealthGenerateRequest,
     EthStealthWalletProfile, EvmProviderProfile, QueueEnqueueResponse, QueueJob, QueueJobPayload,
+    ReceivingDepositTagRequest,
 };
 use sigillum_core::{
     ERC5564_ANNOUNCE_FUNCTION, ERC5564_ANNOUNCER_ADDRESS, ETHEREUM_STEALTH_SCHEME_ID,
@@ -35,6 +36,7 @@ use sigillum_core::{
 };
 
 use crate::audit_log::{AuditEventSpec, AuditQueueJobKind};
+use crate::inventory::WalletInventoryState;
 
 use super::helpers::{
     compare_u256, is_zero_u256, map_wallet_error, multiply_u256_u64, now_unix, random_id,
@@ -68,6 +70,7 @@ struct DepositBlueprint {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use sigillum_api::TreasuryPolicy;
 
     fn abi_word(value: usize) -> String {
         format!("{value:064x}")
@@ -85,6 +88,96 @@ mod tests {
     fn padded_address_topic(address: &str) -> String {
         let raw = address.trim_start_matches("0x");
         format!("0x{raw:0>64}")
+    }
+
+    fn test_wallet(
+        name: &str,
+        default_destination_address: Option<&str>,
+    ) -> EthStealthWalletProfile {
+        EthStealthWalletProfile {
+            name: name.into(),
+            wallet: "wallet".into(),
+            short_name: "eth".into(),
+            provider_profile: "mainnet".into(),
+            compartment_id: 0,
+            chain_id: Some(1),
+            default_destination_address: default_destination_address.map(str::to_string),
+            execution_enabled: true,
+        }
+    }
+
+    fn test_counterparty(id: &str, destination: Option<&str>) -> Counterparty {
+        Counterparty {
+            id: id.into(),
+            name: format!("Party {id}"),
+            note: None,
+            sweep_destination_address: destination.map(str::to_string),
+            created_at_unix: 1,
+        }
+    }
+
+    fn test_policy(block_cross_party_linkage: bool) -> TreasuryPolicy {
+        TreasuryPolicy {
+            enabled: true,
+            allowed_destinations: Vec::new(),
+            max_step_native_wei_hex: None,
+            max_plan_native_wei_hex: None,
+            require_simulation: true,
+            allow_raw_digest_signing: false,
+            block_cross_party_linkage,
+            created_at_unix: 1,
+            updated_at_unix: 1,
+        }
+    }
+
+    fn test_inventory(
+        parties: Vec<Counterparty>,
+        block_cross_party_linkage: Option<bool>,
+    ) -> WalletInventoryState {
+        WalletInventoryState {
+            parties,
+            treasury_policy: block_cross_party_linkage.map(test_policy),
+            ..WalletInventoryState::default()
+        }
+    }
+
+    fn test_deposit(
+        id: &str,
+        wallet_profile: &str,
+        stealth_address: &str,
+        counterparty_id: Option<&str>,
+        sweep_destination_address: Option<&str>,
+    ) -> EthStealthDeposit {
+        EthStealthDeposit {
+            id: id.into(),
+            status: "funded".into(),
+            asset_kind: "native".into(),
+            wallet_profile: wallet_profile.into(),
+            wallet_compartment_id: 0,
+            provider_compartment_id: 0,
+            wallet: wallet_profile.into(),
+            short_name: "eth".into(),
+            stealth_meta_address: format!("st:eth:{id}"),
+            stealth_address: stealth_address.into(),
+            ephemeral_public_key_hex: "0x02".into(),
+            view_tag_hex: "0xaa".into(),
+            announcement: None,
+            token_address: None,
+            expected_amount_hex: None,
+            observed_amount_hex: Some("0x1".into()),
+            observed_native_balance_wei_hex: None,
+            auto_queue_sweep: false,
+            sweep_destination_address: sweep_destination_address.map(str::to_string),
+            min_sweep_amount_hex: None,
+            queue_job_id: None,
+            queue_job_state: None,
+            note: None,
+            created_at_unix: 1,
+            updated_at_unix: 1,
+            last_checked_at_unix: None,
+            broadcast_transaction_hash_hex: None,
+            counterparty_id: counterparty_id.map(str::to_string),
+        }
     }
 
     #[test]
@@ -140,6 +233,200 @@ mod tests {
             "0x000abc"
         );
         assert!(normalize_log_block_tag("123", "from_block").is_err());
+    }
+
+    #[test]
+    fn party_destination_used_when_deposit_has_none() {
+        let party_destination = "0x1111111111111111111111111111111111111111";
+        let wallet_destination = "0x2222222222222222222222222222222222222222";
+        let deposit = test_deposit(
+            "deposit_1",
+            "wallet_1",
+            "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            Some("party_1"),
+            None,
+        );
+        let wallet = test_wallet("wallet_1", Some(wallet_destination));
+        let inventory = test_inventory(
+            vec![test_counterparty("party_1", Some(party_destination))],
+            None,
+        );
+
+        let destination = resolve_stealth_sweep_destination(&deposit, &wallet, &inventory).unwrap();
+
+        assert_eq!(destination.as_deref(), Some(party_destination));
+    }
+
+    #[test]
+    fn deposit_destination_takes_precedence_over_party() {
+        let deposit_destination = "0x3333333333333333333333333333333333333333";
+        let party_destination = "0x4444444444444444444444444444444444444444";
+        let deposit = test_deposit(
+            "deposit_1",
+            "wallet_1",
+            "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            Some("party_1"),
+            Some(deposit_destination),
+        );
+        let wallet = test_wallet(
+            "wallet_1",
+            Some("0x5555555555555555555555555555555555555555"),
+        );
+        let inventory = test_inventory(
+            vec![test_counterparty("party_1", Some(party_destination))],
+            None,
+        );
+
+        let destination = resolve_stealth_sweep_destination(&deposit, &wallet, &inventory).unwrap();
+
+        assert_eq!(destination.as_deref(), Some(deposit_destination));
+    }
+
+    #[test]
+    fn cross_party_shared_destination_blocks_under_fail_closed() {
+        let destination = "0x6666666666666666666666666666666666666666";
+        let target = test_deposit(
+            "deposit_1",
+            "wallet_1",
+            "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            Some("party_1"),
+            None,
+        );
+        let other = test_deposit(
+            "deposit_2",
+            "wallet_1",
+            "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            Some("party_2"),
+            None,
+        );
+        let inventory = test_inventory(
+            vec![
+                test_counterparty("party_1", Some(destination)),
+                test_counterparty("party_2", Some(&destination.to_ascii_uppercase())),
+            ],
+            Some(true),
+        );
+        let warning = detect_stealth_sweep_linkage(
+            &target,
+            destination,
+            &[target.clone(), other],
+            &inventory,
+        );
+
+        assert!(warning.is_some());
+        let would_block = warning.is_some()
+            && inventory
+                .treasury_policy
+                .as_ref()
+                .map(|policy| policy.block_cross_party_linkage)
+                .unwrap_or(false);
+        assert!(would_block);
+    }
+
+    #[test]
+    fn same_party_multiple_deposits_allowed() {
+        let destination = "0x7777777777777777777777777777777777777777";
+        let target = test_deposit(
+            "deposit_1",
+            "wallet_1",
+            "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            Some("party_1"),
+            None,
+        );
+        let other = test_deposit(
+            "deposit_2",
+            "wallet_1",
+            "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            Some("party_1"),
+            None,
+        );
+        let inventory = test_inventory(
+            vec![test_counterparty("party_1", Some(destination))],
+            Some(true),
+        );
+
+        let warning = detect_stealth_sweep_linkage(
+            &target,
+            destination,
+            &[target.clone(), other],
+            &inventory,
+        );
+
+        assert!(warning.is_none());
+    }
+
+    #[test]
+    fn policy_off_yields_warning_not_block() {
+        let destination = "0x8888888888888888888888888888888888888888";
+        let target = test_deposit(
+            "deposit_1",
+            "wallet_1",
+            "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            Some("party_1"),
+            None,
+        );
+        let other = test_deposit(
+            "deposit_2",
+            "wallet_1",
+            "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            Some("party_2"),
+            None,
+        );
+        let inventory = test_inventory(
+            vec![
+                test_counterparty("party_1", Some(destination)),
+                test_counterparty("party_2", Some(destination)),
+            ],
+            Some(false),
+        );
+        let warning = detect_stealth_sweep_linkage(
+            &target,
+            destination,
+            &[target.clone(), other],
+            &inventory,
+        );
+
+        assert!(warning.is_some());
+        let would_block = warning.is_some()
+            && inventory
+                .treasury_policy
+                .as_ref()
+                .map(|policy| policy.block_cross_party_linkage)
+                .unwrap_or(false);
+        assert!(!would_block);
+    }
+
+    #[test]
+    fn two_distinct_unattributed_deposits_to_same_wallet_default_link() {
+        let wallet_destination = "0x9999999999999999999999999999999999999999";
+        let target = test_deposit(
+            "deposit_1",
+            "wallet_1",
+            "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            None,
+            None,
+        );
+        let other = test_deposit(
+            "deposit_2",
+            "wallet_1",
+            "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            None,
+            None,
+        );
+        let wallet = test_wallet("wallet_1", Some(wallet_destination));
+        let inventory = test_inventory(Vec::new(), Some(false));
+        let target_destination = resolve_stealth_sweep_destination(&target, &wallet, &inventory)
+            .unwrap()
+            .expect("wallet default destination");
+
+        let warning = detect_stealth_sweep_linkage(
+            &target,
+            &target_destination,
+            &[target.clone(), other],
+            &inventory,
+        );
+
+        assert!(warning.is_some());
     }
 }
 
@@ -302,6 +589,7 @@ impl SigillumService {
                 updated_at_unix: now,
                 last_checked_at_unix: None,
                 broadcast_transaction_hash_hex: None,
+                counterparty_id: None,
             };
             created += 1;
             response_deposits.push(deposit.clone());
@@ -474,6 +762,7 @@ impl SigillumService {
             updated_at_unix: now,
             last_checked_at_unix: None,
             broadcast_transaction_hash_hex: None,
+            counterparty_id: None,
         };
 
         let _guard = self.state.operation_guard().await;
@@ -535,6 +824,68 @@ impl SigillumService {
         })
     }
 
+    pub(crate) async fn tag_eth_stealth_deposit(
+        &self,
+        token: Option<&str>,
+        body: ReceivingDepositTagRequest,
+    ) -> ServiceResult<EthStealthDepositMutationResponse> {
+        let token = self.require_scope(token, super::capability_scopes::DEPOSITS_DELETE)?;
+        let _guard = self.state.operation_guard().await;
+        let counterparty_id = body
+            .counterparty_id
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(str::to_string);
+
+        let counterparty_name = if let Some(id) = counterparty_id.as_deref() {
+            let inventory =
+                crate::inventory::load_wallet_inventory(&self.state.base_dir).map_err(|error| {
+                    ServiceError::internal(format!("Failed to load wallet inventory: {error}"))
+                })?;
+            let Some(party) = inventory
+                .parties
+                .iter()
+                .find(|party| party.id.as_str() == id)
+            else {
+                return Err(ServiceError::not_found("Counterparty not found."));
+            };
+            Some(party.name.clone())
+        } else {
+            None
+        };
+
+        let mut state = crate::deposits::load_deposits(&self.state.base_dir)
+            .map_err(|error| ServiceError::internal(format!("Failed to load deposits: {error}")))?;
+        let deposit = state
+            .eth_stealth
+            .iter_mut()
+            .find(|deposit| deposit.id == body.deposit_id)
+            .ok_or_else(|| ServiceError::not_found("Deposit not found."))?;
+        deposit.counterparty_id = counterparty_id.clone();
+        deposit.updated_at_unix = now_unix();
+        let deposit = deposit.clone();
+
+        crate::deposits::save_deposits(&self.state.base_dir, &state)
+            .map_err(|error| ServiceError::internal(format!("Failed to save deposits: {error}")))?;
+
+        if let Some(name) = counterparty_name {
+            self.record_audit(
+                self.state.active_compartment_id_for(token),
+                AuditEventSpec::TreasuryReceiveBind { name },
+            )?;
+        }
+
+        Ok(EthStealthDepositMutationResponse {
+            status: if counterparty_id.is_some() {
+                "tagged".into()
+            } else {
+                "untagged".into()
+            },
+            deposit,
+        })
+    }
+
     // ── Deposit Refresh ───────────────────────────────────────────────────
 
     pub(crate) async fn refresh_eth_stealth_deposits(
@@ -585,6 +936,7 @@ impl SigillumService {
             .map_err(|error| ServiceError::internal(format!("Failed to load deposits: {error}")))?;
         let mut queue = crate::queue_store::load_queue(&self.state.base_dir)
             .map_err(|error| ServiceError::internal(format!("Failed to load queue: {error}")))?;
+        let all_deposits = deposits.eth_stealth.clone();
         let deposit_snapshot = {
             let deposit = deposits
                 .eth_stealth
@@ -608,13 +960,22 @@ impl SigillumService {
             }
 
             let (provider, wallet) = self.resolve_wallet_profile(&deposit.wallet_profile)?;
-            let enqueue = self
-                .enqueue_deposit_sweep_job(token, deposit, &wallet, &provider, &mut queue, true)?;
+            let (enqueue, linkage_warning) = self.enqueue_deposit_sweep_job(
+                DepositSweepJobParams {
+                    token,
+                    deposit: &*deposit,
+                    other_deposits: &all_deposits,
+                    wallet: &wallet,
+                    provider: &provider,
+                    strict_destination: true,
+                },
+                &mut queue,
+            )?;
             deposit.queue_job_id = Some(enqueue.job.id.clone());
             deposit.queue_job_state = Some(enqueue.job.state.clone());
             deposit.status = super::queue::queue_status(&enqueue.job.state);
             deposit.updated_at_unix = now_unix();
-            (deposit.clone(), enqueue)
+            (deposit.clone(), enqueue, linkage_warning)
         };
 
         crate::queue_store::save_queue(&self.state.base_dir, &queue)
@@ -634,24 +995,53 @@ impl SigillumService {
             status: deposit_snapshot.1.status,
             deposit: deposit_snapshot.0,
             job: deposit_snapshot.1.job,
+            linkage_warning: deposit_snapshot.2,
         })
     }
+}
 
-    // ── Sweep Job Construction ────────────────────────────────────────────
+// ── Sweep Job Construction ────────────────────────────────────────────────
 
+struct DepositSweepJobParams<'a> {
+    token: &'a str,
+    deposit: &'a EthStealthDeposit,
+    other_deposits: &'a [EthStealthDeposit],
+    wallet: &'a sigillum_api::EthStealthWalletProfile,
+    provider: &'a sigillum_api::EvmProviderProfile,
+    strict_destination: bool,
+}
+
+impl SigillumService {
     fn enqueue_deposit_sweep_job(
         &self,
-        token: &str,
-        deposit: &EthStealthDeposit,
-        wallet: &sigillum_api::EthStealthWalletProfile,
-        provider: &sigillum_api::EvmProviderProfile,
+        params: DepositSweepJobParams<'_>,
         queue: &mut crate::queue_store::QueueState,
-        strict_destination: bool,
-    ) -> ServiceResult<QueueEnqueueResponse> {
-        let destination = deposit
-            .sweep_destination_address
-            .clone()
-            .or_else(|| wallet.default_destination_address.clone());
+    ) -> ServiceResult<(QueueEnqueueResponse, Option<String>)> {
+        let DepositSweepJobParams {
+            token,
+            deposit,
+            other_deposits,
+            wallet,
+            provider,
+            strict_destination,
+        } = params;
+        let inventory =
+            crate::inventory::load_wallet_inventory(&self.state.base_dir).map_err(|error| {
+                ServiceError::internal(format!("Failed to load wallet inventory: {error}"))
+            })?;
+        let destination = resolve_stealth_sweep_destination(deposit, wallet, &inventory)?;
+        let linkage_warning = destination.as_deref().and_then(|destination| {
+            detect_stealth_sweep_linkage(deposit, destination, other_deposits, &inventory)
+        });
+        if linkage_warning.is_some()
+            && inventory
+                .treasury_policy
+                .as_ref()
+                .map(|policy| policy.block_cross_party_linkage)
+                .unwrap_or(false)
+        {
+            return Err(ServiceError::policy_violation("cross_party_linkage"));
+        }
 
         let job = if deposit.asset_kind == "erc20" {
             let recipient_address = destination.ok_or_else(|| {
@@ -745,10 +1135,13 @@ impl SigillumService {
             },
         )?;
 
-        Ok(QueueEnqueueResponse {
-            status: "queued".into(),
-            job,
-        })
+        Ok((
+            QueueEnqueueResponse {
+                status: "queued".into(),
+                job,
+            },
+            linkage_warning,
+        ))
     }
 
     // ── Deposit State Refresh & Sync ───────────────────────────────────────
@@ -811,6 +1204,7 @@ impl SigillumService {
             .into_iter()
             .map(|plan| (plan.deposit_index, plan))
             .collect();
+        let all_deposits = deposits.eth_stealth.clone();
 
         for observation in observations {
             let plan = plans_by_index
@@ -865,17 +1259,22 @@ impl SigillumService {
                 .unwrap_or(false);
             if auto_enqueue && deposit.auto_queue_sweep && !has_active_job && min_ready {
                 let enqueue_result = self.enqueue_deposit_sweep_job(
-                    token,
-                    deposit,
-                    &plan.wallet,
-                    &plan.provider,
+                    DepositSweepJobParams {
+                        token,
+                        deposit: &*deposit,
+                        other_deposits: &all_deposits,
+                        wallet: &plan.wallet,
+                        provider: &plan.provider,
+                        strict_destination: false,
+                    },
                     queue,
-                    false,
-                )?;
-                queued += 1;
-                deposit.queue_job_id = Some(enqueue_result.job.id.clone());
-                deposit.queue_job_state = Some(enqueue_result.job.state.clone());
-                deposit.status = super::queue::queue_status(&enqueue_result.job.state);
+                );
+                if let Ok((enqueue_result, _linkage_warning)) = enqueue_result {
+                    queued += 1;
+                    deposit.queue_job_id = Some(enqueue_result.job.id.clone());
+                    deposit.queue_job_state = Some(enqueue_result.job.state.clone());
+                    deposit.status = super::queue::queue_status(&enqueue_result.job.state);
+                }
             }
 
             processed.push(deposit.clone());
@@ -899,6 +1298,131 @@ fn validate_optional_quantity(value: Option<&str>, label: &str) -> ServiceResult
         })?;
     }
     Ok(())
+}
+
+fn resolve_stealth_sweep_destination(
+    deposit: &EthStealthDeposit,
+    wallet: &EthStealthWalletProfile,
+    inventory: &WalletInventoryState,
+) -> ServiceResult<Option<String>> {
+    if deposit.sweep_destination_address.is_some() {
+        return Ok(deposit.sweep_destination_address.clone());
+    }
+
+    let party = deposit.counterparty_id.as_deref().and_then(|id| {
+        inventory
+            .parties
+            .iter()
+            .find(|party| party.id.as_str() == id)
+    });
+    let party_destination = party
+        .map(counterparty_sweep_destination)
+        .transpose()?
+        .flatten();
+    Ok(party_destination.or(wallet.default_destination_address.clone()))
+}
+
+fn counterparty_sweep_destination(party: &Counterparty) -> ServiceResult<Option<String>> {
+    party
+        .sweep_destination_address
+        .as_deref()
+        .map(str::trim)
+        .filter(|address| !address.is_empty())
+        .map(super::evm::normalize_address)
+        .transpose()
+}
+
+fn detect_stealth_sweep_linkage(
+    target: &EthStealthDeposit,
+    target_destination: &str,
+    other_deposits: &[EthStealthDeposit],
+    inventory: &WalletInventoryState,
+) -> Option<String> {
+    let destination_key = normalize_stealth_linkage_address(target_destination);
+    if destination_key.is_empty() {
+        return None;
+    }
+
+    let target_identity = stealth_sweep_identity_key(target);
+    let mut linked_identities = BTreeSet::new();
+    for other in other_deposits {
+        if other.id == target.id {
+            continue;
+        }
+        let other_destination =
+            resolve_other_stealth_sweep_destination(other, target, target_destination, inventory);
+        let Some(other_destination) = other_destination else {
+            continue;
+        };
+        if normalize_stealth_linkage_address(&other_destination) != destination_key {
+            continue;
+        }
+        let other_identity = stealth_sweep_identity_key(other);
+        if other_identity != target_identity {
+            linked_identities.insert(other_identity);
+        }
+    }
+
+    if linked_identities.is_empty() {
+        None
+    } else {
+        Some(
+            "destination shared with another payer; set a distinct per-party sweep destination"
+                .into(),
+        )
+    }
+}
+
+fn resolve_other_stealth_sweep_destination(
+    other: &EthStealthDeposit,
+    target: &EthStealthDeposit,
+    target_destination: &str,
+    inventory: &WalletInventoryState,
+) -> Option<String> {
+    other
+        .sweep_destination_address
+        .as_deref()
+        .map(str::trim)
+        .filter(|destination| !destination.is_empty())
+        .map(str::to_string)
+        .or_else(|| other_counterparty_sweep_destination(other, inventory))
+        .or_else(|| {
+            (other.wallet_profile == target.wallet_profile).then(|| target_destination.to_string())
+        })
+}
+
+fn other_counterparty_sweep_destination(
+    deposit: &EthStealthDeposit,
+    inventory: &WalletInventoryState,
+) -> Option<String> {
+    let counterparty_id = deposit.counterparty_id.as_deref()?;
+    inventory
+        .parties
+        .iter()
+        .find(|party| party.id.as_str() == counterparty_id)
+        .and_then(|party| party.sweep_destination_address.as_deref())
+        .map(str::trim)
+        .filter(|destination| !destination.is_empty())
+        .map(str::to_string)
+}
+
+fn stealth_sweep_identity_key(deposit: &EthStealthDeposit) -> String {
+    deposit
+        .counterparty_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|id| !id.is_empty())
+        .map(|id| format!("counterparty:{id}"))
+        .unwrap_or_else(|| {
+            format!(
+                "unattributed:{}",
+                normalize_stealth_linkage_address(&deposit.stealth_address)
+            )
+        })
+}
+
+fn normalize_stealth_linkage_address(address: &str) -> String {
+    address.trim().to_ascii_lowercase()
 }
 
 fn gas_balance_sufficient_for_erc20(

@@ -288,7 +288,7 @@ fn test_eth_stealth_check_request_roundtrip() {
     let req = EthStealthCheckRequest {
         wallet: "0xwallet".to_string(),
         stealth: StealthPaymentRef {
-            stealth_address: "0xstealth".to_string(),
+            stealth_address: "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".to_string(),
             ephemeral_public_key_hex: "0xephemeral".to_string(),
             view_tag_hex: Some("0xaa".to_string()),
         },
@@ -304,7 +304,7 @@ fn test_evm_rpc_nonce_request_full() {
             auth_token_key: Some("token_key".to_string()),
             compartment_id: Some(1),
         },
-        address: "0xaddress".to_string(),
+        address: "0x1111111111111111111111111111111111111111".to_string(),
         block_tag: Some("latest".to_string()),
     };
     roundtrip_test(req);
@@ -318,7 +318,7 @@ fn test_evm_rpc_nonce_request_minimal() {
             auth_token_key: None,
             compartment_id: None,
         },
-        address: "0xaddress".to_string(),
+        address: "0x1111111111111111111111111111111111111111".to_string(),
         block_tag: None,
     };
     roundtrip_test(req);
@@ -332,7 +332,7 @@ fn test_evm_rpc_balance_request_roundtrip() {
             auth_token_key: None,
             compartment_id: Some(2),
         },
-        address: "0xaddress".to_string(),
+        address: "0x1111111111111111111111111111111111111111".to_string(),
         block_tag: Some("safe".to_string()),
     };
     roundtrip_test(req);
@@ -346,11 +346,121 @@ fn test_evm_rpc_erc20_balance_request_roundtrip() {
             auth_token_key: Some("key".to_string()),
             compartment_id: None,
         },
-        token_address: "0xtoken".to_string(),
-        owner_address: "0xowner".to_string(),
+        token_address: "0x2222222222222222222222222222222222222222".to_string(),
+        owner_address: "0x3333333333333333333333333333333333333333".to_string(),
         block_tag: None,
     };
     roundtrip_test(req);
+}
+
+#[test]
+fn test_eth_address_validation_accepts_valid_prefixed_address() {
+    use crate::validation::Validate;
+
+    let req = EvmRpcNonceRequest {
+        provider: EvmProviderRef {
+            rpc_url: "https://rpc.example.com".to_string(),
+            auth_token_key: None,
+            compartment_id: None,
+        },
+        address: "0x000000000000000000000000000000000000dEaD".to_string(),
+        block_tag: None,
+    };
+
+    req.validate().unwrap();
+}
+
+#[test]
+fn test_eth_address_validation_accepts_bare_mixed_case_address() {
+    use crate::validation::Validate;
+
+    let req = EvmRpcNonceRequest {
+        provider: EvmProviderRef {
+            rpc_url: "https://rpc.example.com".to_string(),
+            auth_token_key: None,
+            compartment_id: None,
+        },
+        address: "000000000000000000000000000000000000dEaD".to_string(),
+        block_tag: None,
+    };
+
+    req.validate().unwrap();
+}
+
+#[test]
+fn test_eth_address_validation_rejects_too_short_address() {
+    use crate::validation::Validate;
+
+    let req = EvmRpcNonceRequest {
+        provider: EvmProviderRef {
+            rpc_url: "https://rpc.example.com".to_string(),
+            auth_token_key: None,
+            compartment_id: None,
+        },
+        address: "0x1234".to_string(),
+        block_tag: None,
+    };
+
+    let err = req.validate().unwrap_err();
+    assert!(err.contains("address"), "error should mention field: {err}");
+}
+
+#[test]
+fn test_eth_address_validation_rejects_non_hex_40_char_address() {
+    use crate::validation::Validate;
+
+    let req = EvmRpcNonceRequest {
+        provider: EvmProviderRef {
+            rpc_url: "https://rpc.example.com".to_string(),
+            auth_token_key: None,
+            compartment_id: None,
+        },
+        address: "0x000000000000000000000000000000000000000g".to_string(),
+        block_tag: None,
+    };
+
+    let err = req.validate().unwrap_err();
+    assert!(err.contains("address"), "error should mention field: {err}");
+}
+
+#[test]
+fn test_eth_address_validation_rejects_missing_required_length() {
+    use crate::validation::Validate;
+
+    let req = EvmRpcNonceRequest {
+        provider: EvmProviderRef {
+            rpc_url: "https://rpc.example.com".to_string(),
+            auth_token_key: None,
+            compartment_id: None,
+        },
+        address: "000000000000000000000000000000000000000".to_string(),
+        block_tag: None,
+    };
+
+    let err = req.validate().unwrap_err();
+    assert!(err.contains("address"), "error should mention field: {err}");
+}
+
+#[test]
+fn test_optional_eth_address_validation_allows_omitted_address() {
+    use crate::validation::Validate;
+
+    let req = EthStealthSendWithProfileRequest {
+        wallet_profile: "my_profile".to_string(),
+        stealth: StealthPaymentRef {
+            stealth_address: "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".to_string(),
+            ephemeral_public_key_hex: "0xeph".to_string(),
+            view_tag_hex: None,
+        },
+        value_wei_hex: "0x100".to_string(),
+        destination_address: None,
+        nonce: None,
+        gas_limit: None,
+        estimate_fees: None,
+        broadcast: None,
+    };
+
+    req.validate().unwrap();
 }
 
 #[test]
@@ -372,7 +482,7 @@ fn test_eth_stealth_send_transfer_request_full() {
         rpc_url: "https://rpc.example.com".to_string(),
         wallet: "0xwallet".to_string(),
         stealth: StealthPaymentRef {
-            stealth_address: "0xstealth".to_string(),
+            stealth_address: "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".to_string(),
             ephemeral_public_key_hex: "0xeph".to_string(),
             view_tag_hex: Some("0xaa".to_string()),
         },
@@ -381,7 +491,7 @@ fn test_eth_stealth_send_transfer_request_full() {
             max_priority_fee_per_gas_hex: "0x1".to_string(),
             max_fee_per_gas_hex: "0x2".to_string(),
         },
-        destination_address: "0xdest".to_string(),
+        destination_address: "0x000000000000000000000000000000000000dEaD".to_string(),
         value_wei_hex: "0x100".to_string(),
         auth_token_key: Some("key".to_string()),
         provider_compartment_id: Some(1),
@@ -399,7 +509,7 @@ fn test_eth_stealth_send_transfer_request_minimal() {
         rpc_url: "https://rpc.example.com".to_string(),
         wallet: "0xwallet".to_string(),
         stealth: StealthPaymentRef {
-            stealth_address: "0xstealth".to_string(),
+            stealth_address: "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".to_string(),
             ephemeral_public_key_hex: "0xeph".to_string(),
             view_tag_hex: None,
         },
@@ -408,7 +518,7 @@ fn test_eth_stealth_send_transfer_request_minimal() {
             max_priority_fee_per_gas_hex: "0x1".to_string(),
             max_fee_per_gas_hex: "0x2".to_string(),
         },
-        destination_address: "0xdest".to_string(),
+        destination_address: "0x000000000000000000000000000000000000dEaD".to_string(),
         value_wei_hex: "0x100".to_string(),
         auth_token_key: None,
         provider_compartment_id: None,
@@ -431,7 +541,7 @@ fn test_eth_seed_wallet_profile_upsert_request_roundtrip() {
             provider_profile: "mainnet".to_string(),
             compartment_id: Some(1),
             chain_id: Some(1),
-            default_destination_address: Some("0xdest".to_string()),
+            default_destination_address: Some("0x000000000000000000000000000000000000dEaD".to_string()),
             execution_enabled: Some(false),
         };
     roundtrip_test(req);
@@ -448,7 +558,7 @@ fn test_eth_seed_wallet_create_request_roundtrip() {
         provider_profile: "mainnet".to_string(),
         compartment_id: Some(1),
         chain_id: Some(1),
-        default_destination_address: Some("0xdest".to_string()),
+        default_destination_address: Some("0x000000000000000000000000000000000000dEaD".to_string()),
         execution_enabled: Some(false),
     };
     roundtrip_test(req);
@@ -480,7 +590,7 @@ fn test_eth_stealth_send_erc20_transfer_request_roundtrip() {
         rpc_url: "https://rpc.example.com".to_string(),
         wallet: "0xwallet".to_string(),
         stealth: StealthPaymentRef {
-            stealth_address: "0xstealth".to_string(),
+            stealth_address: "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".to_string(),
             ephemeral_public_key_hex: "0xeph".to_string(),
             view_tag_hex: None,
         },
@@ -489,8 +599,8 @@ fn test_eth_stealth_send_erc20_transfer_request_roundtrip() {
             max_priority_fee_per_gas_hex: "0x1".to_string(),
             max_fee_per_gas_hex: "0x2".to_string(),
         },
-        token_address: "0xtoken".to_string(),
-        recipient_address: "0xrecipient".to_string(),
+        token_address: "0x2222222222222222222222222222222222222222".to_string(),
+        recipient_address: "0x4444444444444444444444444444444444444444".to_string(),
         amount_hex: "0x100".to_string(),
         auth_token_key: None,
         provider_compartment_id: None,
@@ -550,7 +660,7 @@ fn test_eth_xpub_wallet_profile_upsert_request_roundtrip() {
         external_receive_path: Some("m/44'/60'/7'/1".to_string()),
         external_account_xpub: None,
         external_account_path: None,
-        default_destination_address: Some("0xdestination".to_string()),
+        default_destination_address: Some("0x000000000000000000000000000000000000dEaD".to_string()),
         execution_enabled: Some(false),
     };
     roundtrip_test(req);
@@ -806,12 +916,14 @@ fn test_risk_catalog_requests_roundtrip() {
 #[test]
 fn test_consolidation_plan_generate_request_roundtrip() {
     let req = ConsolidationPlanGenerateRequest {
-        destination_address: Some("0xdestination".to_string()),
+        destination_address: Some("0x000000000000000000000000000000000000dEaD".to_string()),
         wallet_family: Some("eth-seed".to_string()),
         wallet_profile: Some("seed-main".to_string()),
         provider_profile: Some("mainnet".to_string()),
         include_watch_only: Some(true),
         auto_queue_low_risk: Some(false),
+        routing_strategy: None,
+        party_destinations: Vec::new(),
     };
     roundtrip_test(req);
 }
@@ -850,12 +962,12 @@ fn test_eth_stealth_send_with_profile_request_roundtrip() {
     let req = EthStealthSendWithProfileRequest {
         wallet_profile: "my_profile".to_string(),
         stealth: StealthPaymentRef {
-            stealth_address: "0xstealth".to_string(),
+            stealth_address: "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".to_string(),
             ephemeral_public_key_hex: "0xeph".to_string(),
             view_tag_hex: None,
         },
         value_wei_hex: "0x100".to_string(),
-        destination_address: Some("0xdest".to_string()),
+        destination_address: Some("0x000000000000000000000000000000000000dEaD".to_string()),
         nonce: Some(5),
         gas_limit: Some(21000),
         estimate_fees: Some(true),
@@ -869,12 +981,12 @@ fn test_eth_stealth_send_erc20_with_profile_request_roundtrip() {
     let req = EthStealthSendErc20WithProfileRequest {
         wallet_profile: "profile1".to_string(),
         stealth: StealthPaymentRef {
-            stealth_address: "0xstealth".to_string(),
+            stealth_address: "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".to_string(),
             ephemeral_public_key_hex: "0xeph".to_string(),
             view_tag_hex: Some("0xff".to_string()),
         },
-        token_address: "0xtoken".to_string(),
-        recipient_address: "0xrecip".to_string(),
+        token_address: "0x2222222222222222222222222222222222222222".to_string(),
+        recipient_address: "0x4444444444444444444444444444444444444444".to_string(),
         amount_hex: "0x64".to_string(),
         nonce: None,
         gas_limit: Some(100000),
@@ -889,11 +1001,11 @@ fn test_queue_eth_stealth_native_sweep_request_full() {
     let req = QueueEthStealthNativeSweepRequest {
         wallet_profile: "profile".to_string(),
         stealth: StealthPaymentRef {
-            stealth_address: "0xstealth".to_string(),
+            stealth_address: "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".to_string(),
             ephemeral_public_key_hex: "0xeph".to_string(),
             view_tag_hex: Some("0xaa".to_string()),
         },
-        destination_address: Some("0xdest".to_string()),
+        destination_address: Some("0x000000000000000000000000000000000000dEaD".to_string()),
         min_value_wei_hex: Some("0x1".to_string()),
         gas_limit: Some(21000),
     };
@@ -906,7 +1018,7 @@ fn test_eth_stealth_deposit_create_native_request_roundtrip() {
         wallet_profile: "profile1".to_string(),
         expected_value_wei_hex: Some("0x100".to_string()),
         auto_queue_sweep: Some(true),
-        sweep_destination_address: Some("0xsweep".to_string()),
+        sweep_destination_address: Some("0x5555555555555555555555555555555555555555".to_string()),
         min_sweep_value_wei_hex: Some("0x10".to_string()),
         note: Some("test deposit".to_string()),
         ephemeral_private_key_hex: None,
@@ -918,7 +1030,7 @@ fn test_eth_stealth_deposit_create_native_request_roundtrip() {
 fn test_eth_stealth_deposit_create_erc20_request_roundtrip() {
     let req = EthStealthDepositCreateErc20Request {
         wallet_profile: "profile2".to_string(),
-        token_address: "0xtoken".to_string(),
+        token_address: "0x2222222222222222222222222222222222222222".to_string(),
         expected_amount_hex: Some("0x1000".to_string()),
         auto_queue_sweep: Some(false),
         sweep_destination_address: None,
@@ -963,10 +1075,10 @@ fn test_eth_stealth_announcement_scan_request_roundtrip() {
         wallet_profile: "profile2".to_string(),
         from_block: "0x100".to_string(),
         to_block: Some("latest".to_string()),
-        token_address: Some("0xtoken".to_string()),
+        token_address: Some("0x2222222222222222222222222222222222222222".to_string()),
         limit: Some(250),
         auto_queue_sweep: Some(false),
-        sweep_destination_address: Some("0xdest".to_string()),
+        sweep_destination_address: Some("0x000000000000000000000000000000000000dEaD".to_string()),
         min_sweep_amount_hex: Some("0x10".to_string()),
         note: Some("scan known claim window".to_string()),
     };
@@ -1038,6 +1150,7 @@ fn test_treasury_policy_update_request_full() {
         max_plan_native_wei_hex: Some("0x1bc16d674ec80000".to_string()),
         require_simulation: Some(false),
         allow_raw_digest_signing: Some(true),
+        block_cross_party_linkage: Some(true),
     };
     roundtrip_test(req);
 }
@@ -1051,6 +1164,7 @@ fn test_treasury_policy_update_request_minimal() {
         max_plan_native_wei_hex: None,
         require_simulation: None,
         allow_raw_digest_signing: None,
+        block_cross_party_linkage: None,
     };
     roundtrip_test(req);
 }
@@ -1061,11 +1175,19 @@ fn test_treasury_receive_allocate_request_roundtrip() {
         wallet_profile: "seed-main".to_string(),
         purpose: "counterparty-acme".to_string(),
         label: Some("Acme invoices".to_string()),
+        counterparty_id: None,
     });
     roundtrip_test(TreasuryReceiveAllocateRequest {
         wallet_profile: "seed-main".to_string(),
         purpose: "grant-payout".to_string(),
         label: None,
+        counterparty_id: None,
+    });
+    roundtrip_test(TreasuryReceiveAllocateRequest {
+        wallet_profile: "seed-main".to_string(),
+        purpose: "counterparty-acme".to_string(),
+        label: None,
+        counterparty_id: Some("cp_1".to_string()),
     });
 }
 
@@ -1074,6 +1196,35 @@ fn test_treasury_receive_rotate_request_roundtrip() {
     roundtrip_test(TreasuryReceiveRotateRequest {
         allocation_id: "alloc_123".to_string(),
     });
+}
+
+#[test]
+fn test_counterparty_create_request_roundtrip() {
+    roundtrip_test(CounterpartyCreateRequest {
+        name: "Acme".into(),
+        note: Some("net-30".into()),
+        sweep_destination_address: Some("0x1111111111111111111111111111111111111111".into()),
+    });
+    roundtrip_test(CounterpartyCreateRequest {
+        name: "Beta".into(),
+        note: None,
+        sweep_destination_address: None,
+    });
+}
+
+#[test]
+fn test_counterparty_update_request_roundtrip() {
+    roundtrip_test(CounterpartyUpdateRequest {
+        id: "cp_1".into(),
+        name: "Acme".into(),
+        note: None,
+        sweep_destination_address: Some("0x6666666666666666666666666666666666666666".into()),
+    });
+}
+
+#[test]
+fn test_counterparty_delete_request_roundtrip() {
+    roundtrip_test(CounterpartyDeleteRequest { id: "cp_1".into() });
 }
 
 #[test]

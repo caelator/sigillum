@@ -57,6 +57,17 @@ const WIZARD_CHROME: Record<
   string,
   { pill: string; title: string; summary: string; checklist: string[] }
 > = {
+  wizStepWelcome: {
+    pill: "Welcome",
+    title: "Before you create a vault",
+    summary:
+      "A short orientation so you know exactly what Sigillum is and where your data lives before anything is created.",
+    checklist: [
+      "Confirm this is the machine you want to operate from.",
+      "Decide whether you will use hardware keys, a passphrase, or both.",
+      "Have any FIDO2 hardware key nearby if you plan to enroll one.",
+    ],
+  },
   wizStep0: {
     pill: "Step 1 of 3",
     title: "Choose a protection model",
@@ -247,6 +258,10 @@ export function createSetupWizard(deps: SetupWizardDeps) {
     setTextById("wizStageTitle", meta.title);
     setTextById("wizStageSummary", meta.summary);
     setTrustedHtmlById("wizChecklist", renderChecklist(meta.checklist || []));
+  }
+
+  function wizGetStarted(): void {
+    wizShowStep("wizStep0");
   }
 
   function wizBackToPresets(): void {
@@ -556,6 +571,39 @@ export function createSetupWizard(deps: SetupWizardDeps) {
     wizCompleteFido2Setup();
   }
 
+  function showLinkageChoiceStatus(message: string): void {
+    const status = document.getElementById("wizLinkageChoiceStatus");
+    if (!status) return;
+    status.textContent = message;
+    status.classList.remove("hidden");
+  }
+
+  async function wizEnableLinkageProtection(): Promise<void> {
+    try {
+      const r = await deps.api("POST", "/api/treasury/policy/update", {
+        enabled: false,
+        block_cross_party_linkage: true,
+      });
+      if (r.error) {
+        deps.toast(r.error, "error");
+        return;
+      }
+      showLinkageChoiceStatus(
+        "Payer-linkage protection is on. Sweeps that would link different payers to the same destination are now blocked. Adjust anytime in Treasury policy.",
+      );
+      deps.toast("Payer-linkage protection enabled");
+    } catch (e: any) {
+      deps.toast(String(e?.message ?? e), "error");
+    }
+  }
+
+  function wizDeclineLinkageProtection(): void {
+    showLinkageChoiceStatus(
+      "Left off for now. You can enable payer-linkage protection later in Treasury policy.",
+    );
+    deps.toast("You can enable payer-linkage protection later in Treasury policy.");
+  }
+
   return {
     reset,
     updateWizardChrome,
@@ -563,10 +611,13 @@ export function createSetupWizard(deps: SetupWizardDeps) {
     wizPreset,
     wizBackToPresets,
     wizDetectDevice,
+    wizGetStarted,
     wizInitPassphrase,
     wizProceedFido2,
     wizBackFromFido2Pin,
     wizAddCustomComp,
+    wizDeclineLinkageProtection,
+    wizEnableLinkageProtection,
     wizRegisterKey,
     wizSetNewPin,
     wizSetAdditionalKeyPin,

@@ -6,6 +6,7 @@ members = [
     "crates/sigillum-core",
     "crates/sigillum-client",
     "crates/sigillum-daemon",
+    "crates/sigillum-desktop",
     "crates/sigillum-fido2",
     "crates/sigillum-generator",
     "crates/sigillum-cli",

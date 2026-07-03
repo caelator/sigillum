@@ -150,6 +150,9 @@ pub struct TreasuryPolicy {
     pub require_simulation: bool,
     #[serde(default)]
     pub allow_raw_digest_signing: bool,
+    /// Fail-closed: when true, any step the linkage analyzer flags is hard-blocked.
+    #[serde(default)]
+    pub block_cross_party_linkage: bool,
     pub created_at_unix: u64,
     pub updated_at_unix: u64,
 }
@@ -194,6 +197,25 @@ pub struct TreasuryReceiveAllocation {
     pub created_at_unix: u64,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub retired_at_unix: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub counterparty_id: Option<String>,
+}
+
+/// A payer/counterparty an operator hands a dedicated receive address to.
+///
+/// First-class so each party can be issued a fresh address, keeping parties
+/// unlinkable on-chain. Parties are referenced by receive allocations via
+/// `counterparty_id`; deleting a party unbinds its allocations rather than
+/// erasing allocation history.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct Counterparty {
+    pub id: String,
+    pub name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub note: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sweep_destination_address: Option<String>,
+    pub created_at_unix: u64,
 }
 
 /// All receive allocations, active and retired.
@@ -210,4 +232,92 @@ pub struct TreasuryReceiveAllocationListResponse {
 pub struct TreasuryReceiveAllocationMutationResponse {
     pub status: String,
     pub allocation: TreasuryReceiveAllocation,
+}
+
+/// All known counterparties, newest-first is NOT required; preserve insertion order.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct CounterpartyListResponse {
+    pub parties: Vec<Counterparty>,
+}
+
+/// Result of creating, updating, or deleting a counterparty.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct CounterpartyMutationResponse {
+    pub status: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub party: Option<Counterparty>,
+}
+
+/// One active receiving surface from either an HD allocation or stealth deposit.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ReceivingItem {
+    pub source_type: String,
+    pub address: String,
+    pub chain_id: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub derivation_path: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub purpose: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub counterparty_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub linkage_warning: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub balance_native_wei_hex: Option<String>,
+    pub balance_known: bool,
+    pub status: String,
+    pub created_at_unix: u64,
+}
+
+/// Receiving items grouped by counterparty, with `None` reserved for unassigned items.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ReceivingPartyGroup {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub counterparty: Option<Counterparty>,
+    pub item_count: u32,
+    pub native_total_wei_hex: String,
+    #[serde(default)]
+    pub items: Vec<ReceivingItem>,
+}
+
+/// Count and balance totals across the receiving overview.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ReceivingTotals {
+    pub item_count: u32,
+    pub hd_count: u32,
+    pub stealth_count: u32,
+    pub native_total_wei_hex: String,
+}
+
+/// Balance freshness coverage for the persisted receiving overview.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ReceivingCoverage {
+    pub addresses_total: u32,
+    pub addresses_with_known_balance: u32,
+    pub note: String,
+}
+
+/// Read-only merged view of active HD receiving allocations and stealth deposits.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ReceivingOverviewResponse {
+    pub generated_at_unix: u64,
+    pub include_retired: bool,
+    #[serde(default)]
+    pub groups: Vec<ReceivingPartyGroup>,
+    pub totals: ReceivingTotals,
+    pub coverage: ReceivingCoverage,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ReceivingRefreshResponse {
+    pub generated_at_unix: u64,
+    pub addresses_requested: u32,
+    pub addresses_refreshed: u32,
+    pub addresses_skipped: u32,
+    pub stealth_refreshed: bool,
+    pub provider_status: String,
+    #[serde(default)]
+    pub errors: Vec<String>,
 }

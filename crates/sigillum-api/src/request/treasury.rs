@@ -33,6 +33,8 @@ pub struct TreasuryPolicyUpdateRequest {
     pub require_simulation: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub allow_raw_digest_signing: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub block_cross_party_linkage: Option<bool>,
 }
 
 /// Allocate a fresh purpose-labeled receive address from a wallet profile.
@@ -46,6 +48,8 @@ pub struct TreasuryReceiveAllocateRequest {
     pub purpose: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub label: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub counterparty_id: Option<String>,
 }
 
 /// Retire an active receive allocation and issue the next index for the same
@@ -53,4 +57,40 @@ pub struct TreasuryReceiveAllocateRequest {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct TreasuryReceiveRotateRequest {
     pub allocation_id: String,
+}
+
+/// Create a counterparty the operator can bind receive addresses to.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct CounterpartyCreateRequest {
+    pub name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub note: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sweep_destination_address: Option<String>,
+}
+
+/// Rename or re-note an existing counterparty.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct CounterpartyUpdateRequest {
+    pub id: String,
+    pub name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub note: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sweep_destination_address: Option<String>,
+}
+
+/// Delete a counterparty; bound allocations are unbound, not removed.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct CounterpartyDeleteRequest {
+    pub id: String,
+}
+
+/// Tag (or clear) the counterparty a stealth deposit groups under in the
+/// receiving dashboard. `counterparty_id == None` clears the tag.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ReceivingDepositTagRequest {
+    pub deposit_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub counterparty_id: Option<String>,
 }
