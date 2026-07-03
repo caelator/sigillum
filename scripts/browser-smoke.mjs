@@ -113,12 +113,27 @@ function launchChrome() {
           sleep(1_000),
         ]);
       }
-      fs.rmSync(profileDir, {
+      // Chromium helper processes can outlive the killed main process and
+      // keep writing to the profile dir. A leftover temp dir must not fail
+      // the smoke: retry with backoff, then warn and continue.
+      const rmOptions = {
         recursive: true,
         force: true,
-        maxRetries: 5,
-        retryDelay: 100,
-      });
+        maxRetries: 10,
+        retryDelay: 200,
+      };
+      try {
+        fs.rmSync(profileDir, rmOptions);
+      } catch {
+        await sleep(1_000);
+        try {
+          fs.rmSync(profileDir, rmOptions);
+        } catch (retryError) {
+          console.warn(
+            `browser-smoke: leaving temp profile dir behind at ${profileDir}: ${retryError.message}`,
+          );
+        }
+      }
     },
   };
 }
