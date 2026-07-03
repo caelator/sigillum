@@ -505,6 +505,50 @@ A → (B ∥ C ∥ D) → E → (W1 ∥ W2) → (W3 ∥ W4 ∥ W5 ∥ W6) → W7
 - **Accept:** `cargo test -p sigillum-desktop` runs ≥4 meaningful tests;
   `main.rs` shrinks to Tauri wiring. **Size:** M.
 
+#### C7 — Operator console UX redesign (user-directed, 2026-07-03)
+
+- **Goal:** the embedded console gets a ground-up UX redesign. Previous
+  incremental passes were judged insufficient by the operator; this is an
+  information-architecture restructure, not a polish pass.
+- **Design direction (fixed):** a *quiet security instrument* — calm,
+  dark (`#0d1117` base, matching the app icon), monochrome with a single
+  accent, high density where data lives and generous space where decisions
+  happen, AA+ contrast, visible focus states, no decorative chrome.
+- **Information architecture (fixed):** replace the feature-bucket
+  navigation with five goal-oriented destinations in a left rail:
+  1. **Overview** — lock/compartment status, self-check, recommended next
+     action, recent audit events.
+  2. **Receive** — receiving console: allocations, stealth deposits,
+     counterparties, rotation.
+  3. **Portfolio** — inventory, risk findings, discovery jobs, watch book.
+  4. **Move** — consolidation plans, queue, maintenance, treasury policy.
+  5. **Vault** — secrets/API keys, transit, snapshots, compartments,
+     FIDO2 keys, diagnostics.
+  A persistent status strip shows lock state, active compartment,
+  self-check pill, and "Lock now". Setup wizard and locked states keep
+  their flows but adopt the same visual system. Danger actions are
+  visually distinct and keep typed confirmation.
+- **Hard contracts (break nothing, or update every consumer in the same
+  change):** the runtime smoke greps (`Sigillum Vault` title,
+  `id="statusCard"`, `/api/status` wiring in
+  `scripts/check-runtime-smoke.sh`); every selector used by
+  `scripts/browser-smoke.mjs`; the DOM expectations in
+  `crates/sigillum-daemon/ui/test/ui-smoke.test.ts`; the nonce-based CSP
+  and Rust-side asset assembly; the checked-in generated `app.js` +
+  `styles.css` (regenerate and commit — the gate checks freshness).
+  Prefer keeping element IDs / `data-action` contracts stable and
+  restructuring layout, navigation, hierarchy, and styles around them.
+- **Accept:** all five destinations navigable with consolidated content;
+  no feature loses its surface (cross-check against
+  `docs/operator-surface-parity.md`); UI tests, typecheck, build, daemon
+  HTML tests, runtime smoke, and browser smoke all green; screenshots of
+  setup, locked, and unlocked states reviewed by the operator.
+- **Verify:** `npm --prefix crates/sigillum-daemon/ui run typecheck && npm
+  --prefix crates/sigillum-daemon/ui test && npm --prefix
+  crates/sigillum-daemon/ui run build`; `cargo test -p sigillum-daemon`;
+  `./scripts/check-runtime-smoke.sh`; `./scripts/check-browser-smoke.sh`.
+  **Size:** XL.
+
 #### C6 — Desktop documentation
 
 - **Steps:** README + `docs/deployment.md`: install from `.dmg`; shared
@@ -1389,6 +1433,7 @@ Phase C — Desktop productization
 - [ ] C4 check-desktop.sh in the release gate
 - [ ] C5 boot helpers extracted + tested
 - [ ] C6 desktop docs
+- [ ] C7 operator console UX redesign (user-directed)
 
 Phase D — Operator-surface parity
 - [ ] D1 CLI: transit, evm read-only, wallets read/derive, compartment list
