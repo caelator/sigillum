@@ -1,5 +1,6 @@
 [package]
 name = "sigillum-sdk"
+publish = false
 description = "Embeddable SDK for Sigillum vault integration"
 version.workspace = true
 edition.workspace = true

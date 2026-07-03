@@ -1,5 +1,6 @@
 [package]
 name = "sigillum-core"
+publish = false
 description = "Core traits and file-backed implementation for Sigillum secret management"
 version.workspace = true
 edition.workspace = true

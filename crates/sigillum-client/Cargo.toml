@@ -1,5 +1,6 @@
 [package]
 name = "sigillum-client"
+publish = false
 description = "Client SDK for connecting to a Sigillum vault daemon"
 version.workspace = true
 edition.workspace = true

@@ -1,5 +1,6 @@
 [package]
 name = "sigillum-cli"
+publish = false
 description = "Command-line interface for Sigillum vault management"
 version.workspace = true
 edition.workspace = true

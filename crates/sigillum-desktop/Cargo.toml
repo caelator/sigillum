@@ -1,5 +1,6 @@
 [package]
 name = "sigillum-desktop"
+publish = false
 description = "Native desktop shell for the Sigillum local daemon console"
 version.workspace = true
 edition.workspace = true
