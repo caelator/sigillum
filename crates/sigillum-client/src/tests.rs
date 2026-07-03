@@ -15,6 +15,17 @@ use super::*;
 #[derive(Clone)]
 struct TestState;
 
+#[test]
+fn constructor_normalizes_base_url_without_session_token() {
+    let client = SigillumClient::new("http://127.0.0.1:3200///").expect("client builds");
+
+    assert_eq!(client.session_token(), None);
+    assert_eq!(
+        normalize_base_url("http://127.0.0.1:3200///".to_string()),
+        "http://127.0.0.1:3200"
+    );
+}
+
 async fn unlock() -> Json<serde_json::Value> {
     Json(json!({
         "status": "unlocked",
@@ -521,6 +532,37 @@ async fn evm_erc20_balance_route(
             "owner_address": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
             "amount_hex": "0xf4240",
             "block_tag": "latest",
+        })),
+    )
+}
+
+async fn evm_fee_estimate_route(
+    headers: HeaderMap,
+    Json(body): Json<serde_json::Value>,
+) -> (StatusCode, Json<serde_json::Value>) {
+    let auth = headers
+        .get(header::AUTHORIZATION)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("");
+    if auth != "Bearer test-token" {
+        return (
+            StatusCode::UNAUTHORIZED,
+            Json(json!({ "error": "missing auth" })),
+        );
+    }
+    assert_eq!(body["chain_id"], 1);
+    assert_eq!(body["gas_limit"], 21_000);
+    (
+        StatusCode::OK,
+        Json(json!({
+            "fees": {
+                "chain_id": 1,
+                "max_priority_fee_per_gas_hex": "0x3b9aca00",
+                "max_fee_per_gas_hex": "0x77359400",
+            },
+            "gas_limit": 21_000,
+            "estimated_gas_cost_wei_hex": "0xf61809315000",
+            "source": "provider",
         })),
     )
 }
@@ -1405,6 +1447,7 @@ async fn spawn_test_server() -> SocketAddr {
         .route("/api/evm/nonce", post(evm_nonce_route))
         .route("/api/evm/balance", post(evm_balance_route))
         .route("/api/evm/erc20-balance", post(evm_erc20_balance_route))
+        .route("/api/evm/fees/estimate", post(evm_fee_estimate_route))
         .route("/api/evm/broadcast", post(evm_broadcast_route))
         .route("/api/profiles/evm", get(profiles_evm_list_route))
         .route("/api/profiles/evm/upsert", post(profiles_evm_upsert_route))
@@ -1514,7 +1557,7 @@ async fn spawn_test_server() -> SocketAddr {
 #[cfg_attr(target_os = "macos", ignore = "sandbox blocks loopback bind")]
 async fn unlock_stores_session_for_follow_up_requests() {
     let addr = spawn_test_server().await;
-    let client = SigillumClient::new(format!("http://{addr}/"));
+    let client = SigillumClient::new(format!("http://{addr}/")).expect("client should build");
 
     let unlocked = client.unlock_with_passphrase("passphrase").await.unwrap();
     assert_eq!(unlocked.status, "unlocked");
@@ -1528,7 +1571,7 @@ async fn unlock_stores_session_for_follow_up_requests() {
 #[cfg_attr(target_os = "macos", ignore = "sandbox blocks loopback bind")]
 async fn snapshot_methods_roundtrip_payload_shape() {
     let addr = spawn_test_server().await;
-    let client = SigillumClient::new(format!("http://{addr}"));
+    let client = SigillumClient::new(format!("http://{addr}")).expect("client should build");
     client.set_session_token("test-token");
 
     let (snapshot, summary) = client.export_snapshot("passphrase").await.unwrap();
@@ -1544,7 +1587,7 @@ async fn snapshot_methods_roundtrip_payload_shape() {
 #[cfg_attr(target_os = "macos", ignore = "sandbox blocks loopback bind")]
 async fn audit_events_reads_recent_feed() {
     let addr = spawn_test_server().await;
-    let client = SigillumClient::new(format!("http://{addr}"));
+    let client = SigillumClient::new(format!("http://{addr}")).expect("client should build");
     client.set_session_token("test-token");
 
     let events = client
@@ -1563,7 +1606,7 @@ async fn audit_events_reads_recent_feed() {
 #[cfg_attr(target_os = "macos", ignore = "sandbox blocks loopback bind")]
 async fn audit_verify_reads_chain_report() {
     let addr = spawn_test_server().await;
-    let client = SigillumClient::new(format!("http://{addr}"));
+    let client = SigillumClient::new(format!("http://{addr}")).expect("client should build");
     client.set_session_token("test-token");
 
     let report = client.audit_verify(Some("daemon")).await.unwrap();
@@ -1578,7 +1621,7 @@ async fn audit_verify_reads_chain_report() {
 #[cfg_attr(target_os = "macos", ignore = "sandbox blocks loopback bind")]
 async fn resolve_secret_batch_roundtrips_response_shape() {
     let addr = spawn_test_server().await;
-    let client = SigillumClient::new(format!("http://{addr}"));
+    let client = SigillumClient::new(format!("http://{addr}")).expect("client should build");
     client.set_session_token("test-token");
 
     let values = client
@@ -1599,7 +1642,7 @@ async fn resolve_secret_batch_roundtrips_response_shape() {
 #[cfg_attr(target_os = "macos", ignore = "sandbox blocks loopback bind")]
 async fn record_run_audit_posts_terminal_status() {
     let addr = spawn_test_server().await;
-    let client = SigillumClient::new(format!("http://{addr}"));
+    let client = SigillumClient::new(format!("http://{addr}")).expect("client should build");
     client.set_session_token("test-token");
 
     let response = client
@@ -1619,7 +1662,7 @@ async fn record_run_audit_posts_terminal_status() {
 #[cfg_attr(target_os = "macos", ignore = "sandbox blocks loopback bind")]
 async fn revoke_session_clears_cached_token() {
     let addr = spawn_test_server().await;
-    let client = SigillumClient::new(format!("http://{addr}"));
+    let client = SigillumClient::new(format!("http://{addr}")).expect("client should build");
     client.set_session_token("test-token");
 
     let response = client.revoke_session().await.unwrap();
@@ -1632,7 +1675,7 @@ async fn revoke_session_clears_cached_token() {
 #[cfg_attr(target_os = "macos", ignore = "sandbox blocks loopback bind")]
 async fn diagnostics_reads_operational_metadata() {
     let addr = spawn_test_server().await;
-    let client = SigillumClient::new(format!("http://{addr}"));
+    let client = SigillumClient::new(format!("http://{addr}")).expect("client should build");
     client.set_session_token("test-token");
 
     let response = client.diagnostics().await.unwrap();
@@ -1681,7 +1724,7 @@ async fn diagnostics_reads_operational_metadata() {
 #[cfg_attr(target_os = "macos", ignore = "sandbox blocks loopback bind")]
 async fn transit_helpers_roundtrip_response_shapes() {
     let addr = spawn_test_server().await;
-    let client = SigillumClient::new(format!("http://{addr}"));
+    let client = SigillumClient::new(format!("http://{addr}")).expect("client should build");
     client.set_session_token("test-token");
 
     let (nonce, ciphertext) = client
@@ -1705,7 +1748,7 @@ async fn transit_helpers_roundtrip_response_shapes() {
 #[cfg_attr(target_os = "macos", ignore = "sandbox blocks loopback bind")]
 async fn transaction_signing_helpers_roundtrip_response_shapes() {
     let addr = spawn_test_server().await;
-    let client = SigillumClient::new(format!("http://{addr}"));
+    let client = SigillumClient::new(format!("http://{addr}")).expect("client should build");
     client.set_session_token("test-token");
 
     let transfer = client
@@ -1760,7 +1803,7 @@ async fn transaction_signing_helpers_roundtrip_response_shapes() {
 #[cfg_attr(target_os = "macos", ignore = "sandbox blocks loopback bind")]
 async fn evm_provider_helpers_roundtrip_response_shapes() {
     let addr = spawn_test_server().await;
-    let client = SigillumClient::new(format!("http://{addr}"));
+    let client = SigillumClient::new(format!("http://{addr}")).expect("client should build");
     client.set_session_token("test-token");
 
     let nonce = client
@@ -1806,6 +1849,22 @@ async fn evm_provider_helpers_roundtrip_response_shapes() {
         .unwrap();
     assert_eq!(erc20.amount_hex, "0xf4240");
 
+    let fees = client
+        .evm_estimate_fees(EvmFeeEstimateRequest {
+            provider: sigillum_api::EvmProviderRef {
+                rpc_url: "https://provider.invalid".into(),
+                auth_token_key: None,
+                compartment_id: None,
+            },
+            chain_id: 1,
+            gas_limit: Some(21_000),
+        })
+        .await
+        .unwrap();
+    assert_eq!(fees.fees.chain_id, 1);
+    assert_eq!(fees.gas_limit, 21_000);
+    assert_eq!(fees.source, "provider");
+
     let broadcast = client
         .evm_broadcast(EvmRpcBroadcastRequest {
             provider: sigillum_api::EvmProviderRef {
@@ -1824,7 +1883,7 @@ async fn evm_provider_helpers_roundtrip_response_shapes() {
 #[cfg_attr(target_os = "macos", ignore = "sandbox blocks loopback bind")]
 async fn stealth_send_helpers_roundtrip_response_shapes() {
     let addr = spawn_test_server().await;
-    let client = SigillumClient::new(format!("http://{addr}"));
+    let client = SigillumClient::new(format!("http://{addr}")).expect("client should build");
     client.set_session_token("test-token");
 
     let sent = client
@@ -1889,7 +1948,7 @@ async fn stealth_send_helpers_roundtrip_response_shapes() {
 #[cfg_attr(target_os = "macos", ignore = "sandbox blocks loopback bind")]
 async fn profile_and_queue_helpers_roundtrip_response_shapes() {
     let addr = spawn_test_server().await;
-    let client = SigillumClient::new(format!("http://{addr}"));
+    let client = SigillumClient::new(format!("http://{addr}")).expect("client should build");
     client.set_session_token("test-token");
 
     let providers = client.list_evm_provider_profiles().await.unwrap();
@@ -2110,7 +2169,7 @@ async fn profile_and_queue_helpers_roundtrip_response_shapes() {
 #[cfg_attr(target_os = "macos", ignore = "sandbox blocks loopback bind")]
 async fn list_parties_parses_parties() {
     let addr = spawn_test_server().await;
-    let client = SigillumClient::new(format!("http://{addr}"));
+    let client = SigillumClient::new(format!("http://{addr}")).expect("client should build");
     client.set_session_token("test-token");
 
     let response = client.list_parties().await.unwrap();
@@ -2127,7 +2186,7 @@ async fn list_parties_parses_parties() {
 #[cfg_attr(target_os = "macos", ignore = "sandbox blocks loopback bind")]
 async fn create_party_echoes_name() {
     let addr = spawn_test_server().await;
-    let client = SigillumClient::new(format!("http://{addr}"));
+    let client = SigillumClient::new(format!("http://{addr}")).expect("client should build");
     client.set_session_token("test-token");
 
     let response = client
@@ -2146,7 +2205,7 @@ async fn create_party_echoes_name() {
 #[cfg_attr(target_os = "macos", ignore = "sandbox blocks loopback bind")]
 async fn update_party_parses_mutation() {
     let addr = spawn_test_server().await;
-    let client = SigillumClient::new(format!("http://{addr}"));
+    let client = SigillumClient::new(format!("http://{addr}")).expect("client should build");
     client.set_session_token("test-token");
 
     let response = client
@@ -2168,7 +2227,7 @@ async fn update_party_parses_mutation() {
 #[cfg_attr(target_os = "macos", ignore = "sandbox blocks loopback bind")]
 async fn delete_party_echoes_status() {
     let addr = spawn_test_server().await;
-    let client = SigillumClient::new(format!("http://{addr}"));
+    let client = SigillumClient::new(format!("http://{addr}")).expect("client should build");
     client.set_session_token("test-token");
 
     let response = client
@@ -2185,7 +2244,7 @@ async fn delete_party_echoes_status() {
 #[cfg_attr(target_os = "macos", ignore = "sandbox blocks loopback bind")]
 async fn receiving_overview_parses_totals_and_coverage() {
     let addr = spawn_test_server().await;
-    let client = SigillumClient::new(format!("http://{addr}"));
+    let client = SigillumClient::new(format!("http://{addr}")).expect("client should build");
     client.set_session_token("test-token");
 
     let response = client.receiving_overview().await.unwrap();
@@ -2204,7 +2263,7 @@ async fn receiving_overview_parses_totals_and_coverage() {
 #[cfg_attr(target_os = "macos", ignore = "sandbox blocks loopback bind")]
 async fn refresh_receiving_balances_parses_provider_status() {
     let addr = spawn_test_server().await;
-    let client = SigillumClient::new(format!("http://{addr}"));
+    let client = SigillumClient::new(format!("http://{addr}")).expect("client should build");
     client.set_session_token("test-token");
 
     let response = client.refresh_receiving_balances().await.unwrap();
@@ -2217,7 +2276,7 @@ async fn refresh_receiving_balances_parses_provider_status() {
 #[cfg_attr(target_os = "macos", ignore = "sandbox blocks loopback bind")]
 async fn tag_stealth_deposit_posts_deposit_id_and_parses_status() {
     let addr = spawn_test_server().await;
-    let client = SigillumClient::new(format!("http://{addr}"));
+    let client = SigillumClient::new(format!("http://{addr}")).expect("client should build");
     client.set_session_token("test-token");
 
     let response = client

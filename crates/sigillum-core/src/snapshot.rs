@@ -111,7 +111,7 @@ pub fn export_encrypted_snapshot(
 
     let mut salt = [0u8; 32];
     rand::rngs::OsRng.fill_bytes(&mut salt);
-    let wrap_key = derive_key_with_salt(passphrase, &salt);
+    let wrap_key = derive_key_with_salt(passphrase, &salt)?;
     let cipher = Aes256Gcm::new_from_slice(&wrap_key[..])
         .map_err(|e| VaultError::Encryption(format!("snapshot key init: {e}")))?;
 
@@ -335,7 +335,7 @@ fn decode_encrypted_snapshot(
     let ciphertext = hex::decode(&envelope.ciphertext_hex)
         .map_err(|e| VaultError::Decryption(format!("decode snapshot ciphertext: {e}")))?;
 
-    let wrap_key = derive_key_with_salt(passphrase, &salt);
+    let wrap_key = derive_key_with_salt(passphrase, &salt)?;
     let cipher = Aes256Gcm::new_from_slice(&wrap_key[..])
         .map_err(|e| VaultError::Decryption(format!("snapshot key init: {e}")))?;
     let plaintext = Zeroizing::new(
@@ -497,7 +497,7 @@ mod tests {
         };
         let plaintext = serde_json::to_vec(&archive).unwrap();
         let salt = [7u8; 32];
-        let wrap_key = derive_key_with_salt("passphrase", &salt);
+        let wrap_key = derive_key_with_salt("passphrase", &salt).expect("valid salt derives key");
         let cipher = Aes256Gcm::new_from_slice(&wrap_key[..]).unwrap();
         let nonce_bytes = [9u8; 12];
         let ciphertext = cipher

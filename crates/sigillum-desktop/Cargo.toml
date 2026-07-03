@@ -1,5 +1,6 @@
 [package]
 name = "sigillum-desktop"
+publish = false
 description = "Native desktop shell for the Sigillum local daemon console"
 version.workspace = true
 edition.workspace = true
@@ -21,4 +22,4 @@ tauri-plugin-single-instance = "2"
 tauri-plugin-window-state = "2"
 
 [build-dependencies]
-tauri-build = "2"
+tauri-build = { version = "2", features = [] }

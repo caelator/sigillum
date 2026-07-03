@@ -1,5 +1,6 @@
 [package]
 name = "sigillum-api"
+publish = false
 description = "Shared transport types for the Sigillum daemon API"
 version.workspace = true
 edition.workspace = true

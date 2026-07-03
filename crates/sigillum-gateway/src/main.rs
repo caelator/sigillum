@@ -31,7 +31,10 @@ use crate::state::AppState;
 
 #[tokio::main]
 async fn main() {
-    let config = GatewayConfig::from_env();
+    let config = GatewayConfig::from_env().unwrap_or_else(|error| {
+        eprintln!("Gateway configuration error: {error}");
+        std::process::exit(1);
+    });
 
     // P3: Structured JSON logging when GATEWAY_LOG_JSON=1
     if config.log_json {
@@ -52,9 +55,17 @@ async fn main() {
     tracing::info!("Connecting to database: {}", config.database_url);
     let db = db::connect(&config.database_url)
         .await
-        .expect("Failed to connect to database");
+        .unwrap_or_else(|error| {
+            tracing::error!("Failed to connect to database: {error}");
+            std::process::exit(1);
+        });
 
-    let daemon = Arc::new(SigillumClient::new(&config.daemon_url));
+    let daemon = Arc::new(
+        SigillumClient::new(&config.daemon_url).unwrap_or_else(|error| {
+            eprintln!("Failed to build daemon client: {error}");
+            std::process::exit(1);
+        }),
+    );
     if let Some(token) = config.daemon_capability_token.as_ref() {
         daemon.set_session_token(token.clone());
         tracing::info!("Using SIGILLUM_DAEMON_CAPABILITY_TOKEN for daemon calls");
@@ -90,7 +101,10 @@ async fn main() {
     let app = routes::build_router(state);
     let listener = tokio::net::TcpListener::bind(config.bind_addr)
         .await
-        .expect("Failed to bind");
+        .unwrap_or_else(|error| {
+            tracing::error!("Failed to bind {}: {error}", config.bind_addr);
+            std::process::exit(1);
+        });
     tracing::info!("Gateway listening on {}", config.bind_addr);
 
     if config.rate_limit_rps > 0 {
@@ -103,7 +117,10 @@ async fn main() {
     )
     .with_graceful_shutdown(shutdown_signal())
     .await
-    .unwrap();
+    .unwrap_or_else(|error| {
+        tracing::error!("Server error: {error}");
+        std::process::exit(1);
+    });
 
     tracing::info!("Gateway shut down gracefully");
 }
@@ -111,15 +128,21 @@ async fn main() {
 /// Listen for SIGINT/SIGTERM for graceful shutdown.
 async fn shutdown_signal() {
     let ctrl_c = async {
-        tokio::signal::ctrl_c()
-            .await
-            .expect("Failed to install Ctrl+C handler");
+        tokio::signal::ctrl_c().await.unwrap_or_else(|error| {
+            // Without a signal handler, the gateway has no reliable clean shutdown path.
+            tracing::error!("Failed to install Ctrl+C handler: {error}");
+            std::process::exit(1);
+        });
     };
 
     #[cfg(unix)]
     let terminate = async {
         tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
-            .expect("Failed to install signal handler")
+            .unwrap_or_else(|error| {
+                // Without a signal handler, the gateway has no reliable clean shutdown path.
+                tracing::error!("Failed to install SIGTERM handler: {error}");
+                std::process::exit(1);
+            })
             .recv()
             .await;
     };

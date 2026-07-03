@@ -69,20 +69,28 @@ fn sync_parent_dir(_parent: &Path) -> Result<(), std::io::Error> {
 
 /// Derive a wrap key from a passphrase using Argon2id with a fresh random salt.
 /// Returns `(wrap_key, salt)`.
-#[must_use]
-pub fn derive_key_from_passphrase(passphrase: &str) -> (Zeroizing<[u8; 32]>, [u8; 32]) {
+///
+/// Returns an error if Argon2 parameter construction or derivation fails.
+pub fn derive_key_from_passphrase(
+    passphrase: &str,
+) -> Result<(Zeroizing<[u8; 32]>, [u8; 32]), VaultError> {
     use rand::RngCore;
     use rand::rngs::OsRng;
 
     let mut salt = [0u8; 32];
     OsRng.fill_bytes(&mut salt);
-    let key = derive_key_with_salt(passphrase, &salt);
-    (key, salt)
+    let key = derive_key_with_salt(passphrase, &salt)?;
+    Ok((key, salt))
 }
 
 /// Derive a wrap key from a passphrase and existing salt using Argon2id.
-#[must_use]
-pub fn derive_key_with_salt(passphrase: &str, salt: &[u8]) -> Zeroizing<[u8; 32]> {
+///
+/// Returns an error if Argon2 rejects the configured parameters or salt, such
+/// as a salt shorter than Argon2's minimum length.
+pub fn derive_key_with_salt(
+    passphrase: &str,
+    salt: &[u8],
+) -> Result<Zeroizing<[u8; 32]>, VaultError> {
     use argon2::Argon2;
 
     let mut key = Zeroizing::new([0u8; 32]);
@@ -95,12 +103,12 @@ pub fn derive_key_with_salt(passphrase: &str, salt: &[u8]) -> Zeroizing<[u8; 32]
             ARGON2_PARALLELISM,
             Some(ARGON2_OUTPUT_LEN),
         )
-        .expect("valid Argon2 params"),
+        .map_err(|e| VaultError::KeyDerivation(format!("argon2 params: {e}")))?,
     );
     argon2
         .hash_password_into(passphrase.as_bytes(), salt, &mut *key)
-        .expect("Argon2id derivation failed");
-    key
+        .map_err(|e| VaultError::KeyDerivation(format!("argon2id: {e}")))?;
+    Ok(key)
 }
 
 // ── Salt persistence ────────────────────────────────────────────
@@ -205,16 +213,22 @@ mod tests {
     #[test]
     fn kdf_deterministic_with_same_salt() {
         let salt = [42u8; 32];
-        let k1 = derive_key_with_salt("test-passphrase", &salt);
-        let k2 = derive_key_with_salt("test-passphrase", &salt);
+        let k1 = derive_key_with_salt("test-passphrase", &salt).expect("valid salt derives key");
+        let k2 = derive_key_with_salt("test-passphrase", &salt).expect("valid salt derives key");
         assert_eq!(*k1, *k2);
     }
 
     #[test]
     fn kdf_different_with_different_salt() {
-        let k1 = derive_key_with_salt("test", &[1u8; 32]);
-        let k2 = derive_key_with_salt("test", &[2u8; 32]);
+        let k1 = derive_key_with_salt("test", &[1u8; 32]).expect("valid salt derives key");
+        let k2 = derive_key_with_salt("test", &[2u8; 32]).expect("valid salt derives key");
         assert_ne!(*k1, *k2);
+    }
+
+    #[test]
+    fn kdf_short_salt_returns_key_derivation_error() {
+        let result = derive_key_with_salt("pass", &[0u8; 4]);
+        assert!(matches!(result, Err(VaultError::KeyDerivation(_))));
     }
 
     #[test]

@@ -1,5 +1,6 @@
 [package]
 name = "sigillum-server"
+publish = false
 description = "Sigillum vault server library for custom deployments"
 version.workspace = true
 edition.workspace = true
@@ -12,3 +13,6 @@ categories = ["cryptography", "web-programming"]
 
 [dependencies]
 sigillum-daemon = { workspace = true }
+
+[dev-dependencies]
+tempfile = "3.10"

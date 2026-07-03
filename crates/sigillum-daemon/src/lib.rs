@@ -38,6 +38,14 @@ mod ui;
 
 pub use state::AppState;
 
+#[derive(Debug, thiserror::Error)]
+pub enum DaemonInitError {
+    #[error("failed to build daemon HTTP client: {0}")]
+    HttpClient(#[from] reqwest::Error),
+    #[error("invalid CORS origin header: {0}")]
+    CorsOrigin(#[from] axum::http::header::InvalidHeaderValue),
+}
+
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -56,7 +64,10 @@ pub struct DaemonRunOptions {
 }
 
 /// Build the Axum router with multi-compartment vault state.
-pub fn build_router(base_dir: PathBuf, listen_port: u16) -> (Router, Arc<AppState>) {
+pub fn build_router(
+    base_dir: PathBuf,
+    listen_port: u16,
+) -> Result<(Router, Arc<AppState>), DaemonInitError> {
     if let Err(error) = prepare_base_dir(&base_dir) {
         tracing::warn!(
             path = %base_dir.display(),
@@ -65,7 +76,7 @@ pub fn build_router(base_dir: PathBuf, listen_port: u16) -> (Router, Arc<AppStat
         );
     }
 
-    let state = Arc::new(AppState::new(base_dir));
+    let state = Arc::new(AppState::new(base_dir)?);
     let service = service::SigillumService::new(state.clone());
     match service.recover_runtime_state() {
         Ok(_) => state.mark_startup_ready(),
@@ -75,9 +86,7 @@ pub fn build_router(base_dir: PathBuf, listen_port: u16) -> (Router, Arc<AppStat
         }
     }
 
-    let origin: HeaderValue = format!("http://localhost:{listen_port}")
-        .parse()
-        .expect("valid CORS origin from listen port");
+    let origin: HeaderValue = format!("http://localhost:{listen_port}").parse()?;
 
     let cors = CorsLayer::new()
         .allow_origin(origin)
@@ -95,7 +104,7 @@ pub fn build_router(base_dir: PathBuf, listen_port: u16) -> (Router, Arc<AppStat
         .layer(TraceLayer::new_for_http())
         .with_state(state.clone());
 
-    (app, state)
+    Ok((app, state))
 }
 
 /// Start the daemon and block until shutdown.
@@ -142,8 +151,11 @@ where
 
     prepare_base_dir(&base_dir)?;
     let _daemon_lock = DaemonLock::acquire(&base_dir, options.force_daemon_lock)?;
-    let (app, state) = build_router(base_dir, addr.port());
+    let (app, state) = build_router(base_dir, addr.port())?;
     spawn_idle_lock_task(state.clone());
+
+    #[cfg(unix)]
+    let mut sigterm = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())?;
 
     let listener = tokio::net::TcpListener::bind(addr).await?;
     tracing::info!("sigillum daemon listening on http://{addr}");
@@ -155,9 +167,6 @@ where
             let ctrl_c = tokio::signal::ctrl_c();
             #[cfg(unix)]
             {
-                let mut sigterm =
-                    tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
-                        .expect("failed to install SIGTERM handler");
                 tokio::select! {
                     _ = ctrl_c => {}
                     _ = sigterm.recv() => {}

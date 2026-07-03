@@ -301,7 +301,7 @@ impl SigillumService {
         if let Some(passphrase) = body.passphrase.as_ref() {
             if passphrase.len() >= 8 {
                 for (compartment_id, master_key) in &result.compartment_keys {
-                    let (wrap_key, salt) = derive_key_from_passphrase(passphrase);
+                    let (wrap_key, salt) = derive_key_from_passphrase(passphrase)?;
                     save_salt(&salt, &self.state.salt_path(*compartment_id)).map_err(|error| {
                         ServiceError::internal(format!("Save salt for {compartment_id}: {error}"))
                     })?;

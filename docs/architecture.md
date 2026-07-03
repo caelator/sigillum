@@ -101,6 +101,8 @@ Both flows end by loading compartment master keys into local process memory.
 
 The daemon is a local service, not a distributed secrets platform.
 
+The full HTTP route surface and its UI/CLI parity decisions are enumerated in [operator-surface-parity.md](./operator-surface-parity.md).
+
 ```text
 Browser UI / local HTTP client
             |

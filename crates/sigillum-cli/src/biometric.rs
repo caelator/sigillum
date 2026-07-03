@@ -24,7 +24,10 @@ pub(crate) fn cmd_unlock_biometric(args: &[String]) {
         process::exit(1);
     });
 
-    let client = SigillumClient::new(base_url);
+    let client = SigillumClient::new(base_url).unwrap_or_else(|error| {
+        eprintln!("Failed to build daemon client: {error}");
+        process::exit(1);
+    });
     let response = runtime.block_on(async {
         let challenge = client.biometric_challenge().await?;
         let challenge_id = decode_fixed_hex::<16>(&challenge.challenge_id_hex, "challenge_id_hex")
@@ -80,7 +83,10 @@ fn enroll(args: &[String]) {
         process::exit(1);
     }
 
-    let client = SigillumClient::new(base_url);
+    let client = SigillumClient::new(base_url).unwrap_or_else(|error| {
+        eprintln!("Failed to build daemon client: {error}");
+        process::exit(1);
+    });
     client.set_session_token(require_session_token(args));
 
     let runtime = tokio::runtime::Runtime::new().unwrap_or_else(|error| {

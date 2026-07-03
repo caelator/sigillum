@@ -104,7 +104,9 @@ fn generate_and_store(
     let runtime = tokio::runtime::Runtime::new().unwrap_or_else(|error| {
         exit_with_error(&format!("failed to start async runtime: {error}"))
     });
-    let client = SigillumClient::new(&base_url);
+    let client = SigillumClient::new(&base_url).unwrap_or_else(|error| {
+        exit_with_error(&format!("failed to build daemon client: {error}"))
+    });
     client.set_session_token(&session_token);
     runtime
         .block_on(client.generate_and_store(request))

@@ -112,7 +112,12 @@ pub(crate) fn multiply_u256_u64(value: &[u8; 32], factor: u64) -> [u8; 32] {
     let mut out = [0u8; 32];
     let mut carry = 0u128;
     for (chunk_in, chunk_out) in value.rchunks_exact(8).zip(out.rchunks_exact_mut(8)) {
-        let limb = u64::from_be_bytes(chunk_in.try_into().expect("u64 limb"));
+        // Infallible: rchunks_exact(8) guarantees each chunk is exactly 8 bytes.
+        let limb = u64::from_be_bytes(
+            chunk_in
+                .try_into()
+                .expect("rchunks_exact(8) yields 8-byte chunks"),
+        );
         let wide = (limb as u128) * (factor as u128) + carry;
         chunk_out.copy_from_slice(&(wide as u64).to_be_bytes());
         carry = wide >> 64;

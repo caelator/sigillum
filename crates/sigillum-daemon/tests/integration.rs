@@ -32,7 +32,7 @@ fn test_app() -> (axum::Router, TempDir) {
 
 fn test_app_with_state() -> (axum::Router, Arc<AppState>, TempDir) {
     let dir = TempDir::new().unwrap();
-    let (app, state) = build_router(dir.path().to_path_buf(), 0);
+    let (app, state) = build_router(dir.path().to_path_buf(), 0).expect("router should initialize");
     (app, state, dir)
 }
 

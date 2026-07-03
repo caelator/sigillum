@@ -1,5 +1,6 @@
 [package]
 name = "sigillum-generator"
+publish = false
 description = "Password, passphrase, and TOTP generation for Sigillum"
 version.workspace = true
 edition.workspace = true

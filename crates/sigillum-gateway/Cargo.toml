@@ -1,5 +1,6 @@
 [package]
 name = "sigillum-gateway"
+publish = false
 description = "Local-sidecar payment preview and control surface for Sigillum custody"
 version.workspace = true
 edition.workspace = true

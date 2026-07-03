@@ -93,7 +93,9 @@ impl SigillumService {
                 Ok(salt) if salt.len() == 32 => salt,
                 _ => continue,
             };
-            let wrap_key = derive_key_with_salt(passphrase, &salt);
+            let Ok(wrap_key) = derive_key_with_salt(passphrase, &salt) else {
+                continue;
+            };
             let Some(unwrapped_master_key) =
                 load_wrapped_master_key(&wrap_key, &self.state.wrapped_key_path(meta.id))
             else {
@@ -231,7 +233,9 @@ async fn scan_passphrase_matches(
                     _ => continue,
                 };
 
-                let wrap_key = derive_key_with_salt(passphrase.as_str(), &salt);
+                let Ok(wrap_key) = derive_key_with_salt(passphrase.as_str(), &salt) else {
+                    continue;
+                };
                 let Some(master_key) = load_wrapped_master_key(&wrap_key, &wrapped_path) else {
                     continue;
                 };

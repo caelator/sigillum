@@ -273,7 +273,10 @@ fn setup_passphrase() {
     });
 
     // Wrap master key with passphrase
-    let (wrap_key, salt) = derive_key_from_passphrase(&passphrase);
+    let (wrap_key, salt) = derive_key_from_passphrase(&passphrase).unwrap_or_else(|e| {
+        eprintln!("Failed to derive key: {e}");
+        process::exit(1);
+    });
     if let Err(e) = save_salt(&salt, &compartment_salt_path(0)) {
         eprintln!("Failed to save salt: {e}");
         process::exit(1);
@@ -407,7 +410,11 @@ fn setup_fido2_preset(presets: &[(&str, usize)]) {
             if answer.trim().eq_ignore_ascii_case("y") {
                 let passphrase = prompt_passphrase_confirm();
                 for (meta, mk) in &master_keys {
-                    let (wrap_key, salt) = derive_key_from_passphrase(&passphrase);
+                    let (wrap_key, salt) =
+                        derive_key_from_passphrase(&passphrase).unwrap_or_else(|e| {
+                            eprintln!("Failed to derive key: {e}");
+                            process::exit(1);
+                        });
                     if let Err(e) = save_salt(&salt, &compartment_salt_path(meta.id)) {
                         eprintln!("Failed to save salt for compartment {}: {e}", meta.id);
                         process::exit(1);
@@ -630,7 +637,9 @@ fn unlock_passphrase() {
             _ => continue,
         };
 
-        let wrap_key = derive_key_with_salt(&passphrase, &salt);
+        let Ok(wrap_key) = derive_key_with_salt(&passphrase, &salt) else {
+            continue;
+        };
         if let Some(master_key) = load_wrapped_master_key(&wrap_key, &wrapped_key_path) {
             // Try to decrypt meta.enc to discover compartment
             match Fido2Manager::load_compartment_meta(&base, i, &master_key) {

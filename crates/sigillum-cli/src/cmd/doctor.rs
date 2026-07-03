@@ -220,13 +220,23 @@ fn check_daemon(report: &mut DoctorReport, daemon_url: &str, session_token: Opti
         }
     };
 
-    let result = runtime.block_on(async {
-        let client = SigillumClient::new(daemon_url.to_string());
-        if let Some(token) = session_token {
-            client.set_session_token(token);
+    let client = match SigillumClient::new(daemon_url.to_string()) {
+        Ok(client) => client,
+        Err(error) => {
+            report.check(
+                CheckLevel::Fail,
+                "daemon reachability",
+                format!("{daemon_url} returned an error: {error}"),
+            );
+            return;
         }
-        tokio::time::timeout(Duration::from_secs(3), client.status()).await
-    });
+    };
+    if let Some(token) = session_token {
+        client.set_session_token(token);
+    }
+
+    let result = runtime
+        .block_on(async { tokio::time::timeout(Duration::from_secs(3), client.status()).await });
 
     match result {
         Ok(Ok(status)) => {

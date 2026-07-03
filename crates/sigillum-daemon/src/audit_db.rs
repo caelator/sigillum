@@ -40,7 +40,8 @@ pub(crate) fn open_database(path: &Path) -> Result<Connection, std::io::Error> {
     Ok(connection)
 }
 
-#[allow(dead_code)]
+// Test-only unchained insert wrapper for this module's tests; live code uses append_event_chained / insert_event.
+#[cfg(test)]
 pub(crate) fn append_event(path: &Path, event: &StoredAuditEvent) -> Result<(), std::io::Error> {
     let connection = open_database(path)?;
     insert_event(&connection, event, None, None)

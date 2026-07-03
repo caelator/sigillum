@@ -22,7 +22,7 @@
 //! one; otherwise the touch-only path sends no PIN at all.
 
 use std::future::Future;
-use std::io::{self, Read};
+use std::io;
 use std::process::{self, Stdio};
 use std::time::{Duration, Instant};
 
@@ -37,12 +37,18 @@ use sigillum_api::request::{
 use sigillum_client::{ClientError, SigillumClient};
 use url::Url;
 
+mod args;
 mod deposits;
+mod evm;
 mod inventory;
 mod inventory_args;
 mod queue;
 mod receiving;
+mod transit;
 mod treasury;
+mod wallets;
+
+pub(crate) use args::*;
 
 const DEFAULT_DAEMON_BASE_URL: &str = "http://127.0.0.1:9743";
 const DAEMON_READY_TIMEOUT: Duration = Duration::from_secs(10);
@@ -90,6 +96,7 @@ pub fn cmd_api(args: &[String]) {
                 client.switch_compartment(id).await
             });
         }
+        "compartment" => cmd_api_compartment(args),
         "diagnostics" => run_api_command(
             args,
             true,
@@ -105,6 +112,7 @@ pub fn cmd_api(args: &[String]) {
         }
         "profiles" => cmd_api_profiles(args),
         "deposits" => deposits::cmd_api_deposits(args),
+        "evm" => evm::cmd_api_evm(args),
         "inventory" => inventory::cmd_api_inventory(args),
         "discovery" => cmd_api_discovery(args),
         "risk" => cmd_api_risk(args),
@@ -112,11 +120,26 @@ pub fn cmd_api(args: &[String]) {
         "receiving" => receiving::cmd_api_receiving(args),
         "treasury" => treasury::cmd_api_treasury(args),
         "queue" => queue::cmd_api_queue(args),
+        "transit" => transit::cmd_api_transit(args),
+        "wallets" => wallets::cmd_api_wallets(args),
         "maintenance" => cmd_api_maintenance(args),
         "help" | "--help" | "-h" => print_api_usage(),
         other => {
             eprintln!("Unknown api command: {other}");
             print_api_usage();
+            process::exit(1);
+        }
+    }
+}
+
+/// Dispatch `sigillum api compartment <list>`.
+fn cmd_api_compartment(args: &[String]) {
+    match args.get(1).map(String::as_str) {
+        Some("list") => run_api_command(args, true, |client| async move {
+            client.list_compartments().await
+        }),
+        _ => {
+            eprintln!("Usage: sigillum api compartment <list>");
             process::exit(1);
         }
     }
@@ -285,21 +308,6 @@ fn cmd_api_profiles(args: &[String]) {
             process::exit(1);
         }
     }
-}
-
-/// Read an optional BIP-39 mnemonic passphrase without accepting it as a raw
-/// CLI argument (so it never lands in shell history or the process list).
-fn read_optional_mnemonic_passphrase(args: &[String]) -> Option<String> {
-    if let Some(env_key) = parse_flag(args, "--mnemonic-passphrase-env") {
-        return Some(std::env::var(&env_key).unwrap_or_else(|_| {
-            eprintln!("Environment variable {env_key} is not set.");
-            process::exit(1);
-        }));
-    }
-    if has_flag(args, "--mnemonic-passphrase-stdin") {
-        return Some(read_stdin_secret("mnemonic passphrase"));
-    }
-    None
 }
 
 /// Dispatch `sigillum api discovery <jobs|scan-evm>`.
@@ -542,7 +550,10 @@ where
 
 /// Construct a [`SigillumClient`] with optional session-token attachment.
 fn build_client(args: &[String], require_session: bool) -> SigillumClient {
-    let client = SigillumClient::new(daemon_base_url(args));
+    let client = SigillumClient::new(daemon_base_url(args)).unwrap_or_else(|error| {
+        eprintln!("Failed to build daemon client: {error}");
+        process::exit(1);
+    });
     if require_session {
         let session = require_session_token(args);
         client.set_session_token(session);
@@ -607,10 +618,10 @@ pub(crate) fn ensure_daemon_ready(base_url: &str) -> Result<(), String> {
 }
 
 async fn daemon_reachable(base_url: &str) -> bool {
-    SigillumClient::new(base_url.to_string())
-        .status()
-        .await
-        .is_ok()
+    match SigillumClient::new(base_url.to_string()) {
+        Ok(client) => client.status().await.is_ok(),
+        Err(_) => false,
+    }
 }
 
 fn spawn_daemon_process(port: u16) -> io::Result<()> {
@@ -625,80 +636,6 @@ fn spawn_daemon_process(port: u16) -> io::Result<()> {
         .stderr(Stdio::null());
     let _child = command.spawn()?;
     Ok(())
-}
-
-// ── Sensitive input handling ─────────────────────────────────────
-
-fn read_passphrase(args: &[String]) -> String {
-    read_sensitive_input(
-        args,
-        "--passphrase-env",
-        "--passphrase-stdin",
-        "Daemon passphrase: ",
-    )
-}
-
-fn read_optional_pin(args: &[String]) -> Option<String> {
-    read_optional_sensitive_input(args, "--pin-env", "--pin-stdin")
-}
-
-/// Read a sensitive value using one of three delivery modes (in priority order):
-/// 1. Environment variable (`env_flag`): `--*-env VAR`
-/// 2. Standard input (`stdin_flag`): `--*-stdin`
-/// 3. Interactive terminal prompt (`prompt_label`)
-fn read_sensitive_input(
-    args: &[String],
-    env_flag: &str,
-    stdin_flag: &str,
-    prompt_label: &str,
-) -> String {
-    if let Some(env_key) = parse_flag(args, env_flag) {
-        return std::env::var(&env_key).unwrap_or_else(|_| {
-            eprintln!("Environment variable {env_key} is not set.");
-            process::exit(1);
-        });
-    }
-    if has_flag(args, stdin_flag) {
-        let name = prompt_label.trim_end_matches([':', ' ']);
-        return read_stdin_secret(name);
-    }
-    rpassword::prompt_password(prompt_label).unwrap_or_else(|error| {
-        eprintln!("Failed to read {prompt_label} {error}");
-        process::exit(1);
-    })
-}
-
-fn read_optional_sensitive_input(
-    args: &[String],
-    env_flag: &str,
-    stdin_flag: &str,
-) -> Option<String> {
-    if let Some(env_key) = parse_flag(args, env_flag) {
-        return Some(std::env::var(&env_key).unwrap_or_else(|_| {
-            eprintln!("Environment variable {env_key} is not set.");
-            process::exit(1);
-        }));
-    }
-    if has_flag(args, stdin_flag) {
-        return Some(read_stdin_secret("FIDO2 PIN"));
-    }
-    None
-}
-
-fn read_stdin_secret(name: &str) -> String {
-    let mut buf = String::new();
-    io::stdin()
-        .read_to_string(&mut buf)
-        .unwrap_or_else(|error| {
-            eprintln!("Failed to read {name} from stdin: {error}");
-            process::exit(1);
-        });
-    let value = buf.trim().to_string();
-    if value.is_empty() {
-        eprintln!("Expected non-empty {name} on stdin.");
-        process::exit(1);
-    }
-    value
 }
 
 // ── Output and error handling ────────────────────────────────────
@@ -716,113 +653,6 @@ fn report_client_error(error: ClientError) -> ! {
     process::exit(1);
 }
 
-// ── Flag parsing ────────────────────────────────────────────────
-
-/// Find a `--flag <value>` pair in `args`, returning the value if present.
-fn parse_flag(args: &[String], flag: &str) -> Option<String> {
-    let mut i = 0;
-    while i < args.len() {
-        if args[i] == flag && i + 1 < args.len() {
-            return Some(args[i + 1].clone());
-        }
-        i += 1;
-    }
-    None
-}
-
-fn parse_multi_flag(args: &[String], flag: &str) -> Vec<String> {
-    let mut values = Vec::new();
-    let mut i = 0;
-    while i < args.len() {
-        if args[i] == flag && i + 1 < args.len() {
-            values.push(args[i + 1].clone());
-            i += 1;
-        }
-        i += 1;
-    }
-    values
-}
-
-fn has_flag(args: &[String], flag: &str) -> bool {
-    args.iter().any(|arg| arg == flag)
-}
-
-fn flag_option(args: &[String], flag: &str) -> Option<bool> {
-    if has_flag(args, flag) {
-        Some(true)
-    } else {
-        None
-    }
-}
-
-fn bool_switch(args: &[String], positive: &str, negative: &str) -> Option<bool> {
-    if has_flag(args, positive) {
-        Some(true)
-    } else if has_flag(args, negative) {
-        Some(false)
-    } else {
-        None
-    }
-}
-
-fn require_flag(args: &[String], flag: &str, usage: &str) -> String {
-    parse_flag(args, flag).unwrap_or_else(|| {
-        eprintln!("Usage: {usage}");
-        process::exit(1);
-    })
-}
-
-fn parse_usize_flag(args: &[String], flag: &str) -> Option<usize> {
-    parse_flag(args, flag).map(|value| parse_usize_value(&value, flag))
-}
-
-fn require_usize_flag(args: &[String], flag: &str, usage: &str) -> usize {
-    parse_flag(args, flag)
-        .map(|value| parse_usize_value(&value, flag))
-        .unwrap_or_else(|| {
-            eprintln!("Usage: {usage}");
-            process::exit(1);
-        })
-}
-
-fn parse_u64_flag(args: &[String], flag: &str) -> Option<u64> {
-    parse_flag(args, flag).map(|value| parse_u64_value(&value, flag))
-}
-
-fn parse_u32_flag(args: &[String], flag: &str) -> Option<u32> {
-    parse_flag(args, flag).map(|value| parse_u32_value(&value, flag))
-}
-
-fn require_u64_flag(args: &[String], flag: &str, usage: &str) -> u64 {
-    parse_flag(args, flag)
-        .map(|value| parse_u64_value(&value, flag))
-        .unwrap_or_else(|| {
-            eprintln!("Usage: {usage}");
-            process::exit(1);
-        })
-}
-
-fn parse_usize_value(value: &str, flag: &str) -> usize {
-    value.parse::<usize>().unwrap_or_else(|_| {
-        eprintln!("Invalid value for {flag}: {value}");
-        process::exit(1);
-    })
-}
-
-fn parse_u64_value(value: &str, flag: &str) -> u64 {
-    value.parse::<u64>().unwrap_or_else(|_| {
-        eprintln!("Invalid value for {flag}: {value}");
-        process::exit(1);
-    })
-}
-
-fn parse_u32_value(value: &str, flag: &str) -> u32 {
-    value.parse::<u32>().unwrap_or_else(|_| {
-        eprintln!("Invalid value for {flag}: {value}");
-        process::exit(1);
-    })
-}
-
 fn print_api_usage() {
     eprintln!(
         "\
@@ -835,6 +665,7 @@ COMMANDS:
   lock
   revoke-session
   switch --id <N>
+  compartment <list>
   diagnostics
   selfcheck [--domain <DOMAIN>]...  (domains: provider, seed-wallet, xpub-wallet, stealth-wallet, watch-book, policy, receive-allocation, fido2; default: all)
   profiles evm <list|upsert|delete> [...]
@@ -842,6 +673,7 @@ COMMANDS:
   profiles eth-xpub <list|upsert|delete> [...]
   profiles eth-seed <list|create|delete> [...]  (create generates a new BIP-39 mnemonic and prints it exactly once)
   deposits <list|create-native|create-erc20|scan-announcements|refresh|enqueue-sweep|delete> [...]
+  evm <nonce|balance|erc20-balance|fees> [...]  (read-only; no broadcast)
   inventory <list|chains|watch|scan-evm> [...]  (scan supports --watch-address, --watch-address-file, --include-watch-book, --derivation-pattern, --account-limit)
   discovery <jobs|scan-evm> [...]
   risk <list|catalog|catalog-upsert|catalog-delete> [...]
@@ -849,6 +681,8 @@ COMMANDS:
   receiving <overview|refresh-balances|tag-deposit> [...]
   treasury <overview|policy|policy-update|receive-list|receive-allocate|receive-rotate|parties> [...]
   queue <list|process> [...]
+  transit <encrypt|decrypt|hmac> [...]
+  wallets <xpub-export|xpub-derive|stealth-export|stealth-generate|stealth-check> [...]  (read/derive only; no sign/send)
   maintenance run [...]
 
 GLOBAL FLAGS:

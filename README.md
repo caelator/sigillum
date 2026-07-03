@@ -99,9 +99,11 @@ quarantined next to the restored state for inspection.
 
 ### As a library
 
+These crates are not published to crates.io and must be consumed as git dependencies or from a path/source checkout.
+
 ```toml
 [dependencies]
-sigillum = "0.1"
+sigillum = { git = "https://github.com/caelator/sigillum.git" }
 ```
 
 ```rust
@@ -129,9 +131,11 @@ compartment selection is tracked per session token through bearer session-token
 auth over local HTTP.
 
 For scriptable daemon operations, the CLI now exposes JSON-oriented commands
-under `sigillum api`, including session unlock, compartment switching, provider
-and wallet profile management, deposit management, queue inspection, and
-maintenance runs. These commands default to `http://127.0.0.1:9743`, accept
+under `sigillum api`, including session unlock, compartment switching,
+compartment listing, provider and wallet profile management, deposit
+management, queue inspection, transit encryption helpers, read-only EVM RPC
+queries (no broadcast), wallet xpub/stealth export and derive helpers (no
+sign/send), and maintenance runs. These commands default to `http://127.0.0.1:9743`, accept
 `--url`, `SIGILLUM_BASE_URL`, or `SIGILLUM_DAEMON_URL`, and use `--session` or
 `SIGILLUM_SESSION_TOKEN` for authenticated calls.
 
@@ -149,13 +153,27 @@ or `SIGILLUM_SESSION_TOKEN`.
 ### Desktop app
 
 `sigillum-desktop` is a Tauri v2 shell that runs the Sigillum daemon in-process
-and shows the existing web console in a native window. Launch it with
-`cargo run -p sigillum-desktop`. It uses the same data directory as the CLI
-(`~/.sigillum` by default) and honors `SIGILLUM_BASE_DIR`. The shell adds a
-single-instance guard, native menus with clipboard shortcuts, persisted window
-geometry, and a system tray with live lock state and a "Lock now" action.
-Closing the window auto-locks and hides to the tray; quitting zeroizes keys
-before exit.
+and shows the existing web console in a native window. Launch it during
+development with `cargo run -p sigillum-desktop`. The app uses the same data
+directory as the CLI and daemon (`~/.sigillum` by default, overridable with
+`SIGILLUM_BASE_DIR`), opens the daemon on a fresh loopback port on each launch,
+keeps a single instance focused, and adds a tray with live lock state plus
+"Lock now". Closing the window locks and hides to the tray; quitting locks
+first so loaded master keys are cleared before exit.
+
+To build an installable macOS bundle:
+
+```bash
+cargo install tauri-cli --version '^2' --locked
+cd crates/sigillum-desktop
+cargo tauri build
+```
+
+The build writes `target/release/bundle/macos/Sigillum.app` and
+`target/release/bundle/dmg/Sigillum_<version>_<arch>.dmg` under the workspace
+root. Builds without Apple signing credentials are ad-hoc signed by design;
+install, Gatekeeper, full signing, notarization, and troubleshooting details
+live in `docs/deployment.md`.
 
 ### First-time setup
 
@@ -303,8 +321,8 @@ Actual feature flags in this workspace today:
 Example:
 
 ```toml
-sigillum-core = { version = "0.1", default-features = false }
-sigillum-fido2 = { version = "0.1", default-features = false }
+sigillum-core = { git = "https://github.com/caelator/sigillum.git", default-features = false }
+sigillum-fido2 = { git = "https://github.com/caelator/sigillum.git", default-features = false }
 ```
 
 ## Development

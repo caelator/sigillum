@@ -67,7 +67,8 @@ fn xpub_upsert_request(
 #[tokio::test]
 async fn imported_xpub_profile_forces_watch_only_execution() {
     let dir = TempDir::new().unwrap();
-    let state = Arc::new(AppState::new(dir.path().to_path_buf()));
+    let state =
+        Arc::new(AppState::new(dir.path().to_path_buf()).expect("app state should initialize"));
     unlock_default_compartment(&state);
     let session = state.create_session(Some(0));
     let service = SigillumService::new(state);
@@ -99,7 +100,8 @@ async fn imported_xpub_profile_forces_watch_only_execution() {
 #[tokio::test]
 async fn imported_account_xpub_profile_forces_watch_only_execution() {
     let dir = TempDir::new().unwrap();
-    let state = Arc::new(AppState::new(dir.path().to_path_buf()));
+    let state =
+        Arc::new(AppState::new(dir.path().to_path_buf()).expect("app state should initialize"));
     unlock_default_compartment(&state);
     let session = state.create_session(Some(0));
     let service = SigillumService::new(state);
@@ -129,7 +131,8 @@ async fn imported_account_xpub_profile_forces_watch_only_execution() {
 #[tokio::test]
 async fn imported_account_xpub_with_custom_path_forces_watch_only_execution() {
     let dir = TempDir::new().unwrap();
-    let state = Arc::new(AppState::new(dir.path().to_path_buf()));
+    let state =
+        Arc::new(AppState::new(dir.path().to_path_buf()).expect("app state should initialize"));
     unlock_default_compartment(&state);
     let session = state.create_session(Some(0));
     let service = SigillumService::new(state);
@@ -168,7 +171,8 @@ async fn imported_account_xpub_with_custom_path_forces_watch_only_execution() {
 #[tokio::test]
 async fn imported_custom_path_xpub_profile_forces_watch_only_execution() {
     let dir = TempDir::new().unwrap();
-    let state = Arc::new(AppState::new(dir.path().to_path_buf()));
+    let state =
+        Arc::new(AppState::new(dir.path().to_path_buf()).expect("app state should initialize"));
     unlock_default_compartment(&state);
     let session = state.create_session(Some(0));
     let service = SigillumService::new(state);
@@ -210,7 +214,8 @@ async fn imported_custom_path_xpub_profile_forces_watch_only_execution() {
 #[tokio::test]
 async fn imported_xpub_profile_rejects_invalid_receive_branch() {
     let dir = TempDir::new().unwrap();
-    let state = Arc::new(AppState::new(dir.path().to_path_buf()));
+    let state =
+        Arc::new(AppState::new(dir.path().to_path_buf()).expect("app state should initialize"));
     unlock_default_compartment(&state);
     let session = state.create_session(Some(0));
     let service = SigillumService::new(state);
@@ -238,7 +243,8 @@ async fn imported_xpub_profile_rejects_invalid_receive_branch() {
 #[tokio::test]
 async fn imported_xpub_profile_rejects_mixed_external_sources() {
     let dir = TempDir::new().unwrap();
-    let state = Arc::new(AppState::new(dir.path().to_path_buf()));
+    let state =
+        Arc::new(AppState::new(dir.path().to_path_buf()).expect("app state should initialize"));
     unlock_default_compartment(&state);
     let session = state.create_session(Some(0));
     let service = SigillumService::new(state);

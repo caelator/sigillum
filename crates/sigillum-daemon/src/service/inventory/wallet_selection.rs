@@ -285,7 +285,8 @@ mod tests {
     #[test]
     fn imported_xpub_profile_selects_receive_branch_without_vault() {
         let dir = TempDir::new().unwrap();
-        let state = Arc::new(AppState::new(dir.path().to_path_buf()));
+        let state =
+            Arc::new(AppState::new(dir.path().to_path_buf()).expect("app state should initialize"));
         let service = SigillumService::new(state);
         let imported =
             derive_ethereum_xpub_receive_branch_from_mnemonic(TEST_MNEMONIC, None, 0).unwrap();
@@ -326,7 +327,8 @@ mod tests {
     #[test]
     fn imported_account_xpub_profile_selects_normalized_receive_branch() {
         let dir = TempDir::new().unwrap();
-        let state = Arc::new(AppState::new(dir.path().to_path_buf()));
+        let state =
+            Arc::new(AppState::new(dir.path().to_path_buf()).expect("app state should initialize"));
         let service = SigillumService::new(state);
         let account_xpub =
             derive_ethereum_account_xpub_from_mnemonic(TEST_MNEMONIC, None, 0).unwrap();
@@ -369,7 +371,8 @@ mod tests {
     #[test]
     fn imported_account_xpub_custom_path_profile_selects_operator_path() {
         let dir = TempDir::new().unwrap();
-        let state = Arc::new(AppState::new(dir.path().to_path_buf()));
+        let state =
+            Arc::new(AppState::new(dir.path().to_path_buf()).expect("app state should initialize"));
         let service = SigillumService::new(state);
         let account_xpub =
             derive_ethereum_account_xpub_from_mnemonic(TEST_MNEMONIC, None, 0).unwrap();
@@ -410,7 +413,8 @@ mod tests {
     #[test]
     fn imported_custom_path_xpub_profile_selects_operator_path() {
         let dir = TempDir::new().unwrap();
-        let state = Arc::new(AppState::new(dir.path().to_path_buf()));
+        let state =
+            Arc::new(AppState::new(dir.path().to_path_buf()).expect("app state should initialize"));
         let service = SigillumService::new(state);
         let imported =
             derive_ethereum_xpub_control_branch_from_mnemonic(TEST_MNEMONIC, None, 0).unwrap();

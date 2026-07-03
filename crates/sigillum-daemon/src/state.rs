@@ -43,6 +43,7 @@ mod tests;
 pub(crate) use recovery_files::recover_compartment_replacements;
 use recovery_files::{restore_stashed_ops_dir, stash_snapshot_placeholder_ops};
 
+use crate::DaemonInitError;
 use crate::audit_db::AuditQuery;
 use crate::audit_log::{AuditEventSpec, StoredAuditEvent};
 use crate::operations::{OperationGuard, PendingOperationSpec, list_pending_operations};
@@ -202,7 +203,7 @@ enum LockState {
 }
 
 impl AppState {
-    pub fn new(base_dir: PathBuf) -> Self {
+    pub fn new(base_dir: PathBuf) -> Result<Self, DaemonInitError> {
         let preserved_ops = stash_snapshot_placeholder_ops(&base_dir).ok().flatten();
         let _ = recover_snapshot_restore(&base_dir);
         if let Some(preserved_ops) = preserved_ops.as_deref() {
@@ -219,15 +220,14 @@ impl AppState {
             tracing::warn!(error = %error, "failed to initialize audit database");
         }
 
-        Self {
+        Ok(Self {
             fido2,
             base_dir,
             started_at_unix,
             http_client: reqwest::Client::builder()
                 .connect_timeout(HTTP_CONNECT_TIMEOUT)
                 .timeout(HTTP_REQUEST_TIMEOUT)
-                .build()
-                .expect("daemon HTTP client should build"),
+                .build()?,
             runtime_policy: RuntimePolicy::from_env(),
             vaults: ResilientMutex::new(HashMap::new()),
             unlocked: ResilientMutex::new(HashMap::new()),
@@ -239,7 +239,7 @@ impl AppState {
             startup_error: ResilientMutex::new(None),
             lock_state: ResilientMutex::new(LockState::Ready),
             biometric_challenges: ResilientMutex::new(VecDeque::new()),
-        }
+        })
     }
 
     fn token_matches(stored: &str, candidate: &str) -> bool {

@@ -10,7 +10,8 @@ use tempfile::TempDir;
 async fn spawn_daemon(base_dir: PathBuf) -> (SocketAddr, tokio::task::JoinHandle<()>) {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
-    let (app, _state) = sigillum_daemon::build_router(base_dir, addr.port());
+    let (app, _state) =
+        sigillum_daemon::build_router(base_dir, addr.port()).expect("router should initialize");
     let handle = tokio::spawn(async move {
         axum::serve(listener, app).await.unwrap();
     });

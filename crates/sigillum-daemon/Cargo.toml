@@ -1,5 +1,6 @@
 [package]
 name = "sigillum-daemon"
+publish = false
 description = "Sigillum vault daemon with web UI and REST API"
 version.workspace = true
 edition.workspace = true

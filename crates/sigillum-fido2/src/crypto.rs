@@ -130,7 +130,7 @@ pub fn decrypt_shard_tagged(
     let comp_id = u32::from_le_bytes(
         plaintext[..4]
             .try_into()
-            .expect("slice is exactly 4 bytes after length check"),
+            .map_err(|_| Fido2Error::ShardDecryption("tagged shard header read failed".into()))?,
     ) as usize;
     Ok((comp_id, plaintext[4..].to_vec()))
 }

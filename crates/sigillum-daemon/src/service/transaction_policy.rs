@@ -6,14 +6,19 @@ use super::helpers::compare_u256;
 use super::{ServiceError, ServiceResult, SigillumService};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-#[allow(dead_code)]
 pub(crate) enum TransactionPolicyAction {
     Allow,
     BlockDestination,
     BlockStepCap,
+    // consumed by W7.2 enqueue-time treasury cap re-checks (docs/release-1.0-plan.md)
+    #[allow(dead_code)]
     BlockPlanCap,
+    // consumed by W7.2 enqueue-time simulation re-check (docs/release-1.0-plan.md)
+    #[allow(dead_code)]
     BlockUnsimulated,
     BlockRawDigest,
+    // consumed by W7.3 watch-only signer re-check (docs/release-1.0-plan.md)
+    #[allow(dead_code)]
     BlockWatchOnlySigner,
 }
 

@@ -63,6 +63,10 @@ pub enum VaultError {
     #[error("compartment not found: {id}")]
     CompartmentNotFound { id: usize },
 
+    /// Key derivation failed before a wrap key could be produced.
+    #[error("key derivation failed: {0}")]
+    KeyDerivation(String),
+
     /// Catch-all for miscellaneous errors. Avoid this in new code — use typed variants.
     #[error("{0}")]
     Other(String),

@@ -158,6 +158,22 @@ fn api_profiles_missing_subcommand_exits_nonzero() {
 }
 
 #[test]
+fn api_compartment_missing_subcommand_exits_nonzero() {
+    let output = run(&["api", "compartment"]);
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("Usage"));
+}
+
+#[test]
+fn api_compartment_add_is_not_bridged() {
+    let output = run(&["api", "compartment", "add"]);
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("Usage"));
+}
+
+#[test]
 fn api_profiles_evm_upsert_missing_flags_exits_nonzero() {
     let output = run(&["api", "profiles", "evm", "upsert"]);
     assert!(!output.status.success());
@@ -189,6 +205,564 @@ fn api_deposits_missing_subcommand_exits_nonzero() {
 fn api_queue_missing_subcommand_exits_nonzero() {
     let output = run(&["api", "queue"]);
     assert!(!output.status.success());
+}
+
+#[test]
+fn api_evm_missing_subcommand_exits_nonzero() {
+    let output = run(&["api", "evm"]);
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("Usage"));
+}
+
+#[test]
+fn api_evm_broadcast_is_not_bridged() {
+    let output = run(&["api", "evm", "broadcast"]);
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("Usage"));
+}
+
+#[test]
+fn api_evm_nonce_missing_flags_exits_nonzero() {
+    let output = run(&[
+        "api",
+        "evm",
+        "nonce",
+        "--rpc-url",
+        "https://provider.invalid",
+    ]);
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("--address") || stderr.contains("Usage"),
+        "should mention required flags"
+    );
+}
+
+#[test]
+fn api_evm_balance_missing_flags_exits_nonzero() {
+    let output = run(&[
+        "api",
+        "evm",
+        "balance",
+        "--rpc-url",
+        "https://provider.invalid",
+    ]);
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("--address") || stderr.contains("Usage"),
+        "should mention required flags"
+    );
+}
+
+#[test]
+fn api_evm_erc20_balance_missing_flags_exits_nonzero() {
+    let output = run(&[
+        "api",
+        "evm",
+        "erc20-balance",
+        "--rpc-url",
+        "https://provider.invalid",
+        "--owner-address",
+        "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    ]);
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("--token-address") || stderr.contains("Usage"),
+        "should mention required flags"
+    );
+}
+
+#[test]
+fn api_evm_fees_missing_flags_exits_nonzero() {
+    let output = run(&[
+        "api",
+        "evm",
+        "fees",
+        "--rpc-url",
+        "https://provider.invalid",
+    ]);
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("--chain-id") || stderr.contains("Usage"),
+        "should mention required flags"
+    );
+}
+
+#[test]
+fn api_evm_nonce_reaches_network_with_valid_args() {
+    let output = run(&[
+        "api",
+        "evm",
+        "nonce",
+        "--rpc-url",
+        "https://provider.invalid",
+        "--address",
+        "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "--block-tag",
+        "pending",
+        "--url",
+        "http://127.0.0.1:1",
+        "--session",
+        "test-token",
+    ]);
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(!stderr.contains("Usage:"));
+}
+
+#[test]
+fn api_evm_balance_reaches_network_with_valid_args() {
+    let output = run(&[
+        "api",
+        "evm",
+        "balance",
+        "--rpc-url",
+        "https://provider.invalid",
+        "--address",
+        "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "--url",
+        "http://127.0.0.1:1",
+        "--session",
+        "test-token",
+    ]);
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(!stderr.contains("Usage:"));
+}
+
+#[test]
+fn api_evm_erc20_balance_reaches_network_with_valid_args() {
+    let output = run(&[
+        "api",
+        "evm",
+        "erc20-balance",
+        "--rpc-url",
+        "https://provider.invalid",
+        "--token-address",
+        "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+        "--owner-address",
+        "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "--block-tag",
+        "latest",
+        "--url",
+        "http://127.0.0.1:1",
+        "--session",
+        "test-token",
+    ]);
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(!stderr.contains("Usage:"));
+}
+
+#[test]
+fn api_evm_fees_reaches_network_with_valid_args() {
+    let output = run(&[
+        "api",
+        "evm",
+        "fees",
+        "--rpc-url",
+        "https://provider.invalid",
+        "--chain-id",
+        "1",
+        "--gas-limit",
+        "21000",
+        "--url",
+        "http://127.0.0.1:1",
+        "--session",
+        "test-token",
+    ]);
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(!stderr.contains("Usage:"));
+}
+
+#[test]
+fn api_evm_estimate_alias_reaches_network_with_valid_args() {
+    let output = run(&[
+        "api",
+        "evm",
+        "estimate",
+        "--rpc-url",
+        "https://provider.invalid",
+        "--chain-id",
+        "1",
+        "--url",
+        "http://127.0.0.1:1",
+        "--session",
+        "test-token",
+    ]);
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(!stderr.contains("Usage:"));
+}
+
+#[test]
+fn api_compartment_list_reaches_network_with_valid_args() {
+    let output = run(&[
+        "api",
+        "compartment",
+        "list",
+        "--url",
+        "http://127.0.0.1:1",
+        "--session",
+        "test-token",
+    ]);
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(!stderr.contains("Usage:"));
+}
+
+#[test]
+fn api_transit_encrypt_missing_flags_exits_nonzero() {
+    let output = run(&["api", "transit", "encrypt"]);
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("--key") || stderr.contains("Usage"),
+        "should mention required flags"
+    );
+}
+
+#[test]
+fn api_transit_decrypt_missing_flags_exits_nonzero() {
+    let output = run(&["api", "transit", "decrypt"]);
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("--key") || stderr.contains("Usage"),
+        "should mention required flags"
+    );
+}
+
+#[test]
+fn api_transit_hmac_missing_flags_exits_nonzero() {
+    let output = run(&["api", "transit", "hmac"]);
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("--key") || stderr.contains("Usage"),
+        "should mention required flags"
+    );
+}
+
+#[test]
+fn api_transit_encrypt_invalid_hex_exits_nonzero() {
+    let output = run(&[
+        "api",
+        "transit",
+        "encrypt",
+        "--key",
+        "payments",
+        "--plaintext-hex",
+        "zz",
+    ]);
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("Invalid hex"));
+}
+
+#[test]
+fn api_transit_encrypt_reaches_network_with_valid_args() {
+    let output = run(&[
+        "api",
+        "transit",
+        "encrypt",
+        "--key",
+        "payments",
+        "--plaintext-hex",
+        "00ff",
+        "--aad-hex",
+        "abcd",
+        "--url",
+        "http://127.0.0.1:1",
+        "--session",
+        "test-token",
+    ]);
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(!stderr.contains("Usage:"));
+}
+
+#[test]
+fn api_transit_decrypt_reaches_network_with_valid_args() {
+    let output = run(&[
+        "api",
+        "transit",
+        "decrypt",
+        "--key",
+        "payments",
+        "--nonce-hex",
+        "00ff",
+        "--ciphertext-hex",
+        "abcd",
+        "--aad-hex",
+        "0102",
+        "--url",
+        "http://127.0.0.1:1",
+        "--session",
+        "test-token",
+    ]);
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(!stderr.contains("Usage:"));
+}
+
+#[test]
+fn api_transit_hmac_reaches_network_with_valid_args() {
+    let output = run(&[
+        "api",
+        "transit",
+        "hmac",
+        "--key",
+        "payments",
+        "--input-hex",
+        "00ff",
+        "--url",
+        "http://127.0.0.1:1",
+        "--session",
+        "test-token",
+    ]);
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(!stderr.contains("Usage:"));
+}
+
+#[test]
+fn api_wallets_missing_subcommand_exits_nonzero() {
+    let output = run(&["api", "wallets"]);
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("Usage"));
+}
+
+#[test]
+fn api_wallets_stealth_sign_is_not_bridged() {
+    let output = run(&["api", "wallets", "stealth-sign"]);
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("Usage"));
+}
+
+#[test]
+fn api_wallets_xpub_export_missing_flags_exits_nonzero() {
+    let output = run(&["api", "wallets", "xpub-export"]);
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("--wallet-profile") || stderr.contains("Usage"),
+        "should mention required flags"
+    );
+}
+
+#[test]
+fn api_wallets_xpub_derive_missing_flags_exits_nonzero() {
+    let output = run(&["api", "wallets", "xpub-derive", "--xpub", "xpub6Ctest"]);
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("--index") || stderr.contains("Usage"),
+        "should mention required flags"
+    );
+}
+
+#[test]
+fn api_wallets_stealth_export_missing_flags_exits_nonzero() {
+    let output = run(&["api", "wallets", "stealth-export"]);
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("--wallet") || stderr.contains("Usage"),
+        "should mention required flags"
+    );
+}
+
+#[test]
+fn api_wallets_stealth_generate_missing_flags_exits_nonzero() {
+    let output = run(&["api", "wallets", "stealth-generate"]);
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("--meta-address") || stderr.contains("Usage"),
+        "should mention required flags"
+    );
+}
+
+#[test]
+fn api_wallets_stealth_check_missing_flags_exits_nonzero() {
+    let output = run(&[
+        "api",
+        "wallets",
+        "stealth-check",
+        "--wallet",
+        "treasury",
+        "--stealth-address",
+        "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    ]);
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("--ephemeral-public-key-hex") || stderr.contains("Usage"),
+        "should mention required flags"
+    );
+}
+
+#[test]
+fn api_wallets_xpub_derive_invalid_index_exits_nonzero() {
+    let output = run(&[
+        "api",
+        "wallets",
+        "xpub-derive",
+        "--xpub",
+        "xpub6Ctest",
+        "--index",
+        "notanumber",
+    ]);
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("Invalid value") || stderr.contains("--index"));
+}
+
+#[test]
+fn api_wallets_stealth_check_invalid_ephemeral_public_key_hex_exits_nonzero() {
+    let output = run(&[
+        "api",
+        "wallets",
+        "stealth-check",
+        "--wallet",
+        "treasury",
+        "--stealth-address",
+        "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "--ephemeral-public-key-hex",
+        "zz",
+    ]);
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("Invalid hex"));
+}
+
+#[test]
+fn api_wallets_stealth_check_invalid_view_tag_length_exits_nonzero() {
+    let output = run(&[
+        "api",
+        "wallets",
+        "stealth-check",
+        "--wallet",
+        "treasury",
+        "--stealth-address",
+        "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "--ephemeral-public-key-hex",
+        "02aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "--view-tag-hex",
+        "0102",
+    ]);
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("view-tag") || stderr.contains("1 byte"));
+}
+
+#[test]
+fn api_wallets_xpub_export_reaches_network_with_valid_args() {
+    let output = run(&[
+        "api",
+        "wallets",
+        "xpub-export",
+        "--wallet-profile",
+        "treasury-xpub",
+        "--url",
+        "http://127.0.0.1:1",
+        "--session",
+        "test-token",
+    ]);
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(!stderr.contains("Usage:"));
+}
+
+#[test]
+fn api_wallets_xpub_derive_reaches_network_with_valid_args() {
+    let output = run(&[
+        "api",
+        "wallets",
+        "xpub-derive",
+        "--xpub",
+        "xpub6Ctest",
+        "--index",
+        "0",
+        "--url",
+        "http://127.0.0.1:1",
+        "--session",
+        "test-token",
+    ]);
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(!stderr.contains("Usage:"));
+}
+
+#[test]
+fn api_wallets_stealth_export_reaches_network_with_valid_args() {
+    let output = run(&[
+        "api",
+        "wallets",
+        "stealth-export",
+        "--wallet",
+        "treasury",
+        "--short-name",
+        "ops",
+        "--url",
+        "http://127.0.0.1:1",
+        "--session",
+        "test-token",
+    ]);
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(!stderr.contains("Usage:"));
+}
+
+#[test]
+fn api_wallets_stealth_generate_reaches_network_with_valid_args() {
+    let output = run(&[
+        "api",
+        "wallets",
+        "stealth-generate",
+        "--meta-address",
+        "st:eth:0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "--url",
+        "http://127.0.0.1:1",
+        "--session",
+        "test-token",
+    ]);
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(!stderr.contains("Usage:"));
+}
+
+#[test]
+fn api_wallets_stealth_check_reaches_network_with_valid_args() {
+    let output = run(&[
+        "api",
+        "wallets",
+        "stealth-check",
+        "--wallet",
+        "treasury",
+        "--stealth-address",
+        "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "--ephemeral-public-key-hex",
+        "02aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "--view-tag-hex",
+        "ab",
+        "--url",
+        "http://127.0.0.1:1",
+        "--session",
+        "test-token",
+    ]);
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(!stderr.contains("Usage:"));
 }
 
 #[test]

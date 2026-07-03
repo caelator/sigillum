@@ -14,7 +14,10 @@ pub fn cmd_audit(args: &[String]) {
 
     let session_token = require_session_token(args);
     let query = parse_query(args);
-    let client = SigillumClient::new(base_url);
+    let client = SigillumClient::new(base_url).unwrap_or_else(|error| {
+        eprintln!("Failed to build daemon client: {error}");
+        process::exit(1);
+    });
     client.set_session_token(session_token);
 
     let runtime = tokio::runtime::Runtime::new().unwrap_or_else(|error| {
