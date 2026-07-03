@@ -99,9 +99,11 @@ quarantined next to the restored state for inspection.
 
 ### As a library
 
+These crates are not published to crates.io and must be consumed as git dependencies or from a path/source checkout.
+
 ```toml
 [dependencies]
-sigillum = "0.1"
+sigillum = { git = "https://github.com/caelator/sigillum.git" }
 ```
 
 ```rust
@@ -317,8 +319,8 @@ Actual feature flags in this workspace today:
 Example:
 
 ```toml
-sigillum-core = { version = "0.1", default-features = false }
-sigillum-fido2 = { version = "0.1", default-features = false }
+sigillum-core = { git = "https://github.com/caelator/sigillum.git", default-features = false }
+sigillum-fido2 = { git = "https://github.com/caelator/sigillum.git", default-features = false }
 ```
 
 ## Development

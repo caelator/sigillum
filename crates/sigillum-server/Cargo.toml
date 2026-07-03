@@ -1,5 +1,6 @@
 [package]
 name = "sigillum-server"
+publish = false
 description = "Sigillum vault server library for custom deployments"
 version.workspace = true
 edition.workspace = true
