@@ -280,7 +280,7 @@ export function createReceivingActions(deps: ReceivingActionsDeps) {
   }
 
   function focusReceivingAllocate(): void {
-    deps.jumpToField("treasuryCard", "treasuryReceivePurpose");
+    deps.jumpToField("receiveBookCard", "treasuryReceivePurpose");
   }
 
   function focusReceivingStealth(): void {

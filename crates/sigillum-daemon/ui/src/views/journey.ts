@@ -57,7 +57,7 @@ export function computeJourneySteps(state: JourneyState): JourneyStep[] {
       hint: "Allowed destinations, value caps, and required simulation before any plan can move funds.",
       done: state.policyConfigured,
       action: "journeyJump",
-      actionArg: "treasuryCard",
+      actionArg: "policyCard",
       actionLabel: "Set guardrails",
     },
   ];

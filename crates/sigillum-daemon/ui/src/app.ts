@@ -45,9 +45,12 @@ const OPERATOR_CARD_IDS = [
   'profilesCard',
   'xpubCard',
   'receivingCard',
+  'receiveBookCard',
   'treasuryCard',
   'inventoryCard',
   'depositsCard',
+  'plansCard',
+  'policyCard',
   'queueCard',
   'maintenanceCard',
   'fido2Card',
@@ -56,42 +59,32 @@ const OPERATOR_CARD_IDS = [
   'diagCard',
 ];
 const WORKSPACE_SECTION_KEY = 'sigillumWorkspaceSection';
-const DEFAULT_WORKSPACE_SECTION = 'receiving';
+const DEFAULT_WORKSPACE_SECTION = 'overview';
 const WORKSPACE_SECTIONS = [
   {
-    id: 'receiving',
-    label: 'Receiving',
-    summary: 'Active receive addresses and stealth deposits, grouped by counterparty.',
+    id: 'overview',
+    label: 'Overview',
+    summary: 'Status, next actions, and recent audit events.',
   },
   {
-    id: 'treasury',
-    label: 'Treasury',
-    summary: 'Tracked balances, wallet groups, routing readiness, policy, and receive addresses.',
+    id: 'receive',
+    label: 'Receive',
+    summary: 'Allocations, stealth deposits, counterparties, and rotation.',
   },
   {
-    id: 'wallets',
-    label: 'Wallets',
-    summary: 'Provider endpoints, stealth wallets, and deterministic receive trees.',
+    id: 'portfolio',
+    label: 'Portfolio',
+    summary: 'Wallets, inventory discovery, risk findings, and watch book.',
   },
   {
-    id: 'operations',
-    label: 'Operations',
-    summary: 'Inventory discovery, tracked deposits, queue execution, and maintenance cycles.',
+    id: 'move',
+    label: 'Move',
+    summary: 'Consolidation plans, queue, maintenance, and policy.',
   },
   {
-    id: 'secrets',
-    label: 'Secrets',
-    summary: 'Encrypted secrets, connection keys, compartments, and secret movement.',
-  },
-  {
-    id: 'security',
-    label: 'Security',
-    summary: 'Hardware keys, encrypted snapshots, and the local audit trail.',
-  },
-  {
-    id: 'system',
-    label: 'System',
-    summary: 'Daemon health, runtime policy, and the operator guide.',
+    id: 'vault',
+    label: 'Vault',
+    summary: 'Secrets, connection keys, compartments, hardware keys, snapshots, and diagnostics.',
   },
 ];
 let currentStatus = null;
@@ -285,11 +278,11 @@ function focusWalletCreate() {
 }
 
 function focusTreasuryReceive() {
-  jumpToField('treasuryCard', 'treasuryReceivePurpose');
+  jumpToField('receiveBookCard', 'treasuryReceivePurpose');
 }
 
 function focusTreasuryParty() {
-  jumpToField('treasuryCard', 'treasuryPartyName');
+  jumpToField('receiveBookCard', 'treasuryPartyName');
 }
 
 function focusWatchBook() {
@@ -362,8 +355,8 @@ function updateNextStepCard() {
     title: 'Choose the next concrete operation',
     summary: 'The vault is live. Run maintenance, inspect queue work, review audit history, and verify local daemon health from the workspace sections.',
     items: [
-      { title: 'Operations', body: 'Maintenance refreshes deposits and drains queue work with the current local policy settings.' },
-      { title: 'Security & system', body: 'Snapshots, audit trail, and diagnostics help you validate and recover the local daemon state.' },
+      { title: 'Move', body: 'Maintenance refreshes deposits and drains queue work with the current local policy settings.' },
+      { title: 'Vault', body: 'Snapshots, audit trail, and diagnostics help you validate and recover the local daemon state.' },
     ],
     primaryLabel: 'Open maintenance',
     primaryTarget: 'maintenanceCard',
@@ -408,7 +401,7 @@ function updateNextStepCard() {
         { title: 'Stealth wallet', body: 'Use this when you want tracked deposits, sweep queues, and maintenance workflows today.' },
         { title: 'Seed or xpub receive wallet', body: 'Use this when you want deterministic receive-address previews and multiple wallet profiles visible in one place.' },
       ],
-      primaryLabel: 'Open wallets',
+      primaryLabel: 'Open portfolio',
       primaryTarget: 'profilesCard',
       secondaryLabel: 'Read operator guide',
       secondaryTarget: 'guideCard',
@@ -420,9 +413,9 @@ function updateNextStepCard() {
       summary: 'Your receive wallet profile is ready for address visibility, but tracked deposits, sweep queues, and maintenance still run on stealth wallets today.',
       items: [
         { title: 'Keep receive wallets for visibility', body: 'Use the xpub card to export receive branches and preview deposit addresses by index.' },
-        { title: 'Add stealth for operations', body: 'Use the stealth wallet card when you want deposits, queue jobs, and maintenance cycles to run locally.' },
+        { title: 'Add stealth for live flows', body: 'Use the stealth wallet card when you want deposits, queue jobs, and maintenance cycles to run locally.' },
       ],
-      primaryLabel: 'Open wallets',
+      primaryLabel: 'Open portfolio',
       primaryTarget: 'profilesCard',
       secondaryLabel: 'Open xpub tools',
       secondaryTarget: 'xpubCard',
@@ -523,18 +516,18 @@ function updateHeroState(mode, active, unlocked) {
 
   const activeLabel = active ? (active.compartment_label || ('Compartment ' + active.compartment_id)) : 'No active compartment';
   setText('statusEyebrow', 'Vault unlocked');
-  setText('statusTitle', 'Treasury workspace');
-  setText('statusSummary', 'Every operator surface on this machine is live. Use the sidebar to move between treasury, wallets, operations, secrets, security, and system.');
+  setText('statusTitle', 'Operator workspace');
+  setText('statusSummary', 'Every operator surface on this machine is live. Use the sidebar to move between Overview, Receive, Portfolio, Move, and Vault.');
   setText('heroModeValue', activeLabel);
   setText('heroModeDetail', unlocked.length > 1
     ? 'Multiple compartments are unlocked. Use the sidebar switcher to choose which compartment new operations target.'
     : 'One compartment is unlocked in this session. Additional compartments appear when their thresholds are met.');
-  primary.textContent = 'Open secrets';
-  secondary.textContent = 'Open wallets';
+  primary.textContent = 'Open vault';
+  secondary.textContent = 'Open portfolio';
   setTrustedHtml('statusContext', renderHeroContext([
     { title: 'Protected values', body: 'Use Encrypted Secrets for sensitive data and Connection Keys for values the daemon needs during operator workflows.' },
     { title: 'Wallet families', body: 'Stealth wallets drive deposits and queue workflows today, while xpub receive wallets export public receive branches and preview deterministic addresses.' },
-    { title: 'Operator loop', body: 'Deposits, queue, maintenance, snapshots, audit, and diagnostics each live in a dedicated workspace section.' },
+    { title: 'Operator loop', body: 'Deposits, queue, maintenance, snapshots, audit, and diagnostics each live in a dedicated destination.' },
   ]));
 }
 

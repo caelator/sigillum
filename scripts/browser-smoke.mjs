@@ -509,11 +509,11 @@ async function runBrowserSmoke(cdp) {
   await waitFor(cdp, "document.getElementById('statusBadge').textContent.trim() === 'UNLOCKED'", "unlocked badge");
   await waitFor(cdp, "document.getElementById('compartmentCount').textContent.trim() === '1'", "compartment count after setup");
 
-  await selectWorkspace(cdp, "secrets");
+  await selectWorkspace(cdp, "vault");
   await waitFor(
     cdp,
     "!document.getElementById('apiKeysCard').classList.contains('section-hidden') && !document.getElementById('secretsCard').classList.contains('section-hidden')",
-    "secrets cards visible",
+    "vault cards visible",
   );
 
   await setValue(cdp, "#apiKeyName", API_KEY_NAME, "API key name");
@@ -531,7 +531,7 @@ async function runBrowserSmoke(cdp) {
   await revealListValue(cdp, "#apiKeyList", "Reveal", quoted(API_KEY_VALUE), "API key revealed value");
   await revealListValue(cdp, "#secretList", "Reveal", quoted(SECRET_VALUE), "secret revealed value");
 
-  await selectWorkspace(cdp, "security");
+  await selectWorkspace(cdp, "vault");
   await click(cdp, '[data-action="logoutSession"]', "logout browser session");
   await waitFor(cdp, "!sessionStorage.getItem('sigillumSessionToken')", "browser session token cleared");
   await waitFor(cdp, "document.body.dataset.mode === 'locked'", "locked UI after browser logout");
@@ -541,7 +541,7 @@ async function runBrowserSmoke(cdp) {
   await waitFor(cdp, "document.getElementById('apiKeyCount').textContent.trim() === '1'", "API key count after reauth");
   await waitFor(cdp, "document.getElementById('secretCount').textContent.trim() === '1'", "secret count after reauth");
 
-  await selectWorkspace(cdp, "secrets");
+  await selectWorkspace(cdp, "vault");
   await waitFor(cdp, `document.getElementById('apiKeyList').textContent.includes(${quoted(API_KEY_NAME)})`, "API key listed after reauth");
   await waitFor(cdp, `document.getElementById('secretList').textContent.includes(${quoted(SECRET_NAME)})`, "secret listed after reauth");
 

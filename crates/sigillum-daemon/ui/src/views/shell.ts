@@ -111,9 +111,12 @@ export function createShellRenderer(deps: ShellRendererDeps) {
     setHidden("profilesCard", false);
     setHidden("xpubCard", false);
     setHidden("receivingCard", false);
+    setHidden("receiveBookCard", false);
     setHidden("treasuryCard", false);
     setHidden("inventoryCard", false);
     setHidden("depositsCard", false);
+    setHidden("plansCard", false);
+    setHidden("policyCard", false);
     setHidden("queueCard", false);
     setHidden("maintenanceCard", false);
     setHidden("backupCard", false);

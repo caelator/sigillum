@@ -68,9 +68,12 @@ test("shell renderer applies setup, locked, and unlocked DOM state", () => {
     "profilesCard",
     "xpubCard",
     "receivingCard",
+    "receiveBookCard",
     "treasuryCard",
     "inventoryCard",
     "depositsCard",
+    "plansCard",
+    "policyCard",
     "queueCard",
     "maintenanceCard",
     "backupCard",
@@ -126,7 +129,10 @@ test("shell renderer applies setup, locked, and unlocked DOM state", () => {
   equal(document.body.dataset.mode, "unlocked");
   equal(dom.el("pushCard").classList.contains("hidden"), false);
   equal(dom.el("receivingCard").classList.contains("hidden"), false);
+  equal(dom.el("receiveBookCard").classList.contains("hidden"), false);
   equal(dom.el("treasuryCard").classList.contains("hidden"), false);
+  equal(dom.el("plansCard").classList.contains("hidden"), false);
+  equal(dom.el("policyCard").classList.contains("hidden"), false);
   equal(dom.el("walletManagerCard").classList.contains("hidden"), false);
   ok(calls.includes("push-selectors"));
 });
@@ -3798,7 +3804,7 @@ test("journey card renders done/pending steps and collapses when all complete", 
   ok(html.includes("Set treasury guardrails"));
   ok(html.includes('data-action="journeyRunScan"'));
   ok(html.includes('data-action="journeyJump" data-arg0="walletManagerCard"'));
-  ok(html.includes('data-action="journeyJump" data-arg0="treasuryCard"'));
+  ok(html.includes('data-action="journeyJump" data-arg0="policyCard"'));
   ok(html.includes("The endpoint Sigillum uses to read balances"));
   equal(dom.el("journeyProgress").textContent, "1 of 4");
   equal(dom.el("journeyComplete").classList.contains("hidden"), true);
