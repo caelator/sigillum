@@ -1451,7 +1451,7 @@ Phase C — Desktop productization
 - [x] C1 real icon set
 - [x] C2 bundling enabled (.app/.dmg)
 - [x] C3 env-gated signing, unsigned default documented
-- [ ] C4 check-desktop.sh in the release gate
+- [x] C4 check-desktop.sh in the release gate
 - [x] C5 boot helpers extracted + tested
 - [x] C6 desktop docs
 - [ ] C7 operator console UX redesign (user-directed)
@@ -1566,3 +1566,8 @@ Phase H — Ship
   docs/execution-runbook-1.0.md (current-state ledger, proven multi-agent
   method, wave sequencing for E/W/F/G/H, triage + recovery procedures);
   E0 added under Phase E from the A2 lesson.
+- 2026-07-03 C4 9357245: added `scripts/check-desktop.sh`, wired it into
+  `scripts/check-release.sh` after browser smoke, installed `tauri-cli` on the
+  macOS CI leg, and documented `SIGILLUM_SKIP_DESKTOP_BUNDLE`. Local desktop
+  check produced debug `.app` + `.dmg`, verified `Signature=adhoc`, and took
+  136s; full release gate passed with the new step included.
