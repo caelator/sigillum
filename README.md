@@ -149,13 +149,27 @@ or `SIGILLUM_SESSION_TOKEN`.
 ### Desktop app
 
 `sigillum-desktop` is a Tauri v2 shell that runs the Sigillum daemon in-process
-and shows the existing web console in a native window. Launch it with
-`cargo run -p sigillum-desktop`. It uses the same data directory as the CLI
-(`~/.sigillum` by default) and honors `SIGILLUM_BASE_DIR`. The shell adds a
-single-instance guard, native menus with clipboard shortcuts, persisted window
-geometry, and a system tray with live lock state and a "Lock now" action.
-Closing the window auto-locks and hides to the tray; quitting zeroizes keys
-before exit.
+and shows the existing web console in a native window. Launch it during
+development with `cargo run -p sigillum-desktop`. The app uses the same data
+directory as the CLI and daemon (`~/.sigillum` by default, overridable with
+`SIGILLUM_BASE_DIR`), opens the daemon on a fresh loopback port on each launch,
+keeps a single instance focused, and adds a tray with live lock state plus
+"Lock now". Closing the window locks and hides to the tray; quitting locks
+first so loaded master keys are cleared before exit.
+
+To build an installable macOS bundle:
+
+```bash
+cargo install tauri-cli --version '^2' --locked
+cd crates/sigillum-desktop
+cargo tauri build
+```
+
+The build writes `target/release/bundle/macos/Sigillum.app` and
+`target/release/bundle/dmg/Sigillum_<version>_<arch>.dmg` under the workspace
+root. Builds without Apple signing credentials are ad-hoc signed by design;
+install, Gatekeeper, full signing, notarization, and troubleshooting details
+live in `docs/deployment.md`.
 
 ### First-time setup
 

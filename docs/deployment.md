@@ -76,6 +76,129 @@ Provide a pre-established daemon bearer token through
 `SIGILLUM_DAEMON_SESSION_TOKEN` or `SIGILLUM_SESSION_TOKEN` when the gateway
 needs authenticated daemon operations.
 
+## Mode 4: Desktop App (macOS)
+
+The desktop app is a Tauri v2 macOS shell that runs `sigillum-daemon`
+in-process on a background thread, waits for local readiness, and opens the
+daemon web console in the native window.
+
+### Build the bundle
+
+Install the Tauri v2 CLI, then build from the desktop crate:
+
+```bash
+cargo install tauri-cli --version '^2' --locked
+cd crates/sigillum-desktop
+cargo tauri build
+```
+
+The build writes, under the workspace root:
+
+- `target/release/bundle/macos/Sigillum.app`
+- `target/release/bundle/dmg/Sigillum_<version>_<arch>.dmg`
+
+### Verify the download before opening
+
+Compare the `.dmg` checksum with the release `SHA256SUMS` file:
+
+```bash
+shasum -a 256 Sigillum_<version>_<arch>.dmg
+```
+
+Or check the release manifest directly:
+
+```bash
+shasum -a 256 --check SHA256SUMS --ignore-missing
+```
+
+Do not open a `.dmg` whose checksum does not match the release `SHA256SUMS`.
+
+### Install
+
+Open the `.dmg`, drag `Sigillum.app` into `/Applications`, then eject the
+mounted image.
+
+### First launch on macOS 15+ (Gatekeeper)
+
+Default builds are ad-hoc signed. macOS 15 removed the older
+right-click-then-Open bypass for this case, so use the Privacy & Security
+approval flow:
+
+1. Double-click `Sigillum.app`. macOS reports that it "was not opened" because
+   Apple could not verify it. Click `Done`, not `Move to Trash`.
+2. Open System Settings -> Privacy & Security.
+3. Scroll to the Security section, where `"Sigillum" was blocked to protect your Mac.` appears.
+4. Click `Open Anyway` and authenticate.
+5. Click `Open Anyway` or `Open` in the confirmation dialog.
+
+To verify that a local build is ad-hoc signed:
+
+```bash
+codesign -dv /Applications/Sigillum.app
+```
+
+`codesign` shows `Signature=adhoc` for the default unsigned-credential build.
+
+### Full signing and notarization (optional)
+
+Set the standard Tauri v2 signing variables before building:
+
+- `APPLE_CERTIFICATE`: base64-encoded `.p12`
+- `APPLE_CERTIFICATE_PASSWORD`
+- `APPLE_SIGNING_IDENTITY`, for example `Developer ID Application: <name>`
+
+For notarization, also set:
+
+- `APPLE_ID`
+- `APPLE_PASSWORD`, using an app-specific password
+- `APPLE_TEAM_ID`
+
+When these variables are present, `cargo tauri build` signs the bundle and
+notarizes it when the `APPLE_ID` trio is present. When they are absent, the
+build never fails for missing Apple credentials and remains ad-hoc signed.
+
+### Runtime behavior
+
+The desktop app uses the same data directory as the CLI and daemon:
+`~/.sigillum` by default, or `SIGILLUM_BASE_DIR` when set. A Finder-launched app
+does not see shell exports. To use a custom base directory, launch the binary
+directly from a terminal:
+
+```bash
+/Applications/Sigillum.app/Contents/MacOS/sigillum-desktop
+```
+
+Each launch chooses a new ephemeral `127.0.0.1` port, waits up to 10 seconds for
+TCP readiness, then opens the console in the native window. Launching a second
+copy focuses the existing window. The system tray shows live lock state as
+`Sigillum: Locked` or `Sigillum: Unlocked`, refreshes every 2 seconds, and
+offers `Show Sigillum`, `Lock now`, and `Quit`.
+
+Closing the window does not exit. It hides the window to the tray and
+immediately locks the daemon, clearing loaded master keys from memory. Quit from
+the app menu or tray locks the daemon first, bounded by a 3-second timeout, then
+exits.
+
+### Troubleshooting
+
+If startup reports `daemon did not accept TCP connections within 10s` or
+`daemon exited before readiness`, launch from a terminal to see the daemon error
+on stderr:
+
+```bash
+/Applications/Sigillum.app/Contents/MacOS/sigillum-desktop
+```
+
+Common causes are unsafe `~/.sigillum` permissions, which the daemon requires
+and repairs to `0700` on Unix, or a corrupted or foreign base directory.
+
+Running a standalone `sigillum daemon --port 9743` at the same time is fine.
+The desktop app picks its own ephemeral port, but the two daemon processes hold
+independent unlock state over the same data directory.
+
+If the window shows the static `Sigillum is starting…` page, the webview
+loaded the bundled fallback. Press Cmd+R to reload.
+
 Before calling a source checkout release-ready for this local boundary, run:
 
 ```bash
