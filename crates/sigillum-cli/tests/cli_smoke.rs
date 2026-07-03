@@ -158,6 +158,22 @@ fn api_profiles_missing_subcommand_exits_nonzero() {
 }
 
 #[test]
+fn api_compartment_missing_subcommand_exits_nonzero() {
+    let output = run(&["api", "compartment"]);
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("Usage"));
+}
+
+#[test]
+fn api_compartment_add_is_not_bridged() {
+    let output = run(&["api", "compartment", "add"]);
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("Usage"));
+}
+
+#[test]
 fn api_profiles_evm_upsert_missing_flags_exits_nonzero() {
     let output = run(&["api", "profiles", "evm", "upsert"]);
     assert!(!output.status.success());
@@ -375,6 +391,22 @@ fn api_evm_estimate_alias_reaches_network_with_valid_args() {
         "https://provider.invalid",
         "--chain-id",
         "1",
+        "--url",
+        "http://127.0.0.1:1",
+        "--session",
+        "test-token",
+    ]);
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(!stderr.contains("Usage:"));
+}
+
+#[test]
+fn api_compartment_list_reaches_network_with_valid_args() {
+    let output = run(&[
+        "api",
+        "compartment",
+        "list",
         "--url",
         "http://127.0.0.1:1",
         "--session",

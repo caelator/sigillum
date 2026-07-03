@@ -93,6 +93,7 @@ pub fn cmd_api(args: &[String]) {
                 client.switch_compartment(id).await
             });
         }
+        "compartment" => cmd_api_compartment(args),
         "diagnostics" => run_api_command(
             args,
             true,
@@ -123,6 +124,19 @@ pub fn cmd_api(args: &[String]) {
         other => {
             eprintln!("Unknown api command: {other}");
             print_api_usage();
+            process::exit(1);
+        }
+    }
+}
+
+/// Dispatch `sigillum api compartment <list>`.
+fn cmd_api_compartment(args: &[String]) {
+    match args.get(1).map(String::as_str) {
+        Some("list") => run_api_command(args, true, |client| async move {
+            client.list_compartments().await
+        }),
+        _ => {
+            eprintln!("Usage: sigillum api compartment <list>");
             process::exit(1);
         }
     }
@@ -850,6 +864,7 @@ COMMANDS:
   lock
   revoke-session
   switch --id <N>
+  compartment <list>
   diagnostics
   selfcheck [--domain <DOMAIN>]...  (domains: provider, seed-wallet, xpub-wallet, stealth-wallet, watch-book, policy, receive-allocation, fido2; default: all)
   profiles evm <list|upsert|delete> [...]
