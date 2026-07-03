@@ -54,7 +54,7 @@ checkboxes; keep updating them as you complete tasks (plan rule §0.1.6).
 
 ### 1.4 Remaining work (specs in release-1.0-plan.md §4)
 
-C4; C7 merge; E0 (new, §4 Wave 3) + E1–E5; W1.1–W1.3, W2, W3.1–W3.5, W4,
+C7 merge; E1–E5; W1.1–W1.3, W2, W3.1–W3.5, W4,
 W5, W6.1–W6.4, W7.1–W7.5, W8; F1–F7; G1–G5; H1–H3.
 
 ---
@@ -158,10 +158,11 @@ When `./scripts/check-release.sh` or CI fails, classify FIRST — do not
    stop and surface instead.
 5. **fmt/clippy drift:** mechanical; fix and move on.
 
-**Ubuntu-only CI failures are usually real.** All client loopback tests are
-blanket-skipped on macOS (until E0 lands), so Ubuntu is the only leg that
-executes them. Never dismiss an Ubuntu-only failure as environmental
-without reproducing.
+**Ubuntu-only CI failures are usually real.** Before E0, client loopback tests
+were blanket-skipped on macOS, which hid a real client fixture regression. E0
+replaced that with runtime loopback probes, so macOS should run these tests on
+normal hosts and only skip with a visible reason when the bind is blocked.
+Never dismiss an Ubuntu-only failure as environmental without reproducing.
 
 Local browser-smoke failure artifacts are deleted by the script's own
 cleanup trap; CI uploads them as workflow artifacts (`gh run download`).
@@ -188,22 +189,13 @@ procedure.
 - If the operator has NOT signed off C7 yet, do C4 alone and continue to
   Wave 3 — C7 can merge later; nothing depends on it except G5's docs.
 
-### Wave 3 — Phase E + E0 (recovery semantics; prerequisite for W7)
+### Wave 3 — Phase E (recovery semantics; prerequisite for W7)
 
 Parallel: **E1** (queue state extension — read the E1 premise carefully:
 EXTEND the existing model, wire-compat on existing state strings), **E3**
 (maintenance summaries), **E4** (chain_id on allocations AND stealth
-deposits — two stores), **E2** (crash-replay tests), **E0** (new task, add
-it to the plan under Phase E before dispatching):
-
-> **E0 — Replace the macOS blanket skip on client loopback tests.**
-> `crates/sigillum-client/src/tests.rs` (and any sibling) marks loopback
-> tests `#[cfg_attr(target_os = "macos", ignore = "sandbox blocks loopback
-> bind")]`. Replace with a runtime probe: attempt a `127.0.0.1:0` bind at
-> test start; skip (early-return with eprintln) only when the bind actually
-> fails. Accept: `cargo test -p sigillum-client` on a normal macOS host
-> RUNS the loopback tests; sandboxed environments still skip gracefully.
-> Size S.
+deposits — two stores), **E2** (crash-replay tests). E0 is complete in
+`b30f781`.
 
 Sequenced: **E5** after E2 merges or on top of E2's branch (both live in
 `crates/sigillum-daemon/tests/crash_recovery.rs`).
