@@ -525,6 +525,37 @@ async fn evm_erc20_balance_route(
     )
 }
 
+async fn evm_fee_estimate_route(
+    headers: HeaderMap,
+    Json(body): Json<serde_json::Value>,
+) -> (StatusCode, Json<serde_json::Value>) {
+    let auth = headers
+        .get(header::AUTHORIZATION)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("");
+    if auth != "Bearer test-token" {
+        return (
+            StatusCode::UNAUTHORIZED,
+            Json(json!({ "error": "missing auth" })),
+        );
+    }
+    assert_eq!(body["chain_id"], 1);
+    assert_eq!(body["gas_limit"], 21_000);
+    (
+        StatusCode::OK,
+        Json(json!({
+            "fees": {
+                "chain_id": 1,
+                "max_priority_fee_per_gas_hex": "0x3b9aca00",
+                "max_fee_per_gas_hex": "0x77359400",
+            },
+            "gas_limit": 21_000,
+            "estimated_gas_cost_wei_hex": "0xf61809315000",
+            "source": "provider",
+        })),
+    )
+}
+
 async fn evm_broadcast_route(
     headers: HeaderMap,
     Json(body): Json<serde_json::Value>,
@@ -1405,6 +1436,7 @@ async fn spawn_test_server() -> SocketAddr {
         .route("/api/evm/nonce", post(evm_nonce_route))
         .route("/api/evm/balance", post(evm_balance_route))
         .route("/api/evm/erc20-balance", post(evm_erc20_balance_route))
+        .route("/api/evm/fees/estimate", post(evm_fee_estimate_route))
         .route("/api/evm/broadcast", post(evm_broadcast_route))
         .route("/api/profiles/evm", get(profiles_evm_list_route))
         .route("/api/profiles/evm/upsert", post(profiles_evm_upsert_route))
@@ -1805,6 +1837,22 @@ async fn evm_provider_helpers_roundtrip_response_shapes() {
         .await
         .unwrap();
     assert_eq!(erc20.amount_hex, "0xf4240");
+
+    let fees = client
+        .evm_estimate_fees(EvmFeeEstimateRequest {
+            provider: sigillum_api::EvmProviderRef {
+                rpc_url: "https://provider.invalid".into(),
+                auth_token_key: None,
+                compartment_id: None,
+            },
+            chain_id: 1,
+            gas_limit: Some(21_000),
+        })
+        .await
+        .unwrap();
+    assert_eq!(fees.fees.chain_id, 1);
+    assert_eq!(fees.gas_limit, 21_000);
+    assert_eq!(fees.source, "provider");
 
     let broadcast = client
         .evm_broadcast(EvmRpcBroadcastRequest {

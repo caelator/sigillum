@@ -38,6 +38,7 @@ use sigillum_client::{ClientError, SigillumClient};
 use url::Url;
 
 mod deposits;
+mod evm;
 mod inventory;
 mod inventory_args;
 mod queue;
@@ -106,6 +107,7 @@ pub fn cmd_api(args: &[String]) {
         }
         "profiles" => cmd_api_profiles(args),
         "deposits" => deposits::cmd_api_deposits(args),
+        "evm" => evm::cmd_api_evm(args),
         "inventory" => inventory::cmd_api_inventory(args),
         "discovery" => cmd_api_discovery(args),
         "risk" => cmd_api_risk(args),
@@ -844,6 +846,7 @@ COMMANDS:
   profiles eth-xpub <list|upsert|delete> [...]
   profiles eth-seed <list|create|delete> [...]  (create generates a new BIP-39 mnemonic and prints it exactly once)
   deposits <list|create-native|create-erc20|scan-announcements|refresh|enqueue-sweep|delete> [...]
+  evm <nonce|balance|erc20-balance|fees> [...]  (read-only; no broadcast)
   inventory <list|chains|watch|scan-evm> [...]  (scan supports --watch-address, --watch-address-file, --include-watch-book, --derivation-pattern, --account-limit)
   discovery <jobs|scan-evm> [...]
   risk <list|catalog|catalog-upsert|catalog-delete> [...]
