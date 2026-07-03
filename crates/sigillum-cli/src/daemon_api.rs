@@ -42,6 +42,7 @@ mod inventory;
 mod inventory_args;
 mod queue;
 mod receiving;
+mod transit;
 mod treasury;
 
 const DEFAULT_DAEMON_BASE_URL: &str = "http://127.0.0.1:9743";
@@ -112,6 +113,7 @@ pub fn cmd_api(args: &[String]) {
         "receiving" => receiving::cmd_api_receiving(args),
         "treasury" => treasury::cmd_api_treasury(args),
         "queue" => queue::cmd_api_queue(args),
+        "transit" => transit::cmd_api_transit(args),
         "maintenance" => cmd_api_maintenance(args),
         "help" | "--help" | "-h" => print_api_usage(),
         other => {
@@ -849,6 +851,7 @@ COMMANDS:
   receiving <overview|refresh-balances|tag-deposit> [...]
   treasury <overview|policy|policy-update|receive-list|receive-allocate|receive-rotate|parties> [...]
   queue <list|process> [...]
+  transit <encrypt|decrypt|hmac> [...]
   maintenance run [...]
 
 GLOBAL FLAGS:

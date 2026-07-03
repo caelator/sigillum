@@ -192,6 +192,121 @@ fn api_queue_missing_subcommand_exits_nonzero() {
 }
 
 #[test]
+fn api_transit_encrypt_missing_flags_exits_nonzero() {
+    let output = run(&["api", "transit", "encrypt"]);
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("--key") || stderr.contains("Usage"),
+        "should mention required flags"
+    );
+}
+
+#[test]
+fn api_transit_decrypt_missing_flags_exits_nonzero() {
+    let output = run(&["api", "transit", "decrypt"]);
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("--key") || stderr.contains("Usage"),
+        "should mention required flags"
+    );
+}
+
+#[test]
+fn api_transit_hmac_missing_flags_exits_nonzero() {
+    let output = run(&["api", "transit", "hmac"]);
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("--key") || stderr.contains("Usage"),
+        "should mention required flags"
+    );
+}
+
+#[test]
+fn api_transit_encrypt_invalid_hex_exits_nonzero() {
+    let output = run(&[
+        "api",
+        "transit",
+        "encrypt",
+        "--key",
+        "payments",
+        "--plaintext-hex",
+        "zz",
+    ]);
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("Invalid hex"));
+}
+
+#[test]
+fn api_transit_encrypt_reaches_network_with_valid_args() {
+    let output = run(&[
+        "api",
+        "transit",
+        "encrypt",
+        "--key",
+        "payments",
+        "--plaintext-hex",
+        "00ff",
+        "--aad-hex",
+        "abcd",
+        "--url",
+        "http://127.0.0.1:1",
+        "--session",
+        "test-token",
+    ]);
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(!stderr.contains("Usage:"));
+}
+
+#[test]
+fn api_transit_decrypt_reaches_network_with_valid_args() {
+    let output = run(&[
+        "api",
+        "transit",
+        "decrypt",
+        "--key",
+        "payments",
+        "--nonce-hex",
+        "00ff",
+        "--ciphertext-hex",
+        "abcd",
+        "--aad-hex",
+        "0102",
+        "--url",
+        "http://127.0.0.1:1",
+        "--session",
+        "test-token",
+    ]);
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(!stderr.contains("Usage:"));
+}
+
+#[test]
+fn api_transit_hmac_reaches_network_with_valid_args() {
+    let output = run(&[
+        "api",
+        "transit",
+        "hmac",
+        "--key",
+        "payments",
+        "--input-hex",
+        "00ff",
+        "--url",
+        "http://127.0.0.1:1",
+        "--session",
+        "test-token",
+    ]);
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(!stderr.contains("Usage:"));
+}
+
+#[test]
 fn api_maintenance_missing_run_exits_nonzero() {
     let output = run(&["api", "maintenance"]);
     assert!(!output.status.success());
