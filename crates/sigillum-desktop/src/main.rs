@@ -1,36 +1,21 @@
-use std::net::{SocketAddr, TcpListener, TcpStream};
-use std::path::PathBuf;
-use std::sync::{
-    Arc,
-    mpsc::{self, Receiver},
-};
+use std::net::SocketAddr;
 use std::thread;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
-use sigillum_daemon::{AppState, DaemonRunOptions};
+use sigillum_desktop::{
+    DaemonControl, base_dir, daemon_status_label, daemon_url, lock_daemon_with_timeout,
+    pick_loopback_port, spawn_lock_now, start_daemon, wait_for_daemon,
+};
 use tauri::Manager;
 use tauri::image::Image;
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem, Submenu};
 use tauri::tray::{TrayIcon, TrayIconBuilder};
 use tauri_plugin_window_state::{StateFlags, WindowExt};
-use tokio::runtime::Handle;
 
 const STARTUP_TIMEOUT: Duration = Duration::from_secs(10);
 const DAEMON_READY_HANDLE_TIMEOUT: Duration = Duration::from_secs(3);
-const CONNECT_TIMEOUT: Duration = Duration::from_millis(100);
-const CONNECT_POLL_INTERVAL: Duration = Duration::from_millis(100);
 const LOCK_ON_QUIT_TIMEOUT: Duration = Duration::from_secs(3);
 const TRAY_STATUS_INTERVAL: Duration = Duration::from_secs(2);
-
-struct DaemonControl {
-    state: Arc<AppState>,
-    handle: Handle,
-}
-
-struct DaemonStart {
-    errors: Receiver<String>,
-    ready: Receiver<(Arc<AppState>, Handle)>,
-}
 
 struct TrayHandle {
     _tray: TrayIcon<tauri::Wry>,
@@ -108,16 +93,13 @@ fn setup_desktop(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>>
     app.manage(TrayHandle { _tray: tray });
     start_tray_status_timer(app.handle().clone(), status_item);
 
-    let daemon_url = format!("http://127.0.0.1:{port}/");
-    let window = tauri::WebviewWindowBuilder::new(
-        app,
-        "main",
-        tauri::WebviewUrl::External(daemon_url.parse().expect("valid daemon URL")),
-    )
-    .title("Sigillum")
-    .inner_size(1200.0, 820.0)
-    .min_inner_size(940.0, 640.0)
-    .build()?;
+    let daemon_url = daemon_url(port).map_err(setup_error)?;
+    let window =
+        tauri::WebviewWindowBuilder::new(app, "main", tauri::WebviewUrl::External(daemon_url))
+            .title("Sigillum")
+            .inner_size(1200.0, 820.0)
+            .min_inner_size(940.0, 640.0)
+            .build()?;
 
     install_privacy_close_handler(&window);
     window.restore_state(StateFlags::all())?;
@@ -266,116 +248,6 @@ fn install_privacy_close_handler(window: &tauri::WebviewWindow) {
     });
 }
 
-fn daemon_status_label(is_unlocked: bool) -> &'static str {
-    if is_unlocked {
-        "Sigillum: Unlocked"
-    } else {
-        "Sigillum: Locked"
-    }
-}
-
-fn spawn_lock_now(control: &DaemonControl) {
-    let state = control.state.clone();
-    let handle = control.handle.clone();
-    std::mem::drop(handle.spawn(async move {
-        let _ = state.lock_now().await;
-    }));
-}
-
-fn lock_daemon_with_timeout(control: &DaemonControl, timeout: Duration) {
-    let state = control.state.clone();
-    let handle = control.handle.clone();
-    let (tx, rx) = mpsc::channel();
-    std::mem::drop(handle.spawn(async move {
-        let _ = state.lock_now().await;
-        let _ = tx.send(());
-    }));
-    let _ = rx.recv_timeout(timeout);
-}
-
 fn setup_error(error: String) -> std::io::Error {
     std::io::Error::other(error)
-}
-
-fn base_dir() -> PathBuf {
-    std::env::var_os("SIGILLUM_BASE_DIR")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| {
-            dirs::home_dir()
-                .unwrap_or_else(|| PathBuf::from("."))
-                .join(".sigillum")
-        })
-}
-
-fn pick_loopback_port() -> Result<u16, String> {
-    let listener = TcpListener::bind(("127.0.0.1", 0))
-        .map_err(|error| format!("failed to bind an ephemeral loopback port: {error}"))?;
-    let port = listener
-        .local_addr()
-        .map_err(|error| format!("failed to read loopback listener address: {error}"))?
-        .port();
-    drop(listener);
-    Ok(port)
-}
-
-fn start_daemon(addr: SocketAddr, base_dir: PathBuf) -> Result<DaemonStart, String> {
-    let (daemon_error_tx, daemon_error_rx) = mpsc::channel();
-    let (daemon_ready_tx, daemon_ready_rx) = mpsc::channel();
-    thread::Builder::new()
-        .name("sigillum-daemon".to_string())
-        .spawn(move || {
-            let runtime = match tokio::runtime::Runtime::new() {
-                Ok(runtime) => runtime,
-                Err(error) => {
-                    let message = format!("failed to create daemon runtime: {error}");
-                    eprintln!("{message}");
-                    let _ = daemon_error_tx.send(message);
-                    return;
-                }
-            };
-
-            if let Err(error) = runtime.block_on(sigillum_daemon::run_with_handle(
-                addr,
-                base_dir,
-                DaemonRunOptions::default(),
-                move |state, handle| {
-                    let _ = daemon_ready_tx.send((state, handle));
-                },
-            )) {
-                let message = error.to_string();
-                eprintln!("Sigillum daemon error: {message}");
-                let _ = daemon_error_tx.send(message);
-            }
-        })
-        .map_err(|error| format!("failed to spawn daemon thread: {error}"))?;
-
-    Ok(DaemonStart {
-        errors: daemon_error_rx,
-        ready: daemon_ready_rx,
-    })
-}
-
-fn wait_for_daemon(
-    addr: SocketAddr,
-    timeout: Duration,
-    daemon_errors: &Receiver<String>,
-) -> Result<(), String> {
-    let started_at = Instant::now();
-    loop {
-        if let Ok(error) = daemon_errors.try_recv() {
-            return Err(format!("daemon exited before readiness: {error}"));
-        }
-
-        if TcpStream::connect_timeout(&addr, CONNECT_TIMEOUT).is_ok() {
-            return Ok(());
-        }
-
-        if started_at.elapsed() >= timeout {
-            return Err(format!(
-                "daemon did not accept TCP connections within {timeout:?}"
-            ));
-        }
-
-        thread::sleep(CONNECT_POLL_INTERVAL);
-    }
 }
