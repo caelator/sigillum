@@ -6,6 +6,11 @@
 [wallet-management-roadmap.md](./wallet-management-roadmap.md) product target is **part of 1.0** (EVM scope — see D-9);
 catchup Phase 4 (remote/platform) stays out.
 
+**Operational companion:** [execution-runbook-1.0.md](./execution-runbook-1.0.md)
+records what is already executed, the proven multi-agent method, wave
+sequencing for the remainder, and failure-recovery procedures. Read it before
+executing anything here.
+
 This document is written to be executed by an autonomous coding agent with no
 additional context. Every task has an ID, explicit file paths, steps,
 acceptance criteria, and verification commands. Do not improvise beyond what a
@@ -600,6 +605,22 @@ A → (B ∥ C ∥ D) → E → (W1 ∥ W2) → (W3 ∥ W4 ∥ W5 ∥ W6) → W7
 ### Phase E — Automation, recovery, and policy completion
 
 (Depends on B. E1/E2 are prerequisites for W7.)
+
+#### E0 — Replace the macOS blanket skip on client loopback tests
+
+- **Goal:** macOS CI actually executes the client loopback tests. Today
+  `crates/sigillum-client/src/tests.rs` marks them
+  `#[cfg_attr(target_os = "macos", ignore = "sandbox blocks loopback bind")]`
+  — a blanket platform skip that made macOS blind to a real regression
+  (caught only by Ubuntu during Wave A2).
+- **Steps:** replace the attribute with a runtime probe: attempt a
+  `127.0.0.1:0` bind at test start; skip (early-return with an eprintln
+  naming the reason) only when the bind actually fails. Apply the same
+  pattern to any sibling crate using the blanket skip (grep for the
+  attribute string workspace-wide).
+- **Accept:** on a normal macOS host `cargo test -p sigillum-client` RUNS
+  the loopback tests (not ignored); sandboxed environments still skip
+  gracefully with a visible reason. **Size:** S.
 
 #### E1 — Extend the existing queue job state model
 
@@ -1440,6 +1461,7 @@ Phase D — Operator-surface parity
 - [x] D2 docs/operator-surface-parity.md complete
 
 Phase E — Automation & recovery
+- [ ] E0 macOS loopback skip → runtime sandbox probe
 - [ ] E1 queue state model extended (operator_action_required, deferred semantics)
 - [ ] E2 kill-mid-write replay tests
 - [ ] E3 categorized maintenance summaries
@@ -1538,3 +1560,9 @@ Phase H — Ship
   batched into one PR (per-task worktree branches preserved) to bound CI
   wall-clock; C4 follows as its own PR; C7 (UX redesign) pending operator
   screenshot review.
+- 2026-07-03 Wave 1 merged: PR #2 → main 6cfcdce (merge commit, per-task
+  history preserved), CI green both legs. C4 remains (Wave 2); C7 complete
+  on its branch pending operator sign-off. Execution runbook created at
+  docs/execution-runbook-1.0.md (current-state ledger, proven multi-agent
+  method, wave sequencing for E/W/F/G/H, triage + recovery procedures);
+  E0 added under Phase E from the A2 lesson.
