@@ -227,7 +227,8 @@ mod tests {
     #[test]
     fn invalid_session_hides_unlocked_status() {
         let dir = TempDir::new().unwrap();
-        let state = Arc::new(AppState::new(dir.path().to_path_buf()));
+        let state =
+            Arc::new(AppState::new(dir.path().to_path_buf()).expect("app state should initialize"));
         state.unlock_compartment(0, [7u8; 32], meta(0, 1, "default"));
         let service = SigillumService::new(state);
 
@@ -240,7 +241,8 @@ mod tests {
     #[tokio::test]
     async fn set_api_key_requires_session() {
         let dir = TempDir::new().unwrap();
-        let state = Arc::new(AppState::new(dir.path().to_path_buf()));
+        let state =
+            Arc::new(AppState::new(dir.path().to_path_buf()).expect("app state should initialize"));
         let service = SigillumService::new(state);
 
         let error = service
@@ -259,7 +261,8 @@ mod tests {
     #[tokio::test]
     async fn revoke_session_only_removes_target_token() {
         let dir = TempDir::new().unwrap();
-        let state = Arc::new(AppState::new(dir.path().to_path_buf()));
+        let state =
+            Arc::new(AppState::new(dir.path().to_path_buf()).expect("app state should initialize"));
         state.unlock_compartment(0, [9u8; 32], meta(0, 1, "default"));
         let session_a = state.create_session(Some(0));
         let session_b = state.create_session(Some(0));
@@ -275,7 +278,8 @@ mod tests {
     #[test]
     fn diagnostics_reports_runtime_metadata() {
         let dir = TempDir::new().unwrap();
-        let state = Arc::new(AppState::new(dir.path().to_path_buf()));
+        let state =
+            Arc::new(AppState::new(dir.path().to_path_buf()).expect("app state should initialize"));
         state.unlock_compartment(0, [4u8; 32], meta(0, 1, "default"));
         let session = state.create_session(Some(0));
         let service = SigillumService::new(state);

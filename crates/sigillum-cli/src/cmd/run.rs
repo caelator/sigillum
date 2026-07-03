@@ -122,7 +122,8 @@ fn resolve_secrets(
 
     let runtime = tokio::runtime::Runtime::new().map_err(|e| e.to_string())?;
 
-    let client = SigillumClient::new(base_url);
+    let client =
+        SigillumClient::new(base_url).map_err(|e| format!("failed to build daemon client: {e}"))?;
     client.set_session_token(session_token);
 
     let entries: Vec<SecretResolveRequest> = refs
@@ -155,7 +156,8 @@ fn record_audit(
     use sigillum_api::request::RunAuditRequest;
 
     let runtime = tokio::runtime::Runtime::new().map_err(|e| e.to_string())?;
-    let client = SigillumClient::new(base_url);
+    let client =
+        SigillumClient::new(base_url).map_err(|e| format!("failed to build daemon client: {e}"))?;
     client.set_session_token(session_token);
 
     let request = RunAuditRequest {

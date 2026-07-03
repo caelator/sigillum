@@ -49,6 +49,7 @@ struct BesatasPaymentConfirmationPayload {
 
 /// Compute an HMAC-SHA256 signature for a webhook payload.
 pub fn sign_payload(secret: &str, payload: &str) -> String {
+    // Infallible: HMAC-SHA256 accepts keys of any length (RFC 2104), so new_from_slice cannot fail.
     let mut mac =
         HmacSha256::new_from_slice(secret.as_bytes()).expect("HMAC can take key of any size");
     mac.update(payload.as_bytes());

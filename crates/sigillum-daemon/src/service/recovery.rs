@@ -334,7 +334,8 @@ mod tests {
         };
         crate::deposits::save_deposits(dir.path(), &deposits).unwrap();
 
-        let state = Arc::new(AppState::new(dir.path().to_path_buf()));
+        let state =
+            Arc::new(AppState::new(dir.path().to_path_buf()).expect("app state should initialize"));
         let service = SigillumService::new(state.clone());
 
         let summary = service.recover_runtime_state().unwrap();
@@ -371,7 +372,8 @@ mod tests {
         };
         crate::queue_store::save_queue(dir.path(), &queue).unwrap();
 
-        let state = Arc::new(AppState::new(dir.path().to_path_buf()));
+        let state =
+            Arc::new(AppState::new(dir.path().to_path_buf()).expect("app state should initialize"));
         let service = SigillumService::new(state.clone());
 
         let summary = service.recover_runtime_state().unwrap();
@@ -398,7 +400,7 @@ mod tests {
         )
         .unwrap();
 
-        let state = Arc::new(AppState::new(base.clone()));
+        let state = Arc::new(AppState::new(base.clone()).expect("app state should initialize"));
         let service = SigillumService::new(state.clone());
 
         let summary = service.recover_runtime_state().unwrap();
@@ -427,7 +429,7 @@ mod tests {
         )
         .unwrap();
 
-        let state = Arc::new(AppState::new(base.clone()));
+        let state = Arc::new(AppState::new(base.clone()).expect("app state should initialize"));
         let service = SigillumService::new(state.clone());
 
         let summary = service.recover_runtime_state().unwrap();
@@ -463,7 +465,7 @@ mod tests {
         };
         sigillum_fido2::config::save_config(&base.join("fido2_keys.json"), &config).unwrap();
 
-        let state = Arc::new(AppState::new(base.clone()));
+        let state = Arc::new(AppState::new(base.clone()).expect("app state should initialize"));
         let service = SigillumService::new(state.clone());
 
         let summary = service.recover_runtime_state().unwrap();

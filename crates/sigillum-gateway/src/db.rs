@@ -23,7 +23,9 @@ pub fn default_project_scopes() -> Vec<String> {
 }
 
 fn default_project_scopes_json() -> String {
-    serde_json::to_string(DEFAULT_PROJECT_SCOPES).expect("default scopes serialize")
+    // Infallible: DEFAULT_PROJECT_SCOPES is a const slice of plain strings; serde_json cannot fail on it.
+    serde_json::to_string(DEFAULT_PROJECT_SCOPES)
+        .expect("serializing a const &[&str] to JSON is infallible")
 }
 
 /// Lightweight cloneable database handle for the local sidecar.

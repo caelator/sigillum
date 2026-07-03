@@ -511,7 +511,8 @@ mod tests {
     #[test]
     fn export_generate_check_and_sign_roundtrip() {
         let dir = TempDir::new().unwrap();
-        let state = Arc::new(AppState::new(dir.path().to_path_buf()));
+        let state =
+            Arc::new(AppState::new(dir.path().to_path_buf()).expect("app state should initialize"));
         state.unlock_compartment(0, [7u8; 32], meta(0, 1, "default"));
         let session = state.create_session(Some(0));
         let service = SigillumService::new(state);
@@ -620,7 +621,8 @@ mod tests {
     #[test]
     fn enabled_policy_rejects_raw_digest_signing_by_default() {
         let dir = TempDir::new().unwrap();
-        let state = Arc::new(AppState::new(dir.path().to_path_buf()));
+        let state =
+            Arc::new(AppState::new(dir.path().to_path_buf()).expect("app state should initialize"));
         state.unlock_compartment(0, [7u8; 32], meta(0, 1, "default"));
         let session = state.create_session(Some(0));
         let service = SigillumService::new(state);
@@ -678,7 +680,8 @@ mod tests {
     #[test]
     fn xpub_export_requires_active_compartment_match() {
         let dir = TempDir::new().unwrap();
-        let state = Arc::new(AppState::new(dir.path().to_path_buf()));
+        let state =
+            Arc::new(AppState::new(dir.path().to_path_buf()).expect("app state should initialize"));
         state.unlock_compartment(0, [7u8; 32], meta(0, 1, "default"));
         state.unlock_compartment(1, [8u8; 32], meta(1, 2, "secure"));
         let session = state.create_session(Some(0));
@@ -735,7 +738,8 @@ mod tests {
     #[test]
     fn xpub_export_uses_active_compartment_wallet_profile() {
         let dir = TempDir::new().unwrap();
-        let state = Arc::new(AppState::new(dir.path().to_path_buf()));
+        let state =
+            Arc::new(AppState::new(dir.path().to_path_buf()).expect("app state should initialize"));
         state.unlock_compartment(0, [7u8; 32], meta(0, 1, "default"));
         let session = state.create_session(Some(0));
         let service = SigillumService::new(state);
@@ -791,7 +795,8 @@ mod tests {
     #[test]
     fn xpub_export_returns_imported_receive_xpub_without_local_derivation() {
         let dir = TempDir::new().unwrap();
-        let state = Arc::new(AppState::new(dir.path().to_path_buf()));
+        let state =
+            Arc::new(AppState::new(dir.path().to_path_buf()).expect("app state should initialize"));
         state.unlock_compartment(0, [7u8; 32], meta(0, 1, "default"));
         let session = state.create_session(Some(0));
         let service = SigillumService::new(state);
@@ -849,7 +854,8 @@ mod tests {
     #[test]
     fn xpub_export_normalizes_imported_account_xpub() {
         let dir = TempDir::new().unwrap();
-        let state = Arc::new(AppState::new(dir.path().to_path_buf()));
+        let state =
+            Arc::new(AppState::new(dir.path().to_path_buf()).expect("app state should initialize"));
         state.unlock_compartment(0, [7u8; 32], meta(0, 1, "default"));
         let session = state.create_session(Some(0));
         let service = SigillumService::new(state);
@@ -908,7 +914,8 @@ mod tests {
     #[test]
     fn xpub_export_uses_imported_account_xpub_custom_path() {
         let dir = TempDir::new().unwrap();
-        let state = Arc::new(AppState::new(dir.path().to_path_buf()));
+        let state =
+            Arc::new(AppState::new(dir.path().to_path_buf()).expect("app state should initialize"));
         state.unlock_compartment(0, [7u8; 32], meta(0, 1, "default"));
         let session = state.create_session(Some(0));
         let service = SigillumService::new(state);
@@ -972,7 +979,8 @@ mod tests {
     #[test]
     fn xpub_export_returns_imported_custom_path() {
         let dir = TempDir::new().unwrap();
-        let state = Arc::new(AppState::new(dir.path().to_path_buf()));
+        let state =
+            Arc::new(AppState::new(dir.path().to_path_buf()).expect("app state should initialize"));
         state.unlock_compartment(0, [7u8; 32], meta(0, 1, "default"));
         let session = state.create_session(Some(0));
         let service = SigillumService::new(state);

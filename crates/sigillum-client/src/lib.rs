@@ -9,7 +9,8 @@
 //!
 //! ## Authentication flow
 //!
-//! 1. Create a client with [`SigillumClient::new`].
+//! 1. Create a client with [`SigillumClient::new`] and handle any HTTP-client
+//!    construction error.
 //! 2. Call [`SigillumClient::unlock_with_passphrase`] or
 //!    [`SigillumClient::fido2_unlock`] — the returned session token is stored
 //!    automatically.
@@ -149,16 +150,17 @@ impl SigillumClient {
     // ── Construction ───────────────────────────────────────────
 
     /// Create a client pointing at `base_url` (e.g. `http://127.0.0.1:3200`).
-    pub fn new(base_url: impl Into<String>) -> Self {
-        Self {
+    ///
+    /// Returns an error if the underlying HTTP client cannot be built.
+    pub fn new(base_url: impl Into<String>) -> Result<Self, ClientError> {
+        Ok(Self {
             http: reqwest::Client::builder()
                 .connect_timeout(DEFAULT_CONNECT_TIMEOUT)
                 .timeout(DEFAULT_REQUEST_TIMEOUT)
-                .build()
-                .expect("client HTTP client should build"),
+                .build()?,
             base_url: normalize_base_url(base_url.into()),
             session_token: Mutex::new(None),
-        }
+        })
     }
 
     /// Create a client with a pre-configured `reqwest::Client` (custom timeouts, TLS, etc.).

@@ -13,7 +13,7 @@ fn meta(id: usize, threshold: usize, label: &str) -> CompartmentMeta {
 #[test]
 fn sessions_track_active_compartments_independently() {
     let dir = TempDir::new().unwrap();
-    let state = AppState::new(dir.path().to_path_buf());
+    let state = AppState::new(dir.path().to_path_buf()).expect("app state should initialize");
 
     state.unlock_compartment(0, [1u8; 32], meta(0, 1, "daily"));
     state.unlock_compartment(1, [2u8; 32], meta(1, 2, "secure"));
@@ -30,7 +30,7 @@ fn sessions_track_active_compartments_independently() {
 #[test]
 fn removing_active_compartment_repoints_sessions() {
     let dir = TempDir::new().unwrap();
-    let state = AppState::new(dir.path().to_path_buf());
+    let state = AppState::new(dir.path().to_path_buf()).expect("app state should initialize");
 
     state.unlock_compartment(0, [1u8; 32], meta(0, 1, "daily"));
     state.unlock_compartment(1, [2u8; 32], meta(1, 2, "secure"));
@@ -44,7 +44,7 @@ fn removing_active_compartment_repoints_sessions() {
 #[test]
 fn lock_all_clears_sessions_and_vault_instances() {
     let dir = TempDir::new().unwrap();
-    let state = AppState::new(dir.path().to_path_buf());
+    let state = AppState::new(dir.path().to_path_buf()).expect("app state should initialize");
 
     state.unlock_compartment(0, [1u8; 32], meta(0, 1, "daily"));
     let session = state.create_session(Some(0));
@@ -62,7 +62,7 @@ fn lock_all_clears_sessions_and_vault_instances() {
 #[test]
 fn idle_sessions_are_rejected_and_removed() {
     let dir = TempDir::new().unwrap();
-    let state = AppState::new(dir.path().to_path_buf());
+    let state = AppState::new(dir.path().to_path_buf()).expect("app state should initialize");
 
     state.unlock_compartment(0, [1u8; 32], meta(0, 1, "daily"));
     let session = state.create_session(Some(0));
@@ -80,7 +80,7 @@ fn idle_sessions_are_rejected_and_removed() {
 #[test]
 fn idle_lock_due_requires_all_sessions_to_be_idle() {
     let dir = TempDir::new().unwrap();
-    let state = AppState::new(dir.path().to_path_buf());
+    let state = AppState::new(dir.path().to_path_buf()).expect("app state should initialize");
 
     state.unlock_compartment(0, [1u8; 32], meta(0, 1, "daily"));
     let old_session = state.create_session(Some(0));
@@ -103,7 +103,7 @@ fn idle_lock_due_requires_all_sessions_to_be_idle() {
 #[test]
 fn idle_lock_recheck_cancels_when_reauth_creates_fresh_session() {
     let dir = TempDir::new().unwrap();
-    let state = AppState::new(dir.path().to_path_buf());
+    let state = AppState::new(dir.path().to_path_buf()).expect("app state should initialize");
 
     state.unlock_compartment(0, [1u8; 32], meta(0, 1, "daily"));
     let stale_session = state.create_session(Some(0));
@@ -122,7 +122,7 @@ fn idle_lock_recheck_cancels_when_reauth_creates_fresh_session() {
 #[test]
 fn locking_state_rejects_session_validation_until_lock_finishes() {
     let dir = TempDir::new().unwrap();
-    let state = AppState::new(dir.path().to_path_buf());
+    let state = AppState::new(dir.path().to_path_buf()).expect("app state should initialize");
 
     state.unlock_compartment(0, [1u8; 32], meta(0, 1, "daily"));
     let session = state.create_session(Some(0));
@@ -136,7 +136,7 @@ fn locking_state_rejects_session_validation_until_lock_finishes() {
 #[test]
 fn audit_log_roundtrip_and_limit() {
     let dir = TempDir::new().unwrap();
-    let state = AppState::new(dir.path().to_path_buf());
+    let state = AppState::new(dir.path().to_path_buf()).expect("app state should initialize");
     state.unlock_compartment(0, [1u8; 32], meta(0, 1, "daily"));
 
     state
@@ -193,7 +193,7 @@ fn audit_log_roundtrip_and_limit() {
 #[test]
 fn compartment_audit_verify_requires_unlocked_key() {
     let dir = TempDir::new().unwrap();
-    let state = AppState::new(dir.path().to_path_buf());
+    let state = AppState::new(dir.path().to_path_buf()).expect("app state should initialize");
 
     let error = state.verify_audit_chain("compartment:0").unwrap_err();
 
@@ -203,7 +203,7 @@ fn compartment_audit_verify_requires_unlocked_key() {
 #[test]
 fn startup_recovery_summary_defaults_to_zero() {
     let dir = TempDir::new().unwrap();
-    let state = AppState::new(dir.path().to_path_buf());
+    let state = AppState::new(dir.path().to_path_buf()).expect("app state should initialize");
 
     assert_eq!(
         state.startup_recovery_summary(),

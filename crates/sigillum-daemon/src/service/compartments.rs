@@ -203,7 +203,7 @@ impl SigillumService {
         let mut master_key = [0u8; 32];
         rand::rngs::OsRng.fill_bytes(&mut master_key);
 
-        let (wrap_key, salt) = derive_key_from_passphrase(passphrase.as_str());
+        let (wrap_key, salt) = derive_key_from_passphrase(passphrase.as_str())?;
 
         self.with_vault(body.id, |vault| {
             vault

@@ -542,7 +542,10 @@ where
 
 /// Construct a [`SigillumClient`] with optional session-token attachment.
 fn build_client(args: &[String], require_session: bool) -> SigillumClient {
-    let client = SigillumClient::new(daemon_base_url(args));
+    let client = SigillumClient::new(daemon_base_url(args)).unwrap_or_else(|error| {
+        eprintln!("Failed to build daemon client: {error}");
+        process::exit(1);
+    });
     if require_session {
         let session = require_session_token(args);
         client.set_session_token(session);
@@ -607,10 +610,10 @@ pub(crate) fn ensure_daemon_ready(base_url: &str) -> Result<(), String> {
 }
 
 async fn daemon_reachable(base_url: &str) -> bool {
-    SigillumClient::new(base_url.to_string())
-        .status()
-        .await
-        .is_ok()
+    match SigillumClient::new(base_url.to_string()) {
+        Ok(client) => client.status().await.is_ok(),
+        Err(_) => false,
+    }
 }
 
 fn spawn_daemon_process(port: u16) -> io::Result<()> {

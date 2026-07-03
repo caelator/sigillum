@@ -11,7 +11,8 @@ use tower::util::ServiceExt;
 
 fn test_app() -> (axum::Router, TempDir) {
     let dir = TempDir::new().unwrap();
-    let (app, _state) = sigillum_daemon::build_router(dir.path().to_path_buf(), 0);
+    let (app, _state) = sigillum_daemon::build_router(dir.path().to_path_buf(), 0)
+        .expect("router should initialize");
     (app, dir)
 }
 

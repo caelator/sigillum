@@ -208,7 +208,7 @@ fn verify_passphrase_for_compartment(
         return Err(ServiceError::internal("Stored passphrase salt is invalid."));
     }
 
-    let wrap_key = derive_key_with_salt(passphrase, &salt);
+    let wrap_key = derive_key_with_salt(passphrase, &salt)?;
     let Some(master_key) =
         load_wrapped_master_key(&wrap_key, &state.wrapped_key_path(compartment_id))
     else {
