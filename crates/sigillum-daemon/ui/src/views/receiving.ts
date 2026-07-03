@@ -40,7 +40,7 @@ function itemPurposeLine(item: ReceivingItem): string {
 }
 
 function itemBalanceLine(item: ReceivingItem): string {
-  if (!item.balance_known) return "balance unknown — refresh in B2";
+  if (!item.balance_known) return "balance unknown — run Refresh balances";
   return "balance=" + esc(formatWeiHexAsEth(item.balance_native_wei_hex || "0x0")) + " ETH";
 }
 

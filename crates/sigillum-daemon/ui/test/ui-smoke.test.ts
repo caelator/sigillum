@@ -2091,7 +2091,7 @@ test("receiving overview renders party groups, hd and stealth items, and balance
   ok(
     dom
       .el("receivingGroupList")
-      .innerHTML.includes("balance unknown — refresh in B2"),
+      .innerHTML.includes("balance unknown — run Refresh balances"),
   );
   ok(dom.el("receivingGroupList").innerHTML.includes("copyText"));
 });

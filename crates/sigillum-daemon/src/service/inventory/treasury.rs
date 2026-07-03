@@ -249,7 +249,7 @@ fn build_receiving_overview(
         coverage: ReceivingCoverage {
             addresses_total: item_count,
             addresses_with_known_balance,
-            note: "Balances reflect the last persisted inventory/deposit scan; live refresh arrives in increment B2.".into(),
+            note: "Balances are from the last saved scan. Use Refresh balances to query your provider now.".into(),
         },
     }
 }
