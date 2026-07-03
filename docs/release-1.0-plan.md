@@ -1373,8 +1373,8 @@ git push origin v1.0.0
 
 Phase A — Land the desktop branch
 - [x] A1 GLM convergence blockers verified/closed
-- [ ] A2 PR green on both CI legs
-- [ ] A3 Merged to main
+- [x] A2 PR green on both CI legs
+- [x] A3 Merged to main
 
 Phase B — Workspace hygiene
 - [ ] B1 publish=false + README dependency framing
@@ -1470,3 +1470,13 @@ Phase H — Ship
   should be sandbox-detecting, not platform-blanket. **Follow-up queued for
   Phase B (B4 scope):** replace the blanket macOS ignore with a runtime
   sandbox probe so macOS CI exercises these tests too.
+- 2026-07-02 A2 (cont.): three further Ubuntu-only gate hardenings —
+  runtime smoke now prebuilds the CLI and allows a 120s readiness window
+  (`cargo run --quiet` was compiling silently through the old 20s window);
+  browser-smoke temp-profile cleanup is best-effort (Chromium helpers
+  outlive the killed main process); browser-smoke reauth interaction
+  retries once (re-render race on slow runners) and CI now uploads failure
+  screenshots/DOM snapshots as workflow artifacts.
+- 2026-07-03 A2+A3 fd2b35b: PR #1 green on both legs, squash-merged to
+  main, branch deleted. Phase A complete; B/C/D are unblocked and may run
+  in parallel.
