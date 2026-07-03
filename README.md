@@ -131,9 +131,11 @@ compartment selection is tracked per session token through bearer session-token
 auth over local HTTP.
 
 For scriptable daemon operations, the CLI now exposes JSON-oriented commands
-under `sigillum api`, including session unlock, compartment switching, provider
-and wallet profile management, deposit management, queue inspection, and
-maintenance runs. These commands default to `http://127.0.0.1:9743`, accept
+under `sigillum api`, including session unlock, compartment switching,
+compartment listing, provider and wallet profile management, deposit
+management, queue inspection, transit encryption helpers, read-only EVM RPC
+queries (no broadcast), wallet xpub/stealth export and derive helpers (no
+sign/send), and maintenance runs. These commands default to `http://127.0.0.1:9743`, accept
 `--url`, `SIGILLUM_BASE_URL`, or `SIGILLUM_DAEMON_URL`, and use `--session` or
 `SIGILLUM_SESSION_TOKEN` for authenticated calls.
 

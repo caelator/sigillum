@@ -38,11 +38,14 @@ use sigillum_client::{ClientError, SigillumClient};
 use url::Url;
 
 mod deposits;
+mod evm;
 mod inventory;
 mod inventory_args;
 mod queue;
 mod receiving;
+mod transit;
 mod treasury;
+mod wallets;
 
 const DEFAULT_DAEMON_BASE_URL: &str = "http://127.0.0.1:9743";
 const DAEMON_READY_TIMEOUT: Duration = Duration::from_secs(10);
@@ -90,6 +93,7 @@ pub fn cmd_api(args: &[String]) {
                 client.switch_compartment(id).await
             });
         }
+        "compartment" => cmd_api_compartment(args),
         "diagnostics" => run_api_command(
             args,
             true,
@@ -105,6 +109,7 @@ pub fn cmd_api(args: &[String]) {
         }
         "profiles" => cmd_api_profiles(args),
         "deposits" => deposits::cmd_api_deposits(args),
+        "evm" => evm::cmd_api_evm(args),
         "inventory" => inventory::cmd_api_inventory(args),
         "discovery" => cmd_api_discovery(args),
         "risk" => cmd_api_risk(args),
@@ -112,11 +117,26 @@ pub fn cmd_api(args: &[String]) {
         "receiving" => receiving::cmd_api_receiving(args),
         "treasury" => treasury::cmd_api_treasury(args),
         "queue" => queue::cmd_api_queue(args),
+        "transit" => transit::cmd_api_transit(args),
+        "wallets" => wallets::cmd_api_wallets(args),
         "maintenance" => cmd_api_maintenance(args),
         "help" | "--help" | "-h" => print_api_usage(),
         other => {
             eprintln!("Unknown api command: {other}");
             print_api_usage();
+            process::exit(1);
+        }
+    }
+}
+
+/// Dispatch `sigillum api compartment <list>`.
+fn cmd_api_compartment(args: &[String]) {
+    match args.get(1).map(String::as_str) {
+        Some("list") => run_api_command(args, true, |client| async move {
+            client.list_compartments().await
+        }),
+        _ => {
+            eprintln!("Usage: sigillum api compartment <list>");
             process::exit(1);
         }
     }
@@ -805,6 +825,15 @@ fn require_u64_flag(args: &[String], flag: &str, usage: &str) -> u64 {
         })
 }
 
+fn require_u32_flag(args: &[String], flag: &str, usage: &str) -> u32 {
+    parse_flag(args, flag)
+        .map(|value| parse_u32_value(&value, flag))
+        .unwrap_or_else(|| {
+            eprintln!("Usage: {usage}");
+            process::exit(1);
+        })
+}
+
 fn parse_usize_value(value: &str, flag: &str) -> usize {
     value.parse::<usize>().unwrap_or_else(|_| {
         eprintln!("Invalid value for {flag}: {value}");
@@ -838,6 +867,7 @@ COMMANDS:
   lock
   revoke-session
   switch --id <N>
+  compartment <list>
   diagnostics
   selfcheck [--domain <DOMAIN>]...  (domains: provider, seed-wallet, xpub-wallet, stealth-wallet, watch-book, policy, receive-allocation, fido2; default: all)
   profiles evm <list|upsert|delete> [...]
@@ -845,6 +875,7 @@ COMMANDS:
   profiles eth-xpub <list|upsert|delete> [...]
   profiles eth-seed <list|create|delete> [...]  (create generates a new BIP-39 mnemonic and prints it exactly once)
   deposits <list|create-native|create-erc20|scan-announcements|refresh|enqueue-sweep|delete> [...]
+  evm <nonce|balance|erc20-balance|fees> [...]  (read-only; no broadcast)
   inventory <list|chains|watch|scan-evm> [...]  (scan supports --watch-address, --watch-address-file, --include-watch-book, --derivation-pattern, --account-limit)
   discovery <jobs|scan-evm> [...]
   risk <list|catalog|catalog-upsert|catalog-delete> [...]
@@ -852,6 +883,8 @@ COMMANDS:
   receiving <overview|refresh-balances|tag-deposit> [...]
   treasury <overview|policy|policy-update|receive-list|receive-allocate|receive-rotate|parties> [...]
   queue <list|process> [...]
+  transit <encrypt|decrypt|hmac> [...]
+  wallets <xpub-export|xpub-derive|stealth-export|stealth-generate|stealth-check> [...]  (read/derive only; no sign/send)
   maintenance run [...]
 
 GLOBAL FLAGS:

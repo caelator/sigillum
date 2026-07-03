@@ -47,13 +47,14 @@ use sigillum_api::request::{
     EthStealthSendErc20WithProfileRequest, EthStealthSendTransferRequest,
     EthStealthSendWithProfileRequest, EthStealthSignErc20TransferRequest, EthStealthSignRequest,
     EthStealthSignTransferRequest, EthStealthWalletProfileUpsertRequest, EthXpubDeriveRequest,
-    EthXpubExportRequest, EthXpubWalletProfileUpsertRequest, EvmProfileDeleteRequest,
-    EvmProviderProfileUpsertRequest, EvmRpcBalanceRequest, EvmRpcBroadcastRequest,
-    EvmRpcErc20BalanceRequest, EvmRpcNonceRequest, Fido2RegisterRequest, Fido2RemoveRequest,
-    Fido2SetupRequest, Fido2UnlockRequest, GenerateStoreRequest, KeyOnlyRequest, KeyValueRequest,
-    MaintenanceRunRequest, PassphraseRequest, RiskCatalogDeleteRequest, RiskCatalogUpsertRequest,
-    RunAuditRequest, SecretResolveBatchRequest, SnapshotRestoreRequest, StealthPaymentRef,
-    TransitDecryptRequest, TransitEncryptRequest, TransitHmacRequest,
+    EthXpubExportRequest, EthXpubWalletProfileUpsertRequest, EvmFeeEstimateRequest,
+    EvmProfileDeleteRequest, EvmProviderProfileUpsertRequest, EvmRpcBalanceRequest,
+    EvmRpcBroadcastRequest, EvmRpcErc20BalanceRequest, EvmRpcNonceRequest, Fido2RegisterRequest,
+    Fido2RemoveRequest, Fido2SetupRequest, Fido2UnlockRequest, GenerateStoreRequest,
+    KeyOnlyRequest, KeyValueRequest, MaintenanceRunRequest, PassphraseRequest,
+    RiskCatalogDeleteRequest, RiskCatalogUpsertRequest, RunAuditRequest, SecretResolveBatchRequest,
+    SnapshotRestoreRequest, StealthPaymentRef, TransitDecryptRequest, TransitEncryptRequest,
+    TransitHmacRequest,
 };
 pub use sigillum_api::response::Fido2StatusResponse as DaemonFido2Status;
 pub use sigillum_api::response::{
@@ -73,12 +74,12 @@ pub use sigillum_api::response::{
     EthStealthSignResponse, EthStealthWalletProfile, EthStealthWalletProfileListResponse,
     EthStealthWalletProfileMutationResponse, EthXpubAddressResponse, EthXpubExportResponse,
     EthXpubWalletProfile, EthXpubWalletProfileListResponse, EthXpubWalletProfileMutationResponse,
-    EvmProviderProfile, EvmProviderProfileListResponse, EvmProviderProfileMutationResponse,
-    EvmRpcBalanceResponse, EvmRpcBroadcastResponse, EvmRpcErc20BalanceResponse,
-    EvmRpcNonceResponse, Fido2DetectResponse, Fido2KeyInfo, Fido2ListResponse,
-    Fido2RegisterResponse, Fido2RemoveResponse, Fido2SetupResponse, Fido2StatusResponse,
-    GenerateStoreResponse, GenericStatusResponse, KeyListResponse, KeyValueResponse,
-    MaintenanceRunResponse, QueueEnqueueResponse, QueueJob, QueueJobListResponse,
+    EvmFeeEstimateResponse, EvmProviderProfile, EvmProviderProfileListResponse,
+    EvmProviderProfileMutationResponse, EvmRpcBalanceResponse, EvmRpcBroadcastResponse,
+    EvmRpcErc20BalanceResponse, EvmRpcNonceResponse, Fido2DetectResponse, Fido2KeyInfo,
+    Fido2ListResponse, Fido2RegisterResponse, Fido2RemoveResponse, Fido2SetupResponse,
+    Fido2StatusResponse, GenerateStoreResponse, GenericStatusResponse, KeyListResponse,
+    KeyValueResponse, MaintenanceRunResponse, QueueEnqueueResponse, QueueJob, QueueJobListResponse,
     QueueProcessResponse, RiskCatalogEntry, RiskCatalogListResponse, RiskCatalogMutationResponse,
     RiskFinding, RiskFindingListResponse, SafeTransactionBuilderBatch, SafeTransactionBuilderMeta,
     SafeTransactionBuilderTransaction, SecretResolveBatchResponse, SecretResolveValue,
@@ -661,6 +662,16 @@ impl SigillumClient {
     ) -> Result<EvmRpcErc20BalanceResponse, ClientError> {
         let builder = self
             .request(Method::POST, "/api/evm/erc20-balance")
+            .json(&request);
+        self.send(builder).await
+    }
+
+    pub async fn evm_estimate_fees(
+        &self,
+        request: EvmFeeEstimateRequest,
+    ) -> Result<EvmFeeEstimateResponse, ClientError> {
+        let builder = self
+            .request(Method::POST, "/api/evm/fees/estimate")
             .json(&request);
         self.send(builder).await
     }
