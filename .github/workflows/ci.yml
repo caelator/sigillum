@@ -46,3 +46,13 @@ jobs:
 
       - name: Run release gate
         run: ./scripts/check-release.sh
+
+      - name: Upload browser smoke failure artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: browser-smoke-artifacts-${{ matrix.os }}
+          path: |
+            /tmp/sigillum-browser-smoke.*/artifacts/
+            ${{ runner.temp }}/sigillum-browser-smoke.*/artifacts/
+          if-no-files-found: ignore

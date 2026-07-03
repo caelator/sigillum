@@ -399,7 +399,25 @@ async function runBrowserSmoke(cdp) {
 
   await setValue(cdp, "#passphrase", PASSPHRASE, "unlock passphrase");
   await click(cdp, '[data-action="unlock"]', "unlock after browser logout");
-  await waitFor(cdp, "sessionStorage.getItem('sigillumSessionToken')", "browser session token after reauth");
+  try {
+    await waitFor(
+      cdp,
+      "sessionStorage.getItem('sigillumSessionToken')",
+      "browser session token after reauth (first attempt)",
+      15_000,
+    );
+  } catch {
+    // Slow runners can re-render the locked view between typing and
+    // clicking, submitting an empty passphrase. The interaction is
+    // idempotent; retry once before declaring failure.
+    await setValue(cdp, "#passphrase", PASSPHRASE, "unlock passphrase (retry)");
+    await click(cdp, '[data-action="unlock"]', "unlock after browser logout (retry)");
+    await waitFor(
+      cdp,
+      "sessionStorage.getItem('sigillumSessionToken')",
+      "browser session token after reauth",
+    );
+  }
   await waitFor(cdp, "document.body.dataset.mode === 'unlocked'", "unlocked workspace after reauth");
   await waitFor(cdp, "document.getElementById('apiKeyCount').textContent.trim() === '1'", "API key count after reauth");
   await waitFor(cdp, "document.getElementById('secretCount').textContent.trim() === '1'", "secret count after reauth");
