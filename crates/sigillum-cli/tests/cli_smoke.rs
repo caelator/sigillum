@@ -501,6 +501,239 @@ fn api_transit_hmac_reaches_network_with_valid_args() {
 }
 
 #[test]
+fn api_wallets_missing_subcommand_exits_nonzero() {
+    let output = run(&["api", "wallets"]);
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("Usage"));
+}
+
+#[test]
+fn api_wallets_stealth_sign_is_not_bridged() {
+    let output = run(&["api", "wallets", "stealth-sign"]);
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("Usage"));
+}
+
+#[test]
+fn api_wallets_xpub_export_missing_flags_exits_nonzero() {
+    let output = run(&["api", "wallets", "xpub-export"]);
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("--wallet-profile") || stderr.contains("Usage"),
+        "should mention required flags"
+    );
+}
+
+#[test]
+fn api_wallets_xpub_derive_missing_flags_exits_nonzero() {
+    let output = run(&["api", "wallets", "xpub-derive", "--xpub", "xpub6Ctest"]);
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("--index") || stderr.contains("Usage"),
+        "should mention required flags"
+    );
+}
+
+#[test]
+fn api_wallets_stealth_export_missing_flags_exits_nonzero() {
+    let output = run(&["api", "wallets", "stealth-export"]);
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("--wallet") || stderr.contains("Usage"),
+        "should mention required flags"
+    );
+}
+
+#[test]
+fn api_wallets_stealth_generate_missing_flags_exits_nonzero() {
+    let output = run(&["api", "wallets", "stealth-generate"]);
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("--meta-address") || stderr.contains("Usage"),
+        "should mention required flags"
+    );
+}
+
+#[test]
+fn api_wallets_stealth_check_missing_flags_exits_nonzero() {
+    let output = run(&[
+        "api",
+        "wallets",
+        "stealth-check",
+        "--wallet",
+        "treasury",
+        "--stealth-address",
+        "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    ]);
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("--ephemeral-public-key-hex") || stderr.contains("Usage"),
+        "should mention required flags"
+    );
+}
+
+#[test]
+fn api_wallets_xpub_derive_invalid_index_exits_nonzero() {
+    let output = run(&[
+        "api",
+        "wallets",
+        "xpub-derive",
+        "--xpub",
+        "xpub6Ctest",
+        "--index",
+        "notanumber",
+    ]);
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("Invalid value") || stderr.contains("--index"));
+}
+
+#[test]
+fn api_wallets_stealth_check_invalid_ephemeral_public_key_hex_exits_nonzero() {
+    let output = run(&[
+        "api",
+        "wallets",
+        "stealth-check",
+        "--wallet",
+        "treasury",
+        "--stealth-address",
+        "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "--ephemeral-public-key-hex",
+        "zz",
+    ]);
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("Invalid hex"));
+}
+
+#[test]
+fn api_wallets_stealth_check_invalid_view_tag_length_exits_nonzero() {
+    let output = run(&[
+        "api",
+        "wallets",
+        "stealth-check",
+        "--wallet",
+        "treasury",
+        "--stealth-address",
+        "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "--ephemeral-public-key-hex",
+        "02aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "--view-tag-hex",
+        "0102",
+    ]);
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("view-tag") || stderr.contains("1 byte"));
+}
+
+#[test]
+fn api_wallets_xpub_export_reaches_network_with_valid_args() {
+    let output = run(&[
+        "api",
+        "wallets",
+        "xpub-export",
+        "--wallet-profile",
+        "treasury-xpub",
+        "--url",
+        "http://127.0.0.1:1",
+        "--session",
+        "test-token",
+    ]);
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(!stderr.contains("Usage:"));
+}
+
+#[test]
+fn api_wallets_xpub_derive_reaches_network_with_valid_args() {
+    let output = run(&[
+        "api",
+        "wallets",
+        "xpub-derive",
+        "--xpub",
+        "xpub6Ctest",
+        "--index",
+        "0",
+        "--url",
+        "http://127.0.0.1:1",
+        "--session",
+        "test-token",
+    ]);
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(!stderr.contains("Usage:"));
+}
+
+#[test]
+fn api_wallets_stealth_export_reaches_network_with_valid_args() {
+    let output = run(&[
+        "api",
+        "wallets",
+        "stealth-export",
+        "--wallet",
+        "treasury",
+        "--short-name",
+        "ops",
+        "--url",
+        "http://127.0.0.1:1",
+        "--session",
+        "test-token",
+    ]);
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(!stderr.contains("Usage:"));
+}
+
+#[test]
+fn api_wallets_stealth_generate_reaches_network_with_valid_args() {
+    let output = run(&[
+        "api",
+        "wallets",
+        "stealth-generate",
+        "--meta-address",
+        "st:eth:0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "--url",
+        "http://127.0.0.1:1",
+        "--session",
+        "test-token",
+    ]);
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(!stderr.contains("Usage:"));
+}
+
+#[test]
+fn api_wallets_stealth_check_reaches_network_with_valid_args() {
+    let output = run(&[
+        "api",
+        "wallets",
+        "stealth-check",
+        "--wallet",
+        "treasury",
+        "--stealth-address",
+        "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "--ephemeral-public-key-hex",
+        "02aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "--view-tag-hex",
+        "ab",
+        "--url",
+        "http://127.0.0.1:1",
+        "--session",
+        "test-token",
+    ]);
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(!stderr.contains("Usage:"));
+}
+
+#[test]
 fn api_maintenance_missing_run_exits_nonzero() {
     let output = run(&["api", "maintenance"]);
     assert!(!output.status.success());

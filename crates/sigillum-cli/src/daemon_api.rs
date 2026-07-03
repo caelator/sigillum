@@ -45,6 +45,7 @@ mod queue;
 mod receiving;
 mod transit;
 mod treasury;
+mod wallets;
 
 const DEFAULT_DAEMON_BASE_URL: &str = "http://127.0.0.1:9743";
 const DAEMON_READY_TIMEOUT: Duration = Duration::from_secs(10);
@@ -116,6 +117,7 @@ pub fn cmd_api(args: &[String]) {
         "treasury" => treasury::cmd_api_treasury(args),
         "queue" => queue::cmd_api_queue(args),
         "transit" => transit::cmd_api_transit(args),
+        "wallets" => wallets::cmd_api_wallets(args),
         "maintenance" => cmd_api_maintenance(args),
         "help" | "--help" | "-h" => print_api_usage(),
         other => {
@@ -806,6 +808,15 @@ fn require_u64_flag(args: &[String], flag: &str, usage: &str) -> u64 {
         })
 }
 
+fn require_u32_flag(args: &[String], flag: &str, usage: &str) -> u32 {
+    parse_flag(args, flag)
+        .map(|value| parse_u32_value(&value, flag))
+        .unwrap_or_else(|| {
+            eprintln!("Usage: {usage}");
+            process::exit(1);
+        })
+}
+
 fn parse_usize_value(value: &str, flag: &str) -> usize {
     value.parse::<usize>().unwrap_or_else(|_| {
         eprintln!("Invalid value for {flag}: {value}");
@@ -855,6 +866,7 @@ COMMANDS:
   treasury <overview|policy|policy-update|receive-list|receive-allocate|receive-rotate|parties> [...]
   queue <list|process> [...]
   transit <encrypt|decrypt|hmac> [...]
+  wallets <xpub-export|xpub-derive|stealth-export|stealth-generate|stealth-check> [...]  (read/derive only; no sign/send)
   maintenance run [...]
 
 GLOBAL FLAGS:
