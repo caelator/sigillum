@@ -98,6 +98,10 @@ these are true:
 4. Persistence and restart behavior are explicit and tested.
 5. The README, readiness doc, and roadmap describe the code that actually ships.
 
+Gate 3 (operator surface or explicit API-only decision) is tracked
+route-by-route in
+[docs/operator-surface-parity.md](./docs/operator-surface-parity.md).
+
 ## Current Plan Of Record
 
 The active execution plan for the 1.0 release lives in
