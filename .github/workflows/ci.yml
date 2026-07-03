@@ -44,6 +44,10 @@ jobs:
       - name: Install cargo-deny
         run: cargo install cargo-deny --version 0.19.4 --locked
 
+      - name: Install Tauri CLI (macOS)
+        if: runner.os == 'macOS'
+        run: cargo install tauri-cli --version 2.11.4 --locked
+
       - name: Run release gate
         run: ./scripts/check-release.sh
 
