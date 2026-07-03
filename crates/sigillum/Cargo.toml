@@ -13,6 +13,9 @@ categories = ["cryptography", "authentication"]
 [dependencies]
 sigillum-core = { workspace = true }
 
+[dev-dependencies]
+tempfile = "3.10"
+
 [features]
 default = ["file-backend"]
 file-backend = ["sigillum-core/file-backend"]
