@@ -30,6 +30,7 @@
 //! Old events (before versioning) are automatically converted by `StoredAuditEvent::from_legacy_json()`.
 //! This ensures that old audit trails don't become unreadable after upgrades.
 
+#[cfg(test)]
 use std::io::{BufRead, BufReader, Write};
 use std::path::Path;
 
@@ -37,9 +38,9 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
 use sigillum_api::AuditEvent as PublicAuditEvent;
 
-use crate::json_store::{
-    JsonDocument, JsonSchema, decode_json_document, encode_json_document_compact,
-};
+use crate::json_store::{JsonDocument, JsonSchema};
+#[cfg(test)]
+use crate::json_store::{decode_json_document, encode_json_document_compact};
 
 mod legacy_details;
 
@@ -1436,7 +1437,8 @@ impl AuditEventSpec {
     }
 }
 
-#[allow(dead_code)]
+// Test-only legacy JSONL writer: fixture for audit/migration.rs tests and legacy-format regression tests; live writes go through audit_db::append_event_chained.
+#[cfg(test)]
 pub(crate) fn append_audit_event(
     path: &Path,
     event: &StoredAuditEvent,
@@ -1461,7 +1463,8 @@ pub(crate) fn append_audit_event(
     Ok(())
 }
 
-#[allow(dead_code)]
+// Test-only legacy JSONL reader: regression-tests the legacy decode fallback that audit/migration.rs relies on.
+#[cfg(test)]
 pub(crate) fn read_recent_audit_events(
     path: &Path,
     limit: usize,
