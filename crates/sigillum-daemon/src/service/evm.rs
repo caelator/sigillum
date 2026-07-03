@@ -798,7 +798,6 @@ mod tests {
     }
 
     #[tokio::test]
-    #[cfg_attr(target_os = "macos", ignore = "sandbox blocks loopback bind")]
     async fn provider_rpc_client_batches_dual_balance_reads() {
         async fn handler(
             State(state): State<RpcTestState>,
@@ -821,7 +820,9 @@ mod tests {
         }
 
         let state = RpcTestState::default();
-        let addr = spawn_test_server(state.clone(), handler).await;
+        let Some(addr) = spawn_test_server(state.clone(), handler).await else {
+            return;
+        };
         let http = reqwest::Client::new();
         let rpc = ProviderRpcClient::new(&http, format!("http://{addr}"), Some("rpc-token".into()));
 
@@ -846,7 +847,6 @@ mod tests {
     }
 
     #[tokio::test]
-    #[cfg_attr(target_os = "macos", ignore = "sandbox blocks loopback bind")]
     async fn provider_rpc_client_preserves_retryable_throttling() {
         async fn handler(
             _state: State<RpcTestState>,
@@ -861,7 +861,9 @@ mod tests {
             )
         }
 
-        let addr = spawn_test_server(RpcTestState::default(), handler).await;
+        let Some(addr) = spawn_test_server(RpcTestState::default(), handler).await else {
+            return;
+        };
         let http = reqwest::Client::new();
         let rpc = ProviderRpcClient::new(&http, format!("http://{addr}"), None);
 
@@ -872,17 +874,23 @@ mod tests {
         assert_eq!(error.status(), StatusCode::TOO_MANY_REQUESTS);
     }
 
-    async fn spawn_test_server<H, Fut>(state: RpcTestState, handler: H) -> SocketAddr
+    async fn spawn_test_server<H, Fut>(state: RpcTestState, handler: H) -> Option<SocketAddr>
     where
         H: Clone + Send + Sync + 'static + Fn(State<RpcTestState>, HeaderMap, Json<Value>) -> Fut,
         Fut: std::future::Future<Output = (StatusCode, Json<Value>)> + Send + 'static,
     {
         let app = Router::new().route("/", post(handler)).with_state(state);
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let listener = match tokio::net::TcpListener::bind("127.0.0.1:0").await {
+            Ok(listener) => listener,
+            Err(error) => {
+                eprintln!("skipping loopback test: sandbox blocks loopback bind: {error}");
+                return None;
+            }
+        };
         let addr = listener.local_addr().unwrap();
         tokio::spawn(async move {
             axum::serve(listener, app).await.unwrap();
         });
-        addr
+        Some(addr)
     }
 }

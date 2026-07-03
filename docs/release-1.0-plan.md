@@ -1461,7 +1461,7 @@ Phase D — Operator-surface parity
 - [x] D2 docs/operator-surface-parity.md complete
 
 Phase E — Automation & recovery
-- [ ] E0 macOS loopback skip → runtime sandbox probe
+- [x] E0 macOS loopback skip → runtime sandbox probe
 - [ ] E1 queue state model extended (operator_action_required, deferred semantics)
 - [ ] E2 kill-mid-write replay tests
 - [ ] E3 categorized maintenance summaries
@@ -1571,3 +1571,8 @@ Phase H — Ship
   macOS CI leg, and documented `SIGILLUM_SKIP_DESKTOP_BUNDLE`. Local desktop
   check produced debug `.app` + `.dmg`, verified `Signature=adhoc`, and took
   136s; full release gate passed with the new step included.
+- 2026-07-03 E0 b30f781: replaced macOS blanket ignores on client loopback
+  tests and the sibling daemon EVM loopback tests with runtime bind probes that
+  early-return only when `127.0.0.1:0` cannot bind. Local
+  `cargo test -p sigillum-client -- --nocapture` ran 21 tests with 0 ignored;
+  full `./scripts/check-release.sh` passed.
