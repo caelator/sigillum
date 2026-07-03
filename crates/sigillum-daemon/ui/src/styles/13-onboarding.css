@@ -2,11 +2,11 @@
 
 .trust-point {
   margin-bottom: var(--space-3);
-  padding: var(--space-3) var(--space-4);
-  background: var(--surface-2);
-  border: 1px solid var(--border);
-  border-left: 3px solid var(--accent);
-  border-radius: var(--radius-sm);
+  padding: 4px 0 4px var(--space-3);
+  background: transparent;
+  border: 0;
+  border-left: 1px solid var(--border);
+  border-radius: 0;
 }
 
 .trust-point .tp-head {
@@ -39,11 +39,11 @@
 
 .privacy-note {
   margin: var(--space-2) 0 var(--space-3);
-  padding: 10px var(--space-4);
-  background: var(--warning-tint);
-  border: 1px solid rgba(224,168,60,0.32);
-  border-left: 3px solid var(--warning);
-  border-radius: var(--radius-sm);
+  padding: 4px 0 4px var(--space-3);
+  background: transparent;
+  border: 0;
+  border-left: 1px solid var(--warning);
+  border-radius: 0;
   font-size: var(--fs-xs);
   color: var(--text-secondary);
   line-height: 1.6;

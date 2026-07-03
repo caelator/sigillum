@@ -34,6 +34,14 @@ button {
   transform: translateY(1px);
 }
 
+.btn-primary:focus-visible,
+.btn-ghost:focus-visible,
+.btn-danger:focus-visible,
+.btn-success:focus-visible {
+  outline: 2px solid var(--accent-ring);
+  outline-offset: 2px;
+}
+
 .btn-primary {
   background: var(--accent-fill);
   color: #fff;

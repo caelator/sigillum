@@ -77,6 +77,36 @@ textarea.mono {
   }
 }
 
+@media (max-width: 1100px) {
+  .topbar {
+    flex-wrap: wrap;
+    align-items: flex-start;
+  }
+
+  .topbar-heading {
+    flex: 1 1 calc(100% - 220px);
+  }
+
+  .topbar-meta {
+    margin-left: auto;
+  }
+
+  .topbar-status {
+    order: 3;
+    flex: 1 1 100%;
+    justify-content: flex-start;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .topbar-status #statusStrip {
+    flex: 1 1 260px;
+    justify-content: flex-start;
+    flex-wrap: wrap;
+    overflow: visible;
+  }
+}
+
 @media (max-width: 960px) {
   .sidebar {
     position: static;
@@ -105,6 +135,7 @@ textarea.mono {
 
   .nav-item {
     width: auto;
+    min-height: 36px;
     padding: 6px 12px;
   }
 
@@ -118,11 +149,6 @@ textarea.mono {
     flex-direction: row;
     align-items: center;
     border-top: 0;
-    padding-top: 0;
-  }
-
-  .session-controls {
-    flex-direction: row;
     padding-top: 0;
   }
 
@@ -160,10 +186,5 @@ textarea.mono {
 
   .card {
     padding: var(--space-4);
-  }
-
-  .section-divider {
-    margin-left: calc(-1 * var(--space-4));
-    margin-right: calc(-1 * var(--space-4));
   }
 }

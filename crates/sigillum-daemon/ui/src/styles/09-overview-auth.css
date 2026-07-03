@@ -23,10 +23,11 @@
 }
 
 .hero-mode {
-  padding: var(--space-3) var(--space-4);
-  background: var(--surface-2);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
+  padding: 4px 0 4px var(--space-3);
+  background: transparent;
+  border: 0;
+  border-left: 1px solid var(--border);
+  border-radius: 0;
 }
 
 .hero-mode-kicker {
@@ -41,7 +42,7 @@
   margin-top: 3px;
   font-size: var(--fs-md);
   font-weight: 650;
-  letter-spacing: -0.01em;
+  letter-spacing: 0;
 }
 
 .hero-mode-detail {
@@ -68,10 +69,11 @@
 }
 
 .context-row {
-  padding: var(--space-3) var(--space-4);
-  background: var(--surface-2);
-  border: 1px solid var(--border-faint);
-  border-radius: var(--radius);
+  padding: 4px 0 4px var(--space-3);
+  background: transparent;
+  border: 0;
+  border-left: 1px solid var(--border);
+  border-radius: 0;
   font-size: var(--fs-xs);
   color: var(--text-muted);
   line-height: 1.55;
@@ -89,7 +91,7 @@
 
 body[data-mode="unlocked"] .overview-card h2 {
   font-size: var(--fs-lg);
-  letter-spacing: -0.015em;
+  letter-spacing: 0;
 }
 
 body[data-mode="unlocked"] .overview-card .hero-context {
@@ -108,7 +110,7 @@ body:not([data-mode="unlocked"]) .overview-card {
 
 body:not([data-mode="unlocked"]) .overview-card h2 {
   font-size: var(--fs-xl);
-  letter-spacing: -0.02em;
+  letter-spacing: 0;
   line-height: 1.2;
 }
 
@@ -146,6 +148,7 @@ body[data-mode="setup"] .hero-context {
 body:not([data-mode="unlocked"]) .focus-card {
   box-shadow: var(--shadow-2);
   border-color: var(--border-strong);
+  padding: var(--space-6);
 }
 
 .field-hint {
@@ -186,6 +189,11 @@ body:not([data-mode="unlocked"]) .focus-card {
 
 .unlock-tab:hover {
   color: var(--text);
+}
+
+.unlock-tab:focus-visible {
+  outline: 2px solid var(--accent-ring);
+  outline-offset: 2px;
 }
 
 .unlock-tab.active {
