@@ -24,13 +24,13 @@ Column legend:
   audit, backup, and reset panels), or `no`.
 - **CLI** — the `sigillum api` subcommand dispatched from
   `crates/sigillum-cli/src/daemon_api.rs` (and its `daemon_api/` submodules),
-  a local `sigillum` command where noted, `planned (D1, in progress)`, or `no`.
+  a local `sigillum` command where noted, or `no`.
 - **Decision** — why any missing surface is deliberate.
 
-D1-planned CLI additions (`transit`, read-only `evm`, `wallets`
-export/derive/check/generate, `api compartment list`) are being implemented in
-a parallel task; they are marked `planned (D1, in progress)` and must not be
-treated as existing until D1 lands.
+The D1 CLI additions (`sigillum api transit`, read-only `sigillum api evm`,
+`sigillum api wallets` export/derive/check/generate, and
+`sigillum api compartment list`) have landed; the rows below name the actual
+commands.
 
 | # | Family | Routes (`/api/...` unless noted) | UI | CLI | Decision / rationale |
 |---|--------|----------------------------------|----|-----|----------------------|
@@ -44,17 +44,17 @@ treated as existing until D1 lands.
 | 8 | Audit | `audit`, `audit/verify`, `audit/run` | `app.ts` (recent events) | `sigillum audit` (query + verify); `audit/run` is written by `sigillum run` | `audit/run` is a programmatic recorder used by the `sigillum run` wrapper, not an interactive action; query/verify are covered on both surfaces. |
 | 9 | Setup reset | `setup/reset` | `app.ts` typed-confirmation reset flow | no | Decision (D2): destructive; UI typed-confirmation only — never scriptable, so a reset cannot land in shell history. |
 | 10 | Backup snapshot | `backup/export`, `backup/restore` | `app.ts` | local equivalent: `sigillum backup export\|restore` (offline, direct data-dir; does not call these routes) | CLI stays offline-local by design so restore works without a running daemon; the daemon routes are UI-covered. |
-| 11 | Compartments (visible ops) | `compartment/list`, `compartment/init`, `compartment/switch` | `app.ts` (list/switch), `setup.ts` (init wizard) | `sigillum api switch`; local `sigillum compartment list\|switch`; `sigillum api compartment list`: planned (D1, in progress) | Decision (D2): `init` is destructive-adjacent and runs inside the guided UI setup wizard. |
+| 11 | Compartments (visible ops) | `compartment/list`, `compartment/init`, `compartment/switch` | `app.ts` (list/switch), `setup.ts` (init wizard) | `sigillum api switch`; local `sigillum compartment list\|switch`; `sigillum api compartment list` | Decision (D2): `init` is destructive-adjacent and runs inside the guided UI setup wizard. |
 | 12 | Compartments (add/remove) | `compartment/add`, `compartment/remove` | no (today) | no | Decision (D2): destructive; the operator path is a UI typed-confirmation flow (same pattern as setup/reset), deliberately not CLI. API-only until that UI flow lands. |
 | 13 | API-key CRUD (daemon-side) | `api-keys`, `api-keys/get`, `api-keys/set`, `api-keys/delete` | `app.ts` | no remote CRUD; local `sigillum set-api\|get-api\|delete-api` covers the standalone FileVault | Decision (D2): UI covers daemon-side CRUD; local CLI covers the standalone FileVault; no `sigillum api` CRUD so secret values stay out of shell history. |
 | 14 | Secret CRUD (daemon-side) | `secrets`, `secrets/get`, `secrets/set`, `secrets/delete`, `secrets/push` | `app.ts` | no remote CRUD; local `sigillum set\|get\|delete\|list\|push` covers the standalone FileVault | Decision (D2): same as api-keys — UI covers daemon-side CRUD; local CLI covers the FileVault. |
 | 15 | Secret batch resolution | `secrets/resolve-batch` | no | consumed by `sigillum run` (env injection) | Programmatic-only endpoint; its operator surface is `sigillum run`, which resolves secrets into a child-process environment. |
 | 16 | Generate-and-store | `generate/store` | no | `sigillum generate` | Covered by CLI; generated material is stored server-side. |
-| 17 | Transit crypto | `transit/encrypt`, `transit/decrypt`, `transit/hmac` | no | planned (D1, in progress): `sigillum api transit encrypt\|decrypt\|hmac` | Machine-to-machine crypto operations; CLI is the right surface, no UI need. |
-| 18 | EVM read-only | `evm/nonce`, `evm/balance`, `evm/erc20-balance`, `evm/fees/estimate` | no | planned (D1, in progress): `sigillum api evm nonce\|balance\|erc20-balance\|fees estimate` | Read-only chain queries are scriptable; D1 adds them and explicitly excludes `broadcast`. |
+| 17 | Transit crypto | `transit/encrypt`, `transit/decrypt`, `transit/hmac` | no | `sigillum api transit encrypt\|decrypt\|hmac` | Machine-to-machine crypto operations; CLI is the right surface, no UI need. |
+| 18 | EVM read-only | `evm/nonce`, `evm/balance`, `evm/erc20-balance`, `evm/fees/estimate` | no | `sigillum api evm nonce\|balance\|erc20-balance\|fees estimate` | Read-only chain queries are scriptable; D1 adds them and explicitly excludes `broadcast`. |
 | 19 | EVM broadcast | `evm/broadcast` | no | no — permanent | Decision (D2): no CLI — hazard: signed payloads in shell history and no plan review. Programmatic API/SDK callers only; interactive sends go through plans + queue. |
 | 20 | Wallet profiles | `profiles/evm` (+`/upsert`,`/delete`), `profiles/eth-stealth` (+`/upsert`,`/delete`), `profiles/eth-xpub` (+`/upsert`,`/delete`), `profiles/eth-seed` (+`/upsert`,`/create`,`/delete`) — 13 routes | `wallets.ts`, `walletManager.ts`, `journey.ts` | `sigillum api profiles <evm\|stealth\|eth-xpub\|eth-seed> <list\|upsert\|create\|delete>` | Fully covered. |
-| 21 | Wallet key ops (read/derive, no spend) | `wallets/eth-xpub/export`, `wallets/eth-xpub/derive`, `wallets/eth-stealth/export`, `wallets/eth-stealth/generate`, `wallets/eth-stealth/check` | `wallets.ts` (both exports + derive); generate/check not in UI yet | planned (D1, in progress): `sigillum api wallets xpub-export\|xpub-derive\|stealth-export\|stealth-generate\|stealth-check` | No sign/send in this family, so it is safe to script; D1 adds the CLI. |
+| 21 | Wallet key ops (read/derive, no spend) | `wallets/eth-xpub/export`, `wallets/eth-xpub/derive`, `wallets/eth-stealth/export`, `wallets/eth-stealth/generate`, `wallets/eth-stealth/check` | `wallets.ts` (both exports + derive); generate/check not in UI yet | `sigillum api wallets xpub-export\|xpub-derive\|stealth-export\|stealth-generate\|stealth-check` | No sign/send in this family, so it is safe to script; D1 adds the CLI. |
 | 22 | Wallet sign/send | `wallets/eth-stealth/sign`, `.../sign-transfer`, `.../sign-erc20-transfer`, `.../send-transfer`, `.../send-erc20-transfer`, `.../send-with-profile`, `.../send-erc20-with-profile` | no | no — permanent | Decision (D2): same hazard as `evm/broadcast` — shell history plus no plan review. Interactive spending goes through consolidation plans + queue (review/approve); programmatic callers use the API/SDK. |
 | 23 | Inventory registry | `inventory/wallets`, `inventory/chains` (+`/upsert`,`/delete`), `inventory/scan/evm`, `inventory/watch-addresses` (+`/upsert`,`/delete`) | `inventory.ts` (+ `journey.ts`, `walletManager.ts`) | `sigillum api inventory <list\|chains\|watch\|scan-evm>` | Fully covered. |
 | 24 | Discovery jobs | `discovery/jobs`, `discovery/jobs/cancel`, `discovery/jobs/resume` | `inventory.ts` (cancel/resume; the job list itself is surfaced via the scan flow, not fetched directly) | `sigillum api discovery jobs <list\|cancel\|resume>` | Covered; the UI job-list gap is cosmetic and the CLI lists jobs. |

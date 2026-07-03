@@ -1421,23 +1421,23 @@ Phase A — Land the desktop branch
 - [x] A3 Merged to main
 
 Phase B — Workspace hygiene
-- [ ] B1 publish=false + README dependency framing
-- [ ] B2 expect() burn-down (≤4 justified sites)
-- [ ] B3 dead_code allows resolved
-- [ ] B4 test floors for untested crates
+- [x] B1 publish=false + README dependency framing
+- [x] B2 expect() burn-down (≤4 justified sites)
+- [x] B3 dead_code allows resolved
+- [x] B4 test floors for untested crates
 
 Phase C — Desktop productization
-- [ ] C1 real icon set
-- [ ] C2 bundling enabled (.app/.dmg)
-- [ ] C3 env-gated signing, unsigned default documented
+- [x] C1 real icon set
+- [x] C2 bundling enabled (.app/.dmg)
+- [x] C3 env-gated signing, unsigned default documented
 - [ ] C4 check-desktop.sh in the release gate
-- [ ] C5 boot helpers extracted + tested
-- [ ] C6 desktop docs
+- [x] C5 boot helpers extracted + tested
+- [x] C6 desktop docs
 - [ ] C7 operator console UX redesign (user-directed)
 
 Phase D — Operator-surface parity
-- [ ] D1 CLI: transit, evm read-only, wallets read/derive, compartment list
-- [ ] D2 docs/operator-surface-parity.md complete
+- [x] D1 CLI: transit, evm read-only, wallets read/derive, compartment list
+- [x] D2 docs/operator-surface-parity.md complete
 
 Phase E — Automation & recovery
 - [ ] E1 queue state model extended (operator_action_required, deferred semantics)
@@ -1525,3 +1525,16 @@ Phase H — Ship
 - 2026-07-03 A2+A3 fd2b35b: PR #1 green on both legs, squash-merged to
   main, branch deleted. Phase A complete; B/C/D are unblocked and may run
   in parallel.
+- 2026-07-03 Wave 1 (B1-B4, C1-C3, C5, C6, D1, D2) implemented by eight
+  parallel codex-exec agents in isolated worktrees and integrated on
+  wave/1-bcd. Highlights: KDF/daemon-init/client/gateway-config made
+  fallible (B2, 3 justified expect sites remain); desktop bundles as
+  ad-hoc-signed .app/.dmg with generated icons (C1-C3); desktop boot
+  helpers extracted with 6 tests (C5); 14 new scriptable CLI commands, no
+  sign/send/broadcast (D1, 53 smoke tests); 121/121 routes covered in the
+  parity matrix (D2); serde roundtrip anchor for W2 (B4). Integration
+  fixups: two test callers adapted to fallible SigillumClient::new; parity
+  doc rows flipped from planned to landed. Deviation note: wave tasks
+  batched into one PR (per-task worktree branches preserved) to bound CI
+  wall-clock; C4 follows as its own PR; C7 (UX redesign) pending operator
+  screenshot review.

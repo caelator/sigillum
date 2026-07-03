@@ -16,7 +16,8 @@ pub mod prelude {
 mod tests {
     #[test]
     fn prelude_client_and_core_reexports_are_available() {
-        let client = crate::prelude::SigillumClient::new("http://127.0.0.1:3200");
+        let client = crate::prelude::SigillumClient::new("http://127.0.0.1:3200")
+            .expect("client builds");
         let config = crate::VaultConfig::default();
 
         assert_eq!(client.session_token(), None);

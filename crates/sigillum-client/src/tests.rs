@@ -17,7 +17,7 @@ struct TestState;
 
 #[test]
 fn constructor_normalizes_base_url_without_session_token() {
-    let client = SigillumClient::new("http://127.0.0.1:3200///");
+    let client = SigillumClient::new("http://127.0.0.1:3200///").expect("client builds");
 
     assert_eq!(client.session_token(), None);
     assert_eq!(

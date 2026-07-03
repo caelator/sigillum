@@ -7,3 +7,4 @@ crates/sigillum-daemon/ui/.tmp/
 .DS_Store
 .env
 .gitnexus
+.claude/worktrees/
