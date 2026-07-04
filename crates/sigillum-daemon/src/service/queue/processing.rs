@@ -57,6 +57,7 @@ impl SigillumService {
         let mut succeeded = 0usize;
         let mut blocked = 0usize;
         let mut retrying = 0usize;
+        let operator_action_required = 0usize;
         let mut failed = 0usize;
 
         for job in queue.jobs.iter_mut() {
@@ -236,6 +237,7 @@ impl SigillumService {
             succeeded,
             blocked,
             retrying,
+            operator_action_required,
             failed,
             jobs: processed,
         })

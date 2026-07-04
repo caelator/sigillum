@@ -299,6 +299,8 @@ pub struct DiagnosticsResponse {
     pub retrying_queue_job_count: usize,
     #[serde(default)]
     pub failed_queue_job_count: usize,
+    #[serde(default)]
+    pub operator_action_required_queue_job_count: usize,
     pub deferred_queue_job_count: usize,
     #[serde(default)]
     pub startup_interrupted_operation_count: usize,
@@ -889,6 +891,8 @@ pub struct MaintenanceRunResponse {
     pub blocked: usize,
     #[serde(default)]
     pub retrying: usize,
+    #[serde(default)]
+    pub operator_action_required: usize,
     pub failed: usize,
     pub deposits: Vec<EthStealthDeposit>,
     pub jobs: Vec<QueueJob>,

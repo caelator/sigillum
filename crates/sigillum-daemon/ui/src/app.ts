@@ -1194,6 +1194,7 @@ async function loadDiagnostics() {
       statBox(String(r.blocked_queue_job_count ?? 0), 'Blocked Jobs'),
       statBox(String(r.retrying_queue_job_count ?? 0), 'Retrying Jobs'),
       statBox(String(r.failed_queue_job_count ?? 0), 'Failed Jobs'),
+      statBox(String(r.operator_action_required_queue_job_count ?? 0), 'Action Jobs'),
       statBox(String(r.startup_recovered_queue_job_count ?? 0), 'Recovered Jobs'),
       statBox(String(r.startup_reconciled_deposit_count ?? 0), 'Recovered Deposits'),
       statBox(

@@ -265,6 +265,7 @@ async fn diagnostics_route(headers: HeaderMap) -> (StatusCode, Json<serde_json::
             "blocked_queue_job_count": 0,
             "retrying_queue_job_count": 0,
             "failed_queue_job_count": 0,
+            "operator_action_required_queue_job_count": 0,
             "deferred_queue_job_count": 0,
             "startup_interrupted_operation_count": 0,
             "startup_recovered_queue_job_count": 0,
@@ -1708,6 +1709,7 @@ async fn diagnostics_reads_operational_metadata() {
     assert_eq!(response.blocked_queue_job_count, 0);
     assert_eq!(response.retrying_queue_job_count, 0);
     assert_eq!(response.failed_queue_job_count, 0);
+    assert_eq!(response.operator_action_required_queue_job_count, 0);
     assert_eq!(response.deferred_queue_job_count, 0);
     assert_eq!(response.startup_interrupted_operation_count, 0);
     assert_eq!(response.startup_recovered_queue_job_count, 0);
@@ -2060,6 +2062,7 @@ async fn profile_and_queue_helpers_roundtrip_response_shapes() {
     assert_eq!(processed.succeeded, 1);
     assert_eq!(processed.blocked, 0);
     assert_eq!(processed.retrying, 0);
+    assert_eq!(processed.operator_action_required, 0);
 
     let deposits = client.list_eth_stealth_deposits().await.unwrap();
     assert_eq!(deposits[0].id, "dep-1");

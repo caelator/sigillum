@@ -8,7 +8,8 @@ use crate::service::helpers::now_unix;
 
 use super::{
     QUEUE_STATE_BLOCKED, QUEUE_STATE_FAILED_TERMINAL, QUEUE_STATE_LEGACY_DEFERRED,
-    QUEUE_STATE_LEGACY_FAILED, QUEUE_STATE_QUEUED, QUEUE_STATE_RETRYING, QUEUE_STATE_SENT,
+    QUEUE_STATE_LEGACY_FAILED, QUEUE_STATE_OPERATOR_ACTION_REQUIRED, QUEUE_STATE_QUEUED,
+    QUEUE_STATE_RETRYING, QUEUE_STATE_SENT,
 };
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -16,6 +17,7 @@ pub(in crate::service) struct QueueStateCounts {
     pub blocked: usize,
     pub retrying: usize,
     pub failed: usize,
+    pub operator_action_required: usize,
     pub deferred_legacy: usize,
 }
 
@@ -38,6 +40,7 @@ pub(in crate::service) fn count_queue_states(
             QUEUE_STATE_BLOCKED => counts.blocked += 1,
             QUEUE_STATE_RETRYING => counts.retrying += 1,
             QUEUE_STATE_FAILED_TERMINAL | QUEUE_STATE_LEGACY_FAILED => counts.failed += 1,
+            QUEUE_STATE_OPERATOR_ACTION_REQUIRED => counts.operator_action_required += 1,
             QUEUE_STATE_LEGACY_DEFERRED => counts.deferred_legacy += 1,
             _ => {}
         }
@@ -60,6 +63,7 @@ pub(in crate::service) fn queue_status(state: &str) -> String {
     match normalize_queue_state(state) {
         QUEUE_STATE_SENT => "sweep_sent",
         QUEUE_STATE_FAILED_TERMINAL => "sweep_failed",
+        QUEUE_STATE_OPERATOR_ACTION_REQUIRED => "sweep_operator_action_required",
         QUEUE_STATE_BLOCKED => "sweep_blocked",
         QUEUE_STATE_RETRYING => "sweep_retrying",
         QUEUE_STATE_QUEUED => "sweep_queued",
@@ -78,9 +82,14 @@ pub(super) fn normalize_queue_state(state: &str) -> &str {
 
 pub(in crate::service) fn recover_queue_job(job: &mut QueueJob) -> bool {
     let mut changed = false;
+    let legacy_deferred = job.state == QUEUE_STATE_LEGACY_DEFERRED;
     let normalized_state = normalize_queue_state(&job.state);
     if normalized_state != job.state {
         job.state = normalized_state.into();
+        changed = true;
+    }
+    if legacy_deferred && job.last_error.is_none() {
+        job.last_error = Some("legacy deferred queue job normalized to blocked".into());
         changed = true;
     }
 
@@ -102,6 +111,7 @@ pub(super) fn queue_job_is_runnable(job: &QueueJob, force_target: bool, now: u64
         QUEUE_STATE_RETRYING => {
             force_target || job.next_attempt_after_unix.unwrap_or_default() <= now
         }
+        QUEUE_STATE_OPERATOR_ACTION_REQUIRED => false,
         _ => false,
     }
 }
@@ -163,6 +173,10 @@ mod tests {
     fn queue_status_normalizes_legacy_states() {
         assert_eq!(queue_status("deferred"), "sweep_blocked");
         assert_eq!(queue_status("failed"), "sweep_failed");
+        assert_eq!(
+            queue_status("operator_action_required"),
+            "sweep_operator_action_required"
+        );
         assert_eq!(queue_status("sent"), "sweep_sent");
     }
 
@@ -174,6 +188,7 @@ mod tests {
                 sample_job("retrying", Some(10)),
                 sample_job("failed_terminal", None),
                 sample_job("failed", None),
+                sample_job("operator_action_required", None),
                 sample_job("deferred", None),
             ],
         };
@@ -181,6 +196,7 @@ mod tests {
         assert_eq!(counts.blocked, 1);
         assert_eq!(counts.retrying, 1);
         assert_eq!(counts.failed, 2);
+        assert_eq!(counts.operator_action_required, 1);
         assert_eq!(counts.deferred_legacy, 1);
     }
 
@@ -189,6 +205,19 @@ mod tests {
         let mut deferred = sample_job("deferred", None);
         assert!(recover_queue_job(&mut deferred));
         assert_eq!(deferred.state, "blocked");
+        assert_eq!(
+            deferred.last_error.as_deref(),
+            Some("legacy deferred queue job normalized to blocked")
+        );
+
+        let mut deferred_with_reason = sample_job("deferred", None);
+        deferred_with_reason.last_error = Some("waiting for gas".into());
+        assert!(recover_queue_job(&mut deferred_with_reason));
+        assert_eq!(deferred_with_reason.state, "blocked");
+        assert_eq!(
+            deferred_with_reason.last_error.as_deref(),
+            Some("waiting for gas")
+        );
 
         let mut retrying = sample_job("retrying", None);
         assert!(recover_queue_job(&mut retrying));
@@ -197,6 +226,10 @@ mod tests {
         let mut queued = sample_job("queued", Some(10));
         assert!(recover_queue_job(&mut queued));
         assert!(queued.next_attempt_after_unix.is_none());
+
+        let mut operator_action_required = sample_job("operator_action_required", None);
+        assert!(!recover_queue_job(&mut operator_action_required));
+        assert_eq!(operator_action_required.state, "operator_action_required");
     }
 
     #[test]
@@ -224,6 +257,16 @@ mod tests {
         assert!(queue_job_is_runnable(
             &sample_job("retrying", Some(5)),
             false,
+            10
+        ));
+        assert!(!queue_job_is_runnable(
+            &sample_job("operator_action_required", None),
+            false,
+            10
+        ));
+        assert!(!queue_job_is_runnable(
+            &sample_job("operator_action_required", None),
+            true,
             10
         ));
         assert!(!queue_job_is_runnable(&sample_job("sent", None), false, 10));

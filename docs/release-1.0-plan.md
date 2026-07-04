@@ -652,6 +652,12 @@ A → (B ∥ C ∥ D) → E → (W1 ∥ W2) → (W3 ∥ W4 ∥ W5 ∥ W6) → W7
      the PR, and keep legacy normalization working either way.
   4. Surface any new states + reasons in API/UI/CLI; tests per new
      transition.
+- **E1 implementation decision (2026-07-03):** producer search found no active
+  producer of legacy `deferred`; keep it legacy-only and preserve the existing
+  `deferred` → `blocked` normalization. Recovery records a missing reason when
+  it performs that normalization. `operator_action_required` is added as a
+  distinct non-runnable persisted state; explicit reapprove/cancel endpoints
+  remain out of E1 and belong with the later approval semantics.
 - **Accept:** pre-change v1 queue fixture loads unchanged; existing state
   strings byte-identical on the wire; `operator_action_required` exists,
   is never auto-retried, and round-trips restart. **Verify:**
