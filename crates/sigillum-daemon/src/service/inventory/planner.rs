@@ -620,6 +620,8 @@ mod tests {
             id: format!("alloc_{}", short_form(address, 6)),
             wallet_family: WALLET_FAMILY_ETH_SEED.into(),
             wallet_profile: "seed-main".into(),
+            chain_id: 1,
+            chain_id_assumed: false,
             address: address.into(),
             derivation_path: "m/44'/60'/0'/0/5".into(),
             address_index: 5,

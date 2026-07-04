@@ -366,6 +366,8 @@ export interface TreasuryReceiveAllocation {
   id: string;
   wallet_family: string;
   wallet_profile: string;
+  chain_id: number;
+  chain_id_assumed?: boolean;
   address: string;
   derivation_path: string;
   address_index: number;
@@ -389,6 +391,7 @@ export interface ReceivingItem {
   source_type: string;
   address: string;
   chain_id: number;
+  chain_id_assumed?: boolean;
   derivation_path?: string | null;
   purpose?: string | null;
   label?: string | null;

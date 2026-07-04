@@ -871,6 +871,8 @@ fn test_eth_stealth_deposit_roundtrip() {
         status: "funded".to_string(),
         asset_kind: "native".to_string(),
         wallet_profile: "wallet1".to_string(),
+        chain_id: 1,
+        chain_id_assumed: false,
         wallet_compartment_id: 1,
         provider_compartment_id: 1,
         wallet: "0xwallet".to_string(),
@@ -906,6 +908,51 @@ fn test_eth_stealth_deposit_roundtrip() {
         counterparty_id: None,
     };
     roundtrip_test(deposit);
+}
+
+#[test]
+fn test_eth_stealth_deposit_legacy_chain_defaults() {
+    let deposit = EthStealthDeposit {
+        id: "deposit_1".to_string(),
+        status: "funded".to_string(),
+        asset_kind: "native".to_string(),
+        wallet_profile: "wallet1".to_string(),
+        chain_id: 8453,
+        chain_id_assumed: false,
+        wallet_compartment_id: 1,
+        provider_compartment_id: 1,
+        wallet: "0xwallet".to_string(),
+        short_name: "w1".to_string(),
+        stealth_meta_address: "st:0x...".to_string(),
+        stealth_address: "0xstealth".to_string(),
+        ephemeral_public_key_hex: "0xeph".to_string(),
+        view_tag_hex: "0xaa".to_string(),
+        announcement: None,
+        token_address: None,
+        expected_amount_hex: None,
+        observed_amount_hex: Some("0x100".to_string()),
+        observed_native_balance_wei_hex: Some("0x200".to_string()),
+        auto_queue_sweep: true,
+        sweep_destination_address: None,
+        min_sweep_amount_hex: None,
+        queue_job_id: None,
+        queue_job_state: None,
+        note: Some("test deposit".to_string()),
+        created_at_unix: 1000000,
+        updated_at_unix: 1000001,
+        last_checked_at_unix: Some(1000002),
+        broadcast_transaction_hash_hex: None,
+        counterparty_id: None,
+    };
+    let mut json = serde_json::to_value(deposit).unwrap();
+    let object = json.as_object_mut().unwrap();
+    object.remove("chain_id");
+    object.remove("chain_id_assumed");
+
+    let legacy: EthStealthDeposit = serde_json::from_value(json).unwrap();
+
+    assert_eq!(legacy.chain_id, 1);
+    assert!(legacy.chain_id_assumed);
 }
 
 #[test]
@@ -1478,6 +1525,8 @@ fn sample_receive_allocation() -> TreasuryReceiveAllocation {
         id: "alloc_1".to_string(),
         wallet_family: "eth-seed".to_string(),
         wallet_profile: "seed-main".to_string(),
+        chain_id: 1,
+        chain_id_assumed: false,
         address: "0x1111111111111111111111111111111111111111".to_string(),
         derivation_path: "m/44'/60'/0'/0/5".to_string(),
         address_index: 5,
@@ -1513,6 +1562,13 @@ fn test_treasury_receive_allocation_responses_roundtrip() {
         status: "allocated".to_string(),
         allocation: sample_receive_allocation(),
     });
+    let mut json = serde_json::to_value(sample_receive_allocation()).unwrap();
+    let object = json.as_object_mut().unwrap();
+    object.remove("chain_id");
+    object.remove("chain_id_assumed");
+    let legacy: TreasuryReceiveAllocation = serde_json::from_value(json).unwrap();
+    assert_eq!(legacy.chain_id, 1);
+    assert!(legacy.chain_id_assumed);
     roundtrip_test(ReceivingRefreshResponse {
         generated_at_unix: 99,
         addresses_requested: 3,

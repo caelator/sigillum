@@ -186,6 +186,10 @@ pub struct TreasuryReceiveAllocation {
     pub id: String,
     pub wallet_family: String,
     pub wallet_profile: String,
+    #[serde(default = "default_legacy_mainnet_chain_id")]
+    pub chain_id: u64,
+    #[serde(default = "default_legacy_chain_id_assumed")]
+    pub chain_id_assumed: bool,
     pub address: String,
     pub derivation_path: String,
     pub address_index: u32,
@@ -254,6 +258,8 @@ pub struct ReceivingItem {
     pub source_type: String,
     pub address: String,
     pub chain_id: u64,
+    #[serde(default = "default_legacy_chain_id_assumed")]
+    pub chain_id_assumed: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub derivation_path: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -320,4 +326,12 @@ pub struct ReceivingRefreshResponse {
     pub provider_status: String,
     #[serde(default)]
     pub errors: Vec<String>,
+}
+
+fn default_legacy_mainnet_chain_id() -> u64 {
+    1
+}
+
+fn default_legacy_chain_id_assumed() -> bool {
+    true
 }

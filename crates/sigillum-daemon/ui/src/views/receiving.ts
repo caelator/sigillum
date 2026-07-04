@@ -113,6 +113,7 @@ function renderReceivingItem(
     "<br>" +
     "chain=" +
     esc(String(item.chain_id)) +
+    (item.chain_id_assumed ? " (assumed mainnet)" : "") +
     (item.derivation_path ? " · path=" + esc(item.derivation_path) : "") +
     " · created=" +
     esc(formatTs(item.created_at_unix)) +

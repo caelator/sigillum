@@ -332,8 +332,8 @@ fn hd_receiving_item(
     ReceivingItem {
         source_type: "hd".into(),
         address: allocation.address.clone(),
-        // Increment B1 is EVM mainnet only; allocations do not yet persist chain_id.
-        chain_id: 1,
+        chain_id: allocation.chain_id,
+        chain_id_assumed: allocation.chain_id_assumed,
         derivation_path: Some(allocation.derivation_path.clone()),
         purpose: Some(allocation.purpose.clone()),
         label: allocation.label.clone(),
@@ -350,7 +350,8 @@ fn stealth_receiving_item(deposit: &EthStealthDeposit) -> ReceivingItem {
     ReceivingItem {
         source_type: "stealth".into(),
         address: deposit.stealth_address.clone(),
-        chain_id: 1,
+        chain_id: deposit.chain_id,
+        chain_id_assumed: deposit.chain_id_assumed,
         derivation_path: None,
         purpose: None,
         label: deposit.note.clone(),
@@ -1174,6 +1175,7 @@ impl SigillumService {
         let Some(wallet) = wallets.into_iter().next() else {
             return Err(ServiceError::not_found("Wallet profile not found."));
         };
+        let chain_id = provider_chain_id_for_discovery_wallet(&registry, &wallet)?;
 
         let next_index = next_receive_index(
             &state.receive_allocations,
@@ -1191,6 +1193,8 @@ impl SigillumService {
             id: random_id(),
             wallet_family: wallet.family.clone(),
             wallet_profile: wallet.profile.clone(),
+            chain_id,
+            chain_id_assumed: false,
             address: derived.address,
             derivation_path: format!("{}/{}", wallet.receive_path, next_index),
             address_index: next_index,
@@ -1204,6 +1208,33 @@ impl SigillumService {
         state.receive_allocations.push(allocation.clone());
         Ok(allocation)
     }
+}
+
+fn provider_chain_id_for_discovery_wallet(
+    registry: &crate::profiles::ProfileRegistry,
+    wallet: &super::wallet_selection::DiscoveryWallet,
+) -> ServiceResult<u64> {
+    let provider_profile = match wallet.family.as_str() {
+        WALLET_FAMILY_ETH_SEED => registry
+            .eth_seed_wallets
+            .iter()
+            .find(|profile| profile.name == wallet.profile)
+            .map(|profile| profile.provider_profile.as_str()),
+        WALLET_FAMILY_ETH_XPUB => registry
+            .eth_xpub_wallets
+            .iter()
+            .find(|profile| profile.name == wallet.profile)
+            .map(|profile| profile.provider_profile.as_str()),
+        _ => None,
+    }
+    .ok_or_else(|| ServiceError::not_found("Wallet profile not found."))?;
+
+    registry
+        .evm_providers
+        .iter()
+        .find(|provider| provider.name == provider_profile)
+        .map(|provider| provider.chain_id)
+        .ok_or_else(|| ServiceError::not_found("Provider profile not found."))
 }
 
 /// Console rollup of allocation counts and distinct active purposes.
@@ -1688,6 +1719,8 @@ mod tests {
             id: format!("alloc_{wallet_profile}_{address_index}"),
             wallet_family: "eth-seed".into(),
             wallet_profile: wallet_profile.into(),
+            chain_id: 1,
+            chain_id_assumed: false,
             address: "0x1111111111111111111111111111111111111111".into(),
             derivation_path: format!("m/44'/60'/0'/0/{address_index}"),
             address_index,
@@ -1737,6 +1770,8 @@ mod tests {
             id: id.into(),
             wallet_family: "eth-xpub".into(),
             wallet_profile: "mainnet-xpub".into(),
+            chain_id: 1,
+            chain_id_assumed: false,
             address: address.into(),
             derivation_path: "m/44'/60'/0'/0/0".into(),
             address_index: 0,
@@ -1786,6 +1821,8 @@ mod tests {
             status: "detected".into(),
             asset_kind: "native".into(),
             wallet_profile: "mainnet-xpub".into(),
+            chain_id: 1,
+            chain_id_assumed: false,
             wallet_compartment_id: 0,
             provider_compartment_id: 0,
             wallet: "mainnet-xpub".into(),
@@ -1889,5 +1926,40 @@ mod tests {
         assert_eq!(summary.purposes, 2);
 
         assert_eq!(receive_summary(&[]), TreasuryReceiveSummary::default());
+    }
+
+    #[test]
+    fn hd_receiving_item_uses_allocation_chain_id_and_assumption_marker() {
+        let mut allocation = receiving_allocation(
+            "alloc-base",
+            "0x1111111111111111111111111111111111111111",
+            RECEIVE_STATUS_ACTIVE,
+            None,
+            1,
+        );
+        allocation.chain_id = 8453;
+        allocation.chain_id_assumed = true;
+
+        let item = hd_receiving_item(&allocation, &BTreeMap::new());
+
+        assert_eq!(item.chain_id, 8453);
+        assert!(item.chain_id_assumed);
+    }
+
+    #[test]
+    fn stealth_receiving_item_uses_deposit_chain_id_and_assumption_marker() {
+        let mut deposit = receiving_stealth_deposit(
+            "dep-base",
+            "0x2222222222222222222222222222222222222222",
+            Some("0x1"),
+            None,
+        );
+        deposit.chain_id = 8453;
+        deposit.chain_id_assumed = true;
+
+        let item = stealth_receiving_item(&deposit);
+
+        assert_eq!(item.chain_id, 8453);
+        assert!(item.chain_id_assumed);
     }
 }

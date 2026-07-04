@@ -17,7 +17,34 @@ pub struct DepositState {
 }
 
 impl JsonDocument for DepositState {
-    const SCHEMA: JsonSchema = JsonSchema::new("sigillum.deposits", 1);
+    const SCHEMA: JsonSchema = JsonSchema::new("sigillum.deposits", 2);
+
+    fn from_enveloped_json(
+        path: &std::path::Path,
+        version: u32,
+        data: serde_json::Value,
+    ) -> Result<Self, std::io::Error> {
+        match version {
+            1 | 2 => serde_json::from_value(data).map_err(|error| {
+                std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    format!(
+                        "failed to parse sigillum.deposits schema payload {}: {error}",
+                        path.display()
+                    ),
+                )
+            }),
+            _ => Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!(
+                    "unsupported sigillum.deposits schema version {} in {}; expected {}",
+                    version,
+                    path.display(),
+                    Self::SCHEMA.version
+                ),
+            )),
+        }
+    }
 }
 
 pub fn load_deposits(base_dir: &std::path::Path) -> Result<DepositState, std::io::Error> {
@@ -50,6 +77,8 @@ mod tests {
             status: "pending".into(),
             asset_kind: "native".into(),
             wallet_profile: "wallet-a".into(),
+            chain_id: 1,
+            chain_id_assumed: false,
             wallet_compartment_id: 0,
             provider_compartment_id: 0,
             wallet: "wallet-a".into(),
@@ -121,7 +150,7 @@ mod tests {
         let saved: serde_json::Value =
             serde_json::from_slice(&std::fs::read(deposits_path(dir.path())).unwrap()).unwrap();
         assert_eq!(saved["schema"], json!("sigillum.deposits"));
-        assert_eq!(saved["schema_version"], json!(1));
+        assert_eq!(saved["schema_version"], json!(2));
         assert!(saved["data"]["eth_stealth"].is_array());
     }
 
@@ -135,5 +164,44 @@ mod tests {
 
         let loaded = load_deposits(dir.path()).unwrap();
         assert_eq!(loaded.eth_stealth.len(), 1);
+    }
+
+    #[test]
+    fn legacy_v1_deposits_load_with_assumed_mainnet_chain_id() {
+        let dir = TempDir::new().unwrap();
+        let path = deposits_path(dir.path());
+        std::fs::write(
+            &path,
+            serde_json::to_vec_pretty(&json!({
+                "schema": "sigillum.deposits",
+                "schema_version": 1,
+                "data": {
+                    "eth_stealth": [{
+                        "id": "dep_1",
+                        "status": "pending",
+                        "asset_kind": "native",
+                        "wallet_profile": "wallet-a",
+                        "wallet_compartment_id": 0,
+                        "provider_compartment_id": 0,
+                        "wallet": "wallet-a",
+                        "short_name": "eth",
+                        "stealth_meta_address": "st:eth:example",
+                        "stealth_address": "0x0000000000000000000000000000000000000001",
+                        "ephemeral_public_key_hex": "0x02",
+                        "view_tag_hex": "0xaa",
+                        "auto_queue_sweep": false,
+                        "created_at_unix": 1,
+                        "updated_at_unix": 1
+                    }]
+                }
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+
+        let loaded = load_deposits(dir.path()).unwrap();
+
+        assert_eq!(loaded.eth_stealth[0].chain_id, 1);
+        assert!(loaded.eth_stealth[0].chain_id_assumed);
     }
 }

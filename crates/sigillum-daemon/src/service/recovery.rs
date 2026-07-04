@@ -294,6 +294,8 @@ mod tests {
             status: "pending".into(),
             asset_kind: "native".into(),
             wallet_profile: "payments".into(),
+            chain_id: 1,
+            chain_id_assumed: false,
             wallet_compartment_id: 0,
             provider_compartment_id: 0,
             wallet: "payments".into(),
