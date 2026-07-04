@@ -733,11 +733,16 @@
         <div class="form-row">
           <input type="text" id="chainProfileName" placeholder="Chain profile name">
           <input type="text" id="chainProfileFamily" placeholder="Family (evm, bitcoin, solana)">
-          <input type="number" id="chainProfileId" placeholder="Chain ID (optional)" class="input-mid">
+          <input type="number" id="chainProfileId" placeholder="Chain ID" class="input-mid">
         </div>
         <div class="form-row">
           <input type="text" id="chainProfileProvider" placeholder="Provider profile (optional)">
           <input type="text" id="chainProfileNativeSymbol" placeholder="Native symbol (optional)">
+          <input type="number" id="chainProfileNativeDecimals" placeholder="Decimals" value="18" class="input-mid">
+        </div>
+        <div class="form-row">
+          <input type="number" id="chainProfileFinalityBlocks" placeholder="Finality blocks" class="input-mid">
+          <input type="text" id="chainProfilePermit2Address" placeholder="Permit2 override (optional)">
           <button class="btn-primary" data-action="upsertChainProfile">Save Chain</button>
         </div>
         <div id="chainProfileList"></div>

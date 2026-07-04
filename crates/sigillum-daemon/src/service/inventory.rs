@@ -56,6 +56,7 @@ use wallet_selection::{
 };
 use watch_discovery::select_watch_addresses;
 
+use super::chains::{chain_profile_for_id, ensure_builtin_chain_profiles};
 use super::evm::normalize_address;
 use super::helpers::{map_xpub_error, now_unix, random_id};
 use super::{ServiceError, ServiceResult, SigillumService};
@@ -110,21 +111,72 @@ impl SigillumService {
         let mut state = load_inventory_state(&self.state.base_dir)?;
         let now = now_unix();
         let name = trimmed_required("name", &body.name)?;
+        if body.builtin == Some(true) {
+            return Err(ServiceError::bad_request(
+                "builtin chain profiles cannot be created or updated by operators",
+            ));
+        }
+        let chain_id = body
+            .chain_id
+            .ok_or_else(|| ServiceError::bad_request("chain_id is required"))?;
+        if chain_id == 0 {
+            return Err(ServiceError::bad_request("chain_id must be greater than 0"));
+        }
+        if state
+            .chain_profiles
+            .iter()
+            .any(|existing| existing.name != name && existing.chain_id == Some(chain_id))
+        {
+            return Err(ServiceError::conflict(format!(
+                "chain_id {chain_id} is already registered"
+            )));
+        }
+        let existing = state
+            .chain_profiles
+            .iter()
+            .find(|existing| existing.name == name)
+            .cloned();
+        if existing.as_ref().is_some_and(|profile| profile.builtin)
+            && existing.as_ref().and_then(|profile| profile.chain_id) != Some(chain_id)
+        {
+            return Err(ServiceError::bad_request(
+                "Built-in chain profile chain_id cannot be changed.",
+            ));
+        }
+        let permit2_address = body
+            .permit2_address
+            .and_then(trimmed_optional)
+            .map(|address| normalize_address(&address))
+            .transpose()?;
         let mut profile = ChainProfile {
             name: name.clone(),
             chain_family: trimmed_required("chain_family", &body.chain_family)?,
-            chain_id: body.chain_id,
+            chain_id: Some(chain_id),
             provider_profile: body.provider_profile.and_then(trimmed_optional),
             native_symbol: body
                 .native_symbol
                 .and_then(trimmed_optional)
                 .unwrap_or_else(|| default_native_symbol(&body.chain_family).to_string()),
+            native_decimals: body
+                .native_decimals
+                .or_else(|| existing.as_ref().map(|profile| profile.native_decimals))
+                .unwrap_or(18),
+            finality_blocks: body
+                .finality_blocks
+                .or_else(|| existing.as_ref().map(|profile| profile.finality_blocks))
+                .unwrap_or_default(),
+            permit2_address,
             explorer_url: body.explorer_url.and_then(trimmed_optional),
             capabilities: unique_strings(
                 body.capabilities.into_iter().filter_map(trimmed_optional),
             ),
             enabled: body.enabled.unwrap_or(true),
-            source: DISCOVERY_SOURCE_OPERATOR.into(),
+            source: existing
+                .as_ref()
+                .filter(|profile| profile.builtin)
+                .map(|profile| profile.source.clone())
+                .unwrap_or_else(|| DISCOVERY_SOURCE_OPERATOR.into()),
+            builtin: existing.as_ref().is_some_and(|profile| profile.builtin),
             created_at_unix: now,
             updated_at_unix: now,
         };
@@ -139,6 +191,13 @@ impl SigillumService {
         } else {
             state.chain_profiles.push(profile.clone());
         }
+        ensure_builtin_chain_profiles(&mut state.chain_profiles);
+        profile = state
+            .chain_profiles
+            .iter()
+            .find(|existing| existing.name == name)
+            .cloned()
+            .unwrap_or(profile);
         save_inventory_state(&self.state.base_dir, &state)?;
 
         self.record_audit(
@@ -169,7 +228,13 @@ impl SigillumService {
             .iter()
             .position(|profile| profile.name == name)
             .ok_or_else(|| ServiceError::not_found("Chain profile not found."))?;
+        if state.chain_profiles[position].builtin {
+            return Err(ServiceError::bad_request(
+                "Built-in chain profiles cannot be deleted.",
+            ));
+        }
         let profile = state.chain_profiles.remove(position);
+        ensure_builtin_chain_profiles(&mut state.chain_profiles);
         save_inventory_state(&self.state.base_dir, &state)?;
 
         self.record_audit(
@@ -291,12 +356,6 @@ impl SigillumService {
             &body.allowance_spender_addresses,
             body.allowance_discovery_limit,
         )?;
-        let permit2_allowance_discovery = permit2_allowance_discovery_config(
-            body.discover_permit2_allowances,
-            &body.permit2_contract_addresses,
-            &body.permit2_spender_addresses,
-            body.permit2_allowance_limit,
-        )?;
         let nft_discovery = erc721_transfer_discovery_config(
             body.discover_erc721_transfers,
             body.nft_discovery_from_block.as_deref(),
@@ -345,6 +404,18 @@ impl SigillumService {
         )?;
         let _guard = self.state.operation_guard().await;
         let mut inventory = load_inventory_state(&self.state.base_dir)?;
+        let chain_profiles = inventory.chain_profiles.clone();
+        let permit2_allowance_discovery_for_provider =
+            |provider: &sigillum_api::EvmProviderProfile| {
+                permit2_allowance_discovery_config(
+                    body.discover_permit2_allowances,
+                    &body.permit2_contract_addresses,
+                    &body.permit2_spender_addresses,
+                    body.permit2_allowance_limit,
+                    chain_profile_for_id(&chain_profiles, provider.chain_id)
+                        .and_then(|profile| profile.permit2_address.as_deref()),
+                )
+            };
         let mut watch_probes = body.watch_addresses.clone();
         if body.include_watch_book.unwrap_or(false) {
             watch_probes.extend(
@@ -419,6 +490,8 @@ impl SigillumService {
                 let mut index_has_activity = false;
 
                 for provider in &providers {
+                    let permit2_allowance_discovery =
+                        permit2_allowance_discovery_for_provider(provider)?;
                     let observation = self
                         .observe_inventory_address(
                             wallet,
@@ -511,6 +584,8 @@ impl SigillumService {
                             .map_err(map_xpub_error)?;
                             let derivation_path = format!("{control_path}/{control_index}");
                             for provider in &providers {
+                                let permit2_allowance_discovery =
+                                    permit2_allowance_discovery_for_provider(provider)?;
                                 let observation = self
                                     .observe_inventory_address(
                                         wallet,
@@ -548,6 +623,8 @@ impl SigillumService {
         for watch in &watch_addresses {
             let derivation_path = format!("{}/{}", watch.wallet.receive_path, watch.address_index);
             for provider in &providers {
+                let permit2_allowance_discovery =
+                    permit2_allowance_discovery_for_provider(provider)?;
                 let observation = self
                     .observe_inventory_address(
                         &watch.wallet,

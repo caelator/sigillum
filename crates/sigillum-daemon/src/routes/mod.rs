@@ -449,6 +449,9 @@ fn inventory_routes() -> AppRouter {
             "/api/inventory/wallets",
             get(inventory::list_wallet_inventory),
         )
+        .route("/api/chains", get(inventory::list_chain_profiles))
+        .route("/api/chains/upsert", post(inventory::upsert_chain_profile))
+        .route("/api/chains/delete", post(inventory::delete_chain_profile))
         .route("/api/inventory/chains", get(inventory::list_chain_profiles))
         .route(
             "/api/inventory/chains/upsert",

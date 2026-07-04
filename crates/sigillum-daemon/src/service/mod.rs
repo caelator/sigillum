@@ -29,6 +29,7 @@
 //! - **helpers** — shared hex decoding, u256 arithmetic, timestamps
 
 mod backup;
+pub(crate) mod chains;
 mod compartments;
 mod deposits;
 mod error;

@@ -37,7 +37,10 @@ Required discovery classes:
 
 - Native L1/L2 holdings across configured networks: Ethereum, Base, Arbitrum,
   Optimism, Polygon, BNB Chain, Avalanche, and other EVM networks supported by
-  provider profiles.
+  provider profiles. The first registry-backed chain slice is implemented with
+  non-deletable built-ins for Ethereum, Base, Arbitrum One, OP Mainnet, and
+  Polygon PoS, plus operator-defined custom EVM entries exposed through
+  daemon API, CLI, and UI.
 - Historical account and receive-address discovery for imported seed wallets:
   standard Ethereum paths, common MetaMask/Ledger/Trezor patterns, project
   account paths, and configurable gap limits. The first multi-account seed
@@ -104,8 +107,9 @@ Required discovery classes:
   operator approvals, known-drainer spenders, and revoke recommendations.
   Bounded ERC-20 allowance probes and NFT operator-approval probes are
   implemented for operator-supplied spender/operator addresses. Bounded Permit2
-  allowance probes are implemented for operator-supplied Permit2 contracts and
-  spenders, defaulting to the canonical Permit2 contract when enabled. A local
+  allowance probes are implemented for operator-supplied spenders and either
+  request-supplied Permit2 contracts, a per-chain registry `permit2_address`
+  override, or the canonical Permit2 contract fallback. A local
   operator-managed risk catalog is implemented for spender/operator labels and
   trusted, low, medium, high, or critical risk overrides. Reviewable
   consolidation-plan revoke steps are implemented for discovered ERC-20,
@@ -130,7 +134,9 @@ Suggested components:
 
 - `chain_profiles`: network metadata, RPC providers, explorer/indexer endpoints,
   native asset metadata, block finality windows, gas-token rules, and chain
-  capabilities.
+  capabilities. The current 1.0 slice persists schema-versioned chain profiles
+  with `chain_id`, native asset metadata, `finality_blocks`, optional
+  `permit2_address`, and built-in/custom provenance.
 - `wallet_inventory`: discovered wallet groups, derivation paths, addresses,
   ownership type, signing capability, activity windows, labels, and confidence.
 - `asset_inventory`: native balances, ERC-20 balances, NFTs, DeFi positions,

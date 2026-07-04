@@ -113,6 +113,7 @@ pub fn cmd_api(args: &[String]) {
         "profiles" => cmd_api_profiles(args),
         "deposits" => deposits::cmd_api_deposits(args),
         "evm" => evm::cmd_api_evm(args),
+        "chains" => inventory::cmd_api_chains(args),
         "inventory" => inventory::cmd_api_inventory(args),
         "discovery" => cmd_api_discovery(args),
         "risk" => cmd_api_risk(args),
@@ -549,7 +550,7 @@ where
 }
 
 /// Construct a [`SigillumClient`] with optional session-token attachment.
-fn build_client(args: &[String], require_session: bool) -> SigillumClient {
+pub(super) fn build_client(args: &[String], require_session: bool) -> SigillumClient {
     let client = SigillumClient::new(daemon_base_url(args)).unwrap_or_else(|error| {
         eprintln!("Failed to build daemon client: {error}");
         process::exit(1);
@@ -640,7 +641,7 @@ fn spawn_daemon_process(port: u16) -> io::Result<()> {
 
 // ── Output and error handling ────────────────────────────────────
 
-fn print_json<T: Serialize>(value: &T) {
+pub(super) fn print_json<T: Serialize>(value: &T) {
     let body = serde_json::to_string_pretty(value).unwrap_or_else(|error| {
         eprintln!("Failed to encode JSON output: {error}");
         process::exit(1);
@@ -648,7 +649,7 @@ fn print_json<T: Serialize>(value: &T) {
     println!("{body}");
 }
 
-fn report_client_error(error: ClientError) -> ! {
+pub(super) fn report_client_error(error: ClientError) -> ! {
     eprintln!("{error}");
     process::exit(1);
 }
@@ -674,6 +675,7 @@ COMMANDS:
   profiles eth-seed <list|create|delete> [...]  (create generates a new BIP-39 mnemonic and prints it exactly once)
   deposits <list|create-native|create-erc20|scan-announcements|refresh|enqueue-sweep|delete> [...]
   evm <nonce|balance|erc20-balance|fees> [...]  (read-only; no broadcast)
+  chains <list|upsert|delete> [...]
   inventory <list|chains|watch|scan-evm> [...]  (scan supports --watch-address, --watch-address-file, --include-watch-book, --derivation-pattern, --account-limit)
   discovery <jobs|scan-evm> [...]
   risk <list|catalog|catalog-upsert|catalog-delete> [...]

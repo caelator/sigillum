@@ -530,6 +530,146 @@ test("queue and inventory renderers produce reviewable DOM summaries", () => {
   );
 });
 
+test("chain profile UI renders registry fields and uses chain routes", async () => {
+  const dom = installDom([
+    "chainProfileList",
+    "inventoryJobList",
+    "inventoryAddressList",
+    "inventoryHoldingList",
+    "watchAddressBookList",
+    "riskCatalogList",
+    "riskFindingList",
+    "consolidationPlanList",
+    "chainProfileName",
+    "chainProfileFamily",
+    "chainProfileId",
+    "chainProfileProvider",
+    "chainProfileNativeSymbol",
+    "chainProfileNativeDecimals",
+    "chainProfileFinalityBlocks",
+    "chainProfilePermit2Address",
+  ]);
+  const calls: Array<{ method: string; path: string; body?: any }> = [];
+  const toasts: string[] = [];
+  const chains = {
+    profiles: [
+      {
+        name: "ethereum",
+        chain_family: "evm",
+        chain_id: 1,
+        provider_profile: null,
+        native_symbol: "ETH",
+        native_decimals: 18,
+        finality_blocks: 0,
+        permit2_address: null,
+        capabilities: [],
+        enabled: true,
+        source: "builtin",
+        builtin: true,
+      },
+      {
+        name: "test-rollup",
+        chain_family: "evm",
+        chain_id: 999999,
+        provider_profile: "rollup-rpc",
+        native_symbol: "TST",
+        native_decimals: 18,
+        finality_blocks: 64,
+        permit2_address: "0x5555555555555555555555555555555555555555",
+        capabilities: ["erc20"],
+        enabled: true,
+        source: "operator",
+        builtin: false,
+      },
+    ],
+  };
+  const inventory = createInventoryActions({
+    api: async (method, path, body) => {
+      calls.push({ method, path, body });
+      if (path === "/api/chains") return chains;
+      if (path === "/api/inventory/wallets") {
+        return {
+          jobs: [],
+          addresses: [
+            {
+              address: "0xabc",
+              activity_state: "funded",
+              wallet_family: "eth-seed",
+              wallet_profile: "archive",
+              provider_profile: "mainnet",
+              chain_id: 1,
+              derivation_path: "m/44'/60'/0'/0/0",
+              native_balance_wei_hex: "0x1",
+              transaction_count: 1,
+              classifications: [],
+            },
+          ],
+          holdings: [],
+        };
+      }
+      if (path === "/api/chains/upsert" || path === "/api/chains/delete") {
+        return { status: "ok" };
+      }
+      return { entries: [], findings: [], plans: [] };
+    },
+    toast: (message) => toasts.push(message),
+    downloadJson: () => undefined,
+  });
+
+  inventory.renderChainProfiles(chains.profiles);
+  const chainHtml = dom.el("chainProfileList").innerHTML;
+  ok(chainHtml.includes("builtin"));
+  ok(chainHtml.includes("finality=64"));
+  ok(chainHtml.includes("0x5555555555555555555555555555555555555555"));
+  equal(chainHtml.split('data-action="deleteChainProfile"').length - 1, 1);
+
+  await inventory.loadInventoryOperations();
+  ok(calls.some((call) => call.method === "GET" && call.path === "/api/chains"));
+  ok(dom.el("inventoryAddressList").innerHTML.includes("chain=1 (ethereum)"));
+
+  dom.el("chainProfileName").value = "custom-rollup";
+  dom.el("chainProfileFamily").value = "evm";
+  dom.el("chainProfileId").value = "777";
+  dom.el("chainProfileProvider").value = "custom-rpc";
+  dom.el("chainProfileNativeSymbol").value = "CST";
+  dom.el("chainProfileNativeDecimals").value = "18";
+  dom.el("chainProfileFinalityBlocks").value = "32";
+  dom.el("chainProfilePermit2Address").value = "0x5555555555555555555555555555555555555555";
+  await inventory.upsertChainProfile();
+  deepEqual(
+    calls.find((call) => call.path === "/api/chains/upsert"),
+    {
+      method: "POST",
+      path: "/api/chains/upsert",
+      body: {
+        name: "custom-rollup",
+        chain_family: "evm",
+        chain_id: 777,
+        provider_profile: "custom-rpc",
+        native_symbol: "CST",
+        native_decimals: 18,
+        finality_blocks: 32,
+        permit2_address: "0x5555555555555555555555555555555555555555",
+        capabilities: [],
+        enabled: true,
+      },
+    },
+  );
+
+  (globalThis as any).confirm = () => true;
+  await inventory.deleteChainProfile("test-rollup");
+  deepEqual(
+    calls.find((call) => call.path === "/api/chains/delete"),
+    {
+      method: "POST",
+      path: "/api/chains/delete",
+      body: { name: "test-rollup" },
+    },
+  );
+  ok(toasts.includes("Chain profile saved"));
+  ok(toasts.includes("Chain profile deleted"));
+});
+
 test("operation results include failure cause breakdowns", async () => {
   installDom([
     "queueProcessLimit",

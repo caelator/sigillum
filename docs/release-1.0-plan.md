@@ -727,8 +727,8 @@ PR chain. Update `docs/wallet-management-roadmap.md` status text and
 - **Goal:** chains stop being bare integers; a registry drives per-chain
   behavior.
 - **Files:** new `crates/sigillum-daemon/src/service/chains.rs`; promote
-  `ChainProfile` (`sigillum-api/src/response.rs:689`) from descriptive to
-  registry-backed; new routes under `/api/chains` (list/upsert/delete for
+  `ChainProfile` (`sigillum-api/src/response/inventory.rs`) from descriptive
+  to registry-backed; new routes under `/api/chains` (list/upsert/delete for
   custom entries); persistence in a schema-versioned store; UI in
   `inventory.ts` chain-profiles section; CLI `sigillum api chains
   list|upsert|delete`.
@@ -752,8 +752,8 @@ PR chain. Update `docs/wallet-management-roadmap.md` status text and
 
 - **Premise (verified):** `chain_id` ALREADY exists on addresses, holdings,
   and plan steps, populated from the scanning provider, with chain-aware
-  dedup (`response.rs:562/586/796`; `support.rs:228,372,406,438`). Do NOT
-  add the field, a migration for it, or dedup changes — they exist.
+  dedup (`response/inventory.rs`; `support.rs`). Do NOT add the field, a
+  migration for it, or dedup changes — they exist.
 - **Goal:** close the residue only.
 - **Steps:**
   1. Verify how a legacy inventory JSON document written before the field
@@ -1475,8 +1475,8 @@ Phase E — Automation & recovery
 - [x] E5 destructive-flow recovery complete
 
 Phase W — Wallet-management completion
-- [ ] W1.1 chain registry (built-ins + custom + Permit2 override)
-- [ ] W1.2 chain_id legacy defaults + UI/CLI surfacing (field already exists)
+- [x] W1.1 chain registry (built-ins + custom + Permit2 override)
+- [x] W1.2 chain_id legacy defaults + UI/CLI surfacing (field already exists)
 - [ ] W1.3 multi-chain scan orchestration
 - [x] W2 typed domain model (wire-compatible enums)
 - [ ] W3.1 block-range checkpoints for log scans
@@ -1610,3 +1610,9 @@ Phase H — Ship
   roundtrip anchor with exact literal and legacy JSON compatibility coverage.
   Focused API/daemon/UI tests passed; `cargo test --workspace` passed; full
   `./scripts/check-release.sh` passed.
+- 2026-07-04 W1.1+W1.2 local: added schema-versioned built-in/custom chain
+  registry, `/api/chains` aliases, CLI `sigillum api chains`, UI registry
+  controls, provider selfcheck warnings, per-chain Permit2 overrides, and
+  explicit legacy mainnet defaults plus registry labels for inventory rows.
+  Focused API/daemon/CLI/UI tests passed; manual CLI chain registry smoke
+  passed; full `./scripts/check-release.sh` passed.

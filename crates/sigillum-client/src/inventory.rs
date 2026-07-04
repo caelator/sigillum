@@ -57,7 +57,7 @@ impl SigillumClient {
     }
 
     pub async fn list_chain_profiles(&self) -> Result<ChainProfileListResponse, ClientError> {
-        let builder = self.request(Method::GET, "/api/inventory/chains");
+        let builder = self.request(Method::GET, "/api/chains");
         self.send(builder).await
     }
 
@@ -66,7 +66,7 @@ impl SigillumClient {
         request: ChainProfileUpsertRequest,
     ) -> Result<ChainProfileMutationResponse, ClientError> {
         let builder = self
-            .request(Method::POST, "/api/inventory/chains/upsert")
+            .request(Method::POST, "/api/chains/upsert")
             .json(&request);
         self.send(builder).await
     }
@@ -76,7 +76,7 @@ impl SigillumClient {
         name: &str,
     ) -> Result<ChainProfileMutationResponse, ClientError> {
         let builder = self
-            .request(Method::POST, "/api/inventory/chains/delete")
+            .request(Method::POST, "/api/chains/delete")
             .json(&ChainProfileDeleteRequest { name: name.into() });
         self.send(builder).await
     }

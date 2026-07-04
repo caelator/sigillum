@@ -30,13 +30,19 @@ pub(super) fn permit2_allowance_discovery_config(
     contract_addresses: &[String],
     spender_addresses: &[String],
     limit: Option<usize>,
+    registry_permit2_address: Option<&str>,
 ) -> ServiceResult<Option<Permit2AllowanceDiscoveryConfig>> {
     if enabled != Some(true) {
         return Ok(None);
     }
     let mut contracts = Vec::new();
     if contract_addresses.is_empty() {
-        contracts.push(DEFAULT_PERMIT2_CONTRACT_ADDRESS.to_string());
+        contracts.push(
+            registry_permit2_address
+                .map(normalize_address)
+                .transpose()?
+                .unwrap_or_else(|| DEFAULT_PERMIT2_CONTRACT_ADDRESS.to_string()),
+        );
     } else {
         for contract in contract_addresses {
             push_unique_address(&mut contracts, normalize_address(contract)?);
@@ -134,6 +140,7 @@ mod tests {
             &[],
             &["0x4444444444444444444444444444444444444444".to_string()],
             Some(8),
+            None,
         )
         .unwrap()
         .unwrap();
@@ -145,11 +152,29 @@ mod tests {
     }
 
     #[test]
+    fn uses_registry_override_when_request_contracts_are_empty() {
+        let config = permit2_allowance_discovery_config(
+            Some(true),
+            &[],
+            &["0x4444444444444444444444444444444444444444".to_string()],
+            None,
+            Some("0x5555555555555555555555555555555555555555"),
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(
+            config.contract_addresses,
+            vec!["0x5555555555555555555555555555555555555555"]
+        );
+    }
+
+    #[test]
     fn requires_spenders_when_enabled() {
-        let error = permit2_allowance_discovery_config(Some(true), &[], &[], None).unwrap_err();
+        let error =
+            permit2_allowance_discovery_config(Some(true), &[], &[], None, None).unwrap_err();
         assert!(error.to_string().contains("permit2_spender_addresses"));
         assert!(
-            permit2_allowance_discovery_config(Some(false), &[], &[], None)
+            permit2_allowance_discovery_config(Some(false), &[], &[], None, None)
                 .unwrap()
                 .is_none()
         );
@@ -165,9 +190,10 @@ mod tests {
             "0X4444444444444444444444444444444444444444".to_string(),
             "0x4444444444444444444444444444444444444444".to_string(),
         ];
-        let config = permit2_allowance_discovery_config(Some(true), &contracts, &spenders, None)
-            .unwrap()
-            .unwrap();
+        let config =
+            permit2_allowance_discovery_config(Some(true), &contracts, &spenders, None, None)
+                .unwrap()
+                .unwrap();
         assert_eq!(
             config.contract_addresses,
             vec![DEFAULT_PERMIT2_CONTRACT_ADDRESS]
@@ -185,7 +211,8 @@ mod tests {
                 Some(true),
                 &[],
                 &["0x4444444444444444444444444444444444444444".to_string()],
-                Some(MAX_PERMIT2_ALLOWANCE_LIMIT + 1)
+                Some(MAX_PERMIT2_ALLOWANCE_LIMIT + 1),
+                None,
             )
             .is_err()
         );
