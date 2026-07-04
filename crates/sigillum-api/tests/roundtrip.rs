@@ -10,10 +10,10 @@ use sigillum_api::{
     StealthPaymentRef, TreasuryAllowedDestination, TreasuryAllowedDestinationInput, TreasuryPolicy,
     TreasuryPolicyResponse, TreasuryPolicyUpdateRequest, UnlockedCompartment,
     WalletAddressActivityState, WalletAddressClassification, WalletAssetHolding, WalletAssetKind,
-    WalletDiscoveryCheckpoint, WalletDiscoveryJob, WalletInventoryAddress,
-    WalletInventoryListResponse, WalletInventoryScanRequest, WalletPlanStatus,
-    WalletPlanStepAction, WalletPlanStepStatus, WalletSignerStatus, WalletSimulationStatus,
-    WatchAddressProbe,
+    WalletDiscoveryBlockCursor, WalletDiscoveryCheckpoint, WalletDiscoveryJob,
+    WalletInventoryAddress, WalletInventoryListResponse, WalletInventoryScanRequest,
+    WalletPlanStatus, WalletPlanStepAction, WalletPlanStepStatus, WalletSignerStatus,
+    WalletSimulationStatus, WatchAddressProbe,
 };
 use std::fmt::Debug;
 
@@ -672,6 +672,13 @@ fn inventory_response_roundtrip() {
                 last_scanned_index: Some(17),
                 consecutive_empty: 12,
                 completed: true,
+                updated_at_unix: 1_783_046_000,
+            }],
+            block_cursors: vec![WalletDiscoveryBlockCursor {
+                address: "0xaaaaaaaa11111111222222223333333344444444".to_string(),
+                chain_id: 1,
+                topic_family: "erc20-transfer".to_string(),
+                last_scanned_block: 18_748_000,
                 updated_at_unix: 1_783_046_000,
             }],
             started_at_unix: 1_783_042_400,

@@ -80,6 +80,7 @@ export interface WalletDiscoveryJob {
   active_addresses?: number;
   holdings_detected?: number;
   checkpoints?: WalletDiscoveryCheckpoint[];
+  block_cursors?: WalletDiscoveryBlockCursor[];
   started_at_unix?: number;
   completed_at_unix?: number | null;
   last_error?: string | null;
@@ -95,6 +96,14 @@ export interface WalletDiscoveryCheckpoint {
   last_scanned_index?: number | null;
   consecutive_empty: number;
   completed: boolean;
+  updated_at_unix: number;
+}
+
+export interface WalletDiscoveryBlockCursor {
+  address: string;
+  chain_id: number;
+  topic_family: string;
+  last_scanned_block: number;
   updated_at_unix: number;
 }
 

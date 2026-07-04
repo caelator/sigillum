@@ -45,7 +45,7 @@ pub struct WalletInventoryState {
 }
 
 impl JsonDocument for WalletInventoryState {
-    const SCHEMA: JsonSchema = JsonSchema::new("sigillum.wallet-inventory", 12);
+    const SCHEMA: JsonSchema = JsonSchema::new("sigillum.wallet-inventory", 13);
 
     fn from_enveloped_json(
         path: &std::path::Path,
@@ -53,7 +53,7 @@ impl JsonDocument for WalletInventoryState {
         data: serde_json::Value,
     ) -> Result<Self, std::io::Error> {
         match version {
-            1..=12 => {
+            1..=13 => {
                 let mut state: Self = serde_json::from_value(data).map_err(|error| {
                     std::io::Error::new(
                         std::io::ErrorKind::InvalidData,
@@ -125,6 +125,7 @@ mod tests {
             active_addresses: 1,
             holdings_detected: 1,
             checkpoints: Vec::new(),
+            block_cursors: Vec::new(),
             started_at_unix: 1,
             completed_at_unix: Some(2),
             last_error: None,
@@ -376,6 +377,27 @@ mod tests {
     }
 
     #[test]
+    fn v12_inventory_without_block_cursors_loads_with_empty_cursors() {
+        let dir = TempDir::new().unwrap();
+        let mut state = WalletInventoryState::default();
+        state.jobs.push(sample_job());
+        let envelope = json!({
+            "schema": "sigillum.wallet-inventory",
+            "schema_version": 12,
+            "data": serde_json::to_value(&state).unwrap(),
+        });
+        std::fs::write(
+            wallet_inventory_path(dir.path()),
+            serde_json::to_vec_pretty(&envelope).unwrap(),
+        )
+        .unwrap();
+
+        let loaded = load_wallet_inventory(dir.path()).unwrap();
+        assert_eq!(loaded.jobs.len(), 1);
+        assert!(loaded.jobs[0].block_cursors.is_empty());
+    }
+
+    #[test]
     fn save_and_load_roundtrip_preserves_treasury_policy() {
         let dir = TempDir::new().unwrap();
         let state = WalletInventoryState {
@@ -409,7 +431,7 @@ mod tests {
             serde_json::from_slice(&std::fs::read(wallet_inventory_path(dir.path())).unwrap())
                 .unwrap();
         assert_eq!(saved["schema"], json!("sigillum.wallet-inventory"));
-        assert_eq!(saved["schema_version"], json!(12));
+        assert_eq!(saved["schema_version"], json!(13));
         assert_eq!(saved["data"]["chain_profiles"].as_array().unwrap().len(), 5);
         assert!(saved["data"]["watch_address_book"].is_array());
         assert!(saved["data"]["jobs"].is_array());

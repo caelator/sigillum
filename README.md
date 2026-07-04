@@ -226,11 +226,12 @@ On top of that, the daemon now includes:
 - persistent EVM provider and stealth wallet profiles, each bound to an explicit unlocked compartment
 - persistent stealth deposit records for native ETH and ERC-20 flows, including bounded ERC-5564 announcement-log discovery
 - wallet inventory scans for native balances, manually supplied ERC-20 probes,
-  bounded ERC-20 transfer-log token discovery, optional multi-account
-  Ethereum seed receive-branch discovery, operator-bounded ERC-20 allowance
-  probes, operator-bounded Permit2 allowance probes, bounded ERC-721 transfer-log
-  discovery with `ownerOf` confirmation, bounded ERC-1155 transfer discovery
-  with `balanceOf` confirmation, and operator-bounded NFT `isApprovedForAll`
+  resumable bounded ERC-20 transfer-log token discovery, optional
+  multi-account Ethereum seed receive-branch discovery, operator-bounded
+  ERC-20 allowance probes, operator-bounded Permit2 allowance probes,
+  resumable bounded ERC-721 transfer-log discovery with `ownerOf`
+  confirmation, resumable bounded ERC-1155 transfer discovery with
+  `balanceOf` confirmation, and operator-bounded NFT `isApprovedForAll`
   approval probes across one provider profile or every configured EVM provider
 - a local operator-managed risk catalog for spender/operator labels and
   approval-risk overrides
@@ -297,7 +298,7 @@ The embedded UI currently supports:
 - local EIP-1559 native ETH and ERC-20 transfer signing from derived stealth keys
 - EVM provider profile management
 - stealth wallet profile management
-- wallet inventory scans across one provider or all configured EVM chains, with ERC-20, ERC-20 allowance, Permit2 allowance, ERC-721, ERC-1155, and NFT operator-approval discovery controls
+- wallet inventory scans across one provider or all configured EVM chains, with resumable ERC-20, ERC-721, and ERC-1155 transfer-log cursors plus ERC-20 allowance, Permit2 allowance, and NFT operator-approval discovery controls
 - local risk catalog management for approval spender/operator labels
 - single-chain dry-run consolidation plans that surface approval revokes alongside sweeps
 - stealth deposit creation, refresh, sweep enqueue, and registry browsing
@@ -390,11 +391,12 @@ richer chain indexing, broader policy automation, and the wallet discovery and
 consolidation roadmap in
 [`docs/wallet-management-roadmap.md`](docs/wallet-management-roadmap.md). That
 roadmap covers seed/xpub gap-limit discovery, multi-account Ethereum seed
-receive scanning, old-wallet classification, L1/L2 holdings, ERC-20 transfer-log
-token discovery, the first bounded ERC-721 NFT discovery slice, bounded ERC-1155
-transfer discovery, DeFi positions, airdrops/rewards, ERC-20 allowance probing,
-bounded NFT operator-approval probing, bounded Permit2 allowance probing, and
-reviewable consolidation planning with approval revoke steps. Broader token
+receive scanning, old-wallet classification, L1/L2 holdings, resumable ERC-20
+transfer-log token discovery, the first resumable bounded ERC-721 NFT
+discovery slice, resumable bounded ERC-1155 transfer discovery, DeFi positions,
+airdrops/rewards, ERC-20 allowance probing, bounded NFT operator-approval
+probing, bounded Permit2 allowance probing, and reviewable consolidation
+planning with approval revoke steps. Broader token
 registries, full ERC-1155 batch coverage, NFT metadata/spam classification, DeFi
 adapters, Permit2
 expiration-aware classification, external spender registries, revoke

@@ -1479,7 +1479,7 @@ Phase W — Wallet-management completion
 - [x] W1.2 chain_id legacy defaults + UI/CLI surfacing (field already exists)
 - [x] W1.3 multi-chain scan orchestration
 - [x] W2 typed domain model (wire-compatible enums)
-- [ ] W3.1 block-range checkpoints for log scans
+- [x] W3.1 block-range checkpoints for log scans
 - [ ] W3.2 ERC-1155 batch e2e fixture (decoding already implemented)
 - [ ] W3.3 local token registry import
 - [ ] W3.4 NFT metadata cache + local spam heuristics
@@ -1622,3 +1622,9 @@ Phase H — Ship
   surfacing, and single-chain consolidation-plan generation with optional
   `chain_id` filtering. Focused API/daemon/CLI/UI tests passed; full gate
   and CI passed.
+- 2026-07-04 W3.1 local: added per-address/chain/topic transfer-log block
+  cursors for ERC-20, ERC-721, and ERC-1155 discovery, persisted inventory
+  schema v13 with v12 compatibility, resumable disjoint-range scans after a
+  canceled job, CLI/UI cursor surfacing, and `eth_blockNumber` RPC support.
+  Focused cursor/backcompat tests, Rust API/daemon/CLI gates, and UI
+  typecheck/test/build passed.

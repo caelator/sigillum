@@ -93,6 +93,7 @@ fn annotated_inventory_json(
     if let Some(jobs) = value.get_mut("jobs").and_then(|value| value.as_array_mut()) {
         for job in jobs {
             annotate_job_chains(job, &labels);
+            annotate_job_block_cursors(job, &labels);
         }
     }
     value["chain_profiles"] = serde_json::to_value(chains.profiles).unwrap_or_else(|error| {
@@ -141,6 +142,39 @@ fn annotate_job_chains(value: &mut serde_json::Value, labels: &BTreeMap<u64, Str
         return;
     };
     object.insert("chain_labels".into(), serde_json::json!(chain_labels));
+}
+
+fn annotate_job_block_cursors(value: &mut serde_json::Value, labels: &BTreeMap<u64, String>) {
+    let Some(cursors) = value
+        .get("block_cursors")
+        .and_then(|value| value.as_array())
+    else {
+        return;
+    };
+    let cursor_labels = cursors
+        .iter()
+        .filter_map(|cursor| {
+            let chain_id = cursor.get("chain_id").and_then(|value| value.as_u64())?;
+            let topic_family = cursor
+                .get("topic_family")
+                .and_then(|value| value.as_str())?;
+            let block = cursor
+                .get("last_scanned_block")
+                .and_then(|value| value.as_u64())?;
+            let chain_label = labels
+                .get(&chain_id)
+                .map(|name| format!("{chain_id} ({name})"))
+                .unwrap_or_else(|| chain_id.to_string());
+            Some(format!("{chain_label} {topic_family} to {block}"))
+        })
+        .collect::<Vec<_>>();
+    let Some(object) = value.as_object_mut() else {
+        return;
+    };
+    object.insert(
+        "block_cursor_labels".into(),
+        serde_json::json!(cursor_labels),
+    );
 }
 
 /// Dispatch `sigillum api chains <list|upsert|delete>`.

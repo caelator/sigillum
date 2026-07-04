@@ -668,6 +668,7 @@ fn test_wallet_inventory_scan_response_roundtrip() {
         active_addresses: 1,
         holdings_detected: 1,
         checkpoints: Vec::new(),
+        block_cursors: Vec::new(),
         started_at_unix: 1,
         completed_at_unix: Some(2),
         last_error: None,

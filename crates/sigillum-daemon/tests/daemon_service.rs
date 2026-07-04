@@ -1,6 +1,7 @@
 use std::collections::HashSet;
 use std::net::SocketAddr;
 use std::path::PathBuf;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use axum::extract::State;
@@ -34,6 +35,7 @@ async fn spawn_mock_evm_provider() -> (SocketAddr, tokio::task::JoinHandle<()>) 
         let method = request["method"].as_str().unwrap_or_default();
         let result = match method {
             "eth_chainId" => json!("0x1"),
+            "eth_blockNumber" => json!("0x20"),
             "eth_getTransactionCount" => json!("0x7"),
             "eth_getBalance" => json!("0xde0b6b3a7640000"),
             "eth_feeHistory" => json!({
@@ -203,6 +205,139 @@ async fn spawn_mock_evm_provider() -> (SocketAddr, tokio::task::JoinHandle<()>) 
         axum::serve(listener, app).await.unwrap();
     });
     (addr, handle)
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct LogRangeRequest {
+    from_block: String,
+    to_block: String,
+}
+
+#[derive(Clone)]
+struct CursorRpcState {
+    log_ranges: Arc<Mutex<Vec<LogRangeRequest>>>,
+}
+
+async fn spawn_cursor_mock_evm_provider() -> (
+    SocketAddr,
+    tokio::task::JoinHandle<()>,
+    Arc<Mutex<Vec<LogRangeRequest>>>,
+) {
+    fn parse_quantity(value: &str) -> Option<u64> {
+        u64::from_str_radix(
+            value
+                .strip_prefix("0x")
+                .or_else(|| value.strip_prefix("0X"))
+                .unwrap_or(value),
+            16,
+        )
+        .ok()
+    }
+
+    fn transfer_log(
+        block: u64,
+        token_address: &str,
+        topics: Vec<serde_json::Value>,
+    ) -> serde_json::Value {
+        json!({
+            "address": token_address,
+            "topics": topics,
+            "data": format!("0x{}01", "0".repeat(62)),
+            "blockNumber": format!("0x{block:x}"),
+            "transactionHash": format!("0x{}", "55".repeat(32)),
+            "logIndex": "0x0"
+        })
+    }
+
+    fn rpc_response(state: &CursorRpcState, request: &serde_json::Value) -> serde_json::Value {
+        let method = request["method"].as_str().unwrap_or_default();
+        let result = match method {
+            "eth_chainId" => json!("0x1"),
+            "eth_blockNumber" => json!("0x9"),
+            "eth_getTransactionCount" => json!("0x0"),
+            "eth_getBalance" => json!("0x0"),
+            "eth_call" => {
+                json!("0x0000000000000000000000000000000000000000000000000000000000000001")
+            }
+            "eth_getLogs" => {
+                let filter = &request["params"][0];
+                let from_block = filter["fromBlock"].as_str().unwrap_or("0x0").to_string();
+                let to_block = filter["toBlock"].as_str().unwrap_or("0x0").to_string();
+                state.log_ranges.lock().unwrap().push(LogRangeRequest {
+                    from_block: from_block.clone(),
+                    to_block: to_block.clone(),
+                });
+                let from = parse_quantity(&from_block).unwrap_or_default();
+                let to = parse_quantity(&to_block).unwrap_or_default();
+                let topics = filter["topics"].as_array().cloned().unwrap_or_default();
+                if from <= 5 && to >= 5 {
+                    json!([transfer_log(
+                        5,
+                        "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+                        topics
+                    )])
+                } else if from <= 9 && to >= 9 {
+                    json!([transfer_log(
+                        9,
+                        "0x6b175474e89094c44da98b954eedeac495271d0f",
+                        topics
+                    )])
+                } else {
+                    json!([])
+                }
+            }
+            other => json!({ "unsupported": other }),
+        };
+
+        json!({
+            "jsonrpc": "2.0",
+            "id": request.get("id").cloned().unwrap_or(json!(1)),
+            "result": result,
+        })
+    }
+
+    async fn rpc_handler(
+        State(state): State<CursorRpcState>,
+        headers: HeaderMap,
+        Json(body): Json<serde_json::Value>,
+    ) -> (StatusCode, Json<serde_json::Value>) {
+        let auth = headers
+            .get(header::AUTHORIZATION)
+            .and_then(|value| value.to_str().ok())
+            .unwrap_or("");
+        if auth != "Bearer rpc-test-token" {
+            return (
+                StatusCode::UNAUTHORIZED,
+                Json(json!({ "error": "missing provider auth" })),
+            );
+        }
+
+        let payload = if let Some(requests) = body.as_array() {
+            serde_json::Value::Array(
+                requests
+                    .iter()
+                    .map(|request| rpc_response(&state, request))
+                    .collect(),
+            )
+        } else {
+            rpc_response(&state, &body)
+        };
+
+        (StatusCode::OK, Json(payload))
+    }
+
+    let log_ranges = Arc::new(Mutex::new(Vec::new()));
+    let app = Router::new()
+        .route("/", post(rpc_handler))
+        .with_state(CursorRpcState {
+            log_ranges: Arc::clone(&log_ranges),
+        });
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let handle = tokio::spawn(async move {
+        axum::serve(listener, app).await.unwrap();
+    });
+    (addr, handle, log_ranges)
 }
 
 async fn post_json(
@@ -2288,6 +2423,155 @@ async fn wallet_inventory_scan_records_ad_hoc_watch_addresses() {
     let list_json: serde_json::Value = list.json().await.unwrap();
     assert_eq!(list_json["addresses"].as_array().unwrap().len(), 1);
     assert_eq!(list_json["holdings"].as_array().unwrap().len(), 1);
+
+    handle.abort();
+    rpc_handle.abort();
+}
+
+#[tokio::test]
+async fn wallet_inventory_transfer_log_cursors_resume_after_canceled_job_scan_disjoint_ranges() {
+    let dir = TempDir::new().unwrap();
+    let (addr, handle) = spawn_daemon(dir.path().to_path_buf()).await;
+    let (rpc_addr, rpc_handle, log_ranges) = spawn_cursor_mock_evm_provider().await;
+    let client = reqwest::Client::new();
+
+    let init = post_json(
+        &client,
+        addr,
+        "/api/compartment/init",
+        json!({
+            "id": 0,
+            "label": "default",
+            "threshold": 1,
+            "passphrase": "correct horse battery staple",
+        }),
+        None,
+    )
+    .await;
+    let init_json: serde_json::Value = init.json().await.unwrap();
+    let token = init_json["session_token"].as_str().unwrap().to_string();
+
+    post_json(
+        &client,
+        addr,
+        "/api/api-keys/set",
+        json!({ "key": "alchemy", "value": "rpc-test-token" }),
+        Some(&token),
+    )
+    .await;
+
+    post_json(
+        &client,
+        addr,
+        "/api/profiles/evm/upsert",
+        json!({
+            "name": "mainnet",
+            "rpc_url": format!("http://{rpc_addr}/"),
+            "auth_token_key": "alchemy",
+            "chain_id": 1,
+        }),
+        Some(&token),
+    )
+    .await;
+
+    let scan_body = json!({
+        "provider_profile": "mainnet",
+        "wallet_family": "eth-watch",
+        "watch_addresses": [{
+            "address": "0x7777777777777777777777777777777777777777",
+            "label": "old-ledger"
+        }],
+        "discover_erc20_transfers": true,
+        "token_discovery_from_block": "0x0",
+        "token_discovery_to_block": "0x9",
+        "token_discovery_limit": 1
+    });
+
+    let first = post_json(
+        &client,
+        addr,
+        "/api/inventory/scan/evm",
+        scan_body.clone(),
+        Some(&token),
+    )
+    .await;
+    let first_status = first.status();
+    let first_json: serde_json::Value = first.json().await.unwrap();
+    assert_eq!(first_status, StatusCode::OK, "scan response: {first_json}");
+    assert_eq!(first_json["job"]["status"], "completed");
+    assert!(
+        first_json["job"]["block_cursors"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|cursor| {
+                cursor["topic_family"] == "erc20-transfer"
+                    && cursor["chain_id"] == 1
+                    && cursor["last_scanned_block"] == 5
+            })
+    );
+    let first_ranges = log_ranges.lock().unwrap().clone();
+    assert!(
+        first_ranges
+            .iter()
+            .any(|range| range.from_block == "0x0" && range.to_block == "0x9"),
+        "first scan ranges: {first_ranges:?}"
+    );
+    let cancel = post_json(
+        &client,
+        addr,
+        "/api/discovery/jobs/cancel",
+        json!({ "id": first_json["job"]["id"] }),
+        Some(&token),
+    )
+    .await;
+    let cancel_status = cancel.status();
+    let cancel_json: serde_json::Value = cancel.json().await.unwrap();
+    assert_eq!(
+        cancel_status,
+        StatusCode::OK,
+        "cancel response: {cancel_json}"
+    );
+    assert_eq!(cancel_json["job"]["status"], "canceled");
+    log_ranges.lock().unwrap().clear();
+
+    let second = post_json(
+        &client,
+        addr,
+        "/api/inventory/scan/evm",
+        scan_body,
+        Some(&token),
+    )
+    .await;
+    let second_status = second.status();
+    let second_json: serde_json::Value = second.json().await.unwrap();
+    assert_eq!(
+        second_status,
+        StatusCode::OK,
+        "scan response: {second_json}"
+    );
+    assert!(
+        second_json["job"]["block_cursors"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|cursor| {
+                cursor["topic_family"] == "erc20-transfer"
+                    && cursor["chain_id"] == 1
+                    && cursor["last_scanned_block"] == 9
+            })
+    );
+    let second_ranges = log_ranges.lock().unwrap().clone();
+    assert!(
+        second_ranges
+            .iter()
+            .any(|range| range.from_block == "0x6" && range.to_block == "0x9"),
+        "second scan ranges: {second_ranges:?}"
+    );
+    assert!(
+        second_ranges.iter().all(|range| range.from_block != "0x0"),
+        "second scan must not rescan the original lower bound: {second_ranges:?}"
+    );
 
     handle.abort();
     rpc_handle.abort();

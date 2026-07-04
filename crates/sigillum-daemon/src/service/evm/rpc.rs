@@ -12,6 +12,7 @@ use super::{
     parse_quantity_u256,
 };
 
+mod block;
 mod erc1155;
 mod erc20;
 mod erc721;
@@ -43,7 +44,7 @@ struct JsonRpcError {
 }
 
 #[derive(Clone)]
-pub(super) struct ProviderRpcClient {
+pub(in crate::service) struct ProviderRpcClient {
     http: reqwest::Client,
     rpc_url: String,
     auth_token: Option<String>,

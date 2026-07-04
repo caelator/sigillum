@@ -224,11 +224,12 @@ What it intentionally does not do today:
 - multi-host coordination
 - SSE streams
 - remote audit aggregation pipeline
-- deep on-chain indexing beyond provider RPC balance checks, bounded ERC-20
-  transfer-log token discovery, bounded ERC-721 transfer-log discovery with
-  `ownerOf` confirmation, bounded ERC-1155 transfer discovery with `balanceOf`
-  confirmation, operator-bounded ERC-20 allowance probes, operator-bounded
-  Permit2 allowance probes, operator-bounded NFT approval probes,
+- deep on-chain indexing beyond provider RPC balance checks, bounded and
+  resumable ERC-20 transfer-log token discovery, bounded and resumable ERC-721
+  transfer-log discovery with `ownerOf` confirmation, bounded and resumable
+  ERC-1155 transfer discovery with `balanceOf` confirmation,
+  operator-bounded ERC-20 allowance probes, operator-bounded Permit2 allowance
+  probes, operator-bounded NFT approval probes,
   operator-configured DeFi receipt/share token probes, operator-configured
   trusted claim candidates, standard Merkle claim preflight simulation,
   claim-contract risk findings, and local operator-managed

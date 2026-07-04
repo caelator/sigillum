@@ -4,6 +4,7 @@ use sigillum_api::EvmProviderProfile;
 use crate::service::{ServiceError, ServiceResult, SigillumService};
 
 use super::super::evm::normalize_address;
+use super::checkpoints::{encode_block_quantity, parse_block_quantity};
 
 pub(super) const DISCOVERY_SOURCE_ERC721_TRANSFER_LOG: &str = "erc721-transfer-log";
 pub(super) const DISCOVERY_SOURCE_ERC1155_TRANSFER_LOG: &str = "erc1155-transfer-log";
@@ -41,6 +42,11 @@ pub(super) struct Erc1155HoldingObservation {
     pub(super) contract_address: String,
     pub(super) token_id_hex: String,
     pub(super) amount_hex: String,
+}
+
+struct Erc1155TransferEvent {
+    transfer_topic: String,
+    token_ids_from_log: fn(&str) -> ServiceResult<Vec<String>>,
 }
 
 pub(super) fn erc721_transfer_discovery_config(
@@ -103,7 +109,8 @@ impl SigillumService {
         provider: &EvmProviderProfile,
         owner_address: &str,
         config: &Erc721TransferDiscoveryConfig,
-    ) -> ServiceResult<Vec<Erc721HoldingObservation>> {
+        effective_from_block: &str,
+    ) -> ServiceResult<(Vec<Erc721HoldingObservation>, Option<u64>)> {
         let owner_address = normalize_address(owner_address)?;
         let owner_topic = padded_address_topic(&owner_address)?;
         let transfer_topic = erc721_transfer_topic();
@@ -114,7 +121,20 @@ impl SigillumService {
             None,
         ];
         let incoming_topics = vec![Some(transfer_topic), None, Some(owner_topic), None];
+        let scan_to_block = self
+            .resolved_nft_log_scan_to_block(provider, &config.to_block)
+            .await?;
+        if let (Some(from), Some(to)) = (
+            parse_block_quantity(effective_from_block),
+            parse_block_quantity(&scan_to_block),
+        ) {
+            if from > to {
+                return Ok((Vec::new(), Some(to)));
+            }
+        }
         let mut candidates = Vec::new();
+        let mut saw_logs = false;
+        let mut cursor_block = None;
 
         for topics in [&outgoing_topics, &incoming_topics] {
             if candidates.len() >= config.limit {
@@ -126,11 +146,13 @@ impl SigillumService {
                     provider,
                     None,
                     topics,
-                    &config.from_block,
-                    &config.to_block,
+                    effective_from_block,
+                    &scan_to_block,
                 )
                 .await?;
             for log in logs.into_iter().filter(|log| log.topics.len() >= 4) {
+                saw_logs = true;
+                cursor_block = max_log_block(cursor_block, log.block_number.as_deref());
                 push_unique_candidate(
                     &mut candidates,
                     Erc721HoldingObservation {
@@ -159,7 +181,10 @@ impl SigillumService {
                 confirmed.push(candidate);
             }
         }
-        Ok(confirmed)
+        if cursor_block.is_none() && !saw_logs {
+            cursor_block = parse_block_quantity(&scan_to_block);
+        }
+        Ok((confirmed, cursor_block))
     }
 
     pub(super) async fn discover_erc1155_transfer_holdings_for_address(
@@ -167,27 +192,41 @@ impl SigillumService {
         provider: &EvmProviderProfile,
         owner_address: &str,
         config: &Erc1155TransferDiscoveryConfig,
-    ) -> ServiceResult<Vec<Erc1155HoldingObservation>> {
+        effective_from_block: &str,
+    ) -> ServiceResult<(Vec<Erc1155HoldingObservation>, Option<u64>)> {
         let owner_address = normalize_address(owner_address)?;
         let mut candidates = Vec::new();
-        self.collect_erc1155_candidates_for_event(
-            provider,
-            &owner_address,
-            &erc1155_transfer_single_topic(),
-            config,
-            &mut candidates,
-            erc1155_single_token_ids,
-        )
-        .await?;
-        self.collect_erc1155_candidates_for_event(
-            provider,
-            &owner_address,
-            &erc1155_transfer_batch_topic(),
-            config,
-            &mut candidates,
-            erc1155_batch_token_ids,
-        )
-        .await?;
+        let single_cursor = self
+            .collect_erc1155_candidates_for_event(
+                provider,
+                &owner_address,
+                config,
+                effective_from_block,
+                &mut candidates,
+                Erc1155TransferEvent {
+                    transfer_topic: erc1155_transfer_single_topic(),
+                    token_ids_from_log: erc1155_single_token_ids,
+                },
+            )
+            .await?;
+        let batch_cursor = self
+            .collect_erc1155_candidates_for_event(
+                provider,
+                &owner_address,
+                config,
+                effective_from_block,
+                &mut candidates,
+                Erc1155TransferEvent {
+                    transfer_topic: erc1155_transfer_batch_topic(),
+                    token_ids_from_log: erc1155_batch_token_ids,
+                },
+            )
+            .await?;
+        let cursor_block = match (single_cursor, batch_cursor) {
+            (Some(left), Some(right)) => Some(left.max(right)),
+            (Some(block), None) | (None, Some(block)) => Some(block),
+            (None, None) => None,
+        };
 
         let mut confirmed = Vec::new();
         for candidate in candidates {
@@ -208,31 +247,39 @@ impl SigillumService {
                 });
             }
         }
-        Ok(confirmed)
+        Ok((confirmed, cursor_block))
     }
 
     async fn collect_erc1155_candidates_for_event(
         &self,
         provider: &EvmProviderProfile,
         owner_address: &str,
-        transfer_topic: &str,
         config: &Erc1155TransferDiscoveryConfig,
+        effective_from_block: &str,
         candidates: &mut Vec<Erc1155HoldingObservation>,
-        token_ids_from_log: fn(&str) -> ServiceResult<Vec<String>>,
-    ) -> ServiceResult<()> {
+        event: Erc1155TransferEvent,
+    ) -> ServiceResult<Option<u64>> {
         let owner_topic = padded_address_topic(owner_address)?;
         let outgoing_topics = vec![
-            Some(transfer_topic.to_string()),
+            Some(event.transfer_topic.clone()),
             None,
             Some(owner_topic.clone()),
             None,
         ];
-        let incoming_topics = vec![
-            Some(transfer_topic.to_string()),
-            None,
-            None,
-            Some(owner_topic),
-        ];
+        let incoming_topics = vec![Some(event.transfer_topic), None, None, Some(owner_topic)];
+        let scan_to_block = self
+            .resolved_nft_log_scan_to_block(provider, &config.to_block)
+            .await?;
+        if let (Some(from), Some(to)) = (
+            parse_block_quantity(effective_from_block),
+            parse_block_quantity(&scan_to_block),
+        ) {
+            if from > to {
+                return Ok(Some(to));
+            }
+        }
+        let mut saw_logs = false;
+        let mut cursor_block = None;
 
         for topics in [&outgoing_topics, &incoming_topics] {
             if candidates.len() >= config.limit {
@@ -244,12 +291,14 @@ impl SigillumService {
                     provider,
                     None,
                     topics,
-                    &config.from_block,
-                    &config.to_block,
+                    effective_from_block,
+                    &scan_to_block,
                 )
                 .await?;
             for log in logs.into_iter().filter(|log| log.topics.len() >= 4) {
-                for token_id_hex in token_ids_from_log(&log.data)? {
+                saw_logs = true;
+                cursor_block = max_log_block(cursor_block, log.block_number.as_deref());
+                for token_id_hex in (event.token_ids_from_log)(&log.data)? {
                     push_unique_erc1155_candidate(
                         candidates,
                         Erc1155HoldingObservation {
@@ -267,7 +316,25 @@ impl SigillumService {
                 }
             }
         }
-        Ok(())
+        if cursor_block.is_none() && !saw_logs {
+            cursor_block = parse_block_quantity(&scan_to_block);
+        }
+        Ok(cursor_block)
+    }
+
+    async fn resolved_nft_log_scan_to_block(
+        &self,
+        provider: &EvmProviderProfile,
+        to_block: &str,
+    ) -> ServiceResult<String> {
+        if parse_block_quantity(to_block).is_some() {
+            return Ok(to_block.to_string());
+        }
+        let latest = self
+            .provider_rpc_for_profile(provider.compartment_id, provider)?
+            .get_block_number()
+            .await?;
+        Ok(encode_block_quantity(latest))
     }
 }
 
@@ -317,6 +384,13 @@ fn erc1155_transfer_batch_topic() -> String {
 
 fn event_topic(signature: &str) -> String {
     format!("0x{}", hex::encode(Keccak256::digest(signature.as_bytes())))
+}
+
+fn max_log_block(current: Option<u64>, next: Option<&str>) -> Option<u64> {
+    match next.and_then(parse_block_quantity) {
+        Some(next) => Some(current.map_or(next, |current| current.max(next))),
+        None => current,
+    }
 }
 
 fn padded_address_topic(address: &str) -> ServiceResult<String> {
