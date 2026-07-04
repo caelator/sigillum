@@ -652,6 +652,12 @@ A → (B ∥ C ∥ D) → E → (W1 ∥ W2) → (W3 ∥ W4 ∥ W5 ∥ W6) → W7
      the PR, and keep legacy normalization working either way.
   4. Surface any new states + reasons in API/UI/CLI; tests per new
      transition.
+- **E1 implementation decision (2026-07-03):** producer search found no active
+  producer of legacy `deferred`; keep it legacy-only and preserve the existing
+  `deferred` → `blocked` normalization. Recovery records a missing reason when
+  it performs that normalization. `operator_action_required` is added as a
+  distinct non-runnable persisted state; explicit reapprove/cancel endpoints
+  remain out of E1 and belong with the later approval semantics.
 - **Accept:** pre-change v1 queue fixture loads unchanged; existing state
   strings byte-identical on the wire; `operator_action_required` exists,
   is never auto-retried, and round-trips restart. **Verify:**
@@ -1462,7 +1468,7 @@ Phase D — Operator-surface parity
 
 Phase E — Automation & recovery
 - [x] E0 macOS loopback skip → runtime sandbox probe
-- [ ] E1 queue state model extended (operator_action_required, deferred semantics)
+- [x] E1 queue state model extended (operator_action_required, deferred semantics)
 - [ ] E2 kill-mid-write replay tests
 - [ ] E3 categorized maintenance summaries
 - [ ] E4 chain_id persisted on allocations
@@ -1560,6 +1566,11 @@ Phase H — Ship
   batched into one PR (per-task worktree branches preserved) to bound CI
   wall-clock; C4 follows as its own PR; C7 (UX redesign) pending operator
   screenshot review.
+- 2026-07-03 E1 40cdf5f: queue state model extended with
+  `operator_action_required`, queue store schema v2 accepting v1 envelopes,
+  non-runnable state/recovery/count tests, API/UI/CLI-visible counts/status,
+  and a documented legacy `deferred` decision: no active producer found, keep
+  legacy-only `deferred` → `blocked` normalization with a recovery reason.
 - 2026-07-03 Wave 1 merged: PR #2 → main 6cfcdce (merge commit, per-task
   history preserved), CI green both legs. C4 remains (Wave 2); C7 complete
   on its branch pending operator sign-off. Execution runbook created at

@@ -163,7 +163,12 @@ Current daemon behavior:
   `profiles.rs` centered on profile CRUD and seed/xpub import handling
 - tracks stealth deposit records, discovers matching ERC-5564 announcements from
   bounded provider log scans, and refreshes balances against configured providers
-- queues direct sends and sweep jobs, including deferred jobs that need more balance or gas
+- queues direct sends and sweep jobs with explicit persisted states:
+  `queued`, `blocked`, `retrying`, `sent`, `failed_terminal`, and
+  `operator_action_required`; legacy `deferred` inputs normalize to
+  `blocked` during recovery with a recorded reason, while
+  `operator_action_required` is terminal until a future explicit operator
+  action moves it out of that state
 - keeps queue ownership split inside `service/queue/*`: the façade owns public
   enqueue/list methods, `payloads` owns job construction, `processing` owns the
   drain loop and retry transitions, `sweeps` owns native/ERC-20 sweep execution,

@@ -70,6 +70,12 @@ function queueScheduleLine(job: any): string {
   return "nextAttempt=-";
 }
 
+function queueJobCanProcess(job: any): boolean {
+  return !["operator_action_required", "sent", "failed", "failed_terminal"].includes(
+    String(job.state || ""),
+  );
+}
+
 function depositObservedLine(deposit: any): string {
   const observedAmount = deposit.observed_amount_hex || "-";
   const nativeBalance = deposit.observed_native_balance_wei_hex || "-";
@@ -370,39 +376,47 @@ export function createOperationsActions(deps: OperationsDeps) {
       "queueList",
       jobs,
       "Queue is empty. Once deposits enqueue sweeps or you create manual work, jobs will appear here for review and processing.",
-      (job) =>
-        '<li><div class="entity-main">' +
-        '<div class="entity-title">' +
-        esc(job.id) +
-        " " +
-        statusPill(job.state) +
-        "</div>" +
-        '<div class="entity-meta">' +
-        "kind=" +
-        esc(job.kind || "-") +
-        " · attempts=" +
-        esc(String(job.attempts || 0)) +
-        "<br>" +
-        esc(describeQueueJob(job)) +
-        "<br>" +
-        "created=" +
-        esc(formatTs(job.created_at_unix)) +
-        " · updated=" +
-        esc(formatTs(job.updated_at_unix)) +
-        " · " +
-        esc(queueScheduleLine(job)) +
-        "<br>" +
-        "tx=" +
-        esc(job.transaction_hash_hex || "-") +
-        " · broadcast=" +
-        esc(job.broadcast_transaction_hash_hex || "-") +
-        (job.last_error ? "<br>lastError=" + esc(job.last_error) : "") +
-        "</div></div>" +
-        '<div class="entity-actions">' +
-        '<button class="btn-primary" data-action="processQueueJob" data-arg0="' +
-        escAttr(job.id) +
-        '">Process</button>' +
-        "</div></li>",
+      (job) => {
+        const canProcess = queueJobCanProcess(job);
+        const processButton =
+          '<button class="btn-primary" data-action="processQueueJob" data-arg0="' +
+          escAttr(job.id) +
+          '"' +
+          (canProcess ? "" : " disabled") +
+          ">Process</button>";
+        return (
+          '<li><div class="entity-main">' +
+          '<div class="entity-title">' +
+          esc(job.id) +
+          " " +
+          statusPill(job.state) +
+          "</div>" +
+          '<div class="entity-meta">' +
+          "kind=" +
+          esc(job.kind || "-") +
+          " · attempts=" +
+          esc(String(job.attempts || 0)) +
+          "<br>" +
+          esc(describeQueueJob(job)) +
+          "<br>" +
+          "created=" +
+          esc(formatTs(job.created_at_unix)) +
+          " · updated=" +
+          esc(formatTs(job.updated_at_unix)) +
+          " · " +
+          esc(queueScheduleLine(job)) +
+          "<br>" +
+          "tx=" +
+          esc(job.transaction_hash_hex || "-") +
+          " · broadcast=" +
+          esc(job.broadcast_transaction_hash_hex || "-") +
+          (job.last_error ? "<br>lastError=" + esc(job.last_error) : "") +
+          "</div></div>" +
+          '<div class="entity-actions">' +
+          processButton +
+          "</div></li>"
+        );
+      },
     );
   }
 
@@ -434,6 +448,8 @@ export function createOperationsActions(deps: OperationsDeps) {
         esc(String(r.blocked || 0)) +
         " · retrying=" +
         esc(String(r.retrying || 0)) +
+        " · operator_action_required=" +
+        esc(String(r.operator_action_required || 0)) +
         " · failed=" +
         esc(String(r.failed || 0)),
     );
@@ -460,6 +476,8 @@ export function createOperationsActions(deps: OperationsDeps) {
         esc(String(r.blocked || 0)) +
         " · retrying=" +
         esc(String(r.retrying || 0)) +
+        " · operator_action_required=" +
+        esc(String(r.operator_action_required || 0)) +
         " · failed=" +
         esc(String(r.failed || 0)) +
         " · target=" +
@@ -497,6 +515,8 @@ export function createOperationsActions(deps: OperationsDeps) {
         esc(String(r.blocked || 0)) +
         " · retrying=" +
         esc(String(r.retrying || 0)) +
+        " · operator_action_required=" +
+        esc(String(r.operator_action_required || 0)) +
         " · failed=" +
         esc(String(r.failed || 0)),
     );

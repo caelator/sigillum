@@ -6,7 +6,14 @@ export interface QueueJobView {
   last_error?: string | null;
 }
 
-export type QueueJobBadge = "queued" | "blocked" | "retrying" | "sent" | "failed" | "unknown";
+export type QueueJobBadge =
+  | "queued"
+  | "blocked"
+  | "retrying"
+  | "sent"
+  | "failed"
+  | "operator_action_required"
+  | "unknown";
 
 export function queueJobBadge(job: QueueJobView): QueueJobBadge {
   switch (job.state) {
@@ -17,6 +24,8 @@ export function queueJobBadge(job: QueueJobView): QueueJobBadge {
       return "blocked";
     case "retrying":
       return "retrying";
+    case "operator_action_required":
+      return "operator_action_required";
     case "sent":
       return "sent";
     case "failed":
@@ -28,5 +37,10 @@ export function queueJobBadge(job: QueueJobView): QueueJobBadge {
 }
 
 export function queueJobNeedsAttention(job: QueueJobView): boolean {
-  return queueJobBadge(job) === "blocked" || queueJobBadge(job) === "failed";
+  const badge = queueJobBadge(job);
+  return (
+    badge === "blocked" ||
+    badge === "failed" ||
+    badge === "operator_action_required"
+  );
 }

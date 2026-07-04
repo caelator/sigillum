@@ -1100,6 +1100,7 @@ fn test_queue_process_response_roundtrip() {
         succeeded: 4,
         blocked: 0,
         retrying: 0,
+        operator_action_required: 0,
         failed: 1,
         jobs: vec![QueueJob {
             id: "job_4".to_string(),

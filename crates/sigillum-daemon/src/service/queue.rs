@@ -32,6 +32,7 @@ const QUEUE_STATE_BLOCKED: &str = "blocked";
 const QUEUE_STATE_RETRYING: &str = "retrying";
 const QUEUE_STATE_SENT: &str = "sent";
 const QUEUE_STATE_FAILED_TERMINAL: &str = "failed_terminal";
+const QUEUE_STATE_OPERATOR_ACTION_REQUIRED: &str = "operator_action_required";
 const QUEUE_STATE_LEGACY_DEFERRED: &str = "deferred";
 const QUEUE_STATE_LEGACY_FAILED: &str = "failed";
 

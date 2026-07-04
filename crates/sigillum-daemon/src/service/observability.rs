@@ -144,6 +144,7 @@ impl SigillumService {
             blocked_queue_job_count: queue_counts.blocked,
             retrying_queue_job_count: queue_counts.retrying,
             failed_queue_job_count: queue_counts.failed,
+            operator_action_required_queue_job_count: queue_counts.operator_action_required,
             deferred_queue_job_count: queue_counts.blocked + queue_counts.deferred_legacy,
             startup_interrupted_operation_count: recovery.interrupted_operation_count,
             startup_recovered_operation_count: recovery.recovered_operation_count,

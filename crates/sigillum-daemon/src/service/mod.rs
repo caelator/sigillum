@@ -297,6 +297,7 @@ mod tests {
         assert_eq!(diagnostics.blocked_queue_job_count, 0);
         assert_eq!(diagnostics.retrying_queue_job_count, 0);
         assert_eq!(diagnostics.failed_queue_job_count, 0);
+        assert_eq!(diagnostics.operator_action_required_queue_job_count, 0);
         assert_eq!(diagnostics.deferred_queue_job_count, 0);
         assert_eq!(diagnostics.startup_interrupted_operation_count, 0);
         assert_eq!(diagnostics.startup_recovered_operation_count, 0);

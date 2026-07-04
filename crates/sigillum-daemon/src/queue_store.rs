@@ -4,7 +4,7 @@
 //! on-chain operations — in a versioned [`JsonDocument`]. The queue processor
 //! drains jobs with exponential backoff and updates state in place.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 use sigillum_api::QueueJob;
@@ -18,7 +18,37 @@ pub struct QueueState {
 }
 
 impl JsonDocument for QueueState {
-    const SCHEMA: JsonSchema = JsonSchema::new("sigillum.queue", 1);
+    const SCHEMA: JsonSchema = JsonSchema::new("sigillum.queue", 2);
+
+    fn from_enveloped_json(
+        path: &Path,
+        version: u32,
+        data: serde_json::Value,
+    ) -> Result<Self, std::io::Error> {
+        if version != 1 && version != Self::SCHEMA.version {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!(
+                    "unsupported {} schema version {} in {}; expected 1 or {}",
+                    Self::SCHEMA.name,
+                    version,
+                    path.display(),
+                    Self::SCHEMA.version
+                ),
+            ));
+        }
+
+        serde_json::from_value(data).map_err(|error| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!(
+                    "failed to parse {} schema payload {}: {error}",
+                    Self::SCHEMA.name,
+                    path.display()
+                ),
+            )
+        })
+    }
 }
 
 pub fn load_queue(base_dir: &std::path::Path) -> Result<QueueState, std::io::Error> {
@@ -110,8 +140,70 @@ mod tests {
         let saved: serde_json::Value =
             serde_json::from_slice(&std::fs::read(queue_path(dir.path())).unwrap()).unwrap();
         assert_eq!(saved["schema"], json!("sigillum.queue"));
-        assert_eq!(saved["schema_version"], json!(1));
+        assert_eq!(saved["schema_version"], json!(2));
         assert!(saved["data"]["jobs"].is_array());
+    }
+
+    #[test]
+    fn version_1_queue_envelope_still_loads_without_rewriting_jobs() {
+        let dir = TempDir::new().unwrap();
+        let path = queue_path(dir.path());
+        let queue = json!({
+            "schema": "sigillum.queue",
+            "schema_version": 1,
+            "data": {
+                "jobs": [
+                    sample_job(),
+                    {
+                        "id": "job_deferred",
+                        "state": "deferred",
+                        "attempts": 1,
+                        "created_at_unix": 1,
+                        "updated_at_unix": 2,
+                        "kind": "eth_stealth_native_sweep",
+                        "wallet_profile": "wallet-a",
+                        "stealth_address": "0x0000000000000000000000000000000000000001",
+                        "ephemeral_public_key_hex": "0x02",
+                        "destination_address": "0x0000000000000000000000000000000000000002"
+                    },
+                    {
+                        "id": "job_operator",
+                        "state": "operator_action_required",
+                        "attempts": 1,
+                        "created_at_unix": 1,
+                        "updated_at_unix": 2,
+                        "kind": "eth_stealth_native_sweep",
+                        "wallet_profile": "wallet-a",
+                        "stealth_address": "0x0000000000000000000000000000000000000001",
+                        "ephemeral_public_key_hex": "0x02",
+                        "destination_address": "0x0000000000000000000000000000000000000002",
+                        "last_error": "operator review required"
+                    }
+                ]
+            }
+        });
+        std::fs::write(&path, serde_json::to_vec_pretty(&queue).unwrap()).unwrap();
+
+        let loaded = load_queue(dir.path()).unwrap();
+        let states = loaded
+            .jobs
+            .iter()
+            .map(|job| job.state.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            states,
+            vec!["queued", "deferred", "operator_action_required"]
+        );
+
+        save_queue(dir.path(), &loaded).unwrap();
+        let saved: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(queue_path(dir.path())).unwrap()).unwrap();
+        assert_eq!(saved["schema_version"], json!(2));
+        assert_eq!(saved["data"]["jobs"][1]["state"], json!("deferred"));
+        assert_eq!(
+            saved["data"]["jobs"][2]["state"],
+            json!("operator_action_required")
+        );
     }
 
     #[test]
