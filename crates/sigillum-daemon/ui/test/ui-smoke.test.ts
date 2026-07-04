@@ -1581,6 +1581,8 @@ test("treasury receive list renders rotate buttons only for active allocations",
       id: "alloc-1",
       wallet_family: "eth-seed",
       wallet_profile: "archive",
+      chain_id: 8453,
+      chain_id_assumed: false,
       address: "0x4444444444444444444444444444444444444444",
       derivation_path: "m/44'/60'/0'/0/7",
       address_index: 7,
@@ -1593,6 +1595,8 @@ test("treasury receive list renders rotate buttons only for active allocations",
       id: "alloc-0",
       wallet_family: "eth-seed",
       wallet_profile: "archive",
+      chain_id: 1,
+      chain_id_assumed: true,
       address: "0x5555555555555555555555555555555555555555",
       derivation_path: "m/44'/60'/0'/0/6",
       address_index: 6,
@@ -1608,6 +1612,8 @@ test("treasury receive list renders rotate buttons only for active allocations",
   ok(html.includes("0x4444444444444444444444444444444444444444"));
   ok(html.includes("0x5555555555555555555555555555555555555555"));
   ok(html.includes("eth-seed/archive"));
+  ok(html.includes("chain=8453"));
+  ok(html.includes("chain=1 (assumed mainnet)"));
   ok(html.includes("purpose=invoices"));
   ok(html.includes("label=client-a"));
   ok(html.includes("path=m/44'/60'/0'/0/7"));
@@ -1778,6 +1784,8 @@ test("treasury receive allocate and rotate dispatch api calls with toasts", asyn
     id: "alloc-7",
     wallet_family: "eth-seed",
     wallet_profile: "archive",
+    chain_id: 8453,
+    chain_id_assumed: false,
     address: "0x6666666666666666666666666666666666666666",
     derivation_path: "m/44'/60'/0'/0/9",
     address_index: 9,

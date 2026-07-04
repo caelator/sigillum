@@ -8,6 +8,10 @@ pub struct EthStealthDeposit {
     pub status: String,
     pub asset_kind: String,
     pub wallet_profile: String,
+    #[serde(default = "default_legacy_mainnet_chain_id")]
+    pub chain_id: u64,
+    #[serde(default = "default_legacy_chain_id_assumed")]
+    pub chain_id_assumed: bool,
     #[serde(default)]
     pub wallet_compartment_id: usize,
     #[serde(default)]
@@ -89,4 +93,12 @@ pub struct EthStealthDepositEnqueueSweepResponse {
     pub job: QueueJob,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub linkage_warning: Option<String>,
+}
+
+fn default_legacy_mainnet_chain_id() -> u64 {
+    1
+}
+
+fn default_legacy_chain_id_assumed() -> bool {
+    true
 }

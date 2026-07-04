@@ -433,6 +433,9 @@ export function createTreasuryActions(deps: TreasuryActionsDeps) {
         esc(allocation.wallet_family) +
         "/" +
         esc(allocation.wallet_profile) +
+        " · chain=" +
+        esc(String(allocation.chain_id)) +
+        (allocation.chain_id_assumed ? " (assumed mainnet)" : "") +
         " · purpose=" +
         esc(allocation.purpose) +
         (allocation.label ? " · label=" + esc(allocation.label) : "") +

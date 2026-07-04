@@ -3021,7 +3021,7 @@ async fn deposit_registry_refresh_and_sweep_flow_roundtrip() {
             "name": "mainnet",
             "rpc_url": format!("http://{rpc_addr}/"),
             "auth_token_key": "alchemy",
-            "chain_id": 1,
+            "chain_id": 8453,
             "max_priority_fee_per_gas_hex": "0x59682f00",
             "max_fee_per_gas_hex": "0x77359400",
             "native_gas_limit": 21000,
@@ -3062,6 +3062,8 @@ async fn deposit_registry_refresh_and_sweep_flow_roundtrip() {
     .await;
     assert_eq!(native_deposit.status(), StatusCode::OK);
     let native_deposit_json: serde_json::Value = native_deposit.json().await.unwrap();
+    assert_eq!(native_deposit_json["deposit"]["chain_id"], 8453);
+    assert_eq!(native_deposit_json["deposit"]["chain_id_assumed"], false);
     let native_id = native_deposit_json["deposit"]["id"]
         .as_str()
         .unwrap()
@@ -3079,6 +3081,8 @@ async fn deposit_registry_refresh_and_sweep_flow_roundtrip() {
     let refresh_json: serde_json::Value = refresh.json().await.unwrap();
     assert_eq!(refresh_json["detected"], 1);
     assert_eq!(refresh_json["queued"], 1);
+    assert_eq!(refresh_json["deposits"][0]["chain_id"], 8453);
+    assert_eq!(refresh_json["deposits"][0]["chain_id_assumed"], false);
     let sweep_job_id = refresh_json["deposits"][0]["queue_job_id"]
         .as_str()
         .unwrap()
@@ -3129,6 +3133,8 @@ async fn deposit_registry_refresh_and_sweep_flow_roundtrip() {
     .await;
     assert_eq!(erc20_deposit.status(), StatusCode::OK);
     let erc20_json: serde_json::Value = erc20_deposit.json().await.unwrap();
+    assert_eq!(erc20_json["deposit"]["chain_id"], 8453);
+    assert_eq!(erc20_json["deposit"]["chain_id_assumed"], false);
     let erc20_id = erc20_json["deposit"]["id"].as_str().unwrap().to_string();
 
     let manual_enqueue = post_json(
@@ -3525,7 +3531,7 @@ async fn treasury_receive_address_routes_allocate_and_rotate() {
         json!({
             "name": "mainnet",
             "rpc_url": "http://127.0.0.1:9/",
-            "chain_id": 1,
+            "chain_id": 8453,
         }),
         Some(&token),
     )
@@ -3593,6 +3599,8 @@ async fn treasury_receive_address_routes_allocate_and_rotate() {
     assert_eq!(acme_json["status"], "allocated");
     assert_eq!(acme_json["allocation"]["wallet_family"], "eth-seed");
     assert_eq!(acme_json["allocation"]["wallet_profile"], "seed-main");
+    assert_eq!(acme_json["allocation"]["chain_id"], 8453);
+    assert_eq!(acme_json["allocation"]["chain_id_assumed"], false);
     assert_eq!(acme_json["allocation"]["address_index"], 0);
     assert_eq!(
         acme_json["allocation"]["derivation_path"],
@@ -3634,6 +3642,8 @@ async fn treasury_receive_address_routes_allocate_and_rotate() {
     assert_eq!(beta.status(), StatusCode::OK);
     let beta_json: serde_json::Value = beta.json().await.unwrap();
     assert_eq!(beta_json["allocation"]["address_index"], 1);
+    assert_eq!(beta_json["allocation"]["chain_id"], 8453);
+    assert_eq!(beta_json["allocation"]["chain_id_assumed"], false);
     assert_eq!(
         beta_json["allocation"]["derivation_path"],
         "m/44'/60'/0'/0/1"
@@ -3658,6 +3668,8 @@ async fn treasury_receive_address_routes_allocate_and_rotate() {
     let rotate_json: serde_json::Value = rotate.json().await.unwrap();
     assert_eq!(rotate_json["status"], "rotated");
     assert_eq!(rotate_json["allocation"]["address_index"], 2);
+    assert_eq!(rotate_json["allocation"]["chain_id"], 8453);
+    assert_eq!(rotate_json["allocation"]["chain_id_assumed"], false);
     assert_eq!(
         rotate_json["allocation"]["address"],
         json!(expected_address(2))
@@ -3680,6 +3692,8 @@ async fn treasury_receive_address_routes_allocate_and_rotate() {
     assert_eq!(allocations.len(), 3);
     assert_eq!(allocations[0]["id"], json!(acme_id.clone()));
     assert_eq!(allocations[0]["status"], "retired");
+    assert_eq!(allocations[0]["chain_id"], 8453);
+    assert_eq!(allocations[0]["chain_id_assumed"], false);
     assert!(allocations[0]["retired_at_unix"].is_u64());
     assert_eq!(allocations[1]["status"], "active");
     assert_eq!(allocations[2]["status"], "active");

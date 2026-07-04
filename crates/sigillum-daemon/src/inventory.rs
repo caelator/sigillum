@@ -44,7 +44,7 @@ pub struct WalletInventoryState {
 }
 
 impl JsonDocument for WalletInventoryState {
-    const SCHEMA: JsonSchema = JsonSchema::new("sigillum.wallet-inventory", 10);
+    const SCHEMA: JsonSchema = JsonSchema::new("sigillum.wallet-inventory", 11);
 
     fn from_enveloped_json(
         path: &std::path::Path,
@@ -52,7 +52,7 @@ impl JsonDocument for WalletInventoryState {
         data: serde_json::Value,
     ) -> Result<Self, std::io::Error> {
         match version {
-            1..=10 => serde_json::from_value(data).map_err(|error| {
+            1..=11 => serde_json::from_value(data).map_err(|error| {
                 std::io::Error::new(
                     std::io::ErrorKind::InvalidData,
                     format!(
@@ -221,6 +221,8 @@ mod tests {
             id: "alloc_1".into(),
             wallet_family: "eth-seed".into(),
             wallet_profile: "seed-main".into(),
+            chain_id: 1,
+            chain_id_assumed: false,
             address: "0x2222222222222222222222222222222222222222".into(),
             derivation_path: "m/44'/60'/0'/0/3".into(),
             address_index: 3,
@@ -325,12 +327,46 @@ mod tests {
             serde_json::from_slice(&std::fs::read(wallet_inventory_path(dir.path())).unwrap())
                 .unwrap();
         assert_eq!(saved["schema"], json!("sigillum.wallet-inventory"));
-        assert_eq!(saved["schema_version"], json!(10));
+        assert_eq!(saved["schema_version"], json!(11));
         assert!(saved["data"]["chain_profiles"].is_array());
         assert!(saved["data"]["watch_address_book"].is_array());
         assert!(saved["data"]["jobs"].is_array());
         assert!(saved["data"]["addresses"].is_array());
         assert!(saved["data"]["holdings"].is_array());
         assert!(saved["data"]["risk_catalog"].is_array());
+    }
+
+    #[test]
+    fn legacy_v10_receive_allocations_load_with_assumed_mainnet_chain_id() {
+        let dir = TempDir::new().unwrap();
+        let path = wallet_inventory_path(dir.path());
+        std::fs::write(
+            &path,
+            serde_json::to_vec_pretty(&json!({
+                "schema": "sigillum.wallet-inventory",
+                "schema_version": 10,
+                "data": {
+                    "receive_allocations": [{
+                        "id": "alloc_1",
+                        "wallet_family": "eth-seed",
+                        "wallet_profile": "seed-main",
+                        "address": "0x2222222222222222222222222222222222222222",
+                        "derivation_path": "m/44'/60'/0'/0/3",
+                        "address_index": 3,
+                        "purpose": "counterparty-acme",
+                        "label": "Acme invoices",
+                        "status": "active",
+                        "created_at_unix": 1
+                    }]
+                }
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+
+        let loaded = load_wallet_inventory(dir.path()).unwrap();
+
+        assert_eq!(loaded.receive_allocations[0].chain_id, 1);
+        assert!(loaded.receive_allocations[0].chain_id_assumed);
     }
 }

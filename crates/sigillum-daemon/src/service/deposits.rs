@@ -153,6 +153,8 @@ mod tests {
             status: "funded".into(),
             asset_kind: "native".into(),
             wallet_profile: wallet_profile.into(),
+            chain_id: 1,
+            chain_id_assumed: false,
             wallet_compartment_id: 0,
             provider_compartment_id: 0,
             wallet: wallet_profile.into(),
@@ -563,6 +565,8 @@ impl SigillumService {
                 status: "pending".into(),
                 asset_kind: asset_kind.into(),
                 wallet_profile: wallet.name.clone(),
+                chain_id: provider.chain_id,
+                chain_id_assumed: false,
                 wallet_compartment_id: wallet.compartment_id,
                 provider_compartment_id: provider.compartment_id,
                 wallet: wallet.wallet.clone(),
@@ -712,7 +716,7 @@ impl SigillumService {
         &self,
         token: &str,
         wallet: &EthStealthWalletProfile,
-        _provider: &EvmProviderProfile,
+        provider: &EvmProviderProfile,
         ephemeral_private_key_hex: Option<String>,
         blueprint: DepositBlueprint,
     ) -> ServiceResult<EthStealthDepositMutationResponse> {
@@ -739,6 +743,8 @@ impl SigillumService {
             status: "pending".into(),
             asset_kind: blueprint.asset_kind,
             wallet_profile: blueprint.wallet_profile,
+            chain_id: provider.chain_id,
+            chain_id_assumed: false,
             wallet_compartment_id: blueprint.wallet_compartment_id,
             provider_compartment_id: blueprint.provider_compartment_id,
             wallet: blueprint.wallet,
@@ -1219,6 +1225,8 @@ impl SigillumService {
             let native_balance = decode_quantity_hex(&observation.native_balance_wei_hex)
                 .map_err(map_wallet_error)?;
 
+            deposit.chain_id = plan.provider.chain_id;
+            deposit.chain_id_assumed = false;
             deposit.observed_native_balance_wei_hex =
                 (deposit.asset_kind == "erc20").then(|| observation.native_balance_wei_hex.clone());
             deposit.observed_amount_hex = Some(observation.observed_amount_hex.clone());
