@@ -44,10 +44,14 @@ export interface ChainProfile {
   chain_id?: number | null;
   enabled: boolean;
   native_symbol: string;
+  native_decimals: number;
+  finality_blocks: number;
+  permit2_address?: string | null;
   rpc_profile?: string | null;
   explorer_url?: string | null;
   capabilities: string[];
   source: string;
+  builtin: boolean;
   updated_at_unix: number;
 }
 

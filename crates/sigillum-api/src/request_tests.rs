@@ -886,9 +886,13 @@ fn test_chain_profile_upsert_request_roundtrip() {
         chain_id: Some(8453),
         provider_profile: Some("base-mainnet".to_string()),
         native_symbol: Some("ETH".to_string()),
+        native_decimals: Some(18),
+        finality_blocks: Some(12),
+        permit2_address: Some("0x000000000022d473030f116ddee9f6b43ac78ba3".to_string()),
         explorer_url: Some("https://basescan.org".to_string()),
         capabilities: vec!["native".to_string(), "erc20".to_string()],
         enabled: Some(true),
+        builtin: None,
     };
     roundtrip_test(req);
 }

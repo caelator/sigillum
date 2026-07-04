@@ -10,6 +10,7 @@ BASE_DIR="$(mktemp -d "${TMPDIR:-/tmp}/sigillum-browser-smoke.XXXXXX")"
 ARTIFACT_DIR="${SIGILLUM_BROWSER_SMOKE_ARTIFACT_DIR:-${BASE_DIR}/artifacts}"
 LOG_FILE="${BASE_DIR}/daemon.log"
 DAEMON_PID=""
+FAILED=0
 
 cleanup() {
   if [[ -n "${DAEMON_PID}" ]] && kill -0 "${DAEMON_PID}" >/dev/null 2>&1; then
@@ -17,7 +18,7 @@ cleanup() {
     wait "${DAEMON_PID}" >/dev/null 2>&1 || true
   fi
 
-  if [[ "${SIGILLUM_BROWSER_SMOKE_KEEP_ARTIFACTS:-0}" != "1" ]]; then
+  if [[ "${SIGILLUM_BROWSER_SMOKE_KEEP_ARTIFACTS:-0}" != "1" && "${FAILED}" != "1" ]]; then
     rm -rf "${BASE_DIR}"
   else
     echo "browser smoke artifacts kept at ${BASE_DIR}"
@@ -26,6 +27,7 @@ cleanup() {
 trap cleanup EXIT
 
 fail() {
+  FAILED=1
   echo "browser smoke failed: $*" >&2
   if [[ -f "${LOG_FILE}" ]]; then
     echo "--- daemon log ---" >&2

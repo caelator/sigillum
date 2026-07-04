@@ -78,6 +78,7 @@ function input(id: string): HTMLInputElement {
 export function createInventoryActions(deps: InventoryActionsDeps) {
   let planRoutingListenerBound = false;
   let planPartyDestinationInputIds: string[] = [];
+  let latestChainProfiles: ChainProfile[] = [];
 
   function planRoutingStrategy(): "single" | "per_party" {
     const routingEl = document.getElementById(
@@ -209,6 +210,7 @@ export function createInventoryActions(deps: InventoryActionsDeps) {
         esc(profile.name) +
         " " +
         statusPill(profile.enabled ? "enabled" : "disabled") +
+        (profile.builtin ? " " + statusPill("builtin") : "") +
         "</div>" +
         '<div class="entity-meta">' +
         "family=" +
@@ -219,18 +221,37 @@ export function createInventoryActions(deps: InventoryActionsDeps) {
         esc(profile.provider_profile || "-") +
         " · native=" +
         esc(profile.native_symbol || "-") +
+        " · decimals=" +
+        esc(String(profile.native_decimals ?? 18)) +
+        " · finality=" +
+        esc(String(profile.finality_blocks ?? 0)) +
         "<br>" +
+        "permit2=" +
+        esc(profile.permit2_address || "-") +
+        " · " +
         "capabilities=" +
         esc((profile.capabilities || []).join(", ") || "-") +
         " · source=" +
         esc(profile.source || "-") +
         "</div></div>" +
-        '<div class="entity-actions">' +
-        '<button class="btn-danger" data-action="deleteChainProfile" data-arg0="' +
-        escAttr(profile.name) +
-        '">Delete</button>' +
-        "</div></li>",
+        (profile.builtin
+          ? ""
+          : '<div class="entity-actions">' +
+            '<button class="btn-danger" data-action="deleteChainProfile" data-arg0="' +
+            escAttr(profile.name) +
+            '">Delete</button>' +
+            "</div>") +
+        "</li>",
     );
+  }
+
+  function chainLabel(chainId: number | string | null | undefined): string {
+    if (chainId === null || chainId === undefined) return "-";
+    const numericChainId = Number(chainId);
+    const profile = latestChainProfiles.find(
+      (chain) => chain.enabled && chain.chain_id === numericChainId,
+    );
+    return profile ? `${numericChainId} (${profile.name})` : String(chainId);
   }
 
   function renderInventoryState(inventory: any): void {
@@ -286,7 +307,7 @@ export function createInventoryActions(deps: InventoryActionsDeps) {
         "/" +
         esc(address.wallet_profile) +
         " · chain=" +
-        esc(String(address.chain_id)) +
+        esc(chainLabel(address.chain_id)) +
         (address.derivation_pattern
           ? " · pattern=" + esc(address.derivation_pattern)
           : "") +
@@ -346,6 +367,8 @@ export function createInventoryActions(deps: InventoryActionsDeps) {
         esc(holding.wallet_profile) +
         " · provider=" +
         esc(holding.provider_profile) +
+        " · chain=" +
+        esc(chainLabel(holding.chain_id)) +
         " · source=" +
         esc(holding.source || "-") +
         "</div></div></li>",
@@ -568,14 +591,17 @@ export function createInventoryActions(deps: InventoryActionsDeps) {
     void renderPlanPartyDestinations();
     try {
       const [chains, watchBook, inventory, catalog, risks, plans] = await Promise.all([
-        deps.api("GET", "/api/inventory/chains"),
+        deps.api("GET", "/api/chains"),
         deps.api("GET", "/api/inventory/watch-addresses"),
         deps.api("GET", "/api/inventory/wallets"),
         deps.api("GET", "/api/risk/catalog"),
         deps.api("GET", "/api/risk/findings"),
         deps.api("GET", "/api/plans/consolidation"),
       ]);
-      if (!chains.error) renderChainProfiles(chains.profiles || []);
+      if (!chains.error) {
+        latestChainProfiles = chains.profiles || [];
+        renderChainProfiles(latestChainProfiles);
+      }
       if (!watchBook.error) renderWatchAddressBook(watchBook.entries || []);
       if (!inventory.error) renderInventoryState(inventory);
       if (!catalog.error) renderRiskCatalog(catalog.entries || []);
@@ -591,12 +617,15 @@ export function createInventoryActions(deps: InventoryActionsDeps) {
       deps.toast("Chain profile name and family are required", "error");
       return;
     }
-    const r = await deps.api("POST", "/api/inventory/chains/upsert", {
+    const r = await deps.api("POST", "/api/chains/upsert", {
       name,
       chain_family: family,
       chain_id: optionalNumberValue("chainProfileId"),
       provider_profile: optionalTextValue("chainProfileProvider"),
       native_symbol: optionalTextValue("chainProfileNativeSymbol"),
+      native_decimals: optionalNumberValue("chainProfileNativeDecimals"),
+      finality_blocks: optionalNumberValue("chainProfileFinalityBlocks"),
+      permit2_address: optionalTextValue("chainProfilePermit2Address"),
       capabilities: [],
       enabled: true,
     });
@@ -610,6 +639,9 @@ export function createInventoryActions(deps: InventoryActionsDeps) {
       "chainProfileId",
       "chainProfileProvider",
       "chainProfileNativeSymbol",
+      "chainProfileNativeDecimals",
+      "chainProfileFinalityBlocks",
+      "chainProfilePermit2Address",
     ]);
     deps.toast("Chain profile saved");
     void loadInventoryOperations();
@@ -617,7 +649,7 @@ export function createInventoryActions(deps: InventoryActionsDeps) {
 
   async function deleteChainProfile(name: string): Promise<void> {
     if (!confirm('Delete chain profile "' + name + '"?')) return;
-    const r = await deps.api("POST", "/api/inventory/chains/delete", { name });
+    const r = await deps.api("POST", "/api/chains/delete", { name });
     if (r.error) {
       deps.toast(r.error, "error");
       return;

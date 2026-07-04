@@ -1,7 +1,8 @@
 # Sigillum 1.0 Execution Runbook
 
 **Status:** Active operational handbook for completing the 1.0 release
-**State recorded:** 2026-07-03, `main` @ `6cfcdce` (Wave 1 merged)
+**State recorded:** 2026-07-04, `main` @ `c2caf71` (W2 merged; W1.1/W1.2
+ready on the chain-registry branch)
 **Pairs with:** [release-1.0-plan.md](./release-1.0-plan.md) — the task
 specifications and Decision Register. This runbook does not restate task
 specs; it tells the executing agent **what is already done, how to run the
@@ -23,6 +24,8 @@ newer and battle-tested).
 |---|---|
 | Phase A (desktop branch landed) | PR #1, squash `fd2b35b`; CI green both legs |
 | Wave 1 = B1, B2, B3, B4, C1, C2, C3, C5, C6, D1, D2 | PR #2, merge `6cfcdce`; CI green both legs; per-task commits preserved in history |
+| E5 destructive-flow recovery | PR #10, merge `ce9d347`; full gate passed |
+| W2 typed domain model | PR #11, merge `c2caf71`; full gate and CI passed |
 
 The Master Checklist in `release-1.0-plan.md` §5 reflects this — trust the
 checkboxes; keep updating them as you complete tasks (plan rule §0.1.6).
@@ -54,8 +57,8 @@ checkboxes; keep updating them as you complete tasks (plan rule §0.1.6).
 
 ### 1.4 Remaining work (specs in release-1.0-plan.md §4)
 
-C7 merge; E4–E5; W1.1–W1.3, W2, W3.1–W3.5, W4,
-W5, W6.1–W6.4, W7.1–W7.5, W8; F1–F7; G1–G5; H1–H3.
+C7 merge; W1.3, W3.1–W3.5, W4, W5, W6.1–W6.4, W7.1–W7.5,
+W8; F1–F7; G1–G5; H1–H3.
 
 ---
 

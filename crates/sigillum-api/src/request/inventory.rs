@@ -177,11 +177,19 @@ pub struct ChainProfileUpsertRequest {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub native_symbol: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub native_decimals: Option<u8>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub finality_blocks: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub permit2_address: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub explorer_url: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub capabilities: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub enabled: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub builtin: Option<bool>,
 }
 
 /// Delete a local chain profile.

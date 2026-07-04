@@ -233,6 +233,129 @@ async fn get(
 }
 
 #[tokio::test]
+async fn chain_registry_routes_seed_builtins_and_manage_custom_profiles() {
+    let dir = TempDir::new().unwrap();
+    let (addr, handle) = spawn_daemon(dir.path().to_path_buf()).await;
+    let client = reqwest::Client::new();
+
+    let init = post_json(
+        &client,
+        addr,
+        "/api/compartment/init",
+        json!({
+            "id": 0,
+            "label": "default",
+            "threshold": 1,
+            "passphrase": "correct horse battery staple",
+        }),
+        None,
+    )
+    .await;
+    assert_eq!(init.status(), StatusCode::OK);
+    let init_json: serde_json::Value = init.json().await.unwrap();
+    let token = init_json["session_token"].as_str().unwrap().to_string();
+
+    let builtins = get(&client, addr, "/api/chains", Some(&token)).await;
+    assert_eq!(builtins.status(), StatusCode::OK);
+    let builtins_json: serde_json::Value = builtins.json().await.unwrap();
+    let profiles = builtins_json["profiles"].as_array().unwrap();
+    assert_eq!(profiles.len(), 5);
+    assert!(profiles.iter().any(|profile| {
+        profile["name"] == "polygon-pos"
+            && profile["chain_id"] == 137
+            && profile["native_symbol"] == "POL"
+            && profile["native_decimals"] == 18
+            && profile["builtin"] == true
+    }));
+
+    let upsert = post_json(
+        &client,
+        addr,
+        "/api/chains/upsert",
+        json!({
+            "name": "test-rollup",
+            "chain_family": "evm",
+            "chain_id": 999999,
+            "native_symbol": "TST",
+            "native_decimals": 18,
+            "finality_blocks": 64,
+            "permit2_address": "0X5555555555555555555555555555555555555555",
+            "enabled": true
+        }),
+        Some(&token),
+    )
+    .await;
+    assert_eq!(upsert.status(), StatusCode::OK);
+    let upsert_json: serde_json::Value = upsert.json().await.unwrap();
+    assert_eq!(upsert_json["profile"]["name"], "test-rollup");
+    assert_eq!(upsert_json["profile"]["chain_id"], 999999);
+    assert_eq!(upsert_json["profile"]["finality_blocks"], 64);
+    assert_eq!(
+        upsert_json["profile"]["permit2_address"],
+        "0x5555555555555555555555555555555555555555"
+    );
+    assert_eq!(upsert_json["profile"]["builtin"], false);
+
+    let duplicate = post_json(
+        &client,
+        addr,
+        "/api/chains/upsert",
+        json!({
+            "name": "duplicate-rollup",
+            "chain_family": "evm",
+            "chain_id": 999999
+        }),
+        Some(&token),
+    )
+    .await;
+    assert_eq!(duplicate.status(), StatusCode::CONFLICT);
+
+    let delete_builtin = post_json(
+        &client,
+        addr,
+        "/api/chains/delete",
+        json!({ "name": "ethereum" }),
+        Some(&token),
+    )
+    .await;
+    assert_eq!(delete_builtin.status(), StatusCode::BAD_REQUEST);
+
+    let alias_list = get(&client, addr, "/api/inventory/chains", Some(&token)).await;
+    assert_eq!(alias_list.status(), StatusCode::OK);
+    let alias_json: serde_json::Value = alias_list.json().await.unwrap();
+    assert!(
+        alias_json["profiles"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|profile| profile["name"] == "test-rollup")
+    );
+
+    let delete_custom = post_json(
+        &client,
+        addr,
+        "/api/chains/delete",
+        json!({ "name": "test-rollup" }),
+        Some(&token),
+    )
+    .await;
+    assert_eq!(delete_custom.status(), StatusCode::OK);
+
+    let after_delete = get(&client, addr, "/api/chains", Some(&token)).await;
+    assert_eq!(after_delete.status(), StatusCode::OK);
+    let after_delete_json: serde_json::Value = after_delete.json().await.unwrap();
+    assert!(
+        !after_delete_json["profiles"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|profile| profile["name"] == "test-rollup")
+    );
+
+    handle.abort();
+}
+
+#[tokio::test]
 async fn failed_restore_preserves_existing_session_and_data() {
     let dir = TempDir::new().unwrap();
     let (addr, handle) = spawn_daemon(dir.path().to_path_buf()).await;

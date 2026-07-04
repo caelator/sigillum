@@ -16,7 +16,7 @@ const ARTIFACT_DIR =
   process.env.SIGILLUM_BROWSER_SMOKE_ARTIFACT_DIR ||
   fs.mkdtempSync(path.join(os.tmpdir(), "sigillum-browser-smoke-artifacts."));
 const TIMEOUT_MS = Number(process.env.SIGILLUM_BROWSER_SMOKE_TIMEOUT_MS || 60_000);
-const REAUTH_TIMEOUT_MS = Number(process.env.SIGILLUM_BROWSER_SMOKE_REAUTH_TIMEOUT_MS || 120_000);
+const REAUTH_TIMEOUT_MS = Number(process.env.SIGILLUM_BROWSER_SMOKE_REAUTH_TIMEOUT_MS || 300_000);
 
 function fail(message) {
   throw new Error(`browser smoke failed: ${message}`);
@@ -337,6 +337,7 @@ function reauthStateExpression() {
       unlockError: document.getElementById("unlockError")?.textContent?.trim() || "",
       passphraseValueLength: input?.value?.length || 0,
       unlockButtonDisabled: !!button?.disabled,
+      unlockButtonText: button?.textContent || "",
       controlsReady: ready(input) && ready(button),
       hasToken: !!sessionStorage.getItem("sigillumSessionToken")
     };

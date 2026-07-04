@@ -14,6 +14,7 @@ use sigillum_api::{
 };
 
 use crate::json_store::{JsonDocument, JsonSchema};
+use crate::service::chains::ensure_builtin_chain_profiles;
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct WalletInventoryState {
@@ -44,7 +45,7 @@ pub struct WalletInventoryState {
 }
 
 impl JsonDocument for WalletInventoryState {
-    const SCHEMA: JsonSchema = JsonSchema::new("sigillum.wallet-inventory", 11);
+    const SCHEMA: JsonSchema = JsonSchema::new("sigillum.wallet-inventory", 12);
 
     fn from_enveloped_json(
         path: &std::path::Path,
@@ -52,15 +53,19 @@ impl JsonDocument for WalletInventoryState {
         data: serde_json::Value,
     ) -> Result<Self, std::io::Error> {
         match version {
-            1..=11 => serde_json::from_value(data).map_err(|error| {
-                std::io::Error::new(
-                    std::io::ErrorKind::InvalidData,
-                    format!(
-                        "failed to parse sigillum.wallet-inventory schema payload {}: {error}",
-                        path.display()
-                    ),
-                )
-            }),
+            1..=12 => {
+                let mut state: Self = serde_json::from_value(data).map_err(|error| {
+                    std::io::Error::new(
+                        std::io::ErrorKind::InvalidData,
+                        format!(
+                            "failed to parse sigillum.wallet-inventory schema payload {}: {error}",
+                            path.display()
+                        ),
+                    )
+                })?;
+                ensure_builtin_chain_profiles(&mut state.chain_profiles);
+                Ok(state)
+            }
             _ => Err(std::io::Error::new(
                 std::io::ErrorKind::InvalidData,
                 format!(
@@ -78,7 +83,10 @@ pub fn load_wallet_inventory(
     base_dir: &std::path::Path,
 ) -> Result<WalletInventoryState, std::io::Error> {
     let path = wallet_inventory_path(base_dir);
-    Ok(crate::json_store::load_json_document(&path)?.unwrap_or_default())
+    let mut state: WalletInventoryState =
+        crate::json_store::load_json_document(&path)?.unwrap_or_default();
+    ensure_builtin_chain_profiles(&mut state.chain_profiles);
+    Ok(state)
 }
 
 pub fn save_wallet_inventory(
@@ -86,7 +94,9 @@ pub fn save_wallet_inventory(
     state: &WalletInventoryState,
 ) -> Result<(), std::io::Error> {
     let path = wallet_inventory_path(base_dir);
-    crate::json_store::save_json_document(&path, state)
+    let mut state = state.clone();
+    ensure_builtin_chain_profiles(&mut state.chain_profiles);
+    crate::json_store::save_json_document(&path, &state)
 }
 
 pub fn wallet_inventory_path(base_dir: &std::path::Path) -> PathBuf {
@@ -127,10 +137,14 @@ mod tests {
             chain_id: Some(1),
             provider_profile: Some("mainnet".into()),
             native_symbol: "ETH".into(),
+            native_decimals: 18,
+            finality_blocks: 0,
+            permit2_address: None,
             explorer_url: None,
             capabilities: vec!["native".into(), "erc20".into()],
             enabled: true,
             source: "operator".into(),
+            builtin: true,
             created_at_unix: 1,
             updated_at_unix: 2,
         }
@@ -259,6 +273,8 @@ mod tests {
         assert!(state.jobs.is_empty());
         assert!(state.addresses.is_empty());
         assert!(state.holdings.is_empty());
+        assert_eq!(state.chain_profiles.len(), 5);
+        assert!(state.chain_profiles.iter().all(|profile| profile.builtin));
     }
 
     #[test]
@@ -331,7 +347,7 @@ mod tests {
         let loaded = load_wallet_inventory(dir.path()).unwrap();
 
         assert_eq!(loaded.jobs.len(), 1);
-        assert_eq!(loaded.chain_profiles.len(), 1);
+        assert_eq!(loaded.chain_profiles.len(), 5);
         assert_eq!(loaded.watch_address_book.len(), 1);
         assert_eq!(loaded.addresses.len(), 1);
         assert_eq!(loaded.holdings.len(), 2);
@@ -391,13 +407,116 @@ mod tests {
             serde_json::from_slice(&std::fs::read(wallet_inventory_path(dir.path())).unwrap())
                 .unwrap();
         assert_eq!(saved["schema"], json!("sigillum.wallet-inventory"));
-        assert_eq!(saved["schema_version"], json!(11));
-        assert!(saved["data"]["chain_profiles"].is_array());
+        assert_eq!(saved["schema_version"], json!(12));
+        assert_eq!(saved["data"]["chain_profiles"].as_array().unwrap().len(), 5);
         assert!(saved["data"]["watch_address_book"].is_array());
         assert!(saved["data"]["jobs"].is_array());
         assert!(saved["data"]["addresses"].is_array());
         assert!(saved["data"]["holdings"].is_array());
         assert!(saved["data"]["risk_catalog"].is_array());
+    }
+
+    #[test]
+    fn legacy_v11_inventory_loads_with_chain_registry_and_mainnet_defaults() {
+        let dir = TempDir::new().unwrap();
+        let path = wallet_inventory_path(dir.path());
+        std::fs::write(
+            &path,
+            serde_json::to_vec_pretty(&json!({
+                "schema": "sigillum.wallet-inventory",
+                "schema_version": 11,
+                "data": {
+                    "chain_profiles": [{
+                        "name": "custom-rollup",
+                        "chain_family": "evm",
+                        "chain_id": 999,
+                        "native_symbol": "ETH",
+                        "enabled": true,
+                        "source": "operator",
+                        "created_at_unix": 1,
+                        "updated_at_unix": 2
+                    }],
+                    "addresses": [{
+                        "id": "addr_legacy",
+                        "wallet_family": "eth-seed",
+                        "wallet_profile": "seed-main",
+                        "provider_profile": "mainnet",
+                        "address": "0x1111111111111111111111111111111111111111",
+                        "derivation_path": "m/44'/60'/0'/0/0",
+                        "address_index": 0,
+                        "activity_state": "funded",
+                        "native_balance_wei_hex": "0x1",
+                        "transaction_count": 1,
+                        "source": "legacy",
+                        "first_seen_at_unix": 1,
+                        "last_checked_at_unix": 2
+                    }],
+                    "holdings": [{
+                        "id": "holding_legacy",
+                        "wallet_family": "eth-seed",
+                        "wallet_profile": "seed-main",
+                        "provider_profile": "mainnet",
+                        "address": "0x1111111111111111111111111111111111111111",
+                        "derivation_path": "m/44'/60'/0'/0/0",
+                        "asset_kind": "native",
+                        "amount_hex": "0x1",
+                        "source": "legacy",
+                        "status": "detected",
+                        "first_seen_at_unix": 1,
+                        "last_checked_at_unix": 2
+                    }],
+                    "consolidation_plans": [{
+                        "id": "plan_legacy",
+                        "status": "review_required",
+                        "created_at_unix": 1,
+                        "updated_at_unix": 2,
+                        "summary": {
+                            "total_steps": 1,
+                            "blocked_steps": 0,
+                            "review_required_steps": 1,
+                            "approved_steps": 0,
+                            "executable_steps": 0,
+                            "value_items": 1
+                        },
+                        "steps": [{
+                            "id": "step_legacy",
+                            "action": "sweep_native",
+                            "status": "review_required",
+                            "wallet_family": "eth-seed",
+                            "wallet_profile": "seed-main",
+                            "provider_profile": "mainnet",
+                            "address": "0x1111111111111111111111111111111111111111",
+                            "derivation_path": "m/44'/60'/0'/0/0",
+                            "asset_kind": "native",
+                            "amount_hex": "0x1",
+                            "signer_status": "unknown",
+                            "simulation_status": "not_run",
+                            "risk_level": "low",
+                            "auto_eligible": false,
+                            "approved": false
+                        }]
+                    }]
+                }
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+
+        let loaded = load_wallet_inventory(dir.path()).unwrap();
+
+        assert_eq!(loaded.chain_profiles.len(), 6);
+        let custom = loaded
+            .chain_profiles
+            .iter()
+            .find(|profile| profile.name == "custom-rollup")
+            .expect("custom chain profile loaded");
+        assert!(!custom.builtin);
+        assert_eq!(custom.native_decimals, 18);
+        assert_eq!(custom.finality_blocks, 0);
+        assert!(custom.permit2_address.is_none());
+        assert_eq!(loaded.addresses[0].chain_id, 1);
+        assert_eq!(loaded.holdings[0].chain_id, 1);
+        assert_eq!(loaded.consolidation_plans[0].steps[0].chain_id, 1);
     }
 
     #[test]

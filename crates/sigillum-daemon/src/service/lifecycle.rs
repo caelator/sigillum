@@ -43,7 +43,10 @@ impl SigillumService {
         let passphrase = Zeroizing::new(body.passphrase);
         super::helpers::require_valid_passphrase(&passphrase)?;
 
-        if let Some(response) = self.reauthenticate_unlocked_passphrase(passphrase.as_str())? {
+        if let Some(response) = self
+            .reauthenticate_unlocked_passphrase(passphrase.as_str())
+            .await?
+        {
             return Ok(response);
         }
 
@@ -79,7 +82,7 @@ impl SigillumService {
         self.passphrase_unlock_response(unlocked_metas)
     }
 
-    fn reauthenticate_unlocked_passphrase(
+    async fn reauthenticate_unlocked_passphrase(
         &self,
         passphrase: &str,
     ) -> ServiceResult<Option<UnlockResponse>> {
@@ -87,24 +90,41 @@ impl SigillumService {
             return Ok(None);
         }
 
-        let mut matched_metas = Vec::new();
-        for (meta, loaded_master_key) in self.state.extract_all_master_keys_with_meta() {
-            let salt = match std::fs::read(self.state.salt_path(meta.id)) {
-                Ok(salt) if salt.len() == 32 => salt,
-                _ => continue,
-            };
-            let Ok(wrap_key) = derive_key_with_salt(passphrase, &salt) else {
-                continue;
-            };
-            let Some(unwrapped_master_key) =
-                load_wrapped_master_key(&wrap_key, &self.state.wrapped_key_path(meta.id))
-            else {
-                continue;
-            };
-            if unwrapped_master_key.as_ref() == loaded_master_key.as_ref() {
-                matched_metas.push(meta);
-            }
+        let master_keys = self.state.extract_all_master_keys_with_meta();
+        if master_keys.is_empty() {
+            return Ok(None);
         }
+
+        let base_dir = self.state.base_dir.clone();
+        let passphrase = passphrase.to_owned();
+        let matched_metas = tokio::task::spawn_blocking(move || {
+            let passphrase = Zeroizing::new(passphrase);
+            let mut matched_metas = Vec::new();
+            for (meta, loaded_master_key) in master_keys {
+                let compartment_dir = base_dir.join("compartments").join(meta.id.to_string());
+                let salt = match std::fs::read(compartment_dir.join("passphrase.salt")) {
+                    Ok(salt) if salt.len() == 32 => salt,
+                    _ => continue,
+                };
+                let Ok(wrap_key) = derive_key_with_salt(passphrase.as_str(), &salt) else {
+                    continue;
+                };
+                let Some(unwrapped_master_key) = load_wrapped_master_key(
+                    &wrap_key,
+                    &compartment_dir.join("passphrase_wrapped_key.enc"),
+                ) else {
+                    continue;
+                };
+                if unwrapped_master_key.as_ref() == loaded_master_key.as_ref() {
+                    matched_metas.push(meta);
+                }
+            }
+            matched_metas
+        })
+        .await
+        .map_err(|error| {
+            ServiceError::internal(format!("Passphrase reauth worker failed: {error}"))
+        })?;
 
         if matched_metas.is_empty() {
             return Ok(None);

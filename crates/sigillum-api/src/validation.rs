@@ -841,8 +841,17 @@ impl Validate for crate::request::ChainProfileUpsertRequest {
         check_len("chain_family", &self.chain_family, MAX_LABEL)?;
         check_optional_len("provider_profile", &self.provider_profile, MAX_LABEL)?;
         check_optional_len("native_symbol", &self.native_symbol, MAX_LABEL)?;
+        if self.native_decimals == Some(0) {
+            return Err("native_decimals must be greater than 0".into());
+        }
+        if let Some(permit2_address) = &self.permit2_address {
+            check_eth_address("permit2_address", permit2_address)?;
+        }
         check_optional_len("explorer_url", &self.explorer_url, MAX_RPC_URL)?;
         check_vec_items_len("capabilities", &self.capabilities, MAX_LABEL)?;
+        if self.builtin == Some(true) {
+            return Err("builtin chain profiles cannot be created or updated by operators".into());
+        }
         Ok(())
     }
 }

@@ -30,6 +30,7 @@ use sigillum_core::{
 use crate::audit_log::AuditEventSpec;
 use crate::profiles::ProfileRegistry;
 
+use super::chains::chain_profile_for_id;
 use super::evm::normalize_address;
 use super::helpers::{compare_u256, now_unix};
 use super::{ServiceError, ServiceResult, SigillumService};
@@ -101,8 +102,12 @@ impl SigillumService {
 
         let mut checks = Vec::new();
         if requested(DOMAIN_PROVIDER) {
-            self.check_providers(&registry.evm_providers, &mut checks)
-                .await;
+            self.check_providers(
+                &registry.evm_providers,
+                &inventory.chain_profiles,
+                &mut checks,
+            )
+            .await;
         }
         if requested(DOMAIN_SEED_WALLET) {
             for profile in &registry.eth_seed_wallets {
@@ -166,6 +171,7 @@ impl SigillumService {
     async fn check_providers(
         &self,
         providers: &[EvmProviderProfile],
+        chain_profiles: &[sigillum_api::ChainProfile],
         checks: &mut Vec<SelfCheckResult>,
     ) {
         if providers.is_empty() {
@@ -180,6 +186,15 @@ impl SigillumService {
         }
 
         for provider in providers {
+            if chain_profile_for_id(chain_profiles, provider.chain_id).is_none() {
+                checks.push(result(
+                    DOMAIN_PROVIDER,
+                    &provider.name,
+                    STATUS_WARN,
+                    &format!("No chain registry entry for chain id {}", provider.chain_id),
+                    None,
+                ));
+            }
             let started = Instant::now();
             let probe = tokio::time::timeout(
                 PROVIDER_PROBE_TIMEOUT,
