@@ -3,8 +3,10 @@
 //! Verifies snapshot export/restore roundtrip, wrong passphrase rejection,
 //! truncated/invalid snapshot handling, and fresh directory startup.
 
+use serde_json::{Value, json};
+use std::fs;
 use std::net::SocketAddr;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use tempfile::TempDir;
 
 async fn spawn_daemon(base_dir: PathBuf) -> (SocketAddr, tokio::task::JoinHandle<()>) {
@@ -43,6 +45,314 @@ async fn get(
         req = req.bearer_auth(token);
     }
     req.send().await.unwrap()
+}
+
+#[derive(Clone, Copy)]
+enum StoreKind {
+    Profiles,
+    Deposits,
+    Queue,
+}
+
+impl StoreKind {
+    fn file_name(self) -> &'static str {
+        match self {
+            Self::Profiles => "profiles.json",
+            Self::Deposits => "deposits.json",
+            Self::Queue => "queue.json",
+        }
+    }
+
+    fn schema(self) -> &'static str {
+        match self {
+            Self::Profiles => "sigillum.profiles",
+            Self::Deposits => "sigillum.deposits",
+            Self::Queue => "sigillum.queue",
+        }
+    }
+
+    fn schema_version(self) -> u32 {
+        match self {
+            Self::Profiles | Self::Deposits => 1,
+            Self::Queue => 2,
+        }
+    }
+
+    fn route(self) -> &'static str {
+        match self {
+            Self::Profiles => "/api/profiles/evm",
+            Self::Deposits => "/api/deposits/eth-stealth",
+            Self::Queue => "/api/queue/jobs",
+        }
+    }
+
+    fn response_items(self, body: &Value) -> &Vec<Value> {
+        let key = match self {
+            Self::Profiles => "profiles",
+            Self::Deposits => "deposits",
+            Self::Queue => "jobs",
+        };
+        body[key].as_array().expect("response items")
+    }
+}
+
+fn store_path(base_dir: &Path, kind: StoreKind) -> PathBuf {
+    base_dir.join(kind.file_name())
+}
+
+fn backup_path(path: &Path) -> PathBuf {
+    let file_name = path.file_name().unwrap().to_string_lossy();
+    path.with_file_name(format!("{file_name}.bak"))
+}
+
+fn store_envelope(kind: StoreKind, data: Value) -> Value {
+    json!({
+        "schema": kind.schema(),
+        "schema_version": kind.schema_version(),
+        "data": data,
+    })
+}
+
+fn store_data(kind: StoreKind, label: &str) -> Value {
+    match kind {
+        StoreKind::Profiles => json!({
+            "evm_providers": [{
+                "name": format!("provider-{label}"),
+                "rpc_url": format!("https://{label}.example.invalid"),
+                "compartment_id": 0,
+                "chain_id": if label == "live" { 8453 } else { 1 },
+            }],
+            "eth_stealth_wallets": [],
+            "eth_xpub_wallets": [],
+            "eth_seed_wallets": [],
+        }),
+        StoreKind::Deposits => json!({
+            "eth_stealth": [{
+                "id": format!("deposit-{label}"),
+                "status": "pending",
+                "asset_kind": "native",
+                "wallet_profile": "wallet-a",
+                "wallet_compartment_id": 0,
+                "provider_compartment_id": 0,
+                "wallet": "wallet-a",
+                "short_name": "eth",
+                "stealth_meta_address": "st:eth:example",
+                "stealth_address": "0x0000000000000000000000000000000000000001",
+                "ephemeral_public_key_hex": "0x02",
+                "view_tag_hex": "0xaa",
+                "auto_queue_sweep": false,
+                "created_at_unix": 1,
+                "updated_at_unix": 1,
+            }],
+        }),
+        StoreKind::Queue => json!({
+            "jobs": [
+                {
+                    "id": format!("job-{label}"),
+                    "state": "queued",
+                    "attempts": 0,
+                    "created_at_unix": 1,
+                    "updated_at_unix": 1,
+                    "kind": "eth_stealth_native_sweep",
+                    "wallet_profile": "wallet-a",
+                    "stealth_address": "0x0000000000000000000000000000000000000001",
+                    "ephemeral_public_key_hex": "0x02",
+                    "destination_address": "0x0000000000000000000000000000000000000002"
+                },
+                {
+                    "id": format!("job-operator-{label}"),
+                    "state": "operator_action_required",
+                    "attempts": 0,
+                    "created_at_unix": 1,
+                    "updated_at_unix": 1,
+                    "kind": "eth_stealth_native_sweep",
+                    "wallet_profile": "wallet-a",
+                    "stealth_address": "0x0000000000000000000000000000000000000001",
+                    "ephemeral_public_key_hex": "0x02",
+                    "destination_address": "0x0000000000000000000000000000000000000002",
+                    "last_error": "operator review required"
+                }
+            ],
+        }),
+    }
+}
+
+fn write_store(base_dir: &Path, kind: StoreKind, label: &str) -> Vec<u8> {
+    let path = store_path(base_dir, kind);
+    let body = serde_json::to_vec_pretty(&store_envelope(kind, store_data(kind, label))).unwrap();
+    fs::write(&path, &body).unwrap();
+    fs::write(backup_path(&path), &body).unwrap();
+    body
+}
+
+fn write_live_store(base_dir: &Path, kind: StoreKind, label: &str) -> Vec<u8> {
+    let path = store_path(base_dir, kind);
+    let body = serde_json::to_vec_pretty(&store_envelope(kind, store_data(kind, label))).unwrap();
+    fs::write(&path, &body).unwrap();
+    body
+}
+
+fn write_backup_store(base_dir: &Path, kind: StoreKind, label: &str) -> Vec<u8> {
+    let path = store_path(base_dir, kind);
+    let body = serde_json::to_vec_pretty(&store_envelope(kind, store_data(kind, label))).unwrap();
+    fs::write(backup_path(&path), &body).unwrap();
+    body
+}
+
+fn corrupt_files(base_dir: &Path, kind: StoreKind) -> Vec<PathBuf> {
+    let marker = format!("{}.corrupt-", kind.file_name());
+    let mut files = fs::read_dir(base_dir)
+        .unwrap()
+        .filter_map(Result::ok)
+        .map(|entry| entry.path())
+        .filter(|path| {
+            path.file_name()
+                .unwrap()
+                .to_string_lossy()
+                .contains(&marker)
+        })
+        .collect::<Vec<_>>();
+    files.sort();
+    files
+}
+
+async fn init_compartment(client: &reqwest::Client, addr: SocketAddr) -> String {
+    let init = post_json(
+        client,
+        addr,
+        "/api/compartment/init",
+        json!({
+            "id": 0,
+            "label": "default",
+            "threshold": 1,
+            "passphrase": "recover-test"
+        }),
+        None,
+    )
+    .await;
+    assert!(
+        init.status().is_success(),
+        "compartment init should succeed: {:?}",
+        init.text().await.ok()
+    );
+    init.json::<Value>().await.unwrap()["session_token"]
+        .as_str()
+        .unwrap()
+        .to_string()
+}
+
+async fn assert_health_ready(client: &reqwest::Client, addr: SocketAddr) {
+    let health = get(client, addr, "/api/health", None).await;
+    assert!(
+        health.status().is_success(),
+        "health endpoint should be reachable"
+    );
+    let body: Value = health.json().await.unwrap();
+    assert_eq!(body["ready"], json!(true));
+    assert_eq!(body["startup_error"], Value::Null);
+}
+
+async fn read_store_response(
+    client: &reqwest::Client,
+    addr: SocketAddr,
+    kind: StoreKind,
+    token: &str,
+) -> Value {
+    let response = get(client, addr, kind.route(), Some(token)).await;
+    assert!(
+        response.status().is_success(),
+        "{} should load after recovery: {:?}",
+        kind.route(),
+        response.text().await.ok()
+    );
+    response.json().await.unwrap()
+}
+
+fn assert_response_label(kind: StoreKind, body: &Value, label: &str) {
+    let items = kind.response_items(body);
+    assert!(!items.is_empty(), "recovered response should include items");
+    match kind {
+        StoreKind::Profiles => assert_eq!(items[0]["name"], json!(format!("provider-{label}"))),
+        StoreKind::Deposits => assert_eq!(items[0]["id"], json!(format!("deposit-{label}"))),
+        StoreKind::Queue => {
+            assert!(
+                items
+                    .iter()
+                    .any(|item| item["id"] == json!(format!("job-{label}"))),
+                "recovered queue should include queued job for {label}"
+            );
+            assert!(
+                items
+                    .iter()
+                    .any(|item| item["id"] == json!(format!("job-operator-{label}"))),
+                "recovered queue should include operator-action job for {label}"
+            );
+        }
+    }
+}
+
+async fn assert_temp_not_renamed_window(kind: StoreKind) {
+    let tmp = TempDir::new().unwrap();
+    let path = store_path(tmp.path(), kind);
+    let live_bytes = write_store(tmp.path(), kind, "seed");
+    let backup_bytes = fs::read(backup_path(&path)).unwrap();
+    let orphaned_tmp = tmp.path().join(".tmp_123456_deadbeef");
+    fs::write(&orphaned_tmp, b"orphaned atomic write temp").unwrap();
+
+    let (addr, _handle) = spawn_daemon(tmp.path().to_path_buf()).await;
+    let client = reqwest::Client::new();
+    assert_health_ready(&client, addr).await;
+    let token = init_compartment(&client, addr).await;
+    let body = read_store_response(&client, addr, kind, &token).await;
+
+    assert_response_label(kind, &body, "seed");
+    assert_eq!(fs::read(&path).unwrap(), live_bytes);
+    assert_eq!(fs::read(backup_path(&path)).unwrap(), backup_bytes);
+    assert!(
+        orphaned_tmp.exists(),
+        "orphaned temp file should be ignored"
+    );
+    assert!(corrupt_files(tmp.path(), kind).is_empty());
+}
+
+async fn assert_renamed_with_stale_bak_window(kind: StoreKind) {
+    let tmp = TempDir::new().unwrap();
+    let path = store_path(tmp.path(), kind);
+    let live_bytes = write_live_store(tmp.path(), kind, "live");
+    let backup_bytes = write_backup_store(tmp.path(), kind, "backup");
+    assert_ne!(live_bytes, backup_bytes);
+
+    let (addr, _handle) = spawn_daemon(tmp.path().to_path_buf()).await;
+    let client = reqwest::Client::new();
+    assert_health_ready(&client, addr).await;
+    let token = init_compartment(&client, addr).await;
+    let body = read_store_response(&client, addr, kind, &token).await;
+
+    assert_response_label(kind, &body, "live");
+    assert_eq!(fs::read(&path).unwrap(), live_bytes);
+    assert_eq!(fs::read(backup_path(&path)).unwrap(), live_bytes);
+    assert!(corrupt_files(tmp.path(), kind).is_empty());
+}
+
+async fn assert_truncated_live_window(kind: StoreKind) {
+    let tmp = TempDir::new().unwrap();
+    let path = store_path(tmp.path(), kind);
+    let backup_bytes = write_store(tmp.path(), kind, "backup");
+    let truncated = br#"{"schema":"sigillum.truncated","schema_version":"#;
+    fs::write(&path, truncated).unwrap();
+
+    let (addr, _handle) = spawn_daemon(tmp.path().to_path_buf()).await;
+    let client = reqwest::Client::new();
+    assert_health_ready(&client, addr).await;
+    let token = init_compartment(&client, addr).await;
+    let body = read_store_response(&client, addr, kind, &token).await;
+
+    assert_response_label(kind, &body, "backup");
+    assert_eq!(fs::read(&path).unwrap(), backup_bytes);
+    assert_eq!(fs::read(backup_path(&path)).unwrap(), backup_bytes);
+    let quarantined = corrupt_files(tmp.path(), kind);
+    assert_eq!(quarantined.len(), 1);
+    assert_eq!(fs::read(&quarantined[0]).unwrap(), truncated);
 }
 
 /// Setup: init compartment, set API keys, return (addr, token, tmp_dir).
@@ -88,6 +398,51 @@ async fn setup_with_data() -> (SocketAddr, String, TempDir) {
 }
 
 // ── Happy Paths ────────────────────────────────────────────────────
+
+#[tokio::test]
+async fn profiles_temp_not_renamed_ignores_orphaned_atomic_temp_file() {
+    assert_temp_not_renamed_window(StoreKind::Profiles).await;
+}
+
+#[tokio::test]
+async fn deposits_temp_not_renamed_ignores_orphaned_atomic_temp_file() {
+    assert_temp_not_renamed_window(StoreKind::Deposits).await;
+}
+
+#[tokio::test]
+async fn queue_temp_not_renamed_ignores_orphaned_atomic_temp_file() {
+    assert_temp_not_renamed_window(StoreKind::Queue).await;
+}
+
+#[tokio::test]
+async fn profiles_renamed_with_stale_bak_refreshes_backup_from_live() {
+    assert_renamed_with_stale_bak_window(StoreKind::Profiles).await;
+}
+
+#[tokio::test]
+async fn deposits_renamed_with_stale_bak_refreshes_backup_from_live() {
+    assert_renamed_with_stale_bak_window(StoreKind::Deposits).await;
+}
+
+#[tokio::test]
+async fn queue_renamed_with_stale_bak_refreshes_backup_from_live() {
+    assert_renamed_with_stale_bak_window(StoreKind::Queue).await;
+}
+
+#[tokio::test]
+async fn profiles_truncated_live_quarantines_and_restores_backup() {
+    assert_truncated_live_window(StoreKind::Profiles).await;
+}
+
+#[tokio::test]
+async fn deposits_truncated_live_quarantines_and_restores_backup() {
+    assert_truncated_live_window(StoreKind::Deposits).await;
+}
+
+#[tokio::test]
+async fn queue_truncated_live_quarantines_and_restores_backup() {
+    assert_truncated_live_window(StoreKind::Queue).await;
+}
 
 #[tokio::test]
 async fn snapshot_export_and_restore_preserves_api_keys() {
