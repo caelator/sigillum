@@ -661,6 +661,7 @@ fn test_wallet_inventory_scan_response_roundtrip() {
         wallet_families: vec!["eth-seed".to_string()],
         wallet_profiles: vec!["seed-main".to_string()],
         provider_profiles: vec!["mainnet".to_string()],
+        chain_ids: vec![1],
         gap_limit: 20,
         max_index: 200,
         addresses_scanned: 1,
@@ -797,6 +798,7 @@ fn test_wallet_operations_response_roundtrips() {
     let plan = ConsolidationPlan {
         id: "plan_1".to_string(),
         status: WalletPlanStatus::Blocked,
+        chain_id: 1,
         destination_address: Some("0xdestination".to_string()),
         created_at_unix: 1,
         updated_at_unix: 2,
@@ -817,7 +819,8 @@ fn test_wallet_operations_response_roundtrips() {
     });
     roundtrip_test(ConsolidationPlanMutationResponse {
         status: "generated".to_string(),
-        plan,
+        plan: plan.clone(),
+        plans: vec![plan],
     });
     roundtrip_test(ConsolidationPlanExportResponse {
         status: "exported".to_string(),
@@ -1693,6 +1696,7 @@ fn test_consolidation_plan_policy_violations_roundtrip() {
     let base = ConsolidationPlan {
         id: "plan_2".to_string(),
         status: WalletPlanStatus::Blocked,
+        chain_id: 1,
         destination_address: Some("0x9999999999999999999999999999999999999999".to_string()),
         created_at_unix: 1,
         updated_at_unix: 2,

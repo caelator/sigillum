@@ -448,6 +448,7 @@ fn cmd_api_plans(args: &[String]) {
                 wallet_family: parse_flag(args, "--wallet-family"),
                 wallet_profile: parse_flag(args, "--wallet-profile"),
                 provider_profile: parse_flag(args, "--provider-profile"),
+                chain_id: parse_u64_flag(args, "--chain-id"),
                 include_watch_only: flag_option(args, "--include-watch-only"),
                 auto_queue_low_risk: flag_option(args, "--auto-queue-low-risk"),
                 routing_strategy: parse_flag(args, "--routing-strategy"),

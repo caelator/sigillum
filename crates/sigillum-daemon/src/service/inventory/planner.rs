@@ -308,6 +308,10 @@ pub(super) fn build_plan_steps(
                 .as_deref()
                 .is_none_or(|profile| profile == holding.provider_profile)
         })
+        .filter(|holding| {
+            body.chain_id
+                .is_none_or(|chain_id| chain_id == holding.chain_id)
+        })
     {
         let signer_status = signer_status_for_holding(holding);
         if signer_status == WalletSignerStatus::WatchOnly && body.include_watch_only != Some(true) {
@@ -690,6 +694,7 @@ mod tests {
             wallet_family: None,
             wallet_profile: None,
             provider_profile: None,
+            chain_id: None,
             include_watch_only: None,
             auto_queue_low_risk: None,
             routing_strategy: Some("per_party".into()),

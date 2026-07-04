@@ -47,7 +47,7 @@ use risk::derive_inventory_risk_findings;
 use support::{
     default_native_symbol, load_inventory_state, normalized_wallet_family,
     record_inventory_observation, save_inventory_state, select_providers, trimmed_optional,
-    trimmed_required, unique_strings, validated_gap_limit, validated_max_index,
+    trimmed_required, unique_strings, unique_u64s, validated_gap_limit, validated_max_index,
 };
 use token_discovery::erc20_transfer_discovery_config;
 use wallet_selection::{
@@ -391,8 +391,25 @@ impl SigillumService {
         let registry = crate::profiles::load_profiles(&self.state.base_dir).map_err(|error| {
             ServiceError::internal(format!("Failed to load profile registry: {error}"))
         })?;
-        let providers =
-            select_providers(&registry.evm_providers, body.provider_profile.as_deref())?;
+        if body.all_configured_chains == Some(true)
+            && body
+                .provider_profile
+                .as_deref()
+                .is_some_and(|profile| !profile.trim().is_empty())
+        {
+            return Err(ServiceError::bad_request(
+                "provider_profile cannot be combined with all_configured_chains",
+            ));
+        }
+        let requested_provider_profile = if body.all_configured_chains == Some(true) {
+            None
+        } else {
+            body.provider_profile
+                .as_deref()
+                .map(str::trim)
+                .filter(|profile| !profile.is_empty())
+        };
+        let providers = select_providers(&registry.evm_providers, requested_provider_profile)?;
         let wallets = select_discovery_wallets(
             self,
             &registry.eth_seed_wallets,
@@ -460,6 +477,7 @@ impl SigillumService {
             provider_profiles: unique_strings(
                 providers.iter().map(|provider| provider.name.clone()),
             ),
+            chain_ids: unique_u64s(providers.iter().map(|provider| provider.chain_id)),
             gap_limit,
             max_index,
             addresses_scanned: 0,

@@ -40,7 +40,9 @@ Required discovery classes:
   provider profiles. The first registry-backed chain slice is implemented with
   non-deletable built-ins for Ethereum, Base, Arbitrum One, OP Mainnet, and
   Polygon PoS, plus operator-defined custom EVM entries exposed through
-  daemon API, CLI, and UI.
+  daemon API, CLI, and UI. EVM inventory scans can now explicitly target all
+  configured provider profiles in one operator action, and discovery jobs
+  record the scanned chain IDs.
 - Historical account and receive-address discovery for imported seed wallets:
   standard Ethereum paths, common MetaMask/Ledger/Trezor patterns, project
   account paths, and configurable gap limits. The first multi-account seed
@@ -113,10 +115,13 @@ Required discovery classes:
   operator-managed risk catalog is implemented for spender/operator labels and
   trusted, low, medium, high, or critical risk overrides. Reviewable
   consolidation-plan revoke steps are implemented for discovered ERC-20,
-  Permit2, and NFT operator approvals. Revoke and sweep transaction calldata
-  can be preflighted and exported after explicit approval and successful
-  simulation. External spender registries, expiration-aware Permit2 scoring,
-  dynamic fee policy, and direct queue execution remain future work.
+  Permit2, and NFT operator approvals. Generated consolidation plans are
+  single-chain; all-chain inventory produces separate per-chain plans, and
+  operators can request a specific `chain_id` when generating a plan. Revoke
+  and sweep transaction calldata can be preflighted and exported after
+  explicit approval and successful simulation. External spender registries,
+  expiration-aware Permit2 scoring, dynamic fee policy, and direct queue
+  execution remain future work.
 - Dormant-wallet classification using last activity, transaction count, current
   value, token/NFT/DeFi exposure, gas availability, and whether the private key
   or signing path is actually available. Inventory addresses now carry

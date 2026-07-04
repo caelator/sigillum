@@ -3105,6 +3105,190 @@ async fn wallet_inventory_scan_discovers_erc20_tokens_from_transfer_logs() {
 }
 
 #[tokio::test]
+async fn wallet_inventory_scan_all_configured_chains_splits_consolidation_plans() {
+    let dir = TempDir::new().unwrap();
+    let (addr, handle) = spawn_daemon(dir.path().to_path_buf()).await;
+    let (rpc_addr, rpc_handle) = spawn_mock_evm_provider().await;
+    let client = reqwest::Client::new();
+
+    let init = post_json(
+        &client,
+        addr,
+        "/api/compartment/init",
+        json!({
+            "id": 0,
+            "label": "default",
+            "threshold": 1,
+            "passphrase": "correct horse battery staple",
+        }),
+        None,
+    )
+    .await;
+    let init_json: serde_json::Value = init.json().await.unwrap();
+    let token = init_json["session_token"].as_str().unwrap().to_string();
+
+    let set_provider_token = post_json(
+        &client,
+        addr,
+        "/api/api-keys/set",
+        json!({ "key": "alchemy", "value": "rpc-test-token" }),
+        Some(&token),
+    )
+    .await;
+    assert_eq!(set_provider_token.status(), StatusCode::OK);
+
+    for (name, chain_id) in [("mainnet", 1_u64), ("base", 8453_u64)] {
+        let provider = post_json(
+            &client,
+            addr,
+            "/api/profiles/evm/upsert",
+            json!({
+                "name": name,
+                "rpc_url": format!("http://{rpc_addr}/"),
+                "auth_token_key": "alchemy",
+                "chain_id": chain_id,
+            }),
+            Some(&token),
+        )
+        .await;
+        assert_eq!(provider.status(), StatusCode::OK);
+    }
+
+    let seed = post_json(
+        &client,
+        addr,
+        "/api/profiles/eth-seed/upsert",
+        json!({
+            "name": "seed-main",
+            "label": "Seed main",
+            "mnemonic": "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about",
+            "project_account": 0,
+            "provider_profile": "mainnet",
+        }),
+        Some(&token),
+    )
+    .await;
+    assert_eq!(seed.status(), StatusCode::OK);
+
+    let invalid_scan = post_json(
+        &client,
+        addr,
+        "/api/inventory/scan/evm",
+        json!({
+            "wallet_family": "eth-seed",
+            "wallet_profile": "seed-main",
+            "provider_profile": "mainnet",
+            "all_configured_chains": true,
+            "gap_limit": 1,
+            "max_index": 0,
+        }),
+        Some(&token),
+    )
+    .await;
+    assert_eq!(invalid_scan.status(), StatusCode::BAD_REQUEST);
+
+    let scan = post_json(
+        &client,
+        addr,
+        "/api/inventory/scan/evm",
+        json!({
+            "wallet_family": "eth-seed",
+            "wallet_profile": "seed-main",
+            "all_configured_chains": true,
+            "gap_limit": 1,
+            "max_index": 0,
+        }),
+        Some(&token),
+    )
+    .await;
+    let scan_status = scan.status();
+    let scan_json: serde_json::Value = scan.json().await.unwrap();
+    assert_eq!(scan_status, StatusCode::OK, "scan response: {scan_json}");
+    assert_eq!(scan_json["job"]["status"], "completed");
+    let job_chain_ids = scan_json["job"]["chain_ids"].as_array().unwrap();
+    assert!(job_chain_ids.iter().any(|chain_id| chain_id == 1));
+    assert!(job_chain_ids.iter().any(|chain_id| chain_id == 8453));
+    let provider_profiles = scan_json["job"]["provider_profiles"].as_array().unwrap();
+    assert!(
+        provider_profiles
+            .iter()
+            .any(|provider| provider == "mainnet")
+    );
+    assert!(provider_profiles.iter().any(|provider| provider == "base"));
+
+    let observed_chain_ids = scan_json["addresses"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|address| address["chain_id"].as_u64())
+        .collect::<HashSet<_>>();
+    assert!(observed_chain_ids.contains(&1));
+    assert!(observed_chain_ids.contains(&8453));
+
+    let plan = post_json(
+        &client,
+        addr,
+        "/api/plans/consolidation/generate",
+        json!({
+            "destination_address": "0x9999999999999999999999999999999999999999",
+        }),
+        Some(&token),
+    )
+    .await;
+    let plan_status = plan.status();
+    let plan_json: serde_json::Value = plan.json().await.unwrap();
+    assert_eq!(plan_status, StatusCode::OK, "plan response: {plan_json}");
+    let plans = plan_json["plans"].as_array().unwrap();
+    assert_eq!(plans.len(), 2);
+    let plan_chain_ids = plans
+        .iter()
+        .filter_map(|plan| plan["chain_id"].as_u64())
+        .collect::<HashSet<_>>();
+    assert_eq!(plan_chain_ids, HashSet::from([1_u64, 8453_u64]));
+    for plan in plans {
+        let plan_chain_id = plan["chain_id"].as_u64().unwrap();
+        assert!(
+            plan["steps"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .all(|step| step["chain_id"].as_u64() == Some(plan_chain_id))
+        );
+    }
+
+    let base_only_plan = post_json(
+        &client,
+        addr,
+        "/api/plans/consolidation/generate",
+        json!({
+            "destination_address": "0x9999999999999999999999999999999999999999",
+            "chain_id": 8453,
+        }),
+        Some(&token),
+    )
+    .await;
+    let base_only_status = base_only_plan.status();
+    let base_only_json: serde_json::Value = base_only_plan.json().await.unwrap();
+    assert_eq!(
+        base_only_status,
+        StatusCode::OK,
+        "base-only plan response: {base_only_json}"
+    );
+    assert_eq!(base_only_json["plans"].as_array().unwrap().len(), 1);
+    assert_eq!(base_only_json["plan"]["chain_id"], 8453);
+    assert!(
+        base_only_json["plan"]["steps"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|step| step["chain_id"].as_u64() == Some(8453))
+    );
+
+    handle.abort();
+    rpc_handle.abort();
+}
+
+#[tokio::test]
 async fn deposit_registry_refresh_and_sweep_flow_roundtrip() {
     let dir = TempDir::new().unwrap();
     let (addr, handle) = spawn_daemon(dir.path().to_path_buf()).await;

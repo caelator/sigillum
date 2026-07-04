@@ -68,13 +68,21 @@ export interface WatchAddressBookEntry {
 
 export interface WalletDiscoveryJob {
   id: string;
-  kind: string;
   status: string;
   source: string;
+  wallet_families?: string[];
+  wallet_profiles?: string[];
+  provider_profiles?: string[];
+  chain_ids?: number[];
+  gap_limit?: number;
+  max_index?: number;
+  addresses_scanned?: number;
+  active_addresses?: number;
+  holdings_detected?: number;
   checkpoints?: WalletDiscoveryCheckpoint[];
-  created_at_unix: number;
-  updated_at_unix: number;
-  failure_reason?: string | null;
+  started_at_unix?: number;
+  completed_at_unix?: number | null;
+  last_error?: string | null;
 }
 
 export interface WalletDiscoveryCheckpoint {
@@ -235,6 +243,7 @@ export interface ConsolidationPlanStep {
 export interface ConsolidationPlan {
   id: string;
   status: WalletPlanStatus;
+  chain_id: number;
   destination_address?: string | null;
   created_at_unix: number;
   updated_at_unix: number;
@@ -254,6 +263,7 @@ export interface ConsolidationPlanGenerateRequest {
   wallet_family?: string | null;
   wallet_profile?: string | null;
   provider_profile?: string | null;
+  chain_id?: number | null;
   include_watch_only?: boolean | null;
   auto_queue_low_risk?: boolean | null;
   routing_strategy?: string | null;

@@ -482,3 +482,13 @@ pub(super) fn unique_strings(values: impl Iterator<Item = String>) -> Vec<String
     }
     out
 }
+
+pub(super) fn unique_u64s(values: impl Iterator<Item = u64>) -> Vec<u64> {
+    let mut out = Vec::new();
+    for value in values {
+        if !out.contains(&value) {
+            out.push(value);
+        }
+    }
+    out
+}

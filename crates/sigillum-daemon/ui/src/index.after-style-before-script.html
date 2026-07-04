@@ -756,6 +756,12 @@
           <input type="text" id="inventoryDerivationPattern" placeholder="Derivation pattern">
         </div>
         <div class="form-row">
+          <label class="checkbox-row">
+            <input type="checkbox" id="inventoryAllConfiguredChains">
+            All configured chains
+          </label>
+        </div>
+        <div class="form-row">
           <input type="number" id="inventoryGapLimit" placeholder="Gap limit" value="20" class="input-mid">
           <input type="number" id="inventoryMaxIndex" placeholder="Max index" value="200" class="input-mid">
           <input type="number" id="inventoryAccountLimit" placeholder="Account limit" value="3" class="input-mid">
@@ -865,6 +871,7 @@
         <div id="planPartyDestinations" hidden></div>
         <div class="form-row">
           <input type="text" id="planDestinationAddress" placeholder="Consolidation destination address">
+          <input type="number" id="planChainId" placeholder="Plan chain ID (optional)" class="input-mid">
           <button class="btn-ghost" data-action="loadRiskFindings">Refresh Risks</button>
           <button class="btn-primary" data-action="generateConsolidationPlan">Generate Plan</button>
         </div>

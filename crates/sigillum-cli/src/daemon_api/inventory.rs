@@ -90,6 +90,11 @@ fn annotated_inventory_json(
             annotate_chain_object(holding, &labels);
         }
     }
+    if let Some(jobs) = value.get_mut("jobs").and_then(|value| value.as_array_mut()) {
+        for job in jobs {
+            annotate_job_chains(job, &labels);
+        }
+    }
     value["chain_profiles"] = serde_json::to_value(chains.profiles).unwrap_or_else(|error| {
         eprintln!("Failed to encode chain profiles: {error}");
         process::exit(1);
@@ -116,6 +121,26 @@ fn annotate_chain_object(value: &mut serde_json::Value, labels: &BTreeMap<u64, S
             serde_json::Value::String(chain_id.to_string()),
         );
     }
+}
+
+fn annotate_job_chains(value: &mut serde_json::Value, labels: &BTreeMap<u64, String>) {
+    let Some(chain_ids) = value.get("chain_ids").and_then(|value| value.as_array()) else {
+        return;
+    };
+    let chain_labels = chain_ids
+        .iter()
+        .filter_map(|chain_id| chain_id.as_u64())
+        .map(|chain_id| {
+            labels
+                .get(&chain_id)
+                .map(|name| format!("{chain_id} ({name})"))
+                .unwrap_or_else(|| chain_id.to_string())
+        })
+        .collect::<Vec<_>>();
+    let Some(object) = value.as_object_mut() else {
+        return;
+    };
+    object.insert("chain_labels".into(), serde_json::json!(chain_labels));
 }
 
 /// Dispatch `sigillum api chains <list|upsert|delete>`.
@@ -221,6 +246,7 @@ fn scan_evm(args: &[String]) {
         wallet_family: parse_flag(args, "--wallet-family"),
         wallet_profile: parse_flag(args, "--wallet-profile"),
         provider_profile: parse_flag(args, "--provider-profile"),
+        all_configured_chains: flag_option(args, "--all-configured-chains"),
         derivation_pattern: parse_flag(args, "--derivation-pattern"),
         account_limit: parse_u32_flag(args, "--account-limit"),
         watch_addresses: parse_watch_address_probes(args),

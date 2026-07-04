@@ -661,6 +661,14 @@ impl Validate for crate::request::WalletInventoryScanRequest {
         check_optional_len("wallet_family", &self.wallet_family, MAX_LABEL)?;
         check_optional_len("wallet_profile", &self.wallet_profile, MAX_LABEL)?;
         check_optional_len("provider_profile", &self.provider_profile, MAX_LABEL)?;
+        if self.all_configured_chains == Some(true)
+            && self
+                .provider_profile
+                .as_deref()
+                .is_some_and(|profile| !profile.trim().is_empty())
+        {
+            return Err("provider_profile cannot be combined with all_configured_chains".into());
+        }
         check_optional_len("block_tag", &self.block_tag, MAX_LABEL)?;
         check_optional_len(
             "token_discovery_from_block",
@@ -898,6 +906,9 @@ impl Validate for crate::request::ConsolidationPlanGenerateRequest {
         check_optional_len("wallet_family", &self.wallet_family, MAX_LABEL)?;
         check_optional_len("wallet_profile", &self.wallet_profile, MAX_LABEL)?;
         check_optional_len("provider_profile", &self.provider_profile, MAX_LABEL)?;
+        if self.chain_id == Some(0) {
+            return Err("chain_id must be greater than 0".into());
+        }
         if let Some(strategy) = self.routing_strategy.as_deref() {
             let strategy = strategy.trim();
             if strategy != "single" && strategy != "per_party" {

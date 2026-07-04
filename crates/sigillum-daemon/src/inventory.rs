@@ -118,6 +118,7 @@ mod tests {
             wallet_families: vec!["eth-seed".into()],
             wallet_profiles: vec!["seed-main".into()],
             provider_profiles: vec!["mainnet".into()],
+            chain_ids: vec![1],
             gap_limit: 20,
             max_index: 100,
             addresses_scanned: 1,
@@ -295,6 +296,7 @@ mod tests {
         state.consolidation_plans.push(ConsolidationPlan {
             id: "plan_future".into(),
             status: sigillum_api::WalletPlanStatus::Other("partially_approved".into()),
+            chain_id: 1,
             destination_address: None,
             created_at_unix: 1,
             updated_at_unix: 2,
