@@ -1,4 +1,4 @@
-use sigillum_api::ClaimCandidateProbe;
+use sigillum_api::{ClaimCandidateProbe, WalletAssetKind};
 use sigillum_core::decode_quantity_hex;
 
 use crate::service::{ServiceError, ServiceResult};
@@ -110,7 +110,12 @@ fn validated_claim_candidate_limit(limit: Option<usize>) -> ServiceResult<usize>
 fn normalized_claim_kind(value: &str) -> ServiceResult<String> {
     let value = value.trim().to_ascii_lowercase();
     match value.as_str() {
-        "airdrop" | "reward" => Ok(value),
+        value
+            if value == WalletAssetKind::Airdrop.as_str()
+                || value == WalletAssetKind::Reward.as_str() =>
+        {
+            Ok(value.to_string())
+        }
         _ => Err(ServiceError::bad_request(
             "claim candidate kind must be either reward or airdrop",
         )),

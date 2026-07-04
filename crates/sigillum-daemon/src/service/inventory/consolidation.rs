@@ -1,6 +1,7 @@
 use sigillum_api::{
     ConsolidationPlan, ConsolidationPlanApproveRequest, ConsolidationPlanGenerateRequest,
-    ConsolidationPlanListResponse, ConsolidationPlanMutationResponse,
+    ConsolidationPlanListResponse, ConsolidationPlanMutationResponse, WalletPlanStatus,
+    WalletPlanStepStatus,
 };
 
 use crate::audit_log::AuditEventSpec;
@@ -63,15 +64,15 @@ impl SigillumService {
         }
         let summary = summarize_plan_steps(&steps);
         let status = if summary.total_steps == 0 {
-            "empty"
+            WalletPlanStatus::Empty
         } else if summary.blocked_steps > 0 || !policy_violations.is_empty() {
-            "blocked"
+            WalletPlanStatus::Blocked
         } else {
-            "review_required"
+            WalletPlanStatus::ReviewRequired
         };
         let plan = ConsolidationPlan {
             id: random_id(),
-            status: status.into(),
+            status,
             destination_address,
             created_at_unix: now,
             updated_at_unix: now,
@@ -131,7 +132,7 @@ impl SigillumService {
         }
         let approve_all = body.step_ids.is_empty();
         for step in &mut plan.steps {
-            if step.status == "review_required"
+            if step.status == WalletPlanStepStatus::ReviewRequired
                 && (approve_all || body.step_ids.iter().any(|id| id == &step.id))
             {
                 // Approval is the last review gate, so candidates are
@@ -139,22 +140,22 @@ impl SigillumService {
                 // before a policy change must not slip through approval.
                 if let Some(policy) = policy.as_ref() {
                     apply_policy_blockers_to_step(policy, step);
-                    if step.status == "blocked" {
+                    if step.status == WalletPlanStepStatus::Blocked {
                         continue;
                     }
                 }
                 step.approved = true;
-                step.status = "approved".into();
+                step.status = WalletPlanStepStatus::Approved;
             }
         }
         plan.updated_at_unix = now_unix();
         plan.summary = summarize_plan_steps(&plan.steps);
         plan.status = if plan.summary.blocked_steps > 0 || !plan.policy_violations.is_empty() {
-            "blocked".into()
+            WalletPlanStatus::Blocked
         } else if plan.summary.review_required_steps > 0 {
-            "review_required".into()
+            WalletPlanStatus::ReviewRequired
         } else {
-            "approved".into()
+            WalletPlanStatus::Approved
         };
         let plan = plan.clone();
         save_inventory_state(&self.state.base_dir, &state)?;

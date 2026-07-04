@@ -1,9 +1,11 @@
 use serde::{Deserialize, Serialize};
 
+use super::{WalletAssetKind, WalletPlanStepAction};
+
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ConsolidationPlanExportCall {
     pub step_id: String,
-    pub action: String,
+    pub action: WalletPlanStepAction,
     pub from_address: String,
     pub to_address: String,
     pub value_wei_hex: String,
@@ -11,7 +13,7 @@ pub struct ConsolidationPlanExportCall {
     pub operation: u8,
     pub chain_id: u64,
     pub provider_profile: String,
-    pub asset_kind: String,
+    pub asset_kind: WalletAssetKind,
     pub amount_hex: String,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub evidence: Vec<String>,
@@ -63,7 +65,7 @@ pub struct ConsolidationPlanExportBundle {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ConsolidationPlanExportSkippedStep {
     pub step_id: String,
-    pub action: String,
+    pub action: WalletPlanStepAction,
     pub reason: String,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub blockers: Vec<String>,

@@ -272,6 +272,58 @@ mod tests {
         state.jobs.push(sample_job());
         state.addresses.push(sample_address());
         state.holdings.push(sample_holding());
+        let mut future_holding = sample_holding();
+        future_holding.id = "holding_future".into();
+        future_holding.asset_kind = sigillum_api::WalletAssetKind::Other("future_asset".into());
+        state.holdings.push(future_holding);
+        state.consolidation_plans.push(ConsolidationPlan {
+            id: "plan_future".into(),
+            status: sigillum_api::WalletPlanStatus::Other("partially_approved".into()),
+            destination_address: None,
+            created_at_unix: 1,
+            updated_at_unix: 2,
+            summary: sigillum_api::ConsolidationPlanSummary {
+                total_steps: 1,
+                blocked_steps: 0,
+                review_required_steps: 1,
+                approved_steps: 0,
+                executable_steps: 0,
+                value_items: 1,
+            },
+            policy_violations: Vec::new(),
+            linkage_findings: Vec::new(),
+            steps: vec![sigillum_api::ConsolidationPlanStep {
+                id: "step_future".into(),
+                action: sigillum_api::WalletPlanStepAction::Other("future_action".into()),
+                status: sigillum_api::WalletPlanStepStatus::ReviewRequired,
+                wallet_family: "eth-seed".into(),
+                wallet_profile: "seed-main".into(),
+                provider_profile: "mainnet".into(),
+                chain_id: 1,
+                address: "0x1111111111111111111111111111111111111111".into(),
+                derivation_path: "m/44'/60'/0'/0/0".into(),
+                asset_kind: sigillum_api::WalletAssetKind::Other("future_asset".into()),
+                asset_address: None,
+                token_id_hex: None,
+                counterparty_address: None,
+                protocol_address: None,
+                claim_adapter: None,
+                claim_index_hex: None,
+                claim_proof: Vec::new(),
+                amount_hex: "0x1".into(),
+                destination_address: None,
+                signer_status: sigillum_api::WalletSignerStatus::Other("future_signer".into()),
+                simulation_status: sigillum_api::WalletSimulationStatus::Other(
+                    "future_simulation".into(),
+                ),
+                simulation_evidence: Vec::new(),
+                risk_level: "low".into(),
+                blockers: Vec::new(),
+                linkage_warnings: Vec::new(),
+                auto_eligible: false,
+                approved: false,
+            }],
+        });
         state.risk_catalog.push(sample_risk_catalog_entry());
         state.receive_allocations.push(sample_receive_allocation());
 
@@ -282,7 +334,7 @@ mod tests {
         assert_eq!(loaded.chain_profiles.len(), 1);
         assert_eq!(loaded.watch_address_book.len(), 1);
         assert_eq!(loaded.addresses.len(), 1);
-        assert_eq!(loaded.holdings.len(), 1);
+        assert_eq!(loaded.holdings.len(), 2);
         assert_eq!(loaded.risk_catalog.len(), 1);
         assert_eq!(loaded.addresses[0].wallet_profile, "seed-main");
         assert!(loaded.treasury_policy.is_none());
@@ -291,6 +343,18 @@ mod tests {
         assert_eq!(loaded.receive_allocations[0].status, "active");
         assert_eq!(loaded.receive_allocations[0].purpose, "counterparty-acme");
         assert!(loaded.receive_allocations[0].retired_at_unix.is_none());
+        assert_eq!(
+            loaded.holdings[1].asset_kind,
+            sigillum_api::WalletAssetKind::Other("future_asset".into())
+        );
+        assert_eq!(
+            loaded.consolidation_plans[0].status,
+            sigillum_api::WalletPlanStatus::Other("partially_approved".into())
+        );
+        assert_eq!(
+            loaded.consolidation_plans[0].steps[0].action,
+            sigillum_api::WalletPlanStepAction::Other("future_action".into())
+        );
     }
 
     #[test]

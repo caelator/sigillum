@@ -1,5 +1,5 @@
 use sha3::{Digest, Keccak256};
-use sigillum_api::ConsolidationPlanStep;
+use sigillum_api::{ConsolidationPlanStep, WalletAssetKind, WalletPlanStepAction};
 
 use crate::service::evm::normalize_address;
 use crate::service::{ServiceError, ServiceResult};
@@ -32,8 +32,8 @@ pub(super) enum PlanStepPreflight {
 pub(super) fn prepare_plan_step_preflight(
     step: &ConsolidationPlanStep,
 ) -> ServiceResult<PlanStepPreflight> {
-    match step.action.as_str() {
-        "sweep_native" => {
+    match &step.action {
+        WalletPlanStepAction::SweepNative => {
             let destination = required_address("destination", step.destination_address.as_deref())?;
             let value = required_quantity("sweep amount", &step.amount_hex)?;
             Ok(PlanStepPreflight::Call(PlanStepPreflightCall {
@@ -48,7 +48,7 @@ pub(super) fn prepare_plan_step_preflight(
                 ],
             }))
         }
-        "sweep_erc20" => {
+        WalletPlanStepAction::SweepErc20 => {
             let token = required_address("asset contract", step.asset_address.as_deref())?;
             let destination = required_address("destination", step.destination_address.as_deref())?;
             let amount = required_quantity("sweep amount", &step.amount_hex)?;
@@ -65,12 +65,12 @@ pub(super) fn prepare_plan_step_preflight(
                 ],
             }))
         }
-        "sweep_nft" => {
+        WalletPlanStepAction::SweepNft => {
             let collection = required_address("asset contract", step.asset_address.as_deref())?;
             let destination = required_address("destination", step.destination_address.as_deref())?;
             let token_id = required_optional_quantity("token id", step.token_id_hex.as_deref())?;
-            match step.asset_kind.as_str() {
-                "erc721" => {
+            match &step.asset_kind {
+                WalletAssetKind::Erc721 => {
                     let data_hex =
                         erc721_safe_transfer_call_data(&step.address, &destination, &token_id)?;
                     Ok(PlanStepPreflight::Call(PlanStepPreflightCall {
@@ -86,7 +86,7 @@ pub(super) fn prepare_plan_step_preflight(
                         ],
                     }))
                 }
-                "erc1155" => {
+                WalletAssetKind::Erc1155 => {
                     let amount = required_quantity("sweep amount", &step.amount_hex)?;
                     let data_hex = erc1155_safe_transfer_call_data(
                         &step.address,
@@ -109,13 +109,13 @@ pub(super) fn prepare_plan_step_preflight(
                 }
                 kind => Ok(PlanStepPreflight::Unsupported {
                     evidence: vec![
-                        format!("unsupported_nft_asset_kind={kind}"),
+                        format!("unsupported_nft_asset_kind={}", kind.as_str()),
                         "reason=no_local_nft_transfer_builder_for_asset_kind".into(),
                     ],
                 }),
             }
         }
-        "revoke_erc20_approval" => {
+        WalletPlanStepAction::RevokeErc20Approval => {
             let token = required_address("asset contract", step.asset_address.as_deref())?;
             let spender = required_address("spender", step.counterparty_address.as_deref())?;
             let data_hex = erc20_revoke_approval_call_data(&spender)?;
@@ -130,7 +130,7 @@ pub(super) fn prepare_plan_step_preflight(
                 ],
             }))
         }
-        "revoke_nft_operator_approval" => {
+        WalletPlanStepAction::RevokeNftOperatorApproval => {
             let collection = required_address("asset contract", step.asset_address.as_deref())?;
             let operator = required_address("operator", step.counterparty_address.as_deref())?;
             let data_hex = nft_revoke_operator_call_data(&operator)?;
@@ -145,7 +145,7 @@ pub(super) fn prepare_plan_step_preflight(
                 ],
             }))
         }
-        "revoke_permit2_allowance" => {
+        WalletPlanStepAction::RevokePermit2Allowance => {
             let permit2 = required_address("Permit2 contract", step.protocol_address.as_deref())?;
             let token = required_address("asset contract", step.asset_address.as_deref())?;
             let spender = required_address("spender", step.counterparty_address.as_deref())?;
@@ -162,7 +162,7 @@ pub(super) fn prepare_plan_step_preflight(
                 ],
             }))
         }
-        "claim_reward" => {
+        WalletPlanStepAction::ClaimReward => {
             let adapter = step
                 .claim_adapter
                 .as_deref()
@@ -201,7 +201,7 @@ pub(super) fn prepare_plan_step_preflight(
                 ],
             }))
         }
-        "exit_defi_position" => {
+        WalletPlanStepAction::ExitDefiPosition => {
             let adapter = step
                 .claim_adapter
                 .as_deref()
@@ -239,7 +239,7 @@ pub(super) fn prepare_plan_step_preflight(
         }
         action => Ok(PlanStepPreflight::Unsupported {
             evidence: vec![
-                format!("unsupported_action={action}"),
+                format!("unsupported_action={}", action.as_str()),
                 "reason=no_local_transaction_builder_for_step".into(),
             ],
         }),

@@ -1,6 +1,7 @@
 use sigillum_api::{
     ConsolidationPlanMutationResponse, ConsolidationPlanSimulateRequest, ConsolidationPlanStep,
-    ConsolidationPlanSummary, EvmProviderProfile, WalletInventoryAddress,
+    ConsolidationPlanSummary, EvmProviderProfile, WalletInventoryAddress, WalletPlanStatus,
+    WalletPlanStepAction, WalletPlanStepStatus, WalletSimulationStatus,
 };
 use sigillum_core::decode_quantity_hex;
 
@@ -57,7 +58,7 @@ impl SigillumService {
             let step = state.consolidation_plans[plan_index].steps[step_index].clone();
             let outcome = if let Some(blockers) = non_simulation_blockers(&step) {
                 PlanSimulationOutcome {
-                    status: "blocked".into(),
+                    status: WalletSimulationStatus::Blocked,
                     blocker: None,
                     evidence: vec![format!("blocked_by={}", blockers.join(","))],
                 }
@@ -69,10 +70,10 @@ impl SigillumService {
                 )
                 .await
             };
-            match outcome.status.as_str() {
-                "passed" => passed += 1,
-                "unsupported" => unsupported += 1,
-                "failed" => failed += 1,
+            match &outcome.status {
+                WalletSimulationStatus::Passed => passed += 1,
+                WalletSimulationStatus::Unsupported => unsupported += 1,
+                WalletSimulationStatus::Failed => failed += 1,
                 _ => {}
             }
             apply_simulation_outcome(
@@ -84,7 +85,7 @@ impl SigillumService {
         let plan = &mut state.consolidation_plans[plan_index];
         plan.updated_at_unix = now_unix();
         plan.summary = summarize_plan_steps(&plan.steps);
-        plan.status = plan_status_for_summary(&plan.summary).into();
+        plan.status = plan_status_for_summary(&plan.summary);
         let plan = plan.clone();
         save_inventory_state(&self.state.base_dir, &state)?;
 
@@ -116,7 +117,7 @@ impl SigillumService {
             Some(provider) => provider,
             None => {
                 return PlanSimulationOutcome {
-                    status: "failed".into(),
+                    status: WalletSimulationStatus::Failed,
                     blocker: Some("simulation_failed"),
                     evidence: vec![format!(
                         "provider_not_found={} chain_id={}",
@@ -129,14 +130,14 @@ impl SigillumService {
             Ok(PlanStepPreflight::Call(call)) => call,
             Ok(PlanStepPreflight::Unsupported { evidence }) => {
                 return PlanSimulationOutcome {
-                    status: "unsupported".into(),
+                    status: WalletSimulationStatus::Unsupported,
                     blocker: Some("simulation_unsupported"),
                     evidence,
                 };
             }
             Err(error) => {
                 return PlanSimulationOutcome {
-                    status: "failed".into(),
+                    status: WalletSimulationStatus::Failed,
                     blocker: Some("simulation_failed"),
                     evidence: vec![format!("preflight_prepare_error={error}")],
                 };
@@ -183,7 +184,7 @@ impl SigillumService {
             Ok(result) => {
                 evidence.push(format!("eth_call_result={result}"));
                 PlanSimulationOutcome {
-                    status: "passed".into(),
+                    status: WalletSimulationStatus::Passed,
                     blocker: None,
                     evidence,
                 }
@@ -191,7 +192,7 @@ impl SigillumService {
             Err(error) => {
                 evidence.push(format!("eth_call_error={error}"));
                 PlanSimulationOutcome {
-                    status: "failed".into(),
+                    status: WalletSimulationStatus::Failed,
                     blocker: Some("simulation_failed"),
                     evidence,
                 }
@@ -202,7 +203,7 @@ impl SigillumService {
 
 #[derive(Clone, Debug)]
 struct PlanSimulationOutcome {
-    status: String,
+    status: WalletSimulationStatus,
     blocker: Option<&'static str>,
     evidence: Vec<String>,
 }
@@ -214,7 +215,7 @@ fn apply_zero_value_transaction_gas_policy(
     call: &PlanStepPreflightCall,
     evidence: &mut Vec<String>,
 ) -> Result<(), PlanSimulationOutcome> {
-    if step.action == "sweep_native" || call.value_hex.is_some() {
+    if step.action == WalletPlanStepAction::SweepNative || call.value_hex.is_some() {
         return Ok(());
     }
 
@@ -280,18 +281,20 @@ fn zero_value_transaction_gas_limit(
     provider: &EvmProviderProfile,
     step: &ConsolidationPlanStep,
 ) -> u64 {
-    match step.action.as_str() {
-        "sweep_erc20" | "revoke_erc20_approval" | "revoke_permit2_allowance" => provider
+    match &step.action {
+        WalletPlanStepAction::SweepErc20
+        | WalletPlanStepAction::RevokeErc20Approval
+        | WalletPlanStepAction::RevokePermit2Allowance => provider
             .erc20_gas_limit
             .unwrap_or(DEFAULT_TOKEN_TRANSACTION_GAS_LIMIT),
-        "sweep_nft" => provider
+        WalletPlanStepAction::SweepNft => provider
             .erc20_gas_limit
             .unwrap_or(DEFAULT_NFT_SWEEP_GAS_LIMIT)
             .max(DEFAULT_NFT_SWEEP_GAS_LIMIT),
-        "revoke_nft_operator_approval" => provider
+        WalletPlanStepAction::RevokeNftOperatorApproval => provider
             .erc20_gas_limit
             .unwrap_or(DEFAULT_TOKEN_TRANSACTION_GAS_LIMIT),
-        "claim_reward" => provider
+        WalletPlanStepAction::ClaimReward => provider
             .erc20_gas_limit
             .unwrap_or(DEFAULT_CLAIM_TRANSACTION_GAS_LIMIT)
             .max(DEFAULT_CLAIM_TRANSACTION_GAS_LIMIT),
@@ -323,7 +326,7 @@ fn apply_native_sweep_fee_policy(
     call: &mut PlanStepPreflightCall,
     evidence: &mut Vec<String>,
 ) -> Result<(), PlanSimulationOutcome> {
-    if step.action != "sweep_native" {
+    if step.action != WalletPlanStepAction::SweepNative {
         return Ok(());
     }
 
@@ -382,7 +385,7 @@ fn apply_native_sweep_fee_policy(
 
 fn blocked_simulation(evidence: &[String]) -> PlanSimulationOutcome {
     PlanSimulationOutcome {
-        status: "blocked".into(),
+        status: WalletSimulationStatus::Blocked,
         blocker: Some("simulation_blocked"),
         evidence: evidence.to_vec(),
     }
@@ -390,7 +393,7 @@ fn blocked_simulation(evidence: &[String]) -> PlanSimulationOutcome {
 
 fn failed_simulation(evidence: &[String]) -> PlanSimulationOutcome {
     PlanSimulationOutcome {
-        status: "failed".into(),
+        status: WalletSimulationStatus::Failed,
         blocker: Some("simulation_failed"),
         evidence: evidence.to_vec(),
     }
@@ -424,12 +427,12 @@ fn apply_simulation_outcome(step: &mut ConsolidationPlanStep, outcome: PlanSimul
     step.simulation_evidence = outcome.evidence;
     if step.blockers.is_empty() {
         step.status = if step.approved {
-            "approved".into()
+            WalletPlanStepStatus::Approved
         } else {
-            "review_required".into()
+            WalletPlanStepStatus::ReviewRequired
         };
     } else {
-        step.status = "blocked".into();
+        step.status = WalletPlanStepStatus::Blocked;
     }
 }
 
@@ -446,15 +449,15 @@ fn is_simulation_blocker(blocker: &str) -> bool {
     )
 }
 
-fn plan_status_for_summary(summary: &ConsolidationPlanSummary) -> &'static str {
+fn plan_status_for_summary(summary: &ConsolidationPlanSummary) -> WalletPlanStatus {
     if summary.total_steps == 0 {
-        "empty"
+        WalletPlanStatus::Empty
     } else if summary.blocked_steps > 0 {
-        "blocked"
+        WalletPlanStatus::Blocked
     } else if summary.review_required_steps > 0 {
-        "review_required"
+        WalletPlanStatus::ReviewRequired
     } else {
-        "approved"
+        WalletPlanStatus::Approved
     }
 }
 

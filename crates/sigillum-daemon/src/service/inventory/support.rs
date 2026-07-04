@@ -1,6 +1,6 @@
 use sigillum_api::{
-    EvmProviderProfile, NftMetadataCacheEntry, WalletAssetHolding, WalletDiscoveryJob,
-    WalletInventoryAddress,
+    EvmProviderProfile, NftMetadataCacheEntry, WalletAddressActivityState, WalletAssetHolding,
+    WalletAssetKind, WalletDiscoveryJob, WalletInventoryAddress,
 };
 
 use crate::service::helpers::random_id;
@@ -35,7 +35,7 @@ pub(super) struct ClaimRecordMetadata {
 }
 
 struct HoldingRecordParts<'a> {
-    asset_kind: &'a str,
+    asset_kind: WalletAssetKind,
     asset_address: Option<String>,
     token_id_hex: Option<String>,
     counterparty_address: Option<String>,
@@ -70,7 +70,7 @@ pub(super) fn record_inventory_observation(
     scanned_addresses: &mut Vec<WalletInventoryAddress>,
 ) {
     job.addresses_scanned += 1;
-    if observation.address.activity_state != "empty" {
+    if observation.address.activity_state != WalletAddressActivityState::Empty {
         job.active_addresses += 1;
     }
     for holding in &observation.holdings {
@@ -96,7 +96,10 @@ pub(super) fn record_inventory_observation(
 }
 
 fn conservative_nft_spam_label(holding: &WalletAssetHolding) -> Option<&'static str> {
-    if !matches!(holding.asset_kind.as_str(), "erc721" | "erc1155" | "nft") {
+    if !matches!(
+        holding.asset_kind,
+        WalletAssetKind::Erc721 | WalletAssetKind::Erc1155 | WalletAssetKind::Nft
+    ) {
         return None;
     }
     if !quantity_hex_is_nonzero(&holding.amount_hex) {
@@ -215,10 +218,10 @@ pub(super) fn select_providers(
 pub(super) fn address_record(
     context: &InventoryRecordContext<'_>,
     address_index: u32,
-    activity_state: &str,
+    activity_state: WalletAddressActivityState,
     native_balance_wei_hex: &str,
     transaction_count: u64,
-    classifications: Vec<String>,
+    classifications: Vec<sigillum_api::WalletAddressClassification>,
 ) -> WalletInventoryAddress {
     WalletInventoryAddress {
         id: random_id(),
@@ -231,7 +234,7 @@ pub(super) fn address_record(
         derivation_pattern: Some(context.wallet.derivation_pattern.clone()),
         account_index: Some(context.wallet.account_index),
         address_index,
-        activity_state: activity_state.to_string(),
+        activity_state,
         native_balance_wei_hex: native_balance_wei_hex.to_string(),
         transaction_count,
         classifications,
@@ -243,7 +246,7 @@ pub(super) fn address_record(
 
 pub(super) fn holding_record(
     context: &InventoryRecordContext<'_>,
-    asset_kind: &str,
+    asset_kind: WalletAssetKind,
     asset_address: Option<String>,
     amount_hex: &str,
 ) -> WalletAssetHolding {
@@ -258,7 +261,7 @@ pub(super) fn holding_record(
 
 pub(super) fn holding_record_with_source(
     context: &InventoryRecordContext<'_>,
-    asset_kind: &str,
+    asset_kind: WalletAssetKind,
     asset_address: Option<String>,
     amount_hex: &str,
     source: &str,
@@ -268,7 +271,7 @@ pub(super) fn holding_record_with_source(
 
 pub(super) fn holding_record_with_token_id(
     context: &InventoryRecordContext<'_>,
-    asset_kind: &str,
+    asset_kind: WalletAssetKind,
     asset_address: Option<String>,
     token_id_hex: Option<String>,
     amount_hex: &str,
@@ -291,7 +294,7 @@ pub(super) fn holding_record_with_token_id(
 
 pub(super) fn holding_record_with_counterparty(
     context: &InventoryRecordContext<'_>,
-    asset_kind: &str,
+    asset_kind: WalletAssetKind,
     asset_address: Option<String>,
     counterparty_address: Option<String>,
     amount_hex: &str,
@@ -314,7 +317,7 @@ pub(super) fn holding_record_with_counterparty(
 
 pub(super) fn holding_record_with_protocol_counterparty(
     context: &InventoryRecordContext<'_>,
-    asset_kind: &str,
+    asset_kind: WalletAssetKind,
     asset_address: Option<String>,
     protocol_address: Option<String>,
     counterparty_address: Option<String>,
@@ -338,7 +341,7 @@ pub(super) fn holding_record_with_protocol_counterparty(
 
 pub(super) fn holding_record_with_claim_metadata(
     context: &InventoryRecordContext<'_>,
-    asset_kind: &str,
+    asset_kind: WalletAssetKind,
     asset_address: Option<String>,
     protocol_address: Option<String>,
     amount_hex: &str,
@@ -372,7 +375,7 @@ fn holding_record_full(
         chain_id: context.provider.chain_id,
         address: context.address.to_string(),
         derivation_path: context.derivation_path.to_string(),
-        asset_kind: parts.asset_kind.to_string(),
+        asset_kind: parts.asset_kind,
         asset_address: parts.asset_address,
         token_id_hex: parts.token_id_hex,
         counterparty_address: parts.counterparty_address,
@@ -449,7 +452,7 @@ fn holding_key_matches(left: &WalletAssetHolding, right: &WalletAssetHolding) ->
 }
 
 fn approval_source_key_matches(left: &WalletAssetHolding, right: &WalletAssetHolding) -> bool {
-    left.asset_kind != "approval" || left.source == right.source
+    left.asset_kind != WalletAssetKind::Approval || left.source == right.source
 }
 
 fn protocol_address_key_matches(left: &WalletAssetHolding, right: &WalletAssetHolding) -> bool {

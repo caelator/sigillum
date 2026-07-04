@@ -1,4 +1,6 @@
-use sigillum_api::EvmProviderProfile;
+use sigillum_api::{
+    EvmProviderProfile, WalletAddressActivityState, WalletAddressClassification, WalletAssetKind,
+};
 
 use crate::service::evm::normalize_address;
 use crate::service::{ServiceResult, SigillumService};
@@ -67,11 +69,11 @@ impl SigillumService {
             )
             .await?;
         let mut activity_state = if quantity_hex_is_nonzero(&native_balance_wei_hex) {
-            "funded"
+            WalletAddressActivityState::Funded
         } else if transaction_count > 0 {
-            "active"
+            WalletAddressActivityState::Active
         } else {
-            "empty"
+            WalletAddressActivityState::Empty
         };
 
         let record_context = InventoryRecordContext {
@@ -83,7 +85,7 @@ impl SigillumService {
         };
         let mut holdings = vec![holding_record(
             &record_context,
-            "native",
+            WalletAssetKind::Native,
             None,
             &native_balance_wei_hex,
         )];
@@ -94,8 +96,10 @@ impl SigillumService {
             transfer_log_tokens = self
                 .discover_erc20_transfer_tokens_for_address(provider, &address, config)
                 .await?;
-            if !transfer_log_tokens.is_empty() && activity_state == "empty" {
-                activity_state = "active";
+            if !transfer_log_tokens.is_empty()
+                && activity_state == WalletAddressActivityState::Empty
+            {
+                activity_state = WalletAddressActivityState::Active;
             }
             for token_address in transfer_log_tokens.iter().cloned() {
                 push_unique_token(&mut observed_token_addresses, token_address);
@@ -113,11 +117,11 @@ impl SigillumService {
                 )
                 .await?;
             if quantity_hex_is_nonzero(&amount_hex) {
-                activity_state = "funded";
+                activity_state = WalletAddressActivityState::Funded;
             }
             holdings.push(holding_record_with_source(
                 &record_context,
-                "erc20",
+                WalletAssetKind::Erc20,
                 Some(token_address.clone()),
                 &amount_hex,
                 source_for_token(&transfer_log_tokens, token_address),
@@ -137,7 +141,7 @@ impl SigillumService {
             for allowance in allowances {
                 holdings.push(holding_record_with_counterparty(
                     &record_context,
-                    "approval",
+                    WalletAssetKind::Approval,
                     Some(allowance.token_address),
                     Some(allowance.spender_address),
                     &allowance.amount_hex,
@@ -159,7 +163,7 @@ impl SigillumService {
             for allowance in allowances {
                 holdings.push(holding_record_with_protocol_counterparty(
                     &record_context,
-                    "approval",
+                    WalletAssetKind::Approval,
                     Some(allowance.token_address),
                     Some(allowance.permit2_address),
                     Some(allowance.spender_address),
@@ -175,7 +179,7 @@ impl SigillumService {
                 .discover_erc721_transfer_holdings_for_address(provider, &address, config)
                 .await?;
             if !nfts.is_empty() {
-                activity_state = "funded";
+                activity_state = WalletAddressActivityState::Funded;
             }
             for nft in nfts {
                 let contract_address = nft.contract_address;
@@ -185,7 +189,7 @@ impl SigillumService {
                 );
                 holdings.push(holding_record_with_token_id(
                     &record_context,
-                    "erc721",
+                    WalletAssetKind::Erc721,
                     Some(contract_address),
                     Some(nft.token_id_hex),
                     "0x1",
@@ -199,7 +203,7 @@ impl SigillumService {
                 .discover_erc1155_transfer_holdings_for_address(provider, &address, config)
                 .await?;
             if !tokens.is_empty() {
-                activity_state = "funded";
+                activity_state = WalletAddressActivityState::Funded;
             }
             for token in tokens {
                 let contract_address = token.contract_address;
@@ -209,7 +213,7 @@ impl SigillumService {
                 );
                 holdings.push(holding_record_with_token_id(
                     &record_context,
-                    "erc1155",
+                    WalletAssetKind::Erc1155,
                     Some(contract_address),
                     Some(token.token_id_hex),
                     &token.amount_hex,
@@ -231,7 +235,7 @@ impl SigillumService {
             for approval in approvals {
                 holdings.push(holding_record_with_counterparty(
                     &record_context,
-                    "approval",
+                    WalletAssetKind::Approval,
                     Some(approval.contract_address),
                     Some(approval.operator_address),
                     &approval.amount_hex,
@@ -246,11 +250,11 @@ impl SigillumService {
                 .await?;
             for position in positions {
                 if quantity_hex_is_nonzero(&position.amount_hex) {
-                    activity_state = "funded";
+                    activity_state = WalletAddressActivityState::Funded;
                 }
                 let mut holding = holding_record_with_protocol_counterparty(
                     &record_context,
-                    "defi",
+                    WalletAssetKind::Defi,
                     Some(position.token_address),
                     position.protocol_address,
                     None,
@@ -265,10 +269,10 @@ impl SigillumService {
 
         if let Some(config) = claim_candidate_discovery {
             for candidate in config.candidates_for_address(&address) {
-                activity_state = "funded";
+                activity_state = WalletAddressActivityState::Funded;
                 holdings.push(holding_record_with_claim_metadata(
                     &record_context,
-                    &candidate.kind,
+                    WalletAssetKind::from(candidate.kind.as_str()),
                     Some(candidate.asset_address),
                     Some(candidate.claim_contract_address),
                     &candidate.amount_hex,
@@ -330,22 +334,34 @@ fn address_classifications(
     native_balance_wei_hex: &str,
     transaction_count: u64,
     holdings: &[sigillum_api::WalletAssetHolding],
-) -> Vec<String> {
+) -> Vec<WalletAddressClassification> {
     let mut classifications = Vec::new();
     match wallet.family.as_str() {
-        WALLET_FAMILY_ETH_SEED => push_classification(&mut classifications, "signer_available"),
+        WALLET_FAMILY_ETH_SEED => push_classification(
+            &mut classifications,
+            WalletAddressClassification::SignerAvailable,
+        ),
         WALLET_FAMILY_ETH_XPUB | WALLET_FAMILY_ETH_WATCH => {
-            push_classification(&mut classifications, "watch_only");
+            push_classification(&mut classifications, WalletAddressClassification::WatchOnly);
         }
-        _ => push_classification(&mut classifications, "signer_unknown"),
+        _ => push_classification(
+            &mut classifications,
+            WalletAddressClassification::SignerUnknown,
+        ),
     }
 
     let has_native_gas = quantity_hex_is_nonzero(native_balance_wei_hex);
     if has_native_gas {
-        push_classification(&mut classifications, "gas_available");
+        push_classification(
+            &mut classifications,
+            WalletAddressClassification::GasAvailable,
+        );
     }
     if transaction_count > 0 {
-        push_classification(&mut classifications, "transaction_history");
+        push_classification(
+            &mut classifications,
+            WalletAddressClassification::TransactionHistory,
+        );
     }
 
     let mut has_value = has_native_gas;
@@ -355,55 +371,85 @@ fn address_classifications(
         if !quantity_hex_is_nonzero(&holding.amount_hex) {
             continue;
         }
-        match holding.asset_kind.as_str() {
-            "native" => {
+        match &holding.asset_kind {
+            WalletAssetKind::Native => {
                 has_value = true;
             }
-            "erc20" => {
-                has_value = true;
-                has_non_native_value = true;
-                push_classification(&mut classifications, "token_holding");
-            }
-            "erc721" | "erc1155" | "nft" => {
+            WalletAssetKind::Erc20 => {
                 has_value = true;
                 has_non_native_value = true;
-                push_classification(&mut classifications, "nft_holding");
+                push_classification(
+                    &mut classifications,
+                    WalletAddressClassification::TokenHolding,
+                );
             }
-            "defi" | "airdrop" | "reward" => {
+            WalletAssetKind::Erc721 | WalletAssetKind::Erc1155 | WalletAssetKind::Nft => {
                 has_value = true;
                 has_non_native_value = true;
-                push_classification(&mut classifications, "protocol_holding");
+                push_classification(
+                    &mut classifications,
+                    WalletAddressClassification::NftHolding,
+                );
             }
-            "approval" => {
+            WalletAssetKind::Defi | WalletAssetKind::Airdrop | WalletAssetKind::Reward => {
+                has_value = true;
+                has_non_native_value = true;
+                push_classification(
+                    &mut classifications,
+                    WalletAddressClassification::ProtocolHolding,
+                );
+            }
+            WalletAssetKind::Approval => {
                 has_approval_exposure = true;
             }
-            _ => {}
+            WalletAssetKind::Other(_) => {}
         }
     }
     if has_value {
-        push_classification(&mut classifications, "value_detected");
+        push_classification(
+            &mut classifications,
+            WalletAddressClassification::ValueDetected,
+        );
     }
     if has_non_native_value {
-        push_classification(&mut classifications, "asset_value_detected");
+        push_classification(
+            &mut classifications,
+            WalletAddressClassification::AssetValueDetected,
+        );
         if !has_native_gas {
-            push_classification(&mut classifications, "stranded_value");
+            push_classification(
+                &mut classifications,
+                WalletAddressClassification::StrandedValue,
+            );
         }
     }
     if has_approval_exposure {
-        push_classification(&mut classifications, "approval_exposure");
+        push_classification(
+            &mut classifications,
+            WalletAddressClassification::ApprovalExposure,
+        );
     }
     if has_value && transaction_count == 0 {
-        push_classification(&mut classifications, "dormant_candidate");
+        push_classification(
+            &mut classifications,
+            WalletAddressClassification::DormantCandidate,
+        );
     }
     if !has_value && !has_approval_exposure && transaction_count == 0 {
-        push_classification(&mut classifications, "empty_candidate");
+        push_classification(
+            &mut classifications,
+            WalletAddressClassification::EmptyCandidate,
+        );
     }
     classifications
 }
 
-fn push_classification(classifications: &mut Vec<String>, value: &str) {
-    if !classifications.iter().any(|existing| existing == value) {
-        classifications.push(value.into());
+fn push_classification(
+    classifications: &mut Vec<WalletAddressClassification>,
+    value: WalletAddressClassification,
+) {
+    if !classifications.iter().any(|existing| existing == &value) {
+        classifications.push(value);
     }
 }
 
@@ -446,7 +492,7 @@ mod tests {
             chain_id: 1,
             address: "0x1111111111111111111111111111111111111111".into(),
             derivation_path: "m/44'/60'/0'/0/0".into(),
-            asset_kind: asset_kind.into(),
+            asset_kind: WalletAssetKind::from(asset_kind),
             asset_address: Some("0x2222222222222222222222222222222222222222".into()),
             token_id_hex: None,
             counterparty_address: None,
@@ -476,19 +522,23 @@ mod tests {
         assert!(
             classifications
                 .iter()
-                .any(|value| value == "signer_available")
+                .any(|value| value == &WalletAddressClassification::SignerAvailable)
         );
         assert!(
             classifications
                 .iter()
-                .any(|value| value == "stranded_value")
+                .any(|value| value == &WalletAddressClassification::StrandedValue)
         );
         assert!(
             classifications
                 .iter()
-                .any(|value| value == "dormant_candidate")
+                .any(|value| value == &WalletAddressClassification::DormantCandidate)
         );
-        assert!(classifications.iter().any(|value| value == "token_holding"));
+        assert!(
+            classifications
+                .iter()
+                .any(|value| value == &WalletAddressClassification::TokenHolding)
+        );
     }
 
     #[test]
@@ -499,18 +549,30 @@ mod tests {
             2,
             &[holding("erc721", "0x1"), holding("approval", "0x1")],
         );
-        assert!(classifications.iter().any(|value| value == "watch_only"));
-        assert!(classifications.iter().any(|value| value == "gas_available"));
-        assert!(classifications.iter().any(|value| value == "nft_holding"));
         assert!(
             classifications
                 .iter()
-                .any(|value| value == "approval_exposure")
+                .any(|value| value == &WalletAddressClassification::WatchOnly)
+        );
+        assert!(
+            classifications
+                .iter()
+                .any(|value| value == &WalletAddressClassification::GasAvailable)
+        );
+        assert!(
+            classifications
+                .iter()
+                .any(|value| value == &WalletAddressClassification::NftHolding)
+        );
+        assert!(
+            classifications
+                .iter()
+                .any(|value| value == &WalletAddressClassification::ApprovalExposure)
         );
         assert!(
             !classifications
                 .iter()
-                .any(|value| value == "stranded_value")
+                .any(|value| value == &WalletAddressClassification::StrandedValue)
         );
     }
 
@@ -528,14 +590,20 @@ mod tests {
         let record = address_record(
             &context,
             0,
-            "funded",
+            WalletAddressActivityState::Funded,
             "0x1",
             0,
-            vec!["signer_available".into(), "value_detected".into()],
+            vec![
+                WalletAddressClassification::SignerAvailable,
+                WalletAddressClassification::ValueDetected,
+            ],
         );
         assert_eq!(
             record.classifications,
-            vec!["signer_available".to_string(), "value_detected".to_string()]
+            vec![
+                WalletAddressClassification::SignerAvailable,
+                WalletAddressClassification::ValueDetected,
+            ]
         );
     }
 }

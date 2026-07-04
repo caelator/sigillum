@@ -2,7 +2,8 @@ use std::collections::BTreeMap;
 
 use sigillum_api::{
     ConsolidationPlanGenerateRequest, ConsolidationPlanStep, ConsolidationPlanSummary,
-    TreasuryPolicy, WalletAssetHolding,
+    TreasuryPolicy, WalletAssetHolding, WalletAssetKind, WalletPlanStepAction,
+    WalletPlanStepStatus, WalletSignerStatus, WalletSimulationStatus,
 };
 use sigillum_core::decode_quantity_hex;
 
@@ -19,59 +20,67 @@ use super::support::quantity_hex_is_nonzero;
 use super::treasury::{add_u256, policy_blockers_for_step};
 use super::{WALLET_FAMILY_ETH_SEED, WALLET_FAMILY_ETH_WATCH, WALLET_FAMILY_ETH_XPUB};
 
-pub(super) fn signer_status_for_holding(holding: &WalletAssetHolding) -> &'static str {
+pub(super) fn signer_status_for_holding(holding: &WalletAssetHolding) -> WalletSignerStatus {
     match holding.wallet_family.as_str() {
-        WALLET_FAMILY_ETH_XPUB | WALLET_FAMILY_ETH_WATCH => "watch_only",
-        WALLET_FAMILY_ETH_SEED => "available",
-        _ => "unknown",
+        WALLET_FAMILY_ETH_XPUB | WALLET_FAMILY_ETH_WATCH => WalletSignerStatus::WatchOnly,
+        WALLET_FAMILY_ETH_SEED => WalletSignerStatus::Available,
+        _ => WalletSignerStatus::Unknown,
     }
 }
 
 pub(super) fn plan_step_for_holding(
     holding: &WalletAssetHolding,
     destination_address: Option<String>,
-    signer_status: &str,
+    signer_status: impl Into<WalletSignerStatus>,
 ) -> ConsolidationPlanStep {
+    let signer_status = signer_status.into();
     let action = action_for_holding(holding);
-    let destination_address = if action.starts_with("sweep") {
+    let destination_address = if action.as_str().starts_with("sweep") {
         destination_address
     } else {
         None
     };
     let mut blockers = Vec::new();
-    if destination_address.is_none() && action.starts_with("sweep") {
+    if destination_address.is_none() && action.as_str().starts_with("sweep") {
         blockers.push("missing_destination".into());
     }
-    if signer_status != "available" {
-        blockers.push(signer_status.to_string());
+    if signer_status != WalletSignerStatus::Available {
+        blockers.push(signer_status.as_str().to_string());
     }
-    if holding.asset_kind == "approval" {
+    if holding.asset_kind == WalletAssetKind::Approval {
         if holding.asset_address.is_none() {
             blockers.push("missing_asset_contract".into());
         }
         if holding.counterparty_address.is_none() {
             blockers.push("missing_spender_or_operator".into());
         }
-        if action == "revoke_permit2_allowance" && holding.protocol_address.is_none() {
+        if action == WalletPlanStepAction::RevokePermit2Allowance
+            && holding.protocol_address.is_none()
+        {
             blockers.push("missing_permit2_contract".into());
         }
-        if action == "revoke_approval" {
+        if action == WalletPlanStepAction::RevokeApproval {
             blockers.push("unsupported_approval_source".into());
         }
-    } else if action == "sweep_nft" {
+    } else if action == WalletPlanStepAction::SweepNft {
         if holding.asset_address.is_none() {
             blockers.push("missing_asset_contract".into());
         }
         if holding.token_id_hex.is_none() {
             blockers.push("missing_token_id".into());
         }
-        if holding.asset_kind == "erc1155" && !quantity_hex_is_nonzero(&holding.amount_hex) {
+        if holding.asset_kind == WalletAssetKind::Erc1155
+            && !quantity_hex_is_nonzero(&holding.amount_hex)
+        {
             blockers.push("missing_nft_amount".into());
         }
-        if !matches!(holding.asset_kind.as_str(), "erc721" | "erc1155") {
+        if !matches!(
+            holding.asset_kind,
+            WalletAssetKind::Erc721 | WalletAssetKind::Erc1155
+        ) {
             blockers.push("unsupported_nft_standard".into());
         }
-    } else if holding.asset_kind == "defi" {
+    } else if holding.asset_kind == WalletAssetKind::Defi {
         if holding.asset_address.is_none() {
             blockers.push("missing_asset_contract".into());
         }
@@ -83,25 +92,28 @@ pub(super) fn plan_step_for_holding(
             Some(_) => blockers.push("unsupported_protocol_adapter".into()),
             None => blockers.push("requires_protocol_adapter".into()),
         }
-    } else if matches!(holding.asset_kind.as_str(), "airdrop" | "reward") {
+    } else if matches!(
+        holding.asset_kind,
+        WalletAssetKind::Airdrop | WalletAssetKind::Reward
+    ) {
         push_claim_reward_blockers(holding, &mut blockers);
     }
     let status = if blockers.is_empty() {
-        "review_required"
+        WalletPlanStepStatus::ReviewRequired
     } else {
-        "blocked"
+        WalletPlanStepStatus::Blocked
     };
-    let simulation_status = if blockers.is_empty() || claim_reward_is_simulatable(action, &blockers)
-    {
-        "required"
-    } else {
-        "not_run"
-    };
+    let simulation_status =
+        if blockers.is_empty() || claim_reward_is_simulatable(&action, &blockers) {
+            WalletSimulationStatus::Required
+        } else {
+            WalletSimulationStatus::NotRun
+        };
 
     ConsolidationPlanStep {
         id: random_id(),
-        action: action.into(),
-        status: status.into(),
+        action,
+        status,
         wallet_family: holding.wallet_family.clone(),
         wallet_profile: holding.wallet_profile.clone(),
         provider_profile: holding.provider_profile.clone(),
@@ -118,8 +130,8 @@ pub(super) fn plan_step_for_holding(
         claim_proof: holding.claim_proof.clone(),
         amount_hex: holding.amount_hex.clone(),
         destination_address,
-        signer_status: signer_status.into(),
-        simulation_status: simulation_status.into(),
+        signer_status,
+        simulation_status,
         simulation_evidence: Vec::new(),
         risk_level: if blockers.is_empty() {
             risk_level_for_holding(holding).into()
@@ -156,33 +168,39 @@ fn push_claim_reward_blockers(holding: &WalletAssetHolding, blockers: &mut Vec<S
     }
 }
 
-fn claim_reward_is_simulatable(action: &str, blockers: &[String]) -> bool {
-    action == "claim_reward"
+fn claim_reward_is_simulatable(action: &WalletPlanStepAction, blockers: &[String]) -> bool {
+    action == &WalletPlanStepAction::ClaimReward
         && !blockers.is_empty()
         && blockers
             .iter()
             .all(|blocker| blocker == "claim_execution_disabled")
 }
 
-fn action_for_holding(holding: &WalletAssetHolding) -> &'static str {
-    match holding.asset_kind.as_str() {
-        "native" => "sweep_native",
-        "erc20" => "sweep_erc20",
-        "erc721" | "erc1155" | "nft" => "sweep_nft",
-        "approval" => match holding.source.as_str() {
-            DISCOVERY_SOURCE_ERC20_ALLOWANCE_PROBE => "revoke_erc20_approval",
-            DISCOVERY_SOURCE_PERMIT2_ALLOWANCE_PROBE => "revoke_permit2_allowance",
-            DISCOVERY_SOURCE_NFT_OPERATOR_APPROVAL_PROBE => "revoke_nft_operator_approval",
-            _ => "revoke_approval",
+fn action_for_holding(holding: &WalletAssetHolding) -> WalletPlanStepAction {
+    match &holding.asset_kind {
+        WalletAssetKind::Native => WalletPlanStepAction::SweepNative,
+        WalletAssetKind::Erc20 => WalletPlanStepAction::SweepErc20,
+        WalletAssetKind::Erc721 | WalletAssetKind::Erc1155 | WalletAssetKind::Nft => {
+            WalletPlanStepAction::SweepNft
+        }
+        WalletAssetKind::Approval => match holding.source.as_str() {
+            DISCOVERY_SOURCE_ERC20_ALLOWANCE_PROBE => WalletPlanStepAction::RevokeErc20Approval,
+            DISCOVERY_SOURCE_PERMIT2_ALLOWANCE_PROBE => {
+                WalletPlanStepAction::RevokePermit2Allowance
+            }
+            DISCOVERY_SOURCE_NFT_OPERATOR_APPROVAL_PROBE => {
+                WalletPlanStepAction::RevokeNftOperatorApproval
+            }
+            _ => WalletPlanStepAction::RevokeApproval,
         },
-        "defi" => "exit_defi_position",
-        "airdrop" | "reward" => "claim_reward",
-        _ => "review_asset",
+        WalletAssetKind::Defi => WalletPlanStepAction::ExitDefiPosition,
+        WalletAssetKind::Airdrop | WalletAssetKind::Reward => WalletPlanStepAction::ClaimReward,
+        WalletAssetKind::Other(_) => WalletPlanStepAction::ReviewAsset,
     }
 }
 
 fn risk_level_for_holding(holding: &WalletAssetHolding) -> &'static str {
-    if holding.asset_kind == "approval" {
+    if holding.asset_kind == WalletAssetKind::Approval {
         if holding.source == DISCOVERY_SOURCE_NFT_OPERATOR_APPROVAL_PROBE
             || is_very_large_approval(&holding.amount_hex)
         {
@@ -204,18 +222,21 @@ fn is_very_large_approval(amount_hex: &str) -> bool {
 pub(super) fn summarize_plan_steps(steps: &[ConsolidationPlanStep]) -> ConsolidationPlanSummary {
     ConsolidationPlanSummary {
         total_steps: steps.len(),
-        blocked_steps: steps.iter().filter(|step| step.status == "blocked").count(),
+        blocked_steps: steps
+            .iter()
+            .filter(|step| step.status == WalletPlanStepStatus::Blocked)
+            .count(),
         review_required_steps: steps
             .iter()
-            .filter(|step| step.status == "review_required")
+            .filter(|step| step.status == WalletPlanStepStatus::ReviewRequired)
             .count(),
         approved_steps: steps.iter().filter(|step| step.approved).count(),
         executable_steps: steps
             .iter()
             .filter(|step| {
-                step.status == "approved"
+                step.status == WalletPlanStepStatus::Approved
                     && step.blockers.is_empty()
-                    && step.simulation_status == "passed"
+                    && step.simulation_status == WalletSimulationStatus::Passed
             })
             .count(),
         value_items: steps
@@ -289,7 +310,7 @@ pub(super) fn build_plan_steps(
         })
     {
         let signer_status = signer_status_for_holding(holding);
-        if signer_status == "watch_only" && body.include_watch_only != Some(true) {
+        if signer_status == WalletSignerStatus::WatchOnly && body.include_watch_only != Some(true) {
             continue;
         }
         let (step_destination, missing_party_destination) = if per_party {
@@ -312,7 +333,7 @@ pub(super) fn build_plan_steps(
             )
         };
         let mut step = plan_step_for_holding(holding, step_destination, signer_status);
-        if missing_party_destination && step.action.starts_with("sweep") {
+        if missing_party_destination && step.action.as_str().starts_with("sweep") {
             if !step
                 .blockers
                 .iter()
@@ -320,7 +341,7 @@ pub(super) fn build_plan_steps(
             {
                 step.blockers.push("missing_party_destination".into());
             }
-            step.status = "blocked".into();
+            step.status = WalletPlanStepStatus::Blocked;
             step.risk_level = "blocked".into();
         }
         steps.push(step);
@@ -380,9 +401,9 @@ pub(super) fn apply_policy_blockers_to_step(
 ) {
     let policy_blockers = policy_blockers_for_step(
         policy,
-        &step.action,
+        step.action.as_str(),
         step.destination_address.as_deref(),
-        &step.asset_kind,
+        step.asset_kind.as_str(),
         &step.amount_hex,
     );
     if policy_blockers.is_empty() {
@@ -393,7 +414,7 @@ pub(super) fn apply_policy_blockers_to_step(
             step.blockers.push(blocker);
         }
     }
-    step.status = "blocked".into();
+    step.status = WalletPlanStepStatus::Blocked;
     step.risk_level = "blocked".into();
 }
 
@@ -407,7 +428,7 @@ pub(super) fn apply_linkage_blockers(steps: &mut [ConsolidationPlanStep]) {
         if !step.blockers.iter().any(|b| b == "cross_party_linkage") {
             step.blockers.push("cross_party_linkage".into());
         }
-        step.status = "blocked".into();
+        step.status = WalletPlanStepStatus::Blocked;
         step.risk_level = "blocked".into();
     }
 }
@@ -427,9 +448,9 @@ pub(super) fn plan_policy_violations(
         if let Ok(cap) = decode_quantity_hex(cap_hex) {
             let mut total = [0u8; 32];
             for step in steps.iter().filter(|step| {
-                step.status != "blocked"
-                    && step.asset_kind == "native"
-                    && step.action.starts_with("sweep")
+                step.status != WalletPlanStepStatus::Blocked
+                    && step.asset_kind == WalletAssetKind::Native
+                    && step.action.as_str().starts_with("sweep")
             }) {
                 total = add_u256(
                     &total,
@@ -473,7 +494,7 @@ pub(super) fn analyze_plan_linkage(
 
     let mut steps_by_destination: BTreeMap<String, Vec<(usize, LinkageIdentity)>> = BTreeMap::new();
     for (index, step) in steps.iter().enumerate() {
-        if !step.action.starts_with("sweep") {
+        if !step.action.as_str().starts_with("sweep") {
             continue;
         }
         let Some(destination_address) = step.destination_address.as_deref() else {
