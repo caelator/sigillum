@@ -1472,7 +1472,7 @@ Phase E — Automation & recovery
 - [x] E2 kill-mid-write replay tests
 - [x] E3 categorized maintenance summaries
 - [x] E4 chain_id persisted on allocations
-- [ ] E5 destructive-flow recovery complete
+- [x] E5 destructive-flow recovery complete
 
 Phase W — Wallet-management completion
 - [ ] W1.1 chain registry (built-ins + custom + Permit2 override)
@@ -1599,3 +1599,8 @@ Phase H — Ship
   early-return only when `127.0.0.1:0` cannot bind. Local
   `cargo test -p sigillum-client -- --nocapture` ran 21 tests with 0 ignored;
   full `./scripts/check-release.sh` passed.
+- 2026-07-04 E5 local: added named destructive-flow crash-point coverage for
+  compartment init, compartment removal/replacement, and snapshot restore
+  recovery; documented the per-flow crash guarantees in `docs/backup.md`.
+  Focused `cargo test -p sigillum-daemon --test crash_recovery` passed
+  23/23 tests; full `./scripts/check-release.sh` passed.

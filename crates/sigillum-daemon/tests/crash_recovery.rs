@@ -242,14 +242,127 @@ async fn init_compartment(client: &reqwest::Client, addr: SocketAddr) -> String 
 }
 
 async fn assert_health_ready(client: &reqwest::Client, addr: SocketAddr) {
+    let body = health_body(client, addr).await;
+    assert_eq!(body["ready"], json!(true));
+    assert_eq!(body["startup_error"], Value::Null);
+}
+
+async fn health_body(client: &reqwest::Client, addr: SocketAddr) -> Value {
     let health = get(client, addr, "/api/health", None).await;
     assert!(
         health.status().is_success(),
         "health endpoint should be reachable"
     );
-    let body: Value = health.json().await.unwrap();
-    assert_eq!(body["ready"], json!(true));
-    assert_eq!(body["startup_error"], Value::Null);
+    health.json().await.unwrap()
+}
+
+fn assert_recovery_summary(body: &Value, interrupted: usize, recovered: usize, unresolved: usize) {
+    assert_eq!(
+        body["recovery_summary"]["interrupted_operation_count"],
+        json!(interrupted)
+    );
+    assert_eq!(
+        body["recovery_summary"]["recovered_operation_count"],
+        json!(recovered)
+    );
+    assert_eq!(
+        body["recovery_summary"]["unresolved_operation_count"],
+        json!(unresolved)
+    );
+}
+
+fn write_pending_operation(base_dir: &Path, kind: &str, details: Value, subject: Option<&str>) {
+    let ops_dir = base_dir.join(".ops");
+    fs::create_dir_all(&ops_dir).unwrap();
+    let operation_id = format!("e5-{kind}-{}", subject.unwrap_or("vault").replace('/', "-"));
+    let body = json!({
+        "schema": "sigillum.pending-operation",
+        "schema_version": 1,
+        "data": {
+            "operation_id": operation_id,
+            "subject": subject,
+            "started_at_unix": 1,
+            "kind": kind,
+            "details": details,
+        },
+    });
+    fs::write(
+        ops_dir.join(format!("{operation_id}.json")),
+        serde_json::to_vec_pretty(&body).unwrap(),
+    )
+    .unwrap();
+}
+
+fn pending_ops(base_dir: &Path) -> Vec<PathBuf> {
+    let ops_dir = base_dir.join(".ops");
+    let entries = match fs::read_dir(ops_dir) {
+        Ok(entries) => entries,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Vec::new(),
+        Err(error) => panic!("failed to read ops dir: {error}"),
+    };
+    let mut files = entries
+        .filter_map(Result::ok)
+        .map(|entry| entry.path())
+        .filter(|path| path.extension().and_then(|ext| ext.to_str()) == Some("json"))
+        .collect::<Vec<_>>();
+    files.sort();
+    files
+}
+
+fn assert_no_pending_ops(base_dir: &Path) {
+    assert!(
+        pending_ops(base_dir).is_empty(),
+        "operation journal should be clear"
+    );
+}
+
+fn assert_one_pending_op(base_dir: &Path) {
+    assert_eq!(
+        pending_ops(base_dir).len(),
+        1,
+        "operation journal should stay pending"
+    );
+}
+
+fn compartment_dir(base_dir: &Path, id: usize) -> PathBuf {
+    base_dir.join("compartments").join(id.to_string())
+}
+
+fn write_full_compartment(dir: &Path, marker: &str) {
+    fs::create_dir_all(dir).unwrap();
+    fs::write(dir.join("vault.enc"), format!("{marker}-vault")).unwrap();
+    fs::write(dir.join("meta.enc"), format!("{marker}-meta")).unwrap();
+    fs::write(dir.join("passphrase.salt"), format!("{marker}-salt")).unwrap();
+    fs::write(
+        dir.join("passphrase_wrapped_key.enc"),
+        format!("{marker}-wrapped"),
+    )
+    .unwrap();
+}
+
+fn write_partial_compartment(dir: &Path) {
+    fs::create_dir_all(dir).unwrap();
+    fs::write(dir.join("vault.enc"), b"partial-vault").unwrap();
+}
+
+fn assert_compartment_marker(base_dir: &Path, id: usize, marker: &str) {
+    let vault = fs::read_to_string(compartment_dir(base_dir, id).join("vault.enc")).unwrap();
+    assert_eq!(vault, format!("{marker}-vault"));
+}
+
+fn snapshot_temp_path(base_dir: &Path, suffix: &str) -> PathBuf {
+    let parent = base_dir.parent().unwrap_or(Path::new("."));
+    let name = base_dir
+        .file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "sigillum".into());
+    parent.join(format!(".{name}.{suffix}"))
+}
+
+fn write_snapshot_tree(dir: &Path, marker: &str) {
+    fs::create_dir_all(dir).unwrap();
+    fs::write(dir.join(".initialized"), b"1").unwrap();
+    fs::write(dir.join("snapshot-marker.txt"), marker.as_bytes()).unwrap();
 }
 
 async fn read_store_response(
@@ -395,6 +508,237 @@ async fn setup_with_data() -> (SocketAddr, String, TempDir) {
     }
 
     (addr, token, tmp)
+}
+
+// ── E5 Destructive-Flow Crash Points ───────────────────────────────
+
+#[tokio::test]
+async fn compartment_init_pre_mutation_journal_clears_on_startup() {
+    let tmp = TempDir::new().unwrap();
+    write_pending_operation(
+        tmp.path(),
+        "compartment.init",
+        json!({ "label": "default", "threshold": 1 }),
+        Some("compartment/0"),
+    );
+
+    let (addr, _handle) = spawn_daemon(tmp.path().to_path_buf()).await;
+    let client = reqwest::Client::new();
+    let body = health_body(&client, addr).await;
+
+    assert_eq!(body["ready"], json!(true));
+    assert_eq!(body["startup_error"], Value::Null);
+    assert_recovery_summary(&body, 1, 1, 0);
+    assert_no_pending_ops(tmp.path());
+    assert!(!compartment_dir(tmp.path(), 0).exists());
+    assert!(!tmp.path().join(".initialized").exists());
+}
+
+#[tokio::test]
+async fn compartment_init_mid_mutation_partial_compartment_stays_pending() {
+    let tmp = TempDir::new().unwrap();
+    write_pending_operation(
+        tmp.path(),
+        "compartment.init",
+        json!({ "label": "default", "threshold": 1 }),
+        Some("compartment/0"),
+    );
+    write_partial_compartment(&compartment_dir(tmp.path(), 0));
+
+    let (addr, _handle) = spawn_daemon(tmp.path().to_path_buf()).await;
+    let client = reqwest::Client::new();
+    let body = health_body(&client, addr).await;
+
+    assert_eq!(body["ready"], json!(true));
+    assert_eq!(body["startup_error"], Value::Null);
+    assert_recovery_summary(&body, 1, 0, 1);
+    assert_one_pending_op(tmp.path());
+    assert!(compartment_dir(tmp.path(), 0).join("vault.enc").exists());
+    assert!(!compartment_dir(tmp.path(), 0).join("meta.enc").exists());
+    assert!(!tmp.path().join(".initialized").exists());
+}
+
+#[tokio::test]
+async fn compartment_init_post_mutation_full_tree_clears_journal() {
+    let tmp = TempDir::new().unwrap();
+    write_pending_operation(
+        tmp.path(),
+        "compartment.init",
+        json!({ "label": "default", "threshold": 1 }),
+        Some("compartment/0"),
+    );
+    write_full_compartment(&compartment_dir(tmp.path(), 0), "initialized");
+    fs::write(tmp.path().join(".initialized"), b"1").unwrap();
+
+    let (addr, _handle) = spawn_daemon(tmp.path().to_path_buf()).await;
+    let client = reqwest::Client::new();
+    let body = health_body(&client, addr).await;
+
+    assert_eq!(body["ready"], json!(true));
+    assert_eq!(body["startup_error"], Value::Null);
+    assert_recovery_summary(&body, 1, 1, 0);
+    assert_no_pending_ops(tmp.path());
+    assert_compartment_marker(tmp.path(), 0, "initialized");
+}
+
+#[tokio::test]
+async fn compartment_remove_pre_mutation_journal_clears_and_keeps_live_tree() {
+    let tmp = TempDir::new().unwrap();
+    write_pending_operation(
+        tmp.path(),
+        "compartment.remove",
+        json!({ "id": 0 }),
+        Some("compartment/0"),
+    );
+    write_full_compartment(&compartment_dir(tmp.path(), 0), "real");
+
+    let (addr, _handle) = spawn_daemon(tmp.path().to_path_buf()).await;
+    let client = reqwest::Client::new();
+    let body = health_body(&client, addr).await;
+
+    assert_eq!(body["ready"], json!(true));
+    assert_eq!(body["startup_error"], Value::Null);
+    assert_recovery_summary(&body, 1, 1, 0);
+    assert_no_pending_ops(tmp.path());
+    assert_compartment_marker(tmp.path(), 0, "real");
+}
+
+#[tokio::test]
+async fn compartment_remove_mid_mutation_restores_rollback_tree() {
+    let tmp = TempDir::new().unwrap();
+    let live = compartment_dir(tmp.path(), 0);
+    let replacement = live.with_extension("replacing");
+    let rollback = live.with_extension("rollback");
+    write_pending_operation(
+        tmp.path(),
+        "compartment.remove",
+        json!({ "id": 0 }),
+        Some("compartment/0"),
+    );
+    write_full_compartment(&rollback, "real");
+    write_full_compartment(&replacement, "dummy");
+
+    let (addr, _handle) = spawn_daemon(tmp.path().to_path_buf()).await;
+    let client = reqwest::Client::new();
+    let body = health_body(&client, addr).await;
+
+    assert_eq!(body["ready"], json!(true));
+    assert_eq!(body["startup_error"], Value::Null);
+    assert_recovery_summary(&body, 1, 1, 0);
+    assert_no_pending_ops(tmp.path());
+    assert_compartment_marker(tmp.path(), 0, "real");
+    assert!(!replacement.exists());
+    assert!(!rollback.exists());
+}
+
+#[tokio::test]
+async fn compartment_remove_post_mutation_dummy_tree_clears_journal() {
+    let tmp = TempDir::new().unwrap();
+    let live = compartment_dir(tmp.path(), 0);
+    write_pending_operation(
+        tmp.path(),
+        "compartment.remove",
+        json!({ "id": 0 }),
+        Some("compartment/0"),
+    );
+    write_full_compartment(&live, "dummy");
+
+    let (addr, _handle) = spawn_daemon(tmp.path().to_path_buf()).await;
+    let client = reqwest::Client::new();
+    let body = health_body(&client, addr).await;
+
+    assert_eq!(body["ready"], json!(true));
+    assert_eq!(body["startup_error"], Value::Null);
+    assert_recovery_summary(&body, 1, 1, 0);
+    assert_no_pending_ops(tmp.path());
+    assert_compartment_marker(tmp.path(), 0, "dummy");
+}
+
+#[tokio::test]
+async fn snapshot_restore_pre_mutation_journal_clears_and_keeps_original_tree() {
+    let root = TempDir::new().unwrap();
+    let base = root.path().join("sigillum");
+    write_snapshot_tree(&base, "original");
+    write_pending_operation(
+        &base,
+        "snapshot.restore",
+        json!({ "snapshot_bytes": 128 }),
+        Some("vault"),
+    );
+
+    let (addr, _handle) = spawn_daemon(base.clone()).await;
+    let client = reqwest::Client::new();
+    let body = health_body(&client, addr).await;
+
+    assert_eq!(body["ready"], json!(true));
+    assert_eq!(body["startup_error"], Value::Null);
+    assert_recovery_summary(&body, 1, 1, 0);
+    assert_no_pending_ops(&base);
+    assert_eq!(
+        fs::read_to_string(base.join("snapshot-marker.txt")).unwrap(),
+        "original"
+    );
+}
+
+#[tokio::test]
+async fn snapshot_restore_mid_mutation_restores_rollback_and_clears_journal() {
+    let root = TempDir::new().unwrap();
+    let base = root.path().join("sigillum");
+    let rollback = snapshot_temp_path(&base, "rollback");
+    let staging = snapshot_temp_path(&base, "restoring");
+    fs::create_dir_all(&base).unwrap();
+    write_pending_operation(
+        &base,
+        "snapshot.restore",
+        json!({ "snapshot_bytes": 128 }),
+        Some("vault"),
+    );
+    write_snapshot_tree(&rollback, "original");
+    write_snapshot_tree(&staging, "restored");
+
+    let (addr, _handle) = spawn_daemon(base.clone()).await;
+    let client = reqwest::Client::new();
+    let body = health_body(&client, addr).await;
+
+    assert_eq!(body["ready"], json!(true));
+    assert_eq!(body["startup_error"], Value::Null);
+    assert_recovery_summary(&body, 1, 1, 0);
+    assert_no_pending_ops(&base);
+    assert_eq!(
+        fs::read_to_string(base.join("snapshot-marker.txt")).unwrap(),
+        "original"
+    );
+    assert!(!rollback.exists());
+    assert!(!staging.exists());
+}
+
+#[tokio::test]
+async fn snapshot_restore_post_mutation_purges_rollback_with_moved_journal() {
+    let root = TempDir::new().unwrap();
+    let base = root.path().join("sigillum");
+    let rollback = snapshot_temp_path(&base, "rollback");
+    write_snapshot_tree(&base, "restored");
+    write_snapshot_tree(&rollback, "original");
+    write_pending_operation(
+        &rollback,
+        "snapshot.restore",
+        json!({ "snapshot_bytes": 128 }),
+        Some("vault"),
+    );
+
+    let (addr, _handle) = spawn_daemon(base.clone()).await;
+    let client = reqwest::Client::new();
+    let body = health_body(&client, addr).await;
+
+    assert_eq!(body["ready"], json!(true));
+    assert_eq!(body["startup_error"], Value::Null);
+    assert_recovery_summary(&body, 0, 0, 0);
+    assert_eq!(
+        fs::read_to_string(base.join("snapshot-marker.txt")).unwrap(),
+        "restored"
+    );
+    assert!(!rollback.exists());
+    assert_no_pending_ops(&base);
 }
 
 // ── Happy Paths ────────────────────────────────────────────────────
