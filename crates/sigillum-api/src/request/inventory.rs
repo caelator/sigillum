@@ -89,6 +89,8 @@ pub struct WalletInventoryScanRequest {
     pub wallet_profile: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub provider_profile: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub all_configured_chains: Option<bool>,
     /// Optional seed-wallet derivation pattern.
     ///
     /// `project` preserves the configured Sigillum profile account. `standard`
@@ -239,6 +241,8 @@ pub struct ConsolidationPlanGenerateRequest {
     pub wallet_profile: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub provider_profile: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub chain_id: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub include_watch_only: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]

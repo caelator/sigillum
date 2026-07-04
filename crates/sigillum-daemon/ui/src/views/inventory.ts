@@ -256,6 +256,8 @@ export function createInventoryActions(deps: InventoryActionsDeps) {
 
   function renderInventoryState(inventory: any): void {
     renderEntityList("inventoryJobList", inventory.jobs || [], "No discovery jobs yet.", (job: any) => {
+      const chainIds = job.chain_ids || [];
+      const chainLabels = chainIds.map((chainId: number) => chainLabel(chainId)).join(", ");
       return (
         '<li><div class="entity-main">' +
         '<div class="entity-title">' +
@@ -268,6 +270,8 @@ export function createInventoryActions(deps: InventoryActionsDeps) {
         esc((job.wallet_profiles || []).join(", ") || "-") +
         " · providers=" +
         esc((job.provider_profiles || []).join(", ") || "-") +
+        " · chains=" +
+        esc(chainLabels || "-") +
         "<br>" +
         "scanned=" +
         esc(String(job.addresses_scanned || 0)) +
@@ -550,6 +554,9 @@ export function createInventoryActions(deps: InventoryActionsDeps) {
           statusPill(plan.status) +
           "</div>" +
           '<div class="entity-meta">' +
+          "chain=" +
+          esc(chainLabel(plan.chain_id)) +
+          " · " +
           "steps=" +
           esc(String(summary.total_steps || 0)) +
           " · blocked=" +
@@ -683,10 +690,18 @@ export function createInventoryActions(deps: InventoryActionsDeps) {
     const permit2Contract = optionalTextValue("inventoryPermit2Contract");
     const permit2Spender = optionalTextValue("inventoryPermit2Spender");
     const nftOperator = optionalTextValue("inventoryNftOperator");
-    const r = await deps.api("POST", "/api/inventory/scan/evm", {
+    const allConfiguredChains =
+      (document.getElementById("inventoryAllConfiguredChains") as HTMLInputElement | null)
+        ?.checked ?? false;
+    const providerProfile = optionalTextValue("inventoryProviderProfile");
+    if (allConfiguredChains && providerProfile) {
+      deps.toast("Choose either one provider profile or all configured chains", "error");
+      return;
+    }
+    const body: Record<string, unknown> = {
       wallet_family: walletFamily,
       wallet_profile: optionalTextValue("inventoryWalletProfile"),
-      provider_profile: optionalTextValue("inventoryProviderProfile"),
+      provider_profile: providerProfile,
       derivation_pattern: optionalTextValue("inventoryDerivationPattern"),
       account_limit: optionalNumberValue("inventoryAccountLimit"),
       watch_addresses: watchAddresses,
@@ -714,7 +729,9 @@ export function createInventoryActions(deps: InventoryActionsDeps) {
       nft_discovery_from_block: optionalTextValue("inventoryNftDiscoveryFromBlock"),
       nft_discovery_to_block: optionalTextValue("inventoryNftDiscoveryToBlock"),
       nft_discovery_limit: optionalNumberValue("inventoryNftDiscoveryLimit"),
-    });
+    };
+    if (allConfiguredChains) body.all_configured_chains = true;
+    const r = await deps.api("POST", "/api/inventory/scan/evm", body);
     if (r.error) {
       deps.toast(r.error, "error");
       return;
@@ -890,12 +907,14 @@ export function createInventoryActions(deps: InventoryActionsDeps) {
     const routingStrategy = routingEl?.value === "per_party" ? "per_party" : "single";
     const partyDestinations =
       routingStrategy === "per_party" ? collectPlanPartyDestinations() : [];
+    const chainId = optionalNumberValue("planChainId");
     const body: ConsolidationPlanGenerateRequest = {
       destination_address: optionalTextValue("planDestinationAddress"),
       include_watch_only: true,
       auto_queue_low_risk: false,
       routing_strategy: routingStrategy,
     };
+    if (chainId !== null) body.chain_id = chainId;
     if (routingStrategy === "per_party") body.party_destinations = partyDestinations;
 
     const r = await deps.api("POST", "/api/plans/consolidation/generate", body);

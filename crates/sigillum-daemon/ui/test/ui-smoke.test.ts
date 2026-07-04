@@ -474,6 +474,7 @@ test("queue and inventory renderers produce reviewable DOM summaries", () => {
     {
       id: "plan-1",
       status: "review_required",
+      chain_id: 1,
       summary: {
         total_steps: 1,
         blocked_steps: 0,

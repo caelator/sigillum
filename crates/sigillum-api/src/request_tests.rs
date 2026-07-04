@@ -806,6 +806,7 @@ fn test_wallet_inventory_scan_request_roundtrip() {
         wallet_family: Some("eth-seed".to_string()),
         wallet_profile: Some("seed-main".to_string()),
         provider_profile: Some("mainnet".to_string()),
+        all_configured_chains: Some(false),
         derivation_pattern: Some("standard".to_string()),
         account_limit: Some(3),
         watch_addresses: vec![WatchAddressProbe {
@@ -924,6 +925,7 @@ fn test_consolidation_plan_generate_request_roundtrip() {
         wallet_family: Some("eth-seed".to_string()),
         wallet_profile: Some("seed-main".to_string()),
         provider_profile: Some("mainnet".to_string()),
+        chain_id: Some(1),
         include_watch_only: Some(true),
         auto_queue_low_risk: Some(false),
         routing_strategy: None,

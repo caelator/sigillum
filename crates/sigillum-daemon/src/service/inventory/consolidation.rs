@@ -1,3 +1,5 @@
+use std::collections::BTreeMap;
+
 use sigillum_api::{
     ConsolidationPlan, ConsolidationPlanApproveRequest, ConsolidationPlanGenerateRequest,
     ConsolidationPlanListResponse, ConsolidationPlanMutationResponse, WalletPlanStatus,
@@ -40,62 +42,87 @@ impl SigillumService {
         let now = now_unix();
         let destination_address = body.destination_address.clone().and_then(trimmed_optional);
         let policy = state.treasury_policy.clone();
-        let mut steps = build_plan_steps(&state, &registry, &body, &destination_address);
+        if body.chain_id == Some(0) {
+            return Err(ServiceError::bad_request("chain_id must be greater than 0"));
+        }
+        let steps = build_plan_steps(&state, &registry, &body, &destination_address);
+        let mut steps_by_chain = BTreeMap::<u64, Vec<_>>::new();
+        for step in steps {
+            steps_by_chain.entry(step.chain_id).or_default().push(step);
+        }
+        if steps_by_chain.is_empty() {
+            steps_by_chain.insert(body.chain_id.unwrap_or(1), Vec::new());
+        }
 
-        // Policy runs after planning so planner blockers and policy verdicts
-        // are both visible on each step, then the summary reflects the final
-        // step statuses.
-        if let Some(policy) = policy.as_ref() {
-            for step in &mut steps {
-                apply_policy_blockers_to_step(policy, step);
+        let mut generated_plans = Vec::new();
+        for (chain_id, mut steps) in steps_by_chain {
+            // Policy runs after planning so planner blockers and policy verdicts
+            // are both visible on each step, then the summary reflects the final
+            // step statuses.
+            if let Some(policy) = policy.as_ref() {
+                for step in &mut steps {
+                    apply_policy_blockers_to_step(policy, step);
+                }
             }
+            let policy_violations = policy
+                .as_ref()
+                .map(|policy| plan_policy_violations(policy, &steps))
+                .unwrap_or_default();
+            let linkage_findings = analyze_plan_linkage(&state, &mut steps);
+            if policy
+                .as_ref()
+                .map(|policy| policy.block_cross_party_linkage)
+                .unwrap_or(false)
+            {
+                apply_linkage_blockers(&mut steps);
+            }
+            let summary = summarize_plan_steps(&steps);
+            let status = if summary.total_steps == 0 {
+                WalletPlanStatus::Empty
+            } else if summary.blocked_steps > 0 || !policy_violations.is_empty() {
+                WalletPlanStatus::Blocked
+            } else {
+                WalletPlanStatus::ReviewRequired
+            };
+            let plan = ConsolidationPlan {
+                id: random_id(),
+                status,
+                chain_id,
+                destination_address: destination_address.clone(),
+                created_at_unix: now,
+                updated_at_unix: now,
+                summary,
+                policy_violations,
+                linkage_findings,
+                steps,
+            };
+            generated_plans.push(plan);
         }
-        let policy_violations = policy
-            .as_ref()
-            .map(|policy| plan_policy_violations(policy, &steps))
-            .unwrap_or_default();
-        let linkage_findings = analyze_plan_linkage(&state, &mut steps);
-        if policy
-            .as_ref()
-            .map(|policy| policy.block_cross_party_linkage)
-            .unwrap_or(false)
-        {
-            apply_linkage_blockers(&mut steps);
-        }
-        let summary = summarize_plan_steps(&steps);
-        let status = if summary.total_steps == 0 {
-            WalletPlanStatus::Empty
-        } else if summary.blocked_steps > 0 || !policy_violations.is_empty() {
-            WalletPlanStatus::Blocked
-        } else {
-            WalletPlanStatus::ReviewRequired
-        };
-        let plan = ConsolidationPlan {
-            id: random_id(),
-            status,
-            destination_address,
-            created_at_unix: now,
-            updated_at_unix: now,
-            summary,
-            policy_violations,
-            linkage_findings,
-            steps,
-        };
-        state.consolidation_plans.push(plan.clone());
+
+        state
+            .consolidation_plans
+            .extend(generated_plans.iter().cloned());
         save_inventory_state(&self.state.base_dir, &state)?;
 
-        self.record_audit(
-            self.state.active_compartment_id_for(token),
-            AuditEventSpec::WalletConsolidationPlanGenerate {
-                id: plan.id.clone(),
-                steps: plan.summary.total_steps,
-                blocked: plan.summary.blocked_steps,
-            },
-        )?;
+        for plan in &generated_plans {
+            self.record_audit(
+                self.state.active_compartment_id_for(token),
+                AuditEventSpec::WalletConsolidationPlanGenerate {
+                    id: plan.id.clone(),
+                    steps: plan.summary.total_steps,
+                    blocked: plan.summary.blocked_steps,
+                },
+            )?;
+        }
 
+        let plan = generated_plans
+            .first()
+            .cloned()
+            .ok_or_else(|| ServiceError::internal("No consolidation plan was generated."))?;
         Ok(ConsolidationPlanMutationResponse {
             status: "generated".into(),
             plan,
+            plans: generated_plans,
         })
     }
 
@@ -171,6 +198,7 @@ impl SigillumService {
         Ok(ConsolidationPlanMutationResponse {
             status: "approved".into(),
             plan,
+            plans: Vec::new(),
         })
     }
 }

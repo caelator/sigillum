@@ -96,6 +96,8 @@ pub struct WalletDiscoveryJob {
     pub wallet_profiles: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub provider_profiles: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub chain_ids: Vec<u64>,
     pub gap_limit: u32,
     pub max_index: u32,
     pub addresses_scanned: usize,
@@ -302,6 +304,8 @@ pub struct ConsolidationPlanStep {
 pub struct ConsolidationPlan {
     pub id: String,
     pub status: WalletPlanStatus,
+    #[serde(default = "default_inventory_chain_id")]
+    pub chain_id: u64,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub destination_address: Option<String>,
     pub created_at_unix: u64,
@@ -327,4 +331,6 @@ pub struct ConsolidationPlanListResponse {
 pub struct ConsolidationPlanMutationResponse {
     pub status: String,
     pub plan: ConsolidationPlan,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub plans: Vec<ConsolidationPlan>,
 }

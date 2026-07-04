@@ -102,6 +102,7 @@ impl SigillumService {
         Ok(ConsolidationPlanMutationResponse {
             status: "simulated".into(),
             plan,
+            plans: Vec::new(),
         })
     }
 

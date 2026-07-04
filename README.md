@@ -231,7 +231,7 @@ On top of that, the daemon now includes:
   probes, operator-bounded Permit2 allowance probes, bounded ERC-721 transfer-log
   discovery with `ownerOf` confirmation, bounded ERC-1155 transfer discovery
   with `balanceOf` confirmation, and operator-bounded NFT `isApprovedForAll`
-  approval probes
+  approval probes across one provider profile or every configured EVM provider
 - a local operator-managed risk catalog for spender/operator labels and
   approval-risk overrides
 - reviewable consolidation-plan revoke steps for discovered ERC-20, Permit2,
@@ -297,9 +297,9 @@ The embedded UI currently supports:
 - local EIP-1559 native ETH and ERC-20 transfer signing from derived stealth keys
 - EVM provider profile management
 - stealth wallet profile management
-- wallet inventory scans with ERC-20, ERC-20 allowance, Permit2 allowance, ERC-721, ERC-1155, and NFT operator-approval discovery controls
+- wallet inventory scans across one provider or all configured EVM chains, with ERC-20, ERC-20 allowance, Permit2 allowance, ERC-721, ERC-1155, and NFT operator-approval discovery controls
 - local risk catalog management for approval spender/operator labels
-- dry-run consolidation plans that surface approval revokes alongside sweeps
+- single-chain dry-run consolidation plans that surface approval revokes alongside sweeps
 - stealth deposit creation, refresh, sweep enqueue, and registry browsing
 - queue inspection and batch processing
 - maintenance runs for deposit refresh plus queue draining

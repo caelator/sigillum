@@ -299,6 +299,7 @@ fn wallet_inventory_legacy_json_domains_deserialize_unchanged() {
         WalletAssetKind::Erc20
     );
     assert_eq!(fixture.plan.status, WalletPlanStatus::ReviewRequired);
+    assert_eq!(fixture.plan.chain_id, 1);
     assert_eq!(
         fixture.plan.steps[0].action,
         WalletPlanStepAction::SweepErc20
@@ -586,6 +587,7 @@ fn inventory_request_roundtrip() {
         wallet_family: Some("eth-seed".to_string()),
         wallet_profile: Some("ops-seed-mainnet".to_string()),
         provider_profile: Some("ethereum-mainnet-alchemy".to_string()),
+        all_configured_chains: Some(false),
         derivation_pattern: Some("ledger_live".to_string()),
         account_limit: Some(3),
         watch_addresses: vec![WatchAddressProbe {
@@ -654,6 +656,7 @@ fn inventory_response_roundtrip() {
             wallet_families: vec!["eth-seed".to_string()],
             wallet_profiles: vec!["ops-seed-mainnet".to_string()],
             provider_profiles: vec!["ethereum-mainnet-alchemy".to_string()],
+            chain_ids: vec![1],
             gap_limit: 20,
             max_index: 250,
             addresses_scanned: 18,

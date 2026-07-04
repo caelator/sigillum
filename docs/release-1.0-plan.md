@@ -1477,7 +1477,7 @@ Phase E — Automation & recovery
 Phase W — Wallet-management completion
 - [x] W1.1 chain registry (built-ins + custom + Permit2 override)
 - [x] W1.2 chain_id legacy defaults + UI/CLI surfacing (field already exists)
-- [ ] W1.3 multi-chain scan orchestration
+- [x] W1.3 multi-chain scan orchestration
 - [x] W2 typed domain model (wire-compatible enums)
 - [ ] W3.1 block-range checkpoints for log scans
 - [ ] W3.2 ERC-1155 batch e2e fixture (decoding already implemented)
@@ -1616,3 +1616,8 @@ Phase H — Ship
   explicit legacy mainnet defaults plus registry labels for inventory rows.
   Focused API/daemon/CLI/UI tests passed; manual CLI chain registry smoke
   passed; full `./scripts/check-release.sh` passed.
+- 2026-07-04 W1.3 local: added explicit all-configured-chain EVM inventory
+  scans, chain-tagged discovery jobs, CLI/UI scan controls, CLI/UI plan chain
+  surfacing, and single-chain consolidation-plan generation with optional
+  `chain_id` filtering. Focused API/daemon/CLI/UI tests passed; full gate
+  passed.
