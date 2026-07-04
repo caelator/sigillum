@@ -554,6 +554,8 @@ mod profiles;
 pub use profiles::*;
 
 // ── Wallet inventory and discovery ─────────────────
+mod wallet_domains;
+pub use wallet_domains::*;
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct WalletInventoryAddress {
@@ -569,11 +571,11 @@ pub struct WalletInventoryAddress {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub account_index: Option<u32>,
     pub address_index: u32,
-    pub activity_state: String,
+    pub activity_state: WalletAddressActivityState,
     pub native_balance_wei_hex: String,
     pub transaction_count: u64,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub classifications: Vec<String>,
+    pub classifications: Vec<WalletAddressClassification>,
     pub source: String,
     pub first_seen_at_unix: u64,
     pub last_checked_at_unix: u64,
@@ -588,7 +590,7 @@ pub struct WalletAssetHolding {
     pub chain_id: u64,
     pub address: String,
     pub derivation_path: String,
-    pub asset_kind: String,
+    pub asset_kind: WalletAssetKind,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub asset_address: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -790,15 +792,15 @@ pub struct ConsolidationPlanSummary {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ConsolidationPlanStep {
     pub id: String,
-    pub action: String,
-    pub status: String,
+    pub action: WalletPlanStepAction,
+    pub status: WalletPlanStepStatus,
     pub wallet_family: String,
     pub wallet_profile: String,
     pub provider_profile: String,
     pub chain_id: u64,
     pub address: String,
     pub derivation_path: String,
-    pub asset_kind: String,
+    pub asset_kind: WalletAssetKind,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub asset_address: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -816,8 +818,8 @@ pub struct ConsolidationPlanStep {
     pub amount_hex: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub destination_address: Option<String>,
-    pub signer_status: String,
-    pub simulation_status: String,
+    pub signer_status: WalletSignerStatus,
+    pub simulation_status: WalletSimulationStatus,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub simulation_evidence: Vec<String>,
     pub risk_level: String,
@@ -832,7 +834,7 @@ pub struct ConsolidationPlanStep {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ConsolidationPlan {
     pub id: String,
-    pub status: String,
+    pub status: WalletPlanStatus,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub destination_address: Option<String>,
     pub created_at_unix: u64,

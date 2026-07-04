@@ -1,16 +1,19 @@
-use serde::{Serialize, de::DeserializeOwned};
+use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use sigillum_api::{
-    ActiveCompartment, CapabilitySessionRequest, ClaimCandidateProbe, Counterparty, DefiTokenProbe,
-    ErrorResponse, EthStealthAnnouncementPayload, EthStealthDeposit,
+    ActiveCompartment, CapabilitySessionRequest, ClaimCandidateProbe, ConsolidationPlan,
+    Counterparty, DefiTokenProbe, ErrorResponse, EthStealthAnnouncementPayload, EthStealthDeposit,
     EthStealthDepositCreateNativeRequest, EthStealthDepositListResponse, EvmProviderProfile,
     EvmProviderProfileListResponse, EvmProviderProfileUpsertRequest, EvmProviderRef,
     NftMetadataCacheEntry, QueueEthStealthNativeSweepRequest, QueueJob, QueueJobListResponse,
     QueueJobPayload, ReceivingCoverage, ReceivingDepositTagRequest, ReceivingItem,
     ReceivingOverviewResponse, ReceivingPartyGroup, ReceivingTotals, StatusResponse,
     StealthPaymentRef, TreasuryAllowedDestination, TreasuryAllowedDestinationInput, TreasuryPolicy,
-    TreasuryPolicyResponse, TreasuryPolicyUpdateRequest, UnlockedCompartment, WalletAssetHolding,
+    TreasuryPolicyResponse, TreasuryPolicyUpdateRequest, UnlockedCompartment,
+    WalletAddressActivityState, WalletAddressClassification, WalletAssetHolding, WalletAssetKind,
     WalletDiscoveryCheckpoint, WalletDiscoveryJob, WalletInventoryAddress,
-    WalletInventoryListResponse, WalletInventoryScanRequest, WatchAddressProbe,
+    WalletInventoryListResponse, WalletInventoryScanRequest, WalletPlanStatus,
+    WalletPlanStepAction, WalletPlanStepStatus, WalletSignerStatus, WalletSimulationStatus,
+    WatchAddressProbe,
 };
 use std::fmt::Debug;
 
@@ -18,6 +21,292 @@ fn roundtrip<T: Serialize + DeserializeOwned + PartialEq + Debug>(value: &T) {
     let json = serde_json::to_string(value).expect("serialize fixture to JSON");
     let decoded: T = serde_json::from_str(&json).expect("deserialize fixture from JSON");
     assert_eq!(&decoded, value, "JSON roundtrip changed value: {json}");
+}
+
+fn assert_wire_literal<T>(value: T, literal: &str)
+where
+    T: Serialize + DeserializeOwned + PartialEq + Debug,
+{
+    let json = serde_json::to_string(&value).expect("serialize wire enum");
+    assert_eq!(json, serde_json::to_string(literal).unwrap());
+    let decoded: T = serde_json::from_str(&json).expect("deserialize wire enum");
+    assert_eq!(decoded, value);
+}
+
+#[test]
+fn wallet_domain_enums_serialize_known_wire_literals() {
+    assert_wire_literal(WalletAddressActivityState::Funded, "funded");
+    assert_wire_literal(WalletAddressActivityState::Active, "active");
+    assert_wire_literal(WalletAddressActivityState::Empty, "empty");
+
+    for (value, literal) in [
+        (
+            WalletAddressClassification::SignerAvailable,
+            "signer_available",
+        ),
+        (WalletAddressClassification::WatchOnly, "watch_only"),
+        (WalletAddressClassification::SignerUnknown, "signer_unknown"),
+        (WalletAddressClassification::GasAvailable, "gas_available"),
+        (
+            WalletAddressClassification::TransactionHistory,
+            "transaction_history",
+        ),
+        (WalletAddressClassification::TokenHolding, "token_holding"),
+        (WalletAddressClassification::NftHolding, "nft_holding"),
+        (
+            WalletAddressClassification::ProtocolHolding,
+            "protocol_holding",
+        ),
+        (WalletAddressClassification::ValueDetected, "value_detected"),
+        (
+            WalletAddressClassification::AssetValueDetected,
+            "asset_value_detected",
+        ),
+        (WalletAddressClassification::StrandedValue, "stranded_value"),
+        (
+            WalletAddressClassification::ApprovalExposure,
+            "approval_exposure",
+        ),
+        (
+            WalletAddressClassification::DormantCandidate,
+            "dormant_candidate",
+        ),
+        (
+            WalletAddressClassification::EmptyCandidate,
+            "empty_candidate",
+        ),
+    ] {
+        assert_wire_literal(value, literal);
+    }
+
+    for (value, literal) in [
+        (WalletAssetKind::Native, "native"),
+        (WalletAssetKind::Erc20, "erc20"),
+        (WalletAssetKind::Erc721, "erc721"),
+        (WalletAssetKind::Erc1155, "erc1155"),
+        (WalletAssetKind::Nft, "nft"),
+        (WalletAssetKind::Approval, "approval"),
+        (WalletAssetKind::Defi, "defi"),
+        (WalletAssetKind::Airdrop, "airdrop"),
+        (WalletAssetKind::Reward, "reward"),
+    ] {
+        assert_wire_literal(value, literal);
+    }
+
+    for (value, literal) in [
+        (WalletPlanStepAction::SweepNative, "sweep_native"),
+        (WalletPlanStepAction::SweepErc20, "sweep_erc20"),
+        (WalletPlanStepAction::SweepNft, "sweep_nft"),
+        (
+            WalletPlanStepAction::RevokeErc20Approval,
+            "revoke_erc20_approval",
+        ),
+        (
+            WalletPlanStepAction::RevokePermit2Allowance,
+            "revoke_permit2_allowance",
+        ),
+        (
+            WalletPlanStepAction::RevokeNftOperatorApproval,
+            "revoke_nft_operator_approval",
+        ),
+        (WalletPlanStepAction::RevokeApproval, "revoke_approval"),
+        (WalletPlanStepAction::ExitDefiPosition, "exit_defi_position"),
+        (WalletPlanStepAction::ClaimReward, "claim_reward"),
+        (WalletPlanStepAction::ReviewAsset, "review_asset"),
+    ] {
+        assert_wire_literal(value, literal);
+    }
+
+    for (value, literal) in [
+        (WalletPlanStepStatus::ReviewRequired, "review_required"),
+        (WalletPlanStepStatus::Blocked, "blocked"),
+        (WalletPlanStepStatus::Approved, "approved"),
+    ] {
+        assert_wire_literal(value, literal);
+    }
+
+    for (value, literal) in [
+        (WalletSignerStatus::WatchOnly, "watch_only"),
+        (WalletSignerStatus::Available, "available"),
+        (WalletSignerStatus::Unknown, "unknown"),
+    ] {
+        assert_wire_literal(value, literal);
+    }
+
+    for (value, literal) in [
+        (WalletSimulationStatus::Required, "required"),
+        (WalletSimulationStatus::NotRun, "not_run"),
+        (WalletSimulationStatus::Passed, "passed"),
+        (WalletSimulationStatus::Failed, "failed"),
+        (WalletSimulationStatus::Unsupported, "unsupported"),
+        (WalletSimulationStatus::Blocked, "blocked"),
+    ] {
+        assert_wire_literal(value, literal);
+    }
+
+    for (value, literal) in [
+        (WalletPlanStatus::Empty, "empty"),
+        (WalletPlanStatus::Blocked, "blocked"),
+        (WalletPlanStatus::ReviewRequired, "review_required"),
+        (WalletPlanStatus::Approved, "approved"),
+    ] {
+        assert_wire_literal(value, literal);
+    }
+}
+
+#[test]
+fn wallet_domain_enums_preserve_other_literals() {
+    assert_wire_literal(
+        WalletAddressActivityState::Other("paused_by_operator".to_string()),
+        "paused_by_operator",
+    );
+    assert_wire_literal(
+        WalletAddressClassification::Other("future_classification".to_string()),
+        "future_classification",
+    );
+    assert_wire_literal(
+        WalletAssetKind::Other("quantum_bond".to_string()),
+        "quantum_bond",
+    );
+    assert_wire_literal(
+        WalletPlanStepAction::Other("mint_soulbound".to_string()),
+        "mint_soulbound",
+    );
+    assert_wire_literal(
+        WalletPlanStepStatus::Other("queued_for_review".to_string()),
+        "queued_for_review",
+    );
+    assert_wire_literal(
+        WalletSignerStatus::Other("remote_signer".to_string()),
+        "remote_signer",
+    );
+    assert_wire_literal(
+        WalletSimulationStatus::Other("deferred".to_string()),
+        "deferred",
+    );
+    assert_wire_literal(
+        WalletPlanStatus::Other("partially_approved".to_string()),
+        "partially_approved",
+    );
+}
+
+#[test]
+fn wallet_inventory_legacy_json_domains_deserialize_unchanged() {
+    #[derive(Debug, Deserialize)]
+    struct LegacyFixture {
+        inventory: WalletInventoryListResponse,
+        plan: ConsolidationPlan,
+    }
+
+    let fixture: LegacyFixture = serde_json::from_str(
+        r#"{
+          "inventory": {
+            "jobs": [],
+            "addresses": [{
+              "id": "addr_legacy_1",
+              "wallet_family": "eth-seed",
+              "wallet_profile": "ops-seed-mainnet",
+              "provider_profile": "ethereum-mainnet-alchemy",
+              "chain_id": 1,
+              "address": "0xaaaaaaaa11111111222222223333333344444444",
+              "derivation_path": "m/44'/60'/0'/0/5",
+              "derivation_pattern": "ledger_live",
+              "account_index": 0,
+              "address_index": 5,
+              "activity_state": "funded",
+              "native_balance_wei_hex": "0xde0b6b3a7640000",
+              "transaction_count": 12,
+              "classifications": ["signer_available", "gas_available", "value_detected"],
+              "source": "scan",
+              "first_seen_at_unix": 1782960000,
+              "last_checked_at_unix": 1783046000
+            }],
+            "holdings": [{
+              "id": "hold_legacy_1",
+              "wallet_family": "eth-seed",
+              "wallet_profile": "ops-seed-mainnet",
+              "provider_profile": "ethereum-mainnet-alchemy",
+              "chain_id": 1,
+              "address": "0xaaaaaaaa11111111222222223333333344444444",
+              "derivation_path": "m/44'/60'/0'/0/5",
+              "asset_kind": "erc20",
+              "asset_address": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+              "amount_hex": "0x5f5e100",
+              "source": "scan",
+              "status": "active",
+              "first_seen_at_unix": 1782960000,
+              "last_checked_at_unix": 1783046000
+            }],
+            "nft_metadata_cache": []
+          },
+          "plan": {
+            "id": "plan_legacy_1",
+            "status": "review_required",
+            "destination_address": "0xbbbbbbbb11111111222222223333333344444444",
+            "created_at_unix": 1783046000,
+            "updated_at_unix": 1783046000,
+            "summary": {
+              "total_steps": 1,
+              "blocked_steps": 0,
+              "review_required_steps": 1,
+              "approved_steps": 0,
+              "executable_steps": 0,
+              "value_items": 1
+            },
+            "policy_violations": [],
+            "linkage_findings": [],
+            "steps": [{
+              "id": "step_legacy_1",
+              "action": "sweep_erc20",
+              "status": "review_required",
+              "wallet_family": "eth-seed",
+              "wallet_profile": "ops-seed-mainnet",
+              "provider_profile": "ethereum-mainnet-alchemy",
+              "chain_id": 1,
+              "address": "0xaaaaaaaa11111111222222223333333344444444",
+              "derivation_path": "m/44'/60'/0'/0/5",
+              "asset_kind": "erc20",
+              "asset_address": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+              "amount_hex": "0x5f5e100",
+              "destination_address": "0xbbbbbbbb11111111222222223333333344444444",
+              "signer_status": "available",
+              "simulation_status": "required",
+              "risk_level": "low",
+              "blockers": [],
+              "linkage_warnings": [],
+              "auto_eligible": false,
+              "approved": false
+            }]
+          }
+        }"#,
+    )
+    .expect("legacy wallet inventory and plan JSON deserializes");
+
+    assert_eq!(
+        fixture.inventory.addresses[0].activity_state,
+        WalletAddressActivityState::Funded
+    );
+    assert_eq!(
+        fixture.inventory.addresses[0].classifications,
+        vec![
+            WalletAddressClassification::SignerAvailable,
+            WalletAddressClassification::GasAvailable,
+            WalletAddressClassification::ValueDetected,
+        ]
+    );
+    assert_eq!(
+        fixture.inventory.holdings[0].asset_kind,
+        WalletAssetKind::Erc20
+    );
+    assert_eq!(fixture.plan.status, WalletPlanStatus::ReviewRequired);
+    assert_eq!(
+        fixture.plan.steps[0].action,
+        WalletPlanStepAction::SweepErc20
+    );
+    assert_eq!(
+        fixture.plan.steps[0].simulation_status,
+        WalletSimulationStatus::Required
+    );
 }
 
 #[test]
@@ -397,10 +686,13 @@ fn inventory_response_roundtrip() {
             derivation_pattern: Some("ledger_live".to_string()),
             account_index: Some(0),
             address_index: 5,
-            activity_state: "funded".to_string(),
+            activity_state: WalletAddressActivityState::Funded,
             native_balance_wei_hex: "0xde0b6b3a7640000".to_string(),
             transaction_count: 12,
-            classifications: vec!["signer".to_string(), "treasury".to_string()],
+            classifications: vec![
+                WalletAddressClassification::Other("signer".to_string()),
+                WalletAddressClassification::Other("treasury".to_string()),
+            ],
             source: "scan".to_string(),
             first_seen_at_unix: 1_782_960_000,
             last_checked_at_unix: 1_783_046_000,
@@ -413,7 +705,7 @@ fn inventory_response_roundtrip() {
             chain_id: 1,
             address: "0xaaaaaaaa11111111222222223333333344444444".to_string(),
             derivation_path: "m/44'/60'/0'/0/5".to_string(),
-            asset_kind: "erc20".to_string(),
+            asset_kind: WalletAssetKind::Erc20,
             asset_address: Some("0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48".to_string()),
             token_id_hex: None,
             counterparty_address: Some("0x1111111254eeb25477b68fb85ed929f73a960582".to_string()),

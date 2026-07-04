@@ -13,8 +13,8 @@ use sigillum_api::{
     TreasuryPolicyResponse, TreasuryPolicyUpdateRequest, TreasuryReceiveAllocateRequest,
     TreasuryReceiveAllocation, TreasuryReceiveAllocationListResponse,
     TreasuryReceiveAllocationMutationResponse, TreasuryReceiveRotateRequest,
-    TreasuryReceiveSummary, TreasuryRiskSummary, TreasuryRoutingStatus, WalletAssetHolding,
-    WalletInventoryAddress,
+    TreasuryReceiveSummary, TreasuryRiskSummary, TreasuryRoutingStatus,
+    WalletAddressClassification, WalletAssetHolding, WalletAssetKind, WalletInventoryAddress,
 };
 use sigillum_core::decode_quantity_hex;
 
@@ -99,7 +99,10 @@ fn usize_to_u32_count(value: usize) -> u32 {
     value.min(u32::MAX as usize) as u32
 }
 
-fn has_classification(address: &WalletInventoryAddress, classification: &str) -> bool {
+fn has_classification(
+    address: &WalletInventoryAddress,
+    classification: &WalletAddressClassification,
+) -> bool {
     address
         .classifications
         .iter()
@@ -129,12 +132,14 @@ struct GroupAccumulator {
 }
 
 fn classify_holding(group: &mut GroupAccumulator, holding: &WalletAssetHolding) {
-    match holding.asset_kind.as_str() {
-        "erc20" => group.erc20_holding_count += 1,
-        "erc721" | "erc1155" | "nft" => group.nft_holding_count += 1,
-        "defi" => group.defi_holding_count += 1,
-        "airdrop" | "reward" => group.claimable_holding_count += 1,
-        "approval" => group.approval_exposure_count += 1,
+    match &holding.asset_kind {
+        WalletAssetKind::Erc20 => group.erc20_holding_count += 1,
+        WalletAssetKind::Erc721 | WalletAssetKind::Erc1155 | WalletAssetKind::Nft => {
+            group.nft_holding_count += 1;
+        }
+        WalletAssetKind::Defi => group.defi_holding_count += 1,
+        WalletAssetKind::Airdrop | WalletAssetKind::Reward => group.claimable_holding_count += 1,
+        WalletAssetKind::Approval => group.approval_exposure_count += 1,
         _ => {}
     }
 }
@@ -419,15 +424,16 @@ impl SigillumService {
             if funded {
                 funded_address_count += 1;
             }
-            let watch_only = matches!(
-                address.wallet_family.as_str(),
-                WALLET_FAMILY_ETH_XPUB | WALLET_FAMILY_ETH_WATCH
-            ) || has_classification(address, "watch_only");
+            let watch_only =
+                matches!(
+                    address.wallet_family.as_str(),
+                    WALLET_FAMILY_ETH_XPUB | WALLET_FAMILY_ETH_WATCH
+                ) || has_classification(address, &WalletAddressClassification::WatchOnly);
             if watch_only {
                 watch_only_address_count += 1;
             }
             if address.wallet_family == WALLET_FAMILY_ETH_SEED
-                || has_classification(address, "signer_available")
+                || has_classification(address, &WalletAddressClassification::SignerAvailable)
             {
                 signer_address_count += 1;
             }
@@ -454,11 +460,11 @@ impl SigillumService {
             if watch_only {
                 group.watch_only_address_count += 1;
             } else if address.wallet_family == WALLET_FAMILY_ETH_SEED
-                || has_classification(address, "signer_available")
+                || has_classification(address, &WalletAddressClassification::SignerAvailable)
             {
                 group.signer_address_count += 1;
             }
-            if has_classification(address, "dormant_candidate") {
+            if has_classification(address, &WalletAddressClassification::DormantCandidate) {
                 group.dormant_candidate_count += 1;
             }
         }
@@ -574,7 +580,7 @@ impl SigillumService {
         let plans = TreasuryPlanSummary {
             total_plans: state.consolidation_plans.len(),
             latest_plan_id: latest_plan.map(|plan| plan.id.clone()),
-            latest_plan_status: latest_plan.map(|plan| plan.status.clone()),
+            latest_plan_status: latest_plan.map(|plan| plan.status.to_string()),
             latest_review_required_steps: latest_plan
                 .map(|plan| plan.summary.review_required_steps)
                 .unwrap_or(0),
@@ -688,9 +694,9 @@ impl SigillumService {
                             let now = now_unix();
                             let activity_state = if quantity_hex_is_nonzero(&native_balance_wei_hex)
                             {
-                                "funded"
+                                sigillum_api::WalletAddressActivityState::Funded
                             } else {
-                                "empty"
+                                sigillum_api::WalletAddressActivityState::Empty
                             };
                             upsert_address(
                                 &mut inventory.addresses,
@@ -705,7 +711,7 @@ impl SigillumService {
                                     derivation_pattern: None,
                                     account_index: None,
                                     address_index: allocation.address_index,
-                                    activity_state: activity_state.into(),
+                                    activity_state,
                                     native_balance_wei_hex,
                                     transaction_count: 0,
                                     classifications: Vec::new(),

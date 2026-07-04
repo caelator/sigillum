@@ -116,6 +116,59 @@ export interface RiskCatalogEntry {
   updated_at_unix: number;
 }
 
+type WireString<T extends string> = T | (string & {});
+
+export type WalletAddressActivityState = WireString<"funded" | "active" | "empty">;
+
+export type WalletAddressClassification = WireString<
+  | "signer_available"
+  | "watch_only"
+  | "signer_unknown"
+  | "gas_available"
+  | "transaction_history"
+  | "token_holding"
+  | "nft_holding"
+  | "protocol_holding"
+  | "value_detected"
+  | "asset_value_detected"
+  | "stranded_value"
+  | "approval_exposure"
+  | "dormant_candidate"
+  | "empty_candidate"
+>;
+
+export type WalletAssetKind = WireString<
+  | "native"
+  | "erc20"
+  | "erc721"
+  | "erc1155"
+  | "nft"
+  | "approval"
+  | "defi"
+  | "airdrop"
+  | "reward"
+>;
+
+export type WalletPlanStepAction = WireString<
+  | "sweep_native"
+  | "sweep_erc20"
+  | "sweep_nft"
+  | "revoke_erc20_approval"
+  | "revoke_permit2_allowance"
+  | "revoke_nft_operator_approval"
+  | "revoke_approval"
+  | "exit_defi_position"
+  | "claim_reward"
+  | "review_asset"
+>;
+
+export type WalletPlanStepStatus = WireString<"review_required" | "blocked" | "approved">;
+export type WalletSignerStatus = WireString<"watch_only" | "available" | "unknown">;
+export type WalletSimulationStatus = WireString<
+  "required" | "not_run" | "passed" | "failed" | "unsupported" | "blocked"
+>;
+export type WalletPlanStatus = WireString<"empty" | "blocked" | "review_required" | "approved">;
+
 export interface WalletInventoryAddress {
   id: string;
   wallet_family: string;
@@ -127,10 +180,10 @@ export interface WalletInventoryAddress {
   derivation_pattern?: string | null;
   account_index?: number | null;
   address_index: number;
-  activity_state: string;
+  activity_state: WalletAddressActivityState;
   native_balance_wei_hex: string;
   transaction_count: number;
-  classifications?: string[];
+  classifications?: WalletAddressClassification[];
   source: string;
   first_seen_at_unix: number;
   last_checked_at_unix: number;
@@ -147,15 +200,15 @@ export interface ConsolidationPlanSummary {
 
 export interface ConsolidationPlanStep {
   id: string;
-  action: string;
-  status: string;
+  action: WalletPlanStepAction;
+  status: WalletPlanStepStatus;
   wallet_family: string;
   wallet_profile: string;
   provider_profile: string;
   chain_id: number;
   address: string;
   derivation_path: string;
-  asset_kind: string;
+  asset_kind: WalletAssetKind;
   asset_address?: string | null;
   token_id_hex?: string | null;
   counterparty_address?: string | null;
@@ -165,8 +218,8 @@ export interface ConsolidationPlanStep {
   claim_proof?: string[];
   amount_hex: string;
   destination_address?: string | null;
-  signer_status: string;
-  simulation_status: string;
+  signer_status: WalletSignerStatus;
+  simulation_status: WalletSimulationStatus;
   simulation_evidence?: string[];
   risk_level: string;
   blockers: string[];
@@ -177,7 +230,7 @@ export interface ConsolidationPlanStep {
 
 export interface ConsolidationPlan {
   id: string;
-  status: string;
+  status: WalletPlanStatus;
   destination_address?: string | null;
   created_at_unix: number;
   updated_at_unix: number;
@@ -205,7 +258,7 @@ export interface ConsolidationPlanGenerateRequest {
 
 export interface ConsolidationPlanExportCall {
   step_id: string;
-  action: string;
+  action: WalletPlanStepAction;
   from_address: string;
   to_address: string;
   value_wei_hex: string;
@@ -213,7 +266,7 @@ export interface ConsolidationPlanExportCall {
   operation: number;
   chain_id: number;
   provider_profile: string;
-  asset_kind: string;
+  asset_kind: WalletAssetKind;
   amount_hex: string;
   evidence: string[];
 }
@@ -248,7 +301,7 @@ export interface ConsolidationPlanExportBundle {
 
 export interface ConsolidationPlanExportSkippedStep {
   step_id: string;
-  action: string;
+  action: WalletPlanStepAction;
   reason: string;
   blockers: string[];
 }

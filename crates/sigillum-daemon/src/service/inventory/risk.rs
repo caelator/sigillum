@@ -1,4 +1,7 @@
-use sigillum_api::{RiskCatalogEntry, RiskFinding, WalletAssetHolding, WalletInventoryAddress};
+use sigillum_api::{
+    RiskCatalogEntry, RiskFinding, WalletAddressClassification, WalletAssetHolding,
+    WalletAssetKind, WalletInventoryAddress,
+};
 use sigillum_core::decode_quantity_hex;
 
 use super::nft_approval_discovery::DISCOVERY_SOURCE_NFT_OPERATOR_APPROVAL_PROBE;
@@ -18,7 +21,7 @@ pub(super) fn derive_inventory_risk_findings(
         .iter()
         .filter(|holding| quantity_hex_is_nonzero(&holding.amount_hex))
     {
-        if holding.asset_kind == "approval" {
+        if holding.asset_kind == WalletAssetKind::Approval {
             let catalog_entry = holding
                 .counterparty_address
                 .as_deref()
@@ -35,13 +38,13 @@ pub(super) fn derive_inventory_risk_findings(
                 });
             findings.push(claim_candidate_finding(holding, catalog_entry));
         }
-        if holding.asset_kind != "native"
+        if holding.asset_kind != WalletAssetKind::Native
             && native_balance_for_holding(addresses, holding)
                 .is_none_or(|balance| !quantity_hex_is_nonzero(balance))
         {
             findings.push(RiskFinding {
                 id: stable_finding_id("stranded_gas", holding),
-                category: "stranded_value".into(),
+                category: WalletAddressClassification::StrandedValue.as_str().into(),
                 risk_level: "medium".into(),
                 status: "open".into(),
                 wallet_family: holding.wallet_family.clone(),
@@ -49,11 +52,11 @@ pub(super) fn derive_inventory_risk_findings(
                 provider_profile: holding.provider_profile.clone(),
                 chain_id: holding.chain_id,
                 address: holding.address.clone(),
-                subject_type: holding.asset_kind.clone(),
+                subject_type: holding.asset_kind.to_string(),
                 subject: holding
                     .asset_address
                     .clone()
-                    .unwrap_or_else(|| "native".into()),
+                    .unwrap_or_else(|| WalletAssetKind::Native.as_str().into()),
                 source: "local-risk-engine".into(),
                 recommendation: "Fund gas or route through an approved sponsor before sweeping."
                     .into(),
@@ -70,13 +73,16 @@ pub(super) fn derive_inventory_risk_findings(
 }
 
 fn is_claim_candidate_holding(holding: &WalletAssetHolding) -> bool {
-    matches!(holding.asset_kind.as_str(), "airdrop" | "reward")
+    matches!(
+        &holding.asset_kind,
+        WalletAssetKind::Airdrop | WalletAssetKind::Reward
+    )
 }
 
 fn address_classification_findings(address: &WalletInventoryAddress) -> Vec<RiskFinding> {
     let mut findings = Vec::new();
-    if address_has_classification(address, "watch_only")
-        && address_has_classification(address, "value_detected")
+    if address_has_classification(address, &WalletAddressClassification::WatchOnly)
+        && address_has_classification(address, &WalletAddressClassification::ValueDetected)
     {
         findings.push(address_finding(
             "watch_only_value",
@@ -89,7 +95,7 @@ fn address_classification_findings(address: &WalletInventoryAddress) -> Vec<Risk
             ],
         ));
     }
-    if address_has_classification(address, "dormant_candidate") {
+    if address_has_classification(address, &WalletAddressClassification::DormantCandidate) {
         findings.push(address_finding(
             "dormant_wallet",
             "low",
@@ -101,9 +107,9 @@ fn address_classification_findings(address: &WalletInventoryAddress) -> Vec<Risk
             ],
         ));
     }
-    if address_has_classification(address, "stranded_value") {
+    if address_has_classification(address, &WalletAddressClassification::StrandedValue) {
         findings.push(address_finding(
-            "stranded_value",
+            WalletAddressClassification::StrandedValue.as_str(),
             "medium",
             address,
             "Fund gas or approve a gas sponsor before attempting token or NFT recovery from this address.",
@@ -143,7 +149,10 @@ fn address_finding(
     }
 }
 
-fn address_has_classification(address: &WalletInventoryAddress, classification: &str) -> bool {
+fn address_has_classification(
+    address: &WalletInventoryAddress,
+    classification: &WalletAddressClassification,
+) -> bool {
     address
         .classifications
         .iter()
@@ -309,7 +318,7 @@ fn approval_finding(
         provider_profile: holding.provider_profile.clone(),
         chain_id: holding.chain_id,
         address: holding.address.clone(),
-        subject_type: "approval".into(),
+        subject_type: WalletAssetKind::Approval.as_str().into(),
         subject: spender.clone(),
         source: "local-risk-engine".into(),
         recommendation,

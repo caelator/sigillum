@@ -2,6 +2,7 @@ use sigillum_api::{
     ConsolidationPlanExportBundle, ConsolidationPlanExportCall, ConsolidationPlanExportRequest,
     ConsolidationPlanExportResponse, ConsolidationPlanExportSkippedStep, ConsolidationPlanStep,
     SafeTransactionBuilderBatch, SafeTransactionBuilderMeta, SafeTransactionBuilderTransaction,
+    WalletPlanStepAction, WalletPlanStepStatus, WalletSimulationStatus,
 };
 use sigillum_core::decode_quantity_hex;
 
@@ -147,10 +148,10 @@ fn step_export_skip_reason(step: &ConsolidationPlanStep) -> Option<&'static str>
     if !step.blockers.is_empty() {
         return Some("blocked");
     }
-    if step.simulation_status != "passed" {
+    if step.simulation_status != WalletSimulationStatus::Passed {
         return Some("simulation_not_passed");
     }
-    if step.status != "approved" || !step.approved {
+    if step.status != WalletPlanStepStatus::Approved || !step.approved {
         return Some("not_approved");
     }
     None
@@ -196,7 +197,7 @@ fn export_value_hex(
     step: &ConsolidationPlanStep,
     call: &PlanStepPreflightCall,
 ) -> ServiceResult<String> {
-    if step.action == "sweep_native" {
+    if step.action == WalletPlanStepAction::SweepNative {
         return step
             .simulation_evidence
             .iter()

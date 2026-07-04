@@ -1478,7 +1478,7 @@ Phase W — Wallet-management completion
 - [ ] W1.1 chain registry (built-ins + custom + Permit2 override)
 - [ ] W1.2 chain_id legacy defaults + UI/CLI surfacing (field already exists)
 - [ ] W1.3 multi-chain scan orchestration
-- [ ] W2 typed domain model (wire-compatible enums)
+- [x] W2 typed domain model (wire-compatible enums)
 - [ ] W3.1 block-range checkpoints for log scans
 - [ ] W3.2 ERC-1155 batch e2e fixture (decoding already implemented)
 - [ ] W3.3 local token registry import
@@ -1604,3 +1604,9 @@ Phase H — Ship
   recovery; documented the per-flow crash guarantees in `docs/backup.md`.
   Focused `cargo test -p sigillum-daemon --test crash_recovery` passed
   23/23 tests; full `./scripts/check-release.sh` passed.
+- 2026-07-04 W2 local: converted wallet inventory/action-plan wire domains
+  to serde-compatible typed enums with `Other(String)` forward compatibility,
+  updated inventory producers/consumers and UI contracts, and extended the B4
+  roundtrip anchor with exact literal and legacy JSON compatibility coverage.
+  Focused API/daemon/UI tests passed; `cargo test --workspace` passed; full
+  `./scripts/check-release.sh` passed.

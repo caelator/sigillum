@@ -439,7 +439,9 @@ impl SigillumService {
                             started_at_unix,
                         )
                         .await?;
-                    if observation.address.activity_state != "empty" {
+                    if observation.address.activity_state
+                        != sigillum_api::WalletAddressActivityState::Empty
+                    {
                         index_has_activity = true;
                     }
                     record_inventory_observation(
