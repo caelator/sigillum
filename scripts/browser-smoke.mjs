@@ -16,6 +16,7 @@ const ARTIFACT_DIR =
   process.env.SIGILLUM_BROWSER_SMOKE_ARTIFACT_DIR ||
   fs.mkdtempSync(path.join(os.tmpdir(), "sigillum-browser-smoke-artifacts."));
 const TIMEOUT_MS = Number(process.env.SIGILLUM_BROWSER_SMOKE_TIMEOUT_MS || 60_000);
+const REAUTH_TIMEOUT_MS = Number(process.env.SIGILLUM_BROWSER_SMOKE_REAUTH_TIMEOUT_MS || 120_000);
 
 function fail(message) {
   throw new Error(`browser smoke failed: ${message}`);
@@ -302,6 +303,83 @@ async function selectWorkspace(cdp, section) {
   );
 }
 
+function visibleAndEnabled(selector) {
+  return `(() => {
+    const el = document.querySelector(${quoted(selector)});
+    if (!el || el.disabled) return false;
+    if (el.closest(".hidden")) return false;
+    const style = window.getComputedStyle(el);
+    return style.display !== "none" && style.visibility !== "hidden";
+  })()`;
+}
+
+async function submitPassphraseUnlock(cdp, description) {
+  await waitFor(
+    cdp,
+    `document.body.dataset.mode === "locked" && ${visibleAndEnabled("#passphrase")} && ${visibleAndEnabled("#unlockButton")}`,
+    `${description} controls ready`,
+  );
+  await setValue(cdp, "#passphrase", PASSPHRASE, `${description} passphrase`);
+  await click(cdp, '[data-action="unlock"]', description);
+}
+
+function reauthStateExpression() {
+  return `(() => {
+    const input = document.getElementById("passphrase");
+    const button = document.getElementById("unlockButton");
+    const ready = (el) => {
+      if (!el || el.disabled || el.closest(".hidden")) return false;
+      const style = window.getComputedStyle(el);
+      return style.display !== "none" && style.visibility !== "hidden";
+    };
+    return {
+      mode: document.body.dataset.mode || "",
+      unlockError: document.getElementById("unlockError")?.textContent?.trim() || "",
+      passphraseValueLength: input?.value?.length || 0,
+      unlockButtonDisabled: !!button?.disabled,
+      controlsReady: ready(input) && ready(button),
+      hasToken: !!sessionStorage.getItem("sigillumSessionToken")
+    };
+  })()`;
+}
+
+async function waitForReauthAttempt(cdp, description) {
+  const deadline = Date.now() + REAUTH_TIMEOUT_MS;
+  let lastState = null;
+  while (Date.now() < deadline) {
+    lastState = await evaluate(cdp, reauthStateExpression(), description);
+    if (lastState.hasToken) {
+      return { ok: true, state: lastState };
+    }
+    if (lastState.mode === "locked" && lastState.controlsReady) {
+      return { ok: false, state: lastState };
+    }
+    await sleep(150);
+  }
+  return { ok: false, state: lastState, timedOut: true };
+}
+
+async function reauthAfterBrowserLogout(cdp) {
+  let lastState = null;
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    const label = attempt === 1 ? "unlock after browser logout" : `unlock after browser logout (retry ${attempt - 1})`;
+    await submitPassphraseUnlock(cdp, label);
+    const result = await waitForReauthAttempt(
+      cdp,
+      attempt === 1 ? "browser session token after reauth (first attempt)" : "browser session token after reauth",
+    );
+    lastState = result.state;
+    if (result.ok) {
+      return;
+    }
+    if (result.timedOut) {
+      break;
+    }
+  }
+
+  fail(`browser session token after reauth did not become true: ${JSON.stringify(lastState)}`);
+}
+
 async function captureFailure(cdp) {
   fs.mkdirSync(ARTIFACT_DIR, { recursive: true });
   const screenshotPath = path.join(ARTIFACT_DIR, "browser-smoke-failure.png");
@@ -397,27 +475,7 @@ async function runBrowserSmoke(cdp) {
   await waitFor(cdp, "!sessionStorage.getItem('sigillumSessionToken')", "browser session token cleared");
   await waitFor(cdp, "document.body.dataset.mode === 'locked'", "locked UI after browser logout");
 
-  await setValue(cdp, "#passphrase", PASSPHRASE, "unlock passphrase");
-  await click(cdp, '[data-action="unlock"]', "unlock after browser logout");
-  try {
-    await waitFor(
-      cdp,
-      "sessionStorage.getItem('sigillumSessionToken')",
-      "browser session token after reauth (first attempt)",
-      15_000,
-    );
-  } catch {
-    // Slow runners can re-render the locked view between typing and
-    // clicking, submitting an empty passphrase. The interaction is
-    // idempotent; retry once before declaring failure.
-    await setValue(cdp, "#passphrase", PASSPHRASE, "unlock passphrase (retry)");
-    await click(cdp, '[data-action="unlock"]', "unlock after browser logout (retry)");
-    await waitFor(
-      cdp,
-      "sessionStorage.getItem('sigillumSessionToken')",
-      "browser session token after reauth",
-    );
-  }
+  await reauthAfterBrowserLogout(cdp);
   await waitFor(cdp, "document.body.dataset.mode === 'unlocked'", "unlocked workspace after reauth");
   await waitFor(cdp, "document.getElementById('apiKeyCount').textContent.trim() === '1'", "API key count after reauth");
   await waitFor(cdp, "document.getElementById('secretCount').textContent.trim() === '1'", "secret count after reauth");
