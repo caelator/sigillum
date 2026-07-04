@@ -530,6 +530,86 @@ test("queue and inventory renderers produce reviewable DOM summaries", () => {
   );
 });
 
+test("operation results include failure cause breakdowns", async () => {
+  installDom([
+    "queueProcessLimit",
+    "maintenanceDepositLimit",
+    "maintenanceQueueLimit",
+    "maintenanceAutoEnqueue",
+    "depositList",
+    "queueList",
+  ]);
+  const resultBoxes: Record<string, string> = {};
+  const operations = createOperationsActions({
+    api: async (_method, path) => {
+      if (path === "/api/queue/process") {
+        return {
+          processed: 4,
+          succeeded: 0,
+          blocked: 1,
+          retrying: 1,
+          operator_action_required: 0,
+          failed: 2,
+          failures_by_cause: {
+            provider_error: 1,
+            policy_block: 1,
+            insufficient_gas: 1,
+            validation: 1,
+            unknown: 0,
+          },
+          jobs: [],
+        };
+      }
+      if (path === "/api/maintenance/run") {
+        return {
+          refreshed: 2,
+          detected: 1,
+          queued: 1,
+          processed: 4,
+          succeeded: 0,
+          blocked: 1,
+          retrying: 1,
+          operator_action_required: 0,
+          failed: 2,
+          failures_by_cause: {
+            provider_error: 1,
+            policy_block: 1,
+            insufficient_gas: 1,
+            validation: 1,
+            unknown: 0,
+          },
+          deposits: [],
+          jobs: [],
+        };
+      }
+      if (path === "/api/deposits/eth-stealth") {
+        return { deposits: [] };
+      }
+      return {};
+    },
+    toast: () => undefined,
+    refresh: () => undefined,
+    showResultBox: (id, html) => {
+      resultBoxes[id] = html;
+    },
+    updateNextStepCard: () => undefined,
+  });
+
+  await operations.processQueueBatch();
+  ok(resultBoxes.queueProcessResult.includes("failures_by_cause"));
+  ok(resultBoxes.queueProcessResult.includes("provider_error=1"));
+  ok(resultBoxes.queueProcessResult.includes("policy_block=1"));
+  ok(resultBoxes.queueProcessResult.includes("insufficient_gas=1"));
+  ok(resultBoxes.queueProcessResult.includes("validation=1"));
+
+  await operations.runMaintenanceCycle();
+  ok(resultBoxes.maintenanceResult.includes("failures_by_cause"));
+  ok(resultBoxes.maintenanceResult.includes("provider_error=1"));
+  ok(resultBoxes.maintenanceResult.includes("policy_block=1"));
+  ok(resultBoxes.maintenanceResult.includes("insufficient_gas=1"));
+  ok(resultBoxes.maintenanceResult.includes("validation=1"));
+});
+
 test("inventory actions export consolidation manifests as downloads", async () => {
   installDom();
   let requestBody: any = null;

@@ -81,6 +81,7 @@ impl SigillumService {
             retrying: processed.retrying,
             operator_action_required: processed.operator_action_required,
             failed: processed.failed,
+            failures_by_cause: processed.failures_by_cause,
             deposits: deposits.eth_stealth,
             jobs: processed.jobs,
         })

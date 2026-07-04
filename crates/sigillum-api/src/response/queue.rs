@@ -119,22 +119,9 @@ pub struct QueueJob {
 pub struct QueueJobListResponse {
     pub jobs: Vec<QueueJob>,
 }
+
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct QueueEnqueueResponse {
     pub status: String,
     pub job: QueueJob,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
-pub struct QueueProcessResponse {
-    pub processed: usize,
-    pub succeeded: usize,
-    #[serde(default)]
-    pub blocked: usize,
-    #[serde(default)]
-    pub retrying: usize,
-    #[serde(default)]
-    pub operator_action_required: usize,
-    pub failed: usize,
-    pub jobs: Vec<QueueJob>,
 }

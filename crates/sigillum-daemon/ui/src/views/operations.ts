@@ -76,6 +76,23 @@ function queueJobCanProcess(job: any): boolean {
   );
 }
 
+function failureBreakdownLine(summary: any): string {
+  const failures = summary || {};
+  return (
+    " · failures_by_cause(provider_error=" +
+    esc(String(failures.provider_error || 0)) +
+    " · policy_block=" +
+    esc(String(failures.policy_block || 0)) +
+    " · insufficient_gas=" +
+    esc(String(failures.insufficient_gas || 0)) +
+    " · validation=" +
+    esc(String(failures.validation || 0)) +
+    " · unknown=" +
+    esc(String(failures.unknown || 0)) +
+    ")"
+  );
+}
+
 function depositObservedLine(deposit: any): string {
   const observedAmount = deposit.observed_amount_hex || "-";
   const nativeBalance = deposit.observed_native_balance_wei_hex || "-";
@@ -451,7 +468,8 @@ export function createOperationsActions(deps: OperationsDeps) {
         " · operator_action_required=" +
         esc(String(r.operator_action_required || 0)) +
         " · failed=" +
-        esc(String(r.failed || 0)),
+        esc(String(r.failed || 0)) +
+        failureBreakdownLine(r.failures_by_cause),
     );
     lastQueueJobs = r.jobs || [];
     renderQueueJobs(lastQueueJobs);
@@ -480,6 +498,7 @@ export function createOperationsActions(deps: OperationsDeps) {
         esc(String(r.operator_action_required || 0)) +
         " · failed=" +
         esc(String(r.failed || 0)) +
+        failureBreakdownLine(r.failures_by_cause) +
         " · target=" +
         esc(id),
     );
@@ -518,7 +537,8 @@ export function createOperationsActions(deps: OperationsDeps) {
         " · operator_action_required=" +
         esc(String(r.operator_action_required || 0)) +
         " · failed=" +
-        esc(String(r.failed || 0)),
+        esc(String(r.failed || 0)) +
+        failureBreakdownLine(r.failures_by_cause),
     );
     lastDeposits = r.deposits || [];
     lastQueueJobs = r.jobs || [];

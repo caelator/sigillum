@@ -1102,6 +1102,10 @@ fn test_queue_process_response_roundtrip() {
         retrying: 0,
         operator_action_required: 0,
         failed: 1,
+        failures_by_cause: MaintenanceFailureBreakdown {
+            provider_error: 1,
+            ..MaintenanceFailureBreakdown::default()
+        },
         jobs: vec![QueueJob {
             id: "job_4".to_string(),
             state: "completed".to_string(),
@@ -1124,6 +1128,67 @@ fn test_queue_process_response_roundtrip() {
         }],
     };
     roundtrip_test(resp);
+}
+
+#[test]
+fn test_queue_process_response_defaults_failure_breakdown() {
+    let resp: QueueProcessResponse = serde_json::from_value(serde_json::json!({
+        "processed": 0,
+        "succeeded": 0,
+        "failed": 0,
+        "jobs": []
+    }))
+    .unwrap();
+    assert_eq!(
+        resp.failures_by_cause,
+        MaintenanceFailureBreakdown::default()
+    );
+}
+
+#[test]
+fn test_maintenance_run_response_roundtrip() {
+    let resp = MaintenanceRunResponse {
+        status: "ok".to_string(),
+        refreshed: 3,
+        detected: 2,
+        queued: 1,
+        processed: 4,
+        succeeded: 1,
+        blocked: 1,
+        retrying: 1,
+        operator_action_required: 0,
+        failed: 1,
+        failures_by_cause: MaintenanceFailureBreakdown {
+            provider_error: 1,
+            policy_block: 1,
+            insufficient_gas: 1,
+            validation: 1,
+            unknown: 0,
+        },
+        deposits: vec![],
+        jobs: vec![],
+    };
+    roundtrip_test(resp);
+}
+
+#[test]
+fn test_maintenance_run_response_defaults_failure_breakdown() {
+    let resp: MaintenanceRunResponse = serde_json::from_value(serde_json::json!({
+        "status": "ok",
+        "refreshed": 0,
+        "detected": 0,
+        "queued": 0,
+        "processed": 0,
+        "succeeded": 0,
+        "failed": 0,
+        "deposits": [],
+        "jobs": []
+    }))
+    .unwrap();
+    assert_eq!(
+        resp.failures_by_cause,
+        MaintenanceFailureBreakdown::default()
+    );
 }
 
 #[test]

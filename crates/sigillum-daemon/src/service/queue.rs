@@ -4,6 +4,7 @@
 //! sweeps with deferred execution and retry logic.
 
 mod authorization;
+mod failure;
 mod payloads;
 mod processing;
 mod state;
