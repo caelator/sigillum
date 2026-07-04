@@ -1,9 +1,7 @@
 //! Queue state normalization, recovery, and retry classification.
 
-use axum::http::StatusCode;
 use sigillum_api::QueueJob;
 
-use crate::service::ServiceError;
 use crate::service::helpers::now_unix;
 
 use super::{
@@ -19,16 +17,6 @@ pub(in crate::service) struct QueueStateCounts {
     pub failed: usize,
     pub operator_action_required: usize,
     pub deferred_legacy: usize,
-}
-
-pub(super) enum QueueFailureDisposition {
-    Retryable {
-        reason: String,
-        retry_after_unix: u64,
-    },
-    FailedTerminal {
-        reason: String,
-    },
 }
 
 pub(in crate::service) fn count_queue_states(
@@ -114,29 +102,6 @@ pub(super) fn queue_job_is_runnable(job: &QueueJob, force_target: bool, now: u64
         QUEUE_STATE_OPERATOR_ACTION_REQUIRED => false,
         _ => false,
     }
-}
-
-pub(super) fn classify_queue_error(
-    error: ServiceError,
-    attempts: u32,
-    now: u64,
-    policy: crate::policy::RuntimePolicy,
-) -> QueueFailureDisposition {
-    match error.status() {
-        StatusCode::INTERNAL_SERVER_ERROR | StatusCode::TOO_MANY_REQUESTS => {
-            QueueFailureDisposition::Retryable {
-                reason: error.message().to_string(),
-                retry_after_unix: now + queue_retry_delay_secs(attempts, policy),
-            }
-        }
-        _ => QueueFailureDisposition::FailedTerminal {
-            reason: error.message().to_string(),
-        },
-    }
-}
-
-fn queue_retry_delay_secs(attempts: u32, policy: crate::policy::RuntimePolicy) -> u64 {
-    policy.queue_retry_delay_secs(attempts)
 }
 
 #[cfg(test)]
@@ -270,37 +235,5 @@ mod tests {
             10
         ));
         assert!(!queue_job_is_runnable(&sample_job("sent", None), false, 10));
-    }
-
-    #[test]
-    fn retry_delay_uses_bounded_backoff() {
-        let policy = crate::policy::RuntimePolicy::default();
-        assert_eq!(queue_retry_delay_secs(0, policy), 5);
-        assert_eq!(queue_retry_delay_secs(1, policy), 5);
-        assert_eq!(queue_retry_delay_secs(2, policy), 10);
-        assert_eq!(queue_retry_delay_secs(10, policy), 300);
-    }
-
-    #[test]
-    fn queue_error_classification_distinguishes_retryable_failures() {
-        let now = 100;
-        let policy = crate::policy::RuntimePolicy::default();
-        match classify_queue_error(ServiceError::internal("rpc down"), 0, now, policy) {
-            QueueFailureDisposition::Retryable {
-                reason,
-                retry_after_unix,
-            } => {
-                assert!(reason.contains("rpc down"));
-                assert_eq!(retry_after_unix, 105);
-            }
-            QueueFailureDisposition::FailedTerminal { .. } => panic!("expected retryable"),
-        }
-
-        match classify_queue_error(ServiceError::bad_request("bad payload"), 0, now, policy) {
-            QueueFailureDisposition::FailedTerminal { reason } => {
-                assert!(reason.contains("bad payload"));
-            }
-            QueueFailureDisposition::Retryable { .. } => panic!("expected terminal"),
-        }
     }
 }

@@ -1,15 +1,19 @@
 //! Queue processing loop and execution-result state transitions.
 
 use sigillum_api::{
-    EthStealthSendErc20WithProfileRequest, EthStealthSendWithProfileRequest, QueueJobPayload,
-    QueueProcessRequest, QueueProcessResponse, StealthPaymentRef,
+    EthStealthSendErc20WithProfileRequest, EthStealthSendWithProfileRequest,
+    MaintenanceFailureBreakdown, QueueJobPayload, QueueProcessRequest, QueueProcessResponse,
+    StealthPaymentRef,
 };
 
 use crate::audit_log::AuditEventSpec;
 use crate::service::helpers::now_unix;
 use crate::service::{ServiceError, ServiceResult, SigillumService};
 
-use super::state::{QueueFailureDisposition, classify_queue_error, queue_job_is_runnable};
+use super::failure::{
+    QueueFailureCause, QueueFailureDisposition, classify_blocked_queue_reason, classify_queue_error,
+};
+use super::state::queue_job_is_runnable;
 use super::{
     QUEUE_STATE_BLOCKED, QUEUE_STATE_FAILED_TERMINAL, QUEUE_STATE_RETRYING, QUEUE_STATE_SENT,
     QueueExecution,
@@ -59,6 +63,7 @@ impl SigillumService {
         let mut retrying = 0usize;
         let operator_action_required = 0usize;
         let mut failed = 0usize;
+        let mut failures_by_cause = MaintenanceFailureBreakdown::default();
 
         for job in queue.jobs.iter_mut() {
             if processed.len() >= limit {
@@ -203,6 +208,10 @@ impl SigillumService {
                     succeeded += 1;
                 }
                 Ok(QueueExecution::Blocked(reason)) => {
+                    record_failure_cause(
+                        &mut failures_by_cause,
+                        classify_blocked_queue_reason(&reason),
+                    );
                     job.state = QUEUE_STATE_BLOCKED.into();
                     job.last_error = Some(reason);
                     blocked += 1;
@@ -211,13 +220,16 @@ impl SigillumService {
                     QueueFailureDisposition::Retryable {
                         reason,
                         retry_after_unix,
+                        cause,
                     } => {
+                        record_failure_cause(&mut failures_by_cause, cause);
                         job.state = QUEUE_STATE_RETRYING.into();
                         job.last_error = Some(reason);
                         job.next_attempt_after_unix = Some(retry_after_unix);
                         retrying += 1;
                     }
-                    QueueFailureDisposition::FailedTerminal { reason } => {
+                    QueueFailureDisposition::FailedTerminal { reason, cause } => {
+                        record_failure_cause(&mut failures_by_cause, cause);
                         job.state = QUEUE_STATE_FAILED_TERMINAL.into();
                         job.last_error = Some(reason);
                         failed += 1;
@@ -239,7 +251,18 @@ impl SigillumService {
             retrying,
             operator_action_required,
             failed,
+            failures_by_cause,
             jobs: processed,
         })
+    }
+}
+
+fn record_failure_cause(breakdown: &mut MaintenanceFailureBreakdown, cause: QueueFailureCause) {
+    match cause {
+        QueueFailureCause::ProviderError => breakdown.provider_error += 1,
+        QueueFailureCause::PolicyBlock => breakdown.policy_block += 1,
+        QueueFailureCause::InsufficientGas => breakdown.insufficient_gas += 1,
+        QueueFailureCause::Validation => breakdown.validation += 1,
+        QueueFailureCause::Unknown => breakdown.unknown += 1,
     }
 }

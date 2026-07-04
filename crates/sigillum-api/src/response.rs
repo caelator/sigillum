@@ -874,6 +874,9 @@ pub use treasury::*;
 mod queue;
 pub use queue::*;
 
+mod queue_process;
+pub use queue_process::*;
+
 // ── Deposits ────────────────────────────────────
 
 mod deposits;
@@ -894,6 +897,8 @@ pub struct MaintenanceRunResponse {
     #[serde(default)]
     pub operator_action_required: usize,
     pub failed: usize,
+    #[serde(default)]
+    pub failures_by_cause: MaintenanceFailureBreakdown,
     pub deposits: Vec<EthStealthDeposit>,
     pub jobs: Vec<QueueJob>,
 }

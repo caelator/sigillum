@@ -1470,7 +1470,7 @@ Phase E — Automation & recovery
 - [x] E0 macOS loopback skip → runtime sandbox probe
 - [x] E1 queue state model extended (operator_action_required, deferred semantics)
 - [x] E2 kill-mid-write replay tests
-- [ ] E3 categorized maintenance summaries
+- [x] E3 categorized maintenance summaries
 - [ ] E4 chain_id persisted on allocations
 - [ ] E5 destructive-flow recovery complete
 
@@ -1576,6 +1576,13 @@ Phase H — Ship
   temp files, renamed live files with stale `.bak`, and truncated live files;
   tests assert public-route restore, backup refresh, quarantine artifacts, and
   startup health readiness.
+- 2026-07-04 E3 local: added `failures_by_cause` to queue-process and
+  maintenance responses, daemon failure-cause classification
+  (provider_error / policy_block / insufficient_gas / validation + unknown),
+  UI result summaries, and DTO/client/route/UI tests. Targeted gates passed:
+  API response tests, daemon cause tests, daemon maintenance route test, client
+  maintenance helper test, UI smoke tests, and UI bundle build. Full
+  `./scripts/check-release.sh` passed.
 - 2026-07-03 Wave 1 merged: PR #2 → main 6cfcdce (merge commit, per-task
   history preserved), CI green both legs. C4 remains (Wave 2); C7 complete
   on its branch pending operator sign-off. Execution runbook created at

@@ -54,7 +54,7 @@ checkboxes; keep updating them as you complete tasks (plan rule §0.1.6).
 
 ### 1.4 Remaining work (specs in release-1.0-plan.md §4)
 
-C7 merge; E1–E5; W1.1–W1.3, W2, W3.1–W3.5, W4,
+C7 merge; E4–E5; W1.1–W1.3, W2, W3.1–W3.5, W4,
 W5, W6.1–W6.4, W7.1–W7.5, W8; F1–F7; G1–G5; H1–H3.
 
 ---

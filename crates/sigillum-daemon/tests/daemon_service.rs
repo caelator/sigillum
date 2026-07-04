@@ -1605,6 +1605,7 @@ async fn profile_backed_send_and_queue_flow_persist_internal_configuration() {
     assert_eq!(process.status(), StatusCode::OK);
     let process_json: serde_json::Value = process.json().await.unwrap();
     assert_eq!(process_json["succeeded"], 1);
+    assert_eq!(process_json["failures_by_cause"]["provider_error"], 0);
     assert_eq!(process_json["jobs"][0]["state"], "sent");
 
     let list_after = get(&client, addr, "/api/queue/jobs", Some(&token)).await;
@@ -3162,6 +3163,8 @@ async fn deposit_registry_refresh_and_sweep_flow_roundtrip() {
     assert_eq!(maintenance_json["status"], "ok");
     assert_eq!(maintenance_json["processed"], 1);
     assert_eq!(maintenance_json["succeeded"], 1);
+    assert_eq!(maintenance_json["failures_by_cause"]["provider_error"], 0);
+    assert_eq!(maintenance_json["failures_by_cause"]["policy_block"], 0);
 
     let diagnostics = get(&client, addr, "/api/diagnostics", Some(&token)).await;
     assert_eq!(diagnostics.status(), StatusCode::OK);

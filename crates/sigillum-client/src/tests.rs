@@ -317,6 +317,13 @@ async fn maintenance_run_route(
             "blocked": 0,
             "retrying": 0,
             "failed": 0,
+            "failures_by_cause": {
+                "provider_error": 0,
+                "policy_block": 0,
+                "insufficient_gas": 0,
+                "validation": 0,
+                "unknown": 0
+            },
             "deposits": [],
             "jobs": []
         })),
@@ -2185,6 +2192,7 @@ async fn profile_and_queue_helpers_roundtrip_response_shapes() {
         .unwrap();
     assert_eq!(maintenance.status, "ok");
     assert_eq!(maintenance.succeeded, 1);
+    assert_eq!(maintenance.failures_by_cause.provider_error, 0);
 }
 
 #[tokio::test]
