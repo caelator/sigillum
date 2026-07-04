@@ -1468,7 +1468,7 @@ Phase D — Operator-surface parity
 
 Phase E — Automation & recovery
 - [x] E0 macOS loopback skip → runtime sandbox probe
-- [ ] E1 queue state model extended (operator_action_required, deferred semantics)
+- [x] E1 queue state model extended (operator_action_required, deferred semantics)
 - [ ] E2 kill-mid-write replay tests
 - [ ] E3 categorized maintenance summaries
 - [ ] E4 chain_id persisted on allocations
@@ -1566,6 +1566,11 @@ Phase H — Ship
   batched into one PR (per-task worktree branches preserved) to bound CI
   wall-clock; C4 follows as its own PR; C7 (UX redesign) pending operator
   screenshot review.
+- 2026-07-03 E1 40cdf5f: queue state model extended with
+  `operator_action_required`, queue store schema v2 accepting v1 envelopes,
+  non-runnable state/recovery/count tests, API/UI/CLI-visible counts/status,
+  and a documented legacy `deferred` decision: no active producer found, keep
+  legacy-only `deferred` → `blocked` normalization with a recovery reason.
 - 2026-07-03 Wave 1 merged: PR #2 → main 6cfcdce (merge commit, per-task
   history preserved), CI green both legs. C4 remains (Wave 2); C7 complete
   on its branch pending operator sign-off. Execution runbook created at
