@@ -1616,8 +1616,9 @@ Phase H — Ship
   explicit legacy mainnet defaults plus registry labels for inventory rows.
   Focused API/daemon/CLI/UI tests passed; manual CLI chain registry smoke
   passed; full `./scripts/check-release.sh` passed.
-- 2026-07-04 W1.3 local: added explicit all-configured-chain EVM inventory
-  scans, chain-tagged discovery jobs, CLI/UI scan controls, CLI/UI plan chain
+- 2026-07-04 W1.3 PR #13, merge `c97eda0`: added explicit
+  all-configured-chain EVM inventory scans, chain-tagged discovery jobs,
+  CLI/UI scan controls, CLI/UI plan chain
   surfacing, and single-chain consolidation-plan generation with optional
   `chain_id` filtering. Focused API/daemon/CLI/UI tests passed; full gate
-  passed.
+  and CI passed.

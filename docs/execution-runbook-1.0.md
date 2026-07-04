@@ -1,8 +1,7 @@
 # Sigillum 1.0 Execution Runbook
 
 **Status:** Active operational handbook for completing the 1.0 release
-**State recorded:** 2026-07-04, `main` @ `059a6d9` (W1.1/W1.2 merged;
-W1.3 complete on `task/w1-3-multi-chain-scan`, PR/merge pending)
+**State recorded:** 2026-07-04, `main` @ `c97eda0` (W1.3 merged)
 **Pairs with:** [release-1.0-plan.md](./release-1.0-plan.md) — the task
 specifications and Decision Register. This runbook does not restate task
 specs; it tells the executing agent **what is already done, how to run the
@@ -27,6 +26,7 @@ newer and battle-tested).
 | E5 destructive-flow recovery | PR #10, merge `ce9d347`; full gate passed |
 | W2 typed domain model | PR #11, merge `c2caf71`; full gate and CI passed |
 | W1.1 + W1.2 chain registry and inventory chain surfacing | PR #12, merge `059a6d9`; full gate and CI passed |
+| W1.3 multi-chain scan orchestration | PR #13, merge `c97eda0`; full gate and CI passed |
 
 The Master Checklist in `release-1.0-plan.md` §5 reflects this — trust the
 checkboxes; keep updating them as you complete tasks (plan rule §0.1.6).
@@ -40,11 +40,6 @@ checkboxes; keep updating them as you complete tasks (plan rule §0.1.6).
   screenshots** (review page was delivered to the operator). Procedure on
   approval: §4 Wave 2. If the operator requests changes instead, dispatch a
   new agent on top of that branch with the operator's exact words.
-- **W1.3 (multi-chain scan orchestration):** complete on
-  `task/w1-3-multi-chain-scan`, PR/merge pending; one scan can inventory all
-  configured EVM providers, jobs carry `chain_ids`, and consolidation
-  generation emits single-chain plans.
-
 ### 1.3 Standing obligations (check every wave)
 
 1. **quick-xml advisory ignores** (RUSTSEC-2026-0194/0195 in
