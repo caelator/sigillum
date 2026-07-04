@@ -1469,7 +1469,7 @@ Phase D — Operator-surface parity
 Phase E — Automation & recovery
 - [x] E0 macOS loopback skip → runtime sandbox probe
 - [x] E1 queue state model extended (operator_action_required, deferred semantics)
-- [ ] E2 kill-mid-write replay tests
+- [x] E2 kill-mid-write replay tests
 - [ ] E3 categorized maintenance summaries
 - [ ] E4 chain_id persisted on allocations
 - [ ] E5 destructive-flow recovery complete
@@ -1571,6 +1571,11 @@ Phase H — Ship
   non-runnable state/recovery/count tests, API/UI/CLI-visible counts/status,
   and a documented legacy `deferred` decision: no active producer found, keep
   legacy-only `deferred` → `blocked` normalization with a recovery reason.
+- 2026-07-03 E2 cb2c987: added restart/replay coverage for
+  `profiles.json`, `deposits.json`, and `queue.json` across orphaned atomic
+  temp files, renamed live files with stale `.bak`, and truncated live files;
+  tests assert public-route restore, backup refresh, quarantine artifacts, and
+  startup health readiness.
 - 2026-07-03 Wave 1 merged: PR #2 → main 6cfcdce (merge commit, per-task
   history preserved), CI green both legs. C4 remains (Wave 2); C7 complete
   on its branch pending operator sign-off. Execution runbook created at
