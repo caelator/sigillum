@@ -36,7 +36,8 @@ use crate::audit_log::AuditEventSpec;
 
 use allowance_discovery::erc20_allowance_discovery_config;
 use checkpoints::{
-    ScanCheckpointProgress, latest_resume_checkpoint, sync_inventory_job, update_scan_checkpoint,
+    ScanCheckpointProgress, latest_block_scan_cursors, latest_resume_checkpoint,
+    sync_inventory_job, update_scan_checkpoint,
 };
 use claim_discovery::claim_candidate_discovery_config;
 use defi_discovery::defi_token_position_discovery_config;
@@ -484,6 +485,10 @@ impl SigillumService {
             active_addresses: 0,
             holdings_detected: 0,
             checkpoints: Vec::new(),
+            block_cursors: latest_block_scan_cursors(
+                &inventory.jobs,
+                providers.iter().map(|provider| provider.chain_id),
+            ),
             started_at_unix,
             completed_at_unix: None,
             last_error: None,
@@ -527,6 +532,7 @@ impl SigillumService {
                             nft_operator_approval_discovery.as_ref(),
                             defi_position_discovery.as_ref(),
                             claim_candidate_discovery.as_ref(),
+                            &mut job.block_cursors,
                             started_at_unix,
                         )
                         .await?;
@@ -621,6 +627,7 @@ impl SigillumService {
                                         nft_operator_approval_discovery.as_ref(),
                                         defi_position_discovery.as_ref(),
                                         claim_candidate_discovery.as_ref(),
+                                        &mut job.block_cursors,
                                         started_at_unix,
                                     )
                                     .await?;
@@ -631,6 +638,8 @@ impl SigillumService {
                                     &mut detected_holdings,
                                     &mut scanned_addresses,
                                 );
+                                sync_inventory_job(&mut inventory, &job);
+                                save_inventory_state(&self.state.base_dir, &inventory)?;
                             }
                         }
                     }
@@ -660,6 +669,7 @@ impl SigillumService {
                         nft_operator_approval_discovery.as_ref(),
                         defi_position_discovery.as_ref(),
                         claim_candidate_discovery.as_ref(),
+                        &mut job.block_cursors,
                         started_at_unix,
                     )
                     .await?;
@@ -670,6 +680,8 @@ impl SigillumService {
                     &mut detected_holdings,
                     &mut scanned_addresses,
                 );
+                sync_inventory_job(&mut inventory, &job);
+                save_inventory_state(&self.state.base_dir, &inventory)?;
             }
         }
 

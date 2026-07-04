@@ -399,7 +399,7 @@ impl SigillumService {
         ))
     }
 
-    fn provider_rpc_for_profile(
+    pub(in crate::service) fn provider_rpc_for_profile(
         &self,
         provider_compartment_id: usize,
         provider: &sigillum_api::EvmProviderProfile,

@@ -79,15 +79,17 @@ Required discovery classes:
 - ERC-20 discovery from configured allowlists, transfer logs, token registries,
   and positive balances discovered through provider APIs or local index data.
   The first bounded transfer-log discovery slice is implemented for EVM
-  inventory scans; registries, indexers, and richer positive-balance evidence
-  remain future work.
+  inventory scans and now persists per-address/chain/topic block cursors so
+  later scans resume from the last scanned transfer-log block. Registries,
+  indexers, and richer positive-balance evidence remain future work.
 - NFT discovery for ERC-721 and ERC-1155 ownership, including metadata caching,
   spam filtering, and optional floor or collection valuation providers.
   The first bounded ERC-721 transfer-log slice is implemented for EVM inventory
-  scans and confirms current ownership with `ownerOf`; bounded ERC-1155
-  transfer discovery is implemented with `balanceOf` confirmation for touched
-  token IDs. Metadata, spam filtering, and valuation providers remain future
-  work.
+  scans, resumes from per-address/chain/topic block cursors, and confirms
+  current ownership with `ownerOf`; bounded ERC-1155 transfer discovery is
+  implemented with `balanceOf` confirmation for touched token IDs and uses the
+  same resumable block-cursor model. Metadata, spam filtering, and valuation
+  providers remain future work.
 - DeFi position discovery for common protocols: lending, staking, liquid
   staking, LP positions, vault shares, bridges, vesting/streaming contracts, and
   rewards contracts. The first local slice records operator-configured ERC-20

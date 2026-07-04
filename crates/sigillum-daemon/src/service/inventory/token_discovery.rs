@@ -4,6 +4,7 @@ use sigillum_api::EvmProviderProfile;
 use crate::service::{ServiceError, ServiceResult, SigillumService};
 
 use super::super::evm::normalize_address;
+use super::checkpoints::{encode_block_quantity, parse_block_quantity};
 
 pub(super) const DISCOVERY_SOURCE_ERC20_TRANSFER_LOG: &str = "erc20-transfer-log";
 
@@ -52,12 +53,26 @@ impl SigillumService {
         provider: &EvmProviderProfile,
         owner_address: &str,
         config: &Erc20TransferDiscoveryConfig,
-    ) -> ServiceResult<Vec<String>> {
+        effective_from_block: &str,
+    ) -> ServiceResult<(Vec<String>, Option<u64>)> {
         let owner_topic = padded_address_topic(owner_address)?;
         let transfer_topic = erc20_transfer_topic();
         let outgoing_topics = vec![Some(transfer_topic.clone()), Some(owner_topic.clone())];
         let incoming_topics = vec![Some(transfer_topic), None, Some(owner_topic)];
+        let scan_to_block = self
+            .resolved_token_log_scan_to_block(provider, &config.to_block)
+            .await?;
+        if let (Some(from), Some(to)) = (
+            parse_block_quantity(effective_from_block),
+            parse_block_quantity(&scan_to_block),
+        ) {
+            if from > to {
+                return Ok((Vec::new(), Some(to)));
+            }
+        }
         let mut tokens = Vec::new();
+        let mut saw_logs = false;
+        let mut cursor_block = None;
 
         for topics in [&outgoing_topics, &incoming_topics] {
             if tokens.len() >= config.limit {
@@ -69,11 +84,13 @@ impl SigillumService {
                     provider,
                     None,
                     topics,
-                    &config.from_block,
-                    &config.to_block,
+                    effective_from_block,
+                    &scan_to_block,
                 )
                 .await?;
             for log in logs {
+                saw_logs = true;
+                cursor_block = max_log_block(cursor_block, log.block_number.as_deref());
                 push_unique_token(&mut tokens, log.address);
                 if tokens.len() >= config.limit {
                     break;
@@ -81,7 +98,26 @@ impl SigillumService {
             }
         }
 
-        Ok(tokens)
+        if cursor_block.is_none() && !saw_logs {
+            cursor_block = parse_block_quantity(&scan_to_block);
+        }
+
+        Ok((tokens, cursor_block))
+    }
+
+    async fn resolved_token_log_scan_to_block(
+        &self,
+        provider: &EvmProviderProfile,
+        to_block: &str,
+    ) -> ServiceResult<String> {
+        if parse_block_quantity(to_block).is_some() {
+            return Ok(to_block.to_string());
+        }
+        let latest = self
+            .provider_rpc_for_profile(provider.compartment_id, provider)?
+            .get_block_number()
+            .await?;
+        Ok(encode_block_quantity(latest))
     }
 }
 
@@ -131,6 +167,13 @@ fn erc20_transfer_topic() -> String {
         "0x{}",
         hex::encode(Keccak256::digest(ERC20_TRANSFER_EVENT.as_bytes()))
     )
+}
+
+fn max_log_block(current: Option<u64>, next: Option<&str>) -> Option<u64> {
+    match next.and_then(parse_block_quantity) {
+        Some(next) => Some(current.map_or(next, |current| current.max(next))),
+        None => current,
+    }
 }
 
 fn padded_address_topic(address: &str) -> ServiceResult<String> {

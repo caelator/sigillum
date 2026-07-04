@@ -86,6 +86,16 @@ pub struct WalletDiscoveryCheckpoint {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct WalletDiscoveryBlockCursor {
+    pub address: String,
+    #[serde(default = "default_inventory_chain_id")]
+    pub chain_id: u64,
+    pub topic_family: String,
+    pub last_scanned_block: u64,
+    pub updated_at_unix: u64,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct WalletDiscoveryJob {
     pub id: String,
     pub status: String,
@@ -105,6 +115,8 @@ pub struct WalletDiscoveryJob {
     pub holdings_detected: usize,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub checkpoints: Vec<WalletDiscoveryCheckpoint>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub block_cursors: Vec<WalletDiscoveryBlockCursor>,
     pub started_at_unix: u64,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub completed_at_unix: Option<u64>,

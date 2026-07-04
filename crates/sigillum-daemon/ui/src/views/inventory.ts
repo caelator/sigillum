@@ -254,10 +254,24 @@ export function createInventoryActions(deps: InventoryActionsDeps) {
     return profile ? `${numericChainId} (${profile.name})` : String(chainId);
   }
 
+  function blockCursorSummary(job: WalletDiscoveryJob): string {
+    const cursors = job.block_cursors || [];
+    if (!cursors.length) return "-";
+    const byFamily = new Map<string, number>();
+    for (const cursor of cursors) {
+      const key = `${chainLabel(cursor.chain_id)} ${cursor.topic_family}`;
+      byFamily.set(key, Math.max(byFamily.get(key) || 0, cursor.last_scanned_block));
+    }
+    return Array.from(byFamily.entries())
+      .map(([label, block]) => `${label} to ${block}`)
+      .join(", ");
+  }
+
   function renderInventoryState(inventory: any): void {
     renderEntityList("inventoryJobList", inventory.jobs || [], "No discovery jobs yet.", (job: any) => {
       const chainIds = job.chain_ids || [];
       const chainLabels = chainIds.map((chainId: number) => chainLabel(chainId)).join(", ");
+      const cursorSummary = blockCursorSummary(job);
       return (
         '<li><div class="entity-main">' +
         '<div class="entity-title">' +
@@ -279,6 +293,8 @@ export function createInventoryActions(deps: InventoryActionsDeps) {
         esc(String(job.active_addresses || 0)) +
         " · holdings=" +
         esc(String(job.holdings_detected || 0)) +
+        "<br>scanned to block=" +
+        esc(cursorSummary) +
         "</div></div>" +
         '<div class="entity-actions">' +
         '<button class="btn-ghost" data-action="cancelDiscoveryJob" data-arg0="' +
