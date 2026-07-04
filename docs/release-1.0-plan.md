@@ -1471,7 +1471,7 @@ Phase E — Automation & recovery
 - [x] E1 queue state model extended (operator_action_required, deferred semantics)
 - [x] E2 kill-mid-write replay tests
 - [x] E3 categorized maintenance summaries
-- [ ] E4 chain_id persisted on allocations
+- [x] E4 chain_id persisted on allocations
 - [ ] E5 destructive-flow recovery complete
 
 Phase W — Wallet-management completion
