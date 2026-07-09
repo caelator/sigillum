@@ -822,6 +822,11 @@ impl SigillumService {
         body: TreasuryPolicyUpdateRequest,
     ) -> ServiceResult<TreasuryPolicyMutationResponse> {
         let token = self.require_session(token)?;
+        if body.simulation_freshness_secs == Some(0) {
+            return Err(ServiceError::bad_request(
+                "simulation_freshness_secs must be greater than 0",
+            ));
+        }
         let _guard = self.state.operation_guard().await;
         let mut state = load_inventory_state(&self.state.base_dir)?;
         let now = now_unix();
@@ -857,6 +862,7 @@ impl SigillumService {
             require_simulation: body.require_simulation.unwrap_or(true),
             allow_raw_digest_signing: body.allow_raw_digest_signing.unwrap_or(false),
             block_cross_party_linkage: body.block_cross_party_linkage.unwrap_or(false),
+            simulation_freshness_secs: body.simulation_freshness_secs.unwrap_or(900),
             created_at_unix: state
                 .treasury_policy
                 .as_ref()
@@ -1597,6 +1603,7 @@ mod tests {
             require_simulation: true,
             allow_raw_digest_signing: false,
             block_cross_party_linkage: false,
+            simulation_freshness_secs: 900,
             created_at_unix: 1,
             updated_at_unix: 2,
         }

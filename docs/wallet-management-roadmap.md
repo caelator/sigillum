@@ -322,12 +322,17 @@ The CLI should have parity for automation:
    revokes can be simulated against the correct protocol contract. Native and
    ERC-20 sweep plan steps now also build provider-backed preflight calls before
    they become executable. Native sweep simulation reserves gas using the
-   provider profile's max-fee policy and gas limit, records the resulting
-   spendable amount, and blocks plans that cannot pay gas. ERC-20 sweeps and
-   approval revokes also verify inventoried native gas against the provider fee
-   policy before simulation can pass. ERC-721 and ERC-1155 NFT sweep plan steps
-   now build standard `safeTransferFrom` calls, require explicit token IDs, and
-   verify enough inventoried native gas against a conservative NFT gas floor.
+   provider fee basis and gas limit, records the resulting spendable amount,
+   and blocks plans that cannot pay gas. Gas verification records an explicit
+   fee basis (`static_profile` or `estimated`) with a resolution timestamp as
+   step evidence; provider profiles can opt into live EIP-1559 estimation with
+   `fee_estimation_enabled`. Approval re-checks evidence freshness against the
+   treasury policy's `simulation_freshness_secs` (default 900) and downgrades
+   stale simulations to required. ERC-20 sweeps and approval revokes also verify
+   inventoried native gas against the provider fee policy before simulation can
+   pass. ERC-721 and ERC-1155 NFT sweep plan steps now build standard
+   `safeTransferFrom` calls, require explicit token IDs, and verify enough
+   inventoried native gas against a conservative NFT gas floor.
 5a. Wallet archaeology labels. Discovery now classifies addresses for signer
     availability, watch-only status, gas availability, token/NFT/protocol
     value, stranded value, approval exposure, and dormant-candidate state, and

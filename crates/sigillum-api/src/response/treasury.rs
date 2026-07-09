@@ -153,12 +153,20 @@ pub struct TreasuryPolicy {
     /// Fail-closed: when true, any step the linkage analyzer flags is hard-blocked.
     #[serde(default)]
     pub block_cross_party_linkage: bool,
+    /// Maximum age in seconds of a step's simulation evidence before approval
+    /// downgrades the simulation back to required (forces re-simulation).
+    #[serde(default = "default_simulation_freshness_secs")]
+    pub simulation_freshness_secs: u64,
     pub created_at_unix: u64,
     pub updated_at_unix: u64,
 }
 
 fn default_require_simulation() -> bool {
     true
+}
+
+fn default_simulation_freshness_secs() -> u64 {
+    900
 }
 
 /// Current treasury policy; `None` until an operator configures one.

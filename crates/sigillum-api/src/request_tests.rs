@@ -626,6 +626,7 @@ fn test_evm_provider_profile_upsert_request_full() {
         max_fee_per_gas_hex: Some("0x5f5e100".to_string()),
         native_gas_limit: Some(21000),
         erc20_gas_limit: Some(65000),
+        fee_estimation_enabled: Some(false),
     };
     roundtrip_test(req);
 }
@@ -644,6 +645,7 @@ fn test_evm_provider_profile_upsert_request_minimal() {
         max_fee_per_gas_hex: None,
         native_gas_limit: None,
         erc20_gas_limit: None,
+        fee_estimation_enabled: None,
     };
     roundtrip_test(req);
 }
@@ -1157,6 +1159,7 @@ fn test_treasury_policy_update_request_full() {
         require_simulation: Some(false),
         allow_raw_digest_signing: Some(true),
         block_cross_party_linkage: Some(true),
+        simulation_freshness_secs: Some(900),
     };
     roundtrip_test(req);
 }
@@ -1171,6 +1174,7 @@ fn test_treasury_policy_update_request_minimal() {
         require_simulation: None,
         allow_raw_digest_signing: None,
         block_cross_party_linkage: None,
+        simulation_freshness_secs: None,
     };
     roundtrip_test(req);
 }

@@ -352,6 +352,8 @@ export function createTreasuryActions(deps: TreasuryActionsDeps) {
           esc(String(current.require_simulation)) +
           " · blockCrossPartyLinkage=" +
           esc(String(Boolean(current.block_cross_party_linkage))) +
+          " · simulationFreshnessSecs=" +
+          esc(String(current.simulation_freshness_secs ?? 900)) +
           " · updated=" +
           esc(formatTs(current.updated_at_unix)) +
           "</div></div></li>"
@@ -376,6 +378,7 @@ export function createTreasuryActions(deps: TreasuryActionsDeps) {
             policy.max_plan_native_wei_hex || null,
             policy.require_simulation,
             policy.block_cross_party_linkage,
+            policy.simulation_freshness_secs,
           ]
         : null,
     );
@@ -407,6 +410,10 @@ export function createTreasuryActions(deps: TreasuryActionsDeps) {
       maxPlanEl.value = policy?.max_plan_native_wei_hex
         ? formatWeiHexAsEth(policy.max_plan_native_wei_hex)
         : "";
+    }
+    const freshnessEl = input("treasuryPolicyFreshnessSecs");
+    if (freshnessEl) {
+      freshnessEl.value = policy ? String(policy.simulation_freshness_secs ?? 900) : "900";
     }
   }
 
@@ -612,6 +619,16 @@ export function createTreasuryActions(deps: TreasuryActionsDeps) {
       );
       return;
     }
+    const freshnessText = textValue("treasuryPolicyFreshnessSecs");
+    const freshnessSecs = freshnessText ? parseInt(freshnessText, 10) : null;
+    const freshnessInvalid =
+      Boolean(freshnessText) &&
+      (freshnessSecs === null || Number.isNaN(freshnessSecs) || freshnessSecs <= 0);
+    markInvalid("treasuryPolicyFreshnessSecs", freshnessInvalid);
+    if (freshnessInvalid) {
+      deps.toast("Simulation freshness must be a positive number of seconds", "error");
+      return;
+    }
     const body: TreasuryPolicyUpdateRequest = {
       enabled: Boolean(input("treasuryPolicyEnabled")?.checked),
       allowed_destinations: parseTreasuryDestinationLines(
@@ -622,6 +639,9 @@ export function createTreasuryActions(deps: TreasuryActionsDeps) {
       require_simulation: Boolean(input("treasuryPolicyRequireSim")?.checked),
       block_cross_party_linkage: Boolean(input("treasuryPolicyBlockLinkage")?.checked),
     };
+    if (freshnessText) {
+      body.simulation_freshness_secs = freshnessSecs;
+    }
     const saveButton = document.querySelector(
       '[data-action="updateTreasuryPolicy"]',
     );

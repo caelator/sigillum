@@ -1995,6 +1995,7 @@ async fn profile_and_queue_helpers_roundtrip_response_shapes() {
             max_fee_per_gas_hex: Some("0x2".into()),
             native_gas_limit: Some(21_000),
             erc20_gas_limit: Some(65_000),
+            fee_estimation_enabled: Some(false),
         })
         .await
         .unwrap();

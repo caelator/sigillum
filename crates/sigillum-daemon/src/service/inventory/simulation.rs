@@ -56,7 +56,7 @@ impl SigillumService {
         let inventory_addresses = state.addresses.clone();
         for step_index in step_indexes {
             let step = state.consolidation_plans[plan_index].steps[step_index].clone();
-            let outcome = if let Some(blockers) = non_simulation_blockers(&step) {
+            let mut outcome = if let Some(blockers) = non_simulation_blockers(&step) {
                 PlanSimulationOutcome {
                     status: WalletSimulationStatus::Blocked,
                     blocker: None,
@@ -70,6 +70,9 @@ impl SigillumService {
                 )
                 .await
             };
+            outcome
+                .evidence
+                .push(format!("simulated_at_unix={}", now_unix()));
             match &outcome.status {
                 WalletSimulationStatus::Passed => passed += 1,
                 WalletSimulationStatus::Unsupported => unsupported += 1,
@@ -149,9 +152,44 @@ impl SigillumService {
         evidence.push(format!("chain_id={}", provider.chain_id));
         evidence.push(format!("from={}", step.address));
         evidence.push(format!("to={}", call.target_address));
-        if let Err(outcome) =
-            apply_native_sweep_fee_policy(provider, step, &mut call, &mut evidence)
-        {
+        let fee_basis = if step.action == WalletPlanStepAction::SweepNative {
+            let gas_limit = provider.native_gas_limit.unwrap_or(21_000);
+            Some(
+                match self
+                    .resolve_fee_basis_for_provider_profile(provider, gas_limit)
+                    .await
+                {
+                    Ok(fee_basis) => fee_basis,
+                    Err(error) => {
+                        evidence.push(format!("fee_estimation_error={error}"));
+                        return failed_simulation(&evidence);
+                    }
+                },
+            )
+        } else if call.value_hex.is_none() {
+            let gas_limit = zero_value_transaction_gas_limit(provider, step);
+            Some(
+                match self
+                    .resolve_fee_basis_for_provider_profile(provider, gas_limit)
+                    .await
+                {
+                    Ok(fee_basis) => fee_basis,
+                    Err(error) => {
+                        evidence.push(format!("fee_estimation_error={error}"));
+                        return failed_simulation(&evidence);
+                    }
+                },
+            )
+        } else {
+            None
+        };
+        if let Err(outcome) = apply_native_sweep_fee_policy(
+            provider,
+            step,
+            &mut call,
+            &mut evidence,
+            fee_basis.as_ref(),
+        ) {
             return outcome;
         }
         if let Err(outcome) = apply_zero_value_transaction_gas_policy(
@@ -160,6 +198,7 @@ impl SigillumService {
             step,
             &call,
             &mut evidence,
+            fee_basis.as_ref(),
         ) {
             return outcome;
         }
@@ -200,6 +239,26 @@ impl SigillumService {
             }
         }
     }
+
+    async fn resolve_fee_basis_for_provider_profile(
+        &self,
+        provider: &EvmProviderProfile,
+        gas_limit: u64,
+    ) -> ServiceResult<FeeBasisResolution> {
+        if !provider.fee_estimation_enabled {
+            return Ok(static_fee_basis_for_provider(provider));
+        }
+
+        let response = self
+            .evm_estimate_fees_for_provider(provider.compartment_id, provider, gas_limit)
+            .await?;
+        Ok(FeeBasisResolution::Resolved(ResolvedFeeBasis {
+            basis: "estimated",
+            max_priority_fee_per_gas_hex: response.fees.max_priority_fee_per_gas_hex,
+            max_fee_per_gas_hex: response.fees.max_fee_per_gas_hex,
+            resolved_at_unix: now_unix(),
+        }))
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -209,27 +268,63 @@ struct PlanSimulationOutcome {
     evidence: Vec<String>,
 }
 
+#[derive(Clone, Debug)]
+struct ResolvedFeeBasis {
+    basis: &'static str,
+    max_priority_fee_per_gas_hex: String,
+    max_fee_per_gas_hex: String,
+    resolved_at_unix: u64,
+}
+
+#[derive(Clone, Debug)]
+enum FeeBasisResolution {
+    Resolved(ResolvedFeeBasis),
+    MissingStatic { missing_field: &'static str },
+}
+
+fn static_fee_basis_for_provider(provider: &EvmProviderProfile) -> FeeBasisResolution {
+    let Some(max_priority_fee_per_gas_hex) = provider.max_priority_fee_per_gas_hex.clone() else {
+        return FeeBasisResolution::MissingStatic {
+            missing_field: "max_priority_fee_per_gas_hex",
+        };
+    };
+    let Some(max_fee_per_gas_hex) = provider.max_fee_per_gas_hex.clone() else {
+        return FeeBasisResolution::MissingStatic {
+            missing_field: "max_fee_per_gas_hex",
+        };
+    };
+    FeeBasisResolution::Resolved(ResolvedFeeBasis {
+        basis: "static_profile",
+        max_priority_fee_per_gas_hex,
+        max_fee_per_gas_hex,
+        resolved_at_unix: now_unix(),
+    })
+}
+
 fn apply_zero_value_transaction_gas_policy(
     provider: &EvmProviderProfile,
     inventory_addresses: &[WalletInventoryAddress],
     step: &ConsolidationPlanStep,
     call: &PlanStepPreflightCall,
     evidence: &mut Vec<String>,
+    fee_basis: Option<&FeeBasisResolution>,
 ) -> Result<(), PlanSimulationOutcome> {
     if step.action == WalletPlanStepAction::SweepNative || call.value_hex.is_some() {
         return Ok(());
     }
 
-    let Some(max_priority_fee_per_gas_hex) = provider.max_priority_fee_per_gas_hex.as_deref()
-    else {
-        evidence.push("gas_policy=missing".into());
-        evidence.push("missing_gas_policy=max_priority_fee_per_gas_hex".into());
-        return Err(blocked_simulation(evidence));
-    };
-    let Some(max_fee_per_gas_hex) = provider.max_fee_per_gas_hex.as_deref() else {
-        evidence.push("gas_policy=missing".into());
-        evidence.push("missing_gas_policy=max_fee_per_gas_hex".into());
-        return Err(blocked_simulation(evidence));
+    let basis = match fee_basis {
+        Some(FeeBasisResolution::Resolved(basis)) => basis,
+        Some(FeeBasisResolution::MissingStatic { missing_field }) => {
+            evidence.push("gas_policy=missing".into());
+            evidence.push(format!("missing_gas_policy={missing_field}"));
+            return Err(blocked_simulation(evidence));
+        }
+        None => {
+            evidence.push("gas_policy=missing".into());
+            evidence.push("missing_gas_policy=max_priority_fee_per_gas_hex".into());
+            return Err(blocked_simulation(evidence));
+        }
     };
 
     let gas_limit = zero_value_transaction_gas_limit(provider, step);
@@ -249,7 +344,7 @@ fn apply_zero_value_transaction_gas_policy(
             return Err(failed_simulation(evidence));
         }
     };
-    let max_fee = match decode_quantity_hex(max_fee_per_gas_hex).map_err(map_wallet_error) {
+    let max_fee = match decode_quantity_hex(&basis.max_fee_per_gas_hex).map_err(map_wallet_error) {
         Ok(max_fee) => max_fee,
         Err(error) => {
             evidence.push(format!("gas_policy_error=invalid_max_fee_per_gas:{error}"));
@@ -258,11 +353,17 @@ fn apply_zero_value_transaction_gas_policy(
     };
     let gas_cost = multiply_u256_u64(&max_fee, gas_limit);
 
+    evidence.push(format!("fee_basis={}", basis.basis));
+    evidence.push(format!(
+        "fee_basis_resolved_at_unix={}",
+        basis.resolved_at_unix
+    ));
     evidence.push("gas_policy=profile_max_fee".into());
     evidence.push(format!(
-        "max_priority_fee_per_gas_hex={max_priority_fee_per_gas_hex}"
+        "max_priority_fee_per_gas_hex={}",
+        basis.max_priority_fee_per_gas_hex
     ));
-    evidence.push(format!("max_fee_per_gas_hex={max_fee_per_gas_hex}"));
+    evidence.push(format!("max_fee_per_gas_hex={}", basis.max_fee_per_gas_hex));
     evidence.push(format!("transaction_gas_limit={gas_limit}"));
     evidence.push(format!("native_balance_wei_hex={native_balance_hex}"));
     evidence.push(format!(
@@ -326,21 +427,24 @@ fn apply_native_sweep_fee_policy(
     step: &ConsolidationPlanStep,
     call: &mut PlanStepPreflightCall,
     evidence: &mut Vec<String>,
+    fee_basis: Option<&FeeBasisResolution>,
 ) -> Result<(), PlanSimulationOutcome> {
     if step.action != WalletPlanStepAction::SweepNative {
         return Ok(());
     }
 
-    let Some(max_priority_fee_per_gas_hex) = provider.max_priority_fee_per_gas_hex.as_deref()
-    else {
-        evidence.push("fee_policy=missing".into());
-        evidence.push("missing_fee_policy=max_priority_fee_per_gas_hex".into());
-        return Err(blocked_simulation(evidence));
-    };
-    let Some(max_fee_per_gas_hex) = provider.max_fee_per_gas_hex.as_deref() else {
-        evidence.push("fee_policy=missing".into());
-        evidence.push("missing_fee_policy=max_fee_per_gas_hex".into());
-        return Err(blocked_simulation(evidence));
+    let basis = match fee_basis {
+        Some(FeeBasisResolution::Resolved(basis)) => basis,
+        Some(FeeBasisResolution::MissingStatic { missing_field }) => {
+            evidence.push("fee_policy=missing".into());
+            evidence.push(format!("missing_fee_policy={missing_field}"));
+            return Err(blocked_simulation(evidence));
+        }
+        None => {
+            evidence.push("fee_policy=missing".into());
+            evidence.push("missing_fee_policy=max_priority_fee_per_gas_hex".into());
+            return Err(blocked_simulation(evidence));
+        }
     };
 
     let gas_limit = provider.native_gas_limit.unwrap_or(21_000);
@@ -351,7 +455,7 @@ fn apply_native_sweep_fee_policy(
             return Err(failed_simulation(evidence));
         }
     };
-    let max_fee = match decode_quantity_hex(max_fee_per_gas_hex).map_err(map_wallet_error) {
+    let max_fee = match decode_quantity_hex(&basis.max_fee_per_gas_hex).map_err(map_wallet_error) {
         Ok(max_fee) => max_fee,
         Err(error) => {
             evidence.push(format!("fee_policy_error=invalid_max_fee_per_gas:{error}"));
@@ -360,11 +464,17 @@ fn apply_native_sweep_fee_policy(
     };
     let gas_cost = multiply_u256_u64(&max_fee, gas_limit);
 
+    evidence.push(format!("fee_basis={}", basis.basis));
+    evidence.push(format!(
+        "fee_basis_resolved_at_unix={}",
+        basis.resolved_at_unix
+    ));
     evidence.push("fee_policy=profile_max_fee".into());
     evidence.push(format!(
-        "max_priority_fee_per_gas_hex={max_priority_fee_per_gas_hex}"
+        "max_priority_fee_per_gas_hex={}",
+        basis.max_priority_fee_per_gas_hex
     ));
-    evidence.push(format!("max_fee_per_gas_hex={max_fee_per_gas_hex}"));
+    evidence.push(format!("max_fee_per_gas_hex={}", basis.max_fee_per_gas_hex));
     evidence.push(format!("native_gas_limit={gas_limit}"));
     evidence.push(format!(
         "estimated_gas_cost_wei_hex={}",
@@ -416,6 +526,14 @@ fn non_simulation_blockers(step: &ConsolidationPlanStep) -> Option<Vec<String>> 
 
 fn blocks_simulation(blocker: &str) -> bool {
     !is_simulation_blocker(blocker) && blocker != "claim_execution_disabled"
+}
+
+pub(super) fn parse_simulated_at_unix(evidence: &[String]) -> Option<u64> {
+    evidence
+        .iter()
+        .rev()
+        .find_map(|item| item.strip_prefix("simulated_at_unix="))
+        .and_then(|value| value.parse().ok())
 }
 
 fn apply_simulation_outcome(step: &mut ConsolidationPlanStep, outcome: PlanSimulationOutcome) {
@@ -477,7 +595,26 @@ mod tests {
             max_fee_per_gas_hex: Some("0x2".into()),
             native_gas_limit: Some(21_000),
             erc20_gas_limit: Some(65_000),
+            fee_estimation_enabled: false,
         }
+    }
+
+    fn static_fee_basis() -> FeeBasisResolution {
+        FeeBasisResolution::Resolved(ResolvedFeeBasis {
+            basis: "static_profile",
+            max_priority_fee_per_gas_hex: "0x1".into(),
+            max_fee_per_gas_hex: "0x2".into(),
+            resolved_at_unix: 1,
+        })
+    }
+
+    fn estimated_fee_basis() -> FeeBasisResolution {
+        FeeBasisResolution::Resolved(ResolvedFeeBasis {
+            basis: "estimated",
+            max_priority_fee_per_gas_hex: "0x1".into(),
+            max_fee_per_gas_hex: "0x3".into(),
+            resolved_at_unix: 2,
+        })
     }
 
     fn sample_step(amount_hex: &str) -> ConsolidationPlanStep {
@@ -587,10 +724,17 @@ mod tests {
         let step = sample_step("0x10000");
         let mut call = sample_call();
         let mut evidence = Vec::new();
+        let fee_basis = static_fee_basis();
 
-        apply_native_sweep_fee_policy(&provider, &step, &mut call, &mut evidence).unwrap();
+        apply_native_sweep_fee_policy(&provider, &step, &mut call, &mut evidence, Some(&fee_basis))
+            .unwrap();
 
         assert_eq!(call.value_hex, Some("0x5bf0".into()));
+        assert!(
+            evidence
+                .iter()
+                .any(|item| item == "fee_basis=static_profile")
+        );
         assert!(
             evidence
                 .iter()
@@ -609,9 +753,16 @@ mod tests {
         let step = sample_step("0xa410");
         let mut call = sample_call();
         let mut evidence = Vec::new();
+        let fee_basis = static_fee_basis();
 
-        let outcome =
-            apply_native_sweep_fee_policy(&provider, &step, &mut call, &mut evidence).unwrap_err();
+        let outcome = apply_native_sweep_fee_policy(
+            &provider,
+            &step,
+            &mut call,
+            &mut evidence,
+            Some(&fee_basis),
+        )
+        .unwrap_err();
 
         assert_eq!(outcome.status, "blocked");
         assert_eq!(outcome.blocker, Some("simulation_blocked"));
@@ -625,14 +776,22 @@ mod tests {
 
     #[test]
     fn native_sweep_fee_policy_blocks_when_fee_profile_is_missing() {
-        let mut provider = sample_provider();
-        provider.max_priority_fee_per_gas_hex = None;
+        let provider = sample_provider();
         let step = sample_step("0x10000");
         let mut call = sample_call();
         let mut evidence = Vec::new();
+        let fee_basis = FeeBasisResolution::MissingStatic {
+            missing_field: "max_priority_fee_per_gas_hex",
+        };
 
-        let outcome =
-            apply_native_sweep_fee_policy(&provider, &step, &mut call, &mut evidence).unwrap_err();
+        let outcome = apply_native_sweep_fee_policy(
+            &provider,
+            &step,
+            &mut call,
+            &mut evidence,
+            Some(&fee_basis),
+        )
+        .unwrap_err();
 
         assert_eq!(outcome.status, "blocked");
         assert!(
@@ -644,20 +803,108 @@ mod tests {
     }
 
     #[test]
+    fn estimated_fee_basis_values_drive_native_sweep_math_and_evidence() {
+        let provider = sample_provider();
+        let step = sample_step("0x10000");
+        let mut call = sample_call();
+        let mut evidence = Vec::new();
+        let fee_basis = estimated_fee_basis();
+
+        apply_native_sweep_fee_policy(&provider, &step, &mut call, &mut evidence, Some(&fee_basis))
+            .unwrap();
+
+        assert_eq!(call.value_hex, Some("0x9e8".into()));
+        assert!(evidence.iter().any(|item| item == "fee_basis=estimated"));
+        assert!(
+            evidence
+                .iter()
+                .any(|item| item == "fee_basis_resolved_at_unix=2")
+        );
+        assert!(
+            evidence
+                .iter()
+                .any(|item| item == "max_fee_per_gas_hex=0x3")
+        );
+        assert!(
+            evidence
+                .iter()
+                .any(|item| item == "estimated_gas_cost_wei_hex=0xf618")
+        );
+    }
+
+    #[test]
+    fn static_fee_basis_resolution_preserves_existing_blockers_and_evidence() {
+        let provider = sample_provider();
+        let step = sample_step("0xa410");
+        let mut call = sample_call();
+        let mut evidence = Vec::new();
+        let fee_basis = static_fee_basis_for_provider(&provider);
+
+        let outcome = apply_native_sweep_fee_policy(
+            &provider,
+            &step,
+            &mut call,
+            &mut evidence,
+            Some(&fee_basis),
+        )
+        .unwrap_err();
+
+        assert_eq!(outcome.status, "blocked");
+        assert_eq!(outcome.blocker, Some("simulation_blocked"));
+        assert!(
+            outcome
+                .evidence
+                .iter()
+                .any(|item| item == "fee_basis=static_profile")
+        );
+        assert!(
+            outcome
+                .evidence
+                .iter()
+                .any(|item| item == "fee_policy=profile_max_fee")
+        );
+        assert!(
+            outcome
+                .evidence
+                .iter()
+                .any(|item| item == "max_fee_per_gas_hex=0x2")
+        );
+        assert!(
+            outcome
+                .evidence
+                .iter()
+                .any(|item| item == "fee_policy_blocker=insufficient_native_balance_after_gas")
+        );
+    }
+
+    #[test]
     fn zero_value_gas_policy_accepts_inventory_balance_that_covers_gas() {
         let provider = sample_provider();
         let step = sample_erc20_step();
         let call = sample_erc20_call();
         let addresses = vec![sample_inventory_address("0x20000")];
         let mut evidence = Vec::new();
+        let fee_basis = static_fee_basis();
 
-        apply_zero_value_transaction_gas_policy(&provider, &addresses, &step, &call, &mut evidence)
-            .unwrap();
+        apply_zero_value_transaction_gas_policy(
+            &provider,
+            &addresses,
+            &step,
+            &call,
+            &mut evidence,
+            Some(&fee_basis),
+        )
+        .unwrap();
 
         assert!(
             evidence
                 .iter()
                 .any(|item| item == "gas_policy=profile_max_fee")
+        );
+        assert!(
+            evidence
+                .iter()
+                .any(|item| item == "fee_basis=static_profile")
         );
         assert!(
             evidence
@@ -678,6 +925,7 @@ mod tests {
         let call = sample_erc20_call();
         let addresses = vec![sample_inventory_address("0x1")];
         let mut evidence = Vec::new();
+        let fee_basis = static_fee_basis();
 
         let outcome = apply_zero_value_transaction_gas_policy(
             &provider,
@@ -685,6 +933,7 @@ mod tests {
             &step,
             &call,
             &mut evidence,
+            Some(&fee_basis),
         )
         .unwrap_err();
 
@@ -704,10 +953,17 @@ mod tests {
         let step = sample_erc20_step();
         let call = sample_erc20_call();
         let mut evidence = Vec::new();
+        let fee_basis = static_fee_basis();
 
-        let outcome =
-            apply_zero_value_transaction_gas_policy(&provider, &[], &step, &call, &mut evidence)
-                .unwrap_err();
+        let outcome = apply_zero_value_transaction_gas_policy(
+            &provider,
+            &[],
+            &step,
+            &call,
+            &mut evidence,
+            Some(&fee_basis),
+        )
+        .unwrap_err();
 
         assert_eq!(outcome.status, "blocked");
         assert!(
@@ -725,9 +981,17 @@ mod tests {
         let call = sample_nft_call();
         let addresses = vec![sample_inventory_address("0x40000")];
         let mut evidence = Vec::new();
+        let fee_basis = static_fee_basis();
 
-        apply_zero_value_transaction_gas_policy(&provider, &addresses, &step, &call, &mut evidence)
-            .unwrap();
+        apply_zero_value_transaction_gas_policy(
+            &provider,
+            &addresses,
+            &step,
+            &call,
+            &mut evidence,
+            Some(&fee_basis),
+        )
+        .unwrap();
 
         assert!(
             evidence
@@ -771,9 +1035,17 @@ mod tests {
         let call = sample_erc20_call();
         let addresses = vec![sample_inventory_address("0x40000")];
         let mut evidence = Vec::new();
+        let fee_basis = static_fee_basis();
 
-        apply_zero_value_transaction_gas_policy(&provider, &addresses, &step, &call, &mut evidence)
-            .unwrap();
+        apply_zero_value_transaction_gas_policy(
+            &provider,
+            &addresses,
+            &step,
+            &call,
+            &mut evidence,
+            Some(&fee_basis),
+        )
+        .unwrap();
 
         assert!(
             evidence
@@ -784,6 +1056,26 @@ mod tests {
             evidence
                 .iter()
                 .any(|item| item == "estimated_gas_cost_wei_hex=0x3a980")
+        );
+    }
+
+    #[test]
+    fn parse_simulated_at_unix_returns_last_timestamp() {
+        let evidence = vec![
+            "simulated_at_unix=10".to_string(),
+            "fee_basis=static_profile".to_string(),
+            "simulated_at_unix=20".to_string(),
+        ];
+        assert_eq!(parse_simulated_at_unix(&evidence), Some(20));
+
+        let invalid_last = vec![
+            "simulated_at_unix=10".to_string(),
+            "simulated_at_unix=not-a-number".to_string(),
+        ];
+        assert_eq!(parse_simulated_at_unix(&invalid_last), None);
+        assert_eq!(
+            parse_simulated_at_unix(&["fee_basis=estimated".into()]),
+            None
         );
     }
 }

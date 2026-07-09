@@ -480,6 +480,8 @@ pub struct EvmProviderProfileUpsertRequest {
     pub native_gas_limit: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub erc20_gas_limit: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fee_estimation_enabled: Option<bool>,
 }
 
 /// Delete an EVM provider profile by name.

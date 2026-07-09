@@ -125,6 +125,7 @@ mod tests {
             require_simulation: true,
             allow_raw_digest_signing: false,
             block_cross_party_linkage,
+            simulation_freshness_secs: 900,
             created_at_unix: 1,
             updated_at_unix: 1,
         }

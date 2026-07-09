@@ -822,6 +822,7 @@ mod tests {
             max_fee_per_gas_hex: None,
             native_gas_limit: None,
             erc20_gas_limit: None,
+            fee_estimation_enabled: false,
         }
     }
 
@@ -953,6 +954,7 @@ mod tests {
             require_simulation: true,
             allow_raw_digest_signing: false,
             block_cross_party_linkage: false,
+            simulation_freshness_secs: 900,
             created_at_unix: 1,
             updated_at_unix: 2,
         }

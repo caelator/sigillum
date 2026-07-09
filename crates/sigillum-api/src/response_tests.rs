@@ -401,6 +401,7 @@ fn test_evm_provider_profile_roundtrip() {
         max_fee_per_gas_hex: Some("0x5f5e100".to_string()),
         native_gas_limit: Some(21000),
         erc20_gas_limit: Some(65000),
+        fee_estimation_enabled: false,
     };
     roundtrip_test(profile);
 }
@@ -1653,6 +1654,7 @@ fn sample_treasury_policy() -> TreasuryPolicy {
         require_simulation: true,
         allow_raw_digest_signing: false,
         block_cross_party_linkage: false,
+        simulation_freshness_secs: 900,
         created_at_unix: 1,
         updated_at_unix: 2,
     }
@@ -1675,6 +1677,7 @@ fn test_treasury_policy_responses_roundtrip() {
             require_simulation: false,
             allow_raw_digest_signing: false,
             block_cross_party_linkage: false,
+            simulation_freshness_secs: 900,
             created_at_unix: 1,
             updated_at_unix: 3,
         },
@@ -1689,7 +1692,22 @@ fn test_treasury_policy_require_simulation_defaults_true() {
             .unwrap();
     assert!(policy.require_simulation);
     assert!(!policy.block_cross_party_linkage);
+    assert_eq!(policy.simulation_freshness_secs, 900);
     assert!(policy.allowed_destinations.is_empty());
+}
+
+#[test]
+fn test_evm_provider_profile_fee_estimation_defaults_false() {
+    let profile: EvmProviderProfile = serde_json::from_str(
+        r#"{
+            "name":"mainnet",
+            "rpc_url":"https://eth.example.com",
+            "compartment_id":1,
+            "chain_id":1
+        }"#,
+    )
+    .unwrap();
+    assert!(!profile.fee_estimation_enabled);
 }
 
 #[test]
