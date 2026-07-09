@@ -31,5 +31,13 @@ pub struct QueueProcessResponse {
     pub failed: usize,
     #[serde(default)]
     pub failures_by_cause: MaintenanceFailureBreakdown,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub paused_reason: Option<String>,
     pub jobs: Vec<QueueJob>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct QueueExecutionPauseResponse {
+    pub status: String,
+    pub execution_paused: bool,
 }

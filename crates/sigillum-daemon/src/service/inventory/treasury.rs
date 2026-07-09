@@ -873,6 +873,13 @@ impl SigillumService {
                 "hot_floor_wei_hex must be less than or equal to hot_target_wei_hex",
             ));
         }
+        let previous_execution_paused = state
+            .treasury_policy
+            .as_ref()
+            .map(|policy| policy.execution_paused)
+            .unwrap_or(false);
+        // Policy edits that omit the kill switch must not silently resume execution.
+        let execution_paused = body.execution_paused.unwrap_or(previous_execution_paused);
 
         let policy = TreasuryPolicy {
             enabled: body.enabled,
@@ -893,6 +900,15 @@ impl SigillumService {
             max_gas_topup_wei_hex: validated_cap_hex(
                 "max_gas_topup_wei_hex",
                 body.max_gas_topup_wei_hex,
+            )?,
+            allow_plan_execution: body.allow_plan_execution.unwrap_or(false),
+            allow_sweep_execution: body.allow_sweep_execution.unwrap_or(false),
+            allow_revoke_execution: body.allow_revoke_execution.unwrap_or(false),
+            allow_exit_execution: body.allow_exit_execution.unwrap_or(false),
+            execution_paused,
+            max_fee_per_gas_cap_hex: validated_cap_hex(
+                "max_fee_per_gas_cap_hex",
+                body.max_fee_per_gas_cap_hex,
             )?,
             simulation_freshness_secs: body.simulation_freshness_secs.unwrap_or(900),
             hot_floor_wei_hex,
@@ -1654,6 +1670,12 @@ mod tests {
             allow_claim_execution: false,
             allow_gas_topups: false,
             max_gas_topup_wei_hex: None,
+            allow_plan_execution: false,
+            allow_sweep_execution: false,
+            allow_revoke_execution: false,
+            allow_exit_execution: false,
+            execution_paused: false,
+            max_fee_per_gas_cap_hex: None,
             simulation_freshness_secs: 900,
             hot_floor_wei_hex: "0xde0b6b3a7640000".into(),
             hot_target_wei_hex: "0xde0b6b3a7640000".into(),

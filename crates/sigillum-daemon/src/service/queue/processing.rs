@@ -252,6 +252,7 @@ impl SigillumService {
             operator_action_required,
             failed,
             failures_by_cause,
+            paused_reason: None,
             jobs: processed,
         })
     }

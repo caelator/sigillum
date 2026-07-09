@@ -1279,6 +1279,12 @@ fn test_treasury_policy_update_request_full() {
         allow_claim_execution: Some(true),
         allow_gas_topups: Some(true),
         max_gas_topup_wei_hex: Some("0x2386f26fc10000".to_string()),
+        allow_plan_execution: Some(true),
+        allow_sweep_execution: Some(true),
+        allow_revoke_execution: Some(true),
+        allow_exit_execution: Some(true),
+        execution_paused: Some(true),
+        max_fee_per_gas_cap_hex: Some("0x59682f00".to_string()),
         simulation_freshness_secs: Some(900),
         hot_floor_wei_hex: Some("0xde0b6b3a7640000".to_string()),
         hot_target_wei_hex: Some("0xde0b6b3a7640000".to_string()),
@@ -1299,10 +1305,33 @@ fn test_treasury_policy_update_request_minimal() {
         allow_claim_execution: None,
         allow_gas_topups: None,
         max_gas_topup_wei_hex: None,
+        allow_plan_execution: None,
+        allow_sweep_execution: None,
+        allow_revoke_execution: None,
+        allow_exit_execution: None,
+        execution_paused: None,
+        max_fee_per_gas_cap_hex: None,
         simulation_freshness_secs: None,
         hot_floor_wei_hex: None,
         hot_target_wei_hex: None,
     };
+    let json = serde_json::to_string(&req).unwrap();
+    assert!(!json.contains("allow_plan_execution"));
+    assert!(!json.contains("allow_sweep_execution"));
+    assert!(!json.contains("allow_revoke_execution"));
+    assert!(!json.contains("allow_exit_execution"));
+    assert!(!json.contains("execution_paused"));
+    assert!(!json.contains("max_fee_per_gas_cap_hex"));
+
+    let omitted: TreasuryPolicyUpdateRequest =
+        serde_json::from_str(r#"{"enabled":false}"#).unwrap();
+    assert_eq!(omitted.allow_plan_execution, None);
+    assert_eq!(omitted.allow_sweep_execution, None);
+    assert_eq!(omitted.allow_revoke_execution, None);
+    assert_eq!(omitted.allow_exit_execution, None);
+    assert_eq!(omitted.execution_paused, None);
+    assert_eq!(omitted.max_fee_per_gas_cap_hex, None);
+
     roundtrip_test(req);
 }
 

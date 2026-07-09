@@ -50,7 +50,7 @@ pub struct WalletInventoryState {
 }
 
 impl JsonDocument for WalletInventoryState {
-    const SCHEMA: JsonSchema = JsonSchema::new("sigillum.wallet-inventory", 17);
+    const SCHEMA: JsonSchema = JsonSchema::new("sigillum.wallet-inventory", 18);
 
     fn from_enveloped_json(
         path: &std::path::Path,
@@ -58,7 +58,7 @@ impl JsonDocument for WalletInventoryState {
         data: serde_json::Value,
     ) -> Result<Self, std::io::Error> {
         match version {
-            1..=17 => {
+            1..=18 => {
                 let mut state: Self = serde_json::from_value(data).map_err(|error| {
                     std::io::Error::new(
                         std::io::ErrorKind::InvalidData,
@@ -274,6 +274,12 @@ mod tests {
             allow_claim_execution: false,
             allow_gas_topups: false,
             max_gas_topup_wei_hex: None,
+            allow_plan_execution: false,
+            allow_sweep_execution: false,
+            allow_revoke_execution: false,
+            allow_exit_execution: false,
+            execution_paused: false,
+            max_fee_per_gas_cap_hex: None,
             simulation_freshness_secs: 900,
             hot_floor_wei_hex: "0xde0b6b3a7640000".into(),
             hot_target_wei_hex: "0xde0b6b3a7640000".into(),
@@ -492,6 +498,12 @@ mod tests {
         assert!(!policy.allow_claim_execution);
         assert!(!policy.allow_gas_topups);
         assert!(policy.max_gas_topup_wei_hex.is_none());
+        assert!(!policy.allow_plan_execution);
+        assert!(!policy.allow_sweep_execution);
+        assert!(!policy.allow_revoke_execution);
+        assert!(!policy.allow_exit_execution);
+        assert!(!policy.execution_paused);
+        assert!(policy.max_fee_per_gas_cap_hex.is_none());
         assert_eq!(policy.simulation_freshness_secs, 900);
         assert_eq!(policy.hot_floor_wei_hex, "0xde0b6b3a7640000");
         assert_eq!(policy.hot_target_wei_hex, "0xde0b6b3a7640000");
@@ -666,6 +678,57 @@ mod tests {
     }
 
     #[test]
+    fn legacy_v17_treasury_policy_loads_with_execution_gates_disabled_and_rewrites_v18() {
+        let dir = TempDir::new().unwrap();
+        let envelope = json!({
+            "schema": "sigillum.wallet-inventory",
+            "schema_version": 17,
+            "data": {
+                "treasury_policy": {
+                    "enabled": true,
+                    "allowed_destinations": [{
+                        "address": "0x9999999999999999999999999999999999999999",
+                        "label": "cold-treasury"
+                    }],
+                    "max_step_native_wei_hex": "0xde0b6b3a7640000",
+                    "max_plan_native_wei_hex": null,
+                    "require_simulation": true,
+                    "allow_raw_digest_signing": false,
+                    "block_cross_party_linkage": false,
+                    "allow_claim_execution": false,
+                    "allow_gas_topups": false,
+                    "max_gas_topup_wei_hex": null,
+                    "simulation_freshness_secs": 900,
+                    "hot_floor_wei_hex": "0xde0b6b3a7640000",
+                    "hot_target_wei_hex": "0xde0b6b3a7640000",
+                    "created_at_unix": 1,
+                    "updated_at_unix": 2
+                }
+            },
+        });
+        std::fs::write(
+            wallet_inventory_path(dir.path()),
+            serde_json::to_vec_pretty(&envelope).unwrap(),
+        )
+        .unwrap();
+
+        let loaded = load_wallet_inventory(dir.path()).unwrap();
+        let policy = loaded.treasury_policy.as_ref().expect("policy loaded");
+        assert!(!policy.allow_plan_execution);
+        assert!(!policy.allow_sweep_execution);
+        assert!(!policy.allow_revoke_execution);
+        assert!(!policy.allow_exit_execution);
+        assert!(!policy.execution_paused);
+        assert!(policy.max_fee_per_gas_cap_hex.is_none());
+
+        save_wallet_inventory(dir.path(), &loaded).unwrap();
+        let saved: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(wallet_inventory_path(dir.path())).unwrap())
+                .unwrap();
+        assert_eq!(saved["schema_version"], json!(18));
+    }
+
+    #[test]
     fn save_writes_versioned_schema_envelope() {
         let dir = TempDir::new().unwrap();
         save_wallet_inventory(dir.path(), &WalletInventoryState::default()).unwrap();
@@ -674,7 +737,7 @@ mod tests {
             serde_json::from_slice(&std::fs::read(wallet_inventory_path(dir.path())).unwrap())
                 .unwrap();
         assert_eq!(saved["schema"], json!("sigillum.wallet-inventory"));
-        assert_eq!(saved["schema_version"], json!(17));
+        assert_eq!(saved["schema_version"], json!(18));
         assert_eq!(saved["data"]["chain_profiles"].as_array().unwrap().len(), 5);
         assert!(saved["data"]["watch_address_book"].is_array());
         assert!(saved["data"]["jobs"].is_array());

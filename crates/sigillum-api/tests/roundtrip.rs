@@ -511,6 +511,12 @@ fn treasury_request_roundtrip() {
         allow_claim_execution: Some(true),
         allow_gas_topups: Some(true),
         max_gas_topup_wei_hex: Some("0x2386f26fc10000".to_string()),
+        allow_plan_execution: Some(true),
+        allow_sweep_execution: Some(true),
+        allow_revoke_execution: Some(true),
+        allow_exit_execution: Some(true),
+        execution_paused: Some(true),
+        max_fee_per_gas_cap_hex: Some("0x59682f00".to_string()),
         simulation_freshness_secs: Some(900),
         hot_floor_wei_hex: Some("0xde0b6b3a7640000".to_string()),
         hot_target_wei_hex: Some("0xde0b6b3a7640000".to_string()),
@@ -534,6 +540,12 @@ fn treasury_response_roundtrip() {
             allow_claim_execution: false,
             allow_gas_topups: false,
             max_gas_topup_wei_hex: None,
+            allow_plan_execution: false,
+            allow_sweep_execution: false,
+            allow_revoke_execution: false,
+            allow_exit_execution: false,
+            execution_paused: false,
+            max_fee_per_gas_cap_hex: None,
             simulation_freshness_secs: 900,
             hot_floor_wei_hex: "0xde0b6b3a7640000".to_string(),
             hot_target_wei_hex: "0xde0b6b3a7640000".to_string(),
@@ -563,6 +575,12 @@ fn treasury_policy_gas_topup_defaults_and_roundtrip() {
     .unwrap();
     assert!(!legacy.allow_gas_topups);
     assert!(legacy.max_gas_topup_wei_hex.is_none());
+    assert!(!legacy.allow_plan_execution);
+    assert!(!legacy.allow_sweep_execution);
+    assert!(!legacy.allow_revoke_execution);
+    assert!(!legacy.allow_exit_execution);
+    assert!(!legacy.execution_paused);
+    assert!(legacy.max_fee_per_gas_cap_hex.is_none());
 
     roundtrip(&TreasuryPolicy {
         enabled: true,
@@ -575,6 +593,12 @@ fn treasury_policy_gas_topup_defaults_and_roundtrip() {
         allow_claim_execution: false,
         allow_gas_topups: true,
         max_gas_topup_wei_hex: Some("0x2386f26fc10000".into()),
+        allow_plan_execution: true,
+        allow_sweep_execution: true,
+        allow_revoke_execution: true,
+        allow_exit_execution: true,
+        execution_paused: true,
+        max_fee_per_gas_cap_hex: Some("0x59682f00".into()),
         simulation_freshness_secs: 900,
         hot_floor_wei_hex: "0xde0b6b3a7640000".to_string(),
         hot_target_wei_hex: "0xde0b6b3a7640000".to_string(),
