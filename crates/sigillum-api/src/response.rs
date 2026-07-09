@@ -597,6 +597,9 @@ pub struct MaintenanceRunResponse {
     #[serde(default)]
     pub operator_action_required: usize,
     pub failed: usize,
+    /// W7.4: mirrors `QueueProcessResponse::confirmed` (see there).
+    #[serde(default)]
+    pub confirmed: usize,
     #[serde(default)]
     pub failures_by_cause: MaintenanceFailureBreakdown,
     pub deposits: Vec<EthStealthDeposit>,
