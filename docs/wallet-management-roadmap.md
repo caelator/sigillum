@@ -375,10 +375,21 @@ The CLI should have parity for automation:
     runtime kill switch (`execution_paused`, `POST /api/queue/pause|resume`,
     a UI pause control, and `sigillum api queue pause|resume`),
     `max_fee_per_gas_cap_hex` reserved for later fee-bump logic, and typed
-    gate-flip audit events recording old/new values. Actual plan-step
-    enqueue, signing, and execution against these gates remain future work
-    (W7.2+); with all gates off (the default), today's behavior is
-    unchanged.
+    gate-flip audit events recording old/new values. Plan-step enqueue is
+    now implemented (W7.2): `POST /api/plans/enqueue-step` (explicit confirm
+    flag) and `POST /api/plans/enqueue-plan` (typed confirmation phrase
+    naming the step count and total native value) convert approved, freshly
+    simulated, unblocked steps into `plan_step_execution` queue jobs that
+    carry the preflight-prepared call, a simulation-evidence hash for
+    pre-sign tamper detection, the W6.2 fee basis, and prerequisite job ids
+    in W6.4 dependency order — with every policy gate, treasury rule,
+    linkage check, freshness window, claim gate, and gas-topup opt-in
+    re-validated server-side at enqueue time, and per-(plan, step)
+    idempotency under which a failed job requires operator re-approval.
+    Signing and execution against these gates remain future work (W7.3+):
+    enqueued plan-step jobs stay hard-blocked at drain time ("plan-step
+    execution is not enabled yet"), and with all gates off (the default),
+    today's behavior is unchanged.
 6. DeFi position adapters. The D-11 exit adapter set is now complete: Aave v3
    withdraw, ERC-4626 redeem, Lido wstETH unwrap, and Uniswap v2 LP
    `removeLiquidity` exits are implemented. The Uniswap v2 adapter expands LP
