@@ -1,11 +1,12 @@
 use reqwest::Method;
 use sigillum_api::request::{
     ConsolidationPlanApproveRequest, ConsolidationPlanExportRequest,
-    ConsolidationPlanGenerateRequest, ConsolidationPlanSimulateRequest,
+    ConsolidationPlanGenerateRequest, ConsolidationPlanSimulateRequest, PlanEnqueuePlanRequest,
+    PlanEnqueueStepRequest,
 };
 use sigillum_api::response::{
     ConsolidationPlanExportResponse, ConsolidationPlanListResponse,
-    ConsolidationPlanMutationResponse,
+    ConsolidationPlanMutationResponse, PlanEnqueuePlanResponse, PlanEnqueueStepResponse,
 };
 
 use crate::{ClientError, SigillumClient};
@@ -54,6 +55,26 @@ impl SigillumClient {
     ) -> Result<ConsolidationPlanExportResponse, ClientError> {
         let builder = self
             .request(Method::POST, "/api/plans/consolidation/export")
+            .json(&request);
+        self.send(builder).await
+    }
+
+    pub async fn enqueue_plan_step(
+        &self,
+        request: PlanEnqueueStepRequest,
+    ) -> Result<PlanEnqueueStepResponse, ClientError> {
+        let builder = self
+            .request(Method::POST, "/api/plans/enqueue-step")
+            .json(&request);
+        self.send(builder).await
+    }
+
+    pub async fn enqueue_plan(
+        &self,
+        request: PlanEnqueuePlanRequest,
+    ) -> Result<PlanEnqueuePlanResponse, ClientError> {
+        let builder = self
+            .request(Method::POST, "/api/plans/enqueue-plan")
             .json(&request);
         self.send(builder).await
     }

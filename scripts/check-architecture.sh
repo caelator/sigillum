@@ -55,6 +55,7 @@ check_max_lines "crates/sigillum-daemon/src/audit_log.rs" 1700
 check_max_lines "crates/sigillum-daemon/src/service/evm.rs" 900
 check_max_lines "crates/sigillum-daemon/src/service/evm/rpc.rs" 340
 check_max_lines "crates/sigillum-daemon/src/service/inventory.rs" 750
+check_max_lines "crates/sigillum-daemon/src/service/inventory/plan_execution_enqueue.rs" 1400
 check_max_lines "crates/sigillum-daemon/src/service/queue.rs" 220
 check_max_lines "crates/sigillum-daemon/src/service/queue/payloads.rs" 140
 check_max_lines "crates/sigillum-daemon/src/service/queue/processing.rs" 320
@@ -68,10 +69,13 @@ check_max_lines "crates/sigillum-api/src/request.rs" 820
 check_max_lines "crates/sigillum-api/src/request/queue.rs" 120
 check_max_lines "crates/sigillum-api/src/response.rs" 920
 check_max_lines "crates/sigillum-api/src/response/queue.rs" 140
+check_max_lines "crates/sigillum-api/src/response/queue/plan_step.rs" 160
 check_max_lines "crates/sigillum-cli/src/main.rs" 1450
 check_max_lines "crates/sigillum-cli/src/daemon_api.rs" 860
+check_max_lines "crates/sigillum-cli/src/daemon_api/plans.rs" 280
 check_max_lines "crates/sigillum-cli/src/daemon_api/queue.rs" 80
 check_max_lines "crates/sigillum-client/src/lib.rs" 1150
+check_max_lines "crates/sigillum-client/src/plans.rs" 160
 check_max_lines "crates/sigillum-client/src/queue.rs" 120
 check_max_lines "crates/sigillum-daemon/ui/src/app.js" 2500
 check_max_lines "crates/sigillum-daemon/ui/src/app.ts" 1500
@@ -107,10 +111,14 @@ check_required_file "crates/sigillum-daemon/src/service/queue/payloads.rs"
 check_required_file "crates/sigillum-daemon/src/service/queue/processing.rs"
 check_required_file "crates/sigillum-daemon/src/service/queue/state.rs"
 check_required_file "crates/sigillum-daemon/src/service/queue/sweeps.rs"
+check_required_file "crates/sigillum-daemon/src/service/inventory/plan_execution_enqueue.rs"
 check_required_file "crates/sigillum-api/src/request/queue.rs"
 check_required_file "crates/sigillum-api/src/response/queue.rs"
+check_required_file "crates/sigillum-api/src/response/queue/plan_step.rs"
 check_required_file "crates/sigillum-client/src/queue.rs"
+check_required_file "crates/sigillum-client/src/plans.rs"
 check_required_file "crates/sigillum-cli/src/daemon_api/queue.rs"
+check_required_file "crates/sigillum-cli/src/daemon_api/plans.rs"
 check_required_file "crates/sigillum-daemon/ui/src/styles.d.ts"
 check_required_file "crates/sigillum-daemon/ui/src/styles/app.css"
 check_required_file "crates/sigillum-daemon/ui/src/styles/00-design-tokens.css"
@@ -148,8 +156,10 @@ check_no_inline_tests "crates/sigillum-api/src/request.rs"
 check_no_inline_tests "crates/sigillum-api/src/request/queue.rs"
 check_no_inline_tests "crates/sigillum-api/src/response.rs"
 check_no_inline_tests "crates/sigillum-api/src/response/queue.rs"
+check_no_inline_tests "crates/sigillum-api/src/response/queue/plan_step.rs"
 check_no_inline_tests "crates/sigillum-client/src/lib.rs"
 check_no_inline_tests "crates/sigillum-client/src/queue.rs"
+check_no_inline_tests "crates/sigillum-client/src/plans.rs"
 
 check_contains "crates/sigillum-api/src/request.rs" '^mod queue;$' "queue request contracts must stay in crates/sigillum-api/src/request/queue.rs"
 check_contains "crates/sigillum-api/src/request.rs" '^pub use queue::\*;$' "queue request contract names must remain re-exported from request.rs"
@@ -162,6 +172,9 @@ check_not_contains "crates/sigillum-client/src/lib.rs" 'pub async fn (list_queue
 check_contains "crates/sigillum-cli/src/daemon_api.rs" '^mod queue;$' "queue CLI API commands must stay in crates/sigillum-cli/src/daemon_api/queue.rs"
 check_contains "crates/sigillum-cli/src/daemon_api.rs" '"queue"[[:space:]]*=>[[:space:]]*queue::cmd_api_queue\(args\),' "daemon API queue dispatch must route through the queue module"
 check_not_contains "crates/sigillum-cli/src/daemon_api.rs" '^fn cmd_api_queue\(' "queue CLI command handling must not move back into daemon_api.rs"
+check_contains "crates/sigillum-cli/src/daemon_api.rs" '^mod plans;$' "plans CLI API commands must stay in crates/sigillum-cli/src/daemon_api/plans.rs"
+check_contains "crates/sigillum-cli/src/daemon_api.rs" '"plans"[[:space:]]*=>[[:space:]]*plans::cmd_api_plans\(args\),' "daemon API plans dispatch must route through the plans module"
+check_not_contains "crates/sigillum-cli/src/daemon_api.rs" '^fn cmd_api_plans\(' "plans CLI command handling must not move back into daemon_api.rs"
 check_contains "docs/architecture.md" 'refactor-notes\.md' "architecture docs must link the module ownership notes"
 check_contains "docs/refactor-notes.md" 'Queue Domain Checkpoint' "refactor notes must record the queue domain checkpoint"
 
