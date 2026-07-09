@@ -270,7 +270,16 @@ identity, so the analysis never produces a false negative (two tagged payers to
 one destination are always caught) at the cost of possible false positives. When
 the `block_cross_party_linkage` treasury policy is enabled (an explicit
 fail-closed opt-in surfaced in onboarding, default off), warnings become hard
-blockers at plan generation, approval, and stealth-sweep enqueue.
+blockers at plan generation, approval, and stealth-sweep enqueue. Plan-step
+execution enqueue (W7.2) enforces this at parity (W7.5): linkage is
+re-evaluated fresh against current state at enqueue time exactly as at
+generation and approval — warnings are always recomputed and surfaced
+regardless of the policy value, and the hard block applies whenever
+`block_cross_party_linkage` is on, including when a plan was approved while
+the policy was off and the policy is flipped on before enqueue. This is the
+same single-hop, destination-axis claim described below, carried through to
+execution — no additional amount/timing or multi-hop guarantee is made at
+this stage either.
 
 This protection is deliberately scoped to **single-hop, destination-axis**
 linkage. Sigillum-generated `fund_gas` top-ups are modeled by a common-funder

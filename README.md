@@ -260,7 +260,10 @@ this as a warning, supports routing each payer to a **distinct** destination, an
 — when the `block_cross_party_linkage` treasury policy is enabled (a fail-closed
 opt-in offered during onboarding) — **blocks** any consolidation step or stealth
 sweep that would link payers. This is enforced at plan generation, at approval,
-and at sweep enqueue.
+at stealth-sweep enqueue, and — proven at parity (W7.5) — at plan-step
+execution enqueue: the same single-hop destination-axis claim holds all the
+way to the point a step becomes a signable queue job, with the same scope and
+the same limitations below (no amount/timing or multi-hop claims).
 
 **What it does NOT cover** (operator discipline required):
 
