@@ -857,6 +857,22 @@
         <div id="inventoryJobList"></div>
         <div id="inventoryAddressList"></div>
         <div id="inventoryHoldingList"></div>
+        <div class="section-title">NFT Metadata (opt-in)</div>
+        <p class="helper-text">Fetching NFT metadata contacts external servers, like RPC calls do: the metadata host and any IPFS gateway learn your interest in a collection. Nothing is fetched unless you opt a collection in.</p>
+        <div class="form-row">
+          <input type="number" id="nftMetaOptInChainId" placeholder="Chain id" value="1" class="input-mid">
+          <input type="text" id="nftMetaOptInContract" placeholder="Collection contract address">
+          <button class="btn-ghost" data-action="upsertNftMetadataOptIn">Opt In Collection</button>
+        </div>
+        <div class="form-row">
+          <input type="text" id="nftMetaGatewayUrl" placeholder="IPFS gateway URL (optional, e.g. https://your-gateway/ipfs/)" class="input-wide">
+          <button class="btn-ghost" data-action="saveNftMetadataSettings">Save Gateway</button>
+          <button class="btn-ghost" data-action="fetchNftMetadata">Fetch Metadata Now</button>
+        </div>
+        <div id="nftMetaOptInList"></div>
+        <div id="nftMetadataList"></div>
+        <div class="section-title">Suspicious NFTs (never auto-hidden)</div>
+        <div id="nftSuspiciousList"></div>
 
         <div class="section-divider"></div>
         <div class="section-title">Risk And Plans</div>

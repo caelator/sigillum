@@ -131,6 +131,19 @@ export interface NftMetadataCacheEntry {
   metadata_uri?: string | null;
   name?: string | null;
   spam_label: string;
+  spam_reasons?: string[];
+  fetched_at_unix?: number | null;
+  fetched_uri?: string | null;
+  content_sha256?: string | null;
+  fetch_skipped_reason?: string | null;
+  updated_at_unix: number;
+}
+
+export interface NftMetadataCollectionOptIn {
+  chain_id: number;
+  contract_address: string;
+  enabled: boolean;
+  created_at_unix: number;
   updated_at_unix: number;
 }
 

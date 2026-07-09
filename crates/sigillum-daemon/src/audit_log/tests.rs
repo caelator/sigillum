@@ -50,6 +50,51 @@ fn audit_log_uses_single_line_versioned_documents() {
 }
 
 #[test]
+fn nft_metadata_audit_events_use_public_names_and_payloads() {
+    let events = [
+        AuditEventSpec::WalletInventoryNftMetadataOptInUpsert {
+            chain_id: 1,
+            contract_address: "0x1111111111111111111111111111111111111111".into(),
+        },
+        AuditEventSpec::WalletInventoryNftMetadataOptInDelete {
+            chain_id: 1,
+            contract_address: "0x1111111111111111111111111111111111111111".into(),
+        },
+        AuditEventSpec::WalletInventoryNftMetadataSettingsUpdate {
+            ipfs_gateway_configured: true,
+        },
+        AuditEventSpec::WalletInventoryNftMetadataFetch {
+            fetched: 2,
+            skipped: 1,
+        },
+    ];
+
+    assert_eq!(
+        events[0].kind(),
+        "wallet_inventory.nft_metadata.opt_in.upsert"
+    );
+    assert_eq!(
+        events[1].kind(),
+        "wallet_inventory.nft_metadata.opt_in.delete"
+    );
+    assert_eq!(
+        events[2].kind(),
+        "wallet_inventory.nft_metadata.settings.update"
+    );
+    assert_eq!(events[3].kind(), "wallet_inventory.nft_metadata.fetch");
+    assert_eq!(
+        events[0].public_details()["contract_address"],
+        json!("0x1111111111111111111111111111111111111111")
+    );
+    assert_eq!(
+        events[2].public_details()["ipfs_gateway_configured"],
+        json!(true)
+    );
+    assert_eq!(events[3].public_details()["fetched"], json!(2));
+    assert_eq!(events[3].public_details()["skipped"], json!(1));
+}
+
+#[test]
 fn legacy_public_audit_events_still_load() {
     let dir = TempDir::new().unwrap();
     let path = dir.path().join("audit.log");

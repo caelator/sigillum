@@ -518,6 +518,20 @@ impl SigillumService {
             .await
     }
 
+    pub(super) async fn evm_nft_token_uri_for_provider(
+        &self,
+        provider_compartment_id: usize,
+        provider: &sigillum_api::EvmProviderProfile,
+        contract_address: &str,
+        token_id_hex: &str,
+        erc1155: bool,
+        block_tag: &str,
+    ) -> ServiceResult<String> {
+        self.provider_rpc_for_profile(provider_compartment_id, provider)?
+            .get_nft_token_uri(contract_address, token_id_hex, erc1155, block_tag)
+            .await
+    }
+
     pub(super) async fn evm_nft_operator_approval_for_provider(
         &self,
         provider_compartment_id: usize,
