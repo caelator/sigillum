@@ -66,6 +66,23 @@ export interface WatchAddressBookEntry {
   updated_at_unix: number;
 }
 
+export interface TokenRegistryEntry {
+  chain_id: number;
+  address: string;
+  symbol: string;
+  decimals: number;
+}
+
+export interface TokenRegistryList {
+  id: string;
+  name: string;
+  compartment_id: number;
+  source: string;
+  entries: TokenRegistryEntry[];
+  created_at_unix: number;
+  updated_at_unix: number;
+}
+
 export interface WalletDiscoveryJob {
   id: string;
   status: string;

@@ -11,9 +11,9 @@ use sigillum_api::{
     ConsolidationPlanExportRequest, ConsolidationPlanGenerateRequest,
     ConsolidationPlanSimulateRequest, CounterpartyCreateRequest, CounterpartyDeleteRequest,
     CounterpartyUpdateRequest, DiscoveryJobMutationRequest, RiskCatalogDeleteRequest,
-    RiskCatalogUpsertRequest, TreasuryPolicyUpdateRequest, TreasuryReceiveAllocateRequest,
-    TreasuryReceiveRotateRequest, WalletInventoryScanRequest, WatchAddressBookDeleteRequest,
-    WatchAddressBookUpsertRequest,
+    RiskCatalogUpsertRequest, TokenRegistryDeleteRequest, TokenRegistryImportRequest,
+    TreasuryPolicyUpdateRequest, TreasuryReceiveAllocateRequest, TreasuryReceiveRotateRequest,
+    WalletInventoryScanRequest, WatchAddressBookDeleteRequest, WatchAddressBookUpsertRequest,
 };
 
 use crate::AppState;
@@ -84,6 +84,48 @@ pub(crate) async fn delete_watch_address_book_entry(
     service_response(
         service
             .delete_watch_address_book_entry(bearer_token(&headers).as_deref(), body)
+            .await,
+    )
+}
+
+pub(crate) async fn list_token_registry(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+) -> Response {
+    let service = SigillumService::new(state);
+    service_response(service.list_token_registry(bearer_token(&headers).as_deref()))
+}
+
+pub(crate) async fn import_token_registry(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Json(body): Json<TokenRegistryImportRequest>,
+) -> Response {
+    let body = match validated(Json(body)) {
+        Ok(b) => b,
+        Err(resp) => return resp,
+    };
+    let service = SigillumService::new(state);
+    service_response(
+        service
+            .import_token_registry(bearer_token(&headers).as_deref(), body)
+            .await,
+    )
+}
+
+pub(crate) async fn delete_token_registry_list(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Json(body): Json<TokenRegistryDeleteRequest>,
+) -> Response {
+    let body = match validated(Json(body)) {
+        Ok(b) => b,
+        Err(resp) => return resp,
+    };
+    let service = SigillumService::new(state);
+    service_response(
+        service
+            .delete_token_registry_list(bearer_token(&headers).as_deref(), body)
             .await,
     )
 }

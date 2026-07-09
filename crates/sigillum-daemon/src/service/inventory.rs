@@ -18,6 +18,7 @@ mod risk_catalog;
 mod simulation;
 mod support;
 mod token_discovery;
+mod token_registry;
 mod treasury;
 mod wallet_selection;
 mod watch_book;
@@ -26,9 +27,9 @@ mod watch_discovery;
 use sigillum_api::{
     ChainProfile, ChainProfileDeleteRequest, ChainProfileListResponse,
     ChainProfileMutationResponse, ChainProfileUpsertRequest, DiscoveryJobListResponse,
-    DiscoveryJobMutationRequest, DiscoveryJobMutationResponse, RiskFindingListResponse,
-    WalletDiscoveryJob, WalletInventoryListResponse, WalletInventoryScanRequest,
-    WalletInventoryScanResponse, WatchAddressProbe,
+    DiscoveryJobMutationRequest, DiscoveryJobMutationResponse, EvmProviderProfile,
+    RiskFindingListResponse, WalletDiscoveryJob, WalletInventoryListResponse,
+    WalletInventoryScanRequest, WalletInventoryScanResponse, WatchAddressProbe,
 };
 use sigillum_core::derive_ethereum_address_from_control_xpub;
 
@@ -51,6 +52,7 @@ use support::{
     trimmed_required, unique_strings, unique_u64s, validated_gap_limit, validated_max_index,
 };
 use token_discovery::erc20_transfer_discovery_config;
+use token_registry::{TokenRegistryProbeConfig, token_registry_probe_config};
 use wallet_selection::{
     DERIVATION_PATTERN_PROJECT, DiscoveryWallet, SeedDerivationPattern,
     derive_discovery_wallet_address, scan_account_limit, select_discovery_wallets,
@@ -72,6 +74,15 @@ const MAX_GAP_LIMIT: u32 = 100;
 const DEFAULT_MAX_INDEX: u32 = 200;
 const MAX_SCAN_INDEX: u32 = 10_000;
 const NO_DISCOVERY_WALLETS_ERROR: &str = "No matching discovery wallets found.";
+
+struct TokenRegistryObservationProbe<'a> {
+    wallet: &'a DiscoveryWallet,
+    provider: &'a EvmProviderProfile,
+    derivation_path: &'a str,
+    block_tag: &'a str,
+    config: Option<&'a TokenRegistryProbeConfig>,
+    now: u64,
+}
 
 impl SigillumService {
     pub(crate) fn list_wallet_inventory(
@@ -326,6 +337,30 @@ impl SigillumService {
         Ok(RiskFindingListResponse { findings })
     }
 
+    async fn apply_token_registry_probe(
+        &self,
+        probe: TokenRegistryObservationProbe<'_>,
+        observation: &mut support::InventoryAddressObservation,
+    ) -> ServiceResult<()> {
+        let Some(config) = probe.config else {
+            return Ok(());
+        };
+        let holdings = self
+            .probe_token_registry_for_address(
+                probe.wallet,
+                probe.provider,
+                &observation.address.address,
+                probe.derivation_path,
+                probe.block_tag,
+                config,
+                &observation.holdings,
+                probe.now,
+            )
+            .await?;
+        observation.holdings.extend(holdings);
+        Ok(())
+    }
+
     pub(crate) async fn scan_wallet_inventory_evm(
         &self,
         token: Option<&str>,
@@ -384,6 +419,23 @@ impl SigillumService {
             &body.claim_candidate_probes,
             body.claim_candidate_limit,
         )?;
+        let token_registry_probe = if body.probe_token_registry == Some(true) {
+            let compartment_id = self
+                .state
+                .active_compartment_id_for(token)
+                .ok_or_else(|| ServiceError::forbidden("No active compartment."))?;
+            let state = crate::token_registry::load_token_registry(&self.state.base_dir).map_err(
+                |error| ServiceError::internal(format!("Failed to load token registry: {error}")),
+            )?;
+            let lists: Vec<_> = state
+                .lists
+                .into_iter()
+                .filter(|list| list.compartment_id == compartment_id)
+                .collect();
+            token_registry_probe_config(body.probe_token_registry, &lists)?
+        } else {
+            None
+        };
         let requested_family = normalized_wallet_family(body.wallet_family.as_deref())?;
         let seed_derivation_pattern =
             SeedDerivationPattern::parse(body.derivation_pattern.as_deref())?;
@@ -515,7 +567,7 @@ impl SigillumService {
                 for provider in &providers {
                     let permit2_allowance_discovery =
                         permit2_allowance_discovery_for_provider(provider)?;
-                    let observation = self
+                    let mut observation = self
                         .observe_inventory_address(
                             wallet,
                             provider,
@@ -536,6 +588,18 @@ impl SigillumService {
                             started_at_unix,
                         )
                         .await?;
+                    self.apply_token_registry_probe(
+                        TokenRegistryObservationProbe {
+                            wallet,
+                            provider,
+                            derivation_path: &derivation_path,
+                            block_tag: &block_tag,
+                            config: token_registry_probe.as_ref(),
+                            now: started_at_unix,
+                        },
+                        &mut observation,
+                    )
+                    .await?;
                     if observation.address.activity_state
                         != sigillum_api::WalletAddressActivityState::Empty
                     {
@@ -610,7 +674,7 @@ impl SigillumService {
                             for provider in &providers {
                                 let permit2_allowance_discovery =
                                     permit2_allowance_discovery_for_provider(provider)?;
-                                let observation = self
+                                let mut observation = self
                                     .observe_inventory_address(
                                         wallet,
                                         provider,
@@ -631,6 +695,18 @@ impl SigillumService {
                                         started_at_unix,
                                     )
                                     .await?;
+                                self.apply_token_registry_probe(
+                                    TokenRegistryObservationProbe {
+                                        wallet,
+                                        provider,
+                                        derivation_path: &derivation_path,
+                                        block_tag: &block_tag,
+                                        config: token_registry_probe.as_ref(),
+                                        now: started_at_unix,
+                                    },
+                                    &mut observation,
+                                )
+                                .await?;
                                 record_inventory_observation(
                                     &mut job,
                                     &mut inventory,
@@ -652,7 +728,7 @@ impl SigillumService {
             for provider in &providers {
                 let permit2_allowance_discovery =
                     permit2_allowance_discovery_for_provider(provider)?;
-                let observation = self
+                let mut observation = self
                     .observe_inventory_address(
                         &watch.wallet,
                         provider,
@@ -673,6 +749,18 @@ impl SigillumService {
                         started_at_unix,
                     )
                     .await?;
+                self.apply_token_registry_probe(
+                    TokenRegistryObservationProbe {
+                        wallet: &watch.wallet,
+                        provider,
+                        derivation_path: &derivation_path,
+                        block_tag: &block_tag,
+                        config: token_registry_probe.as_ref(),
+                        now: started_at_unix,
+                    },
+                    &mut observation,
+                )
+                .await?;
                 record_inventory_observation(
                     &mut job,
                     &mut inventory,

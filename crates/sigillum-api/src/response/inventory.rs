@@ -234,6 +234,37 @@ pub struct RiskCatalogMutationResponse {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct TokenRegistryEntry {
+    #[serde(alias = "chainId")]
+    pub chain_id: u64,
+    pub address: String,
+    pub symbol: String,
+    pub decimals: u8,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct TokenRegistryList {
+    pub id: String,
+    pub name: String,
+    pub compartment_id: usize,
+    pub source: String,
+    pub entries: Vec<TokenRegistryEntry>,
+    pub created_at_unix: u64,
+    pub updated_at_unix: u64,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct TokenRegistryListResponse {
+    pub lists: Vec<TokenRegistryList>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct TokenRegistryMutationResponse {
+    pub status: String,
+    pub list: TokenRegistryList,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct RiskFinding {
     pub id: String,
     pub category: String,

@@ -477,6 +477,18 @@ fn inventory_routes() -> AppRouter {
             "/api/inventory/watch-addresses/delete",
             post(inventory::delete_watch_address_book_entry),
         )
+        .route(
+            "/api/inventory/token-registry",
+            get(inventory::list_token_registry),
+        )
+        .route(
+            "/api/inventory/token-registry/import",
+            post(inventory::import_token_registry),
+        )
+        .route(
+            "/api/inventory/token-registry/delete",
+            post(inventory::delete_token_registry_list),
+        )
         .route("/api/discovery/jobs", get(inventory::list_discovery_jobs))
         .route(
             "/api/discovery/jobs/cancel",

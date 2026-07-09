@@ -8,6 +8,7 @@ import type {
   PartyDestination,
   RiskCatalogEntry,
   RiskFinding,
+  TokenRegistryList,
   WatchAddressBookEntry,
   WalletDiscoveryJob,
 } from "../contracts";
@@ -454,6 +455,42 @@ export function createInventoryActions(deps: InventoryActionsDeps) {
     );
   }
 
+  function renderTokenRegistry(lists: TokenRegistryList[]): void {
+    renderEntityList(
+      "tokenRegistryList",
+      lists,
+      "No token registry lists imported yet.",
+      (list) => {
+        const entries = list.entries || [];
+        const chainIds =
+          Array.from(new Set(entries.map((entry) => entry.chain_id)))
+            .sort((left, right) => left - right)
+            .map((chainId) => String(chainId))
+            .join(", ") || "-";
+        return (
+          '<li><div class="entity-main">' +
+          '<div class="entity-title">' +
+          esc(list.name) +
+          " " +
+          statusPill(list.source) +
+          "</div>" +
+          '<div class="entity-meta">' +
+          esc(String(entries.length)) +
+          " entries · chains=" +
+          esc(chainIds) +
+          " · updated=" +
+          esc(String(list.updated_at_unix)) +
+          "</div></div>" +
+          '<div class="entity-actions">' +
+          '<button class="btn-danger" data-action="deleteTokenRegistryList" data-arg0="' +
+          escAttr(list.name) +
+          '">Delete</button>' +
+          "</div></li>"
+        );
+      },
+    );
+  }
+
   function renderRiskFindings(findings: any[]): void {
     renderEntityList(
       "riskFindingList",
@@ -613,20 +650,23 @@ export function createInventoryActions(deps: InventoryActionsDeps) {
     bindPlanRoutingSelect();
     void renderPlanPartyDestinations();
     try {
-      const [chains, watchBook, inventory, catalog, risks, plans] = await Promise.all([
-        deps.api("GET", "/api/chains"),
-        deps.api("GET", "/api/inventory/watch-addresses"),
-        deps.api("GET", "/api/inventory/wallets"),
-        deps.api("GET", "/api/risk/catalog"),
-        deps.api("GET", "/api/risk/findings"),
-        deps.api("GET", "/api/plans/consolidation"),
-      ]);
+      const [chains, watchBook, inventory, tokenRegistry, catalog, risks, plans] =
+        await Promise.all([
+          deps.api("GET", "/api/chains"),
+          deps.api("GET", "/api/inventory/watch-addresses"),
+          deps.api("GET", "/api/inventory/wallets"),
+          deps.api("GET", "/api/inventory/token-registry"),
+          deps.api("GET", "/api/risk/catalog"),
+          deps.api("GET", "/api/risk/findings"),
+          deps.api("GET", "/api/plans/consolidation"),
+        ]);
       if (!chains.error) {
         latestChainProfiles = chains.profiles || [];
         renderChainProfiles(latestChainProfiles);
       }
       if (!watchBook.error) renderWatchAddressBook(watchBook.entries || []);
       if (!inventory.error) renderInventoryState(inventory);
+      if (!tokenRegistry.error) renderTokenRegistry(tokenRegistry.lists || []);
       if (!catalog.error) renderRiskCatalog(catalog.entries || []);
       if (!risks.error) renderRiskFindings(risks.findings || []);
       if (!plans.error) renderConsolidationPlans(plans.plans || []);
@@ -727,6 +767,7 @@ export function createInventoryActions(deps: InventoryActionsDeps) {
       token_addresses: token ? [token] : [],
       block_tag: "latest",
       discover_erc20_transfers: input("inventoryDiscoverErc20Transfers").checked,
+      probe_token_registry: input("inventoryProbeTokenRegistry").checked,
       token_discovery_from_block: optionalTextValue("inventoryTokenDiscoveryFromBlock"),
       token_discovery_to_block: optionalTextValue("inventoryTokenDiscoveryToBlock"),
       token_discovery_limit: optionalNumberValue("inventoryTokenDiscoveryLimit"),
@@ -865,6 +906,43 @@ export function createInventoryActions(deps: InventoryActionsDeps) {
       return;
     }
     deps.toast("Discovery job marked for resume");
+    void loadInventoryOperations();
+  }
+
+  async function importTokenRegistry(): Promise<void> {
+    const name = textValue("tokenRegistryName");
+    if (!name) {
+      deps.toast("Token registry list name is required", "error");
+      return;
+    }
+    const entriesJson = optionalTextValue("tokenRegistryEntriesJson");
+    const filePath = optionalTextValue("tokenRegistryFilePath");
+    if ((entriesJson ? 1 : 0) + (filePath ? 1 : 0) !== 1) {
+      deps.toast("Provide pasted JSON entries or a local file path (not both)", "error");
+      return;
+    }
+    const r = await deps.api("POST", "/api/inventory/token-registry/import", {
+      name,
+      entries_json: entriesJson || undefined,
+      file_path: filePath || undefined,
+    });
+    if (r.error) {
+      deps.toast(r.error, "error");
+      return;
+    }
+    clearFields(["tokenRegistryName", "tokenRegistryEntriesJson", "tokenRegistryFilePath"]);
+    deps.toast("Token registry list imported");
+    void loadInventoryOperations();
+  }
+
+  async function deleteTokenRegistryList(name: string): Promise<void> {
+    if (!confirm('Delete token registry list "' + name + '"?')) return;
+    const r = await deps.api("POST", "/api/inventory/token-registry/delete", { name });
+    if (r.error) {
+      deps.toast(r.error, "error");
+      return;
+    }
+    deps.toast("Token registry list deleted");
     void loadInventoryOperations();
   }
 
@@ -1025,6 +1103,7 @@ export function createInventoryActions(deps: InventoryActionsDeps) {
     renderChainProfiles,
     renderInventoryState,
     renderWatchAddressBook,
+    renderTokenRegistry,
     renderRiskCatalog,
     renderRiskFindings,
     renderConsolidationPlans,
@@ -1040,6 +1119,8 @@ export function createInventoryActions(deps: InventoryActionsDeps) {
     deleteWatchAddressBookEntry,
     cancelDiscoveryJob,
     resumeDiscoveryJob,
+    importTokenRegistry,
+    deleteTokenRegistryList,
     loadRiskFindings,
     upsertRiskCatalogEntry,
     deleteRiskCatalogEntry,

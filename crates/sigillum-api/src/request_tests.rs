@@ -819,6 +819,7 @@ fn test_wallet_inventory_scan_request_roundtrip() {
         resume_from_latest_checkpoint: Some(true),
         token_addresses: vec!["0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48".to_string()],
         block_tag: Some("latest".to_string()),
+        probe_token_registry: Some(true),
         discover_erc20_transfers: Some(true),
         token_discovery_from_block: Some("0x100".to_string()),
         token_discovery_to_block: Some("latest".to_string()),
@@ -876,6 +877,21 @@ fn test_watch_address_book_requests_roundtrip() {
     });
     roundtrip_test(WatchAddressBookDeleteRequest {
         address: "0x7777777777777777777777777777777777777777".to_string(),
+    });
+}
+
+#[test]
+fn test_token_registry_requests_roundtrip() {
+    roundtrip_test(TokenRegistryImportRequest {
+        name: "core-list".to_string(),
+        entries_json: Some(
+            r#"[{"chain_id":1,"address":"0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","symbol":"AAA","decimals":18}]"#
+                .to_string(),
+        ),
+        file_path: None,
+    });
+    roundtrip_test(TokenRegistryDeleteRequest {
+        name: "core-list".to_string(),
     });
 }
 

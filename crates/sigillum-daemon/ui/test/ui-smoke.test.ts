@@ -870,6 +870,7 @@ test("inventory scan sends optional EVM watch-address probes", async () => {
     "inventoryTokenDiscoveryToBlock",
     "inventoryTokenDiscoveryLimit",
     "inventoryDiscoverErc20Allowances",
+    "inventoryProbeTokenRegistry",
     "inventoryAllowanceLimit",
     "inventoryDiscoverPermit2Allowances",
     "inventoryPermit2AllowanceLimit",
@@ -1117,6 +1118,81 @@ test("saved watch-address UI renders, saves, toggles, and deletes entries", asyn
   );
   equal(deleteCall?.body.address, "0x7777777777777777777777777777777777777777");
   ok(toasts.some((message) => message.includes("deleted")));
+});
+
+test("token registry UI renders imported lists and posts local import body", async () => {
+  const dom = installDom([
+    "tokenRegistryList",
+    "tokenRegistryName",
+    "tokenRegistryEntriesJson",
+    "tokenRegistryFilePath",
+  ]);
+  const calls: Array<{ method: string; path: string; body?: any }> = [];
+  const toasts: string[] = [];
+  const inventory = createInventoryActions({
+    api: async (method, path, body) => {
+      calls.push({ method, path, body });
+      if (path === "/api/inventory/token-registry/import") {
+        return { status: "ok", list: { name: "core-list" } };
+      }
+      if (path === "/api/inventory/token-registry") return { lists: [] };
+      return {
+        profiles: [],
+        entries: [],
+        findings: [],
+        plans: [],
+        jobs: [],
+        addresses: [],
+        holdings: [],
+      };
+    },
+    toast: (message) => toasts.push(message),
+    downloadJson: () => undefined,
+  });
+
+  inventory.renderTokenRegistry([
+    {
+      id: "tr1",
+      name: "core-list",
+      compartment_id: 0,
+      source: "pasted-json",
+      entries: [
+        {
+          chain_id: 1,
+          address: "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          symbol: "AAA",
+          decimals: 18,
+        },
+      ],
+      created_at_unix: 1,
+      updated_at_unix: 2,
+    },
+  ]);
+  ok(dom.el("tokenRegistryList").innerHTML.includes("core-list"));
+  ok(dom.el("tokenRegistryList").innerHTML.includes('data-action="deleteTokenRegistryList"'));
+
+  const entriesJson =
+    '[{"chain_id":1,"address":"0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","symbol":"AAA","decimals":18}]';
+  dom.el("tokenRegistryName").value = "core-list";
+  dom.el("tokenRegistryEntriesJson").value = entriesJson;
+  await inventory.importTokenRegistry();
+
+  deepEqual(
+    calls.find((call) => call.path === "/api/inventory/token-registry/import"),
+    {
+      method: "POST",
+      path: "/api/inventory/token-registry/import",
+      body: {
+        name: "core-list",
+        entries_json: entriesJson,
+        file_path: undefined,
+      },
+    },
+  );
+  ok(toasts.includes("Token registry list imported"));
+  equal(dom.el("tokenRegistryName").value, "");
+  equal(dom.el("tokenRegistryEntriesJson").value, "");
+  equal(dom.el("tokenRegistryFilePath").value, "");
 });
 
 test("data-action dispatcher coerces args and restores button busy state", async () => {

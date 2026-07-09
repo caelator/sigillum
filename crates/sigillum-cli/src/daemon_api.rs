@@ -677,7 +677,7 @@ COMMANDS:
   deposits <list|create-native|create-erc20|scan-announcements|refresh|enqueue-sweep|delete> [...]
   evm <nonce|balance|erc20-balance|fees> [...]  (read-only; no broadcast)
   chains <list|upsert|delete> [...]
-  inventory <list|chains|watch|scan-evm> [...]  (scan supports --watch-address, --watch-address-file, --include-watch-book, --derivation-pattern, --account-limit)
+  inventory <list|chains|watch|token-registry|scan-evm> [...]  (scan supports --watch-address, --watch-address-file, --include-watch-book, --derivation-pattern, --account-limit, --probe-token-registry)
   discovery <jobs|scan-evm> [...]
   risk <list|catalog|catalog-upsert|catalog-delete> [...]
   plans <list|generate|approve|simulate|export> [...]

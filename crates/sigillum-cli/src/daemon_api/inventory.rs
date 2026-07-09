@@ -4,7 +4,8 @@ use std::collections::BTreeMap;
 use std::process;
 
 use sigillum_api::request::{
-    ChainProfileUpsertRequest, WalletInventoryScanRequest, WatchAddressBookUpsertRequest,
+    ChainProfileUpsertRequest, TokenRegistryImportRequest, WalletInventoryScanRequest,
+    WatchAddressBookUpsertRequest,
 };
 
 use super::inventory_args::{
@@ -16,9 +17,10 @@ use super::{
     run_api_command,
 };
 
-const USAGE: &str = "Usage: sigillum api inventory <list|chains|watch|scan-evm> [...]";
+const USAGE: &str =
+    "Usage: sigillum api inventory <list|chains|watch|token-registry|scan-evm> [...]";
 
-/// Dispatch `sigillum api inventory <list|chains|watch|scan-evm>`.
+/// Dispatch `sigillum api inventory <list|chains|watch|token-registry|scan-evm>`.
 pub(super) fn cmd_api_inventory(args: &[String]) {
     if args.len() < 2 {
         eprintln!("{USAGE}");
@@ -29,6 +31,7 @@ pub(super) fn cmd_api_inventory(args: &[String]) {
         "list" => list_inventory_with_chain_labels(args),
         "chains" => cmd_chains(args, 2, "sigillum api inventory chains"),
         "watch" => cmd_inventory_watch(args),
+        "token-registry" => cmd_inventory_token_registry(args),
         "scan-evm" => scan_evm(args),
         _ => {
             eprintln!("{USAGE}");
@@ -275,6 +278,50 @@ fn cmd_inventory_watch(args: &[String]) {
     }
 }
 
+fn cmd_inventory_token_registry(args: &[String]) {
+    if args.len() < 3 {
+        eprintln!("Usage: sigillum api inventory token-registry <list|import|delete> [...]");
+        process::exit(1);
+    }
+    match args[2].as_str() {
+        "list" => run_api_command(args, true, |client| async move {
+            client.list_token_registry().await
+        }),
+        "import" => {
+            let usage = "sigillum api inventory token-registry import --name <NAME> (--entries-json <JSON> | --file <PATH>)";
+            let name = require_flag(args, "--name", usage);
+            let entries_json = parse_flag(args, "--entries-json");
+            let file_path = parse_flag(args, "--file");
+            if entries_json.is_some() == file_path.is_some() {
+                eprintln!("Usage: {usage}");
+                process::exit(1);
+            }
+            let request = TokenRegistryImportRequest {
+                name,
+                entries_json,
+                file_path,
+            };
+            run_api_command(args, true, move |client| async move {
+                client.import_token_registry(request).await
+            });
+        }
+        "delete" => {
+            let name = require_flag(
+                args,
+                "--name",
+                "sigillum api inventory token-registry delete --name <NAME>",
+            );
+            run_api_command(args, true, move |client| async move {
+                client.delete_token_registry_list(&name).await
+            });
+        }
+        _ => {
+            eprintln!("Usage: sigillum api inventory token-registry <list|import|delete> [...]");
+            process::exit(1);
+        }
+    }
+}
+
 fn scan_evm(args: &[String]) {
     let request = WalletInventoryScanRequest {
         wallet_family: parse_flag(args, "--wallet-family"),
@@ -290,6 +337,7 @@ fn scan_evm(args: &[String]) {
         resume_from_latest_checkpoint: flag_option(args, "--resume-from-latest-checkpoint"),
         token_addresses: parse_multi_flag(args, "--token-address"),
         block_tag: parse_flag(args, "--block-tag"),
+        probe_token_registry: flag_option(args, "--probe-token-registry"),
         discover_erc20_transfers: flag_option(args, "--discover-erc20-transfers"),
         token_discovery_from_block: parse_flag(args, "--token-discovery-from-block"),
         token_discovery_to_block: parse_flag(args, "--token-discovery-to-block"),

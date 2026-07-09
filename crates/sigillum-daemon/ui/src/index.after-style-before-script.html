@@ -789,6 +789,16 @@
           <button class="btn-ghost" data-action="upsertBulkWatchAddressBookEntries">Save Bulk</button>
         </div>
         <div id="watchAddressBookList"></div>
+        <div class="section-divider"></div>
+        <div class="section-title">Token Registry (local import)</div>
+        <div class="form-row">
+          <input type="text" id="tokenRegistryName" placeholder="List name">
+          <input type="text" id="tokenRegistryFilePath" placeholder="Local file path on daemon host (optional)">
+          <button class="btn-ghost" data-action="importTokenRegistry">Import List</button>
+          <span class="help-tip" tabindex="0" data-tip="Token lists are imported from pasted JSON or a local file only &mdash; Sigillum never fetches lists from the network.">?</span>
+        </div>
+        <textarea id="tokenRegistryEntriesJson" placeholder='Pasted JSON entries: [{"chain_id":1,"address":"0x...","symbol":"USDC","decimals":6}]'></textarea>
+        <div id="tokenRegistryList"></div>
         <div class="form-row">
           <input type="text" id="inventoryTokenDiscoveryFromBlock" placeholder="ERC-20 discovery from block">
           <input type="text" id="inventoryTokenDiscoveryToBlock" placeholder="ERC-20 discovery to block (optional)">
@@ -796,6 +806,12 @@
           <label class="checkbox-row">
             <input type="checkbox" id="inventoryDiscoverErc20Transfers">
             Discover ERC-20 transfer logs
+          </label>
+        </div>
+        <div class="form-row">
+          <label class="checkbox-row">
+            <input type="checkbox" id="inventoryProbeTokenRegistry">
+            Probe imported token registry
           </label>
         </div>
         <div class="form-row">

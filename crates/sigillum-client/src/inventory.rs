@@ -1,11 +1,13 @@
 use reqwest::Method;
 use sigillum_api::request::{
-    ChainProfileDeleteRequest, ChainProfileUpsertRequest, WalletInventoryScanRequest,
-    WatchAddressBookDeleteRequest, WatchAddressBookUpsertRequest,
+    ChainProfileDeleteRequest, ChainProfileUpsertRequest, TokenRegistryDeleteRequest,
+    TokenRegistryImportRequest, WalletInventoryScanRequest, WatchAddressBookDeleteRequest,
+    WatchAddressBookUpsertRequest,
 };
 use sigillum_api::response::{
-    ChainProfileListResponse, ChainProfileMutationResponse, WalletInventoryListResponse,
-    WalletInventoryScanResponse, WatchAddressBookListResponse, WatchAddressBookMutationResponse,
+    ChainProfileListResponse, ChainProfileMutationResponse, TokenRegistryListResponse,
+    TokenRegistryMutationResponse, WalletInventoryListResponse, WalletInventoryScanResponse,
+    WatchAddressBookListResponse, WatchAddressBookMutationResponse,
 };
 
 use crate::{ClientError, SigillumClient};
@@ -52,6 +54,34 @@ impl SigillumClient {
         };
         let builder = self
             .request(Method::POST, "/api/inventory/watch-addresses/delete")
+            .json(&request);
+        self.send(builder).await
+    }
+
+    pub async fn list_token_registry(&self) -> Result<TokenRegistryListResponse, ClientError> {
+        let builder = self.request(Method::GET, "/api/inventory/token-registry");
+        self.send(builder).await
+    }
+
+    pub async fn import_token_registry(
+        &self,
+        request: TokenRegistryImportRequest,
+    ) -> Result<TokenRegistryMutationResponse, ClientError> {
+        let builder = self
+            .request(Method::POST, "/api/inventory/token-registry/import")
+            .json(&request);
+        self.send(builder).await
+    }
+
+    pub async fn delete_token_registry_list(
+        &self,
+        name: &str,
+    ) -> Result<TokenRegistryMutationResponse, ClientError> {
+        let request = TokenRegistryDeleteRequest {
+            name: name.to_string(),
+        };
+        let builder = self
+            .request(Method::POST, "/api/inventory/token-registry/delete")
             .json(&request);
         self.send(builder).await
     }
