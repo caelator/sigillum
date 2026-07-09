@@ -17,8 +17,11 @@ pub(crate) enum TransactionPolicyAction {
     #[allow(dead_code)]
     BlockUnsimulated,
     BlockRawDigest,
-    // consumed by W7.3 watch-only signer re-check (docs/release-1.0-plan.md)
-    #[allow(dead_code)]
+    /// Signer resolution defensively re-checked the source wallet family and
+    /// found it non-derivable (watch-only or unknown) at execution time.
+    /// Enqueue-validation makes this unreachable by construction (blockers
+    /// refuse watch-only steps before they can be enqueued); this variant is
+    /// the fail-closed re-check per W7.3's spec.
     BlockWatchOnlySigner,
 }
 
