@@ -8,7 +8,9 @@ mod failure;
 mod gates;
 mod pause;
 mod payloads;
+mod plan_steps;
 mod processing;
+mod seed_sends;
 mod state;
 mod sweeps;
 
@@ -157,4 +159,9 @@ impl SigillumService {
 pub(super) enum QueueExecution {
     Sent(sigillum_api::EthStealthSendResponse),
     Blocked(String),
+    /// Terminal-until-human (E1 `operator_action_required`): never
+    /// auto-retried. W7.3 uses this for evidence-hash tamper detection and
+    /// for any claim (`ClaimReward`) failure — a Merkle proof may be
+    /// consumed by a single broadcast attempt, so claims are never retried.
+    OperatorActionRequired(String),
 }
