@@ -6,10 +6,10 @@ use sigillum_api::request::QueueProcessRequest;
 
 use super::{parse_flag, parse_usize_flag, run_api_command};
 
-/// Dispatch `sigillum api queue <list|process>`.
+/// Dispatch `sigillum api queue <list|process|pause|resume>`.
 pub(super) fn cmd_api_queue(args: &[String]) {
     if args.len() < 2 {
-        eprintln!("Usage: sigillum api queue <list|process> [...]");
+        eprintln!("Usage: sigillum api queue <list|process|pause|resume> [...]");
         process::exit(1);
     }
 
@@ -26,8 +26,18 @@ pub(super) fn cmd_api_queue(args: &[String]) {
                 client.process_queue(request).await
             });
         }
+        "pause" => run_api_command(
+            args,
+            true,
+            |client| async move { client.pause_queue().await },
+        ),
+        "resume" => run_api_command(
+            args,
+            true,
+            |client| async move { client.resume_queue().await },
+        ),
         _ => {
-            eprintln!("Usage: sigillum api queue <list|process> [...]");
+            eprintln!("Usage: sigillum api queue <list|process|pause|resume> [...]");
             process::exit(1);
         }
     }

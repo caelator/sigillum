@@ -688,7 +688,7 @@ COMMANDS:
   plans <list|generate|approve|simulate|export> [...]
   receiving <overview|refresh-balances|tag-deposit> [...]
   treasury <overview|policy|policy-update|receive-list|receive-allocate|receive-rotate|parties> [...]
-  queue <list|process> [...]
+  queue <list|process|pause|resume> [...]
   transit <encrypt|decrypt|hmac> [...]
   wallets <xpub-export|xpub-derive|stealth-export|stealth-generate|stealth-check> [...]  (read/derive only; no sign/send)
   maintenance run [...]

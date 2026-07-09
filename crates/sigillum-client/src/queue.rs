@@ -7,8 +7,8 @@ use sigillum_api::request::{
 };
 
 use crate::{
-    ClientError, QueueEnqueueResponse, QueueJob, QueueJobListResponse, QueueProcessResponse,
-    SigillumClient,
+    ClientError, QueueEnqueueResponse, QueueExecutionPauseResponse, QueueJob, QueueJobListResponse,
+    QueueProcessResponse, SigillumClient,
 };
 
 impl SigillumClient {
@@ -67,6 +67,16 @@ impl SigillumClient {
         let builder = self
             .request(Method::POST, "/api/queue/process")
             .json(&request);
+        self.send(builder).await
+    }
+
+    pub async fn pause_queue(&self) -> Result<QueueExecutionPauseResponse, ClientError> {
+        let builder = self.request(Method::POST, "/api/queue/pause");
+        self.send(builder).await
+    }
+
+    pub async fn resume_queue(&self) -> Result<QueueExecutionPauseResponse, ClientError> {
+        let builder = self.request(Method::POST, "/api/queue/resume");
         self.send(builder).await
     }
 }
