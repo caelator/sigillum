@@ -438,6 +438,11 @@ pub struct ConsolidationPlanStep {
     pub linkage_warnings: Vec<String>,
     pub auto_eligible: bool,
     pub approved: bool,
+    /// Queue job id once this step has been enqueued for execution (W7.2).
+    /// Persistent idempotency marker: a step is enqueued at most once; a
+    /// failed job requires operator re-approval before re-enqueue.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub queued_job_id: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]

@@ -195,6 +195,7 @@ mod tests {
             linkage_warnings: Vec::new(),
             auto_eligible: false,
             approved: true,
+            queued_job_id: None,
         }
     }
 

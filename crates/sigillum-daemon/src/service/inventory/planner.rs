@@ -151,6 +151,7 @@ pub(super) fn plan_step_for_holding(
         linkage_warnings: Vec::new(),
         auto_eligible: false,
         approved: false,
+        queued_job_id: None,
     }
 }
 

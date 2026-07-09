@@ -286,6 +286,7 @@ fn fund_gas_step(
         linkage_warnings: Vec::new(),
         auto_eligible: false,
         approved: false,
+        queued_job_id: None,
     }
 }
 
@@ -440,6 +441,7 @@ mod tests {
             linkage_warnings: Vec::new(),
             auto_eligible: false,
             approved: false,
+            queued_job_id: None,
         }
     }
 
