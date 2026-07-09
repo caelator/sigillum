@@ -470,6 +470,12 @@ export interface TreasuryPolicy {
   allow_claim_execution?: boolean;
   allow_gas_topups?: boolean;
   max_gas_topup_wei_hex?: string | null;
+  allow_plan_execution?: boolean;
+  allow_sweep_execution?: boolean;
+  allow_revoke_execution?: boolean;
+  allow_exit_execution?: boolean;
+  execution_paused?: boolean;
+  max_fee_per_gas_cap_hex?: string | null;
   simulation_freshness_secs?: number;
   created_at_unix: number;
   updated_at_unix: number;
@@ -487,6 +493,11 @@ export interface TreasuryPolicyUpdateRequest {
   allow_claim_execution?: boolean | null;
   allow_gas_topups?: boolean | null;
   max_gas_topup_wei_hex?: string | null;
+  allow_plan_execution?: boolean | null;
+  allow_sweep_execution?: boolean | null;
+  allow_revoke_execution?: boolean | null;
+  allow_exit_execution?: boolean | null;
+  max_fee_per_gas_cap_hex?: string | null;
   simulation_freshness_secs?: number | null;
 }
 

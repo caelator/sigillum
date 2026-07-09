@@ -368,7 +368,17 @@ The CLI should have parity for automation:
     can be exported as call manifests or matching-Safe Transaction Builder
     batches. This creates auditable execution evidence for native/ERC-20/NFT
     sweeps and approval revokes while keeping direct signing and queue
-    execution disabled until signer-specific policy is implemented.
+    execution disabled until signer-specific policy is implemented. The
+    execution policy surface itself is now implemented (W7.1): per-family
+    fail-closed opt-ins (`allow_sweep_execution`, `allow_revoke_execution`,
+    `allow_exit_execution`) behind an `allow_plan_execution` master gate, a
+    runtime kill switch (`execution_paused`, `POST /api/queue/pause|resume`,
+    a UI pause control, and `sigillum api queue pause|resume`),
+    `max_fee_per_gas_cap_hex` reserved for later fee-bump logic, and typed
+    gate-flip audit events recording old/new values. Actual plan-step
+    enqueue, signing, and execution against these gates remain future work
+    (W7.2+); with all gates off (the default), today's behavior is
+    unchanged.
 6. DeFi position adapters. The D-11 exit adapter set is now complete: Aave v3
    withdraw, ERC-4626 redeem, Lido wstETH unwrap, and Uniswap v2 LP
    `removeLiquidity` exits are implemented. The Uniswap v2 adapter expands LP
@@ -395,7 +405,10 @@ The CLI should have parity for automation:
    dependent step via sequence/depends_on, simulated with fee-basis evidence,
    and subject to the cross-party common-funder linkage rule.
 9. Controlled execution for native/ERC-20 sweeps, gas top-ups, NFT transfers,
-   DeFi exits, claims, swaps, and treasury routing.
+   DeFi exits, claims, swaps, and treasury routing. The policy gates and
+   kill switch that will constrain this execution are implemented (see 5b);
+   the enqueue/signing/execution adapters that would actually act on them
+   are not yet built.
 10. Non-EVM chain families, starting with Bitcoin/UTXO and only then Solana,
    Tron, and Cosmos-style networks.
 

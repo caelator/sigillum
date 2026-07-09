@@ -51,6 +51,36 @@ export function parseEthToWeiHex(value: string): string | null {
   return "0x" + wei.toString(16);
 }
 
+const WEI_PER_GWEI = 10n ** 9n;
+
+export function formatWeiHexAsGwei(weiHex: string): string {
+  if (typeof weiHex !== "string") return "0";
+  const trimmed = weiHex.trim();
+  if (!/^0x[0-9a-fA-F]+$/.test(trimmed)) return "0";
+  let wei: bigint;
+  try {
+    wei = BigInt(trimmed);
+  } catch (_) {
+    return "0";
+  }
+  const whole = wei / WEI_PER_GWEI;
+  const fraction = wei % WEI_PER_GWEI;
+  if (fraction === 0n) return whole.toString();
+  const fractionText = fraction.toString().padStart(9, "0").replace(/0+$/, "");
+  return whole.toString() + "." + fractionText;
+}
+
+export function parseGweiToWeiHex(value: string): string | null {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  const match = /^(\d+)(?:\.(\d+))?$/.exec(trimmed);
+  if (!match) return null;
+  const fractionDigits = match[2] || "";
+  if (fractionDigits.length > 9) return null;
+  const wei = BigInt(match[1]) * WEI_PER_GWEI + BigInt(fractionDigits.padEnd(9, "0"));
+  return "0x" + wei.toString(16);
+}
+
 export function parseTreasuryDestinationLines(
   value: string | null | undefined,
 ): TreasuryAllowedDestination[] {
@@ -85,6 +115,10 @@ function formatDestinationLines(
 
 function capAsEth(weiHex: string | null | undefined): string {
   return weiHex ? formatWeiHexAsEth(weiHex) + " ETH" : "-";
+}
+
+function capAsGwei(weiHex: string | null | undefined): string {
+  return weiHex ? formatWeiHexAsGwei(weiHex) + " Gwei" : "-";
 }
 
 function nativeAmount(
@@ -363,6 +397,18 @@ export function createTreasuryActions(deps: TreasuryActionsDeps) {
           esc(String(Boolean(current.allow_gas_topups))) +
           " · maxGasTopup=" +
           esc(capAsEth(current.max_gas_topup_wei_hex)) +
+          " · allowPlanExecution=" +
+          esc(String(Boolean(current.allow_plan_execution))) +
+          " · allowSweepExecution=" +
+          esc(String(Boolean(current.allow_sweep_execution))) +
+          " · allowRevokeExecution=" +
+          esc(String(Boolean(current.allow_revoke_execution))) +
+          " · allowExitExecution=" +
+          esc(String(Boolean(current.allow_exit_execution))) +
+          " · maxFeePerGasCap=" +
+          esc(capAsGwei(current.max_fee_per_gas_cap_hex)) +
+          " · paused=" +
+          esc(String(Boolean(current.execution_paused))) +
           " · simulationFreshnessSecs=" +
           esc(String(current.simulation_freshness_secs ?? 900)) +
           " · updated=" +
@@ -394,6 +440,11 @@ export function createTreasuryActions(deps: TreasuryActionsDeps) {
             policy.allow_claim_execution,
             policy.allow_gas_topups,
             policy.max_gas_topup_wei_hex || null,
+            policy.allow_plan_execution,
+            policy.allow_sweep_execution,
+            policy.allow_revoke_execution,
+            policy.allow_exit_execution,
+            policy.max_fee_per_gas_cap_hex || null,
             policy.simulation_freshness_secs,
           ]
         : null,
@@ -417,6 +468,22 @@ export function createTreasuryActions(deps: TreasuryActionsDeps) {
     if (allowGasTopupsEl) {
       allowGasTopupsEl.checked = policy ? Boolean(policy.allow_gas_topups) : false;
     }
+    const allowPlanExecEl = input("treasuryPolicyAllowPlanExec");
+    if (allowPlanExecEl) {
+      allowPlanExecEl.checked = policy ? Boolean(policy.allow_plan_execution) : false;
+    }
+    const allowSweepExecEl = input("treasuryPolicyAllowSweepExec");
+    if (allowSweepExecEl) {
+      allowSweepExecEl.checked = policy ? Boolean(policy.allow_sweep_execution) : false;
+    }
+    const allowRevokeExecEl = input("treasuryPolicyAllowRevokeExec");
+    if (allowRevokeExecEl) {
+      allowRevokeExecEl.checked = policy ? Boolean(policy.allow_revoke_execution) : false;
+    }
+    const allowExitExecEl = input("treasuryPolicyAllowExitExec");
+    if (allowExitExecEl) {
+      allowExitExecEl.checked = policy ? Boolean(policy.allow_exit_execution) : false;
+    }
     const destinationsEl = input("treasuryPolicyDestinations");
     if (destinationsEl) {
       destinationsEl.value = policy
@@ -439,6 +506,12 @@ export function createTreasuryActions(deps: TreasuryActionsDeps) {
     if (maxGasTopupEl) {
       maxGasTopupEl.value = policy?.max_gas_topup_wei_hex
         ? formatWeiHexAsEth(policy.max_gas_topup_wei_hex)
+        : "";
+    }
+    const maxFeePerGasEl = input("treasuryPolicyMaxFeePerGasGwei");
+    if (maxFeePerGasEl) {
+      maxFeePerGasEl.value = policy?.max_fee_per_gas_cap_hex
+        ? formatWeiHexAsGwei(policy.max_fee_per_gas_cap_hex)
         : "";
     }
     const hotFloorEl = input("treasuryPolicyHotFloorEth");
@@ -673,6 +746,17 @@ export function createTreasuryActions(deps: TreasuryActionsDeps) {
       );
       return;
     }
+    const maxFeePerGasText = textValue("treasuryPolicyMaxFeePerGasGwei");
+    const maxFeePerGasWeiHex = parseGweiToWeiHex(maxFeePerGasText);
+    const maxFeePerGasInvalid = Boolean(maxFeePerGasText) && maxFeePerGasWeiHex === null;
+    markInvalid("treasuryPolicyMaxFeePerGasGwei", maxFeePerGasInvalid);
+    if (maxFeePerGasInvalid) {
+      deps.toast(
+        "Max fee per gas must be a decimal gwei amount with up to 9 decimals",
+        "error",
+      );
+      return;
+    }
     const hotFloorText = textValue("treasuryPolicyHotFloorEth");
     const hotFloorWeiHex = hotFloorText ? parseEthToWeiHex(hotFloorText) : null;
     const hotFloorInvalid = Boolean(hotFloorText) && hotFloorWeiHex === null;
@@ -717,6 +801,11 @@ export function createTreasuryActions(deps: TreasuryActionsDeps) {
       allow_claim_execution: Boolean(input("treasuryPolicyAllowClaimExec")?.checked),
       allow_gas_topups: Boolean(input("treasuryPolicyAllowGasTopups")?.checked),
       max_gas_topup_wei_hex: maxGasTopupWeiHex,
+      allow_plan_execution: Boolean(input("treasuryPolicyAllowPlanExec")?.checked),
+      allow_sweep_execution: Boolean(input("treasuryPolicyAllowSweepExec")?.checked),
+      allow_revoke_execution: Boolean(input("treasuryPolicyAllowRevokeExec")?.checked),
+      allow_exit_execution: Boolean(input("treasuryPolicyAllowExitExec")?.checked),
+      max_fee_per_gas_cap_hex: maxFeePerGasWeiHex,
     };
     if (freshnessText) {
       body.simulation_freshness_secs = freshnessSecs;

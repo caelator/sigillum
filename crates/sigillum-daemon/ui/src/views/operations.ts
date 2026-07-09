@@ -1,3 +1,4 @@
+import { setHiddenById } from "../render/dom";
 import {
   clearFields,
   optionalNumberValue,
@@ -444,6 +445,33 @@ export function createOperationsActions(deps: OperationsDeps) {
       lastQueueJobs = r.jobs || [];
       renderQueueJobs(lastQueueJobs);
     } catch (_) {}
+    try {
+      const policyResp = await deps.api("GET", "/api/treasury/policy");
+      const paused = Boolean(policyResp?.policy?.execution_paused);
+      setHiddenById("queuePausedBanner", !paused);
+      setHiddenById("queuePauseBtn", paused);
+      setHiddenById("queueResumeBtn", !paused);
+    } catch (_) {}
+  }
+
+  async function pauseQueueExecution(): Promise<void> {
+    const r = await deps.api("POST", "/api/queue/pause");
+    if (r.error) {
+      deps.toast(r.error, "error");
+      return;
+    }
+    deps.toast("Queue execution paused");
+    void loadQueueJobs();
+  }
+
+  async function resumeQueueExecution(): Promise<void> {
+    const r = await deps.api("POST", "/api/queue/resume");
+    if (r.error) {
+      deps.toast(r.error, "error");
+      return;
+    }
+    deps.toast("Queue execution resumed");
+    void loadQueueJobs();
   }
 
   async function processQueueBatch(): Promise<void> {
@@ -469,7 +497,8 @@ export function createOperationsActions(deps: OperationsDeps) {
         esc(String(r.operator_action_required || 0)) +
         " · failed=" +
         esc(String(r.failed || 0)) +
-        failureBreakdownLine(r.failures_by_cause),
+        failureBreakdownLine(r.failures_by_cause) +
+        (r.paused_reason ? " · paused: " + esc(String(r.paused_reason)) : ""),
     );
     lastQueueJobs = r.jobs || [];
     renderQueueJobs(lastQueueJobs);
@@ -564,6 +593,8 @@ export function createOperationsActions(deps: OperationsDeps) {
     enqueueDepositSweep,
     deleteDeposit,
     loadQueueJobs,
+    pauseQueueExecution,
+    resumeQueueExecution,
     processQueueBatch,
     processQueueJob,
     runMaintenanceCycle,
