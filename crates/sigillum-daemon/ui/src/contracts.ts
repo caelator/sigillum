@@ -48,6 +48,7 @@ export interface ChainProfile {
   finality_blocks: number;
   dormancy_block_window?: number;
   permit2_address?: string | null;
+  uniswap_v2_router_address?: string | null;
   rpc_profile?: string | null;
   explorer_url?: string | null;
   capabilities: string[];
@@ -271,6 +272,11 @@ export interface ConsolidationPlanStep {
   claim_adapter?: string | null;
   claim_index_hex?: string | null;
   claim_proof?: string[];
+  exit_token0_address?: string | null;
+  exit_token1_address?: string | null;
+  exit_amount0_min_hex?: string | null;
+  exit_amount1_min_hex?: string | null;
+  exit_deadline_unix?: number | null;
   amount_hex: string;
   destination_address?: string | null;
   signer_status: WalletSignerStatus;

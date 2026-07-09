@@ -10,6 +10,7 @@ mod claim_gate;
 mod consolidation;
 mod defi_adapters;
 mod defi_discovery;
+mod defi_exit_planning;
 mod discovery_jobs;
 mod export;
 mod nft_approval_discovery;

@@ -14,7 +14,6 @@ use super::checkpoints::{
     TOPIC_FAMILY_ERC1155_TRANSFER, effective_from_block, latest_cursor_block, update_block_cursor,
 };
 use super::claim_discovery::{ClaimCandidateDiscoveryConfig, claim_candidate_source};
-use super::defi_adapters::adapter_for_protocol;
 use super::defi_discovery::{DefiTokenPositionDiscoveryConfig, defi_token_probe_source};
 use super::nft_approval_discovery::{
     DISCOVERY_SOURCE_NFT_OPERATOR_APPROVAL_PROBE, NftOperatorApprovalDiscoveryConfig,
@@ -365,8 +364,7 @@ impl SigillumService {
                     &position.amount_hex,
                     &defi_token_probe_source(&position.protocol),
                 );
-                holding.claim_adapter =
-                    adapter_for_protocol(&position.protocol).map(str::to_string);
+                holding.claim_adapter = position.claim_adapter;
                 holdings.push(holding);
             }
         }

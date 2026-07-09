@@ -644,6 +644,11 @@ test("queue and inventory renderers produce reviewable DOM summaries", () => {
           amount_hex: "0xffff",
           counterparty_address: "0xspender",
           protocol_address: null,
+          exit_token0_address: "0xtoken0",
+          exit_token1_address: "0xtoken1",
+          exit_amount0_min_hex: "0x10",
+          exit_amount1_min_hex: "0x20",
+          exit_deadline_unix: 123456,
           signer_status: "available",
           simulation_status: "required",
           simulation_evidence: ["rpc_method=eth_call"],
@@ -658,6 +663,9 @@ test("queue and inventory renderers produce reviewable DOM summaries", () => {
   ]);
   ok(dom.el("consolidationPlanList").innerHTML.includes("revoke_erc20_approval"));
   ok(dom.el("consolidationPlanList").innerHTML.includes("0xspender"));
+  ok(dom.el("consolidationPlanList").innerHTML.includes("token0=0xtoken0"));
+  ok(dom.el("consolidationPlanList").innerHTML.includes("amount0Min=0x10"));
+  ok(dom.el("consolidationPlanList").innerHTML.includes("deadline=123456"));
   ok(dom.el("consolidationPlanList").innerHTML.includes("simulation=required"));
   ok(dom.el("consolidationPlanList").innerHTML.includes("rpc_method=eth_call"));
   ok(dom.el("consolidationPlanList").innerHTML.includes("simulateConsolidationPlan"));
@@ -691,6 +699,7 @@ test("chain profile UI renders registry fields and uses chain routes", async () 
     "chainProfileNativeDecimals",
     "chainProfileFinalityBlocks",
     "chainProfilePermit2Address",
+    "chainProfileUniswapV2Router",
   ]);
   const calls: Array<{ method: string; path: string; body?: any }> = [];
   const toasts: string[] = [];
@@ -705,6 +714,7 @@ test("chain profile UI renders registry fields and uses chain routes", async () 
         native_decimals: 18,
         finality_blocks: 0,
         permit2_address: null,
+        uniswap_v2_router_address: null,
         capabilities: [],
         enabled: true,
         source: "builtin",
@@ -719,6 +729,7 @@ test("chain profile UI renders registry fields and uses chain routes", async () 
         native_decimals: 18,
         finality_blocks: 64,
         permit2_address: "0x5555555555555555555555555555555555555555",
+        uniswap_v2_router_address: "0x6666666666666666666666666666666666666666",
         capabilities: ["erc20"],
         enabled: true,
         source: "operator",
@@ -764,6 +775,7 @@ test("chain profile UI renders registry fields and uses chain routes", async () 
   ok(chainHtml.includes("builtin"));
   ok(chainHtml.includes("finality=64"));
   ok(chainHtml.includes("0x5555555555555555555555555555555555555555"));
+  ok(chainHtml.includes("univ2Router=0x6666666666666666666666666666666666666666"));
   equal(chainHtml.split('data-action="deleteChainProfile"').length - 1, 1);
 
   await inventory.loadInventoryOperations();
@@ -778,6 +790,7 @@ test("chain profile UI renders registry fields and uses chain routes", async () 
   dom.el("chainProfileNativeDecimals").value = "18";
   dom.el("chainProfileFinalityBlocks").value = "32";
   dom.el("chainProfilePermit2Address").value = "0x5555555555555555555555555555555555555555";
+  dom.el("chainProfileUniswapV2Router").value = "0x6666666666666666666666666666666666666666";
   await inventory.upsertChainProfile();
   deepEqual(
     calls.find((call) => call.path === "/api/chains/upsert"),
@@ -793,6 +806,7 @@ test("chain profile UI renders registry fields and uses chain routes", async () 
         native_decimals: 18,
         finality_blocks: 32,
         permit2_address: "0x5555555555555555555555555555555555555555",
+        uniswap_v2_router_address: "0x6666666666666666666666666666666666666666",
         capabilities: [],
         enabled: true,
       },

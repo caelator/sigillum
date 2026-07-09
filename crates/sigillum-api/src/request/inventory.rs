@@ -258,6 +258,8 @@ pub struct ChainProfileUpsertRequest {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub permit2_address: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub uniswap_v2_router_address: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub explorer_url: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub capabilities: Vec<String>,

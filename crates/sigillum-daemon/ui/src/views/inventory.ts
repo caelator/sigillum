@@ -233,6 +233,8 @@ export function createInventoryActions(deps: InventoryActionsDeps) {
         "<br>" +
         "permit2=" +
         esc(profile.permit2_address || "-") +
+        " · univ2Router=" +
+        esc(profile.uniswap_v2_router_address || "-") +
         " · " +
         "capabilities=" +
         esc((profile.capabilities || []).join(", ") || "-") +
@@ -735,6 +737,17 @@ export function createInventoryActions(deps: InventoryActionsDeps) {
                 : "") +
               (step.protocol_address ? " · protocol=" + esc(step.protocol_address) : "") +
               (step.claim_adapter ? " · claimAdapter=" + esc(step.claim_adapter) : "") +
+              (step.exit_token0_address ? " · token0=" + esc(step.exit_token0_address) : "") +
+              (step.exit_token1_address ? " · token1=" + esc(step.exit_token1_address) : "") +
+              (step.exit_amount0_min_hex
+                ? " · amount0Min=" + esc(step.exit_amount0_min_hex)
+                : "") +
+              (step.exit_amount1_min_hex
+                ? " · amount1Min=" + esc(step.exit_amount1_min_hex)
+                : "") +
+              (step.exit_deadline_unix
+                ? " · deadline=" + esc(String(step.exit_deadline_unix))
+                : "") +
               (step.claim_index_hex ? " · claimIndex=" + esc(step.claim_index_hex) : "") +
               ((step.claim_proof || []).length
                 ? " · proofWords=" + esc(String((step.claim_proof || []).length))
@@ -847,6 +860,7 @@ export function createInventoryActions(deps: InventoryActionsDeps) {
       native_decimals: optionalNumberValue("chainProfileNativeDecimals"),
       finality_blocks: optionalNumberValue("chainProfileFinalityBlocks"),
       permit2_address: optionalTextValue("chainProfilePermit2Address"),
+      uniswap_v2_router_address: optionalTextValue("chainProfileUniswapV2Router"),
       capabilities: [],
       enabled: true,
     });
@@ -863,6 +877,7 @@ export function createInventoryActions(deps: InventoryActionsDeps) {
       "chainProfileNativeDecimals",
       "chainProfileFinalityBlocks",
       "chainProfilePermit2Address",
+      "chainProfileUniswapV2Router",
     ]);
     deps.toast("Chain profile saved");
     void loadInventoryOperations();

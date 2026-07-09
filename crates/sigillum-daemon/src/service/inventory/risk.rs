@@ -561,6 +561,7 @@ mod tests {
             finality_blocks: 0,
             dormancy_block_window: window,
             permit2_address: None,
+            uniswap_v2_router_address: None,
             explorer_url: None,
             capabilities: Vec::new(),
             enabled: true,

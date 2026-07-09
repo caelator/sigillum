@@ -239,6 +239,8 @@ pub struct ChainProfile {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub permit2_address: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub uniswap_v2_router_address: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub explorer_url: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub capabilities: Vec<String>,
@@ -407,6 +409,21 @@ pub struct ConsolidationPlanStep {
     pub claim_index_hex: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub claim_proof: Vec<String>,
+    /// Uniswap v2 exit token0 address computed at plan time.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub exit_token0_address: Option<String>,
+    /// Uniswap v2 exit token1 address computed at plan time.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub exit_token1_address: Option<String>,
+    /// Uniswap v2 minimum token0 amount computed at plan time.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub exit_amount0_min_hex: Option<String>,
+    /// Uniswap v2 minimum token1 amount computed at plan time.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub exit_amount1_min_hex: Option<String>,
+    /// Uniswap v2 removeLiquidity deadline computed at plan time.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub exit_deadline_unix: Option<u64>,
     pub amount_hex: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub destination_address: Option<String>,

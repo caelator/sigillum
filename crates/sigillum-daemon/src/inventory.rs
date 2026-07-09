@@ -148,6 +148,7 @@ mod tests {
             finality_blocks: 0,
             dormancy_block_window: sigillum_api::DEFAULT_DORMANCY_BLOCK_WINDOW,
             permit2_address: None,
+            uniswap_v2_router_address: None,
             explorer_url: None,
             capabilities: vec!["native".into(), "erc20".into()],
             enabled: true,
@@ -342,6 +343,11 @@ mod tests {
                 claim_adapter: None,
                 claim_index_hex: None,
                 claim_proof: Vec::new(),
+                exit_token0_address: None,
+                exit_token1_address: None,
+                exit_amount0_min_hex: None,
+                exit_amount1_min_hex: None,
+                exit_deadline_unix: None,
                 amount_hex: "0x1".into(),
                 destination_address: None,
                 signer_status: sigillum_api::WalletSignerStatus::Other("future_signer".into()),
@@ -632,6 +638,89 @@ mod tests {
         assert!(saved["data"]["addresses"].is_array());
         assert!(saved["data"]["holdings"].is_array());
         assert!(saved["data"]["risk_catalog"].is_array());
+    }
+
+    #[test]
+    fn legacy_v15_inventory_loads_without_uniswap_v2_router_or_exit_fields() {
+        let dir = TempDir::new().unwrap();
+        let path = wallet_inventory_path(dir.path());
+        std::fs::write(
+            &path,
+            serde_json::to_vec_pretty(&json!({
+                "schema": "sigillum.wallet-inventory",
+                "schema_version": 15,
+                "data": {
+                    "chain_profiles": [{
+                        "name": "custom-l2",
+                        "chain_family": "evm",
+                        "chain_id": 7777,
+                        "provider_profile": "l2",
+                        "native_symbol": "ETH",
+                        "native_decimals": 18,
+                        "finality_blocks": 0,
+                        "dormancy_block_window": sigillum_api::DEFAULT_DORMANCY_BLOCK_WINDOW,
+                        "enabled": true,
+                        "source": "operator",
+                        "builtin": false,
+                        "created_at_unix": 1,
+                        "updated_at_unix": 2
+                    }],
+                    "consolidation_plans": [{
+                        "id": "plan_legacy",
+                        "status": "review_required",
+                        "chain_id": 7777,
+                        "created_at_unix": 1,
+                        "updated_at_unix": 2,
+                        "summary": {
+                            "total_steps": 1,
+                            "blocked_steps": 0,
+                            "review_required_steps": 1,
+                            "approved_steps": 0,
+                            "executable_steps": 0,
+                            "value_items": 1
+                        },
+                        "steps": [{
+                            "id": "step_legacy",
+                            "sequence": 0,
+                            "action": "exit_defi_position",
+                            "status": "review_required",
+                            "wallet_family": "eth-seed",
+                            "wallet_profile": "seed-main",
+                            "provider_profile": "l2",
+                            "chain_id": 7777,
+                            "address": "0x1111111111111111111111111111111111111111",
+                            "derivation_path": "m/44'/60'/0'/0/0",
+                            "asset_kind": "defi",
+                            "asset_address": "0xdeadfa1200000000000000000000000000000aaa",
+                            "protocol_address": "0xdeadfa1200000000000000000000000000000aaa",
+                            "claim_adapter": "uniswap-v2-remove-liquidity",
+                            "amount_hex": "0xf4240",
+                            "signer_status": "available",
+                            "simulation_status": "required",
+                            "risk_level": "low",
+                            "auto_eligible": false,
+                            "approved": false
+                        }]
+                    }]
+                }
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+
+        let loaded = load_wallet_inventory(dir.path()).unwrap();
+        let custom = loaded
+            .chain_profiles
+            .iter()
+            .find(|profile| profile.name == "custom-l2")
+            .expect("custom profile loaded");
+        assert!(custom.uniswap_v2_router_address.is_none());
+        let step = &loaded.consolidation_plans[0].steps[0];
+        assert!(step.exit_token0_address.is_none());
+        assert!(step.exit_token1_address.is_none());
+        assert!(step.exit_amount0_min_hex.is_none());
+        assert!(step.exit_amount1_min_hex.is_none());
+        assert!(step.exit_deadline_unix.is_none());
     }
 
     #[test]
