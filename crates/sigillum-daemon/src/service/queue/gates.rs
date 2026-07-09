@@ -123,7 +123,11 @@ impl SigillumService {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
+    use sigillum_api::QueueJobPayload;
     use sigillum_api::TreasuryPolicy;
+    use tempfile::TempDir;
 
     use super::*;
 
@@ -163,15 +167,44 @@ mod tests {
         }
     }
 
-    #[test]
-    fn execution_gate_denial_covers_all_families() {
-        for family in [
+    fn all_families() -> [ExecutionFamily; 5] {
+        [
             ExecutionFamily::Sweep,
             ExecutionFamily::Revoke,
             ExecutionFamily::Exit,
             ExecutionFamily::Claim,
             ExecutionFamily::GasTopup,
-        ] {
+        ]
+    }
+
+    fn test_service() -> (TempDir, SigillumService) {
+        let dir = TempDir::new().unwrap();
+        let state = Arc::new(
+            crate::AppState::new(dir.path().to_path_buf()).expect("app state should initialize"),
+        );
+        let service = SigillumService::new(state);
+        (dir, service)
+    }
+
+    fn persist_policy(dir: &TempDir, policy: Option<TreasuryPolicy>) {
+        let mut state = crate::inventory::load_wallet_inventory(dir.path()).unwrap();
+        state.treasury_policy = policy;
+        crate::inventory::save_wallet_inventory(dir.path(), &state).unwrap();
+    }
+
+    fn forbidden_message(result: ServiceResult<()>) -> String {
+        let error = result.unwrap_err();
+        assert_eq!(error.status(), axum::http::StatusCode::FORBIDDEN);
+        error.message().to_string()
+    }
+
+    fn deny_from_current_policy(service: &SigillumService, family: ExecutionFamily) -> String {
+        execution_gate_denial(service.current_treasury_policy().unwrap().as_ref(), family).unwrap()
+    }
+
+    #[test]
+    fn execution_gate_denial_covers_all_families() {
+        for family in all_families() {
             assert_eq!(
                 execution_gate_denial(None, family).as_deref(),
                 Some("execution_gate: plan execution requires an enabled treasury policy")
@@ -290,5 +323,113 @@ mod tests {
         for payload in payloads {
             assert_eq!(queue_payload_execution_family(&payload), None);
         }
+    }
+
+    #[test]
+    fn enqueue_time_gate_negatives_per_family() {
+        for family in all_families() {
+            let (dir, service) = test_service();
+
+            persist_policy(&dir, None);
+            let message = forbidden_message(service.require_execution_family_allowed(family));
+            assert!(message.contains("enabled treasury policy"));
+
+            let mut policy = sample_policy();
+            policy.allow_plan_execution = false;
+            enable_family(&mut policy, family);
+            persist_policy(&dir, Some(policy));
+            let message = forbidden_message(service.require_execution_family_allowed(family));
+            assert!(message.contains("allow_plan_execution"));
+
+            let policy = sample_policy();
+            persist_policy(&dir, Some(policy));
+            let message = forbidden_message(service.require_execution_family_allowed(family));
+            assert!(message.contains(family.gate_field()));
+
+            let mut policy = sample_policy();
+            enable_family(&mut policy, family);
+            policy.execution_paused = true;
+            persist_policy(&dir, Some(policy));
+            let message = forbidden_message(service.require_execution_family_allowed(family));
+            assert!(message.contains("execution_paused"));
+
+            let mut policy = sample_policy();
+            enable_family(&mut policy, family);
+            persist_policy(&dir, Some(policy));
+            service.require_execution_family_allowed(family).unwrap();
+        }
+    }
+
+    #[test]
+    fn execution_time_gate_negatives_per_family() {
+        for family in all_families() {
+            let (dir, service) = test_service();
+
+            persist_policy(&dir, None);
+            assert_eq!(
+                deny_from_current_policy(&service, family),
+                "execution_gate: plan execution requires an enabled treasury policy"
+            );
+            assert!(!service.queue_execution_paused().unwrap());
+
+            let mut policy = sample_policy();
+            policy.allow_plan_execution = false;
+            enable_family(&mut policy, family);
+            persist_policy(&dir, Some(policy));
+            assert_eq!(
+                deny_from_current_policy(&service, family),
+                "execution_gate: allow_plan_execution is disabled"
+            );
+            assert!(!service.queue_execution_paused().unwrap());
+
+            let policy = sample_policy();
+            persist_policy(&dir, Some(policy));
+            assert_eq!(
+                deny_from_current_policy(&service, family),
+                format!("execution_gate: {} is disabled", family.gate_field())
+            );
+            assert!(!service.queue_execution_paused().unwrap());
+
+            let mut policy = sample_policy();
+            enable_family(&mut policy, family);
+            policy.execution_paused = true;
+            persist_policy(&dir, Some(policy));
+            assert_eq!(
+                deny_from_current_policy(&service, family),
+                EXECUTION_PAUSED_REASON
+            );
+            assert!(service.queue_execution_paused().unwrap());
+
+            let mut policy = sample_policy();
+            enable_family(&mut policy, family);
+            persist_policy(&dir, Some(policy));
+            assert_eq!(
+                execution_gate_denial(service.current_treasury_policy().unwrap().as_ref(), family),
+                None
+            );
+            assert!(!service.queue_execution_paused().unwrap());
+        }
+    }
+
+    #[test]
+    fn stealth_payloads_bypass_gate_block_reason_even_under_hostile_policy() {
+        let (dir, service) = test_service();
+        let mut policy = sample_policy();
+        policy.allow_plan_execution = false;
+        policy.execution_paused = true;
+        persist_policy(&dir, Some(policy));
+
+        let payload = QueueJobPayload::EthStealthNativeSweep {
+            wallet_profile: "stealth".into(),
+            stealth_address: "0x1111111111111111111111111111111111111111".into(),
+            ephemeral_public_key_hex: "02aa".into(),
+            destination_address: None,
+            min_value_wei_hex: None,
+            gas_limit: None,
+            view_tag_hex: None,
+        };
+
+        assert_eq!(service.execution_gate_block_reason(&payload).unwrap(), None);
+        assert!(service.queue_execution_paused().unwrap());
     }
 }
