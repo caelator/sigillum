@@ -1,11 +1,14 @@
 use reqwest::Method;
 use sigillum_api::request::{
-    ChainProfileDeleteRequest, ChainProfileUpsertRequest, WalletInventoryScanRequest,
-    WatchAddressBookDeleteRequest, WatchAddressBookUpsertRequest,
+    ChainProfileDeleteRequest, ChainProfileUpsertRequest, NftMetadataFetchRequest,
+    NftMetadataOptInDeleteRequest, NftMetadataOptInUpsertRequest, NftMetadataSettingsUpdateRequest,
+    WalletInventoryScanRequest, WatchAddressBookDeleteRequest, WatchAddressBookUpsertRequest,
 };
 use sigillum_api::response::{
-    ChainProfileListResponse, ChainProfileMutationResponse, WalletInventoryListResponse,
-    WalletInventoryScanResponse, WatchAddressBookListResponse, WatchAddressBookMutationResponse,
+    ChainProfileListResponse, ChainProfileMutationResponse, NftMetadataFetchResponse,
+    NftMetadataOptInListResponse, NftMetadataOptInMutationResponse, NftMetadataSettingsResponse,
+    WalletInventoryListResponse, WalletInventoryScanResponse, WatchAddressBookListResponse,
+    WatchAddressBookMutationResponse,
 };
 
 use crate::{ClientError, SigillumClient};
@@ -22,6 +25,53 @@ impl SigillumClient {
     ) -> Result<WalletInventoryScanResponse, ClientError> {
         let builder = self
             .request(Method::POST, "/api/inventory/scan/evm")
+            .json(&request);
+        self.send(builder).await
+    }
+
+    pub async fn list_nft_metadata_optins(
+        &self,
+    ) -> Result<NftMetadataOptInListResponse, ClientError> {
+        let builder = self.request(Method::GET, "/api/inventory/nft-metadata/opt-ins");
+        self.send(builder).await
+    }
+
+    pub async fn upsert_nft_metadata_optin(
+        &self,
+        request: NftMetadataOptInUpsertRequest,
+    ) -> Result<NftMetadataOptInMutationResponse, ClientError> {
+        let builder = self
+            .request(Method::POST, "/api/inventory/nft-metadata/opt-ins/upsert")
+            .json(&request);
+        self.send(builder).await
+    }
+
+    pub async fn delete_nft_metadata_optin(
+        &self,
+        request: NftMetadataOptInDeleteRequest,
+    ) -> Result<NftMetadataOptInMutationResponse, ClientError> {
+        let builder = self
+            .request(Method::POST, "/api/inventory/nft-metadata/opt-ins/delete")
+            .json(&request);
+        self.send(builder).await
+    }
+
+    pub async fn update_nft_metadata_settings(
+        &self,
+        request: NftMetadataSettingsUpdateRequest,
+    ) -> Result<NftMetadataSettingsResponse, ClientError> {
+        let builder = self
+            .request(Method::POST, "/api/inventory/nft-metadata/settings")
+            .json(&request);
+        self.send(builder).await
+    }
+
+    pub async fn fetch_nft_metadata(
+        &self,
+        request: NftMetadataFetchRequest,
+    ) -> Result<NftMetadataFetchResponse, ClientError> {
+        let builder = self
+            .request(Method::POST, "/api/inventory/nft-metadata/fetch")
             .json(&request);
         self.send(builder).await
     }
