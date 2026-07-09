@@ -80,8 +80,13 @@ Required discovery classes:
   and positive balances discovered through provider APIs or local index data.
   The first bounded transfer-log discovery slice is implemented for EVM
   inventory scans and now persists per-address/chain/topic block cursors so
-  later scans resume from the last scanned transfer-log block. Registries,
-  indexers, and richer positive-balance evidence remain future work.
+  later scans resume from the last scanned transfer-log block. Operator-imported
+  local token registries are now implemented: lists are imported from pasted JSON
+  or a local file path, never fetched from the network (D-15). Scans with
+  `probe_token_registry` probe matching-chain entries with `balanceOf`, record
+  positive balances as holdings with `token_registry:<list-name>` provenance,
+  and skip wrong-chain entries. Indexers and richer positive-balance evidence
+  remain future work.
 - NFT discovery for ERC-721 and ERC-1155 ownership, including metadata caching,
   spam filtering, and optional floor or collection valuation providers.
   The first bounded ERC-721 transfer-log slice is implemented for EVM inventory
