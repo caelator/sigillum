@@ -114,6 +114,8 @@ pub(super) fn plan_step_for_holding(
 
     ConsolidationPlanStep {
         id: random_id(),
+        sequence: 0,
+        depends_on: Vec::new(),
         action,
         status,
         wallet_family: holding.wallet_family.clone(),
@@ -144,6 +146,12 @@ pub(super) fn plan_step_for_holding(
         linkage_warnings: Vec::new(),
         auto_eligible: false,
         approved: false,
+    }
+}
+
+pub(super) fn assign_step_ordering(steps: &mut [ConsolidationPlanStep]) {
+    for (index, step) in steps.iter_mut().enumerate() {
+        step.sequence = index as u32;
     }
 }
 
@@ -686,6 +694,23 @@ mod tests {
         holding.asset_address = None;
         holding.amount_hex = "0x1".into();
         plan_step_for_holding(&holding, Some(destination_address.into()), "available")
+    }
+
+    #[test]
+    fn planner_assign_step_ordering_sets_contiguous_sequence() {
+        let destination = "0x9999999999999999999999999999999999999999";
+        let mut steps = vec![
+            sample_sweep_step("0x1111111111111111111111111111111111111111", destination),
+            sample_sweep_step("0x2222222222222222222222222222222222222222", destination),
+            sample_sweep_step("0x3333333333333333333333333333333333333333", destination),
+        ];
+
+        assign_step_ordering(&mut steps);
+
+        assert_eq!(steps[0].sequence, 0);
+        assert_eq!(steps[1].sequence, 1);
+        assert_eq!(steps[2].sequence, 2);
+        assert!(steps.iter().all(|step| step.depends_on.is_empty()));
     }
 
     fn sample_native_holding_at(address: &str) -> WalletAssetHolding {

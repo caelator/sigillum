@@ -133,9 +133,12 @@ Required discovery classes:
   single-chain; all-chain inventory produces separate per-chain plans, and
   operators can request a specific `chain_id` when generating a plan. Revoke
   and sweep transaction calldata can be preflighted and exported after
-  explicit approval and successful simulation. External spender registries,
-  expiration-aware Permit2 scoring, dynamic fee policy, and direct queue
-  execution remain future work.
+  explicit approval and successful simulation. Plan steps now carry
+  planner-assigned sequence numbers and explicit step dependencies, and exports
+  emit steps in dependency order while refusing (fail-closed) to export any step
+  whose dependency is blocked or skipped, naming the dependency in the skip
+  reason. External spender registries, expiration-aware Permit2 scoring,
+  dynamic fee policy, and direct queue execution remain future work.
 - Dormant-wallet classification using derived last activity, current value,
   token/NFT/DeFi exposure, gas availability, and whether the private key or
   signing path is actually available. Inventory addresses now carry a derived

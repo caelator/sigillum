@@ -308,6 +308,8 @@ fn wallet_inventory_legacy_json_domains_deserialize_unchanged() {
         fixture.plan.steps[0].simulation_status,
         WalletSimulationStatus::Required
     );
+    assert_eq!(fixture.plan.steps[0].sequence, 0);
+    assert!(fixture.plan.steps[0].depends_on.is_empty());
 }
 
 #[test]

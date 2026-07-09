@@ -377,6 +377,12 @@ pub struct ConsolidationPlanSummary {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ConsolidationPlanStep {
     pub id: String,
+    /// Planner-assigned 0-based ordering hint for export/execution.
+    #[serde(default)]
+    pub sequence: u32,
+    /// Ids of plan steps that must be exported/executed successfully before this step.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub depends_on: Vec<String>,
     pub action: WalletPlanStepAction,
     pub status: WalletPlanStepStatus,
     pub wallet_family: String,

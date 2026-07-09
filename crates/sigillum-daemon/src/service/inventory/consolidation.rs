@@ -12,8 +12,8 @@ use crate::inventory::WalletInventoryState;
 use super::super::helpers::{now_unix, random_id};
 use super::super::{ServiceError, ServiceResult, SigillumService};
 use super::planner::{
-    analyze_plan_linkage, apply_linkage_blockers, apply_policy_blockers_to_step, build_plan_steps,
-    plan_policy_violations, summarize_plan_steps,
+    analyze_plan_linkage, apply_linkage_blockers, apply_policy_blockers_to_step,
+    assign_step_ordering, build_plan_steps, plan_policy_violations, summarize_plan_steps,
 };
 use super::simulation::parse_simulated_at_unix;
 use super::support::{load_inventory_state, save_inventory_state, trimmed_optional};
@@ -57,6 +57,7 @@ impl SigillumService {
 
         let mut generated_plans = Vec::new();
         for (chain_id, mut steps) in steps_by_chain {
+            assign_step_ordering(&mut steps);
             // Policy runs after planning so planner blockers and policy verdicts
             // are both visible on each step, then the summary reflects the final
             // step statuses.

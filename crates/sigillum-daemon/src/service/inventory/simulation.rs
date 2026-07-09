@@ -620,6 +620,8 @@ mod tests {
     fn sample_step(amount_hex: &str) -> ConsolidationPlanStep {
         ConsolidationPlanStep {
             id: "step_1".into(),
+            sequence: 0,
+            depends_on: Vec::new(),
             action: "sweep_native".into(),
             status: "review_required".into(),
             wallet_family: "eth-seed".into(),

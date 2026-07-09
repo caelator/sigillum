@@ -253,6 +253,8 @@ export interface ConsolidationPlanSummary {
 
 export interface ConsolidationPlanStep {
   id: string;
+  sequence?: number;
+  depends_on?: string[];
   action: WalletPlanStepAction;
   status: WalletPlanStepStatus;
   wallet_family: string;
