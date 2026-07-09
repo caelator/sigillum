@@ -331,6 +331,7 @@ pub(super) fn build_plan_steps(
             body.chain_id
                 .is_none_or(|chain_id| chain_id == holding.chain_id)
         })
+        .filter(|holding| !is_seed_control_reserve_holding(registry, holding))
     {
         let signer_status = signer_status_for_holding(holding);
         if signer_status == WalletSignerStatus::WatchOnly && body.include_watch_only != Some(true) {
@@ -371,6 +372,33 @@ pub(super) fn build_plan_steps(
     }
 
     steps
+}
+
+fn is_seed_control_reserve_holding(
+    registry: &ProfileRegistry,
+    holding: &WalletAssetHolding,
+) -> bool {
+    if holding.wallet_family != WALLET_FAMILY_ETH_SEED
+        || holding.asset_kind != WalletAssetKind::Native
+    {
+        return false;
+    }
+    let Some(profile) = registry
+        .eth_seed_wallets
+        .iter()
+        .find(|profile| profile.name == holding.wallet_profile)
+    else {
+        return false;
+    };
+
+    [
+        profile.sponsor_address.as_deref(),
+        profile.hot_address.as_deref(),
+        profile.treasury_address.as_deref(),
+    ]
+    .into_iter()
+    .flatten()
+    .any(|address| address.eq_ignore_ascii_case(&holding.address))
 }
 
 fn resolve_default_destination(
@@ -912,6 +940,39 @@ mod tests {
         let registry = sample_seed_registry();
         let holding = sample_native_holding_at("0x1111111111111111111111111111111111111111");
         resolve_default_destination(&state, &registry, &holding, &None)
+    }
+
+    #[test]
+    fn build_plan_steps_skips_seed_control_reserve_native_holdings() {
+        let mut registry = sample_seed_registry();
+        registry.eth_seed_wallets[0].sponsor_address =
+            Some("0x4444444444444444444444444444444444444444".into());
+        let state = WalletInventoryState {
+            holdings: vec![
+                sample_native_holding_at("0x1111111111111111111111111111111111111111"),
+                sample_native_holding_at("0x2222222222222222222222222222222222222222"),
+                sample_native_holding_at("0x3333333333333333333333333333333333333333"),
+                sample_native_holding_at("0x4444444444444444444444444444444444444444"),
+            ],
+            ..WalletInventoryState::default()
+        };
+        let body = sample_plan_request(
+            Some("0x5555555555555555555555555555555555555555"),
+            Vec::new(),
+        );
+
+        let steps = build_plan_steps(
+            &state,
+            &registry,
+            &body,
+            &Some("0x5555555555555555555555555555555555555555".into()),
+        );
+
+        assert_eq!(steps.len(), 1);
+        assert_eq!(
+            steps[0].address,
+            "0x1111111111111111111111111111111111111111"
+        );
     }
 
     #[test]
