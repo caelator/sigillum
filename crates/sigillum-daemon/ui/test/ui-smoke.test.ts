@@ -448,6 +448,7 @@ test("queue and inventory renderers produce reviewable DOM summaries", () => {
         wallet_profile: "archive",
         chain_id: 1,
         derivation_path: "m/44'/60'/0'/0/0",
+        last_activity_block: 123456,
         classifications: ["signer_available", "dormant_candidate"],
       },
     ],
@@ -466,6 +467,7 @@ test("queue and inventory renderers produce reviewable DOM summaries", () => {
   });
   ok(dom.el("inventoryJobList").innerHTML.includes("scan-1"));
   ok(dom.el("inventoryAddressList").innerHTML.includes("0xabc"));
+  ok(dom.el("inventoryAddressList").innerHTML.includes("lastActivityBlock=123456"));
   ok(dom.el("inventoryAddressList").innerHTML.includes("dormant_candidate"));
   ok(dom.el("inventoryHoldingList").innerHTML.includes("native"));
   ok(dom.el("inventoryHoldingList").innerHTML.includes("0xpermit2"));

@@ -621,6 +621,7 @@ fn test_wallet_inventory_scan_response_roundtrip() {
         activity_state: WalletAddressActivityState::Funded,
         native_balance_wei_hex: "0x1".to_string(),
         transaction_count: 1,
+        last_activity_block: None,
         classifications: vec![
             WalletAddressClassification::SignerAvailable,
             WalletAddressClassification::GasAvailable,
@@ -761,6 +762,49 @@ fn test_nft_metadata_responses_roundtrip() {
 }
 
 #[test]
+fn test_wallet_inventory_address_last_activity_block_defaults_and_roundtrips() {
+    let legacy = serde_json::json!({
+        "id": "addr_legacy",
+        "wallet_family": "eth-seed",
+        "wallet_profile": "seed-main",
+        "provider_profile": "mainnet",
+        "chain_id": 1,
+        "address": "0x1111111111111111111111111111111111111111",
+        "derivation_path": "m/44'/60'/0'/0/0",
+        "address_index": 0,
+        "activity_state": "funded",
+        "native_balance_wei_hex": "0x1",
+        "transaction_count": 1,
+        "source": "local-rpc",
+        "first_seen_at_unix": 1,
+        "last_checked_at_unix": 2
+    });
+    let decoded: WalletInventoryAddress = serde_json::from_value(legacy).unwrap();
+    assert_eq!(decoded.last_activity_block, None);
+
+    let with_activity = serde_json::json!({
+        "id": "addr_active",
+        "wallet_family": "eth-seed",
+        "wallet_profile": "seed-main",
+        "provider_profile": "mainnet",
+        "chain_id": 1,
+        "address": "0x1111111111111111111111111111111111111111",
+        "derivation_path": "m/44'/60'/0'/0/0",
+        "address_index": 0,
+        "activity_state": "funded",
+        "native_balance_wei_hex": "0x1",
+        "transaction_count": 1,
+        "last_activity_block": 12345,
+        "source": "local-rpc",
+        "first_seen_at_unix": 1,
+        "last_checked_at_unix": 2
+    });
+    let decoded: WalletInventoryAddress = serde_json::from_value(with_activity).unwrap();
+    assert_eq!(decoded.last_activity_block, Some(12345));
+    roundtrip_test(decoded);
+}
+
+#[test]
 fn test_watch_address_book_responses_roundtrip() {
     let entry = WatchAddressBookEntry {
         id: "watch_1".to_string(),
@@ -792,6 +836,7 @@ fn test_wallet_operations_response_roundtrips() {
         native_symbol: "ETH".to_string(),
         native_decimals: 18,
         finality_blocks: 12,
+        dormancy_block_window: DEFAULT_DORMANCY_BLOCK_WINDOW,
         permit2_address: Some("0x000000000022d473030f116ddee9f6b43ac78ba3".to_string()),
         explorer_url: Some("https://basescan.org".to_string()),
         capabilities: vec!["native".to_string(), "erc20".to_string()],
@@ -808,6 +853,22 @@ fn test_wallet_operations_response_roundtrips() {
         status: "upserted".to_string(),
         profile: chain,
     });
+
+    let legacy = serde_json::json!({
+        "name": "base",
+        "chain_family": "evm",
+        "chain_id": 8453,
+        "native_symbol": "ETH",
+        "native_decimals": 18,
+        "finality_blocks": 12,
+        "enabled": true,
+        "source": "operator",
+        "builtin": false,
+        "created_at_unix": 1,
+        "updated_at_unix": 2
+    });
+    let decoded: ChainProfile = serde_json::from_value(legacy).unwrap();
+    assert_eq!(decoded.dormancy_block_window, DEFAULT_DORMANCY_BLOCK_WINDOW);
 
     let finding = RiskFinding {
         id: "risk_1".to_string(),

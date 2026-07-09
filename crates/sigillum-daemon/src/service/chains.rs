@@ -1,4 +1,4 @@
-use sigillum_api::ChainProfile;
+use sigillum_api::{ChainProfile, DEFAULT_DORMANCY_BLOCK_WINDOW};
 
 pub(crate) const BUILTIN_CHAIN_SOURCE: &str = "builtin";
 pub(crate) const CHAIN_FAMILY_EVM: &str = "evm";
@@ -47,6 +47,7 @@ pub(crate) fn builtin_chain_profile(spec: BuiltinChainSpec) -> ChainProfile {
         native_symbol: spec.native_symbol.into(),
         native_decimals: 18,
         finality_blocks: 0,
+        dormancy_block_window: DEFAULT_DORMANCY_BLOCK_WINDOW,
         permit2_address: None,
         explorer_url: None,
         capabilities: Vec::new(),
@@ -59,6 +60,11 @@ pub(crate) fn builtin_chain_profile(spec: BuiltinChainSpec) -> ChainProfile {
 }
 
 pub(crate) fn ensure_builtin_chain_profiles(profiles: &mut Vec<ChainProfile>) {
+    for profile in profiles.iter_mut() {
+        if profile.dormancy_block_window == 0 {
+            profile.dormancy_block_window = DEFAULT_DORMANCY_BLOCK_WINDOW;
+        }
+    }
     for spec in BUILTIN_CHAIN_SPECS {
         if let Some(existing) = profiles
             .iter_mut()
@@ -89,6 +95,9 @@ fn promote_existing_builtin(profile: &mut ChainProfile, spec: BuiltinChainSpec) 
     profile.native_symbol = spec.native_symbol.into();
     if profile.native_decimals == 0 {
         profile.native_decimals = 18;
+    }
+    if profile.dormancy_block_window == 0 {
+        profile.dormancy_block_window = DEFAULT_DORMANCY_BLOCK_WINDOW;
     }
     profile.source = BUILTIN_CHAIN_SOURCE.into();
     profile.builtin = true;

@@ -254,6 +254,8 @@ pub struct ChainProfileUpsertRequest {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub finality_blocks: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub dormancy_block_window: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub permit2_address: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub explorer_url: Option<String>,

@@ -46,6 +46,7 @@ export interface ChainProfile {
   native_symbol: string;
   native_decimals: number;
   finality_blocks: number;
+  dormancy_block_window?: number;
   permit2_address?: string | null;
   rpc_profile?: string | null;
   explorer_url?: string | null;
@@ -234,6 +235,7 @@ export interface WalletInventoryAddress {
   activity_state: WalletAddressActivityState;
   native_balance_wei_hex: string;
   transaction_count: number;
+  last_activity_block?: number | null;
   classifications?: WalletAddressClassification[];
   source: string;
   first_seen_at_unix: number;
