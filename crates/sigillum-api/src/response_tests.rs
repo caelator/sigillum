@@ -681,6 +681,86 @@ fn test_wallet_inventory_scan_response_roundtrip() {
 }
 
 #[test]
+fn test_nft_metadata_cache_entry_backcompat_and_provenance_fields() {
+    let legacy: NftMetadataCacheEntry = serde_json::from_value(serde_json::json!({
+        "chain_id": 1,
+        "contract_address": "0xdead00000000000000000000000000000000dead",
+        "token_id_hex": "0x01",
+        "spam_label": "unverified_nft_metadata",
+        "updated_at_unix": 2
+    }))
+    .unwrap();
+
+    assert!(legacy.spam_reasons.is_empty());
+    assert!(legacy.fetched_at_unix.is_none());
+    assert!(legacy.fetched_uri.is_none());
+    assert!(legacy.content_sha256.is_none());
+    assert!(legacy.fetch_skipped_reason.is_none());
+
+    let entry = NftMetadataCacheEntry {
+        chain_id: 1,
+        contract_address: "0xdead00000000000000000000000000000000dead".to_string(),
+        token_id_hex: "0x01".to_string(),
+        metadata_uri: Some("ipfs://bafynftmetadata".to_string()),
+        name: Some("Localhost Test NFT".to_string()),
+        spam_label: "trusted".to_string(),
+        spam_reasons: vec!["operator_opt_in".to_string()],
+        fetched_at_unix: Some(3),
+        fetched_uri: Some("http://127.0.0.1:1/ipfs/bafynftmetadata".to_string()),
+        content_sha256: Some("aa".repeat(32)),
+        fetch_skipped_reason: Some("already_cached".to_string()),
+        updated_at_unix: 4,
+    };
+    let json = serde_json::to_value(&entry).unwrap();
+
+    assert_eq!(json["spam_reasons"], serde_json::json!(["operator_opt_in"]));
+    assert_eq!(json["fetched_at_unix"], serde_json::json!(3));
+    assert_eq!(
+        json["fetched_uri"],
+        serde_json::json!("http://127.0.0.1:1/ipfs/bafynftmetadata")
+    );
+    assert_eq!(json["content_sha256"], serde_json::json!("aa".repeat(32)));
+    assert_eq!(
+        json["fetch_skipped_reason"],
+        serde_json::json!("already_cached")
+    );
+    roundtrip_test(entry);
+}
+
+#[test]
+fn test_nft_metadata_responses_roundtrip() {
+    let opt_in = NftMetadataCollectionOptIn {
+        chain_id: 1,
+        contract_address: "0xdead00000000000000000000000000000000dead".to_string(),
+        enabled: true,
+        created_at_unix: 1,
+        updated_at_unix: 2,
+    };
+    roundtrip_test(NftMetadataOptInListResponse {
+        opt_ins: vec![opt_in.clone()],
+        ipfs_gateway_url: Some("http://127.0.0.1:1/ipfs/".to_string()),
+    });
+    roundtrip_test(NftMetadataOptInMutationResponse {
+        status: "upserted".to_string(),
+        opt_in,
+    });
+    roundtrip_test(NftMetadataSettingsResponse {
+        status: "updated".to_string(),
+        ipfs_gateway_url: Some("http://127.0.0.1:1/ipfs/".to_string()),
+    });
+    roundtrip_test(NftMetadataFetchResponse {
+        fetched: 0,
+        skipped: vec![NftMetadataFetchSkip {
+            chain_id: 1,
+            contract_address: "0xdead00000000000000000000000000000000dead".to_string(),
+            token_id_hex: Some("0x01".to_string()),
+            reason: "collection_not_opted_in".to_string(),
+        }],
+        entries: Vec::new(),
+    });
+}
+
+#[test]
 fn test_watch_address_book_responses_roundtrip() {
     let entry = WatchAddressBookEntry {
         id: "watch_1".to_string(),

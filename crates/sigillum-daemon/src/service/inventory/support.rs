@@ -119,13 +119,18 @@ fn upsert_nft_metadata_cache(
     ) else {
         return;
     };
-    let next = NftMetadataCacheEntry {
+    let mut next = NftMetadataCacheEntry {
         chain_id: holding.chain_id,
         contract_address: contract_address.clone(),
         token_id_hex: token_id_hex.clone(),
         metadata_uri: holding.metadata_uri.clone(),
         name: holding.metadata_name.clone(),
         spam_label: spam_label.to_string(),
+        spam_reasons: Vec::new(),
+        fetched_at_unix: None,
+        fetched_uri: None,
+        content_sha256: None,
+        fetch_skipped_reason: None,
         updated_at_unix: holding.last_checked_at_unix,
     };
     if let Some(existing) = cache.iter_mut().find(|existing| {
@@ -137,6 +142,17 @@ fn upsert_nft_metadata_cache(
                 .token_id_hex
                 .eq_ignore_ascii_case(&next.token_id_hex)
     }) {
+        if existing.fetched_at_unix.is_some() {
+            if next.metadata_uri.is_none() {
+                next.metadata_uri = existing.metadata_uri.clone();
+            }
+            if next.name.is_none() {
+                next.name = existing.name.clone();
+            }
+            next.fetched_at_unix = existing.fetched_at_unix;
+            next.fetched_uri = existing.fetched_uri.clone();
+            next.content_sha256 = existing.content_sha256.clone();
+        }
         *existing = next;
     } else {
         cache.push(next);

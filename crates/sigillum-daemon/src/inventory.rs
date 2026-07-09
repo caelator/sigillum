@@ -8,9 +8,10 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 use sigillum_api::{
-    ChainProfile, ConsolidationPlan, Counterparty, NftMetadataCacheEntry, RiskCatalogEntry,
-    RiskFinding, TreasuryPolicy, TreasuryReceiveAllocation, WalletAssetHolding, WalletDiscoveryJob,
-    WalletInventoryAddress, WatchAddressBookEntry,
+    ChainProfile, ConsolidationPlan, Counterparty, NftMetadataCacheEntry,
+    NftMetadataCollectionOptIn, RiskCatalogEntry, RiskFinding, TreasuryPolicy,
+    TreasuryReceiveAllocation, WalletAssetHolding, WalletDiscoveryJob, WalletInventoryAddress,
+    WatchAddressBookEntry,
 };
 
 use crate::json_store::{JsonDocument, JsonSchema};
@@ -30,6 +31,10 @@ pub struct WalletInventoryState {
     pub holdings: Vec<WalletAssetHolding>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub nft_metadata_cache: Vec<NftMetadataCacheEntry>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub nft_metadata_optins: Vec<NftMetadataCollectionOptIn>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub nft_metadata_ipfs_gateway: Option<String>,
     #[serde(default)]
     pub risk_catalog: Vec<RiskCatalogEntry>,
     #[serde(default)]
@@ -45,7 +50,7 @@ pub struct WalletInventoryState {
 }
 
 impl JsonDocument for WalletInventoryState {
-    const SCHEMA: JsonSchema = JsonSchema::new("sigillum.wallet-inventory", 13);
+    const SCHEMA: JsonSchema = JsonSchema::new("sigillum.wallet-inventory", 14);
 
     fn from_enveloped_json(
         path: &std::path::Path,
@@ -53,7 +58,7 @@ impl JsonDocument for WalletInventoryState {
         data: serde_json::Value,
     ) -> Result<Self, std::io::Error> {
         match version {
-            1..=13 => {
+            1..=14 => {
                 let mut state: Self = serde_json::from_value(data).map_err(|error| {
                     std::io::Error::new(
                         std::io::ErrorKind::InvalidData,
@@ -345,6 +350,14 @@ mod tests {
         });
         state.risk_catalog.push(sample_risk_catalog_entry());
         state.receive_allocations.push(sample_receive_allocation());
+        state.nft_metadata_optins.push(NftMetadataCollectionOptIn {
+            chain_id: 1,
+            contract_address: "0xdead00000000000000000000000000000000dead".into(),
+            enabled: true,
+            created_at_unix: 1,
+            updated_at_unix: 2,
+        });
+        state.nft_metadata_ipfs_gateway = Some("http://127.0.0.1:1/ipfs/".into());
 
         save_wallet_inventory(dir.path(), &state).unwrap();
         let loaded = load_wallet_inventory(dir.path()).unwrap();
@@ -362,6 +375,15 @@ mod tests {
         assert_eq!(loaded.receive_allocations[0].status, "active");
         assert_eq!(loaded.receive_allocations[0].purpose, "counterparty-acme");
         assert!(loaded.receive_allocations[0].retired_at_unix.is_none());
+        assert_eq!(loaded.nft_metadata_optins.len(), 1);
+        assert_eq!(
+            loaded.nft_metadata_optins[0].contract_address,
+            "0xdead00000000000000000000000000000000dead"
+        );
+        assert_eq!(
+            loaded.nft_metadata_ipfs_gateway.as_deref(),
+            Some("http://127.0.0.1:1/ipfs/")
+        );
         assert_eq!(
             loaded.holdings[1].asset_kind,
             sigillum_api::WalletAssetKind::Other("future_asset".into())
@@ -398,6 +420,37 @@ mod tests {
     }
 
     #[test]
+    fn v13_inventory_without_nft_metadata_optins_loads_with_defaults() {
+        let dir = TempDir::new().unwrap();
+        let envelope = json!({
+            "schema": "sigillum.wallet-inventory",
+            "schema_version": 13,
+            "data": {
+                "nft_metadata_cache": [{
+                    "chain_id": 1,
+                    "contract_address": "0xdead00000000000000000000000000000000dead",
+                    "token_id_hex": "0x01",
+                    "spam_label": "unverified_nft_metadata",
+                    "updated_at_unix": 2
+                }]
+            },
+        });
+        std::fs::write(
+            wallet_inventory_path(dir.path()),
+            serde_json::to_vec_pretty(&envelope).unwrap(),
+        )
+        .unwrap();
+
+        let loaded = load_wallet_inventory(dir.path()).unwrap();
+
+        assert_eq!(loaded.nft_metadata_cache.len(), 1);
+        assert!(loaded.nft_metadata_cache[0].spam_reasons.is_empty());
+        assert!(loaded.nft_metadata_cache[0].fetched_at_unix.is_none());
+        assert!(loaded.nft_metadata_optins.is_empty());
+        assert!(loaded.nft_metadata_ipfs_gateway.is_none());
+    }
+
+    #[test]
     fn save_and_load_roundtrip_preserves_treasury_policy() {
         let dir = TempDir::new().unwrap();
         let state = WalletInventoryState {
@@ -431,7 +484,7 @@ mod tests {
             serde_json::from_slice(&std::fs::read(wallet_inventory_path(dir.path())).unwrap())
                 .unwrap();
         assert_eq!(saved["schema"], json!("sigillum.wallet-inventory"));
-        assert_eq!(saved["schema_version"], json!(13));
+        assert_eq!(saved["schema_version"], json!(14));
         assert_eq!(saved["data"]["chain_profiles"].as_array().unwrap().len(), 5);
         assert!(saved["data"]["watch_address_book"].is_array());
         assert!(saved["data"]["jobs"].is_array());

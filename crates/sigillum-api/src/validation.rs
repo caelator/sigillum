@@ -822,6 +822,34 @@ impl Validate for crate::request::WalletInventoryScanRequest {
     }
 }
 
+impl Validate for crate::request::NftMetadataOptInUpsertRequest {
+    fn validate(&self) -> Result<(), String> {
+        check_eth_address("contract_address", &self.contract_address)?;
+        Ok(())
+    }
+}
+
+impl Validate for crate::request::NftMetadataOptInDeleteRequest {
+    fn validate(&self) -> Result<(), String> {
+        check_eth_address("contract_address", &self.contract_address)?;
+        Ok(())
+    }
+}
+
+impl Validate for crate::request::NftMetadataSettingsUpdateRequest {
+    fn validate(&self) -> Result<(), String> {
+        check_optional_len("ipfs_gateway_url", &self.ipfs_gateway_url, MAX_RPC_URL)?;
+        Ok(())
+    }
+}
+
+impl Validate for crate::request::NftMetadataFetchRequest {
+    fn validate(&self) -> Result<(), String> {
+        check_optional_eth_address("contract_address", &self.contract_address)?;
+        Ok(())
+    }
+}
+
 impl Validate for crate::request::WatchAddressBookUpsertRequest {
     fn validate(&self) -> Result<(), String> {
         check_eth_address("address", &self.address)?;

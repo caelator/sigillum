@@ -867,6 +867,76 @@ fn test_wallet_inventory_scan_request_roundtrip() {
 }
 
 #[test]
+fn test_nft_metadata_requests_roundtrip() {
+    roundtrip_test(NftMetadataOptInUpsertRequest {
+        chain_id: 1,
+        contract_address: "0xdead00000000000000000000000000000000dead".to_string(),
+        enabled: Some(true),
+    });
+    roundtrip_test(NftMetadataOptInDeleteRequest {
+        chain_id: 1,
+        contract_address: "0xdead00000000000000000000000000000000dead".to_string(),
+    });
+    roundtrip_test(NftMetadataSettingsUpdateRequest {
+        ipfs_gateway_url: Some("http://127.0.0.1:1/ipfs/".to_string()),
+    });
+    roundtrip_test(NftMetadataFetchRequest {
+        chain_id: Some(1),
+        contract_address: Some("0xdead00000000000000000000000000000000dead".to_string()),
+        limit: Some(10),
+    });
+}
+
+#[test]
+fn test_nft_metadata_request_validation() {
+    use crate::validation::Validate;
+
+    let upsert = NftMetadataOptInUpsertRequest {
+        chain_id: 1,
+        contract_address: "0xdead00000000000000000000000000000000dead".to_string(),
+        enabled: None,
+    };
+    assert!(upsert.validate().is_ok());
+
+    let delete = NftMetadataOptInDeleteRequest {
+        chain_id: 1,
+        contract_address: "0xdead00000000000000000000000000000000dead".to_string(),
+    };
+    assert!(delete.validate().is_ok());
+
+    let clear_gateway = NftMetadataSettingsUpdateRequest {
+        ipfs_gateway_url: Some(String::new()),
+    };
+    assert!(clear_gateway.validate().is_ok());
+
+    let fetch = NftMetadataFetchRequest {
+        chain_id: Some(1),
+        contract_address: Some("0xdead00000000000000000000000000000000dead".to_string()),
+        limit: Some(10),
+    };
+    assert!(fetch.validate().is_ok());
+
+    let invalid_upsert = NftMetadataOptInUpsertRequest {
+        chain_id: 1,
+        contract_address: "0xdead".to_string(),
+        enabled: None,
+    };
+    assert!(invalid_upsert.validate().is_err());
+
+    let invalid_fetch = NftMetadataFetchRequest {
+        chain_id: None,
+        contract_address: Some("not-an-address".to_string()),
+        limit: None,
+    };
+    assert!(invalid_fetch.validate().is_err());
+
+    let oversized_gateway = NftMetadataSettingsUpdateRequest {
+        ipfs_gateway_url: Some(format!("http://127.0.0.1/{}", "a".repeat(2_048))),
+    };
+    assert!(oversized_gateway.validate().is_err());
+}
+
+#[test]
 fn test_watch_address_book_requests_roundtrip() {
     roundtrip_test(WatchAddressBookUpsertRequest {
         address: "0x7777777777777777777777777777777777777777".to_string(),

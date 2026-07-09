@@ -124,6 +124,7 @@ pub struct WalletDiscoveryJob {
     pub last_error: Option<String>,
 }
 
+/// Cached NFT metadata and spam-review state for a discovered token.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct NftMetadataCacheEntry {
     pub chain_id: u64,
@@ -134,7 +135,70 @@ pub struct NftMetadataCacheEntry {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
     pub spam_label: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub spam_reasons: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fetched_at_unix: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fetched_uri: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub content_sha256: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fetch_skipped_reason: Option<String>,
     pub updated_at_unix: u64,
+}
+
+/// Per-collection operator opt-in for NFT metadata fetching.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct NftMetadataCollectionOptIn {
+    pub chain_id: u64,
+    pub contract_address: String,
+    pub enabled: bool,
+    pub created_at_unix: u64,
+    pub updated_at_unix: u64,
+}
+
+/// List of NFT metadata collection opt-ins and the configured IPFS gateway.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct NftMetadataOptInListResponse {
+    pub opt_ins: Vec<NftMetadataCollectionOptIn>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ipfs_gateway_url: Option<String>,
+}
+
+/// Result of creating or updating an NFT metadata collection opt-in.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct NftMetadataOptInMutationResponse {
+    pub status: String,
+    pub opt_in: NftMetadataCollectionOptIn,
+}
+
+/// Current NFT metadata fetch settings.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct NftMetadataSettingsResponse {
+    pub status: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ipfs_gateway_url: Option<String>,
+}
+
+/// NFT metadata fetch item skipped before a network request was made.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct NftMetadataFetchSkip {
+    pub chain_id: u64,
+    pub contract_address: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub token_id_hex: Option<String>,
+    pub reason: String,
+}
+
+/// Result of an explicit opt-in NFT metadata fetch pass.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct NftMetadataFetchResponse {
+    pub fetched: usize,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub skipped: Vec<NftMetadataFetchSkip>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub entries: Vec<NftMetadataCacheEntry>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]

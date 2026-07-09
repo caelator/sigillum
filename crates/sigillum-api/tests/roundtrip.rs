@@ -739,6 +739,11 @@ fn inventory_response_roundtrip() {
             metadata_uri: Some("ipfs://bafynftmetadata".to_string()),
             name: Some("Operations Safe Badge".to_string()),
             spam_label: "trusted".to_string(),
+            spam_reasons: vec!["operator_reviewed".to_string()],
+            fetched_at_unix: Some(1_783_046_000),
+            fetched_uri: Some("http://127.0.0.1:1/ipfs/bafynftmetadata".to_string()),
+            content_sha256: Some("aa".repeat(32)),
+            fetch_skipped_reason: None,
             updated_at_unix: 1_783_046_000,
         }],
     });
