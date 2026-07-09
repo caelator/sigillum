@@ -88,8 +88,15 @@ Required discovery classes:
   scans, resumes from per-address/chain/topic block cursors, and confirms
   current ownership with `ownerOf`; bounded ERC-1155 transfer discovery is
   implemented with `balanceOf` confirmation for touched token IDs and uses the
-  same resumable block-cursor model. Metadata, spam filtering, and valuation
-  providers remain future work.
+  same resumable block-cursor model. Per-collection opt-in metadata fetching is
+  implemented: `tokenURI`/`uri` resolves through provider RPC, downloads use the
+  daemon's bounded HTTP client, and cached results record provenance (URI, fetch
+  time, sha-256 content hash); IPFS metadata is fetched only through an
+  operator-configured gateway, otherwise it is skipped with a recorded reason.
+  Local conservative spam heuristics now record reasons for suspected airdrops,
+  trusted-name lookalikes, and operator risk-catalog overrides, and surface them
+  in a never-auto-hidden Suspicious NFTs bucket. Floor or collection valuation
+  providers remain out of scope for 1.0 (D-16).
 - DeFi position discovery for common protocols: lending, staking, liquid
   staking, LP positions, vault shares, bridges, vesting/streaming contracts, and
   rewards contracts. The first local slice records operator-configured ERC-20
@@ -315,6 +322,8 @@ The CLI should have parity for automation:
    catalog, and reviewable approval revoke plan steps are the first
    approval-management slices, and bounded ERC-721/ERC-1155 transfer-log
    discovery with owner/balance confirmation is the first NFT inventory slice.
+   The opt-in NFT metadata fetch pipeline and extended local spam heuristics are
+   now implemented on top of that transfer-log slice.
 5. Consolidation preflight. Provider-backed `eth_call` simulation is
    implemented for ERC-20 `approve(spender, 0)` revokes and NFT
    `setApprovalForAll(operator, false)` revokes. Permit2 allowance probes now

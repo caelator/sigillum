@@ -5,10 +5,10 @@ assembled in `api_router()` and the API surface in `api_routes()`. All route
 registrations live in that one file (submodules under `src/routes/` contain
 handlers only, no registrations).
 
-**Counts (cross-checked against the router):** 124 route registrations
-(`grep -c '\.route(' crates/sigillum-daemon/src/routes/mod.rs` -> 124), which
-is 125 method endpoints because `/api/treasury/parties` registers both GET
-and POST. The 32 family rows below cover 124/124 registrations; each route
+**Counts (cross-checked against the router):** 129 route registrations
+(`grep -c '\.route(' crates/sigillum-daemon/src/routes/mod.rs` -> 129), which
+is 130 method endpoints because `/api/treasury/parties` registers both GET
+and POST. The 33 family rows below cover 129/129 registrations; each route
 appears in exactly one row.
 
 **Maintenance rule (release-1.0 plan §0.1.5 / D2):** every W-task that adds
@@ -66,13 +66,15 @@ commands.
 | 30 | Queue (observe/process) | `queue/jobs`, `queue/process` | `operations.ts` (drives fetches and process summaries, including `operator_action_required`; `queue.ts` renders the queue view) | `sigillum api queue <list\|process>` (JSON includes per-job `state`/`last_error` and process counts) | Fully covered. |
 | 31 | Manual queue enqueue | `queue/enqueue/eth-stealth-transfer`, `.../eth-stealth-erc20-transfer`, `.../eth-stealth-native-sweep`, `.../eth-stealth-erc20-sweep` | no (direct) | no | Decision (D2): maintenance auto-enqueues, and the UI covers the manual path via the deposit sweep action (`deposits/eth-stealth/enqueue-sweep`). Direct enqueue endpoints remain programmatic/API-only. |
 | 32 | FIDO2 admin | `fido2/status`, `fido2/detect`, `fido2/pin/set`, `fido2/list`, `fido2/setup`, `fido2/register`, `fido2/unlock`, `fido2/remove` | `fido2.ts` + `setup.ts` (all except `status`) | `sigillum api unlock-fido2` (unlock only); local `sigillum fido2 <register\|list\|remove\|status\|unlock>` manages the same store offline | Decision (D2): admin requires a physical touch ceremony on the security key at the machine — the interactive UI flow is the operator surface; `status` is a programmatic probe. |
+| 33 | NFT metadata (opt-in fetch) | `inventory/nft-metadata/opt-ins` (+`/upsert`,`/delete`), `inventory/nft-metadata/settings`, `inventory/nft-metadata/fetch` — 5 routes | `inventory.ts` (opt-in controls, gateway setting, fetch, suspicious-NFT bucket) | no | Deliberate UI+API surface at 1.0: metadata fetching is an interactive, privacy-sensitive review action (per-collection opt-in, results need visual review), so no CLI is provided; scripting goes through the API/SDK. |
 
 ## Verification
 
-- Route registrations in `crates/sigillum-daemon/src/routes/mod.rs`: **124**
-  (`grep -c '\.route('`). Method endpoints: **125** (`/api/treasury/parties`
+- Route registrations in `crates/sigillum-daemon/src/routes/mod.rs`: **129**
+  (`grep -c '\.route('`). Method endpoints: **130** (`/api/treasury/parties`
   is GET+POST on one registration).
-- Sum of routes across the 32 rows above: **124** — every registration
+- Sum of routes across the 33 rows above: **129** — every registration
   appears in exactly one row.
 - No row is UI=no and CLI=no without an explicit decision (rows 4, 12, 19,
-  22, 31 carry D2 decisions; rows 2, 15 are machine-plumbing decisions).
+  22, 31 carry D2 decisions; rows 2, 15 are machine-plumbing decisions; row
+  33 records the deliberate UI+API-only NFT metadata decision).
