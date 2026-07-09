@@ -287,6 +287,8 @@ export interface ConsolidationPlanStep {
   linkage_warnings?: string[];
   auto_eligible: boolean;
   approved: boolean;
+  /** Queue job id once the step has been enqueued for execution (W7.2). */
+  queued_job_id?: string | null;
 }
 
 export interface ConsolidationPlan {

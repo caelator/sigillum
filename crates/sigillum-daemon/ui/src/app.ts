@@ -1250,6 +1250,8 @@ const UI_ACTIONS = {
   deleteWalletProfile: walletActions.deleteWalletProfile,
   deleteXpubWalletProfile: walletActions.deleteXpubWalletProfile,
   enqueueDepositSweep: operationsActions.enqueueDepositSweep,
+  enqueuePlanBulk: inventoryActions.enqueuePlanBulk,
+  enqueuePlanStep: inventoryActions.enqueuePlanStep,
   exportSelectedXpubWallet: walletActions.exportSelectedXpubWallet,
   exportSnapshot,
   exportConsolidationPlan: inventoryActions.exportConsolidationPlan,

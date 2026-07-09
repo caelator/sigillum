@@ -789,6 +789,160 @@ test("queue and inventory renderers produce reviewable DOM summaries", () => {
       .el("consolidationPlanList")
       .innerHTML.includes("shared destination links this payer with: Bob"),
   );
+  // No treasury policy loaded: no Execute affordance may render.
+  ok(!dom.el("consolidationPlanList").innerHTML.includes("enqueuePlanStep"));
+  ok(!dom.el("consolidationPlanList").innerHTML.includes("Execute All Eligible"));
+});
+
+test("plan execute affordances render only when gates pass and drive enqueue routes", async () => {
+  const dom = installDom([
+    "chainProfileList",
+    "inventoryJobList",
+    "inventoryAddressList",
+    "inventoryHoldingList",
+    "watchAddressBookList",
+    "riskCatalogList",
+    "riskFindingList",
+    "consolidationPlanList",
+  ]);
+  const calls: Array<{ method: string; path: string; body?: any }> = [];
+  const toasts: string[] = [];
+  const nowSecs = Math.floor(Date.now() / 1000);
+  const expectedPhrase = "EXECUTE 1 PLAN STEPS TOTAL 1000000000000000000 WEI";
+  const eligibleStep = {
+    id: "step-exec",
+    sequence: 0,
+    action: "sweep_native",
+    status: "approved",
+    wallet_family: "eth-seed",
+    wallet_profile: "archive",
+    provider_profile: "mainnet",
+    chain_id: 1,
+    address: "0xabc",
+    derivation_path: "m/44'/60'/0'/0/0",
+    asset_kind: "native",
+    amount_hex: "0xde0b6b3a7640000",
+    destination_address: "0xdest",
+    signer_status: "available",
+    simulation_status: "passed",
+    simulation_evidence: [
+      "fee_basis=static_profile",
+      "simulated_at_unix=" + String(nowSecs),
+    ],
+    risk_level: "low",
+    blockers: [],
+    linkage_warnings: [],
+    auto_eligible: true,
+    approved: true,
+  };
+  const staleStep = {
+    ...eligibleStep,
+    id: "step-stale",
+    simulation_evidence: ["simulated_at_unix=1"],
+  };
+  const queuedStep = { ...eligibleStep, id: "step-queued", queued_job_id: "job-1" };
+  const plans = {
+    plans: [
+      {
+        id: "plan-exec",
+        status: "approved",
+        chain_id: 1,
+        created_at_unix: 1,
+        updated_at_unix: 2,
+        summary: {
+          total_steps: 3,
+          blocked_steps: 0,
+          review_required_steps: 0,
+          approved_steps: 3,
+          executable_steps: 3,
+          value_items: 3,
+        },
+        steps: [eligibleStep, staleStep, queuedStep],
+      },
+    ],
+  };
+  const policy = {
+    policy: {
+      enabled: true,
+      execution_paused: false,
+      allow_plan_execution: true,
+      allow_sweep_execution: true,
+      simulation_freshness_secs: 900,
+    },
+  };
+  const inventory = createInventoryActions({
+    api: async (method, path, body) => {
+      calls.push({ method, path, body });
+      if (path === "/api/plans/consolidation") return plans;
+      if (path === "/api/treasury/policy") return policy;
+      if (path === "/api/plans/enqueue-step") {
+        return { status: "queued", job: { id: "job-new" } };
+      }
+      if (path === "/api/plans/enqueue-plan") {
+        if ((body as any)?.confirmation !== expectedPhrase) {
+          return {
+            error:
+              'confirmation_mismatch: type the exact phrase "' + expectedPhrase + '"',
+            action: expectedPhrase,
+          };
+        }
+        return {
+          status: "queued",
+          enqueued: [{ step_id: "step-exec", job_id: "job-new" }],
+          skipped: [],
+        };
+      }
+      if (path === "/api/inventory/wallets") {
+        return { jobs: [], addresses: [], holdings: [] };
+      }
+      if (path === "/api/chains") return { profiles: [] };
+      return { entries: [], findings: [], plans: [], lists: [] };
+    },
+    toast: (message) => toasts.push(message),
+    downloadJson: () => undefined,
+  });
+
+  await inventory.loadInventoryOperations();
+  const html = dom.el("consolidationPlanList").innerHTML;
+  // Exactly one step passes every gate: fresh passed simulation, approved,
+  // unblocked, policy gates on, not yet enqueued.
+  equal(html.split('data-action="enqueuePlanStep"').length - 1, 1);
+  ok(html.includes('data-arg1="step-exec"'));
+  ok(html.includes("Execute All Eligible"));
+  ok(html.includes("queuedJob=job-1"));
+
+  // Single-step enqueue posts the explicit confirm flag.
+  (globalThis as any).confirm = () => true;
+  await inventory.enqueuePlanStep("plan-exec", "step-exec");
+  deepEqual(
+    calls.find((call) => call.path === "/api/plans/enqueue-step"),
+    {
+      method: "POST",
+      path: "/api/plans/enqueue-step",
+      body: { plan_id: "plan-exec", step_id: "step-exec", confirm: true },
+    },
+  );
+
+  // Bulk enqueue probes for the exact daemon-computed phrase, renders it in
+  // the typed-confirmation dialog, and submits what the operator typed.
+  const promptMessages: string[] = [];
+  (globalThis as any).prompt = (message: string) => {
+    promptMessages.push(message);
+    return expectedPhrase;
+  };
+  await inventory.enqueuePlanBulk("plan-exec");
+  ok(promptMessages.some((message) => message.includes(expectedPhrase)));
+  const bulkCalls = calls.filter((call) => call.path === "/api/plans/enqueue-plan");
+  equal(bulkCalls.length, 2);
+  equal((bulkCalls[0].body as any).confirmation, "");
+  equal((bulkCalls[1].body as any).confirmation, expectedPhrase);
+  ok(toasts.some((message) => message.includes("Enqueued 1 step(s)")));
+
+  // A mistyped phrase never reaches the daemon.
+  (globalThis as any).prompt = () => "EXECUTE 9 PLAN STEPS TOTAL 1 WEI";
+  await inventory.enqueuePlanBulk("plan-exec");
+  equal(calls.filter((call) => call.path === "/api/plans/enqueue-plan").length, 3);
+  ok(toasts.some((message) => message.includes("Confirmation phrase does not match")));
 });
 
 test("chain profile UI renders registry fields and uses chain routes", async () => {
