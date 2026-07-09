@@ -1015,6 +1015,22 @@ impl Validate for crate::request::ConsolidationPlanExportRequest {
     }
 }
 
+impl Validate for crate::request::PlanEnqueueStepRequest {
+    fn validate(&self) -> Result<(), String> {
+        check_len("plan_id", &self.plan_id, MAX_ID)?;
+        check_len("step_id", &self.step_id, MAX_ID)?;
+        Ok(())
+    }
+}
+
+impl Validate for crate::request::PlanEnqueuePlanRequest {
+    fn validate(&self) -> Result<(), String> {
+        check_len("plan_id", &self.plan_id, MAX_ID)?;
+        check_len("confirmation", &self.confirmation, MAX_LABEL)?;
+        Ok(())
+    }
+}
+
 impl Validate for crate::request::TreasuryPolicyUpdateRequest {
     fn validate(&self) -> Result<(), String> {
         if self.allowed_destinations.len() > 256 {

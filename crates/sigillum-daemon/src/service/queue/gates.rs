@@ -472,7 +472,7 @@ mod tests {
     }
 
     fn plan_step_payload(action: &str) -> QueueJobPayload {
-        QueueJobPayload::PlanStepExecution(sigillum_api::PlanStepExecutionPayload {
+        QueueJobPayload::PlanStepExecution(Box::new(sigillum_api::PlanStepExecutionPayload {
             plan_id: "plan_1".into(),
             step_id: "step_1".into(),
             chain_id: 1,
@@ -495,7 +495,7 @@ mod tests {
             max_priority_fee_per_gas_hex: None,
             max_fee_per_gas_hex: None,
             prerequisite_job_ids: Vec::new(),
-        })
+        }))
     }
 
     #[test]

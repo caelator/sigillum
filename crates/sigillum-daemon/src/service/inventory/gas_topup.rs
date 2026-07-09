@@ -182,7 +182,7 @@ impl SigillumService {
     }
 }
 
-fn gas_topup_policy_enabled(policy: Option<&TreasuryPolicy>) -> bool {
+pub(super) fn gas_topup_policy_enabled(policy: Option<&TreasuryPolicy>) -> bool {
     policy
         .map(|policy| policy.enabled && policy.allow_gas_topups)
         .unwrap_or(false)

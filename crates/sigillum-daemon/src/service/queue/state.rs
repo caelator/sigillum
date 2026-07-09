@@ -47,6 +47,28 @@ pub(in crate::service) fn is_active_or_completed_queue_state(state: &str) -> boo
     is_active_queue_state(state) || normalize_queue_state(state) == QUEUE_STATE_SENT
 }
 
+/// Terminal failure (including the legacy `failed` alias).
+pub(in crate::service) fn queue_job_failed_state(state: &str) -> bool {
+    normalize_queue_state(state) == QUEUE_STATE_FAILED_TERMINAL
+}
+
+pub(in crate::service) fn queue_job_operator_action_required(state: &str) -> bool {
+    normalize_queue_state(state) == QUEUE_STATE_OPERATOR_ACTION_REQUIRED
+}
+
+/// Park a job for operator inspection (E1 semantics): it is no longer
+/// runnable until the operator resolves it out-of-band.
+pub(in crate::service) fn mark_job_operator_action_required(
+    job: &mut QueueJob,
+    reason: String,
+    now: u64,
+) {
+    job.state = QUEUE_STATE_OPERATOR_ACTION_REQUIRED.into();
+    job.last_error = Some(reason);
+    job.updated_at_unix = now;
+    job.next_attempt_after_unix = None;
+}
+
 pub(in crate::service) fn queue_status(state: &str) -> String {
     match normalize_queue_state(state) {
         QUEUE_STATE_SENT => "sweep_sent",

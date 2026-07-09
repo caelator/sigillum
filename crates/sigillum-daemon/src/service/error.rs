@@ -87,6 +87,19 @@ impl ServiceError {
         }
     }
 
+    /// 400 with a machine-readable `action` payload (e.g. the exact expected
+    /// typed-confirmation phrase) alongside the human-readable message.
+    pub(crate) fn bad_request_with_action(
+        message: impl Into<String>,
+        action: impl Into<String>,
+    ) -> Self {
+        Self {
+            status: StatusCode::BAD_REQUEST,
+            message: message.into(),
+            action: Some(action.into()),
+        }
+    }
+
     pub(crate) fn locked(message: impl Into<String>) -> Self {
         Self::new(StatusCode::LOCKED, message)
     }

@@ -548,6 +548,14 @@ fn inventory_routes() -> AppRouter {
             "/api/plans/consolidation/export",
             post(inventory::export_consolidation_plan),
         )
+        .route(
+            "/api/plans/enqueue-step",
+            post(inventory::enqueue_consolidation_plan_step),
+        )
+        .route(
+            "/api/plans/enqueue-plan",
+            post(inventory::enqueue_consolidation_plan),
+        )
         .route("/api/treasury/overview", get(inventory::treasury_overview))
         .route(
             "/api/receiving/overview",

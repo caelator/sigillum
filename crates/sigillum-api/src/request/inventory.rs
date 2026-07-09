@@ -355,3 +355,26 @@ pub struct ConsolidationPlanExportRequest {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub safe_address: Option<String>,
 }
+
+/// Enqueue a single approved and freshly simulated plan step as a queue job
+/// (W7.2). Requires an explicit `confirm: true` flag.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct PlanEnqueueStepRequest {
+    pub plan_id: String,
+    pub step_id: String,
+    /// Explicit operator confirmation; the request is refused unless true.
+    #[serde(default)]
+    pub confirm: bool,
+}
+
+/// Bulk-enqueue every auto-eligible step of a plan (W7.2). Requires the exact
+/// typed confirmation phrase `EXECUTE {steps} PLAN STEPS TOTAL {wei} WEI`,
+/// computed server-side from the currently eligible step set.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct PlanEnqueuePlanRequest {
+    pub plan_id: String,
+    /// Typed confirmation phrase; on mismatch the response error carries the
+    /// expected phrase so operator surfaces can render it exactly.
+    #[serde(default)]
+    pub confirmation: String,
+}

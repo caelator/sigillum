@@ -201,7 +201,7 @@ fn build_export(
     Ok((bundles, skipped_steps))
 }
 
-fn selected_step_indexes(plan: &ConsolidationPlan, step_ids: &[String]) -> Vec<usize> {
+pub(super) fn selected_step_indexes(plan: &ConsolidationPlan, step_ids: &[String]) -> Vec<usize> {
     let export_all = step_ids.is_empty();
     plan.steps
         .iter()
@@ -211,7 +211,7 @@ fn selected_step_indexes(plan: &ConsolidationPlan, step_ids: &[String]) -> Vec<u
         .collect()
 }
 
-fn stable_topological_selected_indexes(
+pub(super) fn stable_topological_selected_indexes(
     plan: &ConsolidationPlan,
     selected_indexes: &[usize],
 ) -> Vec<usize> {
@@ -259,7 +259,7 @@ fn stable_topological_selected_indexes(
     ordered
 }
 
-fn dependencies_contain_cycle(plan: &ConsolidationPlan) -> bool {
+pub(super) fn dependencies_contain_cycle(plan: &ConsolidationPlan) -> bool {
     let index_by_id = plan_step_index_by_id(plan);
     let mut states = vec![DependencyVisitState::Unvisited; plan.steps.len()];
     (0..plan.steps.len()).any(|step_index| {

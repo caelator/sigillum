@@ -479,3 +479,38 @@ pub struct ConsolidationPlanMutationResponse {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub plans: Vec<ConsolidationPlan>,
 }
+
+/// Result of enqueueing a single plan step as a queue job (W7.2).
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct PlanEnqueueStepResponse {
+    pub status: String,
+    pub plan_id: String,
+    pub step_id: String,
+    pub job: super::queue::QueueJob,
+}
+
+/// One step enqueued by a bulk plan enqueue (W7.2).
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct PlanEnqueuedStep {
+    pub step_id: String,
+    pub job_id: String,
+}
+
+/// One step a bulk plan enqueue skipped, with its named fail-closed reason.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct PlanEnqueueSkippedStep {
+    pub step_id: String,
+    pub action: WalletPlanStepAction,
+    pub reason: String,
+}
+
+/// Result of a bulk plan enqueue (W7.2): steps enqueued in dependency order
+/// plus the skipped steps with named reasons.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct PlanEnqueuePlanResponse {
+    pub status: String,
+    pub plan_id: String,
+    pub enqueued: Vec<PlanEnqueuedStep>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub skipped: Vec<PlanEnqueueSkippedStep>,
+}

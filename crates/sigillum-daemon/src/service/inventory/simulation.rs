@@ -789,6 +789,18 @@ pub(super) fn parse_simulated_at_unix(evidence: &[String]) -> Option<u64> {
         .and_then(|value| value.parse().ok())
 }
 
+/// Fallback when no treasury policy provides `simulation_freshness_secs`.
+pub(super) const DEFAULT_SIMULATION_FRESHNESS_SECS: u64 = 900;
+
+/// W6.2 freshness rule, shared by approval and enqueue re-validation:
+/// simulation evidence with a missing or unparseable timestamp is treated as
+/// stale (fail closed).
+pub(super) fn simulation_is_stale(evidence: &[String], freshness_secs: u64, now: u64) -> bool {
+    parse_simulated_at_unix(evidence)
+        .map(|simulated_at| now.saturating_sub(simulated_at) > freshness_secs)
+        .unwrap_or(true)
+}
+
 fn apply_simulation_outcome(step: &mut ConsolidationPlanStep, outcome: PlanSimulationOutcome) {
     step.blockers
         .retain(|blocker| !is_simulation_blocker(blocker));

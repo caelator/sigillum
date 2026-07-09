@@ -98,7 +98,7 @@ pub enum QueueJobPayload {
         gas_limit: Option<u64>,
     },
     /// W7.2 consolidation plan-step job. Hard-blocked at drain time until W7.3.
-    PlanStepExecution(PlanStepExecutionPayload),
+    PlanStepExecution(Box<PlanStepExecutionPayload>),
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
