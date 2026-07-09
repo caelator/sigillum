@@ -359,6 +359,10 @@ export function createTreasuryActions(deps: TreasuryActionsDeps) {
           esc(String(Boolean(current.block_cross_party_linkage))) +
           " · allowClaimExecution=" +
           esc(String(Boolean(current.allow_claim_execution))) +
+          " · allowGasTopups=" +
+          esc(String(Boolean(current.allow_gas_topups))) +
+          " · maxGasTopup=" +
+          esc(capAsEth(current.max_gas_topup_wei_hex)) +
           " · simulationFreshnessSecs=" +
           esc(String(current.simulation_freshness_secs ?? 900)) +
           " · updated=" +
@@ -388,6 +392,8 @@ export function createTreasuryActions(deps: TreasuryActionsDeps) {
             policy.require_simulation,
             policy.block_cross_party_linkage,
             policy.allow_claim_execution,
+            policy.allow_gas_topups,
+            policy.max_gas_topup_wei_hex || null,
             policy.simulation_freshness_secs,
           ]
         : null,
@@ -407,6 +413,10 @@ export function createTreasuryActions(deps: TreasuryActionsDeps) {
     if (allowClaimExecEl) {
       allowClaimExecEl.checked = policy ? Boolean(policy.allow_claim_execution) : false;
     }
+    const allowGasTopupsEl = input("treasuryPolicyAllowGasTopups");
+    if (allowGasTopupsEl) {
+      allowGasTopupsEl.checked = policy ? Boolean(policy.allow_gas_topups) : false;
+    }
     const destinationsEl = input("treasuryPolicyDestinations");
     if (destinationsEl) {
       destinationsEl.value = policy
@@ -423,6 +433,12 @@ export function createTreasuryActions(deps: TreasuryActionsDeps) {
     if (maxPlanEl) {
       maxPlanEl.value = policy?.max_plan_native_wei_hex
         ? formatWeiHexAsEth(policy.max_plan_native_wei_hex)
+        : "";
+    }
+    const maxGasTopupEl = input("treasuryPolicyMaxGasTopupEth");
+    if (maxGasTopupEl) {
+      maxGasTopupEl.value = policy?.max_gas_topup_wei_hex
+        ? formatWeiHexAsEth(policy.max_gas_topup_wei_hex)
         : "";
     }
     const hotFloorEl = input("treasuryPolicyHotFloorEth");
@@ -645,6 +661,18 @@ export function createTreasuryActions(deps: TreasuryActionsDeps) {
       );
       return;
     }
+    const maxGasTopupText = textValue("treasuryPolicyMaxGasTopupEth");
+    const maxGasTopupWeiHex = parseEthToWeiHex(maxGasTopupText);
+    const maxGasTopupInvalid =
+      Boolean(maxGasTopupText) && maxGasTopupWeiHex === null;
+    markInvalid("treasuryPolicyMaxGasTopupEth", maxGasTopupInvalid);
+    if (maxGasTopupInvalid) {
+      deps.toast(
+        "Max gas top-up must be a decimal ETH amount with up to 18 decimals",
+        "error",
+      );
+      return;
+    }
     const hotFloorText = textValue("treasuryPolicyHotFloorEth");
     const hotFloorWeiHex = hotFloorText ? parseEthToWeiHex(hotFloorText) : null;
     const hotFloorInvalid = Boolean(hotFloorText) && hotFloorWeiHex === null;
@@ -687,6 +715,8 @@ export function createTreasuryActions(deps: TreasuryActionsDeps) {
       require_simulation: Boolean(input("treasuryPolicyRequireSim")?.checked),
       block_cross_party_linkage: Boolean(input("treasuryPolicyBlockLinkage")?.checked),
       allow_claim_execution: Boolean(input("treasuryPolicyAllowClaimExec")?.checked),
+      allow_gas_topups: Boolean(input("treasuryPolicyAllowGasTopups")?.checked),
+      max_gas_topup_wei_hex: maxGasTopupWeiHex,
     };
     if (freshnessText) {
       body.simulation_freshness_secs = freshnessSecs;

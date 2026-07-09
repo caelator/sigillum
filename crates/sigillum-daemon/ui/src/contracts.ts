@@ -468,6 +468,8 @@ export interface TreasuryPolicy {
   require_simulation: boolean;
   block_cross_party_linkage?: boolean;
   allow_claim_execution?: boolean;
+  allow_gas_topups?: boolean;
+  max_gas_topup_wei_hex?: string | null;
   simulation_freshness_secs?: number;
   created_at_unix: number;
   updated_at_unix: number;
@@ -483,6 +485,8 @@ export interface TreasuryPolicyUpdateRequest {
   require_simulation?: boolean | null;
   block_cross_party_linkage?: boolean | null;
   allow_claim_execution?: boolean | null;
+  allow_gas_topups?: boolean | null;
+  max_gas_topup_wei_hex?: string | null;
   simulation_freshness_secs?: number | null;
 }
 

@@ -264,8 +264,12 @@ and at sweep enqueue.
 
 **What it does NOT cover** (operator discipline required):
 
-- **Gas funding.** Funding a fresh receive address's gas from a shared/known
-  address links them. Fund per-payer gas from per-payer sources.
+- **Manual gas funding.** Sigillum-generated gas top-ups (policy-gated
+  `fund_gas` plan steps, off by default behind `allow_gas_topups`) run the same
+  linkage analysis as sweeps: one sponsor funding different payers' addresses
+  always warns and is hard-blocked when `block_cross_party_linkage` is on.
+  Funding gas manually from a shared/known address still links payers and
+  remains operator discipline - fund per-payer gas from per-payer sources.
 - **Amount and timing correlation.** Out of scope for this threat model.
 - **Downstream re-merging.** Sigillum checks one hop. If you later move
   per-payer destinations into one address, they re-link. Keep them separate.

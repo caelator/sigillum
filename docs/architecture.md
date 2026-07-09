@@ -265,12 +265,14 @@ fail-closed opt-in surfaced in onboarding, default off), warnings become hard
 blockers at plan generation, approval, and stealth-sweep enqueue.
 
 This protection is deliberately scoped to **single-hop, destination-axis**
-linkage. It does not model gas-funding linkage, amount/timing correlation,
-downstream re-merging of per-party destinations, or multi-hop flows, and RPC
-provider calls expose queried addresses to the configured endpoint. The full
-threat model and operator-discipline requirements are documented in the README's
-"Privacy Model — Scope and Limitations" section; the claim is intentionally not
-an unconditional unlinkability guarantee.
+linkage. Sigillum-generated `fund_gas` top-ups are modeled by a common-funder
+pass in `analyze_plan_linkage`: cross-party sponsor funding warns and hard-blocks
+under the same policy. Manual gas funding, amount/timing correlation, downstream
+re-merging of per-party destinations, and multi-hop flows remain out of scope,
+and RPC provider calls expose queried addresses to the configured endpoint. The
+full threat model and operator-discipline requirements are documented in the
+README's "Privacy Model — Scope and Limitations" section; the claim is
+intentionally not an unconditional unlinkability guarantee.
 
 ## Architectural Priorities
 

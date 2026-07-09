@@ -259,7 +259,7 @@
             <div class="trust-point">
               <div class="tp-head">Protect payer privacy on sweeps</div>
               <div class="tp-body">Block consolidations and sweeps that would publicly link your payers (fail-closed). This covers addresses that would land in the same destination (single-hop common-recipient linkage). You can route each payer to a distinct destination, and you can change this anytime in Treasury policy.</div>
-              <p class="card-note mt-8">Scope: detects when different payers would sweep to the SAME destination. It does NOT cover gas-funding linkage, amount or timing correlation, downstream re-merging of per-party destinations, or multi-hop flows &mdash; keep per-party destinations separate.</p>
+              <p class="card-note mt-8">Scope: detects when different payers would sweep to the SAME destination. Sigillum-generated gas top-ups (fund_gas steps) are covered by the same payer-linkage analysis: one sponsor funding different payers warns and is blocked when linkage protection is on. MANUAL gas funding, amount or timing correlation, downstream re-merging of per-party destinations, and multi-hop flows remain operator discipline &mdash; keep per-party destinations separate.</p>
               <div class="form-row">
                 <button class="btn-primary" data-action="wizEnableLinkageProtection">Enable protection</button>
                 <button class="btn-ghost" data-action="wizDeclineLinkageProtection">Decide later</button>
@@ -274,6 +274,15 @@
                 <button class="btn-ghost" data-action="wizDeclineClaimExecution">Decide later</button>
               </div>
               <p class="helper-text hidden" id="wizClaimExecutionChoiceStatus"></p>
+            </div>
+            <div class="trust-point">
+              <div class="tp-head">Allow sponsor gas top-ups (optional)</div>
+              <div class="tp-body">Off by default. Enabling lets consolidation plans add fund_gas steps from the wallet's sponsor address when a source address cannot pay gas. Sigillum-generated top-ups are checked by the payer-linkage analysis: cross-party sponsor funding warns, and is blocked when linkage protection is on. Manual gas funding stays your responsibility - fund per-payer gas from per-payer sources. You can change this anytime in Treasury policy.</div>
+              <div class="form-row">
+                <button class="btn-primary" data-action="wizEnableGasTopups">Enable gas top-ups</button>
+                <button class="btn-ghost" data-action="wizDeclineGasTopups">Decide later</button>
+              </div>
+              <p class="helper-text hidden" id="wizGasTopupsChoiceStatus"></p>
             </div>
           </div>
         </div>
@@ -422,8 +431,12 @@
             <input type="checkbox" id="treasuryPolicyAllowClaimExec">
             Allow Merkle claim execution (default off)
           </label>
+          <label class="checkbox-row">
+            <input type="checkbox" id="treasuryPolicyAllowGasTopups">
+            Allow sponsor gas top-ups (default off)
+          </label>
         </div>
-        <p class="field-hint">Scope: blocks when different payers would sweep to the SAME destination. It does NOT cover gas-funding linkage, amount/timing correlation, downstream re-merging of per-party destinations, or multi-hop flows &mdash; keep per-party destinations separate.</p>
+        <p class="field-hint">Scope: blocks when different payers would sweep to the SAME destination. Sigillum-generated gas top-ups (fund_gas steps) are covered by the same payer-linkage analysis: one sponsor funding different payers warns and is blocked when linkage protection is on. MANUAL gas funding, amount/timing correlation, downstream re-merging of per-party destinations, and multi-hop flows remain operator discipline &mdash; keep per-party destinations separate.</p>
         <p class="field-hint">Claim execution stays blocked unless ALL of these hold: this policy is enabled, the claim uses the merkle-distributor-v1 adapter, its simulation passed, the claim contract is marked trusted in the risk catalog (or carries a claim_execution_reviewed note), and you explicitly approve the step. Other claim types stay review/export-only. A claim that reverts at execution will require operator action and is never auto-retried, because a reverted claim may have consumed its proof.</p>
         <textarea id="treasuryPolicyDestinations" placeholder="Allowed destinations, one per line: 0xADDRESS or 0xADDRESS:label"></textarea>
         <div class="form-row">
@@ -435,8 +448,10 @@
         <div class="form-row">
           <input type="text" id="treasuryPolicyHotFloorEth" placeholder="Hot refill floor (ETH, default 1)">
           <input type="text" id="treasuryPolicyHotTargetEth" placeholder="Hot refill target (ETH, default 1)">
+          <input type="text" id="treasuryPolicyMaxGasTopupEth" placeholder="Max gas top-up (ETH, optional)">
         </div>
         <p class="field-hint">Sweeps route to the hot address while its balance is below the floor; the target is the refill ceiling (floor must be &le; target). Defaults preserve the previous 1 ETH behavior.</p>
+        <p class="field-hint">When enabled, consolidation plans may insert fund_gas steps that fund a source address's gas shortfall from the wallet's sponsor address (1.5x the dependent step's estimated gas, capped by the max top-up). Sigillum-generated top-ups run the same payer-linkage analysis as sweeps: funding different payers' addresses from one sponsor always warns and is hard-blocked when cross-party linkage blocking is on. MANUAL gas funding remains operator discipline.</p>
 
         <div class="section-divider"></div>
         <div class="section-title">Receive Addresses</div>

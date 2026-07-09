@@ -396,6 +396,8 @@ test("setup wizard preserves merkle claim opt-in when enabling payer-linkage pro
     require_simulation: true,
     block_cross_party_linkage: false,
     allow_claim_execution: true,
+    allow_gas_topups: true,
+    max_gas_topup_wei_hex: "0x4",
     simulation_freshness_secs: 120,
     created_at_unix: 1,
     updated_at_unix: 2,
@@ -430,6 +432,8 @@ test("setup wizard preserves merkle claim opt-in when enabling payer-linkage pro
       require_simulation: true,
       block_cross_party_linkage: true,
       allow_claim_execution: true,
+      allow_gas_topups: true,
+      max_gas_topup_wei_hex: "0x4",
       simulation_freshness_secs: 120,
       hot_floor_wei_hex: "0x2",
       hot_target_wei_hex: "0x3",
@@ -545,6 +549,83 @@ test("setup wizard can defer merkle claim execution without policy update", () =
   });
 });
 
+test("setup wizard enables sponsor gas top-ups from done step", async () => {
+  const dom = installDom(["wizGasTopupsChoiceStatus"]);
+  dom.el("wizGasTopupsChoiceStatus").classList.add("hidden");
+  const calls: Array<{ method: string; path: string; body?: any }> = [];
+  const toasts: Array<{ message: string; type?: string }> = [];
+
+  const wizard = createSetupWizard({
+    api: async (method, path, body) => {
+      calls.push({ method, path, body });
+      if (path === "/api/treasury/policy") return { policy: null };
+      return {};
+    },
+    toast: (message, type) => toasts.push({ message, type }),
+    refresh: () => undefined,
+    submitNewFido2Pin: async () => undefined,
+    friendlyFidoError: (message) => String(message),
+  });
+
+  await wizard.wizEnableGasTopups();
+
+  deepEqual(calls, [
+    {
+      method: "GET",
+      path: "/api/treasury/policy",
+      body: undefined,
+    },
+    {
+      method: "POST",
+      path: "/api/treasury/policy/update",
+      body: { enabled: false, allow_gas_topups: true },
+    },
+  ]);
+  equal(dom.el("wizGasTopupsChoiceStatus").classList.contains("hidden"), false);
+  equal(
+    dom.el("wizGasTopupsChoiceStatus").textContent,
+    "Sponsor gas top-up opt-in recorded. Top-ups only appear inside reviewed consolidation plans, are capped by the Treasury policy, and cross-party sponsor funding is still linkage-checked.",
+  );
+  deepEqual(toasts.pop(), {
+    message: "Sponsor gas top-up opt-in recorded",
+    type: undefined,
+  });
+});
+
+test("setup wizard can defer sponsor gas top-ups without policy update", () => {
+  const dom = installDom(["wizGasTopupsChoiceStatus"]);
+  dom.el("wizGasTopupsChoiceStatus").classList.add("hidden");
+  const calls: Array<{ method: string; path: string; body?: any }> = [];
+  const toasts: Array<{ message: string; type?: string }> = [];
+
+  const wizard = createSetupWizard({
+    api: async (method, path, body) => {
+      calls.push({ method, path, body });
+      return {};
+    },
+    toast: (message, type) => toasts.push({ message, type }),
+    refresh: () => undefined,
+    submitNewFido2Pin: async () => undefined,
+    friendlyFidoError: (message) => String(message),
+  });
+
+  wizard.wizDeclineGasTopups();
+
+  equal(
+    calls.some((call) => call.path === "/api/treasury/policy/update"),
+    false,
+  );
+  equal(dom.el("wizGasTopupsChoiceStatus").classList.contains("hidden"), false);
+  equal(
+    dom.el("wizGasTopupsChoiceStatus").textContent,
+    "You can enable sponsor gas top-ups later in Treasury policy.",
+  );
+  deepEqual(toasts.pop(), {
+    message: "You can enable sponsor gas top-ups later in Treasury policy.",
+    type: undefined,
+  });
+});
+
 test("queue and inventory renderers produce reviewable DOM summaries", () => {
   const dom = installDom([
     "queueList",
@@ -618,7 +699,7 @@ test("queue and inventory renderers produce reviewable DOM summaries", () => {
       status: "review_required",
       chain_id: 1,
       summary: {
-        total_steps: 1,
+        total_steps: 2,
         blocked_steps: 0,
         review_required_steps: 1,
         approved_steps: 0,
@@ -658,6 +739,31 @@ test("queue and inventory renderers produce reviewable DOM summaries", () => {
           auto_eligible: false,
           approved: false,
         },
+        {
+          id: "step-gas",
+          sequence: 0,
+          depends_on: ["step-1"],
+          action: "fund_gas",
+          status: "review_required",
+          wallet_family: "eth-seed",
+          wallet_profile: "archive",
+          provider_profile: "mainnet",
+          chain_id: 1,
+          address: "0xsponsor",
+          derivation_path: "m/44'/60'/0'/0/99",
+          asset_kind: "native",
+          asset_address: null,
+          amount_hex: "0x123",
+          destination_address: "0xfunded",
+          signer_status: "available",
+          simulation_status: "passed",
+          simulation_evidence: ["fee_basis=dependent_step"],
+          risk_level: "medium",
+          blockers: [],
+          linkage_warnings: [],
+          auto_eligible: false,
+          approved: false,
+        },
       ],
     },
   ]);
@@ -668,6 +774,10 @@ test("queue and inventory renderers produce reviewable DOM summaries", () => {
   ok(dom.el("consolidationPlanList").innerHTML.includes("deadline=123456"));
   ok(dom.el("consolidationPlanList").innerHTML.includes("simulation=required"));
   ok(dom.el("consolidationPlanList").innerHTML.includes("rpc_method=eth_call"));
+  ok(dom.el("consolidationPlanList").innerHTML.includes("fund_gas"));
+  ok(dom.el("consolidationPlanList").innerHTML.includes("sponsor=0xsponsor"));
+  ok(dom.el("consolidationPlanList").innerHTML.includes("funds=0xfunded"));
+  ok(dom.el("consolidationPlanList").innerHTML.includes("topup=0x123"));
   ok(dom.el("consolidationPlanList").innerHTML.includes("simulateConsolidationPlan"));
   ok(dom.el("consolidationPlanList").innerHTML.includes("exportConsolidationPlan"));
   ok(dom.el("consolidationPlanList").innerHTML.includes("Safe JSON"));
@@ -1924,6 +2034,8 @@ test("treasury policy renderer shows configured policy and empty state", () => {
     max_plan_native_wei_hex: null,
     require_simulation: true,
     allow_claim_execution: true,
+    allow_gas_topups: true,
+    max_gas_topup_wei_hex: "0x" + (250000000000000000n).toString(16),
     created_at_unix: 1717900000,
     updated_at_unix: 1717900500,
   };
@@ -1938,6 +2050,8 @@ test("treasury policy renderer shows configured policy and empty state", () => {
   ok(html.includes("maxPlan=-"));
   ok(html.includes("requireSimulation=true"));
   ok(html.includes("allowClaimExecution=true"));
+  ok(html.includes("allowGasTopups=true"));
+  ok(html.includes("maxGasTopup=0.25 ETH"));
 
   treasury.renderTreasuryPolicy(null);
   ok(
@@ -2013,6 +2127,8 @@ test("treasury policy loader prefills the form without clobbering operator edits
     "treasuryPolicyHotTargetEth",
     "treasuryPolicyRequireSim",
     "treasuryPolicyAllowClaimExec",
+    "treasuryPolicyAllowGasTopups",
+    "treasuryPolicyMaxGasTopupEth",
   ]);
   const policy: TreasuryPolicy = {
     enabled: true,
@@ -2023,6 +2139,8 @@ test("treasury policy loader prefills the form without clobbering operator edits
     max_plan_native_wei_hex: "0xde0b6b3a7640000",
     require_simulation: true,
     allow_claim_execution: true,
+    allow_gas_topups: true,
+    max_gas_topup_wei_hex: "0x" + (500000000000000000n).toString(16),
     created_at_unix: 1,
     updated_at_unix: 2,
   };
@@ -2035,12 +2153,14 @@ test("treasury policy loader prefills the form without clobbering operator edits
   equal(dom.el("treasuryPolicyEnabled").checked, true);
   equal(dom.el("treasuryPolicyRequireSim").checked, true);
   equal(dom.el("treasuryPolicyAllowClaimExec").checked, true);
+  equal(dom.el("treasuryPolicyAllowGasTopups").checked, true);
   equal(
     dom.el("treasuryPolicyDestinations").value,
     "0x2222222222222222222222222222222222222222:cold",
   );
   equal(dom.el("treasuryPolicyMaxStepEth").value, "2");
   equal(dom.el("treasuryPolicyMaxPlanEth").value, "1");
+  equal(dom.el("treasuryPolicyMaxGasTopupEth").value, "0.5");
   equal(dom.el("treasuryPolicyHotFloorEth").value, "1");
   equal(dom.el("treasuryPolicyHotTargetEth").value, "1");
   ok(dom.el("treasuryPolicyList").innerHTML.includes("maxPlan=1 ETH"));
@@ -2061,6 +2181,8 @@ test("treasury policy save validates caps and submits the parsed update request"
     "treasuryPolicyMaxPlanEth",
     "treasuryPolicyRequireSim",
     "treasuryPolicyAllowClaimExec",
+    "treasuryPolicyAllowGasTopups",
+    "treasuryPolicyMaxGasTopupEth",
   ]);
   const calls: Array<{ method: string; path: string; body?: any }> = [];
   const toasts: Array<{ message: string; type?: string }> = [];
@@ -2074,6 +2196,8 @@ test("treasury policy save validates caps and submits the parsed update request"
     max_plan_native_wei_hex: null,
     require_simulation: false,
     allow_claim_execution: true,
+    allow_gas_topups: true,
+    max_gas_topup_wei_hex: "0x" + (250000000000000000n).toString(16),
     created_at_unix: 1,
     updated_at_unix: 2,
   };
@@ -2091,10 +2215,12 @@ test("treasury policy save validates caps and submits the parsed update request"
   dom.el("treasuryPolicyEnabled").checked = true;
   dom.el("treasuryPolicyRequireSim").checked = false;
   dom.el("treasuryPolicyAllowClaimExec").checked = true;
+  dom.el("treasuryPolicyAllowGasTopups").checked = true;
   dom.el("treasuryPolicyDestinations").value =
     "0x2222222222222222222222222222222222222222:cold\n0x3333333333333333333333333333333333333333";
   dom.el("treasuryPolicyMaxStepEth").value = "1.5";
   dom.el("treasuryPolicyMaxPlanEth").value = "not-a-number";
+  dom.el("treasuryPolicyMaxGasTopupEth").value = "0.25";
 
   await treasury.updateTreasuryPolicy();
   equal(calls.length, 0);
@@ -2104,6 +2230,15 @@ test("treasury policy save validates caps and submits the parsed update request"
   });
 
   dom.el("treasuryPolicyMaxPlanEth").value = "";
+  dom.el("treasuryPolicyMaxGasTopupEth").value = "not-a-number";
+  await treasury.updateTreasuryPolicy();
+  equal(calls.length, 0);
+  deepEqual(toasts.pop(), {
+    message: "Max gas top-up must be a decimal ETH amount with up to 18 decimals",
+    type: "error",
+  });
+
+  dom.el("treasuryPolicyMaxGasTopupEth").value = "0.25";
   await treasury.updateTreasuryPolicy();
 
   const update = calls.find((call) => call.path === "/api/treasury/policy/update");
@@ -2121,12 +2256,16 @@ test("treasury policy save validates caps and submits the parsed update request"
       require_simulation: false,
       block_cross_party_linkage: false,
       allow_claim_execution: true,
+      allow_gas_topups: true,
+      max_gas_topup_wei_hex: "0x" + (250000000000000000n).toString(16),
     },
   });
   deepEqual(toasts.pop(), { message: "Treasury policy saved", type: undefined });
   ok(dom.el("treasuryPolicyList").innerHTML.includes(">enabled<"));
   ok(dom.el("treasuryPolicyList").innerHTML.includes("maxStep=1.5 ETH"));
+  ok(dom.el("treasuryPolicyList").innerHTML.includes("maxGasTopup=0.25 ETH"));
   equal(dom.el("treasuryPolicyMaxStepEth").value, "1.5");
+  equal(dom.el("treasuryPolicyMaxGasTopupEth").value, "0.25");
   ok(calls.some((call) => call.path === "/api/treasury/overview"));
 });
 
