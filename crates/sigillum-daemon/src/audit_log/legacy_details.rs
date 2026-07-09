@@ -281,6 +281,23 @@ pub(super) struct WalletInventoryDiscoveryJobUpdateDetails {
 }
 
 #[derive(Clone, Debug, Deserialize)]
+pub(super) struct WalletInventoryNftMetadataOptInDetails {
+    pub(super) chain_id: u64,
+    pub(super) contract_address: String,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+pub(super) struct WalletInventoryNftMetadataSettingsUpdateDetails {
+    pub(super) ipfs_gateway_configured: bool,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+pub(super) struct WalletInventoryNftMetadataFetchDetails {
+    pub(super) fetched: usize,
+    pub(super) skipped: usize,
+}
+
+#[derive(Clone, Debug, Deserialize)]
 pub(super) struct WalletConsolidationPlanGenerateDetails {
     pub(super) id: String,
     pub(super) steps: usize,

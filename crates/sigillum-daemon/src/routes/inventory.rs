@@ -10,10 +10,11 @@ use sigillum_api::{
     ChainProfileDeleteRequest, ChainProfileUpsertRequest, ConsolidationPlanApproveRequest,
     ConsolidationPlanExportRequest, ConsolidationPlanGenerateRequest,
     ConsolidationPlanSimulateRequest, CounterpartyCreateRequest, CounterpartyDeleteRequest,
-    CounterpartyUpdateRequest, DiscoveryJobMutationRequest, RiskCatalogDeleteRequest,
-    RiskCatalogUpsertRequest, TreasuryPolicyUpdateRequest, TreasuryReceiveAllocateRequest,
-    TreasuryReceiveRotateRequest, WalletInventoryScanRequest, WatchAddressBookDeleteRequest,
-    WatchAddressBookUpsertRequest,
+    CounterpartyUpdateRequest, DiscoveryJobMutationRequest, NftMetadataFetchRequest,
+    NftMetadataOptInDeleteRequest, NftMetadataOptInUpsertRequest, NftMetadataSettingsUpdateRequest,
+    RiskCatalogDeleteRequest, RiskCatalogUpsertRequest, TreasuryPolicyUpdateRequest,
+    TreasuryReceiveAllocateRequest, TreasuryReceiveRotateRequest, WalletInventoryScanRequest,
+    WatchAddressBookDeleteRequest, WatchAddressBookUpsertRequest,
 };
 
 use crate::AppState;
@@ -42,6 +43,82 @@ pub(crate) async fn scan_wallet_inventory_evm(
     service_response(
         service
             .scan_wallet_inventory_evm(bearer_token(&headers).as_deref(), body)
+            .await,
+    )
+}
+
+pub(crate) async fn list_nft_metadata_optins(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+) -> Response {
+    let service = SigillumService::new(state);
+    service_response(service.list_nft_metadata_optins(bearer_token(&headers).as_deref()))
+}
+
+pub(crate) async fn upsert_nft_metadata_optin(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Json(body): Json<NftMetadataOptInUpsertRequest>,
+) -> Response {
+    let body = match validated(Json(body)) {
+        Ok(b) => b,
+        Err(resp) => return resp,
+    };
+    let service = SigillumService::new(state);
+    service_response(
+        service
+            .upsert_nft_metadata_optin(bearer_token(&headers).as_deref(), body)
+            .await,
+    )
+}
+
+pub(crate) async fn delete_nft_metadata_optin(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Json(body): Json<NftMetadataOptInDeleteRequest>,
+) -> Response {
+    let body = match validated(Json(body)) {
+        Ok(b) => b,
+        Err(resp) => return resp,
+    };
+    let service = SigillumService::new(state);
+    service_response(
+        service
+            .delete_nft_metadata_optin(bearer_token(&headers).as_deref(), body)
+            .await,
+    )
+}
+
+pub(crate) async fn update_nft_metadata_settings(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Json(body): Json<NftMetadataSettingsUpdateRequest>,
+) -> Response {
+    let body = match validated(Json(body)) {
+        Ok(b) => b,
+        Err(resp) => return resp,
+    };
+    let service = SigillumService::new(state);
+    service_response(
+        service
+            .update_nft_metadata_settings(bearer_token(&headers).as_deref(), body)
+            .await,
+    )
+}
+
+pub(crate) async fn fetch_nft_metadata(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Json(body): Json<NftMetadataFetchRequest>,
+) -> Response {
+    let body = match validated(Json(body)) {
+        Ok(b) => b,
+        Err(resp) => return resp,
+    };
+    let service = SigillumService::new(state);
+    service_response(
+        service
+            .fetch_nft_metadata(bearer_token(&headers).as_deref(), body)
             .await,
     )
 }

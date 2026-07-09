@@ -1,6 +1,6 @@
 use sigillum_api::{
-    EvmProviderProfile, NftMetadataCacheEntry, WalletAddressActivityState, WalletAssetHolding,
-    WalletAssetKind, WalletDiscoveryJob, WalletInventoryAddress,
+    EvmProviderProfile, NftMetadataCacheEntry, RiskCatalogEntry, WalletAddressActivityState,
+    WalletAssetHolding, WalletAssetKind, WalletDiscoveryJob, WalletInventoryAddress,
 };
 
 use crate::service::helpers::random_id;
@@ -32,6 +32,12 @@ pub(super) struct ClaimRecordMetadata {
     pub(super) adapter: Option<String>,
     pub(super) index_hex: Option<String>,
     pub(super) proof: Vec<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(super) struct NftSpamAssessment {
+    pub(super) label: String,
+    pub(super) reasons: Vec<String>,
 }
 
 struct HoldingRecordParts<'a> {
@@ -81,9 +87,20 @@ pub(super) fn record_inventory_observation(
 
     upsert_address(&mut inventory.addresses, observation.address.clone());
     for mut holding in observation.holdings {
-        if let Some(spam_label) = conservative_nft_spam_label(&holding) {
-            holding.spam_label = Some(spam_label.to_string());
-            upsert_nft_metadata_cache(&mut inventory.nft_metadata_cache, &holding, spam_label);
+        let spam_assessment = conservative_nft_spam_label(
+            &holding,
+            &inventory.addresses,
+            &inventory.holdings,
+            &inventory.risk_catalog,
+        );
+        if let Some(assessment) = spam_assessment {
+            holding.spam_label = Some(assessment.label.clone());
+            upsert_nft_metadata_cache(
+                &mut inventory.nft_metadata_cache,
+                &holding,
+                &assessment.label,
+                &assessment.reasons,
+            );
         }
         if quantity_hex_is_nonzero(&holding.amount_hex) {
             upsert_holding(&mut inventory.holdings, holding.clone());
@@ -95,7 +112,12 @@ pub(super) fn record_inventory_observation(
     scanned_addresses.push(observation.address);
 }
 
-fn conservative_nft_spam_label(holding: &WalletAssetHolding) -> Option<&'static str> {
+pub(super) fn conservative_nft_spam_label(
+    holding: &WalletAssetHolding,
+    addresses: &[WalletInventoryAddress],
+    holdings: &[WalletAssetHolding],
+    risk_catalog: &[RiskCatalogEntry],
+) -> Option<NftSpamAssessment> {
     if !matches!(
         holding.asset_kind,
         WalletAssetKind::Erc721 | WalletAssetKind::Erc1155 | WalletAssetKind::Nft
@@ -105,13 +127,87 @@ fn conservative_nft_spam_label(holding: &WalletAssetHolding) -> Option<&'static 
     if !quantity_hex_is_nonzero(&holding.amount_hex) {
         return None;
     }
-    Some("unverified_nft_metadata")
+
+    if let Some(contract_address) = holding.asset_address.as_deref() {
+        if let Some(entry) = risk_catalog
+            .iter()
+            .find(|entry| entry.address.eq_ignore_ascii_case(contract_address))
+        {
+            if entry.risk_level.eq_ignore_ascii_case("trusted") {
+                return Some(NftSpamAssessment {
+                    label: "operator_trusted".into(),
+                    reasons: vec![format!("operator_override:trusted:{}", entry.label)],
+                });
+            }
+            if entry.risk_level.eq_ignore_ascii_case("high")
+                || entry.risk_level.eq_ignore_ascii_case("critical")
+            {
+                return Some(NftSpamAssessment {
+                    label: "operator_flagged_spam".into(),
+                    reasons: vec![format!(
+                        "operator_override:{}:{}",
+                        entry.risk_level.to_ascii_lowercase(),
+                        entry.label
+                    )],
+                });
+            }
+        }
+
+        if let Some(metadata_name) = holding.metadata_name.as_deref() {
+            let normalized_name = normalized_spam_match_name(metadata_name);
+            if !normalized_name.is_empty() {
+                if let Some(entry) = risk_catalog.iter().find(|entry| {
+                    entry.risk_level.eq_ignore_ascii_case("trusted")
+                        && !entry.address.eq_ignore_ascii_case(contract_address)
+                        && normalized_spam_match_name(&entry.label) == normalized_name
+                }) {
+                    return Some(NftSpamAssessment {
+                        label: "suspected_lookalike".into(),
+                        reasons: vec![format!("name_lookalike_of_trusted:{}", entry.label)],
+                    });
+                }
+            }
+        }
+
+        let received_without_outbound_activity = addresses.iter().any(|address| {
+            address.wallet_family == holding.wallet_family
+                && address.wallet_profile == holding.wallet_profile
+                && address.provider_profile == holding.provider_profile
+                && address.chain_id == holding.chain_id
+                && address.address.eq_ignore_ascii_case(&holding.address)
+                && address.transaction_count == 0
+        });
+        let no_matching_operator_approval = !holdings.iter().any(|existing| {
+            existing.asset_kind == WalletAssetKind::Approval
+                && existing.chain_id == holding.chain_id
+                && existing.address.eq_ignore_ascii_case(&holding.address)
+                && existing
+                    .asset_address
+                    .as_deref()
+                    .is_some_and(|address| address.eq_ignore_ascii_case(contract_address))
+        });
+        if received_without_outbound_activity && no_matching_operator_approval {
+            return Some(NftSpamAssessment {
+                label: "suspected_airdrop".into(),
+                reasons: vec![
+                    "received_without_outbound_activity".into(),
+                    "no_matching_operator_approval".into(),
+                ],
+            });
+        }
+    }
+
+    Some(NftSpamAssessment {
+        label: "unverified_nft_metadata".into(),
+        reasons: vec!["metadata_not_verified_locally".into()],
+    })
 }
 
-fn upsert_nft_metadata_cache(
+pub(super) fn upsert_nft_metadata_cache(
     cache: &mut Vec<NftMetadataCacheEntry>,
     holding: &WalletAssetHolding,
     spam_label: &str,
+    spam_reasons: &[String],
 ) {
     let (Some(contract_address), Some(token_id_hex)) = (
         holding.asset_address.as_ref(),
@@ -126,7 +222,7 @@ fn upsert_nft_metadata_cache(
         metadata_uri: holding.metadata_uri.clone(),
         name: holding.metadata_name.clone(),
         spam_label: spam_label.to_string(),
-        spam_reasons: Vec::new(),
+        spam_reasons: spam_reasons.to_vec(),
         fetched_at_unix: None,
         fetched_uri: None,
         content_sha256: None,
@@ -153,10 +249,19 @@ fn upsert_nft_metadata_cache(
             next.fetched_uri = existing.fetched_uri.clone();
             next.content_sha256 = existing.content_sha256.clone();
         }
+        next.fetch_skipped_reason = existing.fetch_skipped_reason.clone();
         *existing = next;
     } else {
         cache.push(next);
     }
+}
+
+fn normalized_spam_match_name(value: &str) -> String {
+    value
+        .bytes()
+        .filter(|byte| byte.is_ascii_alphanumeric())
+        .map(|byte| byte.to_ascii_lowercase() as char)
+        .collect()
 }
 
 pub(super) fn trimmed_required(field: &str, value: &str) -> ServiceResult<String> {
@@ -507,4 +612,153 @@ pub(super) fn unique_u64s(values: impl Iterator<Item = u64>) -> Vec<u64> {
         }
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const OWNER: &str = "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+    const CONTRACT: &str = "0x1111111111111111111111111111111111111111";
+    const TRUSTED: &str = "0xdead000000000000000000000000000000000000";
+
+    #[test]
+    fn airdropped_mock_collection_is_flagged_with_both_reasons() {
+        let holding = nft_holding(CONTRACT, None);
+        let addresses = vec![owner_address(0)];
+
+        let assessment =
+            conservative_nft_spam_label(&holding, &addresses, &[], &[]).expect("assessment");
+
+        assert_eq!(assessment.label, "suspected_airdrop");
+        assert_eq!(
+            assessment.reasons,
+            vec![
+                "received_without_outbound_activity".to_string(),
+                "no_matching_operator_approval".to_string()
+            ]
+        );
+    }
+
+    #[test]
+    fn owner_with_transaction_count_is_not_airdrop_flagged() {
+        let holding = nft_holding(CONTRACT, None);
+        let addresses = vec![owner_address(1)];
+
+        let assessment =
+            conservative_nft_spam_label(&holding, &addresses, &[], &[]).expect("assessment");
+
+        assert_eq!(assessment.label, "unverified_nft_metadata");
+        assert_eq!(
+            assessment.reasons,
+            vec!["metadata_not_verified_locally".to_string()]
+        );
+    }
+
+    #[test]
+    fn lookalike_of_trusted_catalog_entry_is_flagged() {
+        let holding = nft_holding(CONTRACT, Some("Trusted Collection!"));
+        let catalog = vec![risk_entry(TRUSTED, "Trusted Collection", "trusted")];
+
+        let assessment =
+            conservative_nft_spam_label(&holding, &[], &[], &catalog).expect("assessment");
+
+        assert_eq!(assessment.label, "suspected_lookalike");
+        assert_eq!(
+            assessment.reasons,
+            vec!["name_lookalike_of_trusted:Trusted Collection".to_string()]
+        );
+    }
+
+    #[test]
+    fn same_address_trusted_entry_is_operator_trusted() {
+        let holding = nft_holding(CONTRACT, Some("Trusted Collection"));
+        let catalog = vec![risk_entry(CONTRACT, "Trusted Collection", "trusted")];
+
+        let assessment =
+            conservative_nft_spam_label(&holding, &[], &[], &catalog).expect("assessment");
+
+        assert_eq!(assessment.label, "operator_trusted");
+        assert_eq!(
+            assessment.reasons,
+            vec!["operator_override:trusted:Trusted Collection".to_string()]
+        );
+    }
+
+    #[test]
+    fn high_catalog_entry_is_operator_flagged_spam() {
+        let holding = nft_holding(CONTRACT, None);
+        let catalog = vec![risk_entry(CONTRACT, "Known Spam", "high")];
+
+        let assessment =
+            conservative_nft_spam_label(&holding, &[], &[], &catalog).expect("assessment");
+
+        assert_eq!(assessment.label, "operator_flagged_spam");
+        assert_eq!(
+            assessment.reasons,
+            vec!["operator_override:high:Known Spam".to_string()]
+        );
+    }
+
+    fn nft_holding(contract: &str, name: Option<&str>) -> WalletAssetHolding {
+        WalletAssetHolding {
+            id: "holding-1".into(),
+            wallet_family: "eth-seed".into(),
+            wallet_profile: "default".into(),
+            provider_profile: "mainnet".into(),
+            chain_id: 1,
+            address: OWNER.into(),
+            derivation_path: "m/44'/60'/0'/0/0".into(),
+            asset_kind: WalletAssetKind::Erc721,
+            asset_address: Some(contract.into()),
+            token_id_hex: Some("0x1".into()),
+            counterparty_address: None,
+            protocol_address: None,
+            claim_adapter: None,
+            claim_index_hex: None,
+            claim_proof: Vec::new(),
+            metadata_uri: None,
+            metadata_name: name.map(str::to_string),
+            spam_label: None,
+            amount_hex: "0x1".into(),
+            source: "local-rpc".into(),
+            status: "detected".into(),
+            first_seen_at_unix: 100,
+            last_checked_at_unix: 100,
+        }
+    }
+
+    fn owner_address(transaction_count: u64) -> WalletInventoryAddress {
+        WalletInventoryAddress {
+            id: "address-1".into(),
+            wallet_family: "eth-seed".into(),
+            wallet_profile: "default".into(),
+            provider_profile: "mainnet".into(),
+            chain_id: 1,
+            address: OWNER.into(),
+            derivation_path: "m/44'/60'/0'/0/0".into(),
+            derivation_pattern: None,
+            account_index: Some(0),
+            address_index: 0,
+            activity_state: WalletAddressActivityState::Active,
+            native_balance_wei_hex: "0x0".into(),
+            transaction_count,
+            classifications: Vec::new(),
+            source: "local-rpc".into(),
+            first_seen_at_unix: 100,
+            last_checked_at_unix: 100,
+        }
+    }
+
+    fn risk_entry(address: &str, label: &str, risk_level: &str) -> RiskCatalogEntry {
+        RiskCatalogEntry {
+            address: address.into(),
+            label: label.into(),
+            risk_level: risk_level.into(),
+            source: "operator".into(),
+            notes: Vec::new(),
+            created_at_unix: 100,
+            updated_at_unix: 100,
+        }
+    }
 }

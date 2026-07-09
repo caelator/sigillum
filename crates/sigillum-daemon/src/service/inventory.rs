@@ -9,6 +9,7 @@ mod defi_discovery;
 mod export;
 mod nft_approval_discovery;
 mod nft_discovery;
+mod nft_metadata;
 mod observation;
 mod permit2_discovery;
 mod planner;
