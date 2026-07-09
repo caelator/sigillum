@@ -17,6 +17,11 @@ const ARTIFACT_DIR =
   fs.mkdtempSync(path.join(os.tmpdir(), "sigillum-browser-smoke-artifacts."));
 const TIMEOUT_MS = Number(process.env.SIGILLUM_BROWSER_SMOKE_TIMEOUT_MS || 60_000);
 const REAUTH_TIMEOUT_MS = Number(process.env.SIGILLUM_BROWSER_SMOKE_REAUTH_TIMEOUT_MS || 300_000);
+const REVEAL_TIMEOUT_MS = Number(process.env.SIGILLUM_BROWSER_SMOKE_REVEAL_TIMEOUT_MS || 120_000);
+// The reveal button toggles state with no in-flight or disabled signal, so a
+// ready-to-retry read right after clicking can still be the original request.
+// Retrying too early can race that request and toggle the revealed value off.
+const REVEAL_RETRY_SETTLE_MS = 1_200;
 
 function fail(message) {
   throw new Error(`browser smoke failed: ${message}`);
@@ -344,6 +349,63 @@ function reauthStateExpression() {
   })()`;
 }
 
+function revealStateExpression(listSelector, quotedValue) {
+  return `(() => {
+    const list = document.querySelector(${quoted(listSelector)});
+    const buttons = Array.from(list?.querySelectorAll("button") || []);
+    const revealButton = buttons.find((node) => (node.textContent || "").trim().includes("Reveal"));
+    const displayButton = revealButton || buttons.find((node) => (node.textContent || "").trim().includes("Hide"));
+    const ready = (el) => {
+      if (!el || el.disabled || el.closest(".hidden")) return false;
+      const style = window.getComputedStyle(el);
+      return style.display !== "none" && style.visibility !== "hidden";
+    };
+    const listText = list?.textContent || "";
+    return {
+      revealed: listText.includes(${quotedValue}),
+      buttonPresent: !!revealButton,
+      buttonReady: ready(revealButton),
+      buttonText: displayButton?.textContent?.trim() || "",
+      listTextLength: listText.length
+    };
+  })()`;
+}
+
+async function waitForRevealAttempt(cdp, listSelector, quotedValue, description) {
+  const attemptStart = Date.now();
+  const deadline = Date.now() + REVEAL_TIMEOUT_MS;
+  let lastState = null;
+  while (Date.now() < deadline) {
+    lastState = await evaluate(cdp, revealStateExpression(listSelector, quotedValue), description);
+    if (lastState.revealed) {
+      return { ok: true, state: lastState };
+    }
+    if (Date.now() - attemptStart >= REVEAL_RETRY_SETTLE_MS && lastState.buttonPresent && lastState.buttonReady) {
+      return { ok: false, state: lastState };
+    }
+    await sleep(150);
+  }
+  return { ok: false, state: lastState, timedOut: true };
+}
+
+async function revealListValue(cdp, listSelector, buttonText, quotedValue, description) {
+  let lastState = null;
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    const label = attempt === 1 ? description : `${description} (retry ${attempt - 1})`;
+    await clickByText(cdp, `${listSelector} button`, buttonText, label);
+    const result = await waitForRevealAttempt(cdp, listSelector, quotedValue, description);
+    lastState = result.state;
+    if (result.ok) {
+      return;
+    }
+    if (result.timedOut) {
+      break;
+    }
+  }
+
+  fail(`${description} did not become true: ${JSON.stringify(lastState)}`);
+}
+
 async function waitForReauthAttempt(cdp, description) {
   const deadline = Date.now() + REAUTH_TIMEOUT_MS;
   let lastState = null;
@@ -466,10 +528,8 @@ async function runBrowserSmoke(cdp) {
   await waitFor(cdp, `document.getElementById('secretList').textContent.includes(${quoted(SECRET_NAME)})`, "secret listed");
   await waitFor(cdp, "document.getElementById('secretCount').textContent.trim() === '1'", "secret count");
 
-  await clickByText(cdp, "#apiKeyList button", "Reveal", "API key reveal");
-  await waitFor(cdp, `document.getElementById('apiKeyList').textContent.includes(${quoted(API_KEY_VALUE)})`, "API key revealed value");
-  await clickByText(cdp, "#secretList button", "Reveal", "secret reveal");
-  await waitFor(cdp, `document.getElementById('secretList').textContent.includes(${quoted(SECRET_VALUE)})`, "secret revealed value");
+  await revealListValue(cdp, "#apiKeyList", "Reveal", quoted(API_KEY_VALUE), "API key revealed value");
+  await revealListValue(cdp, "#secretList", "Reveal", quoted(SECRET_VALUE), "secret revealed value");
 
   await selectWorkspace(cdp, "security");
   await click(cdp, '[data-action="logoutSession"]', "logout browser session");
