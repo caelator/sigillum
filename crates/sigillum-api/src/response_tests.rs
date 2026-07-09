@@ -769,6 +769,8 @@ fn test_wallet_operations_response_roundtrips() {
 
     let step = ConsolidationPlanStep {
         id: "step_1".to_string(),
+        sequence: 2,
+        depends_on: vec!["step_0".to_string()],
         action: WalletPlanStepAction::SweepErc20,
         status: WalletPlanStepStatus::Blocked,
         wallet_family: "eth-seed".to_string(),

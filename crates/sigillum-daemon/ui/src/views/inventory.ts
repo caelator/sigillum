@@ -536,6 +536,11 @@ export function createInventoryActions(deps: InventoryActionsDeps) {
               statusPill(step.status) +
               " · " +
               esc(step.asset_kind) +
+              " · seq=" +
+              esc(String(step.sequence ?? 0)) +
+              ((step.depends_on || []).length
+                ? " · dependsOn=" + esc((step.depends_on || []).join(","))
+                : "") +
               (step.token_id_hex ? " #" + esc(step.token_id_hex) : "") +
               (step.counterparty_address
                 ? " · spender/operator=" + esc(step.counterparty_address)

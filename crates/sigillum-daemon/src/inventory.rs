@@ -313,6 +313,8 @@ mod tests {
             linkage_findings: Vec::new(),
             steps: vec![sigillum_api::ConsolidationPlanStep {
                 id: "step_future".into(),
+                sequence: 0,
+                depends_on: Vec::new(),
                 action: sigillum_api::WalletPlanStepAction::Other("future_action".into()),
                 status: sigillum_api::WalletPlanStepStatus::ReviewRequired,
                 wallet_family: "eth-seed".into(),
