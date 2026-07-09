@@ -662,6 +662,67 @@ mod tests {
     }
 
     #[test]
+    fn fund_gas_export_orders_topup_before_dependent_and_carries_amount() {
+        let mut fund_step = exportable_step("fund_1", 0, Vec::new());
+        fund_step.action = WalletPlanStepAction::FundGas;
+        fund_step.asset_kind = "native".into();
+        fund_step.asset_address = None;
+        fund_step.amount_hex = "0xb71b0".into();
+        fund_step.address = "0x4444444444444444444444444444444444444444".into();
+        fund_step.destination_address = Some("0x1111111111111111111111111111111111111111".into());
+        let mut dependent = exportable_step("step_b", 1, vec!["fund_1".into()]);
+        dependent.address = "0x1111111111111111111111111111111111111111".into();
+        let plan = synthetic_plan(vec![dependent, fund_step]);
+
+        let (bundles, skipped_steps) =
+            build_export(&plan, &[], EXPORT_FORMAT_CALL_MANIFEST, None).unwrap();
+
+        assert!(skipped_steps.is_empty());
+        assert_eq!(
+            exported_step_ids(&bundles),
+            vec!["fund_1".to_string(), "step_b".to_string()]
+        );
+        let fund_call = bundles
+            .iter()
+            .flat_map(|bundle| &bundle.calls)
+            .find(|call| call.step_id == "fund_1")
+            .unwrap();
+        assert_eq!(
+            fund_call.to_address,
+            "0x1111111111111111111111111111111111111111"
+        );
+        assert_eq!(fund_call.value_wei_hex, "0xb71b0");
+        assert_eq!(fund_call.data_hex, "0x");
+        assert_eq!(fund_call.action, WalletPlanStepAction::FundGas);
+    }
+
+    #[test]
+    fn fund_gas_export_blocked_topup_skips_dependent() {
+        let mut fund_step = exportable_step("fund_1", 0, Vec::new());
+        fund_step.action = WalletPlanStepAction::FundGas;
+        fund_step.asset_kind = "native".into();
+        fund_step.asset_address = None;
+        fund_step.amount_hex = "0xb71b0".into();
+        fund_step.address = "0x4444444444444444444444444444444444444444".into();
+        fund_step.destination_address = Some("0x1111111111111111111111111111111111111111".into());
+        fund_step.status = WalletPlanStepStatus::Blocked;
+        fund_step.blockers = vec!["cross_party_linkage".into()];
+        let mut dependent = exportable_step("step_b", 1, vec!["fund_1".into()]);
+        dependent.address = "0x1111111111111111111111111111111111111111".into();
+        let plan = synthetic_plan(vec![fund_step, dependent]);
+
+        let (bundles, skipped_steps) =
+            build_export(&plan, &[], EXPORT_FORMAT_CALL_MANIFEST, None).unwrap();
+
+        assert!(exported_step_ids(&bundles).is_empty());
+        assert_eq!(skipped_reason(&skipped_steps, "fund_1"), Some("blocked"));
+        assert_eq!(
+            skipped_reason(&skipped_steps, "step_b"),
+            Some("dependency_blocked:fund_1")
+        );
+    }
+
+    #[test]
     fn export_rejects_dependency_cycle() {
         let step_a = exportable_step("step_a", 0, vec!["step_b".into()]);
         let step_b = exportable_step("step_b", 1, vec!["step_a".into()]);
