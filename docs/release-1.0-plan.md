@@ -1494,7 +1494,7 @@ Phase W — Wallet-management completion
 - [x] W7.2 plan-step queue payloads + enqueue validation
 - [x] W7.3 seed-wallet signing execution
 - [x] W7.4 nonces, receipts, failure classes
-- [ ] W7.5 linkage enforcement parity at execution
+- [x] W7.5 linkage enforcement parity at execution
 - [ ] W8 treasury automation (overflow/refill, hysteresis)
 
 Phase F — Assurance
@@ -1750,6 +1750,18 @@ Phase H — Ship
   chain executes in dependency order with a 3-sign/3-broadcast audit
   trail; gates-off behavior preserved. Implemented directly by a Sonnet
   agent under the operator's standing fallback directive.
+- 2026-07-09 W7.5 353f9c7/e00da22: linkage parity proven at the
+  plan-step enqueue path — nine-cell matrix (tagged/untagged parties ×
+  destination collisions × policy on/off, incl. fund_gas common-funder
+  and bulk enqueue-plan skip reasons) plus the approval→enqueue policy
+  flip test mirroring the treasury-allowlist flip. The matrix exposed a
+  real gap, now fixed: enqueue previously skipped linkage recomputation
+  entirely when `block_cross_party_linkage` was off, leaving stale
+  per-step warnings — warnings now always refresh while the hard block
+  stays policy-gated (no fail-closed weakening). README + architecture
+  document that execution enforces the same single-hop destination-axis
+  claim as generation/approval. Implemented via codex-exec (quota
+  restored) with independent re-verification by the wrapping agent.
 - 2026-07-09 W7.4 f972dcb..3a99d1d: execution semantics — per-source
   (address, chain) serialization with an E1-consistent transient skip
   (no legacy `deferred` wire string; dependency-chained same-batch jobs
