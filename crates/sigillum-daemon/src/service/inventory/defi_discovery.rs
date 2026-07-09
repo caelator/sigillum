@@ -6,7 +6,8 @@ use crate::service::{ServiceError, ServiceResult, SigillumService};
 
 use super::super::evm::normalize_address;
 use super::defi_adapters::{
-    DEFI_EXIT_ADAPTER_ERC4626_REDEEM, DEFI_EXIT_ADAPTER_LIDO_WSTETH_UNWRAP, adapter_for_protocol,
+    DEFI_EXIT_ADAPTER_ERC4626_REDEEM, DEFI_EXIT_ADAPTER_LIDO_WSTETH_UNWRAP,
+    DEFI_EXIT_ADAPTER_UNISWAP_V2_REMOVE_LIQUIDITY, adapter_for_protocol,
 };
 
 pub(super) const DISCOVERY_SOURCE_DEFI_TOKEN_PROBE_PREFIX: &str = "defi-token-probe";
@@ -118,8 +119,11 @@ impl SigillumService {
                 }
             } else {
                 let claim_adapter = adapter_for_protocol(&probe.protocol).map(str::to_string);
-                if claim_adapter.as_deref() == Some(DEFI_EXIT_ADAPTER_LIDO_WSTETH_UNWRAP)
-                    && protocol_address.is_none()
+                if matches!(
+                    claim_adapter.as_deref(),
+                    Some(DEFI_EXIT_ADAPTER_LIDO_WSTETH_UNWRAP)
+                        | Some(DEFI_EXIT_ADAPTER_UNISWAP_V2_REMOVE_LIQUIDITY)
+                ) && protocol_address.is_none()
                 {
                     protocol_address = Some(probe.token_address.clone());
                 }

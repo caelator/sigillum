@@ -15,12 +15,21 @@ const GOOD_VAULT: &str = "0xdead4626000000000000000000000000000000aa";
 const NON_4626_TOKEN: &str = "0xdead4626000000000000000000000000000000bb";
 const WSTETH_TOKEN: &str = "0xdead4d57e7570000000000000000000000000000";
 const STETH_TOKEN: &str = "0xdead57e7480000000000000000000000000000aa";
+const UNIV2_PAIR: &str = "0xdeadfa1200000000000000000000000000000aaa";
+const UNIV2_TOKEN0: &str = "0xdead70c0000000000000000000000000000000aa";
+const UNIV2_TOKEN1: &str = "0xdead70c1000000000000000000000000000000bb";
+const UNIV2_ROUTER: &str = "0xdead100e2000000000000000000000000000cccc";
+const UNIV2_CHAIN_ID: u64 = 7777;
 
 #[derive(Clone, Debug)]
 struct RpcConfig {
     native_balance_hex: String,
     redeem_reverts: bool,
     unwrap_reverts: bool,
+    univ2_approve_reverts: bool,
+    univ2_remove_reverts: bool,
+    chain_id: u64,
+    provider_profile: String,
 }
 
 #[derive(Clone)]
@@ -35,6 +44,7 @@ struct TestDaemon {
     rpc_handle: tokio::task::JoinHandle<()>,
     client: reqwest::Client,
     token: String,
+    provider_profile: String,
 }
 
 impl Drop for TestDaemon {
@@ -106,7 +116,7 @@ fn rpc_response(config: &RpcConfig, request: &Value) -> Value {
     }
 
     let result = match method {
-        "eth_chainId" => json!("0x1"),
+        "eth_chainId" => json!(format!("0x{:x}", config.chain_id)),
         "eth_blockNumber" => json!("0x20"),
         "eth_getTransactionCount" => json!("0x7"),
         "eth_getBalance" => json!(config.native_balance_hex),
@@ -130,6 +140,49 @@ fn eth_call_response(config: &RpcConfig, request: &Value) -> Value {
         && data.starts_with("0x70a08231")
     {
         return json_rpc_result(request, json!(abi_word(0xf4240)));
+    }
+    if to == UNIV2_PAIR && data.starts_with("0x70a08231") {
+        return json_rpc_result(request, json!(abi_word(0xf4240)));
+    }
+    if to == UNIV2_PAIR && data.starts_with("0x0dfe1681") {
+        return json_rpc_result(request, json!(abi_address_word(UNIV2_TOKEN0)));
+    }
+    if to == UNIV2_PAIR && data.starts_with("0xd21220a7") {
+        return json_rpc_result(request, json!(abi_address_word(UNIV2_TOKEN1)));
+    }
+    if to == UNIV2_PAIR && data.starts_with("0x0902f1ac") {
+        return json_rpc_result(
+            request,
+            json!(format!(
+                "{}{}{}",
+                abi_word_without_prefix(0x2faf080),
+                abi_word_without_prefix(0x5f5e100),
+                abi_word_without_prefix(0x1)
+            )),
+        );
+    }
+    if to == UNIV2_PAIR && data.starts_with("0x18160ddd") {
+        return json_rpc_result(request, json!(abi_word(0x1e84800)));
+    }
+    if to == UNIV2_PAIR && data.starts_with("0x095ea7b3") {
+        if config.univ2_approve_reverts {
+            return json_rpc_error(request, 3, "execution reverted");
+        }
+        return json_rpc_result(request, json!(abi_word(1)));
+    }
+    if to == UNIV2_ROUTER && data.starts_with("0xbaa2abde") {
+        if config.univ2_remove_reverts {
+            return json_rpc_error(request, 3, "execution reverted");
+        }
+        return json_rpc_result(
+            request,
+            json!(format!(
+                "{}{}{}",
+                "0x",
+                abi_word_without_prefix(0x16e360),
+                abi_word_without_prefix(0x2dc6c0)
+            )),
+        );
     }
 
     if to == GOOD_VAULT && data.starts_with("0xd905777e") {
@@ -161,6 +214,15 @@ fn eth_call_response(config: &RpcConfig, request: &Value) -> Value {
 
 fn abi_word(value: u64) -> String {
     format!("0x{value:064x}")
+}
+
+fn abi_word_without_prefix(value: u64) -> String {
+    format!("{value:064x}")
+}
+
+fn abi_address_word(address: &str) -> String {
+    let raw = address.strip_prefix("0x").unwrap_or(address);
+    format!("0x{}{}", "0".repeat(24), raw.to_ascii_lowercase())
 }
 
 fn json_rpc_result(request: &Value, result: Value) -> Value {
@@ -199,6 +261,8 @@ async fn post_json(
 async fn setup_daemon(config: RpcConfig) -> TestDaemon {
     let dir = TempDir::new().unwrap();
     let (addr, daemon_handle) = spawn_daemon(dir.path().to_path_buf()).await;
+    let provider_profile = config.provider_profile.clone();
+    let chain_id = config.chain_id;
     let (rpc_addr, rpc_handle) = spawn_mock_evm_provider(config).await;
     let client = reqwest::Client::new();
 
@@ -241,10 +305,10 @@ async fn setup_daemon(config: RpcConfig) -> TestDaemon {
         addr,
         "/api/profiles/evm/upsert",
         json!({
-            "name": "mainnet",
+            "name": provider_profile.clone(),
             "rpc_url": format!("http://{rpc_addr}/"),
             "auth_token_key": "alchemy",
-            "chain_id": 1,
+            "chain_id": chain_id,
             "max_priority_fee_per_gas_hex": "0x59682f00",
             "max_fee_per_gas_hex": "0x77359400",
             "native_gas_limit": 21000,
@@ -270,7 +334,7 @@ async fn setup_daemon(config: RpcConfig) -> TestDaemon {
             "label": "Seed main",
             "mnemonic": "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about",
             "project_account": 0,
-            "provider_profile": "mainnet",
+            "provider_profile": provider_profile.clone(),
         }),
         Some(&token),
     )
@@ -286,6 +350,7 @@ async fn setup_daemon(config: RpcConfig) -> TestDaemon {
         rpc_handle,
         client,
         token,
+        provider_profile,
     }
 }
 
@@ -294,6 +359,18 @@ fn default_rpc_config(native_balance_hex: &str) -> RpcConfig {
         native_balance_hex: native_balance_hex.into(),
         redeem_reverts: false,
         unwrap_reverts: false,
+        univ2_approve_reverts: false,
+        univ2_remove_reverts: false,
+        chain_id: 1,
+        provider_profile: "mainnet".into(),
+    }
+}
+
+fn univ2_rpc_config(native_balance_hex: &str) -> RpcConfig {
+    RpcConfig {
+        chain_id: UNIV2_CHAIN_ID,
+        provider_profile: "l2".into(),
+        ..default_rpc_config(native_balance_hex)
     }
 }
 
@@ -305,7 +382,7 @@ async fn scan_defi_token_probe(setup: &TestDaemon, protocol: &str, token_address
         json!({
             "wallet_family": "eth-seed",
             "wallet_profile": "seed-main",
-            "provider_profile": "mainnet",
+            "provider_profile": setup.provider_profile,
             "gap_limit": 1,
             "max_index": 0,
             "discover_defi_token_positions": true,
@@ -344,13 +421,17 @@ async fn generate_consolidation_plan(setup: &TestDaemon, body: Value) -> Value {
 }
 
 async fn simulate_step(setup: &TestDaemon, plan_id: &str, step_id: &str) -> Value {
+    simulate_steps(setup, plan_id, &[step_id]).await
+}
+
+async fn simulate_steps(setup: &TestDaemon, plan_id: &str, step_ids: &[&str]) -> Value {
     let simulate = post_json(
         &setup.client,
         setup.addr,
         "/api/plans/consolidation/simulate",
         json!({
             "plan_id": plan_id,
-            "step_ids": [step_id],
+            "step_ids": step_ids,
         }),
         Some(&setup.token),
     )
@@ -363,6 +444,73 @@ async fn simulate_step(setup: &TestDaemon, plan_id: &str, step_id: &str) -> Valu
         "simulate response: {simulate_json}"
     );
     simulate_json
+}
+
+async fn upsert_univ2_chain_profile(setup: &TestDaemon) -> Value {
+    let upsert = post_json(
+        &setup.client,
+        setup.addr,
+        "/api/chains/upsert",
+        json!({
+            "name": "custom-l2",
+            "chain_family": "evm",
+            "chain_id": UNIV2_CHAIN_ID,
+            "provider_profile": setup.provider_profile,
+            "native_symbol": "ETH",
+            "native_decimals": 18,
+            "finality_blocks": 0,
+            "uniswap_v2_router_address": UNIV2_ROUTER,
+            "enabled": true
+        }),
+        Some(&setup.token),
+    )
+    .await;
+    let upsert_status = upsert.status();
+    let upsert_json: Value = upsert.json().await.unwrap();
+    assert_eq!(
+        upsert_status,
+        StatusCode::OK,
+        "chain upsert response: {upsert_json}"
+    );
+    upsert_json
+}
+
+async fn approve_plan(setup: &TestDaemon, plan_id: &str) -> Value {
+    let approve = post_json(
+        &setup.client,
+        setup.addr,
+        "/api/plans/consolidation/approve",
+        json!({ "plan_id": plan_id }),
+        Some(&setup.token),
+    )
+    .await;
+    let approve_status = approve.status();
+    let approve_json: Value = approve.json().await.unwrap();
+    assert_eq!(
+        approve_status,
+        StatusCode::OK,
+        "approve response: {approve_json}"
+    );
+    approve_json
+}
+
+async fn export_plan(setup: &TestDaemon, plan_id: &str) -> Value {
+    let export = post_json(
+        &setup.client,
+        setup.addr,
+        "/api/plans/consolidation/export",
+        json!({ "plan_id": plan_id }),
+        Some(&setup.token),
+    )
+    .await;
+    let export_status = export.status();
+    let export_json: Value = export.json().await.unwrap();
+    assert_eq!(
+        export_status,
+        StatusCode::OK,
+        "export response: {export_json}"
+    );
+    export_json
 }
 
 fn defi_holding<'a>(scan_json: &'a Value, token_address: &str) -> &'a Value {
@@ -389,6 +537,18 @@ fn exit_defi_step<'a>(plan_json: &'a Value, adapter: Option<&str>) -> &'a Value 
                 && adapter.is_none_or(|adapter| step["claim_adapter"] == adapter)
         })
         .unwrap_or_else(|| panic!("missing exit_defi_position step in {plan_json}"))
+}
+
+fn plan_step_by_action<'a>(plan_json: &'a Value, action: &str, adapter: Option<&str>) -> &'a Value {
+    plan_json["plan"]["steps"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|step| {
+            step["action"] == action
+                && adapter.is_none_or(|adapter| step["claim_adapter"] == adapter)
+        })
+        .unwrap_or_else(|| panic!("missing {action} step in {plan_json}"))
 }
 
 fn step_by_id<'a>(plan_json: &'a Value, step_id: &str) -> &'a Value {
@@ -426,6 +586,15 @@ fn blockers_contain(step: &Value, expected: &str) -> bool {
         .unwrap()
         .iter()
         .any(|blocker| blocker == expected)
+}
+
+fn skipped_step<'a>(export_json: &'a Value, step_id: &str) -> &'a Value {
+    export_json["skipped_steps"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|step| step["step_id"] == step_id)
+        .unwrap_or_else(|| panic!("missing skipped step {step_id} in {export_json}"))
 }
 
 #[tokio::test]
@@ -655,6 +824,270 @@ async fn defi_lido_steth_position_stays_review_fallback() {
 
     assert_eq!(step["status"], "blocked");
     assert!(blockers_contain(step, "requires_protocol_adapter"));
+
+    drop(setup);
+}
+
+#[tokio::test]
+async fn defi_univ2_detection_records_adapter() {
+    let setup = setup_daemon(univ2_rpc_config("0x0")).await;
+
+    let scan_json = scan_defi_token_probe(&setup, "uniswap-v2", UNIV2_PAIR).await;
+    let holding = defi_holding(&scan_json, UNIV2_PAIR);
+
+    assert_eq!(holding["asset_kind"], "defi");
+    assert_eq!(holding["source"], "defi-token-probe:uniswap-v2");
+    assert_eq!(holding["claim_adapter"], "uniswap-v2-remove-liquidity");
+    assert_eq!(holding["amount_hex"], "0xf4240");
+    assert_eq!(holding["protocol_address"], UNIV2_PAIR);
+
+    drop(setup);
+}
+
+#[tokio::test]
+async fn defi_univ2_missing_router_blocks_position() {
+    let setup = setup_daemon(univ2_rpc_config("0xde0b6b3a7640000")).await;
+
+    scan_defi_token_probe(&setup, "uniswap-v2", UNIV2_PAIR).await;
+    let plan_json = generate_consolidation_plan(&setup, json!({})).await;
+    let step = exit_defi_step(&plan_json, Some("uniswap-v2-remove-liquidity"));
+    let univ2_steps = plan_json["plan"]["steps"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|step| step["claim_adapter"] == "uniswap-v2-remove-liquidity")
+        .filter(|step| step["address"] == OWNER_ADDRESS)
+        .count();
+
+    assert_eq!(univ2_steps, 1);
+    assert_eq!(step["status"], "blocked");
+    assert!(blockers_contain(step, "missing_uniswap_v2_router"));
+
+    drop(setup);
+}
+
+#[tokio::test]
+async fn defi_univ2_plan_expands_two_dependency_ordered_steps() {
+    let setup = setup_daemon(univ2_rpc_config("0xde0b6b3a7640000")).await;
+
+    upsert_univ2_chain_profile(&setup).await;
+    scan_defi_token_probe(&setup, "uniswap-v2", UNIV2_PAIR).await;
+    let plan_json = generate_consolidation_plan(&setup, json!({})).await;
+    let approve = plan_step_by_action(
+        &plan_json,
+        "approve_erc20",
+        Some("uniswap-v2-remove-liquidity"),
+    );
+    let remove = exit_defi_step(&plan_json, Some("uniswap-v2-remove-liquidity"));
+    let approve_id = approve["id"].as_str().unwrap();
+    let univ2_steps = plan_json["plan"]["steps"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|step| step["claim_adapter"] == "uniswap-v2-remove-liquidity")
+        .filter(|step| step["address"] == OWNER_ADDRESS)
+        .count();
+
+    assert_eq!(univ2_steps, 2);
+    assert_eq!(approve["counterparty_address"], UNIV2_ROUTER);
+    assert_eq!(approve["claim_adapter"], "uniswap-v2-remove-liquidity");
+    assert!(
+        approve
+            .get("depends_on")
+            .and_then(Value::as_array)
+            .is_none_or(|depends_on| depends_on.is_empty())
+    );
+    assert_eq!(remove["protocol_address"], UNIV2_ROUTER);
+    assert_eq!(remove["exit_token0_address"], UNIV2_TOKEN0);
+    assert_eq!(remove["exit_token1_address"], UNIV2_TOKEN1);
+    assert_eq!(remove["exit_amount0_min_hex"], "0x17b8ff");
+    assert_eq!(remove["exit_amount1_min_hex"], "0x2f71ff");
+    assert!(remove["exit_deadline_unix"].as_u64().unwrap() > 0);
+    assert_eq!(remove["depends_on"], json!([approve_id]));
+    assert!(remove["sequence"].as_u64().unwrap() > approve["sequence"].as_u64().unwrap());
+
+    drop(setup);
+}
+
+#[tokio::test]
+async fn defi_univ2_preflight_pass_records_expected_amounts() {
+    let setup = setup_daemon(univ2_rpc_config("0xde0b6b3a7640000")).await;
+
+    upsert_univ2_chain_profile(&setup).await;
+    scan_defi_token_probe(&setup, "uniswap-v2", UNIV2_PAIR).await;
+    let plan_json = generate_consolidation_plan(&setup, json!({})).await;
+    let plan_id = plan_json["plan"]["id"].as_str().unwrap();
+    let approve_id = plan_step_by_action(
+        &plan_json,
+        "approve_erc20",
+        Some("uniswap-v2-remove-liquidity"),
+    )["id"]
+        .as_str()
+        .unwrap();
+    let remove_id = exit_defi_step(&plan_json, Some("uniswap-v2-remove-liquidity"))["id"]
+        .as_str()
+        .unwrap();
+
+    let simulate_json = simulate_steps(&setup, plan_id, &[approve_id, remove_id]).await;
+    let simulated_approve = step_by_id(&simulate_json, approve_id);
+    let simulated_remove = step_by_id(&simulate_json, remove_id);
+
+    assert_eq!(simulated_approve["simulation_status"], "passed");
+    assert_eq!(simulated_remove["simulation_status"], "passed");
+    assert!(evidence_contains(
+        simulated_remove,
+        "defi_exit_adapter=uniswap-v2-remove-liquidity"
+    ));
+    assert!(evidence_contains(
+        simulated_remove,
+        "prepared_call=uniswap_v2.remove_liquidity(token0,token1,liquidity,amount0Min,amount1Min,to,deadline)"
+    ));
+    assert!(evidence_contains(
+        simulated_remove,
+        "expected_amount0_out_hex=0x16e360"
+    ));
+    assert!(evidence_contains(
+        simulated_remove,
+        "expected_amount1_out_hex=0x2dc6c0"
+    ));
+
+    drop(setup);
+}
+
+#[tokio::test]
+async fn defi_univ2_preflight_revert_blocks_step() {
+    let mut config = univ2_rpc_config("0xde0b6b3a7640000");
+    config.univ2_remove_reverts = true;
+    let setup = setup_daemon(config).await;
+
+    upsert_univ2_chain_profile(&setup).await;
+    scan_defi_token_probe(&setup, "uniswap-v2", UNIV2_PAIR).await;
+    let plan_json = generate_consolidation_plan(&setup, json!({})).await;
+    let plan_id = plan_json["plan"]["id"].as_str().unwrap();
+    let remove_id = exit_defi_step(&plan_json, Some("uniswap-v2-remove-liquidity"))["id"]
+        .as_str()
+        .unwrap();
+
+    let simulate_json = simulate_step(&setup, plan_id, remove_id).await;
+    let simulated_remove = step_by_id(&simulate_json, remove_id);
+
+    assert_eq!(simulated_remove["simulation_status"], "failed");
+    assert_eq!(simulated_remove["status"], "blocked");
+    assert!(blockers_contain(simulated_remove, "simulation_failed"));
+
+    drop(setup);
+}
+
+#[tokio::test]
+async fn defi_univ2_gas_shortfall_blocks_step() {
+    let setup = setup_daemon(univ2_rpc_config("0x1")).await;
+
+    upsert_univ2_chain_profile(&setup).await;
+    scan_defi_token_probe(&setup, "uniswap-v2", UNIV2_PAIR).await;
+    let plan_json = generate_consolidation_plan(&setup, json!({})).await;
+    let plan_id = plan_json["plan"]["id"].as_str().unwrap();
+    let approve_id = plan_step_by_action(
+        &plan_json,
+        "approve_erc20",
+        Some("uniswap-v2-remove-liquidity"),
+    )["id"]
+        .as_str()
+        .unwrap();
+
+    let simulate_json = simulate_step(&setup, plan_id, approve_id).await;
+    let simulated_approve = step_by_id(&simulate_json, approve_id);
+
+    assert_eq!(simulated_approve["simulation_status"], "blocked");
+    assert_eq!(simulated_approve["status"], "blocked");
+    assert!(evidence_contains(
+        simulated_approve,
+        "gas_policy_blocker=insufficient_native_gas"
+    ));
+
+    drop(setup);
+}
+
+#[tokio::test]
+async fn defi_univ2_export_orders_approve_before_remove() {
+    let setup = setup_daemon(univ2_rpc_config("0xde0b6b3a7640000")).await;
+
+    upsert_univ2_chain_profile(&setup).await;
+    scan_defi_token_probe(&setup, "uniswap-v2", UNIV2_PAIR).await;
+    let plan_json = generate_consolidation_plan(&setup, json!({})).await;
+    let plan_id = plan_json["plan"]["id"].as_str().unwrap();
+    let approve_id = plan_step_by_action(
+        &plan_json,
+        "approve_erc20",
+        Some("uniswap-v2-remove-liquidity"),
+    )["id"]
+        .as_str()
+        .unwrap();
+    let remove_id = exit_defi_step(&plan_json, Some("uniswap-v2-remove-liquidity"))["id"]
+        .as_str()
+        .unwrap();
+
+    simulate_steps(&setup, plan_id, &[approve_id, remove_id]).await;
+    approve_plan(&setup, plan_id).await;
+    let export_json = export_plan(&setup, plan_id).await;
+    let calls = export_json["bundles"][0]["calls"].as_array().unwrap();
+
+    assert_eq!(calls.len(), 2);
+    assert_eq!(calls[0]["step_id"], approve_id);
+    assert_eq!(calls[1]["step_id"], remove_id);
+    assert!(
+        calls[0]["data_hex"]
+            .as_str()
+            .unwrap()
+            .starts_with("0x095ea7b3")
+    );
+    assert!(
+        calls[1]["data_hex"]
+            .as_str()
+            .unwrap()
+            .starts_with("0xbaa2abde")
+    );
+
+    drop(setup);
+}
+
+#[tokio::test]
+async fn defi_univ2_export_skips_dependent_of_blocked_approve() {
+    let mut config = univ2_rpc_config("0xde0b6b3a7640000");
+    config.univ2_approve_reverts = true;
+    let setup = setup_daemon(config).await;
+
+    upsert_univ2_chain_profile(&setup).await;
+    scan_defi_token_probe(&setup, "uniswap-v2", UNIV2_PAIR).await;
+    let plan_json = generate_consolidation_plan(&setup, json!({})).await;
+    let plan_id = plan_json["plan"]["id"].as_str().unwrap();
+    let approve_id = plan_step_by_action(
+        &plan_json,
+        "approve_erc20",
+        Some("uniswap-v2-remove-liquidity"),
+    )["id"]
+        .as_str()
+        .unwrap();
+    let remove_id = exit_defi_step(&plan_json, Some("uniswap-v2-remove-liquidity"))["id"]
+        .as_str()
+        .unwrap();
+
+    let simulate_json = simulate_steps(&setup, plan_id, &[approve_id, remove_id]).await;
+    let simulated_approve = step_by_id(&simulate_json, approve_id);
+    let simulated_remove = step_by_id(&simulate_json, remove_id);
+    assert_eq!(simulated_approve["status"], "blocked");
+    assert_eq!(simulated_remove["simulation_status"], "passed");
+
+    approve_plan(&setup, plan_id).await;
+    let export_json = export_plan(&setup, plan_id).await;
+    let skipped_approve = skipped_step(&export_json, approve_id);
+    let skipped_remove = skipped_step(&export_json, remove_id);
+
+    assert_eq!(skipped_approve["reason"], "blocked");
+    assert_eq!(
+        skipped_remove["reason"].as_str().unwrap(),
+        format!("dependency_blocked:{approve_id}")
+    );
+    assert!(export_json["bundles"].as_array().unwrap().is_empty());
 
     drop(setup);
 }

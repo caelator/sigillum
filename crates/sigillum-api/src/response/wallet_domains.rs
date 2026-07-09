@@ -126,6 +126,7 @@ wire_string_enum! {
         RevokePermit2Allowance => "revoke_permit2_allowance",
         RevokeNftOperatorApproval => "revoke_nft_operator_approval",
         RevokeApproval => "revoke_approval",
+        ApproveErc20 => "approve_erc20",
         ExitDefiPosition => "exit_defi_position",
         ClaimReward => "claim_reward",
         ReviewAsset => "review_asset",

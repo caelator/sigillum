@@ -47,6 +47,9 @@ impl SigillumService {
             return Err(ServiceError::bad_request("chain_id must be greater than 0"));
         }
         let steps = build_plan_steps(&state, &registry, &body, &destination_address);
+        let steps = self
+            .expand_defi_exit_steps(&registry.evm_providers, &state.chain_profiles, steps)
+            .await;
         let mut steps_by_chain = BTreeMap::<u64, Vec<_>>::new();
         for step in steps {
             steps_by_chain.entry(step.chain_id).or_default().push(step);

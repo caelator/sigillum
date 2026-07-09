@@ -7,7 +7,7 @@ use crate::service::{ServiceError, ServiceResult};
 use super::claim_discovery::CLAIM_ADAPTER_MERKLE_DISTRIBUTOR_V1;
 use super::defi_adapters::{
     DEFI_EXIT_ADAPTER_AAVE_V3_WITHDRAW, DEFI_EXIT_ADAPTER_ERC4626_REDEEM,
-    DEFI_EXIT_ADAPTER_LIDO_WSTETH_UNWRAP,
+    DEFI_EXIT_ADAPTER_LIDO_WSTETH_UNWRAP, DEFI_EXIT_ADAPTER_UNISWAP_V2_REMOVE_LIQUIDITY,
 };
 
 const ERC20_APPROVE_SELECTOR: &str = "095ea7b3";
@@ -117,6 +117,33 @@ pub(super) fn prepare_plan_step_preflight(
                     ],
                 }),
             }
+        }
+        WalletPlanStepAction::ApproveErc20 => {
+            let token = required_address("asset contract", step.asset_address.as_deref())?;
+            let spender =
+                required_address("approval spender", step.counterparty_address.as_deref())?;
+            let amount = required_quantity("approval amount", &step.amount_hex)?;
+            let data_hex = erc20_approve_call_data(&spender, &amount)?;
+            let mut evidence = vec![
+                "prepared_call=erc20.approve(spender,amount)".into(),
+                format!("spender={spender}"),
+                format!("amount={amount}"),
+            ];
+            if let Some(adapter) = step
+                .claim_adapter
+                .as_deref()
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+            {
+                evidence.push(format!("defi_exit_adapter={adapter}"));
+            }
+            Ok(PlanStepPreflight::Call(PlanStepPreflightCall {
+                label: "erc20.approve(spender,amount)",
+                target_address: token,
+                data_hex,
+                value_hex: None,
+                evidence,
+            }))
         }
         WalletPlanStepAction::RevokeErc20Approval => {
             let token = required_address("asset contract", step.asset_address.as_deref())?;
@@ -274,6 +301,52 @@ pub(super) fn prepare_plan_step_preflight(
                     ],
                 }));
             }
+            if adapter == DEFI_EXIT_ADAPTER_UNISWAP_V2_REMOVE_LIQUIDITY {
+                let router =
+                    required_address("Uniswap V2 router", step.protocol_address.as_deref())?;
+                let token0 =
+                    required_address("Uniswap V2 token0", step.exit_token0_address.as_deref())?;
+                let token1 =
+                    required_address("Uniswap V2 token1", step.exit_token1_address.as_deref())?;
+                let liquidity = required_quantity("remove liquidity", &step.amount_hex)?;
+                let amount0_min = required_optional_quantity(
+                    "amount0 minimum",
+                    step.exit_amount0_min_hex.as_deref(),
+                )?;
+                let amount1_min = required_optional_quantity(
+                    "amount1 minimum",
+                    step.exit_amount1_min_hex.as_deref(),
+                )?;
+                let recipient =
+                    required_address("remove liquidity recipient", Some(step.address.as_str()))?;
+                let deadline = required_deadline(step.exit_deadline_unix)?;
+                let data_hex = uniswap_v2_remove_liquidity_call_data(
+                    &token0,
+                    &token1,
+                    &liquidity,
+                    &amount0_min,
+                    &amount1_min,
+                    &recipient,
+                    deadline,
+                )?;
+                return Ok(PlanStepPreflight::Call(PlanStepPreflightCall {
+                    label: "uniswapV2.removeLiquidity(token0,token1,liquidity,amount0Min,amount1Min,to,deadline)",
+                    target_address: router.clone(),
+                    data_hex,
+                    value_hex: None,
+                    evidence: vec![
+                        "prepared_call=uniswap_v2.remove_liquidity(token0,token1,liquidity,amount0Min,amount1Min,to,deadline)".into(),
+                        format!("defi_exit_adapter={DEFI_EXIT_ADAPTER_UNISWAP_V2_REMOVE_LIQUIDITY}"),
+                        format!("router={router}"),
+                        format!("token0={token0}"),
+                        format!("token1={token1}"),
+                        format!("liquidity={liquidity}"),
+                        format!("amount0_min={amount0_min}"),
+                        format!("amount1_min={amount1_min}"),
+                        format!("deadline_unix={deadline}"),
+                    ],
+                }));
+            }
             Ok(PlanStepPreflight::Unsupported {
                 evidence: vec![
                     format!("unsupported_defi_exit_adapter={adapter}"),
@@ -295,6 +368,14 @@ fn erc20_transfer_call_data(destination_address: &str, amount_hex: &str) -> Serv
         "0x{ERC20_TRANSFER_SELECTOR}{}{}",
         encoded_address_arg(destination_address)?,
         encoded_quantity_arg(amount_hex, "sweep amount")?
+    ))
+}
+
+fn erc20_approve_call_data(spender_address: &str, amount_hex: &str) -> ServiceResult<String> {
+    Ok(format!(
+        "0x{ERC20_APPROVE_SELECTOR}{}{}",
+        encoded_address_arg(spender_address)?,
+        encoded_quantity_arg(amount_hex, "approval amount")?
     ))
 }
 
@@ -417,6 +498,36 @@ fn lido_wsteth_unwrap_call_data(amount_hex: &str) -> ServiceResult<String> {
     ))
 }
 
+fn uniswap_v2_remove_liquidity_call_data(
+    token0_address: &str,
+    token1_address: &str,
+    liquidity_hex: &str,
+    amount0_min_hex: &str,
+    amount1_min_hex: &str,
+    recipient_address: &str,
+    deadline_unix: u64,
+) -> ServiceResult<String> {
+    Ok(format!(
+        "0x{}{}{}{}{}{}{}{}",
+        function_selector_hex(
+            "removeLiquidity(address,address,uint256,uint256,uint256,address,uint256)"
+        ),
+        encoded_address_arg(token0_address)?,
+        encoded_address_arg(token1_address)?,
+        encoded_quantity_arg(liquidity_hex, "remove liquidity")?,
+        encoded_quantity_arg(amount0_min_hex, "amount0 minimum")?,
+        encoded_quantity_arg(amount1_min_hex, "amount1 minimum")?,
+        encoded_address_arg(recipient_address)?,
+        encoded_quantity_arg(&format!("0x{deadline_unix:x}"), "removeLiquidity deadline")?
+    ))
+}
+
+fn required_deadline(value: Option<u64>) -> ServiceResult<u64> {
+    value.ok_or_else(|| {
+        ServiceError::bad_request("removeLiquidity deadline is required for simulation")
+    })
+}
+
 fn required_optional_quantity(field: &str, value: Option<&str>) -> ServiceResult<String> {
     let value = value
         .map(str::trim)
@@ -520,6 +631,11 @@ mod tests {
             claim_adapter: None,
             claim_index_hex: None,
             claim_proof: Vec::new(),
+            exit_token0_address: None,
+            exit_token1_address: None,
+            exit_amount0_min_hex: None,
+            exit_amount1_min_hex: None,
+            exit_deadline_unix: None,
             amount_hex: "0x1".into(),
             destination_address: Some("0x9999999999999999999999999999999999999999".into()),
             signer_status: "available".into(),
@@ -656,6 +772,50 @@ mod tests {
                 "0".repeat(64)
             )
         );
+    }
+
+    #[test]
+    fn prepares_erc20_approve_amount_call_data() {
+        let mut step = sample_step("approve_erc20");
+        step.amount_hex = "0X000f4240".into();
+        step.claim_adapter = Some(DEFI_EXIT_ADAPTER_UNISWAP_V2_REMOVE_LIQUIDITY.into());
+
+        let prepared = prepare_plan_step_preflight(&step).unwrap();
+        let PlanStepPreflight::Call(call) = prepared else {
+            panic!("expected call");
+        };
+
+        assert_eq!(call.label, "erc20.approve(spender,amount)");
+        assert_eq!(
+            call.target_address,
+            "0x2222222222222222222222222222222222222222"
+        );
+        assert_eq!(
+            call.data_hex,
+            format!(
+                "0x095ea7b3{}3333333333333333333333333333333333333333{}0f4240",
+                "0".repeat(24),
+                "0".repeat(58)
+            )
+        );
+        assert!(
+            call.evidence
+                .iter()
+                .any(|item| item == "prepared_call=erc20.approve(spender,amount)")
+        );
+        assert!(call.evidence.iter().any(|item| {
+            item == &format!("defi_exit_adapter={DEFI_EXIT_ADAPTER_UNISWAP_V2_REMOVE_LIQUIDITY}")
+        }));
+    }
+
+    #[test]
+    fn erc20_approve_amount_requires_spender() {
+        let mut step = sample_step("approve_erc20");
+        step.counterparty_address = None;
+
+        let error = prepare_plan_step_preflight(&step).unwrap_err();
+
+        assert!(error.to_string().contains("approval spender"));
     }
 
     #[test]
@@ -821,6 +981,80 @@ mod tests {
                 .iter()
                 .any(|item| item == "steth_withdrawal_queue=out_of_scope_review_asset")
         );
+    }
+
+    #[test]
+    fn prepares_uniswap_v2_remove_liquidity_call_data() {
+        let mut step = sample_step("exit_defi_position");
+        step.asset_kind = "defi".into();
+        step.asset_address = Some("0xdeadfa1200000000000000000000000000000aaa".into());
+        step.protocol_address = Some("0xdead100e2000000000000000000000000000cccc".into());
+        step.claim_adapter = Some(DEFI_EXIT_ADAPTER_UNISWAP_V2_REMOVE_LIQUIDITY.into());
+        step.amount_hex = "0x000f4240".into();
+        step.exit_token0_address = Some("0xdead70c0000000000000000000000000000000aa".into());
+        step.exit_token1_address = Some("0xdead70c1000000000000000000000000000000bb".into());
+        step.exit_amount0_min_hex = Some("0x17b93f".into());
+        step.exit_amount1_min_hex = Some("0x2f727f".into());
+        step.exit_deadline_unix = Some(0x123456);
+
+        let prepared = prepare_plan_step_preflight(&step).unwrap();
+        let PlanStepPreflight::Call(call) = prepared else {
+            panic!("expected call");
+        };
+
+        assert_eq!(
+            call.label,
+            "uniswapV2.removeLiquidity(token0,token1,liquidity,amount0Min,amount1Min,to,deadline)"
+        );
+        assert_eq!(
+            call.target_address,
+            "0xdead100e2000000000000000000000000000cccc"
+        );
+        assert_eq!(
+            call.data_hex,
+            format!(
+                "0xbaa2abde{}dead70c0000000000000000000000000000000aa{}dead70c1000000000000000000000000000000bb{}0f4240{}17b93f{}2f727f{}1111111111111111111111111111111111111111{}123456",
+                "0".repeat(24),
+                "0".repeat(24),
+                "0".repeat(58),
+                "0".repeat(58),
+                "0".repeat(58),
+                "0".repeat(24),
+                "0".repeat(58)
+            )
+        );
+        assert!(call.evidence.iter().any(|item| {
+            item == "prepared_call=uniswap_v2.remove_liquidity(token0,token1,liquidity,amount0Min,amount1Min,to,deadline)"
+        }));
+        assert!(call.evidence.iter().any(|item| {
+            item == &format!("defi_exit_adapter={DEFI_EXIT_ADAPTER_UNISWAP_V2_REMOVE_LIQUIDITY}")
+        }));
+        assert!(
+            call.evidence
+                .iter()
+                .any(|item| item == "amount0_min=0x17b93f")
+        );
+        assert!(
+            call.evidence
+                .iter()
+                .any(|item| item == "deadline_unix=1193046")
+        );
+    }
+
+    #[test]
+    fn uniswap_v2_remove_liquidity_requires_plan_time_fields() {
+        let mut step = sample_step("exit_defi_position");
+        step.asset_kind = "defi".into();
+        step.protocol_address = Some("0xdead100e2000000000000000000000000000cccc".into());
+        step.claim_adapter = Some(DEFI_EXIT_ADAPTER_UNISWAP_V2_REMOVE_LIQUIDITY.into());
+        step.exit_token1_address = Some("0xdead70c1000000000000000000000000000000bb".into());
+        step.exit_amount0_min_hex = Some("0x17b93f".into());
+        step.exit_amount1_min_hex = Some("0x2f727f".into());
+        step.exit_deadline_unix = Some(0x123456);
+
+        let error = prepare_plan_step_preflight(&step).unwrap_err();
+
+        assert!(error.to_string().contains("Uniswap V2 token0"));
     }
 
     #[test]

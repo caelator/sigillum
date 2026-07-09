@@ -362,14 +362,13 @@ The CLI should have parity for automation:
     batches. This creates auditable execution evidence for native/ERC-20/NFT
     sweeps and approval revokes while keeping direct signing and queue
     execution disabled until signer-specific policy is implemented.
-6. DeFi position adapters. The first implemented slice records
-   operator-configured ERC-20 receipt/share token probes as protocol holdings,
-   including the existing Aave v3 withdraw preflight adapter and the generic
-   ERC-4626 redeem exit adapter with maxRedeem/convertToAssets interface
-   verification, redeem preflight simulation, and expected-assets-out evidence.
-   The Lido wstETH unwrap adapter is now implemented for `unwrap(amount)` only;
-   the stETH withdrawal queue remains out of scope, so stETH holdings stay
-   review-only unless a future adapter is explicitly added.
+6. DeFi position adapters. The D-11 exit adapter set is now complete: Aave v3
+   withdraw, ERC-4626 redeem, Lido wstETH unwrap, and Uniswap v2 LP
+   `removeLiquidity` exits are implemented. The Uniswap v2 adapter expands LP
+   exits into dependency-ordered `approve` plus `removeLiquidity` steps, derives
+   minimum token amounts from pair reserves at plan time, and requires
+   per-chain operator-configured router addresses. Positions matching no
+   supported adapter remain review-only.
 7. Airdrop/reward discovery with strict claim risk gates. The first trusted
    candidate-ingestion, claim-contract risk-finding, and standard Merkle claim
    simulation slices are implemented; verified source adapters, richer external

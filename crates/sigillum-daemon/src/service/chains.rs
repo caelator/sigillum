@@ -49,6 +49,7 @@ pub(crate) fn builtin_chain_profile(spec: BuiltinChainSpec) -> ChainProfile {
         finality_blocks: 0,
         dormancy_block_window: DEFAULT_DORMANCY_BLOCK_WINDOW,
         permit2_address: None,
+        uniswap_v2_router_address: None,
         explorer_url: None,
         capabilities: Vec::new(),
         enabled: true,
