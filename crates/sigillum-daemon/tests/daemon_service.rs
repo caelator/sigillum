@@ -207,6 +207,127 @@ async fn spawn_mock_evm_provider() -> (SocketAddr, tokio::task::JoinHandle<()>) 
     (addr, handle)
 }
 
+async fn spawn_erc1155_batch_mock_evm_provider() -> (SocketAddr, tokio::task::JoinHandle<()>) {
+    fn abi_word(value: u64) -> String {
+        format!("{value:064x}")
+    }
+
+    fn batch_data() -> String {
+        let mut data = String::from("0x");
+        for value in [0x40_u64, 0xc0, 0x3, 0xa1, 0xb2, 0xc3, 0x3, 0x5, 0x9, 0x7] {
+            data.push_str(&abi_word(value));
+        }
+        data
+    }
+
+    fn rpc_response(request: &serde_json::Value) -> serde_json::Value {
+        const TRANSFER_BATCH_TOPIC: &str =
+            "0x4a39dc06d4c0dbc64b70af90fd698a233a518aa5d07e595d983b8c0526c8f7fb";
+        const OWNER_ADDRESS: &str = "9858effd232b4033e47d90003d41ec34ecaeda94";
+
+        let method = request["method"].as_str().unwrap_or_default();
+        let result = match method {
+            "eth_chainId" => json!("0x1"),
+            "eth_blockNumber" => json!("0x20"),
+            "eth_getTransactionCount" => json!("0x0"),
+            "eth_getBalance" => json!("0x0"),
+            "eth_getLogs" => {
+                let filter = &request["params"][0];
+                let fallback_topic = format!("0x{}", "00".repeat(32));
+                let topics = filter["topics"].as_array().cloned().unwrap_or_default();
+                let event_topic = topics
+                    .first()
+                    .and_then(|topic| topic.as_str())
+                    .unwrap_or("");
+                if event_topic == TRANSFER_BATCH_TOPIC {
+                    let mut log_topics = topics
+                        .iter()
+                        .map(|topic| {
+                            topic
+                                .as_str()
+                                .map(|value| json!(value))
+                                .unwrap_or_else(|| json!(fallback_topic.clone()))
+                        })
+                        .collect::<Vec<_>>();
+                    while log_topics.len() < 4 {
+                        log_topics.push(json!(fallback_topic.clone()));
+                    }
+
+                    json!([{
+                        "address": "0x1155000000000000000000000000000000000000",
+                        "topics": log_topics,
+                        "data": batch_data(),
+                        "blockNumber": "0x10",
+                        "transactionHash": format!("0x{}", "44".repeat(32)),
+                        "logIndex": "0x0"
+                    }])
+                } else {
+                    json!([])
+                }
+            }
+            "eth_call" => {
+                let data = request["params"][0]["data"]
+                    .as_str()
+                    .unwrap_or_default()
+                    .to_ascii_lowercase();
+                if data.starts_with("0x00fdd58e") {
+                    if data.contains(OWNER_ADDRESS) && data.ends_with(&abi_word(0xa1)) {
+                        json!("0x5")
+                    } else if data.contains(OWNER_ADDRESS) && data.ends_with(&abi_word(0xc3)) {
+                        json!("0x7")
+                    } else {
+                        json!("0x0")
+                    }
+                } else {
+                    json!("0x0")
+                }
+            }
+            other => json!({ "unsupported": other }),
+        };
+
+        json!({
+            "jsonrpc": "2.0",
+            "id": request.get("id").cloned().unwrap_or(json!(1)),
+            "result": result,
+        })
+    }
+
+    async fn rpc_handler(
+        State(_state): State<RpcState>,
+        headers: HeaderMap,
+        Json(body): Json<serde_json::Value>,
+    ) -> (StatusCode, Json<serde_json::Value>) {
+        let auth = headers
+            .get(header::AUTHORIZATION)
+            .and_then(|value| value.to_str().ok())
+            .unwrap_or("");
+        if auth != "Bearer rpc-test-token" {
+            return (
+                StatusCode::UNAUTHORIZED,
+                Json(json!({ "error": "missing provider auth" })),
+            );
+        }
+
+        let payload = if let Some(requests) = body.as_array() {
+            serde_json::Value::Array(requests.iter().map(rpc_response).collect())
+        } else {
+            rpc_response(&body)
+        };
+
+        (StatusCode::OK, Json(payload))
+    }
+
+    let app = Router::new()
+        .route("/", post(rpc_handler))
+        .with_state(RpcState);
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let handle = tokio::spawn(async move {
+        axum::serve(listener, app).await.unwrap();
+    });
+    (addr, handle)
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct LogRangeRequest {
     from_block: String,
@@ -3383,6 +3504,141 @@ async fn wallet_inventory_scan_discovers_erc20_tokens_from_transfer_logs() {
     let catalog = get(&client, addr, "/api/risk/catalog", Some(&token)).await;
     let catalog_json: serde_json::Value = catalog.json().await.unwrap();
     assert!(catalog_json["entries"].as_array().unwrap().is_empty());
+
+    handle.abort();
+    rpc_handle.abort();
+}
+
+#[tokio::test]
+async fn wallet_inventory_scan_erc1155_transfer_batch_yields_only_positive_balance_holdings() {
+    fn token_word(value: u64) -> String {
+        format!("0x{value:064x}")
+    }
+
+    let dir = TempDir::new().unwrap();
+    let (addr, handle) = spawn_daemon(dir.path().to_path_buf()).await;
+    let (rpc_addr, rpc_handle) = spawn_erc1155_batch_mock_evm_provider().await;
+    let client = reqwest::Client::new();
+
+    let init = post_json(
+        &client,
+        addr,
+        "/api/compartment/init",
+        json!({
+            "id": 0,
+            "label": "default",
+            "threshold": 1,
+            "passphrase": "correct horse battery staple",
+        }),
+        None,
+    )
+    .await;
+    let init_json: serde_json::Value = init.json().await.unwrap();
+    let token = init_json["session_token"].as_str().unwrap().to_string();
+
+    post_json(
+        &client,
+        addr,
+        "/api/api-keys/set",
+        json!({ "key": "alchemy", "value": "rpc-test-token" }),
+        Some(&token),
+    )
+    .await;
+
+    post_json(
+        &client,
+        addr,
+        "/api/profiles/evm/upsert",
+        json!({
+            "name": "mainnet",
+            "rpc_url": format!("http://{rpc_addr}/"),
+            "auth_token_key": "alchemy",
+            "chain_id": 1,
+            "max_priority_fee_per_gas_hex": "0x59682f00",
+            "max_fee_per_gas_hex": "0x77359400",
+            "native_gas_limit": 21000,
+            "erc20_gas_limit": 65000,
+        }),
+        Some(&token),
+    )
+    .await;
+
+    let seed = post_json(
+        &client,
+        addr,
+        "/api/profiles/eth-seed/upsert",
+        json!({
+            "name": "seed-main",
+            "label": "Seed main",
+            "mnemonic": "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about",
+            "project_account": 0,
+            "provider_profile": "mainnet",
+        }),
+        Some(&token),
+    )
+    .await;
+    assert_eq!(seed.status(), StatusCode::OK);
+
+    let scan = post_json(
+        &client,
+        addr,
+        "/api/inventory/scan/evm",
+        json!({
+            "wallet_family": "eth-seed",
+            "wallet_profile": "seed-main",
+            "provider_profile": "mainnet",
+            "gap_limit": 1,
+            "max_index": 0,
+            "discover_erc1155_transfers": true,
+            "nft_discovery_from_block": "0x0",
+            "nft_discovery_limit": 8
+        }),
+        Some(&token),
+    )
+    .await;
+    let scan_status = scan.status();
+    let scan_json: serde_json::Value = scan.json().await.unwrap();
+    assert_eq!(scan_status, StatusCode::OK, "scan response: {scan_json}");
+    assert_eq!(scan_json["job"]["status"], "completed");
+
+    let token_a1 = token_word(0xa1);
+    let token_b2 = token_word(0xb2);
+    let token_c3 = token_word(0xc3);
+    let holdings = scan_json["holdings"].as_array().unwrap();
+    let erc1155_log_holdings = holdings
+        .iter()
+        .filter(|holding| holding["source"] == "erc1155-transfer-log")
+        .collect::<Vec<_>>();
+    assert_eq!(erc1155_log_holdings.len(), 2);
+    assert!(erc1155_log_holdings.iter().any(|holding| {
+        holding["asset_kind"] == "erc1155"
+            && holding["asset_address"] == "0x1155000000000000000000000000000000000000"
+            && holding["token_id_hex"] == token_a1
+            && holding["amount_hex"] == "0x5"
+    }));
+    assert!(erc1155_log_holdings.iter().any(|holding| {
+        holding["asset_kind"] == "erc1155"
+            && holding["asset_address"] == "0x1155000000000000000000000000000000000000"
+            && holding["token_id_hex"] == token_c3
+            && holding["amount_hex"] == "0x7"
+    }));
+    assert!(
+        !holdings
+            .iter()
+            .any(|holding| holding["token_id_hex"] == token_b2)
+    );
+    assert!(
+        scan_json["job"]["checkpoints"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|checkpoint| {
+                checkpoint["wallet_family"] == "eth-seed"
+                    && checkpoint["wallet_profile"] == "seed-main"
+                    && checkpoint["provider_profile"] == "mainnet"
+                    && checkpoint["completed"] == true
+            })
+    );
 
     handle.abort();
     rpc_handle.abort();
