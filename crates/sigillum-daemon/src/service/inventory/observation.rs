@@ -40,6 +40,14 @@ use super::{
     WALLET_FAMILY_ETH_XPUB,
 };
 
+#[derive(Clone, Copy, Debug)]
+pub(super) struct AddressActivityContext {
+    pub(super) prior_last_activity_block: Option<u64>,
+    pub(super) announcement_activity_block: Option<u64>,
+    pub(super) chain_tip_block: Option<u64>,
+    pub(super) dormancy_block_window: u64,
+}
+
 impl SigillumService {
     #[allow(clippy::too_many_arguments)]
     pub(super) async fn observe_inventory_address(
@@ -59,6 +67,7 @@ impl SigillumService {
         nft_operator_approval_discovery: Option<&NftOperatorApprovalDiscoveryConfig>,
         defi_position_discovery: Option<&DefiTokenPositionDiscoveryConfig>,
         claim_candidate_discovery: Option<&ClaimCandidateDiscoveryConfig>,
+        activity: AddressActivityContext,
         block_cursors: &mut Vec<WalletDiscoveryBlockCursor>,
         now: u64,
     ) -> ServiceResult<InventoryAddressObservation> {
@@ -89,6 +98,7 @@ impl SigillumService {
             derivation_path,
             now,
         };
+        let mut observed_activity_block = None;
         let mut holdings = vec![holding_record(
             &record_context,
             WalletAssetKind::Native,
@@ -112,6 +122,10 @@ impl SigillumService {
                 .discover_erc20_transfer_tokens_for_address(provider, &address, config, &from_block)
                 .await?;
             transfer_log_tokens = tokens;
+            if !transfer_log_tokens.is_empty() {
+                observed_activity_block =
+                    max_optional_block(observed_activity_block, scanned_to_block);
+            }
             if let Some(scanned_to_block) = scanned_to_block {
                 update_block_cursor(
                     block_cursors,
@@ -220,6 +234,11 @@ impl SigillumService {
                     &from_block,
                 )
                 .await?;
+            let has_observed_nfts = !nfts.is_empty();
+            if has_observed_nfts {
+                observed_activity_block =
+                    max_optional_block(observed_activity_block, scanned_to_block);
+            }
             if let Some(scanned_to_block) = scanned_to_block {
                 update_block_cursor(
                     block_cursors,
@@ -232,7 +251,7 @@ impl SigillumService {
                     },
                 );
             }
-            if !nfts.is_empty() {
+            if has_observed_nfts {
                 activity_state = WalletAddressActivityState::Funded;
             }
             for nft in nfts {
@@ -270,6 +289,11 @@ impl SigillumService {
                     &from_block,
                 )
                 .await?;
+            let has_observed_tokens = !tokens.is_empty();
+            if has_observed_tokens {
+                observed_activity_block =
+                    max_optional_block(observed_activity_block, scanned_to_block);
+            }
             if let Some(scanned_to_block) = scanned_to_block {
                 update_block_cursor(
                     block_cursors,
@@ -282,7 +306,7 @@ impl SigillumService {
                     },
                 );
             }
-            if !tokens.is_empty() {
+            if has_observed_tokens {
                 activity_state = WalletAddressActivityState::Funded;
             }
             for token in tokens {
@@ -370,6 +394,10 @@ impl SigillumService {
             }
         }
 
+        let last_activity_block = max_optional_block(
+            max_optional_block(observed_activity_block, activity.prior_last_activity_block),
+            activity.announcement_activity_block,
+        );
         Ok(InventoryAddressObservation {
             address: address_record(
                 &record_context,
@@ -377,11 +405,15 @@ impl SigillumService {
                 activity_state,
                 &native_balance_wei_hex,
                 transaction_count,
+                last_activity_block,
                 address_classifications(
                     wallet,
                     &native_balance_wei_hex,
                     transaction_count,
                     &holdings,
+                    last_activity_block,
+                    activity.chain_tip_block,
+                    activity.dormancy_block_window,
                 ),
             ),
             holdings,
@@ -414,6 +446,9 @@ fn address_classifications(
     native_balance_wei_hex: &str,
     transaction_count: u64,
     holdings: &[sigillum_api::WalletAssetHolding],
+    last_activity_block: Option<u64>,
+    chain_tip_block: Option<u64>,
+    dormancy_block_window: u64,
 ) -> Vec<WalletAddressClassification> {
     let mut classifications = Vec::new();
     match wallet.family.as_str() {
@@ -509,7 +544,12 @@ fn address_classifications(
             WalletAddressClassification::ApprovalExposure,
         );
     }
-    if has_value && transaction_count == 0 {
+    let dormant = has_value
+        && match (last_activity_block, chain_tip_block) {
+            (Some(activity), Some(tip)) => activity.saturating_add(dormancy_block_window) < tip,
+            _ => transaction_count == 0,
+        };
+    if dormant {
         push_classification(
             &mut classifications,
             WalletAddressClassification::DormantCandidate,
@@ -522,6 +562,10 @@ fn address_classifications(
         );
     }
     classifications
+}
+
+fn max_optional_block(left: Option<u64>, right: Option<u64>) -> Option<u64> {
+    left.max(right)
 }
 
 fn push_classification(
@@ -598,6 +642,9 @@ mod tests {
             "0x0",
             0,
             &[holding("erc20", "0x1")],
+            None,
+            None,
+            sigillum_api::DEFAULT_DORMANCY_BLOCK_WINDOW,
         );
         assert!(
             classifications
@@ -628,6 +675,9 @@ mod tests {
             "0x1",
             2,
             &[holding("erc721", "0x1"), holding("approval", "0x1")],
+            None,
+            None,
+            sigillum_api::DEFAULT_DORMANCY_BLOCK_WINDOW,
         );
         assert!(
             classifications
@@ -657,6 +707,63 @@ mod tests {
     }
 
     #[test]
+    fn dormancy_window_marks_old_activity_dormant_despite_transaction_count() {
+        let classifications = address_classifications(
+            &wallet(WALLET_FAMILY_ETH_SEED),
+            "0x0",
+            5,
+            &[holding("erc20", "0x1")],
+            Some(100),
+            Some(2_000_000),
+            sigillum_api::DEFAULT_DORMANCY_BLOCK_WINDOW,
+        );
+
+        assert!(
+            classifications
+                .iter()
+                .any(|value| value == &WalletAddressClassification::DormantCandidate)
+        );
+    }
+
+    #[test]
+    fn dormancy_window_keeps_recent_activity_active_despite_zero_transaction_count() {
+        let classifications = address_classifications(
+            &wallet(WALLET_FAMILY_ETH_SEED),
+            "0x0",
+            0,
+            &[holding("erc20", "0x1")],
+            Some(1_950_000),
+            Some(2_000_000),
+            sigillum_api::DEFAULT_DORMANCY_BLOCK_WINDOW,
+        );
+
+        assert!(
+            !classifications
+                .iter()
+                .any(|value| value == &WalletAddressClassification::DormantCandidate)
+        );
+    }
+
+    #[test]
+    fn dormancy_falls_back_to_transaction_count_without_block_evidence() {
+        let classifications = address_classifications(
+            &wallet(WALLET_FAMILY_ETH_SEED),
+            "0x0",
+            0,
+            &[holding("erc20", "0x1")],
+            None,
+            None,
+            sigillum_api::DEFAULT_DORMANCY_BLOCK_WINDOW,
+        );
+
+        assert!(
+            classifications
+                .iter()
+                .any(|value| value == &WalletAddressClassification::DormantCandidate)
+        );
+    }
+
+    #[test]
     fn address_record_persists_classifications() {
         let wallet = wallet(WALLET_FAMILY_ETH_SEED);
         let provider = provider();
@@ -673,6 +780,7 @@ mod tests {
             WalletAddressActivityState::Funded,
             "0x1",
             0,
+            Some(123),
             vec![
                 WalletAddressClassification::SignerAvailable,
                 WalletAddressClassification::ValueDetected,

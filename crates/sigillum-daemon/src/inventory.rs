@@ -45,7 +45,7 @@ pub struct WalletInventoryState {
 }
 
 impl JsonDocument for WalletInventoryState {
-    const SCHEMA: JsonSchema = JsonSchema::new("sigillum.wallet-inventory", 13);
+    const SCHEMA: JsonSchema = JsonSchema::new("sigillum.wallet-inventory", 14);
 
     fn from_enveloped_json(
         path: &std::path::Path,
@@ -53,7 +53,7 @@ impl JsonDocument for WalletInventoryState {
         data: serde_json::Value,
     ) -> Result<Self, std::io::Error> {
         match version {
-            1..=13 => {
+            1..=14 => {
                 let mut state: Self = serde_json::from_value(data).map_err(|error| {
                     std::io::Error::new(
                         std::io::ErrorKind::InvalidData,
@@ -141,6 +141,7 @@ mod tests {
             native_symbol: "ETH".into(),
             native_decimals: 18,
             finality_blocks: 0,
+            dormancy_block_window: sigillum_api::DEFAULT_DORMANCY_BLOCK_WINDOW,
             permit2_address: None,
             explorer_url: None,
             capabilities: vec!["native".into(), "erc20".into()],
@@ -167,6 +168,7 @@ mod tests {
             activity_state: "funded".into(),
             native_balance_wei_hex: "0x1".into(),
             transaction_count: 0,
+            last_activity_block: None,
             classifications: vec![
                 "signer_available".into(),
                 "gas_available".into(),
@@ -431,7 +433,7 @@ mod tests {
             serde_json::from_slice(&std::fs::read(wallet_inventory_path(dir.path())).unwrap())
                 .unwrap();
         assert_eq!(saved["schema"], json!("sigillum.wallet-inventory"));
-        assert_eq!(saved["schema_version"], json!(13));
+        assert_eq!(saved["schema_version"], json!(14));
         assert_eq!(saved["data"]["chain_profiles"].as_array().unwrap().len(), 5);
         assert!(saved["data"]["watch_address_book"].is_array());
         assert!(saved["data"]["jobs"].is_array());
@@ -541,6 +543,73 @@ mod tests {
         assert_eq!(loaded.addresses[0].chain_id, 1);
         assert_eq!(loaded.holdings[0].chain_id, 1);
         assert_eq!(loaded.consolidation_plans[0].steps[0].chain_id, 1);
+    }
+
+    #[test]
+    fn legacy_v13_inventory_defaults_dormancy_window_and_last_activity_block() {
+        let dir = TempDir::new().unwrap();
+        let path = wallet_inventory_path(dir.path());
+        std::fs::write(
+            &path,
+            serde_json::to_vec_pretty(&json!({
+                "schema": "sigillum.wallet-inventory",
+                "schema_version": 13,
+                "data": {
+                    "chain_profiles": [{
+                        "name": "custom-rollup",
+                        "chain_family": "evm",
+                        "chain_id": 999,
+                        "native_symbol": "ETH",
+                        "enabled": true,
+                        "source": "operator",
+                        "created_at_unix": 1,
+                        "updated_at_unix": 2
+                    }],
+                    "addresses": [{
+                        "id": "addr_legacy",
+                        "wallet_family": "eth-seed",
+                        "wallet_profile": "seed-main",
+                        "provider_profile": "mainnet",
+                        "chain_id": 999,
+                        "address": "0x1111111111111111111111111111111111111111",
+                        "derivation_path": "m/44'/60'/0'/0/0",
+                        "address_index": 0,
+                        "activity_state": "funded",
+                        "native_balance_wei_hex": "0x1",
+                        "transaction_count": 1,
+                        "source": "legacy",
+                        "first_seen_at_unix": 1,
+                        "last_checked_at_unix": 2
+                    }]
+                }
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+
+        let loaded = load_wallet_inventory(dir.path()).unwrap();
+
+        assert_eq!(
+            loaded.addresses[0].last_activity_block, None,
+            "legacy addresses default to no derived activity block"
+        );
+        let custom = loaded
+            .chain_profiles
+            .iter()
+            .find(|profile| profile.name == "custom-rollup")
+            .expect("custom profile loaded");
+        assert_eq!(
+            custom.dormancy_block_window,
+            sigillum_api::DEFAULT_DORMANCY_BLOCK_WINDOW
+        );
+        assert!(
+            loaded
+                .chain_profiles
+                .iter()
+                .filter(|profile| profile.builtin)
+                .all(|profile| profile.dormancy_block_window
+                    == sigillum_api::DEFAULT_DORMANCY_BLOCK_WINDOW)
+        );
     }
 
     #[test]

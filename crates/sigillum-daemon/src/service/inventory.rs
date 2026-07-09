@@ -1,5 +1,7 @@
 //! Wallet inventory and read-only discovery operations.
 
+use std::collections::BTreeMap;
+
 mod allowance_discovery;
 mod checkpoints;
 mod claim_discovery;
@@ -25,10 +27,10 @@ mod watch_discovery;
 
 use sigillum_api::{
     ChainProfile, ChainProfileDeleteRequest, ChainProfileListResponse,
-    ChainProfileMutationResponse, ChainProfileUpsertRequest, DiscoveryJobListResponse,
-    DiscoveryJobMutationRequest, DiscoveryJobMutationResponse, RiskFindingListResponse,
-    WalletDiscoveryJob, WalletInventoryListResponse, WalletInventoryScanRequest,
-    WalletInventoryScanResponse, WatchAddressProbe,
+    ChainProfileMutationResponse, ChainProfileUpsertRequest, DEFAULT_DORMANCY_BLOCK_WINDOW,
+    DiscoveryJobListResponse, DiscoveryJobMutationRequest, DiscoveryJobMutationResponse,
+    RiskFindingListResponse, WalletDiscoveryJob, WalletInventoryListResponse,
+    WalletInventoryScanRequest, WalletInventoryScanResponse, WatchAddressProbe,
 };
 use sigillum_core::derive_ethereum_address_from_control_xpub;
 
@@ -43,12 +45,14 @@ use claim_discovery::claim_candidate_discovery_config;
 use defi_discovery::defi_token_position_discovery_config;
 use nft_approval_discovery::nft_operator_approval_discovery_config;
 use nft_discovery::{erc721_transfer_discovery_config, erc1155_transfer_discovery_config};
+use observation::AddressActivityContext;
 use permit2_discovery::permit2_allowance_discovery_config;
 use risk::derive_inventory_risk_findings;
 use support::{
-    default_native_symbol, load_inventory_state, normalized_wallet_family,
-    record_inventory_observation, save_inventory_state, select_providers, trimmed_optional,
-    trimmed_required, unique_strings, unique_u64s, validated_gap_limit, validated_max_index,
+    announcement_activity_blocks, default_native_symbol, load_inventory_state,
+    normalized_wallet_family, record_inventory_observation, save_inventory_state, select_providers,
+    trimmed_optional, trimmed_required, unique_strings, unique_u64s, validated_gap_limit,
+    validated_max_index,
 };
 use token_discovery::erc20_transfer_discovery_config;
 use wallet_selection::{
@@ -123,6 +127,24 @@ impl SigillumService {
         if chain_id == 0 {
             return Err(ServiceError::bad_request("chain_id must be greater than 0"));
         }
+        let existing = state
+            .chain_profiles
+            .iter()
+            .find(|existing| existing.name == name)
+            .cloned();
+        let dormancy_block_window = match body.dormancy_block_window {
+            Some(0) => {
+                return Err(ServiceError::bad_request(
+                    "dormancy_block_window must be greater than 0",
+                ));
+            }
+            Some(window) => window,
+            None => existing
+                .as_ref()
+                .map(|profile| profile.dormancy_block_window)
+                .filter(|window| *window > 0)
+                .unwrap_or(DEFAULT_DORMANCY_BLOCK_WINDOW),
+        };
         if state
             .chain_profiles
             .iter()
@@ -132,11 +154,6 @@ impl SigillumService {
                 "chain_id {chain_id} is already registered"
             )));
         }
-        let existing = state
-            .chain_profiles
-            .iter()
-            .find(|existing| existing.name == name)
-            .cloned();
         if existing.as_ref().is_some_and(|profile| profile.builtin)
             && existing.as_ref().and_then(|profile| profile.chain_id) != Some(chain_id)
         {
@@ -166,6 +183,7 @@ impl SigillumService {
                 .finality_blocks
                 .or_else(|| existing.as_ref().map(|profile| profile.finality_blocks))
                 .unwrap_or_default(),
+            dormancy_block_window,
             permit2_address,
             explorer_url: body.explorer_url.and_then(trimmed_optional),
             capabilities: unique_strings(
@@ -322,6 +340,7 @@ impl SigillumService {
             &state.addresses,
             &state.holdings,
             &state.risk_catalog,
+            &state.chain_profiles,
         ));
         Ok(RiskFindingListResponse { findings })
     }
@@ -423,6 +442,18 @@ impl SigillumService {
         let _guard = self.state.operation_guard().await;
         let mut inventory = load_inventory_state(&self.state.base_dir)?;
         let chain_profiles = inventory.chain_profiles.clone();
+        let deposits = crate::deposits::load_deposits(&self.state.base_dir)
+            .map(|deposits| deposits.eth_stealth)
+            .unwrap_or_default();
+        let announcement_activity = announcement_activity_blocks(&deposits);
+        let mut chain_tip_blocks = BTreeMap::new();
+        for provider in &providers {
+            let tip = match self.provider_rpc_for_profile(provider.compartment_id, provider) {
+                Ok(rpc) => rpc.get_block_number().await.ok(),
+                Err(_) => None,
+            };
+            chain_tip_blocks.insert(provider.name.clone(), tip);
+        }
         let permit2_allowance_discovery_for_provider =
             |provider: &sigillum_api::EvmProviderProfile| {
                 permit2_allowance_discovery_config(
@@ -532,6 +563,15 @@ impl SigillumService {
                             nft_operator_approval_discovery.as_ref(),
                             defi_position_discovery.as_ref(),
                             claim_candidate_discovery.as_ref(),
+                            activity_context_for_observation(
+                                &inventory,
+                                &chain_profiles,
+                                &announcement_activity,
+                                &chain_tip_blocks,
+                                wallet,
+                                provider,
+                                &derived.address,
+                            ),
                             &mut job.block_cursors,
                             started_at_unix,
                         )
@@ -627,6 +667,15 @@ impl SigillumService {
                                         nft_operator_approval_discovery.as_ref(),
                                         defi_position_discovery.as_ref(),
                                         claim_candidate_discovery.as_ref(),
+                                        activity_context_for_observation(
+                                            &inventory,
+                                            &chain_profiles,
+                                            &announcement_activity,
+                                            &chain_tip_blocks,
+                                            wallet,
+                                            provider,
+                                            &derived.address,
+                                        ),
                                         &mut job.block_cursors,
                                         started_at_unix,
                                     )
@@ -669,6 +718,15 @@ impl SigillumService {
                         nft_operator_approval_discovery.as_ref(),
                         defi_position_discovery.as_ref(),
                         claim_candidate_discovery.as_ref(),
+                        activity_context_for_observation(
+                            &inventory,
+                            &chain_profiles,
+                            &announcement_activity,
+                            &chain_tip_blocks,
+                            &watch.wallet,
+                            provider,
+                            &watch.address,
+                        ),
                         &mut job.block_cursors,
                         started_at_unix,
                     )
@@ -706,5 +764,42 @@ impl SigillumService {
             addresses: scanned_addresses,
             holdings: detected_holdings,
         })
+    }
+}
+
+fn activity_context_for_observation(
+    inventory: &crate::inventory::WalletInventoryState,
+    chain_profiles: &[ChainProfile],
+    announcement_activity: &BTreeMap<(u64, String), u64>,
+    chain_tip_blocks: &BTreeMap<String, Option<u64>>,
+    wallet: &DiscoveryWallet,
+    provider: &sigillum_api::EvmProviderProfile,
+    address: &str,
+) -> AddressActivityContext {
+    let prior_last_activity_block = inventory
+        .addresses
+        .iter()
+        .find(|existing| {
+            existing.wallet_family == wallet.family
+                && existing.wallet_profile == wallet.profile
+                && existing.provider_profile == provider.name
+                && existing.chain_id == provider.chain_id
+                && existing.address.eq_ignore_ascii_case(address)
+        })
+        .and_then(|existing| existing.last_activity_block);
+    let announcement_activity_block = announcement_activity
+        .get(&(provider.chain_id, address.to_ascii_lowercase()))
+        .copied();
+    let chain_tip_block = chain_tip_blocks.get(&provider.name).copied().flatten();
+    let dormancy_block_window = chain_profile_for_id(chain_profiles, provider.chain_id)
+        .map(|profile| profile.dormancy_block_window)
+        .filter(|window| *window > 0)
+        .unwrap_or(DEFAULT_DORMANCY_BLOCK_WINDOW);
+
+    AddressActivityContext {
+        prior_last_activity_block,
+        announcement_activity_block,
+        chain_tip_block,
+        dormancy_block_window,
     }
 }

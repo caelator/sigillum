@@ -124,12 +124,14 @@ Required discovery classes:
   explicit approval and successful simulation. External spender registries,
   expiration-aware Permit2 scoring, dynamic fee policy, and direct queue
   execution remain future work.
-- Dormant-wallet classification using last activity, transaction count, current
-  value, token/NFT/DeFi exposure, gas availability, and whether the private key
-  or signing path is actually available. Inventory addresses now carry
-  operator-facing classifications such as `signer_available`, `watch_only`,
-  `gas_available`, `stranded_value`, `approval_exposure`, and
-  `dormant_candidate`; richer last-activity timestamps and valuation remain
+- Dormant-wallet classification using derived last activity, current value,
+  token/NFT/DeFi exposure, gas availability, and whether the private key or
+  signing path is actually available. Inventory addresses now carry a derived
+  `last_activity_block` from the max block across observed transfer logs and
+  ERC-5564 stealth announcement scans; scan-progress cursors never count as
+  activity. Dormancy is classified against each chain-registry entry's
+  `dormancy_block_window` (default `1,000,000` blocks) instead of transaction
+  count alone, and dormant findings carry block evidence. Valuation remains
   future work.
 
 ## Local Indexing Architecture

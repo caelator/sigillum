@@ -340,6 +340,126 @@ async fn spawn_cursor_mock_evm_provider() -> (
     (addr, handle, log_ranges)
 }
 
+#[derive(Clone)]
+struct ActivityRpcState {
+    tip_block: u64,
+    log_block: u64,
+    transaction_count: u64,
+}
+
+async fn spawn_activity_mock_evm_provider(
+    tip_block: u64,
+    log_block: u64,
+    transaction_count: u64,
+) -> (SocketAddr, tokio::task::JoinHandle<()>) {
+    fn parse_quantity(value: &str) -> Option<u64> {
+        u64::from_str_radix(
+            value
+                .strip_prefix("0x")
+                .or_else(|| value.strip_prefix("0X"))
+                .unwrap_or(value),
+            16,
+        )
+        .ok()
+    }
+
+    fn rpc_response(state: &ActivityRpcState, request: &serde_json::Value) -> serde_json::Value {
+        let method = request["method"].as_str().unwrap_or_default();
+        let result = match method {
+            "eth_chainId" => json!("0x1"),
+            "eth_blockNumber" => json!(format!("0x{:x}", state.tip_block)),
+            "eth_getTransactionCount" => json!(format!("0x{:x}", state.transaction_count)),
+            "eth_getBalance" => json!("0x0"),
+            "eth_call" => {
+                json!("0x0000000000000000000000000000000000000000000000000000000000000001")
+            }
+            "eth_getLogs" => {
+                let filter = &request["params"][0];
+                let from_block = filter["fromBlock"].as_str().unwrap_or("0x0");
+                let to_block = filter["toBlock"].as_str().unwrap_or("0x0");
+                let from = parse_quantity(from_block).unwrap_or_default();
+                let to = parse_quantity(to_block).unwrap_or_default();
+                if from <= state.log_block && to >= state.log_block {
+                    let fallback_topic = format!("0x{}", "00".repeat(32));
+                    let topics = filter["topics"]
+                        .as_array()
+                        .cloned()
+                        .unwrap_or_default()
+                        .iter()
+                        .map(|topic| {
+                            topic
+                                .as_str()
+                                .map(|value| json!(value))
+                                .unwrap_or_else(|| json!(fallback_topic))
+                        })
+                        .collect::<Vec<_>>();
+                    json!([{
+                        "address": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+                        "topics": topics,
+                        "data": format!("0x{}01", "0".repeat(62)),
+                        "blockNumber": format!("0x{:x}", state.log_block),
+                        "transactionHash": format!("0x{}", "66".repeat(32)),
+                        "logIndex": "0x0"
+                    }])
+                } else {
+                    json!([])
+                }
+            }
+            other => json!({ "unsupported": other }),
+        };
+
+        json!({
+            "jsonrpc": "2.0",
+            "id": request.get("id").cloned().unwrap_or(json!(1)),
+            "result": result,
+        })
+    }
+
+    async fn rpc_handler(
+        State(state): State<ActivityRpcState>,
+        headers: HeaderMap,
+        Json(body): Json<serde_json::Value>,
+    ) -> (StatusCode, Json<serde_json::Value>) {
+        let auth = headers
+            .get(header::AUTHORIZATION)
+            .and_then(|value| value.to_str().ok())
+            .unwrap_or("");
+        if auth != "Bearer rpc-test-token" {
+            return (
+                StatusCode::UNAUTHORIZED,
+                Json(json!({ "error": "missing provider auth" })),
+            );
+        }
+
+        let payload = if let Some(requests) = body.as_array() {
+            serde_json::Value::Array(
+                requests
+                    .iter()
+                    .map(|request| rpc_response(&state, request))
+                    .collect(),
+            )
+        } else {
+            rpc_response(&state, &body)
+        };
+
+        (StatusCode::OK, Json(payload))
+    }
+
+    let app = Router::new()
+        .route("/", post(rpc_handler))
+        .with_state(ActivityRpcState {
+            tip_block,
+            log_block,
+            transaction_count,
+        });
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let handle = tokio::spawn(async move {
+        axum::serve(listener, app).await.unwrap();
+    });
+    (addr, handle)
+}
+
 async fn post_json(
     client: &reqwest::Client,
     addr: SocketAddr,
@@ -365,6 +485,57 @@ async fn get(
         req = req.bearer_auth(token);
     }
     req.send().await.unwrap()
+}
+
+async fn init_default_compartment(client: &reqwest::Client, addr: SocketAddr) -> String {
+    let init = post_json(
+        client,
+        addr,
+        "/api/compartment/init",
+        json!({
+            "id": 0,
+            "label": "default",
+            "threshold": 1,
+            "passphrase": "correct horse battery staple",
+        }),
+        None,
+    )
+    .await;
+    assert_eq!(init.status(), StatusCode::OK);
+    let init_json: serde_json::Value = init.json().await.unwrap();
+    init_json["session_token"].as_str().unwrap().to_string()
+}
+
+async fn configure_mainnet_provider(
+    client: &reqwest::Client,
+    addr: SocketAddr,
+    token: &str,
+    rpc_addr: SocketAddr,
+) {
+    let api_key = post_json(
+        client,
+        addr,
+        "/api/api-keys/set",
+        json!({ "key": "alchemy", "value": "rpc-test-token" }),
+        Some(token),
+    )
+    .await;
+    assert_eq!(api_key.status(), StatusCode::OK);
+
+    let provider = post_json(
+        client,
+        addr,
+        "/api/profiles/evm/upsert",
+        json!({
+            "name": "mainnet",
+            "rpc_url": format!("http://{rpc_addr}/"),
+            "auth_token_key": "alchemy",
+            "chain_id": 1,
+        }),
+        Some(token),
+    )
+    .await;
+    assert_eq!(provider.status(), StatusCode::OK);
 }
 
 #[tokio::test]
@@ -2575,6 +2746,174 @@ async fn wallet_inventory_transfer_log_cursors_resume_after_canceled_job_scan_di
 
     handle.abort();
     rpc_handle.abort();
+}
+
+#[tokio::test]
+async fn wallet_inventory_old_activity_classifies_dormant_candidate() {
+    let dir = TempDir::new().unwrap();
+    let (addr, handle) = spawn_daemon(dir.path().to_path_buf()).await;
+    let (rpc_addr, rpc_handle) = spawn_activity_mock_evm_provider(1_100_000, 5, 5).await;
+    let client = reqwest::Client::new();
+    let token = init_default_compartment(&client, addr).await;
+    configure_mainnet_provider(&client, addr, &token, rpc_addr).await;
+
+    let scan = post_json(
+        &client,
+        addr,
+        "/api/inventory/scan/evm",
+        json!({
+            "provider_profile": "mainnet",
+            "wallet_family": "eth-watch",
+            "watch_addresses": [{
+                "address": "0x7777777777777777777777777777777777777777",
+                "label": "old-ledger"
+            }],
+            "discover_erc20_transfers": true,
+            "token_discovery_from_block": "0x0",
+            "gap_limit": 1,
+            "max_index": 0
+        }),
+        Some(&token),
+    )
+    .await;
+    let scan_status = scan.status();
+    let scan_json: serde_json::Value = scan.json().await.unwrap();
+    assert_eq!(scan_status, StatusCode::OK, "scan response: {scan_json}");
+    assert_eq!(scan_json["addresses"][0]["last_activity_block"], 5);
+    let classifications = scan_json["addresses"][0]["classifications"]
+        .as_array()
+        .unwrap();
+    assert!(
+        classifications
+            .iter()
+            .any(|classification| classification == "dormant_candidate")
+    );
+
+    let risks = get(&client, addr, "/api/risk/findings", Some(&token)).await;
+    assert_eq!(risks.status(), StatusCode::OK);
+    let risks_json: serde_json::Value = risks.json().await.unwrap();
+    let findings = risks_json["findings"].as_array().unwrap();
+    assert!(findings.iter().any(|finding| {
+        finding["category"] == "dormant_wallet"
+            && finding["evidence"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|evidence| evidence == "Last observed on-chain activity block: 5")
+    }));
+
+    handle.abort();
+    rpc_handle.abort();
+}
+
+#[tokio::test]
+async fn wallet_inventory_recent_activity_is_not_dormant_candidate() {
+    let dir = TempDir::new().unwrap();
+    let (addr, handle) = spawn_daemon(dir.path().to_path_buf()).await;
+    let (rpc_addr, rpc_handle) = spawn_activity_mock_evm_provider(1_100_000, 1_050_000, 0).await;
+    let client = reqwest::Client::new();
+    let token = init_default_compartment(&client, addr).await;
+    configure_mainnet_provider(&client, addr, &token, rpc_addr).await;
+
+    let scan = post_json(
+        &client,
+        addr,
+        "/api/inventory/scan/evm",
+        json!({
+            "provider_profile": "mainnet",
+            "wallet_family": "eth-watch",
+            "watch_addresses": [{
+                "address": "0x7777777777777777777777777777777777777777",
+                "label": "recent-ledger"
+            }],
+            "discover_erc20_transfers": true,
+            "token_discovery_from_block": "0x0",
+            "gap_limit": 1,
+            "max_index": 0
+        }),
+        Some(&token),
+    )
+    .await;
+    let scan_status = scan.status();
+    let scan_json: serde_json::Value = scan.json().await.unwrap();
+    assert_eq!(scan_status, StatusCode::OK, "scan response: {scan_json}");
+    assert_eq!(scan_json["addresses"][0]["last_activity_block"], 1_050_000);
+    let classifications = scan_json["addresses"][0]["classifications"]
+        .as_array()
+        .unwrap();
+    assert!(
+        classifications
+            .iter()
+            .any(|classification| classification == "value_detected")
+    );
+    assert!(
+        !classifications
+            .iter()
+            .any(|classification| classification == "dormant_candidate")
+    );
+
+    handle.abort();
+    rpc_handle.abort();
+}
+
+#[tokio::test]
+async fn chain_profile_dormancy_block_window_defaults_and_validates_for_chains_route() {
+    let dir = TempDir::new().unwrap();
+    let (addr, handle) = spawn_daemon(dir.path().to_path_buf()).await;
+    let client = reqwest::Client::new();
+    let token = init_default_compartment(&client, addr).await;
+
+    let builtins = get(&client, addr, "/api/chains", Some(&token)).await;
+    assert_eq!(builtins.status(), StatusCode::OK);
+    let builtins_json: serde_json::Value = builtins.json().await.unwrap();
+    assert!(
+        builtins_json["profiles"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|profile| {
+                profile["name"] == "ethereum" && profile["dormancy_block_window"] == 1_000_000
+            })
+    );
+
+    let upsert = post_json(
+        &client,
+        addr,
+        "/api/chains/upsert",
+        json!({
+            "name": "activity-test-rollup",
+            "chain_family": "evm",
+            "chain_id": 4242,
+            "dormancy_block_window": 123
+        }),
+        Some(&token),
+    )
+    .await;
+    let upsert_status = upsert.status();
+    let upsert_json: serde_json::Value = upsert.json().await.unwrap();
+    assert_eq!(
+        upsert_status,
+        StatusCode::OK,
+        "upsert response: {upsert_json}"
+    );
+    assert_eq!(upsert_json["profile"]["dormancy_block_window"], 123);
+
+    let invalid = post_json(
+        &client,
+        addr,
+        "/api/chains/upsert",
+        json!({
+            "name": "invalid-activity-rollup",
+            "chain_family": "evm",
+            "chain_id": 4243,
+            "dormancy_block_window": 0
+        }),
+        Some(&token),
+    )
+    .await;
+    assert_eq!(invalid.status(), StatusCode::BAD_REQUEST);
+
+    handle.abort();
 }
 
 #[tokio::test]

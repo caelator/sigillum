@@ -1,6 +1,6 @@
 use sigillum_api::{
-    RiskCatalogEntry, RiskFinding, WalletAddressClassification, WalletAssetHolding,
-    WalletAssetKind, WalletInventoryAddress,
+    ChainProfile, DEFAULT_DORMANCY_BLOCK_WINDOW, RiskCatalogEntry, RiskFinding,
+    WalletAddressClassification, WalletAssetHolding, WalletAssetKind, WalletInventoryAddress,
 };
 use sigillum_core::decode_quantity_hex;
 
@@ -12,10 +12,11 @@ pub(super) fn derive_inventory_risk_findings(
     addresses: &[WalletInventoryAddress],
     holdings: &[WalletAssetHolding],
     risk_catalog: &[RiskCatalogEntry],
+    chain_profiles: &[ChainProfile],
 ) -> Vec<RiskFinding> {
     let mut findings = Vec::new();
     for address in addresses {
-        findings.extend(address_classification_findings(address));
+        findings.extend(address_classification_findings(address, chain_profiles));
     }
     for holding in holdings
         .iter()
@@ -79,7 +80,10 @@ fn is_claim_candidate_holding(holding: &WalletAssetHolding) -> bool {
     )
 }
 
-fn address_classification_findings(address: &WalletInventoryAddress) -> Vec<RiskFinding> {
+fn address_classification_findings(
+    address: &WalletInventoryAddress,
+    chain_profiles: &[ChainProfile],
+) -> Vec<RiskFinding> {
     let mut findings = Vec::new();
     if address_has_classification(address, &WalletAddressClassification::WatchOnly)
         && address_has_classification(address, &WalletAddressClassification::ValueDetected)
@@ -96,15 +100,29 @@ fn address_classification_findings(address: &WalletInventoryAddress) -> Vec<Risk
         ));
     }
     if address_has_classification(address, &WalletAddressClassification::DormantCandidate) {
+        let window = dormancy_block_window_for_chain(chain_profiles, address.chain_id);
+        let mut evidence = match address.last_activity_block {
+            Some(block) => vec![format!("Last observed on-chain activity block: {block}")],
+            None => vec![
+                "No on-chain activity blocks observed; address has no outgoing transaction count"
+                    .into(),
+            ],
+        };
+        evidence.push(format!(
+            "Dormancy block window: {window} blocks (chain {})",
+            address.chain_id
+        ));
+        evidence.push(
+            "Last-activity evidence is derived from observed transfer logs and stealth announcement scans; other activity may not be captured."
+                .into(),
+        );
+        evidence.push(format!("Derivation path: {}", address.derivation_path));
         findings.push(address_finding(
             "dormant_wallet",
             "low",
             address,
             "Review this funded address as a dormant or historical receive address before consolidation.",
-            vec![
-                "Value was detected on an address with no outgoing transaction count".into(),
-                format!("Derivation path: {}", address.derivation_path),
-            ],
+            evidence,
         ));
     }
     if address_has_classification(address, &WalletAddressClassification::StrandedValue) {
@@ -120,6 +138,15 @@ fn address_classification_findings(address: &WalletInventoryAddress) -> Vec<Risk
         ));
     }
     findings
+}
+
+fn dormancy_block_window_for_chain(chain_profiles: &[ChainProfile], chain_id: u64) -> u64 {
+    chain_profiles
+        .iter()
+        .find(|profile| profile.chain_id == Some(chain_id))
+        .map(|profile| profile.dormancy_block_window)
+        .filter(|window| *window > 0)
+        .unwrap_or(DEFAULT_DORMANCY_BLOCK_WINDOW)
 }
 
 fn address_finding(
@@ -472,6 +499,7 @@ mod tests {
             activity_state: "funded".into(),
             native_balance_wei_hex: "0x0".into(),
             transaction_count: 0,
+            last_activity_block: None,
             classifications: classifications
                 .iter()
                 .map(|value| (*value).into())
@@ -522,6 +550,27 @@ mod tests {
         }
     }
 
+    fn sample_chain_profile(window: u64) -> ChainProfile {
+        ChainProfile {
+            name: "ethereum".into(),
+            chain_family: "evm".into(),
+            chain_id: Some(1),
+            provider_profile: None,
+            native_symbol: "ETH".into(),
+            native_decimals: 18,
+            finality_blocks: 0,
+            dormancy_block_window: window,
+            permit2_address: None,
+            explorer_url: None,
+            capabilities: Vec::new(),
+            enabled: true,
+            source: "operator".into(),
+            builtin: false,
+            created_at_unix: 1,
+            updated_at_unix: 2,
+        }
+    }
+
     #[test]
     fn address_classifications_emit_watch_only_dormant_and_stranded_findings() {
         let findings = derive_inventory_risk_findings(
@@ -531,6 +580,7 @@ mod tests {
                 "stranded_value",
                 "dormant_candidate",
             ])],
+            &[],
             &[],
             &[],
         );
@@ -547,9 +597,35 @@ mod tests {
     }
 
     #[test]
+    fn dormant_findings_include_last_activity_block_and_window_evidence() {
+        let mut address = sample_address(&["value_detected", "dormant_candidate"]);
+        address.last_activity_block = Some(4711);
+        let findings =
+            derive_inventory_risk_findings(&[address], &[], &[], &[sample_chain_profile(123)]);
+
+        let finding = findings
+            .iter()
+            .find(|finding| finding.category == "dormant_wallet")
+            .expect("dormant finding");
+        assert!(
+            finding
+                .evidence
+                .iter()
+                .any(|value| { value == "Last observed on-chain activity block: 4711" })
+        );
+        assert!(
+            finding
+                .evidence
+                .iter()
+                .any(|value| { value == "Dormancy block window: 123 blocks (chain 1)" })
+        );
+    }
+
+    #[test]
     fn empty_address_classifications_do_not_emit_address_findings() {
         let findings = derive_inventory_risk_findings(
             &[sample_address(&["watch_only", "empty_candidate"])],
+            &[],
             &[],
             &[],
         );
@@ -559,7 +635,7 @@ mod tests {
     #[test]
     fn claim_candidates_emit_review_findings() {
         let holding = sample_claim_holding("airdrop");
-        let findings = derive_inventory_risk_findings(&[], &[holding], &[]);
+        let findings = derive_inventory_risk_findings(&[], &[holding], &[], &[]);
 
         let finding = findings
             .iter()
@@ -588,7 +664,7 @@ mod tests {
             "0x2222222222222222222222222222222222222222",
             "critical",
         )];
-        let findings = derive_inventory_risk_findings(&[], &[holding], &catalog);
+        let findings = derive_inventory_risk_findings(&[], &[holding], &catalog, &[]);
 
         let finding = findings
             .iter()
@@ -608,7 +684,7 @@ mod tests {
     fn claim_candidates_without_claim_contract_are_high_risk() {
         let mut holding = sample_claim_holding("airdrop");
         holding.protocol_address = None;
-        let findings = derive_inventory_risk_findings(&[], &[holding], &[]);
+        let findings = derive_inventory_risk_findings(&[], &[holding], &[], &[]);
 
         let finding = findings
             .iter()

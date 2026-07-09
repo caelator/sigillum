@@ -699,6 +699,7 @@ fn inventory_response_roundtrip() {
             activity_state: WalletAddressActivityState::Funded,
             native_balance_wei_hex: "0xde0b6b3a7640000".to_string(),
             transaction_count: 12,
+            last_activity_block: None,
             classifications: vec![
                 WalletAddressClassification::Other("signer".to_string()),
                 WalletAddressClassification::Other("treasury".to_string()),

@@ -562,6 +562,7 @@ impl SigillumService {
             &state.addresses,
             &state.holdings,
             &state.risk_catalog,
+            &state.chain_profiles,
         ));
         for finding in &findings {
             risk.total_findings += 1;
@@ -714,6 +715,7 @@ impl SigillumService {
                                     activity_state,
                                     native_balance_wei_hex,
                                     transaction_count: 0,
+                                    last_activity_block: None,
                                     classifications: Vec::new(),
                                     source: DISCOVERY_SOURCE_LOCAL_RPC.into(),
                                     first_seen_at_unix: now,
@@ -1758,6 +1760,7 @@ mod tests {
             activity_state: "funded".into(),
             native_balance_wei_hex: "0x1".into(),
             transaction_count: 0,
+            last_activity_block: None,
             classifications: Vec::new(),
             source: "local-rpc".into(),
             first_seen_at_unix: 1,
@@ -1809,6 +1812,7 @@ mod tests {
             activity_state: "funded".into(),
             native_balance_wei_hex: balance.into(),
             transaction_count: 0,
+            last_activity_block: None,
             classifications: Vec::new(),
             source: "persisted-test".into(),
             first_seen_at_unix: 1,

@@ -574,6 +574,7 @@ mod tests {
             activity_state: "funded".into(),
             native_balance_wei_hex: native_balance_wei_hex.into(),
             transaction_count: 0,
+            last_activity_block: None,
             classifications: vec!["signer_available".into()],
             source: "local-rpc".into(),
             first_seen_at_unix: 1,

@@ -5,6 +5,8 @@ use super::{
     WalletPlanStepAction, WalletPlanStepStatus, WalletSignerStatus, WalletSimulationStatus,
 };
 
+pub const DEFAULT_DORMANCY_BLOCK_WINDOW: u64 = 1_000_000;
+
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct WalletInventoryAddress {
     pub id: String,
@@ -23,6 +25,8 @@ pub struct WalletInventoryAddress {
     pub activity_state: WalletAddressActivityState,
     pub native_balance_wei_hex: String,
     pub transaction_count: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_activity_block: Option<u64>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub classifications: Vec<WalletAddressClassification>,
     pub source: String,
@@ -166,6 +170,8 @@ pub struct ChainProfile {
     pub native_decimals: u8,
     #[serde(default)]
     pub finality_blocks: u64,
+    #[serde(default = "default_chain_dormancy_block_window")]
+    pub dormancy_block_window: u64,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub permit2_address: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -182,6 +188,10 @@ pub struct ChainProfile {
 
 fn default_chain_native_decimals() -> u8 {
     18
+}
+
+fn default_chain_dormancy_block_window() -> u64 {
+    DEFAULT_DORMANCY_BLOCK_WINDOW
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]

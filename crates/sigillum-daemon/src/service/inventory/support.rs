@@ -1,6 +1,8 @@
+use std::collections::BTreeMap;
+
 use sigillum_api::{
-    EvmProviderProfile, NftMetadataCacheEntry, WalletAddressActivityState, WalletAssetHolding,
-    WalletAssetKind, WalletDiscoveryJob, WalletInventoryAddress,
+    EthStealthDeposit, EvmProviderProfile, NftMetadataCacheEntry, WalletAddressActivityState,
+    WalletAssetHolding, WalletAssetKind, WalletDiscoveryJob, WalletInventoryAddress,
 };
 
 use crate::service::helpers::random_id;
@@ -221,6 +223,7 @@ pub(super) fn address_record(
     activity_state: WalletAddressActivityState,
     native_balance_wei_hex: &str,
     transaction_count: u64,
+    last_activity_block: Option<u64>,
     classifications: Vec<sigillum_api::WalletAddressClassification>,
 ) -> WalletInventoryAddress {
     WalletInventoryAddress {
@@ -237,6 +240,7 @@ pub(super) fn address_record(
         activity_state,
         native_balance_wei_hex: native_balance_wei_hex.to_string(),
         transaction_count,
+        last_activity_block,
         classifications,
         source: DISCOVERY_SOURCE_LOCAL_RPC.into(),
         first_seen_at_unix: context.now,
@@ -411,6 +415,7 @@ pub(super) fn upsert_address(
     }) {
         next.id = existing.id.clone();
         next.first_seen_at_unix = existing.first_seen_at_unix;
+        next.last_activity_block = next.last_activity_block.max(existing.last_activity_block);
         *existing = next;
     } else {
         addresses.push(next);
@@ -491,4 +496,125 @@ pub(super) fn unique_u64s(values: impl Iterator<Item = u64>) -> Vec<u64> {
         }
     }
     out
+}
+
+pub(super) fn announcement_activity_blocks(
+    deposits: &[EthStealthDeposit],
+) -> BTreeMap<(u64, String), u64> {
+    let mut blocks: BTreeMap<(u64, String), u64> = BTreeMap::new();
+    for deposit in deposits {
+        let Some(note) = deposit.note.as_deref() else {
+            continue;
+        };
+        if !note.starts_with("erc5564-announcement") {
+            continue;
+        }
+        let Some(block) = note
+            .split("; ")
+            .find_map(|part| part.strip_prefix("block="))
+            .and_then(parse_hex_u64)
+        else {
+            continue;
+        };
+        blocks
+            .entry((
+                deposit.chain_id,
+                deposit.stealth_address.to_ascii_lowercase(),
+            ))
+            .and_modify(|existing| *existing = (*existing).max(block))
+            .or_insert(block);
+    }
+    blocks
+}
+
+fn parse_hex_u64(value: &str) -> Option<u64> {
+    let raw = value
+        .strip_prefix("0x")
+        .or_else(|| value.strip_prefix("0X"))?;
+    if raw.is_empty() || !raw.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        return None;
+    }
+    u64::from_str_radix(raw, 16).ok()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn deposit(stealth_address: &str, note: Option<&str>) -> EthStealthDeposit {
+        EthStealthDeposit {
+            id: format!("dep_{stealth_address}"),
+            status: "pending".into(),
+            asset_kind: "native".into(),
+            wallet_profile: "wallet-a".into(),
+            chain_id: 1,
+            chain_id_assumed: false,
+            wallet_compartment_id: 0,
+            provider_compartment_id: 0,
+            wallet: "wallet-a".into(),
+            short_name: "eth".into(),
+            stealth_meta_address: "st:eth:example".into(),
+            stealth_address: stealth_address.into(),
+            ephemeral_public_key_hex: "0x02".into(),
+            view_tag_hex: "0xaa".into(),
+            announcement: None,
+            token_address: None,
+            expected_amount_hex: None,
+            observed_amount_hex: None,
+            observed_native_balance_wei_hex: None,
+            auto_queue_sweep: false,
+            sweep_destination_address: None,
+            min_sweep_amount_hex: None,
+            queue_job_id: None,
+            queue_job_state: None,
+            note: note.map(str::to_string),
+            created_at_unix: 1,
+            updated_at_unix: 1,
+            last_checked_at_unix: None,
+            broadcast_transaction_hash_hex: None,
+            counterparty_id: None,
+        }
+    }
+
+    #[test]
+    fn announcement_activity_blocks_parse_notes_and_keep_max() {
+        let deposits = vec![
+            deposit(
+                "0xAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+                Some("erc5564-announcement; block=0x10; tx=0xabc"),
+            ),
+            deposit(
+                "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                Some("erc5564-announcement; block=0x2a; tx=0xdef"),
+            ),
+        ];
+
+        let blocks = announcement_activity_blocks(&deposits);
+
+        assert_eq!(
+            blocks.get(&(1, "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".into())),
+            Some(&42)
+        );
+    }
+
+    #[test]
+    fn announcement_activity_blocks_ignore_missing_or_malformed_block() {
+        let deposits = vec![
+            deposit(
+                "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                Some("erc5564-announcement; tx=0xabc"),
+            ),
+            deposit(
+                "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                Some("erc5564-announcement; block=not-hex"),
+            ),
+            deposit(
+                "0xcccccccccccccccccccccccccccccccccccccccc",
+                Some("operator-note; block=0x10"),
+            ),
+            deposit("0xdddddddddddddddddddddddddddddddddddddddd", None),
+        ];
+
+        assert!(announcement_activity_blocks(&deposits).is_empty());
+    }
 }
