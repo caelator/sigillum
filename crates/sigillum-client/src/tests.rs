@@ -6,14 +6,20 @@ use axum::{Json, Router};
 use serde_json::json;
 use sigillum_api::request::{
     CounterpartyCreateRequest, CounterpartyDeleteRequest, CounterpartyUpdateRequest, Eip1559Fees,
-    EvmProviderRef, QueueEthStealthErc20SweepRequest, QueueEthStealthNativeSweepRequest,
+    EvmProviderRef, NftMetadataFetchRequest, NftMetadataOptInDeleteRequest,
+    NftMetadataOptInUpsertRequest, NftMetadataSettingsUpdateRequest,
+    QueueEthStealthErc20SweepRequest, QueueEthStealthNativeSweepRequest,
     QueueEthStealthTransferRequest, QueueProcessRequest, ReceivingDepositTagRequest,
+    TokenRegistryImportRequest,
 };
 
 use super::*;
 
 #[derive(Clone)]
 struct TestState;
+
+const NFT_METADATA_CONTRACT: &str = "0xdead00000000000000000000000000000000dead";
+const NFT_METADATA_GATEWAY: &str = "https://ipfs.example.invalid/ipfs/";
 
 #[test]
 fn constructor_normalizes_base_url_without_session_token() {
@@ -47,6 +53,153 @@ async fn api_keys(headers: HeaderMap) -> (StatusCode, Json<serde_json::Value>) {
         );
     }
     (StatusCode::OK, Json(json!({ "keys": ["alpha", "beta"] })))
+}
+
+async fn nft_metadata_optins_route(headers: HeaderMap) -> (StatusCode, Json<serde_json::Value>) {
+    let auth = headers
+        .get(header::AUTHORIZATION)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("");
+    if auth != "Bearer test-token" {
+        return (
+            StatusCode::UNAUTHORIZED,
+            Json(json!({ "error": "missing auth" })),
+        );
+    }
+    (
+        StatusCode::OK,
+        Json(json!({
+            "opt_ins": [{
+                "chain_id": 1,
+                "contract_address": NFT_METADATA_CONTRACT,
+                "enabled": true,
+                "created_at_unix": 1,
+                "updated_at_unix": 2
+            }],
+            "ipfs_gateway_url": NFT_METADATA_GATEWAY
+        })),
+    )
+}
+
+async fn nft_metadata_optin_upsert_route(
+    headers: HeaderMap,
+    Json(body): Json<serde_json::Value>,
+) -> (StatusCode, Json<serde_json::Value>) {
+    let auth = headers
+        .get(header::AUTHORIZATION)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("");
+    if auth != "Bearer test-token" {
+        return (
+            StatusCode::UNAUTHORIZED,
+            Json(json!({ "error": "missing auth" })),
+        );
+    }
+    assert_eq!(body["chain_id"], 1);
+    assert_eq!(body["contract_address"], NFT_METADATA_CONTRACT);
+    assert_eq!(body["enabled"], true);
+    (
+        StatusCode::OK,
+        Json(json!({
+            "status": "upserted",
+            "opt_in": {
+                "chain_id": 1,
+                "contract_address": NFT_METADATA_CONTRACT,
+                "enabled": true,
+                "created_at_unix": 1,
+                "updated_at_unix": 3
+            }
+        })),
+    )
+}
+
+async fn nft_metadata_optin_delete_route(
+    headers: HeaderMap,
+    Json(body): Json<serde_json::Value>,
+) -> (StatusCode, Json<serde_json::Value>) {
+    let auth = headers
+        .get(header::AUTHORIZATION)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("");
+    if auth != "Bearer test-token" {
+        return (
+            StatusCode::UNAUTHORIZED,
+            Json(json!({ "error": "missing auth" })),
+        );
+    }
+    assert_eq!(body["chain_id"], 1);
+    assert_eq!(body["contract_address"], NFT_METADATA_CONTRACT);
+    (
+        StatusCode::OK,
+        Json(json!({
+            "status": "deleted",
+            "opt_in": {
+                "chain_id": 1,
+                "contract_address": NFT_METADATA_CONTRACT,
+                "enabled": false,
+                "created_at_unix": 1,
+                "updated_at_unix": 4
+            }
+        })),
+    )
+}
+
+async fn nft_metadata_settings_route(
+    headers: HeaderMap,
+    Json(body): Json<serde_json::Value>,
+) -> (StatusCode, Json<serde_json::Value>) {
+    let auth = headers
+        .get(header::AUTHORIZATION)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("");
+    if auth != "Bearer test-token" {
+        return (
+            StatusCode::UNAUTHORIZED,
+            Json(json!({ "error": "missing auth" })),
+        );
+    }
+    assert_eq!(body["ipfs_gateway_url"], NFT_METADATA_GATEWAY);
+    (
+        StatusCode::OK,
+        Json(json!({
+            "status": "updated",
+            "ipfs_gateway_url": NFT_METADATA_GATEWAY
+        })),
+    )
+}
+
+async fn nft_metadata_fetch_route(
+    headers: HeaderMap,
+    Json(body): Json<serde_json::Value>,
+) -> (StatusCode, Json<serde_json::Value>) {
+    let auth = headers
+        .get(header::AUTHORIZATION)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("");
+    if auth != "Bearer test-token" {
+        return (
+            StatusCode::UNAUTHORIZED,
+            Json(json!({ "error": "missing auth" })),
+        );
+    }
+    assert_eq!(body["chain_id"], 1);
+    assert_eq!(body["contract_address"], NFT_METADATA_CONTRACT);
+    assert_eq!(body["limit"], 1);
+    (
+        StatusCode::OK,
+        Json(json!({
+            "fetched": 1,
+            "entries": [{
+                "chain_id": 1,
+                "contract_address": NFT_METADATA_CONTRACT,
+                "token_id_hex": "0x1",
+                "metadata_uri": "ipfs://fake/1",
+                "name": "Fake NFT",
+                "spam_label": "ok",
+                "updated_at_unix": 5
+            }]
+        })),
+    )
 }
 
 async fn resolve_batch_route(
@@ -838,6 +991,92 @@ async fn deposits_list_route(headers: HeaderMap) -> (StatusCode, Json<serde_json
     )
 }
 
+fn token_registry_list_json(name: &str, source: &str) -> serde_json::Value {
+    json!({
+        "id": format!("token-registry-{name}"),
+        "name": name,
+        "compartment_id": 0,
+        "source": source,
+        "entries": [{
+            "chain_id": 1,
+            "address": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "symbol": "FAKE",
+            "decimals": 18
+        }],
+        "created_at_unix": 10,
+        "updated_at_unix": 11
+    })
+}
+
+async fn token_registry_list_route(headers: HeaderMap) -> (StatusCode, Json<serde_json::Value>) {
+    let auth = headers
+        .get(header::AUTHORIZATION)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("");
+    if auth != "Bearer test-token" {
+        return (
+            StatusCode::UNAUTHORIZED,
+            Json(json!({ "error": "missing auth" })),
+        );
+    }
+    (
+        StatusCode::OK,
+        Json(json!({
+            "lists": [token_registry_list_json("stablecoins", "entries-json")]
+        })),
+    )
+}
+
+async fn token_registry_import_route(
+    headers: HeaderMap,
+    Json(body): Json<serde_json::Value>,
+) -> (StatusCode, Json<serde_json::Value>) {
+    let auth = headers
+        .get(header::AUTHORIZATION)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("");
+    if auth != "Bearer test-token" {
+        return (
+            StatusCode::UNAUTHORIZED,
+            Json(json!({ "error": "missing auth" })),
+        );
+    }
+    assert_eq!(body["name"], "stablecoins");
+    assert!(body["entries_json"].is_string());
+    assert!(body.get("file_path").is_none());
+    (
+        StatusCode::OK,
+        Json(json!({
+            "status": "imported",
+            "list": token_registry_list_json("stablecoins", "entries-json")
+        })),
+    )
+}
+
+async fn token_registry_delete_route(
+    headers: HeaderMap,
+    Json(body): Json<serde_json::Value>,
+) -> (StatusCode, Json<serde_json::Value>) {
+    let auth = headers
+        .get(header::AUTHORIZATION)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("");
+    if auth != "Bearer test-token" {
+        return (
+            StatusCode::UNAUTHORIZED,
+            Json(json!({ "error": "missing auth" })),
+        );
+    }
+    assert_eq!(body["name"], "stablecoins");
+    (
+        StatusCode::OK,
+        Json(json!({
+            "status": "deleted",
+            "list": token_registry_list_json("stablecoins", "entries-json")
+        })),
+    )
+}
+
 async fn deposits_create_route(
     headers: HeaderMap,
     Json(body): Json<serde_json::Value>,
@@ -1440,6 +1679,26 @@ async fn spawn_test_server() -> Option<SocketAddr> {
     let app = Router::new()
         .route("/api/unlock", post(unlock))
         .route("/api/api-keys", get(api_keys))
+        .route(
+            "/api/inventory/nft-metadata/opt-ins",
+            get(nft_metadata_optins_route),
+        )
+        .route(
+            "/api/inventory/nft-metadata/opt-ins/upsert",
+            post(nft_metadata_optin_upsert_route),
+        )
+        .route(
+            "/api/inventory/nft-metadata/opt-ins/delete",
+            post(nft_metadata_optin_delete_route),
+        )
+        .route(
+            "/api/inventory/nft-metadata/settings",
+            post(nft_metadata_settings_route),
+        )
+        .route(
+            "/api/inventory/nft-metadata/fetch",
+            post(nft_metadata_fetch_route),
+        )
         .route("/api/secrets/resolve-batch", post(resolve_batch_route))
         .route("/api/audit", get(audit_route))
         .route("/api/audit/verify", get(audit_verify_route))
@@ -1488,6 +1747,18 @@ async fn spawn_test_server() -> Option<SocketAddr> {
             post(send_with_profile_route),
         )
         .route("/api/deposits/eth-stealth", get(deposits_list_route))
+        .route(
+            "/api/inventory/token-registry",
+            get(token_registry_list_route),
+        )
+        .route(
+            "/api/inventory/token-registry/import",
+            post(token_registry_import_route),
+        )
+        .route(
+            "/api/inventory/token-registry/delete",
+            post(token_registry_delete_route),
+        )
         .route(
             "/api/deposits/eth-stealth/create-native",
             post(deposits_create_route),
@@ -1580,6 +1851,70 @@ async fn unlock_stores_session_for_follow_up_requests() {
 
     let keys = client.list_api_keys().await.unwrap();
     assert_eq!(keys, vec!["alpha".to_string(), "beta".to_string()]);
+}
+
+#[tokio::test]
+async fn nft_metadata_routes_roundtrip() {
+    let Some(addr) = spawn_test_server().await else {
+        return;
+    };
+    let client = SigillumClient::new(format!("http://{addr}")).expect("client should build");
+    client.set_session_token("test-token");
+
+    let opt_ins = client.list_nft_metadata_optins().await.unwrap();
+    assert_eq!(opt_ins.opt_ins.len(), 1);
+    assert_eq!(opt_ins.opt_ins[0].contract_address, NFT_METADATA_CONTRACT);
+    assert!(opt_ins.opt_ins[0].enabled);
+    assert_eq!(
+        opt_ins.ipfs_gateway_url.as_deref(),
+        Some(NFT_METADATA_GATEWAY)
+    );
+
+    let upserted = client
+        .upsert_nft_metadata_optin(NftMetadataOptInUpsertRequest {
+            chain_id: 1,
+            contract_address: NFT_METADATA_CONTRACT.into(),
+            enabled: Some(true),
+        })
+        .await
+        .unwrap();
+    assert_eq!(upserted.status, "upserted");
+    assert!(upserted.opt_in.enabled);
+
+    let deleted = client
+        .delete_nft_metadata_optin(NftMetadataOptInDeleteRequest {
+            chain_id: 1,
+            contract_address: NFT_METADATA_CONTRACT.into(),
+        })
+        .await
+        .unwrap();
+    assert_eq!(deleted.status, "deleted");
+    assert!(!deleted.opt_in.enabled);
+
+    let settings = client
+        .update_nft_metadata_settings(NftMetadataSettingsUpdateRequest {
+            ipfs_gateway_url: Some(NFT_METADATA_GATEWAY.into()),
+        })
+        .await
+        .unwrap();
+    assert_eq!(settings.status, "updated");
+    assert_eq!(
+        settings.ipfs_gateway_url.as_deref(),
+        Some(NFT_METADATA_GATEWAY)
+    );
+
+    let fetched = client
+        .fetch_nft_metadata(NftMetadataFetchRequest {
+            chain_id: Some(1),
+            contract_address: Some(NFT_METADATA_CONTRACT.into()),
+            limit: Some(1),
+        })
+        .await
+        .unwrap();
+    assert_eq!(fetched.fetched, 1);
+    assert_eq!(fetched.entries.len(), 1);
+    assert_eq!(fetched.entries[0].contract_address, NFT_METADATA_CONTRACT);
+    assert_eq!(fetched.entries[0].name.as_deref(), Some("Fake NFT"));
 }
 
 #[tokio::test]
@@ -1995,6 +2330,7 @@ async fn profile_and_queue_helpers_roundtrip_response_shapes() {
             max_fee_per_gas_hex: Some("0x2".into()),
             native_gas_limit: Some(21_000),
             erc20_gas_limit: Some(65_000),
+            fee_estimation_enabled: Some(false),
         })
         .await
         .unwrap();
@@ -2193,6 +2529,53 @@ async fn profile_and_queue_helpers_roundtrip_response_shapes() {
     assert_eq!(maintenance.status, "ok");
     assert_eq!(maintenance.succeeded, 1);
     assert_eq!(maintenance.failures_by_cause.provider_error, 0);
+}
+
+fn assert_stablecoin_registry(list: &sigillum_api::response::TokenRegistryList) {
+    assert_eq!(list.name, "stablecoins");
+    assert_eq!(list.source, "entries-json");
+    assert_eq!(list.entries.len(), 1);
+    assert_eq!(list.entries[0].chain_id, 1);
+    assert_eq!(
+        list.entries[0].address,
+        "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    );
+    assert_eq!(list.entries[0].symbol, "FAKE");
+    assert_eq!(list.entries[0].decimals, 18);
+}
+
+#[tokio::test]
+async fn token_registry_helpers_roundtrip_response_shapes() {
+    let Some(addr) = spawn_test_server().await else {
+        return;
+    };
+    let client = SigillumClient::new(format!("http://{addr}/")).expect("client should build");
+    client.unlock_with_passphrase("passphrase").await.unwrap();
+
+    let lists = client.list_token_registry().await.unwrap();
+    assert_eq!(lists.lists.len(), 1);
+    assert_stablecoin_registry(&lists.lists[0]);
+
+    let imported = client
+        .import_token_registry(TokenRegistryImportRequest {
+            name: "stablecoins".into(),
+            entries_json: Some(
+                r#"[{"chainId":1,"address":"0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","symbol":"FAKE","decimals":18}]"#
+                    .into(),
+            ),
+            file_path: None,
+        })
+        .await
+        .unwrap();
+    assert_eq!(imported.status, "imported");
+    assert_stablecoin_registry(&imported.list);
+
+    let deleted = client
+        .delete_token_registry_list("stablecoins")
+        .await
+        .unwrap();
+    assert_eq!(deleted.status, "deleted");
+    assert_stablecoin_registry(&deleted.list);
 }
 
 #[tokio::test]

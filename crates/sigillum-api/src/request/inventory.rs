@@ -75,6 +75,28 @@ pub struct WatchAddressBookDeleteRequest {
     pub address: String,
 }
 
+/// Import a local ERC-20 token registry list.
+///
+/// D-15 keeps token registries local: operators may paste JSON or provide a
+/// local file path, but Sigillum never fetches token lists over the network.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct TokenRegistryImportRequest {
+    pub name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub entries_json: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub file_path: Option<String>,
+}
+
+/// Delete a local ERC-20 token registry list.
+///
+/// D-15 keeps token registries local: deletion only removes locally imported
+/// lists and never interacts with network token-list sources.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct TokenRegistryDeleteRequest {
+    pub name: String,
+}
+
 /// Run read-only EVM wallet discovery for imported seed and xpub profiles.
 ///
 /// When no wallet filter is provided, all `eth-seed` and `eth-xpub` profiles
@@ -115,6 +137,8 @@ pub struct WalletInventoryScanRequest {
     pub token_addresses: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub block_tag: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub probe_token_registry: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub discover_erc20_transfers: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -167,6 +191,53 @@ pub struct WalletInventoryScanRequest {
     pub nft_discovery_limit: Option<usize>,
 }
 
+/// Add or update an opt-in collection for NFT metadata fetching.
+///
+/// Metadata fetches are opt-in per collection because resolved token URIs can
+/// reveal wallet interests to gateways and remote metadata hosts, similar to
+/// direct RPC calls.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct NftMetadataOptInUpsertRequest {
+    pub chain_id: u64,
+    pub contract_address: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub enabled: Option<bool>,
+}
+
+/// Delete an opt-in collection for NFT metadata fetching.
+///
+/// Removing an opt-in prevents future metadata fetches for the collection,
+/// avoiding the privacy cost of contacting gateways or remote metadata hosts.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct NftMetadataOptInDeleteRequest {
+    pub chain_id: u64,
+    pub contract_address: String,
+}
+
+/// Update NFT metadata fetch settings.
+///
+/// A configured IPFS gateway is used only for opt-in metadata fetches; setting
+/// an empty string clears the gateway.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct NftMetadataSettingsUpdateRequest {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ipfs_gateway_url: Option<String>,
+}
+
+/// Run an explicit NFT metadata fetch for opted-in collections.
+///
+/// Fetching metadata has a privacy cost like RPC calls because it can disclose
+/// collection and token interest to gateways or remote metadata hosts.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct NftMetadataFetchRequest {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub chain_id: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub contract_address: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub limit: Option<usize>,
+}
+
 /// Create or update a local chain profile used by discovery and planning.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ChainProfileUpsertRequest {
@@ -182,6 +253,8 @@ pub struct ChainProfileUpsertRequest {
     pub native_decimals: Option<u8>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub finality_blocks: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub dormancy_block_window: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub permit2_address: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]

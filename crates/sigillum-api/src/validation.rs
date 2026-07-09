@@ -137,6 +137,8 @@ const MAX_ID: usize = 256;
 const MAX_ENV_NAME: usize = 256;
 const MAX_TOKEN_ADDRESSES: usize = 128;
 const MAX_CLAIM_PROOF_WORDS: usize = 64;
+const MAX_TOKEN_REGISTRY_JSON: usize = 1_000_000;
+const MAX_FILE_PATH: usize = 1024;
 const MAX_CAPABILITY_SCOPES: usize = 32;
 const MAX_CAPABILITY_SCOPE: usize = 128;
 const MAX_CAPABILITY_TTL_SECS: u64 = 24 * 60 * 60;
@@ -822,6 +824,34 @@ impl Validate for crate::request::WalletInventoryScanRequest {
     }
 }
 
+impl Validate for crate::request::NftMetadataOptInUpsertRequest {
+    fn validate(&self) -> Result<(), String> {
+        check_eth_address("contract_address", &self.contract_address)?;
+        Ok(())
+    }
+}
+
+impl Validate for crate::request::NftMetadataOptInDeleteRequest {
+    fn validate(&self) -> Result<(), String> {
+        check_eth_address("contract_address", &self.contract_address)?;
+        Ok(())
+    }
+}
+
+impl Validate for crate::request::NftMetadataSettingsUpdateRequest {
+    fn validate(&self) -> Result<(), String> {
+        check_optional_len("ipfs_gateway_url", &self.ipfs_gateway_url, MAX_RPC_URL)?;
+        Ok(())
+    }
+}
+
+impl Validate for crate::request::NftMetadataFetchRequest {
+    fn validate(&self) -> Result<(), String> {
+        check_optional_eth_address("contract_address", &self.contract_address)?;
+        Ok(())
+    }
+}
+
 impl Validate for crate::request::WatchAddressBookUpsertRequest {
     fn validate(&self) -> Result<(), String> {
         check_eth_address("address", &self.address)?;
@@ -839,6 +869,22 @@ impl Validate for crate::request::WatchAddressBookUpsertRequest {
 impl Validate for crate::request::WatchAddressBookDeleteRequest {
     fn validate(&self) -> Result<(), String> {
         check_eth_address("address", &self.address)?;
+        Ok(())
+    }
+}
+
+impl Validate for crate::request::TokenRegistryImportRequest {
+    fn validate(&self) -> Result<(), String> {
+        check_len("name", &self.name, MAX_LABEL)?;
+        check_optional_len("entries_json", &self.entries_json, MAX_TOKEN_REGISTRY_JSON)?;
+        check_optional_len("file_path", &self.file_path, MAX_FILE_PATH)?;
+        Ok(())
+    }
+}
+
+impl Validate for crate::request::TokenRegistryDeleteRequest {
+    fn validate(&self) -> Result<(), String> {
+        check_len("name", &self.name, MAX_LABEL)?;
         Ok(())
     }
 }
@@ -997,6 +1043,8 @@ impl Validate for crate::request::TreasuryPolicyUpdateRequest {
             &self.max_plan_native_wei_hex,
             MAX_HEX,
         )?;
+        check_optional_len("hot_floor_wei_hex", &self.hot_floor_wei_hex, MAX_HEX)?;
+        check_optional_len("hot_target_wei_hex", &self.hot_target_wei_hex, MAX_HEX)?;
         Ok(())
     }
 }

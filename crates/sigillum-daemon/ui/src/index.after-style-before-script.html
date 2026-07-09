@@ -415,8 +415,14 @@
         <div class="form-row">
           <input type="text" id="treasuryPolicyMaxStepEth" placeholder="Max per-step native (ETH, optional)">
           <input type="text" id="treasuryPolicyMaxPlanEth" placeholder="Max per-plan native (ETH, optional)">
+          <input type="number" id="treasuryPolicyFreshnessSecs" min="1" placeholder="Simulation freshness (secs, default 900)">
           <button class="btn-primary" data-action="updateTreasuryPolicy">Save Policy</button>
         </div>
+        <div class="form-row">
+          <input type="text" id="treasuryPolicyHotFloorEth" placeholder="Hot refill floor (ETH, default 1)">
+          <input type="text" id="treasuryPolicyHotTargetEth" placeholder="Hot refill target (ETH, default 1)">
+        </div>
+        <p class="field-hint">Sweeps route to the hot address while its balance is below the floor; the target is the refill ceiling (floor must be &le; target). Defaults preserve the previous 1 ETH behavior.</p>
 
         <div class="section-divider"></div>
         <div class="section-title">Receive Addresses</div>
@@ -613,6 +619,10 @@
         <div class="form-row">
           <input type="number" id="providerNativeGasLimit" placeholder="Native gas limit (optional)">
           <input type="number" id="providerErc20GasLimit" placeholder="ERC-20 gas limit (optional)">
+          <label class="checkbox-row">
+            <input type="checkbox" id="providerFeeEstimation">
+            Live fee estimation (EIP-1559)
+          </label>
           <button class="btn-primary" data-action="upsertProviderProfile">Save Provider</button>
         </div>
         <div id="providerProfileList"></div>
@@ -789,6 +799,16 @@
           <button class="btn-ghost" data-action="upsertBulkWatchAddressBookEntries">Save Bulk</button>
         </div>
         <div id="watchAddressBookList"></div>
+        <div class="section-divider"></div>
+        <div class="section-title">Token Registry (local import)</div>
+        <div class="form-row">
+          <input type="text" id="tokenRegistryName" placeholder="List name">
+          <input type="text" id="tokenRegistryFilePath" placeholder="Local file path on daemon host (optional)">
+          <button class="btn-ghost" data-action="importTokenRegistry">Import List</button>
+          <span class="help-tip" tabindex="0" data-tip="Token lists are imported from pasted JSON or a local file only &mdash; Sigillum never fetches lists from the network.">?</span>
+        </div>
+        <textarea id="tokenRegistryEntriesJson" placeholder='Pasted JSON entries: [{"chain_id":1,"address":"0x...","symbol":"USDC","decimals":6}]'></textarea>
+        <div id="tokenRegistryList"></div>
         <div class="form-row">
           <input type="text" id="inventoryTokenDiscoveryFromBlock" placeholder="ERC-20 discovery from block">
           <input type="text" id="inventoryTokenDiscoveryToBlock" placeholder="ERC-20 discovery to block (optional)">
@@ -796,6 +816,12 @@
           <label class="checkbox-row">
             <input type="checkbox" id="inventoryDiscoverErc20Transfers">
             Discover ERC-20 transfer logs
+          </label>
+        </div>
+        <div class="form-row">
+          <label class="checkbox-row">
+            <input type="checkbox" id="inventoryProbeTokenRegistry">
+            Probe imported token registry
           </label>
         </div>
         <div class="form-row">
@@ -841,6 +867,22 @@
         <div id="inventoryJobList"></div>
         <div id="inventoryAddressList"></div>
         <div id="inventoryHoldingList"></div>
+        <div class="section-title">NFT Metadata (opt-in)</div>
+        <p class="helper-text">Fetching NFT metadata contacts external servers, like RPC calls do: the metadata host and any IPFS gateway learn your interest in a collection. Nothing is fetched unless you opt a collection in.</p>
+        <div class="form-row">
+          <input type="number" id="nftMetaOptInChainId" placeholder="Chain id" value="1" class="input-mid">
+          <input type="text" id="nftMetaOptInContract" placeholder="Collection contract address">
+          <button class="btn-ghost" data-action="upsertNftMetadataOptIn">Opt In Collection</button>
+        </div>
+        <div class="form-row">
+          <input type="text" id="nftMetaGatewayUrl" placeholder="IPFS gateway URL (optional, e.g. https://your-gateway/ipfs/)" class="input-wide">
+          <button class="btn-ghost" data-action="saveNftMetadataSettings">Save Gateway</button>
+          <button class="btn-ghost" data-action="fetchNftMetadata">Fetch Metadata Now</button>
+        </div>
+        <div id="nftMetaOptInList"></div>
+        <div id="nftMetadataList"></div>
+        <div class="section-title">Suspicious NFTs (never auto-hidden)</div>
+        <div id="nftSuspiciousList"></div>
 
         <div class="section-divider"></div>
         <div class="section-title">Risk And Plans</div>

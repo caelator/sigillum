@@ -401,6 +401,7 @@ fn test_evm_provider_profile_roundtrip() {
         max_fee_per_gas_hex: Some("0x5f5e100".to_string()),
         native_gas_limit: Some(21000),
         erc20_gas_limit: Some(65000),
+        fee_estimation_enabled: false,
     };
     roundtrip_test(profile);
 }
@@ -621,6 +622,7 @@ fn test_wallet_inventory_scan_response_roundtrip() {
         activity_state: WalletAddressActivityState::Funded,
         native_balance_wei_hex: "0x1".to_string(),
         transaction_count: 1,
+        last_activity_block: None,
         classifications: vec![
             WalletAddressClassification::SignerAvailable,
             WalletAddressClassification::GasAvailable,
@@ -681,6 +683,129 @@ fn test_wallet_inventory_scan_response_roundtrip() {
 }
 
 #[test]
+fn test_nft_metadata_cache_entry_backcompat_and_provenance_fields() {
+    let legacy: NftMetadataCacheEntry = serde_json::from_value(serde_json::json!({
+        "chain_id": 1,
+        "contract_address": "0xdead00000000000000000000000000000000dead",
+        "token_id_hex": "0x01",
+        "spam_label": "unverified_nft_metadata",
+        "updated_at_unix": 2
+    }))
+    .unwrap();
+
+    assert!(legacy.spam_reasons.is_empty());
+    assert!(legacy.fetched_at_unix.is_none());
+    assert!(legacy.fetched_uri.is_none());
+    assert!(legacy.content_sha256.is_none());
+    assert!(legacy.fetch_skipped_reason.is_none());
+
+    let entry = NftMetadataCacheEntry {
+        chain_id: 1,
+        contract_address: "0xdead00000000000000000000000000000000dead".to_string(),
+        token_id_hex: "0x01".to_string(),
+        metadata_uri: Some("ipfs://bafynftmetadata".to_string()),
+        name: Some("Localhost Test NFT".to_string()),
+        spam_label: "trusted".to_string(),
+        spam_reasons: vec!["operator_opt_in".to_string()],
+        fetched_at_unix: Some(3),
+        fetched_uri: Some("http://127.0.0.1:1/ipfs/bafynftmetadata".to_string()),
+        content_sha256: Some("aa".repeat(32)),
+        fetch_skipped_reason: Some("already_cached".to_string()),
+        updated_at_unix: 4,
+    };
+    let json = serde_json::to_value(&entry).unwrap();
+
+    assert_eq!(json["spam_reasons"], serde_json::json!(["operator_opt_in"]));
+    assert_eq!(json["fetched_at_unix"], serde_json::json!(3));
+    assert_eq!(
+        json["fetched_uri"],
+        serde_json::json!("http://127.0.0.1:1/ipfs/bafynftmetadata")
+    );
+    assert_eq!(json["content_sha256"], serde_json::json!("aa".repeat(32)));
+    assert_eq!(
+        json["fetch_skipped_reason"],
+        serde_json::json!("already_cached")
+    );
+    roundtrip_test(entry);
+}
+
+#[test]
+fn test_nft_metadata_responses_roundtrip() {
+    let opt_in = NftMetadataCollectionOptIn {
+        chain_id: 1,
+        contract_address: "0xdead00000000000000000000000000000000dead".to_string(),
+        enabled: true,
+        created_at_unix: 1,
+        updated_at_unix: 2,
+    };
+    roundtrip_test(NftMetadataOptInListResponse {
+        opt_ins: vec![opt_in.clone()],
+        ipfs_gateway_url: Some("http://127.0.0.1:1/ipfs/".to_string()),
+    });
+    roundtrip_test(NftMetadataOptInMutationResponse {
+        status: "upserted".to_string(),
+        opt_in,
+    });
+    roundtrip_test(NftMetadataSettingsResponse {
+        status: "updated".to_string(),
+        ipfs_gateway_url: Some("http://127.0.0.1:1/ipfs/".to_string()),
+    });
+    roundtrip_test(NftMetadataFetchResponse {
+        fetched: 0,
+        skipped: vec![NftMetadataFetchSkip {
+            chain_id: 1,
+            contract_address: "0xdead00000000000000000000000000000000dead".to_string(),
+            token_id_hex: Some("0x01".to_string()),
+            reason: "collection_not_opted_in".to_string(),
+        }],
+        entries: Vec::new(),
+    });
+}
+
+#[test]
+fn test_wallet_inventory_address_last_activity_block_defaults_and_roundtrips() {
+    let legacy = serde_json::json!({
+        "id": "addr_legacy",
+        "wallet_family": "eth-seed",
+        "wallet_profile": "seed-main",
+        "provider_profile": "mainnet",
+        "chain_id": 1,
+        "address": "0x1111111111111111111111111111111111111111",
+        "derivation_path": "m/44'/60'/0'/0/0",
+        "address_index": 0,
+        "activity_state": "funded",
+        "native_balance_wei_hex": "0x1",
+        "transaction_count": 1,
+        "source": "local-rpc",
+        "first_seen_at_unix": 1,
+        "last_checked_at_unix": 2
+    });
+    let decoded: WalletInventoryAddress = serde_json::from_value(legacy).unwrap();
+    assert_eq!(decoded.last_activity_block, None);
+
+    let with_activity = serde_json::json!({
+        "id": "addr_active",
+        "wallet_family": "eth-seed",
+        "wallet_profile": "seed-main",
+        "provider_profile": "mainnet",
+        "chain_id": 1,
+        "address": "0x1111111111111111111111111111111111111111",
+        "derivation_path": "m/44'/60'/0'/0/0",
+        "address_index": 0,
+        "activity_state": "funded",
+        "native_balance_wei_hex": "0x1",
+        "transaction_count": 1,
+        "last_activity_block": 12345,
+        "source": "local-rpc",
+        "first_seen_at_unix": 1,
+        "last_checked_at_unix": 2
+    });
+    let decoded: WalletInventoryAddress = serde_json::from_value(with_activity).unwrap();
+    assert_eq!(decoded.last_activity_block, Some(12345));
+    roundtrip_test(decoded);
+}
+
+#[test]
 fn test_watch_address_book_responses_roundtrip() {
     let entry = WatchAddressBookEntry {
         id: "watch_1".to_string(),
@@ -712,6 +837,7 @@ fn test_wallet_operations_response_roundtrips() {
         native_symbol: "ETH".to_string(),
         native_decimals: 18,
         finality_blocks: 12,
+        dormancy_block_window: DEFAULT_DORMANCY_BLOCK_WINDOW,
         permit2_address: Some("0x000000000022d473030f116ddee9f6b43ac78ba3".to_string()),
         explorer_url: Some("https://basescan.org".to_string()),
         capabilities: vec!["native".to_string(), "erc20".to_string()],
@@ -728,6 +854,22 @@ fn test_wallet_operations_response_roundtrips() {
         status: "upserted".to_string(),
         profile: chain,
     });
+
+    let legacy = serde_json::json!({
+        "name": "base",
+        "chain_family": "evm",
+        "chain_id": 8453,
+        "native_symbol": "ETH",
+        "native_decimals": 18,
+        "finality_blocks": 12,
+        "enabled": true,
+        "source": "operator",
+        "builtin": false,
+        "created_at_unix": 1,
+        "updated_at_unix": 2
+    });
+    let decoded: ChainProfile = serde_json::from_value(legacy).unwrap();
+    assert_eq!(decoded.dormancy_block_window, DEFAULT_DORMANCY_BLOCK_WINDOW);
 
     let finding = RiskFinding {
         id: "risk_1".to_string(),
@@ -767,8 +909,33 @@ fn test_wallet_operations_response_roundtrips() {
         entry: catalog_entry,
     });
 
+    let registry_entry = TokenRegistryEntry {
+        chain_id: 1,
+        address: "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".to_string(),
+        symbol: "AAA".to_string(),
+        decimals: 18,
+    };
+    let registry_list = TokenRegistryList {
+        id: "registry_1".to_string(),
+        name: "core-list".to_string(),
+        compartment_id: 0,
+        source: "pasted-json".to_string(),
+        entries: vec![registry_entry],
+        created_at_unix: 1,
+        updated_at_unix: 2,
+    };
+    roundtrip_test(TokenRegistryListResponse {
+        lists: vec![registry_list.clone()],
+    });
+    roundtrip_test(TokenRegistryMutationResponse {
+        status: "imported".to_string(),
+        list: registry_list,
+    });
+
     let step = ConsolidationPlanStep {
         id: "step_1".to_string(),
+        sequence: 2,
+        depends_on: vec!["step_0".to_string()],
         action: WalletPlanStepAction::SweepErc20,
         status: WalletPlanStepStatus::Blocked,
         wallet_family: "eth-seed".to_string(),
@@ -1653,6 +1820,9 @@ fn sample_treasury_policy() -> TreasuryPolicy {
         require_simulation: true,
         allow_raw_digest_signing: false,
         block_cross_party_linkage: false,
+        simulation_freshness_secs: 900,
+        hot_floor_wei_hex: "0xde0b6b3a7640000".to_string(),
+        hot_target_wei_hex: "0xde0b6b3a7640000".to_string(),
         created_at_unix: 1,
         updated_at_unix: 2,
     }
@@ -1675,6 +1845,9 @@ fn test_treasury_policy_responses_roundtrip() {
             require_simulation: false,
             allow_raw_digest_signing: false,
             block_cross_party_linkage: false,
+            simulation_freshness_secs: 900,
+            hot_floor_wei_hex: "0xde0b6b3a7640000".to_string(),
+            hot_target_wei_hex: "0xde0b6b3a7640000".to_string(),
             created_at_unix: 1,
             updated_at_unix: 3,
         },
@@ -1689,7 +1862,24 @@ fn test_treasury_policy_require_simulation_defaults_true() {
             .unwrap();
     assert!(policy.require_simulation);
     assert!(!policy.block_cross_party_linkage);
+    assert_eq!(policy.simulation_freshness_secs, 900);
+    assert_eq!(policy.hot_floor_wei_hex, "0xde0b6b3a7640000");
+    assert_eq!(policy.hot_target_wei_hex, "0xde0b6b3a7640000");
     assert!(policy.allowed_destinations.is_empty());
+}
+
+#[test]
+fn test_evm_provider_profile_fee_estimation_defaults_false() {
+    let profile: EvmProviderProfile = serde_json::from_str(
+        r#"{
+            "name":"mainnet",
+            "rpc_url":"https://eth.example.com",
+            "compartment_id":1,
+            "chain_id":1
+        }"#,
+    )
+    .unwrap();
+    assert!(!profile.fee_estimation_enabled);
 }
 
 #[test]
@@ -1791,4 +1981,17 @@ fn test_setup_reset_response_roundtrip() {
     let json = serde_json::to_string(&bare).unwrap();
     assert!(!json.contains("archived_to"));
     roundtrip_test(bare);
+}
+
+#[test]
+fn test_token_registry_entry_accepts_chain_id_alias() {
+    let entry: TokenRegistryEntry = serde_json::from_value(serde_json::json!({
+        "chainId": 1,
+        "address": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "symbol": "AAA",
+        "decimals": 18
+    }))
+    .unwrap();
+
+    assert_eq!(entry.chain_id, 1);
 }

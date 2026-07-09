@@ -8,14 +8,18 @@ use sigillum_api::request::{
     TreasuryReceiveRotateRequest,
 };
 
-use super::{bool_switch, parse_flag, parse_multi_flag, require_flag, run_api_command};
+use super::{
+    bool_switch, parse_flag, parse_multi_flag, parse_u64_flag, require_flag, run_api_command,
+};
 
 /// Dispatch `sigillum api treasury
 /// <overview|policy|policy-update|receive-list|receive-allocate|receive-rotate>`.
 pub(super) fn cmd_api_treasury(args: &[String]) {
     const POLICY_UPDATE_USAGE: &str = "sigillum api treasury policy-update <--enabled|--disabled> \
         [--destination 0xADDR[:label]]... [--max-step-wei-hex 0x..] [--max-plan-wei-hex 0x..] \
-        [--require-simulation|--no-require-simulation] [--block-cross-party-linkage <true|false>]";
+        [--require-simulation|--no-require-simulation] [--block-cross-party-linkage <true|false>] \
+        [--simulation-freshness-secs <SECS>] [--hot-floor-wei-hex 0x..] \
+        [--hot-target-wei-hex 0x..]";
     const PARTIES_USAGE: &str = "sigillum api treasury parties <list|create|update|delete> \
         [--id <ID>] [--name <NAME>] [--note <NOTE>] [--sweep-destination <ADDRESS>]";
     const RECEIVE_ALLOCATE_USAGE: &str = "sigillum api treasury receive-allocate \
@@ -79,6 +83,9 @@ pub(super) fn cmd_api_treasury(args: &[String]) {
                     "--disallow-raw-digest-signing",
                 ),
                 block_cross_party_linkage,
+                simulation_freshness_secs: parse_u64_flag(args, "--simulation-freshness-secs"),
+                hot_floor_wei_hex: parse_flag(args, "--hot-floor-wei-hex"),
+                hot_target_wei_hex: parse_flag(args, "--hot-target-wei-hex"),
             };
             run_api_command(args, true, move |client| async move {
                 client.update_treasury_policy(request).await

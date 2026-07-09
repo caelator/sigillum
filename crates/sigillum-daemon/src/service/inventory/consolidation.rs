@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 use sigillum_api::{
     ConsolidationPlan, ConsolidationPlanApproveRequest, ConsolidationPlanGenerateRequest,
     ConsolidationPlanListResponse, ConsolidationPlanMutationResponse, WalletPlanStatus,
-    WalletPlanStepStatus,
+    WalletPlanStepStatus, WalletSimulationStatus,
 };
 
 use crate::audit_log::AuditEventSpec;
@@ -12,9 +12,10 @@ use crate::inventory::WalletInventoryState;
 use super::super::helpers::{now_unix, random_id};
 use super::super::{ServiceError, ServiceResult, SigillumService};
 use super::planner::{
-    analyze_plan_linkage, apply_linkage_blockers, apply_policy_blockers_to_step, build_plan_steps,
-    plan_policy_violations, summarize_plan_steps,
+    analyze_plan_linkage, apply_linkage_blockers, apply_policy_blockers_to_step,
+    assign_step_ordering, build_plan_steps, plan_policy_violations, summarize_plan_steps,
 };
+use super::simulation::parse_simulated_at_unix;
 use super::support::{load_inventory_state, save_inventory_state, trimmed_optional};
 
 impl SigillumService {
@@ -56,6 +57,7 @@ impl SigillumService {
 
         let mut generated_plans = Vec::new();
         for (chain_id, mut steps) in steps_by_chain {
+            assign_step_ordering(&mut steps);
             // Policy runs after planning so planner blockers and policy verdicts
             // are both visible on each step, then the summary reflects the final
             // step statuses.
@@ -156,6 +158,23 @@ impl SigillumService {
         if let Some(linkage_state) = linkage_state.as_ref() {
             let _ = analyze_plan_linkage(linkage_state, &mut plan.steps);
             apply_linkage_blockers(&mut plan.steps);
+        }
+        let freshness_secs = policy
+            .as_ref()
+            .map(|policy| policy.simulation_freshness_secs)
+            .unwrap_or(900);
+        let now = now_unix();
+        for step in &mut plan.steps {
+            if step.simulation_status == WalletSimulationStatus::Passed {
+                let simulated_at = parse_simulated_at_unix(&step.simulation_evidence);
+                if simulated_at
+                    .map(|simulated_at| now.saturating_sub(simulated_at) > freshness_secs)
+                    .unwrap_or(true)
+                {
+                    // Stale or unprovable simulation evidence must be re-run before execution (fail closed).
+                    step.simulation_status = WalletSimulationStatus::Required;
+                }
+            }
         }
         let approve_all = body.step_ids.is_empty();
         for step in &mut plan.steps {

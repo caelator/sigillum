@@ -466,6 +466,26 @@ fn inventory_routes() -> AppRouter {
             post(inventory::scan_wallet_inventory_evm),
         )
         .route(
+            "/api/inventory/nft-metadata/opt-ins",
+            get(inventory::list_nft_metadata_optins),
+        )
+        .route(
+            "/api/inventory/nft-metadata/opt-ins/upsert",
+            post(inventory::upsert_nft_metadata_optin),
+        )
+        .route(
+            "/api/inventory/nft-metadata/opt-ins/delete",
+            post(inventory::delete_nft_metadata_optin),
+        )
+        .route(
+            "/api/inventory/nft-metadata/settings",
+            post(inventory::update_nft_metadata_settings),
+        )
+        .route(
+            "/api/inventory/nft-metadata/fetch",
+            post(inventory::fetch_nft_metadata),
+        )
+        .route(
             "/api/inventory/watch-addresses",
             get(inventory::list_watch_address_book),
         )
@@ -476,6 +496,18 @@ fn inventory_routes() -> AppRouter {
         .route(
             "/api/inventory/watch-addresses/delete",
             post(inventory::delete_watch_address_book_entry),
+        )
+        .route(
+            "/api/inventory/token-registry",
+            get(inventory::list_token_registry),
+        )
+        .route(
+            "/api/inventory/token-registry/import",
+            post(inventory::import_token_registry),
+        )
+        .route(
+            "/api/inventory/token-registry/delete",
+            post(inventory::delete_token_registry_list),
         )
         .route("/api/discovery/jobs", get(inventory::list_discovery_jobs))
         .route(

@@ -8,9 +8,10 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 use sigillum_api::{
-    ChainProfile, ConsolidationPlan, Counterparty, NftMetadataCacheEntry, RiskCatalogEntry,
-    RiskFinding, TreasuryPolicy, TreasuryReceiveAllocation, WalletAssetHolding, WalletDiscoveryJob,
-    WalletInventoryAddress, WatchAddressBookEntry,
+    ChainProfile, ConsolidationPlan, Counterparty, NftMetadataCacheEntry,
+    NftMetadataCollectionOptIn, RiskCatalogEntry, RiskFinding, TreasuryPolicy,
+    TreasuryReceiveAllocation, WalletAssetHolding, WalletDiscoveryJob, WalletInventoryAddress,
+    WatchAddressBookEntry,
 };
 
 use crate::json_store::{JsonDocument, JsonSchema};
@@ -30,6 +31,10 @@ pub struct WalletInventoryState {
     pub holdings: Vec<WalletAssetHolding>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub nft_metadata_cache: Vec<NftMetadataCacheEntry>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub nft_metadata_optins: Vec<NftMetadataCollectionOptIn>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub nft_metadata_ipfs_gateway: Option<String>,
     #[serde(default)]
     pub risk_catalog: Vec<RiskCatalogEntry>,
     #[serde(default)]
@@ -45,7 +50,7 @@ pub struct WalletInventoryState {
 }
 
 impl JsonDocument for WalletInventoryState {
-    const SCHEMA: JsonSchema = JsonSchema::new("sigillum.wallet-inventory", 13);
+    const SCHEMA: JsonSchema = JsonSchema::new("sigillum.wallet-inventory", 15);
 
     fn from_enveloped_json(
         path: &std::path::Path,
@@ -53,7 +58,7 @@ impl JsonDocument for WalletInventoryState {
         data: serde_json::Value,
     ) -> Result<Self, std::io::Error> {
         match version {
-            1..=13 => {
+            1..=15 => {
                 let mut state: Self = serde_json::from_value(data).map_err(|error| {
                     std::io::Error::new(
                         std::io::ErrorKind::InvalidData,
@@ -141,6 +146,7 @@ mod tests {
             native_symbol: "ETH".into(),
             native_decimals: 18,
             finality_blocks: 0,
+            dormancy_block_window: sigillum_api::DEFAULT_DORMANCY_BLOCK_WINDOW,
             permit2_address: None,
             explorer_url: None,
             capabilities: vec!["native".into(), "erc20".into()],
@@ -167,6 +173,7 @@ mod tests {
             activity_state: "funded".into(),
             native_balance_wei_hex: "0x1".into(),
             transaction_count: 0,
+            last_activity_block: None,
             classifications: vec![
                 "signer_available".into(),
                 "gas_available".into(),
@@ -263,6 +270,9 @@ mod tests {
             require_simulation: true,
             allow_raw_digest_signing: false,
             block_cross_party_linkage: false,
+            simulation_freshness_secs: 900,
+            hot_floor_wei_hex: "0xde0b6b3a7640000".into(),
+            hot_target_wei_hex: "0xde0b6b3a7640000".into(),
             created_at_unix: 1,
             updated_at_unix: 2,
         }
@@ -313,6 +323,8 @@ mod tests {
             linkage_findings: Vec::new(),
             steps: vec![sigillum_api::ConsolidationPlanStep {
                 id: "step_future".into(),
+                sequence: 0,
+                depends_on: Vec::new(),
                 action: sigillum_api::WalletPlanStepAction::Other("future_action".into()),
                 status: sigillum_api::WalletPlanStepStatus::ReviewRequired,
                 wallet_family: "eth-seed".into(),
@@ -345,6 +357,14 @@ mod tests {
         });
         state.risk_catalog.push(sample_risk_catalog_entry());
         state.receive_allocations.push(sample_receive_allocation());
+        state.nft_metadata_optins.push(NftMetadataCollectionOptIn {
+            chain_id: 1,
+            contract_address: "0xdead00000000000000000000000000000000dead".into(),
+            enabled: true,
+            created_at_unix: 1,
+            updated_at_unix: 2,
+        });
+        state.nft_metadata_ipfs_gateway = Some("http://127.0.0.1:1/ipfs/".into());
 
         save_wallet_inventory(dir.path(), &state).unwrap();
         let loaded = load_wallet_inventory(dir.path()).unwrap();
@@ -362,6 +382,15 @@ mod tests {
         assert_eq!(loaded.receive_allocations[0].status, "active");
         assert_eq!(loaded.receive_allocations[0].purpose, "counterparty-acme");
         assert!(loaded.receive_allocations[0].retired_at_unix.is_none());
+        assert_eq!(loaded.nft_metadata_optins.len(), 1);
+        assert_eq!(
+            loaded.nft_metadata_optins[0].contract_address,
+            "0xdead00000000000000000000000000000000dead"
+        );
+        assert_eq!(
+            loaded.nft_metadata_ipfs_gateway.as_deref(),
+            Some("http://127.0.0.1:1/ipfs/")
+        );
         assert_eq!(
             loaded.holdings[1].asset_kind,
             sigillum_api::WalletAssetKind::Other("future_asset".into())
@@ -398,6 +427,37 @@ mod tests {
     }
 
     #[test]
+    fn v13_inventory_without_nft_metadata_optins_loads_with_defaults() {
+        let dir = TempDir::new().unwrap();
+        let envelope = json!({
+            "schema": "sigillum.wallet-inventory",
+            "schema_version": 13,
+            "data": {
+                "nft_metadata_cache": [{
+                    "chain_id": 1,
+                    "contract_address": "0xdead00000000000000000000000000000000dead",
+                    "token_id_hex": "0x01",
+                    "spam_label": "unverified_nft_metadata",
+                    "updated_at_unix": 2
+                }]
+            },
+        });
+        std::fs::write(
+            wallet_inventory_path(dir.path()),
+            serde_json::to_vec_pretty(&envelope).unwrap(),
+        )
+        .unwrap();
+
+        let loaded = load_wallet_inventory(dir.path()).unwrap();
+
+        assert_eq!(loaded.nft_metadata_cache.len(), 1);
+        assert!(loaded.nft_metadata_cache[0].spam_reasons.is_empty());
+        assert!(loaded.nft_metadata_cache[0].fetched_at_unix.is_none());
+        assert!(loaded.nft_metadata_optins.is_empty());
+        assert!(loaded.nft_metadata_ipfs_gateway.is_none());
+    }
+
+    #[test]
     fn save_and_load_roundtrip_preserves_treasury_policy() {
         let dir = TempDir::new().unwrap();
         let state = WalletInventoryState {
@@ -420,6 +480,101 @@ mod tests {
             Some("0xde0b6b3a7640000")
         );
         assert!(policy.require_simulation);
+        assert_eq!(policy.simulation_freshness_secs, 900);
+        assert_eq!(policy.hot_floor_wei_hex, "0xde0b6b3a7640000");
+        assert_eq!(policy.hot_target_wei_hex, "0xde0b6b3a7640000");
+    }
+
+    #[test]
+    fn legacy_v13_treasury_policy_loads_with_default_simulation_freshness() {
+        let dir = TempDir::new().unwrap();
+        let envelope = json!({
+            "schema": "sigillum.wallet-inventory",
+            "schema_version": 13,
+            "data": {
+                "treasury_policy": {
+                    "enabled": true,
+                    "allowed_destinations": [{
+                        "address": "0x9999999999999999999999999999999999999999",
+                        "label": "cold-treasury"
+                    }],
+                    "max_step_native_wei_hex": "0xde0b6b3a7640000",
+                    "max_plan_native_wei_hex": null,
+                    "require_simulation": true,
+                    "allow_raw_digest_signing": false,
+                    "block_cross_party_linkage": false,
+                    "created_at_unix": 1,
+                    "updated_at_unix": 2
+                }
+            },
+        });
+        std::fs::write(
+            wallet_inventory_path(dir.path()),
+            serde_json::to_vec_pretty(&envelope).unwrap(),
+        )
+        .unwrap();
+
+        let loaded = load_wallet_inventory(dir.path()).unwrap();
+        let policy = loaded.treasury_policy.expect("policy loaded");
+        assert!(policy.enabled);
+        assert_eq!(policy.allowed_destinations.len(), 1);
+        assert_eq!(
+            policy.allowed_destinations[0].address,
+            "0x9999999999999999999999999999999999999999"
+        );
+        assert_eq!(
+            policy.allowed_destinations[0].label.as_deref(),
+            Some("cold-treasury")
+        );
+        assert_eq!(
+            policy.max_step_native_wei_hex.as_deref(),
+            Some("0xde0b6b3a7640000")
+        );
+        assert!(policy.max_plan_native_wei_hex.is_none());
+        assert!(policy.require_simulation);
+        assert!(!policy.allow_raw_digest_signing);
+        assert!(!policy.block_cross_party_linkage);
+        assert_eq!(policy.simulation_freshness_secs, 900);
+        assert_eq!(policy.hot_floor_wei_hex, "0xde0b6b3a7640000");
+        assert_eq!(policy.hot_target_wei_hex, "0xde0b6b3a7640000");
+        assert_eq!(policy.created_at_unix, 1);
+        assert_eq!(policy.updated_at_unix, 2);
+    }
+
+    #[test]
+    fn legacy_v14_treasury_policy_loads_with_one_eth_hot_floor_and_target() {
+        let dir = TempDir::new().unwrap();
+        let envelope = json!({
+            "schema": "sigillum.wallet-inventory",
+            "schema_version": 14,
+            "data": {
+                "treasury_policy": {
+                    "enabled": true,
+                    "allowed_destinations": [{
+                        "address": "0x9999999999999999999999999999999999999999",
+                        "label": "cold-treasury"
+                    }],
+                    "max_step_native_wei_hex": "0xde0b6b3a7640000",
+                    "max_plan_native_wei_hex": null,
+                    "require_simulation": true,
+                    "allow_raw_digest_signing": false,
+                    "block_cross_party_linkage": false,
+                    "simulation_freshness_secs": 900,
+                    "created_at_unix": 1,
+                    "updated_at_unix": 2
+                }
+            },
+        });
+        std::fs::write(
+            wallet_inventory_path(dir.path()),
+            serde_json::to_vec_pretty(&envelope).unwrap(),
+        )
+        .unwrap();
+
+        let loaded = load_wallet_inventory(dir.path()).unwrap();
+        let policy = loaded.treasury_policy.expect("policy loaded");
+        assert_eq!(policy.hot_floor_wei_hex, "0xde0b6b3a7640000");
+        assert_eq!(policy.hot_target_wei_hex, "0xde0b6b3a7640000");
     }
 
     #[test]
@@ -431,7 +586,7 @@ mod tests {
             serde_json::from_slice(&std::fs::read(wallet_inventory_path(dir.path())).unwrap())
                 .unwrap();
         assert_eq!(saved["schema"], json!("sigillum.wallet-inventory"));
-        assert_eq!(saved["schema_version"], json!(13));
+        assert_eq!(saved["schema_version"], json!(15));
         assert_eq!(saved["data"]["chain_profiles"].as_array().unwrap().len(), 5);
         assert!(saved["data"]["watch_address_book"].is_array());
         assert!(saved["data"]["jobs"].is_array());
@@ -541,6 +696,73 @@ mod tests {
         assert_eq!(loaded.addresses[0].chain_id, 1);
         assert_eq!(loaded.holdings[0].chain_id, 1);
         assert_eq!(loaded.consolidation_plans[0].steps[0].chain_id, 1);
+    }
+
+    #[test]
+    fn legacy_v13_inventory_defaults_dormancy_window_and_last_activity_block() {
+        let dir = TempDir::new().unwrap();
+        let path = wallet_inventory_path(dir.path());
+        std::fs::write(
+            &path,
+            serde_json::to_vec_pretty(&json!({
+                "schema": "sigillum.wallet-inventory",
+                "schema_version": 13,
+                "data": {
+                    "chain_profiles": [{
+                        "name": "custom-rollup",
+                        "chain_family": "evm",
+                        "chain_id": 999,
+                        "native_symbol": "ETH",
+                        "enabled": true,
+                        "source": "operator",
+                        "created_at_unix": 1,
+                        "updated_at_unix": 2
+                    }],
+                    "addresses": [{
+                        "id": "addr_legacy",
+                        "wallet_family": "eth-seed",
+                        "wallet_profile": "seed-main",
+                        "provider_profile": "mainnet",
+                        "chain_id": 999,
+                        "address": "0x1111111111111111111111111111111111111111",
+                        "derivation_path": "m/44'/60'/0'/0/0",
+                        "address_index": 0,
+                        "activity_state": "funded",
+                        "native_balance_wei_hex": "0x1",
+                        "transaction_count": 1,
+                        "source": "legacy",
+                        "first_seen_at_unix": 1,
+                        "last_checked_at_unix": 2
+                    }]
+                }
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+
+        let loaded = load_wallet_inventory(dir.path()).unwrap();
+
+        assert_eq!(
+            loaded.addresses[0].last_activity_block, None,
+            "legacy addresses default to no derived activity block"
+        );
+        let custom = loaded
+            .chain_profiles
+            .iter()
+            .find(|profile| profile.name == "custom-rollup")
+            .expect("custom profile loaded");
+        assert_eq!(
+            custom.dormancy_block_window,
+            sigillum_api::DEFAULT_DORMANCY_BLOCK_WINDOW
+        );
+        assert!(
+            loaded
+                .chain_profiles
+                .iter()
+                .filter(|profile| profile.builtin)
+                .all(|profile| profile.dormancy_block_window
+                    == sigillum_api::DEFAULT_DORMANCY_BLOCK_WINDOW)
+        );
     }
 
     #[test]

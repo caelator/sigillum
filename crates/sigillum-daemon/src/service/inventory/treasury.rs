@@ -22,7 +22,7 @@ use crate::audit_log::AuditEventSpec;
 use crate::deposits::DepositState;
 use crate::inventory::WalletInventoryState;
 use crate::service::evm::normalize_address;
-use crate::service::helpers::{map_xpub_error, now_unix, random_id};
+use crate::service::helpers::{compare_u256, map_xpub_error, now_unix, random_id};
 use crate::service::transaction_policy::{
     TransactionPolicyCheck, TransactionPolicyKind, transaction_policy_actions,
 };
@@ -45,6 +45,8 @@ const DEFAULT_NATIVE_SYMBOL: &str = "ETH";
 const RECEIVE_STATUS_ACTIVE: &str = "active";
 const RECEIVE_STATUS_RETIRED: &str = "retired";
 const RECEIVING_LINKAGE_WARNING: &str = "Sweeping here would link this payer with another party. Set a distinct per-party sweep destination.";
+const DEFAULT_HOT_FLOOR_WEI_HEX: &str = "0xde0b6b3a7640000";
+const DEFAULT_HOT_TARGET_WEI_HEX: &str = "0xde0b6b3a7640000";
 /// Absurdly large but bounded: receive indices beyond this point indicate a
 /// runaway caller, not a treasury that genuinely needs a million addresses.
 const MAX_RECEIVE_INDEX: u32 = 1_000_000;
@@ -562,6 +564,7 @@ impl SigillumService {
             &state.addresses,
             &state.holdings,
             &state.risk_catalog,
+            &state.chain_profiles,
         ));
         for finding in &findings {
             risk.total_findings += 1;
@@ -714,6 +717,7 @@ impl SigillumService {
                                     activity_state,
                                     native_balance_wei_hex,
                                     transaction_count: 0,
+                                    last_activity_block: None,
                                     classifications: Vec::new(),
                                     source: DISCOVERY_SOURCE_LOCAL_RPC.into(),
                                     first_seen_at_unix: now,
@@ -822,6 +826,11 @@ impl SigillumService {
         body: TreasuryPolicyUpdateRequest,
     ) -> ServiceResult<TreasuryPolicyMutationResponse> {
         let token = self.require_session(token)?;
+        if body.simulation_freshness_secs == Some(0) {
+            return Err(ServiceError::bad_request(
+                "simulation_freshness_secs must be greater than 0",
+            ));
+        }
         let _guard = self.state.operation_guard().await;
         let mut state = load_inventory_state(&self.state.base_dir)?;
         let now = now_unix();
@@ -843,6 +852,28 @@ impl SigillumService {
             });
         }
 
+        let hot_floor_wei_hex = validated_required_quantity_hex(
+            "hot_floor_wei_hex",
+            body.hot_floor_wei_hex,
+            DEFAULT_HOT_FLOOR_WEI_HEX,
+        )?;
+        let hot_target_wei_hex = validated_required_quantity_hex(
+            "hot_target_wei_hex",
+            body.hot_target_wei_hex,
+            DEFAULT_HOT_TARGET_WEI_HEX,
+        )?;
+        let hot_floor = decode_quantity_hex(&hot_floor_wei_hex).map_err(|_| {
+            ServiceError::bad_request("hot_floor_wei_hex must be a hex uint256 quantity")
+        })?;
+        let hot_target = decode_quantity_hex(&hot_target_wei_hex).map_err(|_| {
+            ServiceError::bad_request("hot_target_wei_hex must be a hex uint256 quantity")
+        })?;
+        if compare_u256(&hot_floor, &hot_target).is_gt() {
+            return Err(ServiceError::bad_request(
+                "hot_floor_wei_hex must be less than or equal to hot_target_wei_hex",
+            ));
+        }
+
         let policy = TreasuryPolicy {
             enabled: body.enabled,
             allowed_destinations,
@@ -857,6 +888,9 @@ impl SigillumService {
             require_simulation: body.require_simulation.unwrap_or(true),
             allow_raw_digest_signing: body.allow_raw_digest_signing.unwrap_or(false),
             block_cross_party_linkage: body.block_cross_party_linkage.unwrap_or(false),
+            simulation_freshness_secs: body.simulation_freshness_secs.unwrap_or(900),
+            hot_floor_wei_hex,
+            hot_target_wei_hex,
             created_at_unix: state
                 .treasury_policy
                 .as_ref()
@@ -1301,6 +1335,20 @@ fn validated_cap_hex(field: &str, value: Option<String>) -> ServiceResult<Option
     Ok(Some(value))
 }
 
+fn validated_required_quantity_hex(
+    field: &str,
+    value: Option<String>,
+    default_value: &str,
+) -> ServiceResult<String> {
+    let value = value
+        .and_then(trimmed_optional)
+        .unwrap_or_else(|| default_value.to_string());
+    decode_quantity_hex(&value).map_err(|_| {
+        ServiceError::bad_request(format!("{field} must be a hex uint256 quantity"))
+    })?;
+    Ok(value)
+}
+
 /// Treasury policy blockers for a single consolidation plan step.
 ///
 /// Returned markers extend the step's planner blockers; policy violations
@@ -1597,6 +1645,9 @@ mod tests {
             require_simulation: true,
             allow_raw_digest_signing: false,
             block_cross_party_linkage: false,
+            simulation_freshness_secs: 900,
+            hot_floor_wei_hex: "0xde0b6b3a7640000".into(),
+            hot_target_wei_hex: "0xde0b6b3a7640000".into(),
             created_at_unix: 1,
             updated_at_unix: 2,
         }
@@ -1758,6 +1809,7 @@ mod tests {
             activity_state: "funded".into(),
             native_balance_wei_hex: "0x1".into(),
             transaction_count: 0,
+            last_activity_block: None,
             classifications: Vec::new(),
             source: "local-rpc".into(),
             first_seen_at_unix: 1,
@@ -1809,6 +1861,7 @@ mod tests {
             activity_state: "funded".into(),
             native_balance_wei_hex: balance.into(),
             transaction_count: 0,
+            last_activity_block: None,
             classifications: Vec::new(),
             source: "persisted-test".into(),
             first_seen_at_unix: 1,

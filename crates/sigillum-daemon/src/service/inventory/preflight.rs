@@ -436,6 +436,8 @@ mod tests {
     fn sample_step(action: &str) -> ConsolidationPlanStep {
         ConsolidationPlanStep {
             id: "step_1".into(),
+            sequence: 0,
+            depends_on: Vec::new(),
             action: action.into(),
             status: "review_required".into(),
             wallet_family: "eth-seed".into(),

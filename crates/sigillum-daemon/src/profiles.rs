@@ -78,6 +78,7 @@ mod tests {
             max_fee_per_gas_hex: None,
             native_gas_limit: None,
             erc20_gas_limit: None,
+            fee_estimation_enabled: false,
         });
 
         save_profiles(dir.path(), &registry).unwrap();
@@ -127,6 +128,7 @@ mod tests {
             max_fee_per_gas_hex: None,
             native_gas_limit: None,
             erc20_gas_limit: None,
+            fee_estimation_enabled: false,
         });
 
         save_profiles(dir.path(), &registry).unwrap();

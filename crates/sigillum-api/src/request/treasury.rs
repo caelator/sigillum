@@ -35,6 +35,12 @@ pub struct TreasuryPolicyUpdateRequest {
     pub allow_raw_digest_signing: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub block_cross_party_linkage: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub simulation_freshness_secs: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hot_floor_wei_hex: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hot_target_wei_hex: Option<String>,
 }
 
 /// Allocate a fresh purpose-labeled receive address from a wallet profile.

@@ -57,30 +57,10 @@ pub struct KeyValueRequest {
     pub value: Option<String>,
 }
 
-/// Supported CLI password generator character sets.
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "kebab-case")]
-pub enum PasswordCharset {
-    Loweralpha,
-    Mixalpha,
-    Numeric,
-    AlphaNumeric,
-    MixalphaNumeric,
-    MixalphaNumericSymbol,
-}
+// ── Secret generation ─────────────────────────────────────────
 
-impl PasswordCharset {
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            Self::Loweralpha => "loweralpha",
-            Self::Mixalpha => "mixalpha",
-            Self::Numeric => "numeric",
-            Self::AlphaNumeric => "alpha-numeric",
-            Self::MixalphaNumeric => "mixalpha-numeric",
-            Self::MixalphaNumericSymbol => "mixalpha-numeric-symbol",
-        }
-    }
-}
+mod generate;
+pub use generate::*;
 
 /// Retrieve or delete a key by name from the active compartment.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -480,6 +460,8 @@ pub struct EvmProviderProfileUpsertRequest {
     pub native_gas_limit: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub erc20_gas_limit: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fee_estimation_enabled: Option<bool>,
 }
 
 /// Delete an EVM provider profile by name.
@@ -796,25 +778,6 @@ pub struct RunAuditRequest {
     pub success: bool,
 }
 
-/// Atomically generate a secret value and persist it in the active compartment.
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
-pub struct GenerateStoreRequest {
-    pub key: String,
-    pub kind: GenerateStoreKind,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(tag = "type", rename_all = "kebab-case")]
-pub enum GenerateStoreKind {
-    Password {
-        length: usize,
-        charset: PasswordCharset,
-    },
-    Passphrase {
-        word_count: usize,
-        separator: String,
-    },
-}
 #[cfg(test)]
 #[path = "request_tests.rs"]
 mod tests;

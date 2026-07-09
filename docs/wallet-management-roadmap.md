@@ -80,16 +80,28 @@ Required discovery classes:
   and positive balances discovered through provider APIs or local index data.
   The first bounded transfer-log discovery slice is implemented for EVM
   inventory scans and now persists per-address/chain/topic block cursors so
-  later scans resume from the last scanned transfer-log block. Registries,
-  indexers, and richer positive-balance evidence remain future work.
+  later scans resume from the last scanned transfer-log block. Operator-imported
+  local token registries are now implemented: lists are imported from pasted JSON
+  or a local file path, never fetched from the network (D-15). Scans with
+  `probe_token_registry` probe matching-chain entries with `balanceOf`, record
+  positive balances as holdings with `token_registry:<list-name>` provenance,
+  and skip wrong-chain entries. Indexers and richer positive-balance evidence
+  remain future work.
 - NFT discovery for ERC-721 and ERC-1155 ownership, including metadata caching,
   spam filtering, and optional floor or collection valuation providers.
   The first bounded ERC-721 transfer-log slice is implemented for EVM inventory
   scans, resumes from per-address/chain/topic block cursors, and confirms
   current ownership with `ownerOf`; bounded ERC-1155 transfer discovery is
   implemented with `balanceOf` confirmation for touched token IDs and uses the
-  same resumable block-cursor model. Metadata, spam filtering, and valuation
-  providers remain future work.
+  same resumable block-cursor model. Per-collection opt-in metadata fetching is
+  implemented: `tokenURI`/`uri` resolves through provider RPC, downloads use the
+  daemon's bounded HTTP client, and cached results record provenance (URI, fetch
+  time, sha-256 content hash); IPFS metadata is fetched only through an
+  operator-configured gateway, otherwise it is skipped with a recorded reason.
+  Local conservative spam heuristics now record reasons for suspected airdrops,
+  trusted-name lookalikes, and operator risk-catalog overrides, and surface them
+  in a never-auto-hidden Suspicious NFTs bucket. Floor or collection valuation
+  providers remain out of scope for 1.0 (D-16).
 - DeFi position discovery for common protocols: lending, staking, liquid
   staking, LP positions, vault shares, bridges, vesting/streaming contracts, and
   rewards contracts. The first local slice records operator-configured ERC-20
@@ -121,15 +133,20 @@ Required discovery classes:
   single-chain; all-chain inventory produces separate per-chain plans, and
   operators can request a specific `chain_id` when generating a plan. Revoke
   and sweep transaction calldata can be preflighted and exported after
-  explicit approval and successful simulation. External spender registries,
-  expiration-aware Permit2 scoring, dynamic fee policy, and direct queue
-  execution remain future work.
-- Dormant-wallet classification using last activity, transaction count, current
-  value, token/NFT/DeFi exposure, gas availability, and whether the private key
-  or signing path is actually available. Inventory addresses now carry
-  operator-facing classifications such as `signer_available`, `watch_only`,
-  `gas_available`, `stranded_value`, `approval_exposure`, and
-  `dormant_candidate`; richer last-activity timestamps and valuation remain
+  explicit approval and successful simulation. Plan steps now carry
+  planner-assigned sequence numbers and explicit step dependencies, and exports
+  emit steps in dependency order while refusing (fail-closed) to export any step
+  whose dependency is blocked or skipped, naming the dependency in the skip
+  reason. External spender registries, expiration-aware Permit2 scoring,
+  dynamic fee policy, and direct queue execution remain future work.
+- Dormant-wallet classification using derived last activity, current value,
+  token/NFT/DeFi exposure, gas availability, and whether the private key or
+  signing path is actually available. Inventory addresses now carry a derived
+  `last_activity_block` from the max block across observed transfer logs and
+  ERC-5564 stealth announcement scans; scan-progress cursors never count as
+  activity. Dormancy is classified against each chain-registry entry's
+  `dormancy_block_window` (default `1,000,000` blocks) instead of transaction
+  count alone, and dormant findings carry block evidence. Valuation remains
   future work.
 
 ## Local Indexing Architecture
@@ -315,6 +332,8 @@ The CLI should have parity for automation:
    catalog, and reviewable approval revoke plan steps are the first
    approval-management slices, and bounded ERC-721/ERC-1155 transfer-log
    discovery with owner/balance confirmation is the first NFT inventory slice.
+   The opt-in NFT metadata fetch pipeline and extended local spam heuristics are
+   now implemented on top of that transfer-log slice.
 5. Consolidation preflight. Provider-backed `eth_call` simulation is
    implemented for ERC-20 `approve(spender, 0)` revokes and NFT
    `setApprovalForAll(operator, false)` revokes. Permit2 allowance probes now
@@ -322,12 +341,17 @@ The CLI should have parity for automation:
    revokes can be simulated against the correct protocol contract. Native and
    ERC-20 sweep plan steps now also build provider-backed preflight calls before
    they become executable. Native sweep simulation reserves gas using the
-   provider profile's max-fee policy and gas limit, records the resulting
-   spendable amount, and blocks plans that cannot pay gas. ERC-20 sweeps and
-   approval revokes also verify inventoried native gas against the provider fee
-   policy before simulation can pass. ERC-721 and ERC-1155 NFT sweep plan steps
-   now build standard `safeTransferFrom` calls, require explicit token IDs, and
-   verify enough inventoried native gas against a conservative NFT gas floor.
+   provider fee basis and gas limit, records the resulting spendable amount,
+   and blocks plans that cannot pay gas. Gas verification records an explicit
+   fee basis (`static_profile` or `estimated`) with a resolution timestamp as
+   step evidence; provider profiles can opt into live EIP-1559 estimation with
+   `fee_estimation_enabled`. Approval re-checks evidence freshness against the
+   treasury policy's `simulation_freshness_secs` (default 900) and downgrades
+   stale simulations to required. ERC-20 sweeps and approval revokes also verify
+   inventoried native gas against the provider fee policy before simulation can
+   pass. ERC-721 and ERC-1155 NFT sweep plan steps now build standard
+   `safeTransferFrom` calls, require explicit token IDs, and verify enough
+   inventoried native gas against a conservative NFT gas floor.
 5a. Wallet archaeology labels. Discovery now classifies addresses for signer
     availability, watch-only status, gas availability, token/NFT/protocol
     value, stranded value, approval exposure, and dormant-candidate state, and
@@ -347,7 +371,11 @@ The CLI should have parity for automation:
    simulation slices are implemented; verified source adapters, richer external
    risk feeds, and explicit claim execution adapters remain future work.
 8. Consolidation planner with broader dry-run simulation for dynamic fee
-   estimation, gas top-ups, exits, claims, swaps, and treasury routing.
+   estimation, gas top-ups, exits, claims, swaps, and treasury routing. Hot-wallet
+   refill routing is now policy-driven through
+   `TreasuryPolicy.hot_floor_wei_hex` / `hot_target_wei_hex` (both default 1
+   ETH, preserving prior behavior); the planner routes to the hot address only
+   while its balance is below the floor.
 9. Controlled execution for native/ERC-20 sweeps, gas top-ups, NFT transfers,
    DeFi exits, claims, swaps, and treasury routing.
 10. Non-EVM chain families, starting with Bitcoin/UTXO and only then Solana,

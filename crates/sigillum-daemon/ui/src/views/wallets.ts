@@ -78,7 +78,9 @@ export function createWalletActions(deps: WalletActionsDeps) {
           " · nativeGas=" +
           (profile.native_gas_limit || "-") +
           " · erc20Gas=" +
-          (profile.erc20_gas_limit || "-");
+          (profile.erc20_gas_limit || "-") +
+          " · feeEstimation=" +
+          (profile.fee_estimation_enabled ? "on" : "off");
         return (
           '<li><div class="entity-main">' +
           '<div class="entity-title">' +
@@ -354,6 +356,7 @@ export function createWalletActions(deps: WalletActionsDeps) {
       max_fee_per_gas_hex: optionalTextValue("providerMaxFee"),
       native_gas_limit: optionalNumberValue("providerNativeGasLimit"),
       erc20_gas_limit: optionalNumberValue("providerErc20GasLimit"),
+      fee_estimation_enabled: Boolean(input("providerFeeEstimation")?.checked),
     });
     if (r.error) {
       deps.toast(r.error, "error");
@@ -370,6 +373,8 @@ export function createWalletActions(deps: WalletActionsDeps) {
       "providerNativeGasLimit",
       "providerErc20GasLimit",
     ]);
+    const feeEstimationEl = input("providerFeeEstimation");
+    if (feeEstimationEl) feeEstimationEl.checked = false;
     deps.toast("Provider profile saved");
     deps.refresh();
   }

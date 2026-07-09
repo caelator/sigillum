@@ -135,14 +135,12 @@ does not claim internet-facing or hosted-service assurance.
 `cargo deny check` currently emits duplicate-version warnings and exits
 successfully with advisories, bans, licenses, and sources all accepted.
 
-Two RustSec advisories are temporarily ignored in both `.cargo/audit.toml`
-and `deny.toml`: RUSTSEC-2026-0194 and RUSTSEC-2026-0195 (quick-xml 0.39.x
-DoS advisories, reached only through `plist` ← `tauri` in
-`sigillum-desktop`). The affected code parses trusted, app-owned macOS
-bundle files; no untrusted XML reaches quick-xml in this workspace. No
-fixed upstream `plist` release exists yet (advisories published
-2026-06-29). The exceptions carry removal notes and must be re-evaluated
-on each release-gate run (`cargo update -p plist`).
+No RustSec advisories are currently ignored. The former temporary
+exceptions for RUSTSEC-2026-0194 and RUSTSEC-2026-0195 (quick-xml 0.39.x
+DoS advisories via `plist` ← `tauri`) were removed on 2026-07-08 after
+`cargo update` moved the workspace to quick-xml 0.41.0, which is outside
+the advisories' vulnerable range; `cargo audit` and `cargo deny check`
+pass with empty ignore lists.
 
 ## Requirement Audit
 

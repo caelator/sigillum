@@ -12,13 +12,17 @@ use super::{
     parse_quantity_u256,
 };
 
+mod abi;
 mod block;
 mod erc1155;
 mod erc20;
 mod erc721;
+mod errors;
 mod logs;
 mod permit2;
 
+use abi::{nft_token_uri_call_data, parse_abi_string_result};
+use errors::{provider_http_error, provider_json_rpc_error};
 pub(in crate::service) use logs::EvmLogEntry;
 use logs::parse_log_entry;
 
@@ -217,6 +221,26 @@ impl ProviderRpcClient {
         normalize_hex_blob_allow_empty(result, "eth_call result")
     }
 
+    pub(super) async fn get_nft_token_uri(
+        &self,
+        contract_address: &str,
+        token_id_hex: &str,
+        erc1155: bool,
+        block_tag: &str,
+    ) -> ServiceResult<String> {
+        let value = self
+            .request(
+                1,
+                "eth_call",
+                json!([{
+                    "to": normalize_address(contract_address)?,
+                    "data": nft_token_uri_call_data(token_id_hex, erc1155)?,
+                }, block_tag]),
+            )
+            .await?;
+        parse_abi_string_result(&value)
+    }
+
     async fn request(&self, id: u64, method: &'static str, params: Value) -> ServiceResult<Value> {
         let response = self
             .request_batch(&[JsonRpcRequest {
@@ -288,52 +312,4 @@ fn batch_result(
             ServiceError::internal(format!("Provider batch response missing item for {method}"))
         })?
         .into_result(method)
-}
-
-fn provider_http_error(method: &str, status: reqwest::StatusCode) -> ServiceError {
-    let message = format!("Provider request failed for {method}: http {status}");
-    if status == reqwest::StatusCode::TOO_MANY_REQUESTS {
-        ServiceError::too_many_requests(message)
-    } else if status.is_client_error() {
-        ServiceError::bad_request(message)
-    } else {
-        ServiceError::internal(message)
-    }
-}
-
-fn provider_json_rpc_error(method: &str, error: JsonRpcError) -> ServiceError {
-    let message = format!(
-        "Provider error for {method}: {} ({})",
-        error.message, error.code
-    );
-    if provider_error_is_rate_limited(error.code, &error.message) {
-        ServiceError::too_many_requests(message)
-    } else if matches!(error.code, -32700 | -32600 | -32601 | -32602) {
-        ServiceError::bad_request(message)
-    } else {
-        ServiceError::internal(message)
-    }
-}
-
-fn provider_error_is_rate_limited(code: i64, message: &str) -> bool {
-    if code == -32005 {
-        return true;
-    }
-    let message = message.to_ascii_lowercase();
-    message.contains("rate limit")
-        || message.contains("too many requests")
-        || message.contains("throttle")
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn provider_rate_limit_detection_catches_common_signals() {
-        assert!(provider_error_is_rate_limited(-32005, "request limit"));
-        assert!(provider_error_is_rate_limited(0, "Too many requests"));
-        assert!(provider_error_is_rate_limited(0, "provider throttle"));
-        assert!(!provider_error_is_rate_limited(-32602, "invalid params"));
-    }
 }

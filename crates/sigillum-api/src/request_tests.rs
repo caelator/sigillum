@@ -626,6 +626,7 @@ fn test_evm_provider_profile_upsert_request_full() {
         max_fee_per_gas_hex: Some("0x5f5e100".to_string()),
         native_gas_limit: Some(21000),
         erc20_gas_limit: Some(65000),
+        fee_estimation_enabled: Some(false),
     };
     roundtrip_test(req);
 }
@@ -644,6 +645,7 @@ fn test_evm_provider_profile_upsert_request_minimal() {
         max_fee_per_gas_hex: None,
         native_gas_limit: None,
         erc20_gas_limit: None,
+        fee_estimation_enabled: None,
     };
     roundtrip_test(req);
 }
@@ -819,6 +821,7 @@ fn test_wallet_inventory_scan_request_roundtrip() {
         resume_from_latest_checkpoint: Some(true),
         token_addresses: vec!["0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48".to_string()],
         block_tag: Some("latest".to_string()),
+        probe_token_registry: Some(true),
         discover_erc20_transfers: Some(true),
         token_discovery_from_block: Some("0x100".to_string()),
         token_discovery_to_block: Some("latest".to_string()),
@@ -867,6 +870,76 @@ fn test_wallet_inventory_scan_request_roundtrip() {
 }
 
 #[test]
+fn test_nft_metadata_requests_roundtrip() {
+    roundtrip_test(NftMetadataOptInUpsertRequest {
+        chain_id: 1,
+        contract_address: "0xdead00000000000000000000000000000000dead".to_string(),
+        enabled: Some(true),
+    });
+    roundtrip_test(NftMetadataOptInDeleteRequest {
+        chain_id: 1,
+        contract_address: "0xdead00000000000000000000000000000000dead".to_string(),
+    });
+    roundtrip_test(NftMetadataSettingsUpdateRequest {
+        ipfs_gateway_url: Some("http://127.0.0.1:1/ipfs/".to_string()),
+    });
+    roundtrip_test(NftMetadataFetchRequest {
+        chain_id: Some(1),
+        contract_address: Some("0xdead00000000000000000000000000000000dead".to_string()),
+        limit: Some(10),
+    });
+}
+
+#[test]
+fn test_nft_metadata_request_validation() {
+    use crate::validation::Validate;
+
+    let upsert = NftMetadataOptInUpsertRequest {
+        chain_id: 1,
+        contract_address: "0xdead00000000000000000000000000000000dead".to_string(),
+        enabled: None,
+    };
+    assert!(upsert.validate().is_ok());
+
+    let delete = NftMetadataOptInDeleteRequest {
+        chain_id: 1,
+        contract_address: "0xdead00000000000000000000000000000000dead".to_string(),
+    };
+    assert!(delete.validate().is_ok());
+
+    let clear_gateway = NftMetadataSettingsUpdateRequest {
+        ipfs_gateway_url: Some(String::new()),
+    };
+    assert!(clear_gateway.validate().is_ok());
+
+    let fetch = NftMetadataFetchRequest {
+        chain_id: Some(1),
+        contract_address: Some("0xdead00000000000000000000000000000000dead".to_string()),
+        limit: Some(10),
+    };
+    assert!(fetch.validate().is_ok());
+
+    let invalid_upsert = NftMetadataOptInUpsertRequest {
+        chain_id: 1,
+        contract_address: "0xdead".to_string(),
+        enabled: None,
+    };
+    assert!(invalid_upsert.validate().is_err());
+
+    let invalid_fetch = NftMetadataFetchRequest {
+        chain_id: None,
+        contract_address: Some("not-an-address".to_string()),
+        limit: None,
+    };
+    assert!(invalid_fetch.validate().is_err());
+
+    let oversized_gateway = NftMetadataSettingsUpdateRequest {
+        ipfs_gateway_url: Some(format!("http://127.0.0.1/{}", "a".repeat(2_048))),
+    };
+    assert!(oversized_gateway.validate().is_err());
+}
+
+#[test]
 fn test_watch_address_book_requests_roundtrip() {
     roundtrip_test(WatchAddressBookUpsertRequest {
         address: "0x7777777777777777777777777777777777777777".to_string(),
@@ -880,6 +953,21 @@ fn test_watch_address_book_requests_roundtrip() {
 }
 
 #[test]
+fn test_token_registry_requests_roundtrip() {
+    roundtrip_test(TokenRegistryImportRequest {
+        name: "core-list".to_string(),
+        entries_json: Some(
+            r#"[{"chain_id":1,"address":"0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","symbol":"AAA","decimals":18}]"#
+                .to_string(),
+        ),
+        file_path: None,
+    });
+    roundtrip_test(TokenRegistryDeleteRequest {
+        name: "core-list".to_string(),
+    });
+}
+
+#[test]
 fn test_chain_profile_upsert_request_roundtrip() {
     let req = ChainProfileUpsertRequest {
         name: "base".to_string(),
@@ -889,6 +977,7 @@ fn test_chain_profile_upsert_request_roundtrip() {
         native_symbol: Some("ETH".to_string()),
         native_decimals: Some(18),
         finality_blocks: Some(12),
+        dormancy_block_window: Some(crate::DEFAULT_DORMANCY_BLOCK_WINDOW),
         permit2_address: Some("0x000000000022d473030f116ddee9f6b43ac78ba3".to_string()),
         explorer_url: Some("https://basescan.org".to_string()),
         capabilities: vec!["native".to_string(), "erc20".to_string()],
@@ -1157,6 +1246,9 @@ fn test_treasury_policy_update_request_full() {
         require_simulation: Some(false),
         allow_raw_digest_signing: Some(true),
         block_cross_party_linkage: Some(true),
+        simulation_freshness_secs: Some(900),
+        hot_floor_wei_hex: Some("0xde0b6b3a7640000".to_string()),
+        hot_target_wei_hex: Some("0xde0b6b3a7640000".to_string()),
     };
     roundtrip_test(req);
 }
@@ -1171,6 +1263,9 @@ fn test_treasury_policy_update_request_minimal() {
         require_simulation: None,
         allow_raw_digest_signing: None,
         block_cross_party_linkage: None,
+        simulation_freshness_secs: None,
+        hot_floor_wei_hex: None,
+        hot_target_wei_hex: None,
     };
     roundtrip_test(req);
 }

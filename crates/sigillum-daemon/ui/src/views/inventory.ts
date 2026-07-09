@@ -5,9 +5,12 @@ import type {
   ConsolidationPlanExportResponse,
   ConsolidationPlanStep,
   Counterparty,
+  NftMetadataCacheEntry,
+  NftMetadataCollectionOptIn,
   PartyDestination,
   RiskCatalogEntry,
   RiskFinding,
+  TokenRegistryList,
   WatchAddressBookEntry,
   WalletDiscoveryJob,
 } from "../contracts";
@@ -267,6 +270,149 @@ export function createInventoryActions(deps: InventoryActionsDeps) {
       .join(", ");
   }
 
+  function renderNftMetadataOptIns(response: {
+    opt_ins?: NftMetadataCollectionOptIn[];
+    ipfs_gateway_url?: string | null;
+  }): void {
+    const gatewayInput = document.getElementById("nftMetaGatewayUrl") as
+      | HTMLInputElement
+      | null;
+    if (response.ipfs_gateway_url && gatewayInput && !gatewayInput.value) {
+      gatewayInput.value = response.ipfs_gateway_url;
+    }
+    renderEntityList(
+      "nftMetaOptInList",
+      response.opt_ins || [],
+      "No collections opted in. NFT metadata is never fetched without an explicit opt-in.",
+      (optIn) => {
+        const nextEnabled = !optIn.enabled;
+        return (
+          '<li><div class="entity-main">' +
+          '<div class="entity-title">' +
+          esc(optIn.contract_address) +
+          " " +
+          statusPill(optIn.enabled ? "enabled" : "disabled") +
+          "</div>" +
+          '<div class="entity-meta">' +
+          "chain=" +
+          esc(chainLabel(optIn.chain_id)) +
+          " · updated=" +
+          esc(String(optIn.updated_at_unix || "-")) +
+          "</div></div>" +
+          '<div class="entity-actions">' +
+          '<button class="btn-ghost" data-action="toggleNftMetadataOptIn" data-arg0="' +
+          escAttr(optIn.contract_address) +
+          '" data-arg1="' +
+          escAttr(String(optIn.chain_id)) +
+          '" data-arg2="' +
+          escAttr(String(nextEnabled)) +
+          '">' +
+          esc(nextEnabled ? "Enable" : "Disable") +
+          "</button>" +
+          '<button class="btn-danger" data-action="deleteNftMetadataOptIn" data-arg0="' +
+          escAttr(optIn.contract_address) +
+          '" data-arg1="' +
+          escAttr(String(optIn.chain_id)) +
+          '">Delete</button>' +
+          "</div></li>"
+        );
+      },
+    );
+  }
+
+  function nftHoldingContext(inventory: any, entry: NftMetadataCacheEntry): string {
+    const entryContract = entry.contract_address.toLowerCase();
+    const entryTokenId = (entry.token_id_hex || "").toLowerCase();
+    const matches = (inventory.holdings || []).filter((holding: any) => {
+      const holdingContract = String(
+        holding.asset_address || holding.contract_address || "",
+      ).toLowerCase();
+      const holdingTokenId = String(holding.token_id_hex || "").toLowerCase();
+      return (
+        Number(holding.chain_id) === Number(entry.chain_id) &&
+        holdingContract === entryContract &&
+        holdingTokenId === entryTokenId
+      );
+    });
+    if (!matches.length) return "";
+    const addresses = Array.from(
+      new Set(matches.map((holding: any) => holding.address).filter(Boolean)),
+    )
+      .slice(0, 3)
+      .join(", ");
+    return (
+      "<br>holdings=" +
+      esc(String(matches.length)) +
+      (addresses ? " · addresses=" + esc(addresses) : "")
+    );
+  }
+
+  function nftMetadataProvenanceLine(entry: NftMetadataCacheEntry): string {
+    const fetchedParts: string[] = [];
+    if (entry.fetched_at_unix !== undefined && entry.fetched_at_unix !== null) {
+      fetchedParts.push("fetched=" + String(entry.fetched_at_unix));
+    }
+    if (entry.fetched_uri) fetchedParts.push("uri=" + entry.fetched_uri);
+    if (entry.content_sha256) {
+      fetchedParts.push("sha256=" + entry.content_sha256.slice(0, 12));
+    }
+    if (fetchedParts.length) return "<br>" + esc(fetchedParts.join(" · "));
+    if (entry.fetch_skipped_reason) {
+      return "<br>skipped=" + esc(entry.fetch_skipped_reason);
+    }
+    return "";
+  }
+
+  function renderNftMetadata(inventory: any): void {
+    const entries = (inventory.nft_metadata_cache || []) as NftMetadataCacheEntry[];
+    renderEntityList(
+      "nftMetadataList",
+      entries,
+      "No NFT metadata cache entries yet.",
+      (entry) =>
+        '<li><div class="entity-main">' +
+        '<div class="entity-title">' +
+        esc(entry.name || "(unnamed)") +
+        " " +
+        statusPill(entry.spam_label || "unlabeled") +
+        "</div>" +
+        '<div class="entity-meta">' +
+        "contract=" +
+        esc(entry.contract_address) +
+        " · tokenId=" +
+        esc(entry.token_id_hex || "-") +
+        " · chain=" +
+        esc(chainLabel(entry.chain_id)) +
+        nftHoldingContext(inventory, entry) +
+        nftMetadataProvenanceLine(entry) +
+        "</div></div></li>",
+    );
+    renderEntityList(
+      "nftSuspiciousList",
+      entries.filter(
+        (entry) => Boolean(entry.spam_label) && entry.spam_label !== "operator_trusted",
+      ),
+      "No suspicious NFTs flagged.",
+      (entry) =>
+        '<li><div class="entity-main">' +
+        '<div class="entity-title">' +
+        esc(entry.name || "(unnamed)") +
+        " " +
+        statusPill(entry.spam_label || "unlabeled") +
+        "</div>" +
+        '<div class="entity-meta">' +
+        "contract=" +
+        esc(entry.contract_address) +
+        " · tokenId=" +
+        esc(entry.token_id_hex || "-") +
+        " · chain=" +
+        esc(chainLabel(entry.chain_id)) +
+        "<br>reasons=" +
+        esc((entry.spam_reasons || []).join(", ") || entry.spam_label || "-") +
+        "</div></div></li>",
+    );
+  }
+
   function renderInventoryState(inventory: any): void {
     renderEntityList("inventoryJobList", inventory.jobs || [], "No discovery jobs yet.", (job: any) => {
       const chainIds = job.chain_ids || [];
@@ -341,6 +487,9 @@ export function createInventoryActions(deps: InventoryActionsDeps) {
         esc(address.native_balance_wei_hex || "0x0") +
         " · txCount=" +
         esc(String(address.transaction_count || 0)) +
+        (address.last_activity_block !== undefined && address.last_activity_block !== null
+          ? " · lastActivityBlock=" + esc(String(address.last_activity_block))
+          : "") +
         ((address.classifications || []).length
           ? "<br>classifications=" + esc((address.classifications || []).join(", "))
           : "") +
@@ -393,6 +542,7 @@ export function createInventoryActions(deps: InventoryActionsDeps) {
         esc(holding.source || "-") +
         "</div></div></li>",
     );
+    renderNftMetadata(inventory);
   }
 
   function renderWatchAddressBook(entries: WatchAddressBookEntry[]): void {
@@ -447,6 +597,42 @@ export function createInventoryActions(deps: InventoryActionsDeps) {
           "</button>" +
           '<button class="btn-danger" data-action="deleteWatchAddressBookEntry" data-arg0="' +
           escAttr(entry.address) +
+          '">Delete</button>' +
+          "</div></li>"
+        );
+      },
+    );
+  }
+
+  function renderTokenRegistry(lists: TokenRegistryList[]): void {
+    renderEntityList(
+      "tokenRegistryList",
+      lists,
+      "No token registry lists imported yet.",
+      (list) => {
+        const entries = list.entries || [];
+        const chainIds =
+          Array.from(new Set(entries.map((entry) => entry.chain_id)))
+            .sort((left, right) => left - right)
+            .map((chainId) => String(chainId))
+            .join(", ") || "-";
+        return (
+          '<li><div class="entity-main">' +
+          '<div class="entity-title">' +
+          esc(list.name) +
+          " " +
+          statusPill(list.source) +
+          "</div>" +
+          '<div class="entity-meta">' +
+          esc(String(entries.length)) +
+          " entries · chains=" +
+          esc(chainIds) +
+          " · updated=" +
+          esc(String(list.updated_at_unix)) +
+          "</div></div>" +
+          '<div class="entity-actions">' +
+          '<button class="btn-danger" data-action="deleteTokenRegistryList" data-arg0="' +
+          escAttr(list.name) +
           '">Delete</button>' +
           "</div></li>"
         );
@@ -536,6 +722,11 @@ export function createInventoryActions(deps: InventoryActionsDeps) {
               statusPill(step.status) +
               " · " +
               esc(step.asset_kind) +
+              " · seq=" +
+              esc(String(step.sequence ?? 0)) +
+              ((step.depends_on || []).length
+                ? " · dependsOn=" + esc((step.depends_on || []).join(","))
+                : "") +
               (step.token_id_hex ? " #" + esc(step.token_id_hex) : "") +
               (step.counterparty_address
                 ? " · spender/operator=" + esc(step.counterparty_address)
@@ -613,23 +804,28 @@ export function createInventoryActions(deps: InventoryActionsDeps) {
     bindPlanRoutingSelect();
     void renderPlanPartyDestinations();
     try {
-      const [chains, watchBook, inventory, catalog, risks, plans] = await Promise.all([
-        deps.api("GET", "/api/chains"),
-        deps.api("GET", "/api/inventory/watch-addresses"),
-        deps.api("GET", "/api/inventory/wallets"),
-        deps.api("GET", "/api/risk/catalog"),
-        deps.api("GET", "/api/risk/findings"),
-        deps.api("GET", "/api/plans/consolidation"),
-      ]);
+      const [chains, watchBook, inventory, tokenRegistry, catalog, risks, plans, nftOptIns] =
+        await Promise.all([
+          deps.api("GET", "/api/chains"),
+          deps.api("GET", "/api/inventory/watch-addresses"),
+          deps.api("GET", "/api/inventory/wallets"),
+          deps.api("GET", "/api/inventory/token-registry"),
+          deps.api("GET", "/api/risk/catalog"),
+          deps.api("GET", "/api/risk/findings"),
+          deps.api("GET", "/api/plans/consolidation"),
+          deps.api("GET", "/api/inventory/nft-metadata/opt-ins"),
+        ]);
       if (!chains.error) {
         latestChainProfiles = chains.profiles || [];
         renderChainProfiles(latestChainProfiles);
       }
       if (!watchBook.error) renderWatchAddressBook(watchBook.entries || []);
       if (!inventory.error) renderInventoryState(inventory);
+      if (!tokenRegistry.error) renderTokenRegistry(tokenRegistry.lists || []);
       if (!catalog.error) renderRiskCatalog(catalog.entries || []);
       if (!risks.error) renderRiskFindings(risks.findings || []);
       if (!plans.error) renderConsolidationPlans(plans.plans || []);
+      if (!nftOptIns.error) renderNftMetadataOptIns(nftOptIns);
     } catch (_) {}
   }
 
@@ -727,6 +923,7 @@ export function createInventoryActions(deps: InventoryActionsDeps) {
       token_addresses: token ? [token] : [],
       block_tag: "latest",
       discover_erc20_transfers: input("inventoryDiscoverErc20Transfers").checked,
+      probe_token_registry: input("inventoryProbeTokenRegistry").checked,
       token_discovery_from_block: optionalTextValue("inventoryTokenDiscoveryFromBlock"),
       token_discovery_to_block: optionalTextValue("inventoryTokenDiscoveryToBlock"),
       token_discovery_limit: optionalNumberValue("inventoryTokenDiscoveryLimit"),
@@ -848,6 +1045,122 @@ export function createInventoryActions(deps: InventoryActionsDeps) {
     void loadInventoryOperations();
   }
 
+  async function upsertNftMetadataOptIn(): Promise<void> {
+    const chainId = optionalNumberValue("nftMetaOptInChainId");
+    const contractAddress = textValue("nftMetaOptInContract");
+    if (chainId === null || !contractAddress) {
+      deps.toast("Chain id and collection contract address are required", "error");
+      return;
+    }
+    const r = await deps.api("POST", "/api/inventory/nft-metadata/opt-ins/upsert", {
+      chain_id: chainId,
+      contract_address: contractAddress,
+      enabled: true,
+    });
+    if (r.error) {
+      deps.toast(r.error, "error");
+      return;
+    }
+    clearFields(["nftMetaOptInContract"]);
+    deps.toast("NFT metadata collection opted in");
+    void loadInventoryOperations();
+  }
+
+  async function toggleNftMetadataOptIn(
+    contractAddress: string,
+    chainId: string,
+    enabled: string,
+  ): Promise<void> {
+    const numericChainId = Number(chainId);
+    if (!contractAddress || !Number.isFinite(numericChainId)) {
+      deps.toast("NFT metadata opt-in target is invalid", "error");
+      return;
+    }
+    const nextEnabled = enabled === "true";
+    const r = await deps.api("POST", "/api/inventory/nft-metadata/opt-ins/upsert", {
+      chain_id: numericChainId,
+      contract_address: contractAddress,
+      enabled: nextEnabled,
+    });
+    if (r.error) {
+      deps.toast(r.error, "error");
+      return;
+    }
+    deps.toast(nextEnabled ? "NFT metadata collection enabled" : "NFT metadata collection disabled");
+    void loadInventoryOperations();
+  }
+
+  async function deleteNftMetadataOptIn(
+    contractAddress: string,
+    chainId: string,
+  ): Promise<void> {
+    const numericChainId = Number(chainId);
+    if (!contractAddress || !Number.isFinite(numericChainId)) {
+      deps.toast("NFT metadata opt-in target is invalid", "error");
+      return;
+    }
+    if (!confirm('Delete NFT metadata opt-in "' + contractAddress + '"?')) return;
+    const r = await deps.api("POST", "/api/inventory/nft-metadata/opt-ins/delete", {
+      chain_id: numericChainId,
+      contract_address: contractAddress,
+    });
+    if (r.error) {
+      deps.toast(r.error, "error");
+      return;
+    }
+    deps.toast("NFT metadata opt-in deleted");
+    void loadInventoryOperations();
+  }
+
+  async function saveNftMetadataSettings(): Promise<void> {
+    const r = await deps.api("POST", "/api/inventory/nft-metadata/settings", {
+      ipfs_gateway_url: textValue("nftMetaGatewayUrl"),
+    });
+    if (r.error) {
+      deps.toast(r.error, "error");
+      return;
+    }
+    deps.toast("NFT metadata settings saved");
+    void loadInventoryOperations();
+  }
+
+  function skippedNftMetadataSummary(skip: any): string {
+    const subject = [
+      skip.contract_address || null,
+      skip.token_id_hex ? "#" + skip.token_id_hex : null,
+      skip.chain_id !== undefined && skip.chain_id !== null
+        ? "chain=" + chainLabel(skip.chain_id)
+        : null,
+    ]
+      .filter(Boolean)
+      .join(" ");
+    return (subject ? subject + ": " : "") + (skip.reason || "skipped");
+  }
+
+  async function fetchNftMetadata(): Promise<void> {
+    const fetchButton = document.querySelector('[data-action="fetchNftMetadata"]');
+    if (fetchButton) fetchButton.classList.add("btn-busy");
+    try {
+      const r = await deps.api("POST", "/api/inventory/nft-metadata/fetch", {});
+      if (r.error) {
+        deps.toast(r.error, "error");
+        return;
+      }
+      const skipped = (r.skipped || []) as any[];
+      const skipSummary = skipped.slice(0, 3).map(skippedNftMetadataSummary).join("; ");
+      deps.toast(
+        "Fetched " +
+          String(r.fetched || 0) +
+          ", skipped " +
+          String(skipped.length) +
+          (skipSummary ? ": " + skipSummary : ""),
+      );
+      void loadInventoryOperations();
+    } finally {
+      if (fetchButton) fetchButton.classList.remove("btn-busy");
+    }
+  }
+
   async function cancelDiscoveryJob(id: string): Promise<void> {
     const r = await deps.api("POST", "/api/discovery/jobs/cancel", { id });
     if (r.error) {
@@ -865,6 +1178,43 @@ export function createInventoryActions(deps: InventoryActionsDeps) {
       return;
     }
     deps.toast("Discovery job marked for resume");
+    void loadInventoryOperations();
+  }
+
+  async function importTokenRegistry(): Promise<void> {
+    const name = textValue("tokenRegistryName");
+    if (!name) {
+      deps.toast("Token registry list name is required", "error");
+      return;
+    }
+    const entriesJson = optionalTextValue("tokenRegistryEntriesJson");
+    const filePath = optionalTextValue("tokenRegistryFilePath");
+    if ((entriesJson ? 1 : 0) + (filePath ? 1 : 0) !== 1) {
+      deps.toast("Provide pasted JSON entries or a local file path (not both)", "error");
+      return;
+    }
+    const r = await deps.api("POST", "/api/inventory/token-registry/import", {
+      name,
+      entries_json: entriesJson || undefined,
+      file_path: filePath || undefined,
+    });
+    if (r.error) {
+      deps.toast(r.error, "error");
+      return;
+    }
+    clearFields(["tokenRegistryName", "tokenRegistryEntriesJson", "tokenRegistryFilePath"]);
+    deps.toast("Token registry list imported");
+    void loadInventoryOperations();
+  }
+
+  async function deleteTokenRegistryList(name: string): Promise<void> {
+    if (!confirm('Delete token registry list "' + name + '"?')) return;
+    const r = await deps.api("POST", "/api/inventory/token-registry/delete", { name });
+    if (r.error) {
+      deps.toast(r.error, "error");
+      return;
+    }
+    deps.toast("Token registry list deleted");
     void loadInventoryOperations();
   }
 
@@ -1025,6 +1375,7 @@ export function createInventoryActions(deps: InventoryActionsDeps) {
     renderChainProfiles,
     renderInventoryState,
     renderWatchAddressBook,
+    renderTokenRegistry,
     renderRiskCatalog,
     renderRiskFindings,
     renderConsolidationPlans,
@@ -1038,8 +1389,15 @@ export function createInventoryActions(deps: InventoryActionsDeps) {
     upsertBulkWatchAddressBookEntries,
     toggleWatchAddressBookEntry,
     deleteWatchAddressBookEntry,
+    upsertNftMetadataOptIn,
+    toggleNftMetadataOptIn,
+    deleteNftMetadataOptIn,
+    saveNftMetadataSettings,
+    fetchNftMetadata,
     cancelDiscoveryJob,
     resumeDiscoveryJob,
+    importTokenRegistry,
+    deleteTokenRegistryList,
     loadRiskFindings,
     upsertRiskCatalogEntry,
     deleteRiskCatalogEntry,

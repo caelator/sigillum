@@ -5,13 +5,8 @@ yanked = "deny"
 # Linux (wry), which carry blanket unmaintained advisories we cannot act
 # on transitively; cargo audit still surfaces them as warnings.
 unmaintained = "workspace"
-# Mirrors .cargo/audit.toml — quick-xml DoS advisories via plist <- tauri;
-# trusted app-owned plists only, no untrusted XML path; no fixed plist
-# release exists yet (see docs/production-readiness-audit.md).
-ignore = [
-    { id = "RUSTSEC-2026-0194", reason = "quick-xml via plist<-tauri; parses trusted app-owned bundle files only; no upstream fix released yet" },
-    { id = "RUSTSEC-2026-0195", reason = "quick-xml via plist<-tauri; parses trusted app-owned bundle files only; no upstream fix released yet" },
-]
+# Mirrors .cargo/audit.toml — no scoped advisory exceptions currently.
+ignore = []
 
 [licenses]
 allow = [

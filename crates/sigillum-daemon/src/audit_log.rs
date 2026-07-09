@@ -397,6 +397,24 @@ pub(crate) enum AuditEventSpec {
     WalletInventoryRiskCatalogUpsert { address: String, risk_level: String },
     #[serde(rename = "wallet_inventory.risk_catalog.delete")]
     WalletInventoryRiskCatalogDelete { address: String },
+    #[serde(rename = "wallet_inventory.token_registry.import")]
+    WalletInventoryTokenRegistryImport { name: String, entries: usize },
+    #[serde(rename = "wallet_inventory.token_registry.delete")]
+    WalletInventoryTokenRegistryDelete { name: String },
+    #[serde(rename = "wallet_inventory.nft_metadata.opt_in.upsert")]
+    WalletInventoryNftMetadataOptInUpsert {
+        chain_id: u64,
+        contract_address: String,
+    },
+    #[serde(rename = "wallet_inventory.nft_metadata.opt_in.delete")]
+    WalletInventoryNftMetadataOptInDelete {
+        chain_id: u64,
+        contract_address: String,
+    },
+    #[serde(rename = "wallet_inventory.nft_metadata.settings.update")]
+    WalletInventoryNftMetadataSettingsUpdate { ipfs_gateway_configured: bool },
+    #[serde(rename = "wallet_inventory.nft_metadata.fetch")]
+    WalletInventoryNftMetadataFetch { fetched: usize, skipped: usize },
     #[serde(rename = "wallet_inventory.watch_address.upsert")]
     WalletInventoryWatchAddressUpsert { address: String, label: String },
     #[serde(rename = "wallet_inventory.watch_address.delete")]
@@ -530,6 +548,22 @@ impl AuditEventSpec {
             }
             Self::WalletInventoryRiskCatalogUpsert { .. } => "wallet_inventory.risk_catalog.upsert",
             Self::WalletInventoryRiskCatalogDelete { .. } => "wallet_inventory.risk_catalog.delete",
+            Self::WalletInventoryTokenRegistryImport { .. } => {
+                "wallet_inventory.token_registry.import"
+            }
+            Self::WalletInventoryTokenRegistryDelete { .. } => {
+                "wallet_inventory.token_registry.delete"
+            }
+            Self::WalletInventoryNftMetadataOptInUpsert { .. } => {
+                "wallet_inventory.nft_metadata.opt_in.upsert"
+            }
+            Self::WalletInventoryNftMetadataOptInDelete { .. } => {
+                "wallet_inventory.nft_metadata.opt_in.delete"
+            }
+            Self::WalletInventoryNftMetadataSettingsUpdate { .. } => {
+                "wallet_inventory.nft_metadata.settings.update"
+            }
+            Self::WalletInventoryNftMetadataFetch { .. } => "wallet_inventory.nft_metadata.fetch",
             Self::WalletInventoryWatchAddressUpsert { .. } => {
                 "wallet_inventory.watch_address.upsert"
             }
@@ -860,6 +894,24 @@ impl AuditEventSpec {
             } => json!({ "address": address, "risk_level": risk_level }),
             Self::WalletInventoryRiskCatalogDelete { address } => {
                 json!({ "address": address })
+            }
+            Self::WalletInventoryTokenRegistryImport { name, entries } => {
+                json!({ "name": name, "entries": entries })
+            }
+            Self::WalletInventoryTokenRegistryDelete { name } => json!({ "name": name }),
+            Self::WalletInventoryNftMetadataOptInUpsert {
+                chain_id,
+                contract_address,
+            }
+            | Self::WalletInventoryNftMetadataOptInDelete {
+                chain_id,
+                contract_address,
+            } => json!({ "chain_id": chain_id, "contract_address": contract_address }),
+            Self::WalletInventoryNftMetadataSettingsUpdate {
+                ipfs_gateway_configured,
+            } => json!({ "ipfs_gateway_configured": ipfs_gateway_configured }),
+            Self::WalletInventoryNftMetadataFetch { fetched, skipped } => {
+                json!({ "fetched": fetched, "skipped": skipped })
             }
             Self::WalletInventoryWatchAddressUpsert { address, label } => {
                 json!({ "address": address, "label": label })
@@ -1360,6 +1412,41 @@ impl AuditEventSpec {
                 Ok(Self::WalletInventoryDiscoveryJobUpdate {
                     id: details.id,
                     status: details.status,
+                })
+            }
+            "wallet_inventory.nft_metadata.opt_in.upsert" => {
+                let details = parse_legacy_details::<WalletInventoryNftMetadataOptInDetails>(
+                    path, &kind, details,
+                )?;
+                Ok(Self::WalletInventoryNftMetadataOptInUpsert {
+                    chain_id: details.chain_id,
+                    contract_address: details.contract_address,
+                })
+            }
+            "wallet_inventory.nft_metadata.opt_in.delete" => {
+                let details = parse_legacy_details::<WalletInventoryNftMetadataOptInDetails>(
+                    path, &kind, details,
+                )?;
+                Ok(Self::WalletInventoryNftMetadataOptInDelete {
+                    chain_id: details.chain_id,
+                    contract_address: details.contract_address,
+                })
+            }
+            "wallet_inventory.nft_metadata.settings.update" => {
+                let details = parse_legacy_details::<
+                    WalletInventoryNftMetadataSettingsUpdateDetails,
+                >(path, &kind, details)?;
+                Ok(Self::WalletInventoryNftMetadataSettingsUpdate {
+                    ipfs_gateway_configured: details.ipfs_gateway_configured,
+                })
+            }
+            "wallet_inventory.nft_metadata.fetch" => {
+                let details = parse_legacy_details::<WalletInventoryNftMetadataFetchDetails>(
+                    path, &kind, details,
+                )?;
+                Ok(Self::WalletInventoryNftMetadataFetch {
+                    fetched: details.fetched,
+                    skipped: details.skipped,
                 })
             }
             "wallet_consolidation.plan.generate" => {

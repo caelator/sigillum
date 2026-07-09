@@ -1480,16 +1480,16 @@ Phase W — Wallet-management completion
 - [x] W1.3 multi-chain scan orchestration
 - [x] W2 typed domain model (wire-compatible enums)
 - [x] W3.1 block-range checkpoints for log scans
-- [ ] W3.2 ERC-1155 batch e2e fixture (decoding already implemented)
-- [ ] W3.3 local token registry import
-- [ ] W3.4 NFT metadata cache + local spam heuristics
-- [ ] W3.5 on-chain last-activity signals
+- [x] W3.2 ERC-1155 batch e2e fixture (decoding already implemented)
+- [x] W3.3 local token registry import
+- [x] W3.4 NFT metadata cache + local spam heuristics
+- [x] W3.5 on-chain last-activity signals
 - [ ] W4 DeFi exit adapters: ERC-4626, UniV2 LP, Lido unwrap (Aave v3 exists)
 - [ ] W5 Merkle claim execution enablement
 - [ ] W6.1 fund_gas steps with linkage rule
-- [ ] W6.2 dynamic fees in planning/preflight
-- [ ] W6.3 policy-driven hot floor/refill
-- [ ] W6.4 step dependency ordering
+- [x] W6.2 dynamic fees in planning/preflight
+- [x] W6.3 policy-driven hot floor/refill
+- [x] W6.4 step dependency ordering
 - [ ] W7.1 execution policy gates + kill switch
 - [ ] W7.2 plan-step queue payloads + enqueue validation
 - [ ] W7.3 seed-wallet signing execution
@@ -1628,3 +1628,39 @@ Phase H — Ship
   canceled job, CLI/UI cursor surfacing, and `eth_blockNumber` RPC support.
   Focused cursor/backcompat tests, Rust API/daemon/CLI gates, and UI
   typecheck/test/build passed.
+- 2026-07-08 W3.2 a18f347: ERC-1155 TransferBatch end-to-end mock fixture
+  through the real scan route; zero-balance ids filtered; test-only diff.
+- 2026-07-08 W3.3 a8a75e7: local token registry import — store
+  `sigillum.token-registry` v1, `/api/inventory/token-registry` routes,
+  `probe_token_registry` scan flag, UI/CLI surfaces, D-15 network-path
+  rejection at import, holdings provenance `token_registry:<list-name>`.
+- 2026-07-08 W3.4 3379af8: opt-in NFT metadata fetch pipeline writing
+  provenance (URI, fetch time, content hash) into the existing
+  `nft_metadata_cache`; airdrop/lookalike spam heuristics with recorded
+  reasons; never-auto-hidden suspicious bucket in UI; API-only (no-CLI)
+  parity decision recorded (row 33); zero-traffic-without-opt-in negative
+  tests.
+- 2026-07-08 W3.5 75f7041: `last_activity_block` derived from observed
+  transfer-log/announcement evidence only (monotonic, never cursor
+  progress); per-chain `dormancy_block_window` on registry entries;
+  dormancy classified by block window with block evidence in risk
+  findings; UI/CLI surfacing.
+- 2026-07-08 W6.2 4cbf58f: `simulation_freshness_secs` policy field
+  (default 900); estimated-vs-static fee basis recorded as step evidence;
+  stale approvals downgrade simulation to `required`; estimation RPC
+  failure fails closed.
+- 2026-07-08 W6.3 47975fa: `hot_floor_wei_hex`/`hot_target_wei_hex`
+  replace the 1 ETH planner hardcode; migration defaults both to
+  `0xde0b6b3a7640000` with a byte-identical legacy routing test;
+  `floor <= target` validated; UI/CLI policy editor fields.
+- 2026-07-08 W6.4 f543e1f: `sequence`/`depends_on` on
+  ConsolidationPlanStep with serde-default backcompat; export emits
+  dependency order, refuses blocked/skipped/missing dependencies
+  fail-closed with named reasons, rejects cycles.
+- 2026-07-08 Wave 5 integrated on wave/5-discovery-planner (8c8fca5):
+  wallet-inventory schema chain reconciled to v15 (v14 = W3.4+W3.5 fields,
+  v15 = W6.2/W6.3 fields); parity doc recounted at 132 route
+  registrations / 33 family rows; quick-xml RUSTSEC-2026-0194/0195
+  ignores removed from `.cargo/audit.toml` + `deny.toml` after
+  `cargo update` reached quick-xml 0.41.0 (audit + deny green with empty
+  ignore lists).

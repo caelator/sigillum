@@ -308,6 +308,8 @@ fn wallet_inventory_legacy_json_domains_deserialize_unchanged() {
         fixture.plan.steps[0].simulation_status,
         WalletSimulationStatus::Required
     );
+    assert_eq!(fixture.plan.steps[0].sequence, 0);
+    assert!(fixture.plan.steps[0].depends_on.is_empty());
 }
 
 #[test]
@@ -357,6 +359,7 @@ fn profiles_request_roundtrip() {
         max_fee_per_gas_hex: Some("0x12a05f200".to_string()),
         native_gas_limit: Some(21_000),
         erc20_gas_limit: Some(65_000),
+        fee_estimation_enabled: Some(false),
     });
 }
 
@@ -373,6 +376,7 @@ fn profiles_response_roundtrip() {
             max_fee_per_gas_hex: Some("0x12a05f200".to_string()),
             native_gas_limit: Some(21_000),
             erc20_gas_limit: Some(65_000),
+            fee_estimation_enabled: false,
         }],
     });
 }
@@ -503,6 +507,9 @@ fn treasury_request_roundtrip() {
         require_simulation: Some(true),
         allow_raw_digest_signing: Some(false),
         block_cross_party_linkage: Some(true),
+        simulation_freshness_secs: Some(900),
+        hot_floor_wei_hex: Some("0xde0b6b3a7640000".to_string()),
+        hot_target_wei_hex: Some("0xde0b6b3a7640000".to_string()),
     });
 }
 
@@ -520,6 +527,9 @@ fn treasury_response_roundtrip() {
             require_simulation: true,
             allow_raw_digest_signing: false,
             block_cross_party_linkage: true,
+            simulation_freshness_secs: 900,
+            hot_floor_wei_hex: "0xde0b6b3a7640000".to_string(),
+            hot_target_wei_hex: "0xde0b6b3a7640000".to_string(),
             created_at_unix: 1_783_000_000,
             updated_at_unix: 1_783_046_000,
         }),
@@ -603,6 +613,7 @@ fn inventory_request_roundtrip() {
             "0xdac17f958d2ee523a2206206994597c13d831ec7".to_string(),
         ],
         block_tag: Some("safe".to_string()),
+        probe_token_registry: Some(true),
         discover_erc20_transfers: Some(true),
         token_discovery_from_block: Some("0x11e1a300".to_string()),
         token_discovery_to_block: Some("latest".to_string()),
@@ -699,6 +710,7 @@ fn inventory_response_roundtrip() {
             activity_state: WalletAddressActivityState::Funded,
             native_balance_wei_hex: "0xde0b6b3a7640000".to_string(),
             transaction_count: 12,
+            last_activity_block: None,
             classifications: vec![
                 WalletAddressClassification::Other("signer".to_string()),
                 WalletAddressClassification::Other("treasury".to_string()),
@@ -739,6 +751,11 @@ fn inventory_response_roundtrip() {
             metadata_uri: Some("ipfs://bafynftmetadata".to_string()),
             name: Some("Operations Safe Badge".to_string()),
             spam_label: "trusted".to_string(),
+            spam_reasons: vec!["operator_reviewed".to_string()],
+            fetched_at_unix: Some(1_783_046_000),
+            fetched_uri: Some("http://127.0.0.1:1/ipfs/bafynftmetadata".to_string()),
+            content_sha256: Some("aa".repeat(32)),
+            fetch_skipped_reason: None,
             updated_at_unix: 1_783_046_000,
         }],
     });

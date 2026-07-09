@@ -46,6 +46,7 @@ export interface ChainProfile {
   native_symbol: string;
   native_decimals: number;
   finality_blocks: number;
+  dormancy_block_window?: number;
   permit2_address?: string | null;
   rpc_profile?: string | null;
   explorer_url?: string | null;
@@ -62,6 +63,23 @@ export interface WatchAddressBookEntry {
   tags: string[];
   source: string;
   enabled: boolean;
+  created_at_unix: number;
+  updated_at_unix: number;
+}
+
+export interface TokenRegistryEntry {
+  chain_id: number;
+  address: string;
+  symbol: string;
+  decimals: number;
+}
+
+export interface TokenRegistryList {
+  id: string;
+  name: string;
+  compartment_id: number;
+  source: string;
+  entries: TokenRegistryEntry[];
   created_at_unix: number;
   updated_at_unix: number;
 }
@@ -114,6 +132,19 @@ export interface NftMetadataCacheEntry {
   metadata_uri?: string | null;
   name?: string | null;
   spam_label: string;
+  spam_reasons?: string[];
+  fetched_at_unix?: number | null;
+  fetched_uri?: string | null;
+  content_sha256?: string | null;
+  fetch_skipped_reason?: string | null;
+  updated_at_unix: number;
+}
+
+export interface NftMetadataCollectionOptIn {
+  chain_id: number;
+  contract_address: string;
+  enabled: boolean;
+  created_at_unix: number;
   updated_at_unix: number;
 }
 
@@ -204,6 +235,7 @@ export interface WalletInventoryAddress {
   activity_state: WalletAddressActivityState;
   native_balance_wei_hex: string;
   transaction_count: number;
+  last_activity_block?: number | null;
   classifications?: WalletAddressClassification[];
   source: string;
   first_seen_at_unix: number;
@@ -221,6 +253,8 @@ export interface ConsolidationPlanSummary {
 
 export interface ConsolidationPlanStep {
   id: string;
+  sequence?: number;
+  depends_on?: string[];
   action: WalletPlanStepAction;
   status: WalletPlanStepStatus;
   wallet_family: string;
@@ -423,8 +457,11 @@ export interface TreasuryPolicy {
   allowed_destinations?: TreasuryAllowedDestination[];
   max_step_native_wei_hex?: string | null;
   max_plan_native_wei_hex?: string | null;
+  hot_floor_wei_hex?: string;
+  hot_target_wei_hex?: string;
   require_simulation: boolean;
   block_cross_party_linkage?: boolean;
+  simulation_freshness_secs?: number;
   created_at_unix: number;
   updated_at_unix: number;
 }
@@ -434,8 +471,11 @@ export interface TreasuryPolicyUpdateRequest {
   allowed_destinations?: TreasuryAllowedDestination[];
   max_step_native_wei_hex?: string | null;
   max_plan_native_wei_hex?: string | null;
+  hot_floor_wei_hex?: string | null;
+  hot_target_wei_hex?: string | null;
   require_simulation?: boolean | null;
   block_cross_party_linkage?: boolean | null;
+  simulation_freshness_secs?: number | null;
 }
 
 export interface TreasuryReceiveAllocation {
