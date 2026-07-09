@@ -22,7 +22,9 @@ use crate::audit_log::AuditEventSpec;
 use crate::deposits::DepositState;
 use crate::inventory::WalletInventoryState;
 use crate::service::evm::normalize_address;
-use crate::service::helpers::{compare_u256, map_xpub_error, now_unix, random_id};
+use crate::service::helpers::{
+    compare_u256, map_xpub_error, now_unix, random_id, session_fingerprint_hex,
+};
 use crate::service::transaction_policy::{
     TransactionPolicyCheck, TransactionPolicyKind, transaction_policy_actions,
 };
@@ -833,6 +835,7 @@ impl SigillumService {
         }
         let _guard = self.state.operation_guard().await;
         let mut state = load_inventory_state(&self.state.base_dir)?;
+        let previous_policy = state.treasury_policy.clone();
         let now = now_unix();
 
         let mut allowed_destinations: Vec<TreasuryAllowedDestination> = Vec::new();
@@ -873,6 +876,12 @@ impl SigillumService {
                 "hot_floor_wei_hex must be less than or equal to hot_target_wei_hex",
             ));
         }
+        let previous_execution_paused = previous_policy
+            .as_ref()
+            .map(|policy| policy.execution_paused)
+            .unwrap_or(false);
+        // Policy edits that omit the kill switch must not silently resume execution.
+        let execution_paused = body.execution_paused.unwrap_or(previous_execution_paused);
 
         let policy = TreasuryPolicy {
             enabled: body.enabled,
@@ -894,11 +903,19 @@ impl SigillumService {
                 "max_gas_topup_wei_hex",
                 body.max_gas_topup_wei_hex,
             )?,
+            allow_plan_execution: body.allow_plan_execution.unwrap_or(false),
+            allow_sweep_execution: body.allow_sweep_execution.unwrap_or(false),
+            allow_revoke_execution: body.allow_revoke_execution.unwrap_or(false),
+            allow_exit_execution: body.allow_exit_execution.unwrap_or(false),
+            execution_paused,
+            max_fee_per_gas_cap_hex: validated_cap_hex(
+                "max_fee_per_gas_cap_hex",
+                body.max_fee_per_gas_cap_hex,
+            )?,
             simulation_freshness_secs: body.simulation_freshness_secs.unwrap_or(900),
             hot_floor_wei_hex,
             hot_target_wei_hex,
-            created_at_unix: state
-                .treasury_policy
+            created_at_unix: previous_policy
                 .as_ref()
                 .map(|existing| existing.created_at_unix)
                 .unwrap_or(now),
@@ -914,6 +931,77 @@ impl SigillumService {
                 destinations: policy.allowed_destinations.len(),
             },
         )?;
+        let fingerprint_hex = session_fingerprint_hex(token);
+        for (gate, old_value, new_value) in [
+            (
+                "allow_plan_execution",
+                previous_policy
+                    .as_ref()
+                    .map(|policy| policy.allow_plan_execution)
+                    .unwrap_or(false),
+                policy.allow_plan_execution,
+            ),
+            (
+                "allow_sweep_execution",
+                previous_policy
+                    .as_ref()
+                    .map(|policy| policy.allow_sweep_execution)
+                    .unwrap_or(false),
+                policy.allow_sweep_execution,
+            ),
+            (
+                "allow_revoke_execution",
+                previous_policy
+                    .as_ref()
+                    .map(|policy| policy.allow_revoke_execution)
+                    .unwrap_or(false),
+                policy.allow_revoke_execution,
+            ),
+            (
+                "allow_exit_execution",
+                previous_policy
+                    .as_ref()
+                    .map(|policy| policy.allow_exit_execution)
+                    .unwrap_or(false),
+                policy.allow_exit_execution,
+            ),
+            (
+                "allow_claim_execution",
+                previous_policy
+                    .as_ref()
+                    .map(|policy| policy.allow_claim_execution)
+                    .unwrap_or(false),
+                policy.allow_claim_execution,
+            ),
+            (
+                "allow_gas_topups",
+                previous_policy
+                    .as_ref()
+                    .map(|policy| policy.allow_gas_topups)
+                    .unwrap_or(false),
+                policy.allow_gas_topups,
+            ),
+            (
+                "execution_paused",
+                previous_policy
+                    .as_ref()
+                    .map(|policy| policy.execution_paused)
+                    .unwrap_or(false),
+                policy.execution_paused,
+            ),
+        ] {
+            if old_value != new_value {
+                self.record_audit(
+                    self.state.active_compartment_id_for(token),
+                    AuditEventSpec::TreasuryExecutionGateUpdate {
+                        gate: gate.into(),
+                        old_value,
+                        new_value,
+                        session_fingerprint_hex: fingerprint_hex.clone(),
+                    },
+                )?;
+            }
+        }
 
         Ok(TreasuryPolicyMutationResponse {
             status: "updated".into(),
@@ -1654,6 +1742,12 @@ mod tests {
             allow_claim_execution: false,
             allow_gas_topups: false,
             max_gas_topup_wei_hex: None,
+            allow_plan_execution: false,
+            allow_sweep_execution: false,
+            allow_revoke_execution: false,
+            allow_exit_execution: false,
+            execution_paused: false,
+            max_fee_per_gas_cap_hex: None,
             simulation_freshness_secs: 900,
             hot_floor_wei_hex: "0xde0b6b3a7640000".into(),
             hot_target_wei_hex: "0xde0b6b3a7640000".into(),

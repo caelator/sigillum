@@ -1490,7 +1490,7 @@ Phase W — Wallet-management completion
 - [x] W6.2 dynamic fees in planning/preflight
 - [x] W6.3 policy-driven hot floor/refill
 - [x] W6.4 step dependency ordering
-- [ ] W7.1 execution policy gates + kill switch
+- [x] W7.1 execution policy gates + kill switch
 - [ ] W7.2 plan-step queue payloads + enqueue validation
 - [ ] W7.3 seed-wallet signing execution
 - [ ] W7.4 nonces, receipts, failure classes
@@ -1701,3 +1701,17 @@ Phase H — Ship
   reserves (sponsor/hot/treasury) are no longer generic sweep sources —
   prevents plans from draining the sponsor gas float (test-covered; W8
   builds on this).
+- 2026-07-09 W7.1 57cd960..e0624b8: execution policy surface — master
+  `allow_plan_execution` + per-family sweep/revoke/exit gates +
+  `execution_paused` kill switch + `max_fee_per_gas_cap_hex` (schema v18,
+  all fail-closed defaults); reusable gate evaluation re-reads persisted
+  policy at enqueue and drain chokepoints (policy flip between → blocked
+  with named reason); pause halts the drain loop immediately
+  (mid-drain test) via `POST /api/queue/pause|resume`, UI pause
+  control/banner, CLI; typed gate-flip audit events carry old/new value
+  + session fingerprint (never the raw token); per-gate enqueue-time and
+  execution-time negatives; defaults-off byte-identical regressions;
+  EthSeed* hard block untouched; stealth families exempt by construction.
+  Parity doc 134 registrations / 135 endpoints. UI/docs step implemented
+  by a Sonnet agent (operator-directed fallback after a Codex CLI
+  usage-limit block).

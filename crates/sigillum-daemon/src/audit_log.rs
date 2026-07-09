@@ -443,6 +443,13 @@ pub(crate) enum AuditEventSpec {
     },
     #[serde(rename = "treasury.policy.update")]
     TreasuryPolicyUpdate { enabled: bool, destinations: usize },
+    #[serde(rename = "treasury.policy.execution_gate.update")]
+    TreasuryExecutionGateUpdate {
+        gate: String,
+        old_value: bool,
+        new_value: bool,
+        session_fingerprint_hex: String,
+    },
     /// Derived addresses are intentionally omitted: the audit log records
     /// that an allocation happened, not which address it produced.
     #[serde(rename = "treasury.receive.allocate")]
@@ -575,6 +582,7 @@ impl AuditEventSpec {
             Self::WalletConsolidationPlanSimulate { .. } => "wallet_consolidation.plan.simulate",
             Self::WalletConsolidationPlanExport { .. } => "wallet_consolidation.plan.export",
             Self::TreasuryPolicyUpdate { .. } => "treasury.policy.update",
+            Self::TreasuryExecutionGateUpdate { .. } => "treasury.policy.execution_gate.update",
             Self::TreasuryReceiveAllocate { .. } => "treasury.receive.allocate",
             Self::TreasuryReceiveRotate { .. } => "treasury.receive.rotate",
             Self::TreasuryPartyCreate { .. } => "treasury.party.create",
@@ -951,6 +959,17 @@ impl AuditEventSpec {
                 enabled,
                 destinations,
             } => json!({ "enabled": enabled, "destinations": destinations }),
+            Self::TreasuryExecutionGateUpdate {
+                gate,
+                old_value,
+                new_value,
+                session_fingerprint_hex,
+            } => json!({
+                "gate": gate,
+                "old_value": old_value,
+                "new_value": new_value,
+                "session_fingerprint_hex": session_fingerprint_hex,
+            }),
             Self::TreasuryReceiveAllocate {
                 wallet_profile,
                 purpose,

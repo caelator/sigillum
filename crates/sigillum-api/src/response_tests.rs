@@ -1337,6 +1337,7 @@ fn test_queue_process_response_roundtrip() {
             provider_error: 1,
             ..MaintenanceFailureBreakdown::default()
         },
+        paused_reason: None,
         jobs: vec![QueueJob {
             id: "job_4".to_string(),
             state: "completed".to_string(),
@@ -1359,6 +1360,10 @@ fn test_queue_process_response_roundtrip() {
         }],
     };
     roundtrip_test(resp);
+    roundtrip_test(QueueExecutionPauseResponse {
+        status: "updated".to_string(),
+        execution_paused: true,
+    });
 }
 
 #[test]
@@ -1374,6 +1379,7 @@ fn test_queue_process_response_defaults_failure_breakdown() {
         resp.failures_by_cause,
         MaintenanceFailureBreakdown::default()
     );
+    assert!(resp.paused_reason.is_none());
 }
 
 #[test]
@@ -1829,6 +1835,12 @@ fn sample_treasury_policy() -> TreasuryPolicy {
         allow_claim_execution: false,
         allow_gas_topups: false,
         max_gas_topup_wei_hex: None,
+        allow_plan_execution: true,
+        allow_sweep_execution: true,
+        allow_revoke_execution: true,
+        allow_exit_execution: true,
+        execution_paused: true,
+        max_fee_per_gas_cap_hex: Some("0x59682f00".to_string()),
         simulation_freshness_secs: 900,
         hot_floor_wei_hex: "0xde0b6b3a7640000".to_string(),
         hot_target_wei_hex: "0xde0b6b3a7640000".to_string(),
@@ -1857,6 +1869,12 @@ fn test_treasury_policy_responses_roundtrip() {
             allow_claim_execution: false,
             allow_gas_topups: false,
             max_gas_topup_wei_hex: None,
+            allow_plan_execution: false,
+            allow_sweep_execution: false,
+            allow_revoke_execution: false,
+            allow_exit_execution: false,
+            execution_paused: false,
+            max_fee_per_gas_cap_hex: None,
             simulation_freshness_secs: 900,
             hot_floor_wei_hex: "0xde0b6b3a7640000".to_string(),
             hot_target_wei_hex: "0xde0b6b3a7640000".to_string(),
@@ -1877,6 +1895,12 @@ fn test_treasury_policy_require_simulation_defaults_true() {
     assert!(!policy.allow_claim_execution);
     assert!(!policy.allow_gas_topups);
     assert!(policy.max_gas_topup_wei_hex.is_none());
+    assert!(!policy.allow_plan_execution);
+    assert!(!policy.allow_sweep_execution);
+    assert!(!policy.allow_revoke_execution);
+    assert!(!policy.allow_exit_execution);
+    assert!(!policy.execution_paused);
+    assert!(policy.max_fee_per_gas_cap_hex.is_none());
     assert_eq!(policy.simulation_freshness_secs, 900);
     assert_eq!(policy.hot_floor_wei_hex, "0xde0b6b3a7640000");
     assert_eq!(policy.hot_target_wei_hex, "0xde0b6b3a7640000");

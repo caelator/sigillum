@@ -1017,6 +1017,136 @@ test("operation results include failure cause breakdowns", async () => {
   ok(resultBoxes.maintenanceResult.includes("validation=1"));
 });
 
+test("processQueueBatch surfaces a mid-drain pause reason in the result line", async () => {
+  installDom(["queueProcessLimit", "queueList"]);
+  const resultBoxes: Record<string, string> = {};
+  const operations = createOperationsActions({
+    api: async (_method, path) => {
+      if (path === "/api/queue/process") {
+        return {
+          processed: 2,
+          succeeded: 1,
+          blocked: 0,
+          retrying: 0,
+          operator_action_required: 0,
+          failed: 0,
+          failures_by_cause: {
+            provider_error: 0,
+            policy_block: 0,
+            insufficient_gas: 0,
+            validation: 0,
+            unknown: 0,
+          },
+          paused_reason:
+            "execution_paused: queue execution is paused by the operator kill switch",
+          jobs: [],
+        };
+      }
+      return {};
+    },
+    toast: () => undefined,
+    refresh: () => undefined,
+    showResultBox: (id, html) => {
+      resultBoxes[id] = html;
+    },
+    updateNextStepCard: () => undefined,
+  });
+
+  await operations.processQueueBatch();
+  ok(
+    resultBoxes.queueProcessResult.includes(
+      "paused: execution_paused: queue execution is paused by the operator kill switch",
+    ),
+  );
+});
+
+test("queue kill switch toggles the paused banner and buttons and re-loads the queue", async () => {
+  const dom = installDom([
+    "queueList",
+    "queuePausedBanner",
+    "queuePauseBtn",
+    "queueResumeBtn",
+  ]);
+  const calls: Array<{ method: string; path: string }> = [];
+  let executionPaused = false;
+  const operations = createOperationsActions({
+    api: async (method, path) => {
+      calls.push({ method, path });
+      if (path === "/api/queue/jobs") return { jobs: [] };
+      if (path === "/api/treasury/policy") {
+        return { policy: { execution_paused: executionPaused } };
+      }
+      if (path === "/api/queue/pause") {
+        executionPaused = true;
+        return { status: "paused", execution_paused: true };
+      }
+      if (path === "/api/queue/resume") {
+        executionPaused = false;
+        return { status: "resumed", execution_paused: false };
+      }
+      return {};
+    },
+    toast: () => undefined,
+    refresh: () => undefined,
+    showResultBox: () => undefined,
+    updateNextStepCard: () => undefined,
+  });
+
+  await operations.loadQueueJobs();
+  equal(dom.el("queuePausedBanner").classList.contains("hidden"), true);
+  equal(dom.el("queuePauseBtn").classList.contains("hidden"), false);
+  equal(dom.el("queueResumeBtn").classList.contains("hidden"), true);
+
+  const toasts: Array<{ message: string; type?: string }> = [];
+  const pausable = createOperationsActions({
+    api: async (method, path) => {
+      calls.push({ method, path });
+      if (path === "/api/queue/jobs") return { jobs: [] };
+      if (path === "/api/treasury/policy") {
+        return { policy: { execution_paused: executionPaused } };
+      }
+      if (path === "/api/queue/pause") {
+        executionPaused = true;
+        return { status: "paused", execution_paused: true };
+      }
+      if (path === "/api/queue/resume") {
+        executionPaused = false;
+        return { status: "resumed", execution_paused: false };
+      }
+      return {};
+    },
+    toast: (message, type) => toasts.push({ message, type }),
+    refresh: () => undefined,
+    showResultBox: () => undefined,
+    updateNextStepCard: () => undefined,
+  });
+
+  // pauseQueueExecution/resumeQueueExecution re-trigger loadQueueJobs with `void`
+  // (fire-and-forget, matching this module's existing idiom), so flush the
+  // microtask queue before asserting on its effects.
+  const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
+
+  const callsBeforePause = calls.length;
+  await pausable.pauseQueueExecution();
+  await flush();
+  ok(calls.some((call) => call.path === "/api/queue/pause"));
+  ok(calls.length > callsBeforePause + 1); // pause call plus the re-triggered loadQueueJobs fetches
+  ok(toasts.some((t) => t.message === "Queue execution paused"));
+  equal(dom.el("queuePausedBanner").classList.contains("hidden"), false);
+  equal(dom.el("queuePauseBtn").classList.contains("hidden"), true);
+  equal(dom.el("queueResumeBtn").classList.contains("hidden"), false);
+
+  const callsBeforeResume = calls.length;
+  await pausable.resumeQueueExecution();
+  await flush();
+  ok(calls.some((call) => call.path === "/api/queue/resume"));
+  ok(calls.length > callsBeforeResume + 1);
+  ok(toasts.some((t) => t.message === "Queue execution resumed"));
+  equal(dom.el("queuePausedBanner").classList.contains("hidden"), true);
+  equal(dom.el("queuePauseBtn").classList.contains("hidden"), false);
+  equal(dom.el("queueResumeBtn").classList.contains("hidden"), true);
+});
+
 test("inventory actions export consolidation manifests as downloads", async () => {
   installDom();
   let requestBody: any = null;
@@ -2036,6 +2166,12 @@ test("treasury policy renderer shows configured policy and empty state", () => {
     allow_claim_execution: true,
     allow_gas_topups: true,
     max_gas_topup_wei_hex: "0x" + (250000000000000000n).toString(16),
+    allow_plan_execution: true,
+    allow_sweep_execution: true,
+    allow_revoke_execution: false,
+    allow_exit_execution: false,
+    max_fee_per_gas_cap_hex: "0x" + (50000000000n).toString(16),
+    execution_paused: true,
     created_at_unix: 1717900000,
     updated_at_unix: 1717900500,
   };
@@ -2052,6 +2188,12 @@ test("treasury policy renderer shows configured policy and empty state", () => {
   ok(html.includes("allowClaimExecution=true"));
   ok(html.includes("allowGasTopups=true"));
   ok(html.includes("maxGasTopup=0.25 ETH"));
+  ok(html.includes("allowPlanExecution=true"));
+  ok(html.includes("allowSweepExecution=true"));
+  ok(html.includes("allowRevokeExecution=false"));
+  ok(html.includes("allowExitExecution=false"));
+  ok(html.includes("maxFeePerGasCap=50 Gwei"));
+  ok(html.includes("paused=true"));
 
   treasury.renderTreasuryPolicy(null);
   ok(
@@ -2129,6 +2271,11 @@ test("treasury policy loader prefills the form without clobbering operator edits
     "treasuryPolicyAllowClaimExec",
     "treasuryPolicyAllowGasTopups",
     "treasuryPolicyMaxGasTopupEth",
+    "treasuryPolicyAllowPlanExec",
+    "treasuryPolicyAllowSweepExec",
+    "treasuryPolicyAllowRevokeExec",
+    "treasuryPolicyAllowExitExec",
+    "treasuryPolicyMaxFeePerGasGwei",
   ]);
   const policy: TreasuryPolicy = {
     enabled: true,
@@ -2141,6 +2288,11 @@ test("treasury policy loader prefills the form without clobbering operator edits
     allow_claim_execution: true,
     allow_gas_topups: true,
     max_gas_topup_wei_hex: "0x" + (500000000000000000n).toString(16),
+    allow_plan_execution: true,
+    allow_sweep_execution: true,
+    allow_revoke_execution: true,
+    allow_exit_execution: true,
+    max_fee_per_gas_cap_hex: "0x" + (30000000000n).toString(16),
     created_at_unix: 1,
     updated_at_unix: 2,
   };
@@ -2154,6 +2306,11 @@ test("treasury policy loader prefills the form without clobbering operator edits
   equal(dom.el("treasuryPolicyRequireSim").checked, true);
   equal(dom.el("treasuryPolicyAllowClaimExec").checked, true);
   equal(dom.el("treasuryPolicyAllowGasTopups").checked, true);
+  equal(dom.el("treasuryPolicyAllowPlanExec").checked, true);
+  equal(dom.el("treasuryPolicyAllowSweepExec").checked, true);
+  equal(dom.el("treasuryPolicyAllowRevokeExec").checked, true);
+  equal(dom.el("treasuryPolicyAllowExitExec").checked, true);
+  equal(dom.el("treasuryPolicyMaxFeePerGasGwei").value, "30");
   equal(
     dom.el("treasuryPolicyDestinations").value,
     "0x2222222222222222222222222222222222222222:cold",
@@ -2183,6 +2340,11 @@ test("treasury policy save validates caps and submits the parsed update request"
     "treasuryPolicyAllowClaimExec",
     "treasuryPolicyAllowGasTopups",
     "treasuryPolicyMaxGasTopupEth",
+    "treasuryPolicyAllowPlanExec",
+    "treasuryPolicyAllowSweepExec",
+    "treasuryPolicyAllowRevokeExec",
+    "treasuryPolicyAllowExitExec",
+    "treasuryPolicyMaxFeePerGasGwei",
   ]);
   const calls: Array<{ method: string; path: string; body?: any }> = [];
   const toasts: Array<{ message: string; type?: string }> = [];
@@ -2198,6 +2360,11 @@ test("treasury policy save validates caps and submits the parsed update request"
     allow_claim_execution: true,
     allow_gas_topups: true,
     max_gas_topup_wei_hex: "0x" + (250000000000000000n).toString(16),
+    allow_plan_execution: true,
+    allow_sweep_execution: true,
+    allow_revoke_execution: false,
+    allow_exit_execution: false,
+    max_fee_per_gas_cap_hex: "0x" + (25000000000n).toString(16),
     created_at_unix: 1,
     updated_at_unix: 2,
   };
@@ -2216,11 +2383,16 @@ test("treasury policy save validates caps and submits the parsed update request"
   dom.el("treasuryPolicyRequireSim").checked = false;
   dom.el("treasuryPolicyAllowClaimExec").checked = true;
   dom.el("treasuryPolicyAllowGasTopups").checked = true;
+  dom.el("treasuryPolicyAllowPlanExec").checked = true;
+  dom.el("treasuryPolicyAllowSweepExec").checked = true;
+  dom.el("treasuryPolicyAllowRevokeExec").checked = false;
+  dom.el("treasuryPolicyAllowExitExec").checked = false;
   dom.el("treasuryPolicyDestinations").value =
     "0x2222222222222222222222222222222222222222:cold\n0x3333333333333333333333333333333333333333";
   dom.el("treasuryPolicyMaxStepEth").value = "1.5";
   dom.el("treasuryPolicyMaxPlanEth").value = "not-a-number";
   dom.el("treasuryPolicyMaxGasTopupEth").value = "0.25";
+  dom.el("treasuryPolicyMaxFeePerGasGwei").value = "25";
 
   await treasury.updateTreasuryPolicy();
   equal(calls.length, 0);
@@ -2239,6 +2411,15 @@ test("treasury policy save validates caps and submits the parsed update request"
   });
 
   dom.el("treasuryPolicyMaxGasTopupEth").value = "0.25";
+  dom.el("treasuryPolicyMaxFeePerGasGwei").value = "not-a-number";
+  await treasury.updateTreasuryPolicy();
+  equal(calls.length, 0);
+  deepEqual(toasts.pop(), {
+    message: "Max fee per gas must be a decimal gwei amount with up to 9 decimals",
+    type: "error",
+  });
+
+  dom.el("treasuryPolicyMaxFeePerGasGwei").value = "25";
   await treasury.updateTreasuryPolicy();
 
   const update = calls.find((call) => call.path === "/api/treasury/policy/update");
@@ -2258,14 +2439,23 @@ test("treasury policy save validates caps and submits the parsed update request"
       allow_claim_execution: true,
       allow_gas_topups: true,
       max_gas_topup_wei_hex: "0x" + (250000000000000000n).toString(16),
+      allow_plan_execution: true,
+      allow_sweep_execution: true,
+      allow_revoke_execution: false,
+      allow_exit_execution: false,
+      max_fee_per_gas_cap_hex: "0x" + (25000000000n).toString(16),
     },
   });
   deepEqual(toasts.pop(), { message: "Treasury policy saved", type: undefined });
   ok(dom.el("treasuryPolicyList").innerHTML.includes(">enabled<"));
   ok(dom.el("treasuryPolicyList").innerHTML.includes("maxStep=1.5 ETH"));
   ok(dom.el("treasuryPolicyList").innerHTML.includes("maxGasTopup=0.25 ETH"));
+  ok(dom.el("treasuryPolicyList").innerHTML.includes("allowPlanExecution=true"));
+  ok(dom.el("treasuryPolicyList").innerHTML.includes("allowSweepExecution=true"));
+  ok(dom.el("treasuryPolicyList").innerHTML.includes("maxFeePerGasCap=25 Gwei"));
   equal(dom.el("treasuryPolicyMaxStepEth").value, "1.5");
   equal(dom.el("treasuryPolicyMaxGasTopupEth").value, "0.25");
+  equal(dom.el("treasuryPolicyMaxFeePerGasGwei").value, "25");
   ok(calls.some((call) => call.path === "/api/treasury/overview"));
 });
 

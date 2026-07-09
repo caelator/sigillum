@@ -13,6 +13,7 @@ use crate::service::{ServiceError, ServiceResult, SigillumService};
 use super::failure::{
     QueueFailureCause, QueueFailureDisposition, classify_blocked_queue_reason, classify_queue_error,
 };
+use super::gates::EXECUTION_PAUSED_REASON;
 use super::state::queue_job_is_runnable;
 use super::{
     QUEUE_STATE_BLOCKED, QUEUE_STATE_FAILED_TERMINAL, QUEUE_STATE_RETRYING, QUEUE_STATE_SENT,
@@ -64,9 +65,16 @@ impl SigillumService {
         let operator_action_required = 0usize;
         let mut failed = 0usize;
         let mut failures_by_cause = MaintenanceFailureBreakdown::default();
+        let mut paused_reason: Option<String> = None;
 
         for job in queue.jobs.iter_mut() {
             if processed.len() >= limit {
+                break;
+            }
+            // Pause is immediate: no new job starts. Any in-flight job finishes
+            // its current attempt; remaining jobs keep state and attempts intact.
+            if self.queue_execution_paused()? {
+                paused_reason = Some(EXECUTION_PAUSED_REASON.to_string());
                 break;
             }
             if let Some(target_id) = body.id.as_deref() {
@@ -87,7 +95,11 @@ impl SigillumService {
             job.updated_at_unix = now;
             job.next_attempt_after_unix = None;
 
-            let result = match &job.payload {
+            #[rustfmt::skip]
+            let result = if let Some(reason) = self.execution_gate_block_reason(&job.payload)? {
+                Ok(QueueExecution::Blocked(reason))
+            } else {
+            match &job.payload {
                 QueueJobPayload::EthStealthTransfer {
                     wallet_profile,
                     stealth_address,
@@ -197,6 +209,7 @@ impl SigillumService {
                 | QueueJobPayload::EthSeedErc20Sweep { .. } => Ok(QueueExecution::Blocked(
                     "seed-wallet queue execution is not enabled yet".into(),
                 )),
+            }
             };
 
             match result {
@@ -252,6 +265,7 @@ impl SigillumService {
             operator_action_required,
             failed,
             failures_by_cause,
+            paused_reason,
             jobs: processed,
         })
     }

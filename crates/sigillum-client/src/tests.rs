@@ -1675,6 +1675,46 @@ async fn queue_process_route(
     )
 }
 
+async fn queue_pause_route(headers: HeaderMap) -> (StatusCode, Json<serde_json::Value>) {
+    let auth = headers
+        .get(header::AUTHORIZATION)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("");
+    if auth != "Bearer test-token" {
+        return (
+            StatusCode::UNAUTHORIZED,
+            Json(json!({ "error": "missing auth" })),
+        );
+    }
+    (
+        StatusCode::OK,
+        Json(json!({
+            "status": "paused",
+            "execution_paused": true
+        })),
+    )
+}
+
+async fn queue_resume_route(headers: HeaderMap) -> (StatusCode, Json<serde_json::Value>) {
+    let auth = headers
+        .get(header::AUTHORIZATION)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("");
+    if auth != "Bearer test-token" {
+        return (
+            StatusCode::UNAUTHORIZED,
+            Json(json!({ "error": "missing auth" })),
+        );
+    }
+    (
+        StatusCode::OK,
+        Json(json!({
+            "status": "resumed",
+            "execution_paused": false
+        })),
+    )
+}
+
 async fn spawn_test_server() -> Option<SocketAddr> {
     let app = Router::new()
         .route("/api/unlock", post(unlock))
@@ -1822,6 +1862,8 @@ async fn spawn_test_server() -> Option<SocketAddr> {
             post(queue_enqueue_route),
         )
         .route("/api/queue/process", post(queue_process_route))
+        .route("/api/queue/pause", post(queue_pause_route))
+        .route("/api/queue/resume", post(queue_resume_route))
         .with_state(TestState);
 
     let listener = match tokio::net::TcpListener::bind("127.0.0.1:0").await {
@@ -2406,6 +2448,14 @@ async fn profile_and_queue_helpers_roundtrip_response_shapes() {
     assert_eq!(processed.blocked, 0);
     assert_eq!(processed.retrying, 0);
     assert_eq!(processed.operator_action_required, 0);
+
+    let paused = client.pause_queue().await.unwrap();
+    assert_eq!(paused.status, "paused");
+    assert!(paused.execution_paused);
+
+    let resumed = client.resume_queue().await.unwrap();
+    assert_eq!(resumed.status, "resumed");
+    assert!(!resumed.execution_paused);
 
     let deposits = client.list_eth_stealth_deposits().await.unwrap();
     assert_eq!(deposits[0].id, "dep-1");

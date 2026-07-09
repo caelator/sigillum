@@ -42,6 +42,18 @@ pub struct TreasuryPolicyUpdateRequest {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub max_gas_topup_wei_hex: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub allow_plan_execution: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub allow_sweep_execution: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub allow_revoke_execution: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub allow_exit_execution: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub execution_paused: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_fee_per_gas_cap_hex: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub simulation_freshness_secs: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub hot_floor_wei_hex: Option<String>,

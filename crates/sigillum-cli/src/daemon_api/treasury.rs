@@ -19,7 +19,10 @@ pub(super) fn cmd_api_treasury(args: &[String]) {
         [--destination 0xADDR[:label]]... [--max-step-wei-hex 0x..] [--max-plan-wei-hex 0x..] \
         [--require-simulation|--no-require-simulation] [--block-cross-party-linkage <true|false>] \
         [--allow-claim-execution <true|false>] [--allow-gas-topups <true|false>] \
-        [--max-gas-topup-wei-hex 0x..] \
+        [--allow-plan-execution <true|false>] [--allow-sweep-execution <true|false>] \
+        [--allow-revoke-execution <true|false>] [--allow-exit-execution <true|false>] \
+        [--execution-paused <true|false>] [--max-gas-topup-wei-hex 0x..] \
+        [--max-fee-per-gas-cap-hex 0x..] \
         [--simulation-freshness-secs <SECS>] [--hot-floor-wei-hex 0x..] \
         [--hot-target-wei-hex 0x..]";
     const PARTIES_USAGE: &str = "sigillum api treasury parties <list|create|update|delete> \
@@ -61,32 +64,21 @@ pub(super) fn cmd_api_treasury(args: &[String]) {
                 })
                 .collect();
             let block_cross_party_linkage =
-                parse_flag(args, "--block-cross-party-linkage").map(|value| match value.as_str() {
-                    "true" => true,
-                    "false" => false,
-                    _ => {
-                        eprintln!("Usage: {POLICY_UPDATE_USAGE}");
-                        process::exit(1);
-                    }
-                });
+                parse_bool_value_flag(args, "--block-cross-party-linkage", POLICY_UPDATE_USAGE);
             let allow_claim_execution =
-                parse_flag(args, "--allow-claim-execution").map(|value| match value.as_str() {
-                    "true" => true,
-                    "false" => false,
-                    _ => {
-                        eprintln!("Usage: {POLICY_UPDATE_USAGE}");
-                        process::exit(1);
-                    }
-                });
+                parse_bool_value_flag(args, "--allow-claim-execution", POLICY_UPDATE_USAGE);
             let allow_gas_topups =
-                parse_flag(args, "--allow-gas-topups").map(|value| match value.as_str() {
-                    "true" => true,
-                    "false" => false,
-                    _ => {
-                        eprintln!("Usage: {POLICY_UPDATE_USAGE}");
-                        process::exit(1);
-                    }
-                });
+                parse_bool_value_flag(args, "--allow-gas-topups", POLICY_UPDATE_USAGE);
+            let allow_plan_execution =
+                parse_bool_value_flag(args, "--allow-plan-execution", POLICY_UPDATE_USAGE);
+            let allow_sweep_execution =
+                parse_bool_value_flag(args, "--allow-sweep-execution", POLICY_UPDATE_USAGE);
+            let allow_revoke_execution =
+                parse_bool_value_flag(args, "--allow-revoke-execution", POLICY_UPDATE_USAGE);
+            let allow_exit_execution =
+                parse_bool_value_flag(args, "--allow-exit-execution", POLICY_UPDATE_USAGE);
+            let execution_paused =
+                parse_bool_value_flag(args, "--execution-paused", POLICY_UPDATE_USAGE);
             let request = TreasuryPolicyUpdateRequest {
                 enabled,
                 allowed_destinations,
@@ -106,6 +98,12 @@ pub(super) fn cmd_api_treasury(args: &[String]) {
                 allow_claim_execution,
                 allow_gas_topups,
                 max_gas_topup_wei_hex: parse_flag(args, "--max-gas-topup-wei-hex"),
+                allow_plan_execution,
+                allow_sweep_execution,
+                allow_revoke_execution,
+                allow_exit_execution,
+                execution_paused,
+                max_fee_per_gas_cap_hex: parse_flag(args, "--max-fee-per-gas-cap-hex"),
                 simulation_freshness_secs: parse_u64_flag(args, "--simulation-freshness-secs"),
                 hot_floor_wei_hex: parse_flag(args, "--hot-floor-wei-hex"),
                 hot_target_wei_hex: parse_flag(args, "--hot-target-wei-hex"),
@@ -146,6 +144,17 @@ pub(super) fn cmd_api_treasury(args: &[String]) {
             process::exit(1);
         }
     }
+}
+
+fn parse_bool_value_flag(args: &[String], name: &str, usage: &str) -> Option<bool> {
+    parse_flag(args, name).map(|value| match value.as_str() {
+        "true" => true,
+        "false" => false,
+        _ => {
+            eprintln!("Usage: {usage}");
+            process::exit(1);
+        }
+    })
 }
 
 fn cmd_api_treasury_parties(args: &[String], usage: &str) {

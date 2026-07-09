@@ -171,6 +171,28 @@ pub struct TreasuryPolicy {
     /// gas-blocked with a reason naming this cap.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_gas_topup_wei_hex: Option<String>,
+    /// Fail-closed master gate (default false, per Decision Register D-6): no
+    /// consolidation plan step may be enqueued or executed unless this gate and
+    /// the step's per-family gate hold and execution is not paused.
+    #[serde(default)]
+    pub allow_plan_execution: bool,
+    /// Fail-closed per-family opt-in for sweep steps (native/ERC-20/NFT transfers).
+    #[serde(default)]
+    pub allow_sweep_execution: bool,
+    /// Fail-closed per-family opt-in for approval-revoke steps.
+    #[serde(default)]
+    pub allow_revoke_execution: bool,
+    /// Fail-closed per-family opt-in for DeFi exit-adapter steps. Claim steps
+    /// keep using allow_claim_execution; gas top-ups keep using allow_gas_topups.
+    #[serde(default)]
+    pub allow_exit_execution: bool,
+    /// Runtime kill switch: when true, all queue execution halts immediately (no
+    /// new job starts at drain time). Honored even when the policy is disabled.
+    #[serde(default)]
+    pub execution_paused: bool,
+    /// Optional 0x-prefixed uint256 wei fee ceiling for W7.4 fee-bump logic.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_fee_per_gas_cap_hex: Option<String>,
     /// Maximum age in seconds of a step's simulation evidence before approval
     /// downgrades the simulation back to required (forces re-simulation).
     #[serde(default = "default_simulation_freshness_secs")]

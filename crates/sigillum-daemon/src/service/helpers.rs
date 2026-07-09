@@ -179,3 +179,9 @@ pub(crate) fn random_id() -> String {
     rand::rngs::OsRng.fill_bytes(&mut bytes);
     hex::encode(bytes)
 }
+
+pub(in crate::service) fn session_fingerprint_hex(token: &str) -> String {
+    use sha2::{Digest, Sha256};
+    let digest = Sha256::digest(token.as_bytes());
+    hex::encode(&digest[..8])
+}

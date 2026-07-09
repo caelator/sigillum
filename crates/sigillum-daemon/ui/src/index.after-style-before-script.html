@@ -284,6 +284,10 @@
               </div>
               <p class="helper-text hidden" id="wizGasTopupsChoiceStatus"></p>
             </div>
+            <div class="trust-point">
+              <div class="tp-head">Plan execution stays off by default</div>
+              <div class="tp-body">Consolidation plans are review-and-export only until you explicitly enable execution per family (sweeps, revokes, DeFi exits &mdash; plus the claim and gas top-up opt-ins above) behind a master gate in Treasury policy. A global pause switch in the Operations queue view halts all queue execution immediately. Every gate change is recorded in the audit log.</div>
+            </div>
           </div>
         </div>
 
@@ -435,9 +439,26 @@
             <input type="checkbox" id="treasuryPolicyAllowGasTopups">
             Allow sponsor gas top-ups (default off)
           </label>
+          <label class="checkbox-row">
+            <input type="checkbox" id="treasuryPolicyAllowPlanExec">
+            Allow plan execution (master gate, default off)
+          </label>
+          <label class="checkbox-row">
+            <input type="checkbox" id="treasuryPolicyAllowSweepExec">
+            Allow sweep execution (default off)
+          </label>
+          <label class="checkbox-row">
+            <input type="checkbox" id="treasuryPolicyAllowRevokeExec">
+            Allow revoke execution (default off)
+          </label>
+          <label class="checkbox-row">
+            <input type="checkbox" id="treasuryPolicyAllowExitExec">
+            Allow DeFi exit execution (default off)
+          </label>
         </div>
         <p class="field-hint">Scope: blocks when different payers would sweep to the SAME destination. Sigillum-generated gas top-ups (fund_gas steps) are covered by the same payer-linkage analysis: one sponsor funding different payers warns and is blocked when linkage protection is on. MANUAL gas funding, amount/timing correlation, downstream re-merging of per-party destinations, and multi-hop flows remain operator discipline &mdash; keep per-party destinations separate.</p>
         <p class="field-hint">Claim execution stays blocked unless ALL of these hold: this policy is enabled, the claim uses the merkle-distributor-v1 adapter, its simulation passed, the claim contract is marked trusted in the risk catalog (or carries a claim_execution_reviewed note), and you explicitly approve the step. Other claim types stay review/export-only. A claim that reverts at execution will require operator action and is never auto-retried, because a reverted claim may have consumed its proof.</p>
+        <p class="field-hint">Nothing executes from a consolidation plan step unless this policy is enabled AND the master gate (allow plan execution) AND that step's per-family gate (sweep, revoke, or DeFi exit) are all on. Claim execution and gas top-ups keep their existing separate opt-ins above. Every gate change is written to the audit log. The Operations queue view has a global pause switch that halts ALL queue execution immediately &mdash; including today's stealth sweep jobs &mdash; and it is honored even while this policy is disabled.</p>
         <textarea id="treasuryPolicyDestinations" placeholder="Allowed destinations, one per line: 0xADDRESS or 0xADDRESS:label"></textarea>
         <div class="form-row">
           <input type="text" id="treasuryPolicyMaxStepEth" placeholder="Max per-step native (ETH, optional)">
@@ -449,6 +470,7 @@
           <input type="text" id="treasuryPolicyHotFloorEth" placeholder="Hot refill floor (ETH, default 1)">
           <input type="text" id="treasuryPolicyHotTargetEth" placeholder="Hot refill target (ETH, default 1)">
           <input type="text" id="treasuryPolicyMaxGasTopupEth" placeholder="Max gas top-up (ETH, optional)">
+          <input type="text" id="treasuryPolicyMaxFeePerGasGwei" placeholder="Max fee per gas (gwei, optional)">
         </div>
         <p class="field-hint">Sweeps route to the hot address while its balance is below the floor; the target is the refill ceiling (floor must be &le; target). Defaults preserve the previous 1 ETH behavior.</p>
         <p class="field-hint">When enabled, consolidation plans may insert fund_gas steps that fund a source address's gas shortfall from the wallet's sponsor address (1.5x the dependent step's estimated gas, capped by the max top-up). Sigillum-generated top-ups run the same payer-linkage analysis as sweeps: funding different payers' addresses from one sponsor always warns and is hard-blocked when cross-party linkage blocking is on. MANUAL gas funding remains operator discipline.</p>
@@ -1039,9 +1061,12 @@
           <h2>Queue</h2>
           <div class="card-head-actions">
             <button class="btn-ghost btn-small" data-action="loadQueueJobs">Refresh Queue</button>
+            <button class="btn-danger btn-small" id="queuePauseBtn" data-action="pauseQueueExecution">Pause Execution</button>
+            <button class="btn-success btn-small hidden" id="queueResumeBtn" data-action="resumeQueueExecution">Resume Execution</button>
           </div>
         </div>
         <p class="helper-text">Inspect queued sends and sweep jobs, then process a batch or rerun an individual job.</p>
+        <div id="queuePausedBanner" class="result-box hidden"><strong>Queue execution is PAUSED.</strong> No queued job will run until you resume.</div>
         <div class="form-row">
           <input type="number" id="queueProcessLimit" placeholder="Process limit" value="20" class="input-mid">
           <button class="btn-primary" data-action="processQueueBatch">Process Queue</button>
