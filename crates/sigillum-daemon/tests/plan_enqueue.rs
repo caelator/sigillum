@@ -925,6 +925,464 @@ async fn enqueue_step_refuses_fund_gas_without_gas_topup_optin() {
     env.shutdown();
 }
 
+// ── W7.5 linkage enforcement parity matrix ────────────────────────────────
+
+fn allocation_for(id: &str, address: &str, index: u64, counterparty_id: &str) -> Value {
+    json!({
+        "id": id,
+        "wallet_family": "eth-seed",
+        "wallet_profile": "seed-main",
+        "chain_id": 1,
+        "chain_id_assumed": false,
+        "address": address,
+        "derivation_path": format!("m/44'/60'/0'/0/{index}"),
+        "address_index": index,
+        "purpose": "invoice",
+        "status": "active",
+        "created_at_unix": 1,
+        "counterparty_id": counterparty_id,
+    })
+}
+
+fn warnings(step: &Value) -> Vec<String> {
+    step["linkage_warnings"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .map(|warning| warning.as_str().unwrap().to_string())
+        .collect()
+}
+
+fn assert_warnings_contain(step: &Value, expected: &str) {
+    let warnings = warnings(step);
+    assert!(
+        warnings.iter().any(|warning| warning.contains(expected)),
+        "warnings for step {} did not contain {expected:?}: {warnings:?}",
+        step["id"]
+    );
+}
+
+fn assert_warnings_empty(step: &Value) {
+    let warnings = warnings(step);
+    assert!(
+        warnings.is_empty(),
+        "expected no linkage warnings for step {}: {warnings:?}",
+        step["id"]
+    );
+}
+
+#[tokio::test]
+async fn enqueue_step_cross_party_linkage_warns_without_blocking_when_policy_off() {
+    let (env, plan_id, step_id) = approved_plan_env().await;
+    let second_address = "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+    add_plan_step(&env, &plan_id, &step_id, |step| {
+        step["id"] = json!("step_linked");
+        step["sequence"] = json!(1);
+        step["address"] = json!(second_address);
+    });
+    edit_inventory(&env, |data| {
+        data["parties"] = json!([
+            { "id": "party_a", "name": "Party A", "created_at_unix": 1 },
+            { "id": "party_b", "name": "Party B", "created_at_unix": 1 },
+        ]);
+        data["receive_allocations"] = json!([
+            allocation_for("alloc_a", SEED_ADDRESS, 0, "party_a"),
+            allocation_for("alloc_b", second_address, 1, "party_b"),
+        ]);
+    });
+    update_policy(&env, gates_on_policy_body()).await;
+
+    let (status, body) = enqueue_step(&env, &plan_id, &step_id, true).await;
+    assert_eq!(status, StatusCode::OK, "enqueue response: {body}");
+    assert!(body.get("job").is_some(), "enqueue response: {body}");
+    assert_eq!(queue_jobs(&env).await.len(), 1);
+
+    let original = plan_step(&env, &plan_id, &step_id).await;
+    let linked = plan_step(&env, &plan_id, "step_linked").await;
+    assert_warnings_contain(&original, "Party B");
+    assert_warnings_contain(&linked, "Party A");
+    env.shutdown();
+}
+
+#[tokio::test]
+async fn enqueue_step_single_party_multiple_sources_never_warns_regardless_of_policy() {
+    let (env, plan_id, step_id) = approved_plan_env().await;
+    let second_address = "0xbcbcbcbcbcbcbcbcbcbcbcbcbcbcbcbcbcbcbcbc";
+    add_plan_step(&env, &plan_id, &step_id, |step| {
+        step["id"] = json!("step_same_party");
+        step["sequence"] = json!(1);
+        step["address"] = json!(second_address);
+    });
+    edit_inventory(&env, |data| {
+        data["parties"] = json!([{ "id": "party_a", "name": "Party A", "created_at_unix": 1 }]);
+        data["receive_allocations"] = json!([
+            allocation_for("alloc_a", SEED_ADDRESS, 0, "party_a"),
+            allocation_for("alloc_b", second_address, 1, "party_a"),
+        ]);
+    });
+    update_policy(&env, gates_on_policy_body()).await;
+
+    let (status, body) = enqueue_step(&env, &plan_id, &step_id, true).await;
+    assert_eq!(status, StatusCode::OK, "policy off enqueue: {body}");
+    assert_warnings_empty(&plan_step(&env, &plan_id, &step_id).await);
+    assert_warnings_empty(&plan_step(&env, &plan_id, "step_same_party").await);
+
+    let mut policy = gates_on_policy_body();
+    policy["block_cross_party_linkage"] = json!(true);
+    update_policy(&env, policy).await;
+    let (status, body) = enqueue_step(&env, &plan_id, "step_same_party", true).await;
+    assert_eq!(status, StatusCode::OK, "policy on enqueue: {body}");
+    assert_warnings_empty(&plan_step(&env, &plan_id, &step_id).await);
+    assert_warnings_empty(&plan_step(&env, &plan_id, "step_same_party").await);
+    env.shutdown();
+}
+
+#[tokio::test]
+async fn enqueue_step_distinct_destinations_never_warns_regardless_of_policy() {
+    let (env, plan_id, step_id) = approved_plan_env().await;
+    let second_address = "0xbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbd";
+    let second_destination = "0x2222222222222222222222222222222222222222";
+    add_plan_step(&env, &plan_id, &step_id, |step| {
+        step["id"] = json!("step_distinct_destination");
+        step["sequence"] = json!(1);
+        step["address"] = json!(second_address);
+        step["destination_address"] = json!(second_destination);
+    });
+    edit_inventory(&env, |data| {
+        data["parties"] = json!([
+            { "id": "party_a", "name": "Party A", "created_at_unix": 1 },
+            { "id": "party_b", "name": "Party B", "created_at_unix": 1 },
+        ]);
+        data["receive_allocations"] = json!([
+            allocation_for("alloc_a", SEED_ADDRESS, 0, "party_a"),
+            allocation_for("alloc_b", second_address, 1, "party_b"),
+        ]);
+    });
+    let mut policy = gates_on_policy_body();
+    policy["allowed_destinations"] = json!([
+        { "address": DESTINATION, "label": "test-treasury" },
+        { "address": second_destination, "label": "second-treasury" },
+    ]);
+    update_policy(&env, policy.clone()).await;
+
+    let (status, body) = enqueue_step(&env, &plan_id, &step_id, true).await;
+    assert_eq!(status, StatusCode::OK, "policy off enqueue: {body}");
+    assert_warnings_empty(&plan_step(&env, &plan_id, &step_id).await);
+    assert_warnings_empty(&plan_step(&env, &plan_id, "step_distinct_destination").await);
+
+    policy["block_cross_party_linkage"] = json!(true);
+    update_policy(&env, policy).await;
+    let (status, body) = enqueue_step(&env, &plan_id, "step_distinct_destination", true).await;
+    assert_eq!(status, StatusCode::OK, "policy on enqueue: {body}");
+    assert_warnings_empty(&plan_step(&env, &plan_id, &step_id).await);
+    assert_warnings_empty(&plan_step(&env, &plan_id, "step_distinct_destination").await);
+    env.shutdown();
+}
+
+#[tokio::test]
+async fn enqueue_step_untagged_addresses_treated_as_distinct_identities() {
+    let (env, plan_id, step_id) = approved_plan_env().await;
+    let second_address = "0xbebebebebebebebebebebebebebebebebebebebe";
+    add_plan_step(&env, &plan_id, &step_id, |step| {
+        step["id"] = json!("step_untagged");
+        step["sequence"] = json!(1);
+        step["address"] = json!(second_address);
+    });
+    edit_inventory(&env, |data| {
+        data["parties"] = json!([]);
+        data["receive_allocations"] = json!([]);
+    });
+    update_policy(&env, gates_on_policy_body()).await;
+
+    let (status, body) = enqueue_step(&env, &plan_id, &step_id, true).await;
+    assert_eq!(status, StatusCode::OK, "policy off enqueue: {body}");
+    assert_warnings_contain(&plan_step(&env, &plan_id, &step_id).await, "0xbebebebe...");
+    assert_warnings_contain(
+        &plan_step(&env, &plan_id, "step_untagged").await,
+        "0x9858effd...",
+    );
+
+    let mut policy = gates_on_policy_body();
+    policy["block_cross_party_linkage"] = json!(true);
+    update_policy(&env, policy).await;
+    let (status, body) = enqueue_step(&env, &plan_id, "step_untagged", true).await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    assert!(
+        body["error"]
+            .as_str()
+            .unwrap()
+            .starts_with("cross_party_linkage:"),
+        "error: {body}"
+    );
+    env.shutdown();
+}
+
+#[tokio::test]
+async fn enqueue_step_same_untagged_source_swept_twice_never_warns() {
+    let (env, plan_id, step_id) = approved_plan_env().await;
+    add_plan_step(&env, &plan_id, &step_id, |step| {
+        step["id"] = json!("step_same_untagged_source");
+        step["sequence"] = json!(1);
+        step["address"] = json!(SEED_ADDRESS);
+    });
+    edit_inventory(&env, |data| {
+        data["parties"] = json!([]);
+        data["receive_allocations"] = json!([]);
+    });
+    update_policy(&env, gates_on_policy_body()).await;
+
+    let (status, body) = enqueue_step(&env, &plan_id, &step_id, true).await;
+    assert_eq!(status, StatusCode::OK, "policy off enqueue: {body}");
+    assert_warnings_empty(&plan_step(&env, &plan_id, &step_id).await);
+    assert_warnings_empty(&plan_step(&env, &plan_id, "step_same_untagged_source").await);
+
+    let mut policy = gates_on_policy_body();
+    policy["block_cross_party_linkage"] = json!(true);
+    update_policy(&env, policy).await;
+    let (status, body) = enqueue_step(&env, &plan_id, "step_same_untagged_source", true).await;
+    assert_eq!(status, StatusCode::OK, "policy on enqueue: {body}");
+    assert_warnings_empty(&plan_step(&env, &plan_id, &step_id).await);
+    assert_warnings_empty(&plan_step(&env, &plan_id, "step_same_untagged_source").await);
+    env.shutdown();
+}
+
+#[tokio::test]
+async fn enqueue_step_fund_gas_common_funder_blocks_when_policy_on() {
+    let (env, plan_id, step_id) = approved_plan_env().await;
+    let now = now_unix();
+    let funder = "0xbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbf";
+    let first_destination = "0x3333333333333333333333333333333333333333";
+    let second_destination = "0x4444444444444444444444444444444444444444";
+    add_plan_step(&env, &plan_id, &step_id, |step| {
+        step["id"] = json!("step_fund_gas_a");
+        step["sequence"] = json!(1);
+        step["action"] = json!("fund_gas");
+        step["address"] = json!(funder);
+        step["amount_hex"] = json!("0x2f9b8");
+        step["destination_address"] = json!(first_destination);
+        step["simulation_status"] = json!("passed");
+        step["simulation_evidence"] = json!([format!("simulated_at_unix={now}")]);
+    });
+    add_plan_step(&env, &plan_id, &step_id, |step| {
+        step["id"] = json!("step_fund_gas_b");
+        step["sequence"] = json!(2);
+        step["action"] = json!("fund_gas");
+        step["address"] = json!(funder);
+        step["amount_hex"] = json!("0x2f9b8");
+        step["destination_address"] = json!(second_destination);
+        step["simulation_status"] = json!("passed");
+        step["simulation_evidence"] = json!([format!("simulated_at_unix={now}")]);
+    });
+    edit_inventory(&env, |data| {
+        data["parties"] = json!([
+            { "id": "party_a", "name": "Party A", "created_at_unix": 1 },
+            { "id": "party_b", "name": "Party B", "created_at_unix": 1 },
+        ]);
+        data["receive_allocations"] = json!([
+            allocation_for("alloc_a", first_destination, 2, "party_a"),
+            allocation_for("alloc_b", second_destination, 3, "party_b"),
+        ]);
+    });
+    update_policy(&env, gates_on_policy_body()).await;
+
+    let (status, body) = enqueue_step(&env, &plan_id, "step_fund_gas_a", true).await;
+    assert_eq!(status, StatusCode::OK, "policy off enqueue: {body}");
+    assert_warnings_contain(
+        &plan_step(&env, &plan_id, "step_fund_gas_a").await,
+        "Party B",
+    );
+    assert_warnings_contain(
+        &plan_step(&env, &plan_id, "step_fund_gas_b").await,
+        "Party A",
+    );
+
+    let mut policy = gates_on_policy_body();
+    policy["block_cross_party_linkage"] = json!(true);
+    update_policy(&env, policy).await;
+    let (status, body) = enqueue_step(&env, &plan_id, "step_fund_gas_b", true).await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    assert!(
+        body["error"]
+            .as_str()
+            .unwrap()
+            .starts_with("cross_party_linkage:"),
+        "error: {body}"
+    );
+    env.shutdown();
+}
+
+#[tokio::test]
+async fn enqueue_step_fund_gas_same_party_topups_never_warn() {
+    let (env, plan_id, step_id) = approved_plan_env().await;
+    let now = now_unix();
+    let funder = "0xc1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1";
+    let first_destination = "0x5555555555555555555555555555555555555555";
+    let second_destination = "0x6666666666666666666666666666666666666666";
+    add_plan_step(&env, &plan_id, &step_id, |step| {
+        step["id"] = json!("step_fund_gas_same_a");
+        step["sequence"] = json!(1);
+        step["action"] = json!("fund_gas");
+        step["address"] = json!(funder);
+        step["amount_hex"] = json!("0x2f9b8");
+        step["destination_address"] = json!(first_destination);
+        step["simulation_status"] = json!("passed");
+        step["simulation_evidence"] = json!([format!("simulated_at_unix={now}")]);
+    });
+    add_plan_step(&env, &plan_id, &step_id, |step| {
+        step["id"] = json!("step_fund_gas_same_b");
+        step["sequence"] = json!(2);
+        step["action"] = json!("fund_gas");
+        step["address"] = json!(funder);
+        step["amount_hex"] = json!("0x2f9b8");
+        step["destination_address"] = json!(second_destination);
+        step["simulation_status"] = json!("passed");
+        step["simulation_evidence"] = json!([format!("simulated_at_unix={now}")]);
+    });
+    edit_inventory(&env, |data| {
+        data["parties"] = json!([{ "id": "party_a", "name": "Party A", "created_at_unix": 1 }]);
+        data["receive_allocations"] = json!([
+            allocation_for("alloc_a", first_destination, 2, "party_a"),
+            allocation_for("alloc_b", second_destination, 3, "party_a"),
+        ]);
+    });
+    update_policy(&env, gates_on_policy_body()).await;
+
+    let (status, body) = enqueue_step(&env, &plan_id, "step_fund_gas_same_a", true).await;
+    assert_eq!(status, StatusCode::OK, "policy off enqueue: {body}");
+    assert_warnings_empty(&plan_step(&env, &plan_id, "step_fund_gas_same_a").await);
+    assert_warnings_empty(&plan_step(&env, &plan_id, "step_fund_gas_same_b").await);
+
+    let mut policy = gates_on_policy_body();
+    policy["block_cross_party_linkage"] = json!(true);
+    update_policy(&env, policy).await;
+    let (status, body) = enqueue_step(&env, &plan_id, "step_fund_gas_same_b", true).await;
+    assert_eq!(status, StatusCode::OK, "policy on enqueue: {body}");
+    assert_warnings_empty(&plan_step(&env, &plan_id, "step_fund_gas_same_a").await);
+    assert_warnings_empty(&plan_step(&env, &plan_id, "step_fund_gas_same_b").await);
+    env.shutdown();
+}
+
+#[tokio::test]
+async fn enqueue_plan_bulk_skips_cross_party_linked_step_with_named_reason() {
+    let (env, plan_id, step_id) = approved_plan_env().await;
+    let linked_address = "0xc2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2";
+    let normal_address = "0xc3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3";
+    let normal_destination = "0x7777777777777777777777777777777777777777";
+    add_plan_step(&env, &plan_id, &step_id, |step| {
+        step["id"] = json!("step_linked_bulk");
+        step["sequence"] = json!(1);
+        step["address"] = json!(linked_address);
+    });
+    add_plan_step(&env, &plan_id, &step_id, |step| {
+        step["id"] = json!("step_normal_bulk");
+        step["sequence"] = json!(2);
+        step["address"] = json!(normal_address);
+        step["destination_address"] = json!(normal_destination);
+    });
+    edit_inventory(&env, |data| {
+        data["parties"] = json!([
+            { "id": "party_a", "name": "Party A", "created_at_unix": 1 },
+            { "id": "party_b", "name": "Party B", "created_at_unix": 1 },
+            { "id": "party_c", "name": "Party C", "created_at_unix": 1 },
+        ]);
+        data["receive_allocations"] = json!([
+            allocation_for("alloc_a", SEED_ADDRESS, 0, "party_a"),
+            allocation_for("alloc_b", linked_address, 1, "party_b"),
+            allocation_for("alloc_c", normal_address, 2, "party_c"),
+        ]);
+    });
+    let mut policy = gates_on_policy_body();
+    policy["block_cross_party_linkage"] = json!(true);
+    policy["allowed_destinations"] = json!([
+        { "address": DESTINATION, "label": "test-treasury" },
+        { "address": normal_destination, "label": "normal-treasury" },
+    ]);
+    update_policy(&env, policy).await;
+
+    let (status, body) = enqueue_plan(&env, &plan_id, "").await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "probe: {body}");
+    let expected = body["action"].as_str().unwrap().to_string();
+
+    let (status, body) = enqueue_plan(&env, &plan_id, &expected).await;
+    assert_eq!(status, StatusCode::OK, "bulk enqueue: {body}");
+    let enqueued = body["enqueued"].as_array().unwrap();
+    assert_eq!(enqueued.len(), 1, "enqueued: {body}");
+    assert_eq!(enqueued[0]["step_id"], json!("step_normal_bulk"));
+    let skipped = body["skipped"].as_array().unwrap();
+    assert!(
+        skipped.iter().any(|skip| {
+            skip["step_id"] == json!(step_id) && skip["reason"] == json!("cross_party_linkage")
+        }),
+        "skipped: {body}"
+    );
+    assert!(
+        skipped.iter().any(|skip| {
+            skip["step_id"] == json!("step_linked_bulk")
+                && skip["reason"] == json!("cross_party_linkage")
+        }),
+        "skipped: {body}"
+    );
+    assert_eq!(queue_jobs(&env).await.len(), 1);
+    env.shutdown();
+}
+
+#[tokio::test]
+async fn enqueue_step_linkage_policy_flip_between_approval_and_enqueue_blocks() {
+    let env = setup_plan_env().await;
+    update_policy(&env, gates_on_policy_body()).await;
+    let (plan_id, step_id) = generate_and_simulate_plan(&env).await;
+    let second_address = "0xc4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4";
+    add_plan_step(&env, &plan_id, &step_id, |step| {
+        step["id"] = json!("step_linked_after_flip");
+        step["sequence"] = json!(1);
+        step["address"] = json!(second_address);
+    });
+    edit_inventory(&env, |data| {
+        data["parties"] = json!([
+            { "id": "party_a", "name": "Party A", "created_at_unix": 1 },
+            { "id": "party_b", "name": "Party B", "created_at_unix": 1 },
+        ]);
+        data["receive_allocations"] = json!([
+            allocation_for("alloc_a", SEED_ADDRESS, 0, "party_a"),
+            allocation_for("alloc_b", second_address, 1, "party_b"),
+        ]);
+    });
+
+    let approved = approve_plan(&env, &plan_id).await;
+    for id in [&step_id, "step_linked_after_flip"] {
+        let step = approved["plan"]["steps"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|step| step["id"] == json!(id))
+            .unwrap_or_else(|| panic!("approved step {id} missing: {approved}"));
+        assert_eq!(
+            step["approved"],
+            json!(true),
+            "approve response: {approved}"
+        );
+        assert_ne!(
+            step["status"],
+            json!("blocked"),
+            "approve response: {approved}"
+        );
+    }
+
+    let mut policy = gates_on_policy_body();
+    policy["block_cross_party_linkage"] = json!(true);
+    update_policy(&env, policy).await;
+    let (status, body) = enqueue_step(&env, &plan_id, &step_id, true).await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    assert!(
+        body["error"]
+            .as_str()
+            .unwrap()
+            .starts_with("cross_party_linkage:"),
+        "error: {body}"
+    );
+    env.shutdown();
+}
+
 // ── Idempotency ────────────────────────────────────────────────────────────
 
 #[tokio::test]
