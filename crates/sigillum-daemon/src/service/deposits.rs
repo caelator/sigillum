@@ -126,6 +126,8 @@ mod tests {
             allow_raw_digest_signing: false,
             block_cross_party_linkage,
             allow_claim_execution: false,
+            allow_gas_topups: false,
+            max_gas_topup_wei_hex: None,
             simulation_freshness_secs: 900,
             hot_floor_wei_hex: "0xde0b6b3a7640000".into(),
             hot_target_wei_hex: "0xde0b6b3a7640000".into(),

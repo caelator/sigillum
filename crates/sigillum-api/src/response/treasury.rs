@@ -159,6 +159,18 @@ pub struct TreasuryPolicy {
     /// risk catalog, step explicitly approved).
     #[serde(default)]
     pub allow_claim_execution: bool,
+    /// Fail-closed opt-in (default false, per Decision Register D-6): when true,
+    /// the consolidation planner may emit fund_gas steps that fund a source
+    /// address's gas shortfall from the wallet's sponsor address; cross-party
+    /// sponsor funding is still linkage-checked and hard-blocked when
+    /// block_cross_party_linkage is on.
+    #[serde(default)]
+    pub allow_gas_topups: bool,
+    /// Optional 0x-prefixed uint256 wei cap on a single fund_gas amount; a
+    /// computed top-up above the cap is not emitted and the dependent step stays
+    /// gas-blocked with a reason naming this cap.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_gas_topup_wei_hex: Option<String>,
     /// Maximum age in seconds of a step's simulation evidence before approval
     /// downgrades the simulation back to required (forces re-simulation).
     #[serde(default = "default_simulation_freshness_secs")]

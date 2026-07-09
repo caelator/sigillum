@@ -112,6 +112,7 @@ fn wallet_domain_enums_serialize_known_wire_literals() {
         (WalletPlanStepAction::RevokeApproval, "revoke_approval"),
         (WalletPlanStepAction::ExitDefiPosition, "exit_defi_position"),
         (WalletPlanStepAction::ClaimReward, "claim_reward"),
+        (WalletPlanStepAction::FundGas, "fund_gas"),
         (WalletPlanStepAction::ReviewAsset, "review_asset"),
     ] {
         assert_wire_literal(value, literal);
@@ -508,6 +509,8 @@ fn treasury_request_roundtrip() {
         allow_raw_digest_signing: Some(false),
         block_cross_party_linkage: Some(true),
         allow_claim_execution: Some(true),
+        allow_gas_topups: Some(true),
+        max_gas_topup_wei_hex: Some("0x2386f26fc10000".to_string()),
         simulation_freshness_secs: Some(900),
         hot_floor_wei_hex: Some("0xde0b6b3a7640000".to_string()),
         hot_target_wei_hex: Some("0xde0b6b3a7640000".to_string()),
@@ -529,12 +532,54 @@ fn treasury_response_roundtrip() {
             allow_raw_digest_signing: false,
             block_cross_party_linkage: true,
             allow_claim_execution: false,
+            allow_gas_topups: false,
+            max_gas_topup_wei_hex: None,
             simulation_freshness_secs: 900,
             hot_floor_wei_hex: "0xde0b6b3a7640000".to_string(),
             hot_target_wei_hex: "0xde0b6b3a7640000".to_string(),
             created_at_unix: 1_783_000_000,
             updated_at_unix: 1_783_046_000,
         }),
+    });
+}
+
+#[test]
+fn treasury_policy_gas_topup_defaults_and_roundtrip() {
+    let legacy: TreasuryPolicy = serde_json::from_value(serde_json::json!({
+        "enabled": true,
+        "allowed_destinations": [],
+        "max_step_native_wei_hex": null,
+        "max_plan_native_wei_hex": null,
+        "require_simulation": true,
+        "allow_raw_digest_signing": false,
+        "block_cross_party_linkage": false,
+        "allow_claim_execution": false,
+        "simulation_freshness_secs": 900,
+        "hot_floor_wei_hex": "0xde0b6b3a7640000",
+        "hot_target_wei_hex": "0xde0b6b3a7640000",
+        "created_at_unix": 1_783_000_000,
+        "updated_at_unix": 1_783_046_000
+    }))
+    .unwrap();
+    assert!(!legacy.allow_gas_topups);
+    assert!(legacy.max_gas_topup_wei_hex.is_none());
+
+    roundtrip(&TreasuryPolicy {
+        enabled: true,
+        allowed_destinations: Vec::new(),
+        max_step_native_wei_hex: None,
+        max_plan_native_wei_hex: None,
+        require_simulation: true,
+        allow_raw_digest_signing: false,
+        block_cross_party_linkage: false,
+        allow_claim_execution: false,
+        allow_gas_topups: true,
+        max_gas_topup_wei_hex: Some("0x2386f26fc10000".into()),
+        simulation_freshness_secs: 900,
+        hot_floor_wei_hex: "0xde0b6b3a7640000".to_string(),
+        hot_target_wei_hex: "0xde0b6b3a7640000".to_string(),
+        created_at_unix: 1_783_000_000,
+        updated_at_unix: 1_783_046_000,
     });
 }
 
