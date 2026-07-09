@@ -603,6 +603,7 @@ fn inventory_request_roundtrip() {
             "0xdac17f958d2ee523a2206206994597c13d831ec7".to_string(),
         ],
         block_tag: Some("safe".to_string()),
+        probe_token_registry: Some(true),
         discover_erc20_transfers: Some(true),
         token_discovery_from_block: Some("0x11e1a300".to_string()),
         token_discovery_to_block: Some("latest".to_string()),

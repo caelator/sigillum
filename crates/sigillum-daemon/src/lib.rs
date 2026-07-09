@@ -34,6 +34,7 @@ mod queue_store;
 mod routes;
 mod service;
 mod state;
+mod token_registry;
 mod ui;
 
 pub use state::AppState;

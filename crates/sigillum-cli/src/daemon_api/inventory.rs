@@ -290,6 +290,7 @@ fn scan_evm(args: &[String]) {
         resume_from_latest_checkpoint: flag_option(args, "--resume-from-latest-checkpoint"),
         token_addresses: parse_multi_flag(args, "--token-address"),
         block_tag: parse_flag(args, "--block-tag"),
+        probe_token_registry: flag_option(args, "--probe-token-registry"),
         discover_erc20_transfers: flag_option(args, "--discover-erc20-transfers"),
         token_discovery_from_block: parse_flag(args, "--token-discovery-from-block"),
         token_discovery_to_block: parse_flag(args, "--token-discovery-to-block"),

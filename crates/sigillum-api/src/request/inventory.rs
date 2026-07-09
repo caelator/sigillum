@@ -75,6 +75,28 @@ pub struct WatchAddressBookDeleteRequest {
     pub address: String,
 }
 
+/// Import a local ERC-20 token registry list.
+///
+/// D-15 keeps token registries local: operators may paste JSON or provide a
+/// local file path, but Sigillum never fetches token lists over the network.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct TokenRegistryImportRequest {
+    pub name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub entries_json: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub file_path: Option<String>,
+}
+
+/// Delete a local ERC-20 token registry list.
+///
+/// D-15 keeps token registries local: deletion only removes locally imported
+/// lists and never interacts with network token-list sources.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct TokenRegistryDeleteRequest {
+    pub name: String,
+}
+
 /// Run read-only EVM wallet discovery for imported seed and xpub profiles.
 ///
 /// When no wallet filter is provided, all `eth-seed` and `eth-xpub` profiles
@@ -115,6 +137,8 @@ pub struct WalletInventoryScanRequest {
     pub token_addresses: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub block_tag: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub probe_token_registry: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub discover_erc20_transfers: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]

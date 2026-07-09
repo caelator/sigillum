@@ -767,6 +767,29 @@ fn test_wallet_operations_response_roundtrips() {
         entry: catalog_entry,
     });
 
+    let registry_entry = TokenRegistryEntry {
+        chain_id: 1,
+        address: "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".to_string(),
+        symbol: "AAA".to_string(),
+        decimals: 18,
+    };
+    let registry_list = TokenRegistryList {
+        id: "registry_1".to_string(),
+        name: "core-list".to_string(),
+        compartment_id: 0,
+        source: "pasted-json".to_string(),
+        entries: vec![registry_entry],
+        created_at_unix: 1,
+        updated_at_unix: 2,
+    };
+    roundtrip_test(TokenRegistryListResponse {
+        lists: vec![registry_list.clone()],
+    });
+    roundtrip_test(TokenRegistryMutationResponse {
+        status: "imported".to_string(),
+        list: registry_list,
+    });
+
     let step = ConsolidationPlanStep {
         id: "step_1".to_string(),
         action: WalletPlanStepAction::SweepErc20,
@@ -1791,4 +1814,17 @@ fn test_setup_reset_response_roundtrip() {
     let json = serde_json::to_string(&bare).unwrap();
     assert!(!json.contains("archived_to"));
     roundtrip_test(bare);
+}
+
+#[test]
+fn test_token_registry_entry_accepts_chain_id_alias() {
+    let entry: TokenRegistryEntry = serde_json::from_value(serde_json::json!({
+        "chainId": 1,
+        "address": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "symbol": "AAA",
+        "decimals": 18
+    }))
+    .unwrap();
+
+    assert_eq!(entry.chain_id, 1);
 }

@@ -397,6 +397,10 @@ pub(crate) enum AuditEventSpec {
     WalletInventoryRiskCatalogUpsert { address: String, risk_level: String },
     #[serde(rename = "wallet_inventory.risk_catalog.delete")]
     WalletInventoryRiskCatalogDelete { address: String },
+    #[serde(rename = "wallet_inventory.token_registry.import")]
+    WalletInventoryTokenRegistryImport { name: String, entries: usize },
+    #[serde(rename = "wallet_inventory.token_registry.delete")]
+    WalletInventoryTokenRegistryDelete { name: String },
     #[serde(rename = "wallet_inventory.watch_address.upsert")]
     WalletInventoryWatchAddressUpsert { address: String, label: String },
     #[serde(rename = "wallet_inventory.watch_address.delete")]
@@ -530,6 +534,12 @@ impl AuditEventSpec {
             }
             Self::WalletInventoryRiskCatalogUpsert { .. } => "wallet_inventory.risk_catalog.upsert",
             Self::WalletInventoryRiskCatalogDelete { .. } => "wallet_inventory.risk_catalog.delete",
+            Self::WalletInventoryTokenRegistryImport { .. } => {
+                "wallet_inventory.token_registry.import"
+            }
+            Self::WalletInventoryTokenRegistryDelete { .. } => {
+                "wallet_inventory.token_registry.delete"
+            }
             Self::WalletInventoryWatchAddressUpsert { .. } => {
                 "wallet_inventory.watch_address.upsert"
             }
@@ -861,6 +871,10 @@ impl AuditEventSpec {
             Self::WalletInventoryRiskCatalogDelete { address } => {
                 json!({ "address": address })
             }
+            Self::WalletInventoryTokenRegistryImport { name, entries } => {
+                json!({ "name": name, "entries": entries })
+            }
+            Self::WalletInventoryTokenRegistryDelete { name } => json!({ "name": name }),
             Self::WalletInventoryWatchAddressUpsert { address, label } => {
                 json!({ "address": address, "label": label })
             }
