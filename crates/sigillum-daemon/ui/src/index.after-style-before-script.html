@@ -418,6 +418,11 @@
           <input type="number" id="treasuryPolicyFreshnessSecs" min="1" placeholder="Simulation freshness (secs, default 900)">
           <button class="btn-primary" data-action="updateTreasuryPolicy">Save Policy</button>
         </div>
+        <div class="form-row">
+          <input type="text" id="treasuryPolicyHotFloorEth" placeholder="Hot refill floor (ETH, default 1)">
+          <input type="text" id="treasuryPolicyHotTargetEth" placeholder="Hot refill target (ETH, default 1)">
+        </div>
+        <p class="field-hint">Sweeps route to the hot address while its balance is below the floor; the target is the refill ceiling (floor must be &le; target). Defaults preserve the previous 1 ETH behavior.</p>
 
         <div class="section-divider"></div>
         <div class="section-title">Receive Addresses</div>

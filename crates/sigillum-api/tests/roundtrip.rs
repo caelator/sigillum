@@ -506,6 +506,8 @@ fn treasury_request_roundtrip() {
         allow_raw_digest_signing: Some(false),
         block_cross_party_linkage: Some(true),
         simulation_freshness_secs: Some(900),
+        hot_floor_wei_hex: Some("0xde0b6b3a7640000".to_string()),
+        hot_target_wei_hex: Some("0xde0b6b3a7640000".to_string()),
     });
 }
 
@@ -524,6 +526,8 @@ fn treasury_response_roundtrip() {
             allow_raw_digest_signing: false,
             block_cross_party_linkage: true,
             simulation_freshness_secs: 900,
+            hot_floor_wei_hex: "0xde0b6b3a7640000".to_string(),
+            hot_target_wei_hex: "0xde0b6b3a7640000".to_string(),
             created_at_unix: 1_783_000_000,
             updated_at_unix: 1_783_046_000,
         }),

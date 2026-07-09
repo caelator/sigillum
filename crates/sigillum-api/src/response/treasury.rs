@@ -157,6 +157,14 @@ pub struct TreasuryPolicy {
     /// downgrades the simulation back to required (forces re-simulation).
     #[serde(default = "default_simulation_freshness_secs")]
     pub simulation_freshness_secs: u64,
+    /// Hot-wallet refill floor: sweeps route to the hot address while its
+    /// balance is below this threshold. Default 1 ETH (preserves the pre-policy hardcode).
+    #[serde(default = "default_hot_floor_wei_hex")]
+    pub hot_floor_wei_hex: String,
+    /// Hot-wallet refill ceiling (floor <= target). Refills top up to this
+    /// level; it does not itself trigger routing to hot. Default 1 ETH.
+    #[serde(default = "default_hot_target_wei_hex")]
+    pub hot_target_wei_hex: String,
     pub created_at_unix: u64,
     pub updated_at_unix: u64,
 }
@@ -167,6 +175,14 @@ fn default_require_simulation() -> bool {
 
 fn default_simulation_freshness_secs() -> u64 {
     900
+}
+
+fn default_hot_floor_wei_hex() -> String {
+    "0xde0b6b3a7640000".to_string()
+}
+
+fn default_hot_target_wei_hex() -> String {
+    "0xde0b6b3a7640000".to_string()
 }
 
 /// Current treasury policy; `None` until an operator configures one.

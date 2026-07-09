@@ -1160,6 +1160,8 @@ fn test_treasury_policy_update_request_full() {
         allow_raw_digest_signing: Some(true),
         block_cross_party_linkage: Some(true),
         simulation_freshness_secs: Some(900),
+        hot_floor_wei_hex: Some("0xde0b6b3a7640000".to_string()),
+        hot_target_wei_hex: Some("0xde0b6b3a7640000".to_string()),
     };
     roundtrip_test(req);
 }
@@ -1175,6 +1177,8 @@ fn test_treasury_policy_update_request_minimal() {
         allow_raw_digest_signing: None,
         block_cross_party_linkage: None,
         simulation_freshness_secs: None,
+        hot_floor_wei_hex: None,
+        hot_target_wei_hex: None,
     };
     roundtrip_test(req);
 }

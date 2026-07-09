@@ -1655,6 +1655,8 @@ fn sample_treasury_policy() -> TreasuryPolicy {
         allow_raw_digest_signing: false,
         block_cross_party_linkage: false,
         simulation_freshness_secs: 900,
+        hot_floor_wei_hex: "0xde0b6b3a7640000".to_string(),
+        hot_target_wei_hex: "0xde0b6b3a7640000".to_string(),
         created_at_unix: 1,
         updated_at_unix: 2,
     }
@@ -1678,6 +1680,8 @@ fn test_treasury_policy_responses_roundtrip() {
             allow_raw_digest_signing: false,
             block_cross_party_linkage: false,
             simulation_freshness_secs: 900,
+            hot_floor_wei_hex: "0xde0b6b3a7640000".to_string(),
+            hot_target_wei_hex: "0xde0b6b3a7640000".to_string(),
             created_at_unix: 1,
             updated_at_unix: 3,
         },
@@ -1693,6 +1697,8 @@ fn test_treasury_policy_require_simulation_defaults_true() {
     assert!(policy.require_simulation);
     assert!(!policy.block_cross_party_linkage);
     assert_eq!(policy.simulation_freshness_secs, 900);
+    assert_eq!(policy.hot_floor_wei_hex, "0xde0b6b3a7640000");
+    assert_eq!(policy.hot_target_wei_hex, "0xde0b6b3a7640000");
     assert!(policy.allowed_destinations.is_empty());
 }
 

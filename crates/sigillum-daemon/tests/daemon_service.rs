@@ -4028,6 +4028,104 @@ async fn treasury_policy_update_round_trips_simulation_freshness() {
 }
 
 #[tokio::test]
+async fn treasury_policy_update_round_trips_hot_floor_and_target() {
+    let dir = TempDir::new().unwrap();
+    let (addr, handle) = spawn_daemon(dir.path().to_path_buf()).await;
+    let client = reqwest::Client::new();
+
+    let init = post_json(
+        &client,
+        addr,
+        "/api/compartment/init",
+        json!({
+            "id": 0,
+            "label": "default",
+            "threshold": 1,
+            "passphrase": "correct horse battery staple",
+        }),
+        None,
+    )
+    .await;
+    assert_eq!(init.status(), StatusCode::OK);
+    let init_json: serde_json::Value = init.json().await.unwrap();
+    let token = init_json["session_token"].as_str().unwrap().to_string();
+
+    let update = post_json(
+        &client,
+        addr,
+        "/api/treasury/policy/update",
+        json!({
+            "enabled": true,
+            "hot_floor_wei_hex": "0x1",
+            "hot_target_wei_hex": "0x2",
+        }),
+        Some(&token),
+    )
+    .await;
+    assert_eq!(update.status(), StatusCode::OK);
+    let update_json: serde_json::Value = update.json().await.unwrap();
+    assert_eq!(update_json["policy"]["hot_floor_wei_hex"], json!("0x1"));
+    assert_eq!(update_json["policy"]["hot_target_wei_hex"], json!("0x2"));
+
+    let read_back = get(&client, addr, "/api/treasury/policy", Some(&token)).await;
+    assert_eq!(read_back.status(), StatusCode::OK);
+    let read_back_json: serde_json::Value = read_back.json().await.unwrap();
+    assert_eq!(read_back_json["policy"]["hot_floor_wei_hex"], json!("0x1"));
+    assert_eq!(read_back_json["policy"]["hot_target_wei_hex"], json!("0x2"));
+
+    let defaulted = post_json(
+        &client,
+        addr,
+        "/api/treasury/policy/update",
+        json!({
+            "enabled": true,
+        }),
+        Some(&token),
+    )
+    .await;
+    assert_eq!(defaulted.status(), StatusCode::OK);
+    let defaulted_json: serde_json::Value = defaulted.json().await.unwrap();
+    assert_eq!(
+        defaulted_json["policy"]["hot_floor_wei_hex"],
+        json!("0xde0b6b3a7640000")
+    );
+    assert_eq!(
+        defaulted_json["policy"]["hot_target_wei_hex"],
+        json!("0xde0b6b3a7640000")
+    );
+
+    let invalid_order = post_json(
+        &client,
+        addr,
+        "/api/treasury/policy/update",
+        json!({
+            "enabled": true,
+            "hot_floor_wei_hex": "0x3",
+            "hot_target_wei_hex": "0x2",
+        }),
+        Some(&token),
+    )
+    .await;
+    assert_eq!(invalid_order.status(), StatusCode::BAD_REQUEST);
+
+    let invalid_floor = post_json(
+        &client,
+        addr,
+        "/api/treasury/policy/update",
+        json!({
+            "enabled": true,
+            "hot_floor_wei_hex": "not-hex",
+            "hot_target_wei_hex": "0x2",
+        }),
+        Some(&token),
+    )
+    .await;
+    assert_eq!(invalid_floor.status(), StatusCode::BAD_REQUEST);
+
+    handle.abort();
+}
+
+#[tokio::test]
 async fn plan_simulation_records_estimated_fee_basis_when_provider_opts_in() {
     let (_dir, addr, handle, rpc_handle, client, token) =
         setup_seed_inventory_for_consolidation(Some(true)).await;

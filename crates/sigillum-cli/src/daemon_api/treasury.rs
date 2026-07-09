@@ -18,7 +18,8 @@ pub(super) fn cmd_api_treasury(args: &[String]) {
     const POLICY_UPDATE_USAGE: &str = "sigillum api treasury policy-update <--enabled|--disabled> \
         [--destination 0xADDR[:label]]... [--max-step-wei-hex 0x..] [--max-plan-wei-hex 0x..] \
         [--require-simulation|--no-require-simulation] [--block-cross-party-linkage <true|false>] \
-        [--simulation-freshness-secs <SECS>]";
+        [--simulation-freshness-secs <SECS>] [--hot-floor-wei-hex 0x..] \
+        [--hot-target-wei-hex 0x..]";
     const PARTIES_USAGE: &str = "sigillum api treasury parties <list|create|update|delete> \
         [--id <ID>] [--name <NAME>] [--note <NOTE>] [--sweep-destination <ADDRESS>]";
     const RECEIVE_ALLOCATE_USAGE: &str = "sigillum api treasury receive-allocate \
@@ -83,6 +84,8 @@ pub(super) fn cmd_api_treasury(args: &[String]) {
                 ),
                 block_cross_party_linkage,
                 simulation_freshness_secs: parse_u64_flag(args, "--simulation-freshness-secs"),
+                hot_floor_wei_hex: parse_flag(args, "--hot-floor-wei-hex"),
+                hot_target_wei_hex: parse_flag(args, "--hot-target-wei-hex"),
             };
             run_api_command(args, true, move |client| async move {
                 client.update_treasury_policy(request).await

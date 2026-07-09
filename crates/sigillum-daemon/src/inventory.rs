@@ -45,7 +45,7 @@ pub struct WalletInventoryState {
 }
 
 impl JsonDocument for WalletInventoryState {
-    const SCHEMA: JsonSchema = JsonSchema::new("sigillum.wallet-inventory", 14);
+    const SCHEMA: JsonSchema = JsonSchema::new("sigillum.wallet-inventory", 15);
 
     fn from_enveloped_json(
         path: &std::path::Path,
@@ -53,7 +53,7 @@ impl JsonDocument for WalletInventoryState {
         data: serde_json::Value,
     ) -> Result<Self, std::io::Error> {
         match version {
-            1..=14 => {
+            1..=15 => {
                 let mut state: Self = serde_json::from_value(data).map_err(|error| {
                     std::io::Error::new(
                         std::io::ErrorKind::InvalidData,
@@ -264,6 +264,8 @@ mod tests {
             allow_raw_digest_signing: false,
             block_cross_party_linkage: false,
             simulation_freshness_secs: 900,
+            hot_floor_wei_hex: "0xde0b6b3a7640000".into(),
+            hot_target_wei_hex: "0xde0b6b3a7640000".into(),
             created_at_unix: 1,
             updated_at_unix: 2,
         }
@@ -422,6 +424,8 @@ mod tests {
         );
         assert!(policy.require_simulation);
         assert_eq!(policy.simulation_freshness_secs, 900);
+        assert_eq!(policy.hot_floor_wei_hex, "0xde0b6b3a7640000");
+        assert_eq!(policy.hot_target_wei_hex, "0xde0b6b3a7640000");
     }
 
     #[test]
@@ -474,8 +478,46 @@ mod tests {
         assert!(!policy.allow_raw_digest_signing);
         assert!(!policy.block_cross_party_linkage);
         assert_eq!(policy.simulation_freshness_secs, 900);
+        assert_eq!(policy.hot_floor_wei_hex, "0xde0b6b3a7640000");
+        assert_eq!(policy.hot_target_wei_hex, "0xde0b6b3a7640000");
         assert_eq!(policy.created_at_unix, 1);
         assert_eq!(policy.updated_at_unix, 2);
+    }
+
+    #[test]
+    fn legacy_v14_treasury_policy_loads_with_one_eth_hot_floor_and_target() {
+        let dir = TempDir::new().unwrap();
+        let envelope = json!({
+            "schema": "sigillum.wallet-inventory",
+            "schema_version": 14,
+            "data": {
+                "treasury_policy": {
+                    "enabled": true,
+                    "allowed_destinations": [{
+                        "address": "0x9999999999999999999999999999999999999999",
+                        "label": "cold-treasury"
+                    }],
+                    "max_step_native_wei_hex": "0xde0b6b3a7640000",
+                    "max_plan_native_wei_hex": null,
+                    "require_simulation": true,
+                    "allow_raw_digest_signing": false,
+                    "block_cross_party_linkage": false,
+                    "simulation_freshness_secs": 900,
+                    "created_at_unix": 1,
+                    "updated_at_unix": 2
+                }
+            },
+        });
+        std::fs::write(
+            wallet_inventory_path(dir.path()),
+            serde_json::to_vec_pretty(&envelope).unwrap(),
+        )
+        .unwrap();
+
+        let loaded = load_wallet_inventory(dir.path()).unwrap();
+        let policy = loaded.treasury_policy.expect("policy loaded");
+        assert_eq!(policy.hot_floor_wei_hex, "0xde0b6b3a7640000");
+        assert_eq!(policy.hot_target_wei_hex, "0xde0b6b3a7640000");
     }
 
     #[test]
@@ -487,7 +529,7 @@ mod tests {
             serde_json::from_slice(&std::fs::read(wallet_inventory_path(dir.path())).unwrap())
                 .unwrap();
         assert_eq!(saved["schema"], json!("sigillum.wallet-inventory"));
-        assert_eq!(saved["schema_version"], json!(14));
+        assert_eq!(saved["schema_version"], json!(15));
         assert_eq!(saved["data"]["chain_profiles"].as_array().unwrap().len(), 5);
         assert!(saved["data"]["watch_address_book"].is_array());
         assert!(saved["data"]["jobs"].is_array());

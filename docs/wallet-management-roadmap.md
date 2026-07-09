@@ -352,7 +352,11 @@ The CLI should have parity for automation:
    simulation slices are implemented; verified source adapters, richer external
    risk feeds, and explicit claim execution adapters remain future work.
 8. Consolidation planner with broader dry-run simulation for dynamic fee
-   estimation, gas top-ups, exits, claims, swaps, and treasury routing.
+   estimation, gas top-ups, exits, claims, swaps, and treasury routing. Hot-wallet
+   refill routing is now policy-driven through
+   `TreasuryPolicy.hot_floor_wei_hex` / `hot_target_wei_hex` (both default 1
+   ETH, preserving prior behavior); the planner routes to the hot address only
+   while its balance is below the floor.
 9. Controlled execution for native/ERC-20 sweeps, gas top-ups, NFT transfers,
    DeFi exits, claims, swaps, and treasury routing.
 10. Non-EVM chain families, starting with Bitcoin/UTXO and only then Solana,

@@ -20,6 +20,8 @@ use super::support::quantity_hex_is_nonzero;
 use super::treasury::{add_u256, policy_blockers_for_step};
 use super::{WALLET_FAMILY_ETH_SEED, WALLET_FAMILY_ETH_WATCH, WALLET_FAMILY_ETH_XPUB};
 
+const DEFAULT_HOT_FLOOR_WEI_HEX: &str = "0xde0b6b3a7640000";
+
 pub(super) fn signer_status_for_holding(holding: &WalletAssetHolding) -> WalletSignerStatus {
     match holding.wallet_family.as_str() {
         WALLET_FAMILY_ETH_XPUB | WALLET_FAMILY_ETH_WATCH => WalletSignerStatus::WatchOnly,
@@ -379,8 +381,14 @@ fn resolve_default_destination(
                     })
                     .and_then(|addr| decode_quantity_hex(&addr.native_balance_wei_hex).ok())
                     .unwrap_or([0u8; 32]);
-                let target_refill = decode_quantity_hex("0xde0b6b3a7640000").unwrap(); // 1.0 ETH in wei
-                if compare_u256(&hot_balance, &target_refill).is_lt() {
+                let floor = state
+                    .treasury_policy
+                    .as_ref()
+                    .and_then(|policy| decode_quantity_hex(&policy.hot_floor_wei_hex).ok())
+                    .unwrap_or_else(|| decode_quantity_hex(DEFAULT_HOT_FLOOR_WEI_HEX).unwrap());
+                // hot_target_wei_hex is the execution refill ceiling, not a
+                // routing trigger: only balance below the floor routes hot.
+                if compare_u256(&hot_balance, &floor).is_lt() {
                     Some(hot_addr.clone())
                 } else {
                     Some(treasury_addr.clone())
@@ -603,7 +611,10 @@ fn short_form(value: &str, max_chars: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sigillum_api::{Counterparty, PartyDestination, TreasuryReceiveAllocation};
+    use sigillum_api::{
+        Counterparty, EthSeedWalletProfile, PartyDestination, TreasuryReceiveAllocation,
+        WalletInventoryAddress,
+    };
 
     fn sample_holding(
         asset_kind: &str,
@@ -700,6 +711,145 @@ mod tests {
             routing_strategy: Some("per_party".into()),
             party_destinations,
         }
+    }
+
+    fn sample_seed_registry() -> ProfileRegistry {
+        ProfileRegistry {
+            eth_seed_wallets: vec![EthSeedWalletProfile {
+                name: "seed-main".into(),
+                label: Some("Seed main".into()),
+                project_account: 0,
+                provider_profile: "mainnet".into(),
+                compartment_id: 0,
+                chain_id: Some(1),
+                word_count: 12,
+                mnemonic_secret_key: "wallet.seed.seed-main.mnemonic".into(),
+                account_path: "m/44'/60'/0'".into(),
+                receive_path: "m/44'/60'/0'/0".into(),
+                receive_xpub: "xpub661MyMwAqRbcFexample".into(),
+                first_receive_address: "0x1111111111111111111111111111111111111111".into(),
+                default_destination_address: None,
+                control_xpub: None,
+                sponsor_address: None,
+                hot_address: Some("0x2222222222222222222222222222222222222222".into()),
+                treasury_address: Some("0x3333333333333333333333333333333333333333".into()),
+                execution_enabled: false,
+            }],
+            ..ProfileRegistry::default()
+        }
+    }
+
+    fn sample_hot_address(balance_hex: &str) -> WalletInventoryAddress {
+        WalletInventoryAddress {
+            id: "addr_hot".into(),
+            wallet_family: WALLET_FAMILY_ETH_SEED.into(),
+            wallet_profile: "seed-main".into(),
+            provider_profile: "mainnet".into(),
+            chain_id: 1,
+            address: "0x2222222222222222222222222222222222222222".into(),
+            derivation_path: "m/44'/60'/0'/0/1".into(),
+            derivation_pattern: Some("hot".into()),
+            account_index: Some(0),
+            address_index: 1,
+            activity_state: "funded".into(),
+            native_balance_wei_hex: balance_hex.into(),
+            transaction_count: 0,
+            classifications: Vec::new(),
+            source: "test".into(),
+            first_seen_at_unix: 1,
+            last_checked_at_unix: 2,
+        }
+    }
+
+    fn sample_routing_policy(floor_hex: &str, target_hex: &str) -> TreasuryPolicy {
+        TreasuryPolicy {
+            enabled: true,
+            allowed_destinations: Vec::new(),
+            max_step_native_wei_hex: None,
+            max_plan_native_wei_hex: None,
+            require_simulation: true,
+            allow_raw_digest_signing: false,
+            block_cross_party_linkage: false,
+            simulation_freshness_secs: 900,
+            hot_floor_wei_hex: floor_hex.into(),
+            hot_target_wei_hex: target_hex.into(),
+            created_at_unix: 1,
+            updated_at_unix: 1,
+        }
+    }
+
+    fn default_destination_for_hot_balance(
+        hot_balance_hex: &str,
+        treasury_policy: Option<TreasuryPolicy>,
+    ) -> Option<String> {
+        let state = WalletInventoryState {
+            addresses: vec![sample_hot_address(hot_balance_hex)],
+            treasury_policy,
+            ..WalletInventoryState::default()
+        };
+        let registry = sample_seed_registry();
+        let holding = sample_native_holding_at("0x1111111111111111111111111111111111111111");
+        resolve_default_destination(&state, &registry, &holding, &None)
+    }
+
+    #[test]
+    fn legacy_default_routing_is_byte_identical_to_one_eth_hardcode() {
+        let cases = [
+            (
+                "0xde0b6b3a763ffff",
+                "0x2222222222222222222222222222222222222222",
+            ),
+            (
+                DEFAULT_HOT_FLOOR_WEI_HEX,
+                "0x3333333333333333333333333333333333333333",
+            ),
+            (
+                "0xde0b6b3a7640001",
+                "0x3333333333333333333333333333333333333333",
+            ),
+        ];
+
+        for (hot_balance, expected_destination) in cases {
+            assert_eq!(
+                default_destination_for_hot_balance(hot_balance, None).as_deref(),
+                Some(expected_destination)
+            );
+            assert_eq!(
+                default_destination_for_hot_balance(
+                    hot_balance,
+                    Some(sample_routing_policy(
+                        DEFAULT_HOT_FLOOR_WEI_HEX,
+                        DEFAULT_HOT_FLOOR_WEI_HEX,
+                    )),
+                )
+                .as_deref(),
+                Some(expected_destination)
+            );
+        }
+    }
+
+    #[test]
+    fn policy_floor_overrides_default() {
+        let policy = sample_routing_policy("0x2", "0x2");
+
+        assert_eq!(
+            default_destination_for_hot_balance("0x1", Some(policy.clone())).as_deref(),
+            Some("0x2222222222222222222222222222222222222222")
+        );
+        assert_eq!(
+            default_destination_for_hot_balance("0x2", Some(policy)).as_deref(),
+            Some("0x3333333333333333333333333333333333333333")
+        );
+    }
+
+    #[test]
+    fn target_does_not_trigger_refill() {
+        let policy = sample_routing_policy("0x1", DEFAULT_HOT_FLOOR_WEI_HEX);
+
+        assert_eq!(
+            default_destination_for_hot_balance("0x1", Some(policy)).as_deref(),
+            Some("0x3333333333333333333333333333333333333333")
+        );
     }
 
     #[test]

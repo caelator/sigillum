@@ -1776,6 +1776,8 @@ test("treasury policy loader prefills the form without clobbering operator edits
     "treasuryPolicyDestinations",
     "treasuryPolicyMaxStepEth",
     "treasuryPolicyMaxPlanEth",
+    "treasuryPolicyHotFloorEth",
+    "treasuryPolicyHotTargetEth",
     "treasuryPolicyRequireSim",
   ]);
   const policy: TreasuryPolicy = {
@@ -1803,7 +1805,11 @@ test("treasury policy loader prefills the form without clobbering operator edits
   );
   equal(dom.el("treasuryPolicyMaxStepEth").value, "2");
   equal(dom.el("treasuryPolicyMaxPlanEth").value, "1");
+  equal(dom.el("treasuryPolicyHotFloorEth").value, "1");
+  equal(dom.el("treasuryPolicyHotTargetEth").value, "1");
   ok(dom.el("treasuryPolicyList").innerHTML.includes("maxPlan=1 ETH"));
+  ok(dom.el("treasuryPolicyList").innerHTML.includes("hotFloor=1 ETH"));
+  ok(dom.el("treasuryPolicyList").innerHTML.includes("hotTarget=1 ETH"));
 
   dom.el("treasuryPolicyDestinations").value = "0xdraft";
   await treasury.loadTreasuryOverview();
@@ -1910,6 +1916,61 @@ test("treasury policy save persists cross-party linkage block toggle", async () 
 
   const update = calls.find((call) => call.path === "/api/treasury/policy/update");
   equal(update?.body.block_cross_party_linkage, true);
+});
+
+test("treasury policy save posts hot refill caps only when provided", async () => {
+  const dom = installDom([
+    "treasuryPolicyList",
+    "treasuryPolicyEnabled",
+    "treasuryPolicyRequireSim",
+    "treasuryPolicyBlockLinkage",
+    "treasuryPolicyDestinations",
+    "treasuryPolicyMaxStepEth",
+    "treasuryPolicyMaxPlanEth",
+    "treasuryPolicyFreshnessSecs",
+    "treasuryPolicyHotFloorEth",
+    "treasuryPolicyHotTargetEth",
+  ]);
+  const calls: Array<{ method: string; path: string; body?: any }> = [];
+  const treasury = createTreasuryActions({
+    api: async (method, path, body) => {
+      calls.push({ method, path, body });
+      if (path === "/api/treasury/policy/update") {
+        return { status: "updated", policy: null };
+      }
+      return {};
+    },
+    toast: () => undefined,
+  });
+
+  dom.el("treasuryPolicyHotFloorEth").value = "1";
+  dom.el("treasuryPolicyHotTargetEth").value = "1";
+  await treasury.updateTreasuryPolicy();
+
+  const withHotCaps = calls.find(
+    (call) => call.path === "/api/treasury/policy/update",
+  );
+  deepEqual(
+    {
+      hot_floor_wei_hex: withHotCaps?.body.hot_floor_wei_hex,
+      hot_target_wei_hex: withHotCaps?.body.hot_target_wei_hex,
+    },
+    {
+      hot_floor_wei_hex: "0xde0b6b3a7640000",
+      hot_target_wei_hex: "0xde0b6b3a7640000",
+    },
+  );
+
+  calls.length = 0;
+  dom.el("treasuryPolicyHotFloorEth").value = "";
+  dom.el("treasuryPolicyHotTargetEth").value = "";
+  await treasury.updateTreasuryPolicy();
+
+  const withoutHotCaps = calls.find(
+    (call) => call.path === "/api/treasury/policy/update",
+  );
+  ok(!("hot_floor_wei_hex" in withoutHotCaps!.body));
+  ok(!("hot_target_wei_hex" in withoutHotCaps!.body));
 });
 
 test("treasury policy save posts simulation freshness only when provided", async () => {
