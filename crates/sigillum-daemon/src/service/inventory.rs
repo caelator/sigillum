@@ -67,6 +67,13 @@ use wallet_selection::{
 };
 use watch_discovery::select_watch_addresses;
 
+// W7.3 plan-step execution (service/queue/plan_steps.rs) reuses the
+// inventory domain's evidence-hash re-verification and simulation-time gas
+// limit assumptions so execution never diverges from what was validated at
+// enqueue/simulation time.
+pub(in crate::service) use plan_execution_enqueue::verify_plan_step_execution_evidence;
+pub(in crate::service) use simulation::zero_value_transaction_gas_limit;
+
 use super::chains::chain_profile_for_id;
 use super::evm::normalize_address;
 use super::helpers::{map_xpub_error, now_unix, random_id};

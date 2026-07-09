@@ -1,5 +1,7 @@
 //! Queue processing loop and execution-result state transitions.
 
+use std::collections::HashMap;
+
 use sigillum_api::{
     EthStealthSendErc20WithProfileRequest, EthStealthSendWithProfileRequest,
     MaintenanceFailureBreakdown, QueueJobPayload, QueueProcessRequest, QueueProcessResponse,
@@ -14,7 +16,7 @@ use super::failure::{
     QueueFailureCause, QueueFailureDisposition, classify_blocked_queue_reason, classify_queue_error,
 };
 use super::gates::EXECUTION_PAUSED_REASON;
-use super::state::queue_job_is_runnable;
+use super::state::{mark_job_operator_action_required, queue_job_is_runnable};
 use super::{
     QUEUE_STATE_BLOCKED, QUEUE_STATE_FAILED_TERMINAL, QUEUE_STATE_RETRYING, QUEUE_STATE_SENT,
     QueueExecution,
@@ -62,10 +64,21 @@ impl SigillumService {
         let mut succeeded = 0usize;
         let mut blocked = 0usize;
         let mut retrying = 0usize;
-        let operator_action_required = 0usize;
+        let mut operator_action_required = 0usize;
         let mut failed = 0usize;
         let mut failures_by_cause = MaintenanceFailureBreakdown::default();
         let mut paused_reason: Option<String> = None;
+
+        // Snapshot of every job's id -> state, refreshed after each job so
+        // `PlanStepExecution` dependents resolve within the same drain batch
+        // (W6.4 ordering) instead of waiting for the next `process_queue`
+        // call. Built once up front because `queue.jobs.iter_mut()` below
+        // holds a mutable borrow of the vector for the loop's duration.
+        let mut job_states: HashMap<String, String> = queue
+            .jobs
+            .iter()
+            .map(|job| (job.id.clone(), job.state.clone()))
+            .collect();
 
         for job in queue.jobs.iter_mut() {
             if processed.len() >= limit {
@@ -204,16 +217,76 @@ impl SigillumService {
                     )
                     .await
                 }
-                QueueJobPayload::EthSeedTransfer { .. }
-                | QueueJobPayload::EthSeedNativeSweep { .. }
-                | QueueJobPayload::EthSeedErc20Sweep { .. } => Ok(QueueExecution::Blocked(
-                    "seed-wallet queue execution is not enabled yet".into(),
-                )),
-                // W7.2 hard block: plan-step jobs stay blocked at drain time
-                // regardless of policy gates. W7.3 lifts this.
-                QueueJobPayload::PlanStepExecution { .. } => Ok(QueueExecution::Blocked(
-                    "plan-step execution is not enabled yet".into(),
-                )),
+                // W7.3: EthSeed* jobs execute once their Sweep-family gate
+                // (checked above, before this match) passes. With gates off
+                // the outer `execution_gate_block_reason` check above
+                // short-circuits before this arm is ever reached, so the
+                // byte-identical "not enabled yet" wording no longer applies
+                // here — it is superseded by the gate's own denial reason.
+                QueueJobPayload::EthSeedTransfer {
+                    wallet_profile,
+                    address,
+                    derivation_path,
+                    value_wei_hex,
+                    destination_address,
+                    nonce,
+                    gas_limit,
+                } => self
+                    .process_eth_seed_transfer(
+                        wallet_profile,
+                        address,
+                        derivation_path,
+                        value_wei_hex,
+                        destination_address,
+                        *nonce,
+                        *gas_limit,
+                    )
+                    .await,
+                QueueJobPayload::EthSeedNativeSweep {
+                    wallet_profile,
+                    address,
+                    derivation_path,
+                    destination_address,
+                    min_value_wei_hex,
+                    gas_limit,
+                } => self
+                    .process_eth_seed_native_sweep(
+                        wallet_profile,
+                        address,
+                        derivation_path,
+                        destination_address.clone(),
+                        min_value_wei_hex.as_deref(),
+                        *gas_limit,
+                    )
+                    .await,
+                QueueJobPayload::EthSeedErc20Sweep {
+                    wallet_profile,
+                    address,
+                    derivation_path,
+                    token_address,
+                    recipient_address,
+                    min_amount_hex,
+                    gas_limit,
+                } => self
+                    .process_eth_seed_erc20_sweep(
+                        wallet_profile,
+                        address,
+                        derivation_path,
+                        token_address,
+                        recipient_address.clone(),
+                        min_amount_hex.as_deref(),
+                        *gas_limit,
+                    )
+                    .await,
+                // W7.3: plan-step jobs execute once their action-family gate
+                // (checked above) passes; see `plan_steps.rs` for the full
+                // pre-signing guard chain (dependency ordering, evidence-hash
+                // re-verification, signer resolution, fee cap) that runs
+                // before any key material is touched.
+                QueueJobPayload::PlanStepExecution(step_payload) => {
+                    self.process_plan_step_execution(token, &job.id, step_payload, &job_states)
+                        .await
+                }
             }
             };
 
@@ -233,6 +306,12 @@ impl SigillumService {
                     job.state = QUEUE_STATE_BLOCKED.into();
                     job.last_error = Some(reason);
                     blocked += 1;
+                }
+                Ok(QueueExecution::OperatorActionRequired(reason)) => {
+                    // E1: terminal-until-human, never auto-retried (W7.3
+                    // evidence-hash tamper detection and claim-revert rule).
+                    mark_job_operator_action_required(job, reason, now);
+                    operator_action_required += 1;
                 }
                 Err(error) => match classify_queue_error(error, job.attempts, now, policy) {
                     QueueFailureDisposition::Retryable {
@@ -254,6 +333,11 @@ impl SigillumService {
                     }
                 },
             }
+
+            // Refresh the dependency-lookup snapshot immediately so a
+            // dependent `PlanStepExecution` job processed later in THIS
+            // batch sees this job's just-computed outcome.
+            job_states.insert(job.id.clone(), job.state.clone());
 
             processed.push(job.clone());
 

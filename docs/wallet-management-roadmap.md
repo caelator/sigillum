@@ -386,10 +386,23 @@ The CLI should have parity for automation:
     linkage check, freshness window, claim gate, and gas-topup opt-in
     re-validated server-side at enqueue time, and per-(plan, step)
     idempotency under which a failed job requires operator re-approval.
-    Signing and execution against these gates remain future work (W7.3+):
-    enqueued plan-step jobs stay hard-blocked at drain time ("plan-step
-    execution is not enabled yet"), and with all gates off (the default),
-    today's behavior is unchanged.
+    Signing and execution are now implemented (W7.3): at drain time,
+    `plan_step_execution` jobs re-verify the simulation-evidence hash against
+    the job's own prepared call BEFORE touching any key material (any
+    mismatch parks the job as `operator_action_required` and it is never
+    signed), re-derive the seed-wallet signing key for the step's source
+    address inside the unlocked compartment (defensively re-checking
+    watch-only/underivable sources even though enqueue-validation already
+    excludes them), enforce `max_fee_per_gas_cap_hex` when set, and sign +
+    broadcast the prepared calldata verbatim per action family (native/ERC-20/
+    NFT sweeps, approval revokes, DeFi exit-adapter calls, merkle-distributor-v1
+    claims, gas top-ups) — re-reading the same policy gates and kill switch
+    enqueue already checked. A typed sign -> broadcast audit trail records
+    plan/step/job ids and transaction hashes, never key material. Claim
+    failures never auto-retry (a Merkle proof may be partially consumed) and
+    park as `operator_action_required` instead. With all gates off (the
+    default), today's behavior is unchanged. Nonce management, receipt-
+    confirmed finality, and fee-bump retry ladders remain future work (W7.4).
 6. DeFi position adapters. The D-11 exit adapter set is now complete: Aave v3
    withdraw, ERC-4626 redeem, Lido wstETH unwrap, and Uniswap v2 LP
    `removeLiquidity` exits are implemented. The Uniswap v2 adapter expands LP
@@ -401,9 +414,12 @@ The CLI should have parity for automation:
    candidate-ingestion, claim-contract risk-finding, and standard Merkle claim
    simulation slices are implemented; the enablement gate (policy opt-in,
    simulation, risk-catalog review, and explicit approval) is implemented for
-   `merkle-distributor-v1`, while verified source adapters, richer external risk
-   feeds, the execution adapter, and revert-to-`operator_action_required`
-   handling remain future work.
+   `merkle-distributor-v1`. Execution is now implemented (W7.3): claim signing
+   and broadcast reuse the prepared calldata verbatim, and any failure —
+   including a broadcast error standing in for an on-chain revert — parks the
+   job as `operator_action_required` and is never auto-retried, since a
+   Merkle proof may be partially consumed. Verified source adapters and
+   richer external risk feeds remain future work.
 8. Consolidation planner with broader dry-run simulation for dynamic fee
    estimation, gas top-ups, exits, claims, swaps, and treasury routing. Hot-wallet
    refill routing is now policy-driven through
@@ -417,9 +433,13 @@ The CLI should have parity for automation:
    and subject to the cross-party common-funder linkage rule.
 9. Controlled execution for native/ERC-20 sweeps, gas top-ups, NFT transfers,
    DeFi exits, claims, swaps, and treasury routing. The policy gates and
-   kill switch that will constrain this execution are implemented (see 5b);
-   the enqueue/signing/execution adapters that would actually act on them
-   are not yet built.
+   kill switch that constrain this execution are implemented (see 5b), and
+   the enqueue (W7.2) and signing/execution (W7.3) adapters for native/ERC-20/
+   NFT sweeps, approval revokes, DeFi exits, `merkle-distributor-v1` claims,
+   and gas top-ups are now built. Swaps stay out of scope for 1.0 (D-13).
+   Nonce management, receipt-confirmed finality, fee-bump retry ladders
+   (W7.4), and treasury automation / overflow-refill routing (W8) remain
+   future work.
 10. Non-EVM chain families, starting with Bitcoin/UTXO and only then Solana,
    Tron, and Cosmos-style networks.
 

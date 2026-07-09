@@ -101,14 +101,18 @@ pub(crate) fn queue_payload_execution_family(payload: &QueueJobPayload) -> Optio
     match payload {
         // EthStealth* variants are the pre-W7 stealth families: deliberately
         // NOT plan execution, so treasury execution gates must not affect them.
-        // EthSeed* variants keep their W7.3 hard block in processing.rs.
         QueueJobPayload::EthStealthTransfer { .. }
         | QueueJobPayload::EthStealthErc20Transfer { .. }
         | QueueJobPayload::EthStealthNativeSweep { .. }
-        | QueueJobPayload::EthStealthErc20Sweep { .. }
-        | QueueJobPayload::EthSeedTransfer { .. }
+        | QueueJobPayload::EthStealthErc20Sweep { .. } => None,
+        // EthSeed* variants (W7.3): fund movement out of a seed-derived
+        // wallet is a Sweep-family execution regardless of shape (plain
+        // transfer or threshold sweep) — there is no separate "transfer"
+        // execution family, and none of these three should ever bypass the
+        // gates the way the pre-W7 stealth families do.
+        QueueJobPayload::EthSeedTransfer { .. }
         | QueueJobPayload::EthSeedNativeSweep { .. }
-        | QueueJobPayload::EthSeedErc20Sweep { .. } => None,
+        | QueueJobPayload::EthSeedErc20Sweep { .. } => Some(ExecutionFamily::Sweep),
         // A non-executable action (ReviewAsset) is unreachable by construction
         // (enqueue refuses it); if such a payload ever appears, gate it under
         // a family rather than exempting it from gates (fail closed).
@@ -288,7 +292,7 @@ mod tests {
     }
 
     #[test]
-    fn current_queue_payloads_are_not_plan_execution_families() {
+    fn current_stealth_queue_payloads_are_not_plan_execution_families() {
         let payloads = [
             QueueJobPayload::EthStealthTransfer {
                 wallet_profile: "stealth".into(),
@@ -330,6 +334,20 @@ mod tests {
                 gas_limit: None,
                 view_tag_hex: None,
             },
+        ];
+
+        for payload in payloads {
+            assert_eq!(queue_payload_execution_family(&payload), None);
+        }
+    }
+
+    /// W7.3: EthSeed* queue payloads now gate the same way `PlanStepExecution`
+    /// sweep steps do (`ExecutionFamily::Sweep`) — the block on
+    /// `service/queue/processing.rs`'s hard-coded seed-wallet message lifts
+    /// behind these gates instead of applying unconditionally.
+    #[test]
+    fn eth_seed_queue_payloads_are_gated_as_sweep_family() {
+        let payloads = [
             QueueJobPayload::EthSeedTransfer {
                 wallet_profile: "seed".into(),
                 address: "0x1111111111111111111111111111111111111111".into(),
@@ -359,7 +377,10 @@ mod tests {
         ];
 
         for payload in payloads {
-            assert_eq!(queue_payload_execution_family(&payload), None);
+            assert_eq!(
+                queue_payload_execution_family(&payload),
+                Some(ExecutionFamily::Sweep)
+            );
         }
     }
 

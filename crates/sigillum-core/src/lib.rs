@@ -41,14 +41,15 @@ pub mod unlock;
 pub use error::VaultError;
 pub use ethereum_stealth::{
     ERC5564_ANNOUNCE_FUNCTION, ERC5564_ANNOUNCER_ADDRESS, ETHEREUM_STEALTH_SCHEME_ID,
-    EthereumEip1559Erc20Transfer, EthereumEip1559Transfer, EthereumSignedTransaction,
-    EthereumStealthAnnouncement, EthereumStealthCheck, EthereumStealthError,
-    EthereumStealthMetaAddress, EthereumStealthPayment, EthereumStealthSignature,
-    EthereumStealthWallet, build_erc5564_announcement, check_ethereum_stealth_address,
-    decode_quantity_hex, derive_sigillum_ethereum_stealth_wallet, encode_erc5564_announce_calldata,
-    generate_ethereum_stealth_address, sign_ethereum_eip1559_transaction,
-    sign_ethereum_erc20_transfer, sign_ethereum_native_transfer, sign_ethereum_stealth_digest,
-    sign_ethereum_stealth_erc20_transfer, sign_ethereum_stealth_native_transfer,
+    EthereumEip1559Call, EthereumEip1559Erc20Transfer, EthereumEip1559Transfer,
+    EthereumSignedTransaction, EthereumStealthAnnouncement, EthereumStealthCheck,
+    EthereumStealthError, EthereumStealthMetaAddress, EthereumStealthPayment,
+    EthereumStealthSignature, EthereumStealthWallet, build_erc5564_announcement,
+    check_ethereum_stealth_address, decode_quantity_hex, derive_sigillum_ethereum_stealth_wallet,
+    encode_erc5564_announce_calldata, generate_ethereum_stealth_address, sign_ethereum_call,
+    sign_ethereum_eip1559_transaction, sign_ethereum_erc20_transfer, sign_ethereum_native_transfer,
+    sign_ethereum_stealth_digest, sign_ethereum_stealth_erc20_transfer,
+    sign_ethereum_stealth_native_transfer,
 };
 pub use ethereum_xpub::{
     ETHEREUM_XPUB_COIN_TYPE, ETHEREUM_XPUB_CONTROL_BRANCH, ETHEREUM_XPUB_PURPOSE,
@@ -56,13 +57,13 @@ pub use ethereum_xpub::{
     EthereumXpubReceiveExport, derive_ethereum_account_xpub_from_mnemonic,
     derive_ethereum_address_from_account_xpub, derive_ethereum_address_from_control_xpub,
     derive_ethereum_address_from_imported_xpub, derive_ethereum_address_from_xpub,
-    derive_ethereum_receive_branch_from_account_xpub,
+    derive_ethereum_private_key_from_mnemonic, derive_ethereum_receive_branch_from_account_xpub,
     derive_ethereum_receive_branch_from_account_xpub_with_path,
     derive_ethereum_xpub_control_branch_from_mnemonic,
     derive_ethereum_xpub_receive_branch_from_mnemonic, derive_private_key_at_path,
     derive_sigillum_ethereum_xpub_control_branch, derive_sigillum_ethereum_xpub_receive_address,
-    derive_sigillum_ethereum_xpub_receive_branch, ethereum_mnemonic_word_count,
-    generate_ethereum_mnemonic, validate_ethereum_imported_xpub_path,
+    derive_sigillum_ethereum_xpub_receive_branch, ethereum_address_from_signing_key,
+    ethereum_mnemonic_word_count, generate_ethereum_mnemonic, validate_ethereum_imported_xpub_path,
 };
 pub use protected_secret::PinnedSecretBytes;
 pub use traits::{SecretStore, VaultLifecycle};

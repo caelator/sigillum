@@ -1,3 +1,4 @@
+use secrecy::ExposeSecret;
 use serde::{Deserialize, Serialize};
 use sigillum_api::{
     EthSeedWalletCreateRequest, EthSeedWalletCreateResponse, EthSeedWalletProfile,
@@ -6,7 +7,7 @@ use sigillum_api::{
 };
 use sigillum_core::{
     SecretStore, derive_ethereum_address_from_control_xpub, derive_ethereum_address_from_xpub,
-    derive_ethereum_xpub_control_branch_from_mnemonic,
+    derive_ethereum_private_key_from_mnemonic, derive_ethereum_xpub_control_branch_from_mnemonic,
     derive_ethereum_xpub_receive_branch_from_mnemonic, ethereum_mnemonic_word_count,
     generate_ethereum_mnemonic,
 };
@@ -336,6 +337,43 @@ impl SigillumService {
         Ok(EthSeedWalletProfileMutationResponse {
             status: "deleted".into(),
             profile,
+        })
+    }
+
+    /// Derive the signing key for `derivation_path` from a seed wallet
+    /// profile's vault-stored mnemonic, inside the unlocked compartment
+    /// (W7.3 plan-step execution).
+    ///
+    /// Locked compartment or a missing/corrupt secret both fail closed with
+    /// a named `ServiceError` (never panics). The mnemonic (and BIP-39
+    /// passphrase, if any) are held in `Zeroizing` buffers that are wiped
+    /// when this function returns; the returned [`k256::ecdsa::SigningKey`]
+    /// zeroizes itself on drop (house style, cf. `ethereum_xpub.rs`).
+    pub(in crate::service) fn derive_eth_seed_signing_key(
+        &self,
+        profile: &EthSeedWalletProfile,
+        derivation_path: &str,
+    ) -> ServiceResult<k256::ecdsa::SigningKey> {
+        self.with_vault(profile.compartment_id, |vault| {
+            if !vault.is_unlocked() {
+                return Err(ServiceError::forbidden("Wallet compartment is locked."));
+            }
+            let secret = vault
+                .read_secret(&profile.mnemonic_secret_key)
+                .map_err(|error| ServiceError::internal(error.to_string()))?
+                .ok_or_else(|| ServiceError::not_found("Seed wallet mnemonic secret not found."))?;
+            let mut stored: StoredSeedWalletSecret = serde_json::from_str(secret.expose_secret())
+                .map_err(|error| {
+                ServiceError::internal(format!("Failed to parse seed wallet secret: {error}"))
+            })?;
+            let mnemonic = Zeroizing::new(std::mem::take(&mut stored.mnemonic));
+            let passphrase = stored.mnemonic_passphrase.take().map(Zeroizing::new);
+            derive_ethereum_private_key_from_mnemonic(
+                &mnemonic,
+                passphrase.as_ref().map(|value| value.as_str()),
+                derivation_path,
+            )
+            .map_err(map_xpub_error)
         })
     }
 }

@@ -481,6 +481,31 @@ pub(in crate::service) fn plan_step_evidence_hash_hex(
     step: &ConsolidationPlanStep,
     call: &PlanStepPreflightCall,
 ) -> String {
+    plan_step_evidence_hash_hex_parts(
+        plan_id,
+        step,
+        call.label,
+        &call.target_address,
+        &call.data_hex,
+        call.value_hex.as_deref(),
+    )
+}
+
+/// Same canonicalization as [`plan_step_evidence_hash_hex`], but takes the
+/// prepared-call fields as plain string parts instead of a
+/// [`PlanStepPreflightCall`] (whose type is private to this module). W7.3
+/// (`service::queue::plan_steps`) re-verifies the evidence hash from a
+/// [`sigillum_api::PlanStepExecutionPayload`]'s own stored call fields
+/// against the step's CURRENT live state via this entry point — never by
+/// rebuilding the call through [`prepare_plan_step_preflight`].
+pub(in crate::service) fn plan_step_evidence_hash_hex_parts(
+    plan_id: &str,
+    step: &ConsolidationPlanStep,
+    call_label: &str,
+    call_target_address: &str,
+    call_data_hex: &str,
+    call_value_wei_hex: Option<&str>,
+) -> String {
     let mut canonical = String::new();
     let mut push = |key: &str, value: &str| {
         canonical.push_str(key);
@@ -504,19 +529,65 @@ pub(in crate::service) fn plan_step_evidence_hash_hex(
         "destination_address",
         step.destination_address.as_deref().unwrap_or(""),
     );
-    push("call_label", call.label);
-    push("call_target_address", &call.target_address);
-    push("call_data_hex", &call.data_hex);
-    push(
-        "call_value_wei_hex",
-        call.value_hex.as_deref().unwrap_or(""),
-    );
+    push("call_label", call_label);
+    push("call_target_address", call_target_address);
+    push("call_data_hex", call_data_hex);
+    push("call_value_wei_hex", call_value_wei_hex.unwrap_or(""));
     let mut evidence = step.simulation_evidence.clone();
     evidence.sort();
     for item in &evidence {
         push("evidence", item);
     }
     hex::encode(Sha256::digest(canonical.as_bytes()))
+}
+
+/// W7.3 pre-signing guard: recompute the step's evidence hash from its
+/// CURRENT live state (looked up by `plan_id`/`step_id`) and the job's own
+/// stored prepared-call fields, and compare against
+/// `payload.simulation_evidence_hash_hex`. Returns the tamper-naming reason
+/// on any mismatch (including a missing plan/step, which cannot be
+/// distinguished from tampering and must fail closed the same way) — the
+/// caller must treat this as `operator_action_required` and never sign.
+pub(in crate::service) fn verify_plan_step_execution_evidence(
+    state: &WalletInventoryState,
+    payload: &sigillum_api::PlanStepExecutionPayload,
+) -> Result<(), String> {
+    let plan = state
+        .consolidation_plans
+        .iter()
+        .find(|plan| plan.id == payload.plan_id)
+        .ok_or_else(|| {
+            format!(
+                "evidence_hash_tamper: plan {} not found for step {}",
+                payload.plan_id, payload.step_id
+            )
+        })?;
+    let step = plan
+        .steps
+        .iter()
+        .find(|step| step.id == payload.step_id)
+        .ok_or_else(|| {
+            format!(
+                "evidence_hash_tamper: step {} not found in plan {}",
+                payload.step_id, payload.plan_id
+            )
+        })?;
+    let recomputed = plan_step_evidence_hash_hex_parts(
+        &payload.plan_id,
+        step,
+        &payload.call_label,
+        &payload.call_target_address,
+        &payload.call_data_hex,
+        payload.call_value_wei_hex.as_deref(),
+    );
+    if recomputed != payload.simulation_evidence_hash_hex {
+        return Err(format!(
+            "evidence_hash_tamper: simulation evidence hash mismatch for step {} (plan {}); \
+             the step's prepared call or simulation evidence changed since this job was enqueued",
+            payload.step_id, payload.plan_id
+        ));
+    }
+    Ok(())
 }
 
 fn parse_evidence_value(evidence: &[String], key: &str) -> Option<String> {
@@ -1006,6 +1077,131 @@ mod tests {
         erc20.asset_address = Some("0x2222222222222222222222222222222222222222".into());
         let total = batch_total_native_wei(&[&native, &erc20]);
         assert_eq!(u256_decimal_string(&total), "10000000000");
+    }
+
+    fn sample_plan(step: ConsolidationPlanStep) -> ConsolidationPlan {
+        ConsolidationPlan {
+            id: "plan_1".into(),
+            status: "approved".into(),
+            chain_id: 1,
+            destination_address: Some("0x9999999999999999999999999999999999999999".into()),
+            created_at_unix: 1,
+            updated_at_unix: 1,
+            summary: sigillum_api::ConsolidationPlanSummary {
+                total_steps: 1,
+                blocked_steps: 0,
+                review_required_steps: 0,
+                approved_steps: 1,
+                executable_steps: 1,
+                value_items: 1,
+            },
+            policy_violations: Vec::new(),
+            linkage_findings: Vec::new(),
+            steps: vec![step],
+        }
+    }
+
+    fn sample_payload_for(
+        step: &ConsolidationPlanStep,
+        call: &PlanStepPreflightCall,
+    ) -> PlanStepExecutionPayload {
+        PlanStepExecutionPayload {
+            plan_id: "plan_1".into(),
+            step_id: step.id.clone(),
+            chain_id: step.chain_id,
+            source_address: step.address.clone(),
+            derivation_path: step.derivation_path.clone(),
+            wallet_family: step.wallet_family.clone(),
+            wallet_profile: step.wallet_profile.clone(),
+            provider_profile: step.provider_profile.clone(),
+            action: step.action.clone(),
+            asset_kind: step.asset_kind.clone(),
+            asset_address: step.asset_address.clone(),
+            amount_hex: step.amount_hex.clone(),
+            destination_address: step.destination_address.clone(),
+            call_label: call.label.to_string(),
+            call_target_address: call.target_address.clone(),
+            call_data_hex: call.data_hex.clone(),
+            call_value_wei_hex: call.value_hex.clone(),
+            simulation_evidence_hash_hex: plan_step_evidence_hash_hex("plan_1", step, call),
+            fee_basis: None,
+            max_priority_fee_per_gas_hex: None,
+            max_fee_per_gas_hex: None,
+            prerequisite_job_ids: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn verify_plan_step_execution_evidence_accepts_unchanged_step() {
+        let step = sample_step();
+        let call = sample_call();
+        let payload = sample_payload_for(&step, &call);
+        let state = WalletInventoryState {
+            consolidation_plans: vec![sample_plan(step)],
+            ..Default::default()
+        };
+
+        assert!(verify_plan_step_execution_evidence(&state, &payload).is_ok());
+    }
+
+    #[test]
+    fn verify_plan_step_execution_evidence_rejects_tampered_call_field() {
+        let step = sample_step();
+        let call = sample_call();
+        let mut payload = sample_payload_for(&step, &call);
+        // Tamper with the persisted job's own call field after enqueue (as
+        // if the queue store were edited out of band).
+        payload.call_target_address = "0x8888888888888888888888888888888888888888".into();
+        let state = WalletInventoryState {
+            consolidation_plans: vec![sample_plan(step)],
+            ..Default::default()
+        };
+
+        let error = verify_plan_step_execution_evidence(&state, &payload).unwrap_err();
+        assert!(error.starts_with("evidence_hash_tamper:"), "{error}");
+    }
+
+    #[test]
+    fn verify_plan_step_execution_evidence_rejects_step_that_changed_since_enqueue() {
+        let step = sample_step();
+        let call = sample_call();
+        let payload = sample_payload_for(&step, &call);
+        let mut changed_step = step.clone();
+        // Re-simulation (or any other live-state change) after enqueue
+        // changes the evidence array, so the recomputed hash no longer
+        // matches what was committed at enqueue time.
+        changed_step
+            .simulation_evidence
+            .push("resimulated=true".into());
+        let state = WalletInventoryState {
+            consolidation_plans: vec![sample_plan(changed_step)],
+            ..Default::default()
+        };
+
+        let error = verify_plan_step_execution_evidence(&state, &payload).unwrap_err();
+        assert!(error.starts_with("evidence_hash_tamper:"), "{error}");
+    }
+
+    #[test]
+    fn verify_plan_step_execution_evidence_rejects_missing_plan_or_step() {
+        let step = sample_step();
+        let call = sample_call();
+        let payload = sample_payload_for(&step, &call);
+
+        let empty_state = WalletInventoryState::default();
+        let error = verify_plan_step_execution_evidence(&empty_state, &payload).unwrap_err();
+        assert!(error.starts_with("evidence_hash_tamper:"), "{error}");
+        assert!(error.contains("plan"), "{error}");
+
+        let mut other_plan = sample_plan(step);
+        other_plan.steps.clear();
+        let state = WalletInventoryState {
+            consolidation_plans: vec![other_plan],
+            ..Default::default()
+        };
+        let error = verify_plan_step_execution_evidence(&state, &payload).unwrap_err();
+        assert!(error.starts_with("evidence_hash_tamper:"), "{error}");
+        assert!(error.contains("step"), "{error}");
     }
 
     #[test]

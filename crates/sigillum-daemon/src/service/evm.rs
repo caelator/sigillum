@@ -370,6 +370,22 @@ impl SigillumService {
             .await
     }
 
+    /// Broadcast an already-signed raw transaction against a specific
+    /// provider profile, without the session/audit scaffolding
+    /// [`Self::evm_broadcast`] adds for the route-level API. Used by W7.3
+    /// plan-step execution (`service::queue::plan_steps`), which records its
+    /// own typed sign/broadcast audit events.
+    pub(super) async fn evm_broadcast_raw_transaction_for_provider(
+        &self,
+        provider_compartment_id: usize,
+        provider: &sigillum_api::EvmProviderProfile,
+        raw_transaction_hex: &str,
+    ) -> ServiceResult<String> {
+        self.provider_rpc_for_profile(provider_compartment_id, provider)?
+            .send_raw_transaction(raw_transaction_hex)
+            .await
+    }
+
     pub(super) async fn evm_logs_for_provider(
         &self,
         provider_compartment_id: usize,

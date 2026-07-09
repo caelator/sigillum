@@ -63,3 +63,22 @@ Wave 5 established the first API/client/CLI vertical slice:
 Future API/client/CLI domain splits should follow this shape: move one domain
 end to end, keep public names stable, add or update tests, document ownership,
 ratchet guardrails, then re-run GitNexus indexing after commit.
+
+## W7.3 Queue Execution Split
+
+Mirrors the sweeps split for the two families the drain loop lifts behind
+the W7.1 execution gates:
+
+- `PlanStepExecution` job execution owns `service/queue/plan_steps.rs`
+  (pre-signing guards: dependency ordering, evidence-hash re-verification,
+  signer resolution, fee cap) and `service/queue/plan_steps/signing.rs` (the
+  sign + broadcast crypto boundary and its typed sign/broadcast/
+  broadcast-failed audit events).
+- Legacy `EthSeed*` job execution owns `service/queue/seed_sends.rs`,
+  mirroring `sweeps.rs`'s balance-check-then-send shape but signing with a
+  key derived on demand from the seed wallet's vault-stored mnemonic.
+- Both families gate through the same `ExecutionFamily`/`execution_gate_*`
+  machinery `gates.rs` already exposed for `PlanStepExecution`; `queue.rs`'s
+  drain loop no longer hard-blocks either family once gates pass.
+- `scripts/check-architecture.sh` enforces the new module locations and line
+  budgets.

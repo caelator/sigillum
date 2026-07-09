@@ -8,7 +8,7 @@ use bip32::{ChildNumber, Prefix, XPrv, XPub};
 use bip39::{Language, Mnemonic};
 use sha3::{Digest, Keccak256};
 use thiserror::Error;
-use zeroize::Zeroizing;
+use zeroize::{Zeroize, Zeroizing};
 
 pub const ETHEREUM_XPUB_PURPOSE: u32 = 44;
 pub const ETHEREUM_XPUB_COIN_TYPE: u32 = 60;
@@ -342,10 +342,40 @@ pub fn derive_private_key_at_path(
             .derive_child(child)
             .map_err(|_| EthereumXpubError::InvalidKeyMaterial)?;
     }
-    let key_bytes = current.private_key().to_bytes();
+    let mut key_bytes = current.private_key().to_bytes();
     let signing_key = k256::ecdsa::SigningKey::from_slice(&key_bytes)
         .map_err(|_| EthereumXpubError::InvalidKeyMaterial)?;
+    key_bytes.zeroize();
     Ok(signing_key)
+}
+
+/// Derive a signing key directly from a BIP-39 mnemonic phrase (plus optional
+/// passphrase) at a full BIP-32 path (e.g. `m/44'/60'/0'/0/5`).
+///
+/// Composes [`mnemonic_seed`] with [`derive_private_key_at_path`]; the
+/// intermediate 64-byte seed lives in a [`Zeroizing`] buffer and is wiped
+/// before this function returns (house style: derived key material never
+/// outlives its use). The returned [`k256::ecdsa::SigningKey`] zeroizes
+/// itself on drop (`ecdsa::SigningKey` implements `ZeroizeOnDrop`).
+pub fn derive_ethereum_private_key_from_mnemonic(
+    mnemonic_phrase: &str,
+    mnemonic_passphrase: Option<&str>,
+    path: &str,
+) -> Result<k256::ecdsa::SigningKey, EthereumXpubError> {
+    let seed = Zeroizing::new(mnemonic_seed(mnemonic_phrase, mnemonic_passphrase)?);
+    derive_private_key_at_path(seed.as_slice(), path)
+}
+
+/// Compute the Ethereum address for a signing key's public key.
+///
+/// Used to verify a locally derived signing key matches an expected address
+/// before it is used to sign on that address's behalf (defense in depth
+/// against a derivation-path/address mismatch).
+pub fn ethereum_address_from_signing_key(signing_key: &k256::ecdsa::SigningKey) -> String {
+    let encoded = signing_key.verifying_key().to_encoded_point(false);
+    let bytes = encoded.as_bytes();
+    let digest = Keccak256::digest(&bytes[1..]);
+    format!("0x{}", hex::encode(&digest[12..]))
 }
 
 fn derive_account_xprv(master_key: &[u8], project_account: u32) -> Result<XPrv, EthereumXpubError> {
@@ -774,6 +804,49 @@ mod tests {
         assert_eq!(
             ethereum_address_from_verifying_key(pkey.verifying_key()),
             address_0.address
+        );
+    }
+
+    #[test]
+    fn mnemonic_private_key_derivation_matches_seed_path_and_xpub_address() {
+        let twelve_word = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
+        let receive_export =
+            derive_ethereum_xpub_receive_branch_from_mnemonic(twelve_word, None, 0).unwrap();
+        let expected_address =
+            derive_ethereum_address_from_xpub(&receive_export.receive_xpub, 0).unwrap();
+
+        let from_mnemonic =
+            derive_ethereum_private_key_from_mnemonic(twelve_word, None, "m/44'/60'/0'/0/0")
+                .unwrap();
+        let seed = mnemonic_seed(twelve_word, None).unwrap();
+        let from_seed = derive_private_key_at_path(&seed, "m/44'/60'/0'/0/0").unwrap();
+
+        assert_eq!(
+            ethereum_address_from_signing_key(&from_mnemonic),
+            expected_address.address
+        );
+        assert_eq!(
+            ethereum_address_from_signing_key(&from_mnemonic),
+            ethereum_address_from_signing_key(&from_seed)
+        );
+    }
+
+    #[test]
+    fn mnemonic_private_key_derivation_rejects_invalid_mnemonic() {
+        assert_eq!(
+            derive_ethereum_private_key_from_mnemonic("not a mnemonic", None, "m/44'/60'/0'/0/0"),
+            Err(EthereumXpubError::InvalidMnemonic)
+        );
+    }
+
+    #[test]
+    fn address_from_signing_key_matches_verifying_key_helper() {
+        let twelve_word = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
+        let seed = mnemonic_seed(twelve_word, None).unwrap();
+        let signing_key = derive_private_key_at_path(&seed, "m/44'/60'/0'/0/3").unwrap();
+        assert_eq!(
+            ethereum_address_from_signing_key(&signing_key),
+            ethereum_address_from_verifying_key(signing_key.verifying_key())
         );
     }
 }

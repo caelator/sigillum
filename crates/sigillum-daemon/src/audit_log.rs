@@ -454,6 +454,44 @@ pub(crate) enum AuditEventSpec {
         action_family: String,
         session_fingerprint_hex: String,
     },
+    /// W7.3: a plan-step's prepared call was signed (before broadcast). NEVER
+    /// carries key material — only ids, the source address, and the resulting
+    /// (locally computed) transaction hash.
+    #[serde(rename = "wallet_consolidation.plan.step_sign")]
+    WalletConsolidationPlanStepSign {
+        plan_id: String,
+        step_id: String,
+        job_id: String,
+        action_family: String,
+        source_address: String,
+        transaction_hash_hex: String,
+        session_fingerprint_hex: String,
+    },
+    /// W7.3: a signed plan-step transaction was accepted by the RPC provider.
+    #[serde(rename = "wallet_consolidation.plan.step_broadcast")]
+    WalletConsolidationPlanStepBroadcast {
+        plan_id: String,
+        step_id: String,
+        job_id: String,
+        action_family: String,
+        transaction_hash_hex: String,
+        broadcast_transaction_hash_hex: String,
+        session_fingerprint_hex: String,
+    },
+    /// W7.3: a signed plan-step transaction failed to broadcast (the queue
+    /// job's own state/last_error carries the retry/terminal disposition;
+    /// this event is the forensic record that a real signed transaction
+    /// existed even though it never reached the network).
+    #[serde(rename = "wallet_consolidation.plan.step_broadcast_failed")]
+    WalletConsolidationPlanStepBroadcastFailed {
+        plan_id: String,
+        step_id: String,
+        job_id: String,
+        action_family: String,
+        transaction_hash_hex: String,
+        reason: String,
+        session_fingerprint_hex: String,
+    },
     #[serde(rename = "treasury.policy.update")]
     TreasuryPolicyUpdate { enabled: bool, destinations: usize },
     #[serde(rename = "treasury.policy.execution_gate.update")]
@@ -596,6 +634,13 @@ impl AuditEventSpec {
             Self::WalletConsolidationPlanExport { .. } => "wallet_consolidation.plan.export",
             Self::WalletConsolidationPlanEnqueueStep { .. } => {
                 "wallet_consolidation.plan.enqueue_step"
+            }
+            Self::WalletConsolidationPlanStepSign { .. } => "wallet_consolidation.plan.step_sign",
+            Self::WalletConsolidationPlanStepBroadcast { .. } => {
+                "wallet_consolidation.plan.step_broadcast"
+            }
+            Self::WalletConsolidationPlanStepBroadcastFailed { .. } => {
+                "wallet_consolidation.plan.step_broadcast_failed"
             }
             Self::TreasuryPolicyUpdate { .. } => "treasury.policy.update",
             Self::TreasuryExecutionGateUpdate { .. } => "treasury.policy.execution_gate.update",
@@ -982,6 +1027,57 @@ impl AuditEventSpec {
                 "step_id": step_id,
                 "job_id": job_id,
                 "action_family": action_family,
+                "session_fingerprint_hex": session_fingerprint_hex,
+            }),
+            Self::WalletConsolidationPlanStepSign {
+                plan_id,
+                step_id,
+                job_id,
+                action_family,
+                source_address,
+                transaction_hash_hex,
+                session_fingerprint_hex,
+            } => json!({
+                "plan_id": plan_id,
+                "step_id": step_id,
+                "job_id": job_id,
+                "action_family": action_family,
+                "source_address": source_address,
+                "transaction_hash_hex": transaction_hash_hex,
+                "session_fingerprint_hex": session_fingerprint_hex,
+            }),
+            Self::WalletConsolidationPlanStepBroadcast {
+                plan_id,
+                step_id,
+                job_id,
+                action_family,
+                transaction_hash_hex,
+                broadcast_transaction_hash_hex,
+                session_fingerprint_hex,
+            } => json!({
+                "plan_id": plan_id,
+                "step_id": step_id,
+                "job_id": job_id,
+                "action_family": action_family,
+                "transaction_hash_hex": transaction_hash_hex,
+                "broadcast_transaction_hash_hex": broadcast_transaction_hash_hex,
+                "session_fingerprint_hex": session_fingerprint_hex,
+            }),
+            Self::WalletConsolidationPlanStepBroadcastFailed {
+                plan_id,
+                step_id,
+                job_id,
+                action_family,
+                transaction_hash_hex,
+                reason,
+                session_fingerprint_hex,
+            } => json!({
+                "plan_id": plan_id,
+                "step_id": step_id,
+                "job_id": job_id,
+                "action_family": action_family,
+                "transaction_hash_hex": transaction_hash_hex,
+                "reason": reason,
                 "session_fingerprint_hex": session_fingerprint_hex,
             }),
             Self::TreasuryPolicyUpdate {

@@ -641,6 +641,50 @@ pub fn sign_ethereum_erc20_transfer(
     )
 }
 
+/// An arbitrary EIP-1559 contract call: destination address, calldata, and
+/// optional native value. Generic counterpart to [`EthereumEip1559Transfer`]
+/// and [`EthereumEip1559Erc20Transfer`] for prepared calldata that does not
+/// fit either shape (approvals/revocations, DeFi exit-adapter calls, Merkle
+/// claims, NFT transfers). The caller is responsible for building `data` —
+/// this module never re-derives calldata from higher-level intent.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct EthereumEip1559Call {
+    pub chain_id: u64,
+    pub nonce: u64,
+    pub max_priority_fee_per_gas: [u8; 32],
+    pub max_fee_per_gas: [u8; 32],
+    pub gas_limit: u64,
+    pub to_address: String,
+    pub value: [u8; 32],
+    pub data: Vec<u8>,
+}
+
+/// Sign an arbitrary EIP-1559 contract call (destination + calldata + value)
+/// with a directly supplied signing key. Used by callers that hold a
+/// prepared call (target address, calldata, value) verbatim and must not
+/// rebuild it at signing time.
+pub fn sign_ethereum_call(
+    signing_key: &SigningKey,
+    call: &EthereumEip1559Call,
+) -> Result<EthereumSignedTransaction, EthereumStealthError> {
+    let to_address = normalize_ethereum_address(&call.to_address)?;
+    sign_ethereum_eip1559_transaction(
+        signing_key,
+        UnsignedEip1559Transaction {
+            chain_id: call.chain_id,
+            nonce: call.nonce,
+            max_priority_fee_per_gas: call.max_priority_fee_per_gas,
+            max_fee_per_gas: call.max_fee_per_gas,
+            gas_limit: call.gas_limit,
+            to_address: to_address.clone(),
+            value: call.value,
+            data: call.data.clone(),
+        },
+        "contract-call",
+        to_address,
+    )
+}
+
 // ── EIP-1559 transaction construction ──
 
 fn parse_meta_address(value: &str) -> Result<ParsedMetaAddress, EthereumStealthError> {
@@ -1242,5 +1286,44 @@ mod tests {
         assert_eq!(signed.kind, "erc20-transfer");
         assert!(signed.data_hex.starts_with("a9059cbb"));
         assert_eq!(signed.value_hex, "0x0");
+    }
+
+    #[test]
+    fn sign_ethereum_call_signs_arbitrary_prepared_calldata_verbatim() {
+        let signing_key = SigningKey::from_slice(&[41u8; 32]).unwrap();
+        let call = EthereumEip1559Call {
+            chain_id: 1,
+            nonce: 3,
+            max_priority_fee_per_gas: decode_quantity_hex("0x1").unwrap(),
+            max_fee_per_gas: decode_quantity_hex("0x2").unwrap(),
+            gas_limit: 65_000,
+            to_address: "0x2222222222222222222222222222222222222222".into(),
+            value: [0u8; 32],
+            data: hex::decode("095ea7b3").unwrap(),
+        };
+
+        let signed = sign_ethereum_call(&signing_key, &call).unwrap();
+
+        assert_eq!(signed.kind, "contract-call");
+        assert_eq!(
+            signed.to_address,
+            "0x2222222222222222222222222222222222222222"
+        );
+        assert_eq!(signed.data_hex, "095ea7b3");
+        assert_eq!(signed.value_hex, "0x0");
+        assert_eq!(signed.transaction_hash_hex.len(), 64);
+
+        // Reusing the exact same call must sign deterministically...
+        let signed_again = sign_ethereum_call(&signing_key, &call).unwrap();
+        assert_eq!(signed.raw_transaction_hex, signed_again.raw_transaction_hex);
+
+        // ...and any change to the prepared call must change the signature.
+        let mut tampered = call.clone();
+        tampered.data = hex::decode("a9059cbb").unwrap();
+        let signed_tampered = sign_ethereum_call(&signing_key, &tampered).unwrap();
+        assert_ne!(
+            signed.transaction_hash_hex,
+            signed_tampered.transaction_hash_hex
+        );
     }
 }

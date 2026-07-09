@@ -1492,7 +1492,7 @@ Phase W — Wallet-management completion
 - [x] W6.4 step dependency ordering
 - [x] W7.1 execution policy gates + kill switch
 - [x] W7.2 plan-step queue payloads + enqueue validation
-- [ ] W7.3 seed-wallet signing execution
+- [x] W7.3 seed-wallet signing execution
 - [ ] W7.4 nonces, receipts, failure classes
 - [ ] W7.5 linkage enforcement parity at execution
 - [ ] W8 treasury automation (overflow/refill, hysteresis)
@@ -1734,3 +1734,19 @@ Phase H — Ship
   `sigillum api plans enqueue-step|enqueue-plan`. 29 new integration
   tests. Implemented directly by a Sonnet agent under the operator's
   standing fallback directive.
+- 2026-07-09 W7.3 03eb022..1d8e63a: signing execution lands — new
+  `service/queue/plan_steps.rs` (+signing.rs) executes PlanStepExecution
+  jobs in fixed order: dependency check → evidence-hash re-verification
+  (tamper → operator_action_required, never signed) → signer resolution
+  from the unlocked compartment seed with a BlockWatchOnlySigner
+  re-check → fee-cap check → sign + broadcast with typed
+  signed/broadcast audit events; `seed_sends.rs` executes legacy
+  EthSeed* (now gated as the sweep family; stealth stays exempt);
+  same-batch dependents resolve in one drain via a job-state snapshot;
+  claims revert/failure parks operator_action_required and never
+  retries; keys held in Zeroizing wrappers and an explicit test
+  re-derives the key and asserts its hex (and mnemonic) absent from
+  audit events and persisted store bytes; full sweep→revoke→fund_gas
+  chain executes in dependency order with a 3-sign/3-broadcast audit
+  trail; gates-off behavior preserved. Implemented directly by a Sonnet
+  agent under the operator's standing fallback directive.

@@ -19,7 +19,6 @@ const DESTINATION: &str = "0x9999999999999999999999999999999999999999";
 const SEED_ADDRESS: &str = "0x9858effd232b4033e47d90003d41ec34ecaeda94";
 const ONE_ETH_HEX: &str = "0xde0b6b3a7640000";
 const ONE_ETH_DECIMAL: &str = "1000000000000000000";
-const PLAN_STEP_DRAIN_BLOCK_REASON: &str = "plan-step execution is not enabled yet";
 
 async fn spawn_daemon(base_dir: PathBuf) -> (SocketAddr, tokio::task::JoinHandle<()>) {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -1192,14 +1191,18 @@ async fn enqueue_plan_refuses_when_gates_off_at_policy_check() {
 
 // ── Drain-time hard block (CRITICAL: no execution yet) ─────────────────────
 
+/// W7.3: the drain-time hard block ("plan-step execution is not enabled
+/// yet") lifts once every W7.1 gate passes — the job signs and broadcasts
+/// against the mock RPC provider instead of staying blocked (superseding
+/// the pre-W7.3 behavior this test used to assert).
 #[tokio::test]
-async fn plan_step_jobs_stay_blocked_at_drain_even_with_all_gates_on() {
+async fn plan_step_jobs_execute_at_drain_once_all_gates_pass() {
     let (env, plan_id, step_id) = approved_plan_env().await;
     let (status, body) = enqueue_step(&env, &plan_id, &step_id, true).await;
     assert_eq!(status, StatusCode::OK, "enqueue: {body}");
     let job_id = body["job"]["id"].as_str().unwrap().to_string();
 
-    // Every W7.1 gate is ON, yet the job must not execute.
+    // Every W7.1 gate is ON: the job signs and broadcasts.
     let process = post_json(
         &env.client,
         env.addr,
@@ -1215,17 +1218,59 @@ async fn plan_step_jobs_stay_blocked_at_drain_even_with_all_gates_on() {
         json!(1),
         "process: {process_json}"
     );
-    assert_eq!(process_json["blocked"], json!(1), "process: {process_json}");
     assert_eq!(
         process_json["succeeded"],
+        json!(1),
+        "process: {process_json}"
+    );
+    assert_eq!(process_json["blocked"], json!(0), "process: {process_json}");
+    assert_eq!(
+        process_json["operator_action_required"],
         json!(0),
         "process: {process_json}"
     );
 
     let jobs = queue_jobs(&env).await;
     assert_eq!(jobs[0]["id"], json!(job_id));
-    assert_eq!(jobs[0]["state"], json!("blocked"));
-    assert_eq!(jobs[0]["last_error"], json!(PLAN_STEP_DRAIN_BLOCK_REASON));
+    assert_eq!(jobs[0]["state"], json!("sent"));
+    assert!(jobs[0]["last_error"].is_null(), "job: {}", jobs[0]);
+    assert!(
+        jobs[0]["transaction_hash_hex"].as_str().unwrap().len() == 64,
+        "job: {}",
+        jobs[0]
+    );
+    assert!(
+        jobs[0]["broadcast_transaction_hash_hex"]
+            .as_str()
+            .unwrap()
+            .starts_with("11"),
+        "job: {}",
+        jobs[0]
+    );
+
+    // The typed sign -> broadcast audit chain is recorded, with no key
+    // material anywhere in it.
+    let audit = get(&env.client, env.addr, "/api/audit", Some(&env.token)).await;
+    assert_eq!(audit.status(), StatusCode::OK);
+    let audit_json: Value = audit.json().await.unwrap();
+    let events = audit_json["events"].as_array().unwrap();
+    let kinds: Vec<&str> = events
+        .iter()
+        .map(|event| event["kind"].as_str().unwrap())
+        .collect();
+    assert!(
+        kinds.contains(&"wallet_consolidation.plan.step_sign"),
+        "{kinds:?}"
+    );
+    assert!(
+        kinds.contains(&"wallet_consolidation.plan.step_broadcast"),
+        "{kinds:?}"
+    );
+    let audit_text = audit_json.to_string();
+    assert!(
+        !audit_text.to_lowercase().contains("abandon abandon"),
+        "audit log must never contain mnemonic material"
+    );
     env.shutdown();
 }
 
