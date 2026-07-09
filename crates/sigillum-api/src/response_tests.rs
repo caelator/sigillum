@@ -839,6 +839,7 @@ fn test_wallet_operations_response_roundtrips() {
         finality_blocks: 12,
         dormancy_block_window: DEFAULT_DORMANCY_BLOCK_WINDOW,
         permit2_address: Some("0x000000000022d473030f116ddee9f6b43ac78ba3".to_string()),
+        uniswap_v2_router_address: Some("0xdead100e2000000000000000000000000000cccc".to_string()),
         explorer_url: Some("https://basescan.org".to_string()),
         capabilities: vec!["native".to_string(), "erc20".to_string()],
         enabled: true,
@@ -952,6 +953,11 @@ fn test_wallet_operations_response_roundtrips() {
         claim_adapter: Some("merkle-distributor-v1".to_string()),
         claim_index_hex: Some("0x7".to_string()),
         claim_proof: vec![format!("0x{}", "11".repeat(32))],
+        exit_token0_address: Some("0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".to_string()),
+        exit_token1_address: Some("0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb".to_string()),
+        exit_amount0_min_hex: Some("0x10".to_string()),
+        exit_amount1_min_hex: Some("0x20".to_string()),
+        exit_deadline_unix: Some(1_783_046_000),
         amount_hex: "0x1".to_string(),
         destination_address: Some("0xdestination".to_string()),
         signer_status: WalletSignerStatus::Other("signing_not_implemented".to_string()),
@@ -1820,6 +1826,7 @@ fn sample_treasury_policy() -> TreasuryPolicy {
         require_simulation: true,
         allow_raw_digest_signing: false,
         block_cross_party_linkage: false,
+        allow_claim_execution: false,
         simulation_freshness_secs: 900,
         hot_floor_wei_hex: "0xde0b6b3a7640000".to_string(),
         hot_target_wei_hex: "0xde0b6b3a7640000".to_string(),
@@ -1845,6 +1852,7 @@ fn test_treasury_policy_responses_roundtrip() {
             require_simulation: false,
             allow_raw_digest_signing: false,
             block_cross_party_linkage: false,
+            allow_claim_execution: false,
             simulation_freshness_secs: 900,
             hot_floor_wei_hex: "0xde0b6b3a7640000".to_string(),
             hot_target_wei_hex: "0xde0b6b3a7640000".to_string(),
@@ -1862,6 +1870,7 @@ fn test_treasury_policy_require_simulation_defaults_true() {
             .unwrap();
     assert!(policy.require_simulation);
     assert!(!policy.block_cross_party_linkage);
+    assert!(!policy.allow_claim_execution);
     assert_eq!(policy.simulation_freshness_secs, 900);
     assert_eq!(policy.hot_floor_wei_hex, "0xde0b6b3a7640000");
     assert_eq!(policy.hot_target_wei_hex, "0xde0b6b3a7640000");

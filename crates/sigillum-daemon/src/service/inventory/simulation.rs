@@ -12,6 +12,11 @@ use crate::service::helpers::{
 };
 use crate::service::{ServiceError, ServiceResult, SigillumService};
 
+use super::claim_gate::refresh_claim_execution_blocker;
+use super::defi_adapters::{
+    DEFI_EXIT_ADAPTER_AAVE_V3_WITHDRAW, DEFI_EXIT_ADAPTER_ERC4626_REDEEM,
+    DEFI_EXIT_ADAPTER_LIDO_WSTETH_UNWRAP, DEFI_EXIT_ADAPTER_UNISWAP_V2_REMOVE_LIQUIDITY,
+};
 use super::planner::summarize_plan_steps;
 use super::preflight::{PlanStepPreflight, PlanStepPreflightCall, prepare_plan_step_preflight};
 use super::support::{load_inventory_state, save_inventory_state};
@@ -54,6 +59,8 @@ impl SigillumService {
         let mut failed = 0usize;
         let mut unsupported = 0usize;
         let inventory_addresses = state.addresses.clone();
+        let policy = state.treasury_policy.clone();
+        let risk_catalog = state.risk_catalog.clone();
         for step_index in step_indexes {
             let step = state.consolidation_plans[plan_index].steps[step_index].clone();
             let mut outcome = if let Some(blockers) = non_simulation_blockers(&step) {
@@ -82,6 +89,11 @@ impl SigillumService {
             apply_simulation_outcome(
                 &mut state.consolidation_plans[plan_index].steps[step_index],
                 outcome,
+            );
+            refresh_claim_execution_blocker(
+                policy.as_ref(),
+                &risk_catalog,
+                &mut state.consolidation_plans[plan_index].steps[step_index],
             );
         }
 
@@ -223,6 +235,9 @@ impl SigillumService {
         {
             Ok(result) => {
                 evidence.push(format!("eth_call_result={result}"));
+                for expected_output in defi_expected_output_evidence(step, &result) {
+                    evidence.push(expected_output);
+                }
                 PlanSimulationOutcome {
                     status: WalletSimulationStatus::Passed,
                     blocker: None,
@@ -385,6 +400,7 @@ fn zero_value_transaction_gas_limit(
 ) -> u64 {
     match &step.action {
         WalletPlanStepAction::SweepErc20
+        | WalletPlanStepAction::ApproveErc20
         | WalletPlanStepAction::RevokeErc20Approval
         | WalletPlanStepAction::RevokePermit2Allowance => provider
             .erc20_gas_limit
@@ -524,6 +540,83 @@ fn non_simulation_blockers(step: &ConsolidationPlanStep) -> Option<Vec<String>> 
     }
 }
 
+fn defi_expected_output_evidence(step: &ConsolidationPlanStep, result_hex: &str) -> Vec<String> {
+    if step.action != WalletPlanStepAction::ExitDefiPosition {
+        return Vec::new();
+    }
+    let Some(adapter) = step.claim_adapter.as_deref() else {
+        return Vec::new();
+    };
+    match adapter {
+        DEFI_EXIT_ADAPTER_AAVE_V3_WITHDRAW
+        | DEFI_EXIT_ADAPTER_ERC4626_REDEEM
+        | DEFI_EXIT_ADAPTER_LIDO_WSTETH_UNWRAP => {
+            canonical_quantity_hex_from_single_word(result_hex)
+                .map(|value| vec![format!("expected_assets_out_hex={value}")])
+                .unwrap_or_default()
+        }
+        DEFI_EXIT_ADAPTER_UNISWAP_V2_REMOVE_LIQUIDITY => {
+            let Some(words) = strict_words_hex(result_hex, 2) else {
+                return Vec::new();
+            };
+            vec![
+                format!(
+                    "expected_amount0_out_hex={}",
+                    canonical_quantity_hex_from_word(&words[0])
+                ),
+                format!(
+                    "expected_amount1_out_hex={}",
+                    canonical_quantity_hex_from_word(&words[1])
+                ),
+            ]
+        }
+        _ => Vec::new(),
+    }
+}
+
+fn canonical_quantity_hex_from_single_word(value: &str) -> Option<String> {
+    let raw = value
+        .trim()
+        .strip_prefix("0x")
+        .or_else(|| value.trim().strip_prefix("0X"))
+        .unwrap_or_else(|| value.trim());
+    if raw.len() != 64 || !raw.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        return None;
+    }
+    let raw = raw.trim_start_matches('0');
+    if raw.is_empty() {
+        Some("0x0".into())
+    } else {
+        Some(format!("0x{}", raw.to_ascii_lowercase()))
+    }
+}
+
+fn strict_words_hex(value: &str, expected_words: usize) -> Option<Vec<String>> {
+    let raw = value
+        .trim()
+        .strip_prefix("0x")
+        .or_else(|| value.trim().strip_prefix("0X"))
+        .unwrap_or_else(|| value.trim());
+    if raw.len() != expected_words.checked_mul(64)?
+        || !raw.bytes().all(|byte| byte.is_ascii_hexdigit())
+    {
+        return None;
+    }
+    raw.as_bytes()
+        .chunks_exact(64)
+        .map(|chunk| Some(std::str::from_utf8(chunk).ok()?.to_ascii_lowercase()))
+        .collect::<Option<Vec<_>>>()
+}
+
+fn canonical_quantity_hex_from_word(word: &str) -> String {
+    let raw = word.trim_start_matches('0');
+    if raw.is_empty() {
+        "0x0".into()
+    } else {
+        format!("0x{}", raw.to_ascii_lowercase())
+    }
+}
+
 fn blocks_simulation(blocker: &str) -> bool {
     !is_simulation_blocker(blocker) && blocker != "claim_execution_disabled"
 }
@@ -638,6 +731,11 @@ mod tests {
             claim_adapter: None,
             claim_index_hex: None,
             claim_proof: Vec::new(),
+            exit_token0_address: None,
+            exit_token1_address: None,
+            exit_amount0_min_hex: None,
+            exit_amount1_min_hex: None,
+            exit_deadline_unix: None,
             amount_hex: amount_hex.into(),
             destination_address: Some("0x9999999999999999999999999999999999999999".into()),
             signer_status: "available".into(),
@@ -1060,6 +1158,110 @@ mod tests {
                 .iter()
                 .any(|item| item == "estimated_gas_cost_wei_hex=0x3a980")
         );
+    }
+
+    #[test]
+    fn defi_expected_assets_evidence_records_aave_single_word() {
+        let mut step = sample_step("0xf4240");
+        step.action = "exit_defi_position".into();
+        step.claim_adapter = Some(DEFI_EXIT_ADAPTER_AAVE_V3_WITHDRAW.into());
+
+        let evidence = defi_expected_output_evidence(
+            &step,
+            "0x00000000000000000000000000000000000000000000000000000000000f0000",
+        );
+
+        assert_eq!(evidence, vec!["expected_assets_out_hex=0xf0000"]);
+    }
+
+    #[test]
+    fn defi_expected_assets_evidence_records_erc4626_zero_word() {
+        let mut step = sample_step("0xf4240");
+        step.action = "exit_defi_position".into();
+        step.claim_adapter = Some(DEFI_EXIT_ADAPTER_ERC4626_REDEEM.into());
+
+        let evidence = defi_expected_output_evidence(
+            &step,
+            "0x0000000000000000000000000000000000000000000000000000000000000000",
+        );
+
+        assert_eq!(evidence, vec!["expected_assets_out_hex=0x0"]);
+    }
+
+    #[test]
+    fn defi_expected_assets_evidence_records_lido_wsteth_unwrap_single_word() {
+        let mut step = sample_step("0xf4240");
+        step.action = "exit_defi_position".into();
+        step.claim_adapter = Some(DEFI_EXIT_ADAPTER_LIDO_WSTETH_UNWRAP.into());
+
+        let evidence = defi_expected_output_evidence(
+            &step,
+            "0x00000000000000000000000000000000000000000000000000000000000f5000",
+        );
+
+        assert_eq!(evidence, vec!["expected_assets_out_hex=0xf5000"]);
+    }
+
+    #[test]
+    fn defi_expected_assets_evidence_records_uniswap_v2_two_words() {
+        let mut step = sample_step("0xf4240");
+        step.action = "exit_defi_position".into();
+        step.claim_adapter = Some(DEFI_EXIT_ADAPTER_UNISWAP_V2_REMOVE_LIQUIDITY.into());
+
+        let evidence = defi_expected_output_evidence(
+            &step,
+            &format!(
+                "{}{}",
+                abi_word_without_prefix(0x16e360),
+                abi_word_without_prefix(0x2dc6c0)
+            ),
+        );
+
+        assert_eq!(
+            evidence,
+            vec![
+                "expected_amount0_out_hex=0x16e360",
+                "expected_amount1_out_hex=0x2dc6c0"
+            ]
+        );
+    }
+
+    #[test]
+    fn defi_expected_assets_evidence_ignores_malformed_or_unsupported_results() {
+        let mut step = sample_step("0xf4240");
+        step.action = "exit_defi_position".into();
+        step.claim_adapter = Some(DEFI_EXIT_ADAPTER_ERC4626_REDEEM.into());
+        assert!(defi_expected_output_evidence(&step, "0xf0000").is_empty());
+        assert_eq!(
+            defi_expected_output_evidence(
+                &step,
+                "0x00000000000000000000000000000000000000000000000000000000000f000g",
+            ),
+            Vec::<String>::new()
+        );
+
+        step.claim_adapter = Some("unsupported-adapter".into());
+        assert_eq!(
+            defi_expected_output_evidence(
+                &step,
+                "0x00000000000000000000000000000000000000000000000000000000000f0000",
+            ),
+            Vec::<String>::new()
+        );
+
+        step.action = "sweep_erc20".into();
+        step.claim_adapter = Some(DEFI_EXIT_ADAPTER_AAVE_V3_WITHDRAW.into());
+        assert_eq!(
+            defi_expected_output_evidence(
+                &step,
+                "0x00000000000000000000000000000000000000000000000000000000000f0000",
+            ),
+            Vec::<String>::new()
+        );
+    }
+
+    fn abi_word_without_prefix(value: u64) -> String {
+        format!("{value:064x}")
     }
 
     #[test]

@@ -266,6 +266,15 @@
               </div>
               <p class="helper-text hidden" id="wizLinkageChoiceStatus"></p>
             </div>
+            <div class="trust-point">
+              <div class="tp-head">Enable Merkle claim execution (optional)</div>
+              <div class="tp-body">Off by default. Turning this on does NOT execute anything by itself: a claim can only run when it uses the audited merkle-distributor-v1 adapter, its simulation passed, you marked the claim contract trusted (or reviewed) in the risk catalog, and you explicitly approve the step. All other claim types stay review-only. You can change this anytime in Treasury policy.</div>
+              <div class="form-row">
+                <button class="btn-primary" data-action="wizEnableClaimExecution">Enable claim execution</button>
+                <button class="btn-ghost" data-action="wizDeclineClaimExecution">Decide later</button>
+              </div>
+              <p class="helper-text hidden" id="wizClaimExecutionChoiceStatus"></p>
+            </div>
           </div>
         </div>
 
@@ -409,8 +418,13 @@
             <input type="checkbox" id="treasuryPolicyBlockLinkage">
             Block cross-party linkage (fail-closed)
           </label>
+          <label class="checkbox-row">
+            <input type="checkbox" id="treasuryPolicyAllowClaimExec">
+            Allow Merkle claim execution (default off)
+          </label>
         </div>
         <p class="field-hint">Scope: blocks when different payers would sweep to the SAME destination. It does NOT cover gas-funding linkage, amount/timing correlation, downstream re-merging of per-party destinations, or multi-hop flows &mdash; keep per-party destinations separate.</p>
+        <p class="field-hint">Claim execution stays blocked unless ALL of these hold: this policy is enabled, the claim uses the merkle-distributor-v1 adapter, its simulation passed, the claim contract is marked trusted in the risk catalog (or carries a claim_execution_reviewed note), and you explicitly approve the step. Other claim types stay review/export-only. A claim that reverts at execution will require operator action and is never auto-retried, because a reverted claim may have consumed its proof.</p>
         <textarea id="treasuryPolicyDestinations" placeholder="Allowed destinations, one per line: 0xADDRESS or 0xADDRESS:label"></textarea>
         <div class="form-row">
           <input type="text" id="treasuryPolicyMaxStepEth" placeholder="Max per-step native (ETH, optional)">
@@ -753,6 +767,7 @@
         <div class="form-row">
           <input type="number" id="chainProfileFinalityBlocks" placeholder="Finality blocks" class="input-mid">
           <input type="text" id="chainProfilePermit2Address" placeholder="Permit2 override (optional)">
+          <input type="text" id="chainProfileUniswapV2Router" placeholder="Uniswap v2 router (optional)">
           <button class="btn-primary" data-action="upsertChainProfile">Save Chain</button>
         </div>
         <div id="chainProfileList"></div>

@@ -1,4 +1,5 @@
 use super::*;
+use crate::validation::Validate;
 
 fn roundtrip_test<T: Serialize + for<'de> Deserialize<'de> + PartialEq + std::fmt::Debug>(
     value: T,
@@ -979,12 +980,41 @@ fn test_chain_profile_upsert_request_roundtrip() {
         finality_blocks: Some(12),
         dormancy_block_window: Some(crate::DEFAULT_DORMANCY_BLOCK_WINDOW),
         permit2_address: Some("0x000000000022d473030f116ddee9f6b43ac78ba3".to_string()),
+        uniswap_v2_router_address: Some("0xdead100e2000000000000000000000000000cccc".to_string()),
         explorer_url: Some("https://basescan.org".to_string()),
         capabilities: vec!["native".to_string(), "erc20".to_string()],
         enabled: Some(true),
         builtin: None,
     };
     roundtrip_test(req);
+}
+
+#[test]
+fn test_chain_profile_upsert_validates_uniswap_v2_router_address() {
+    let mut req = ChainProfileUpsertRequest {
+        name: "custom-l2".to_string(),
+        chain_family: "evm".to_string(),
+        chain_id: Some(7777),
+        provider_profile: Some("l2".to_string()),
+        native_symbol: Some("ETH".to_string()),
+        native_decimals: Some(18),
+        finality_blocks: Some(12),
+        dormancy_block_window: Some(crate::DEFAULT_DORMANCY_BLOCK_WINDOW),
+        permit2_address: None,
+        uniswap_v2_router_address: Some("0xdead100e2000000000000000000000000000cccc".to_string()),
+        explorer_url: None,
+        capabilities: Vec::new(),
+        enabled: Some(true),
+        builtin: None,
+    };
+
+    req.validate().unwrap();
+    req.uniswap_v2_router_address = Some("not-an-address".to_string());
+    assert!(
+        req.validate()
+            .unwrap_err()
+            .contains("uniswap_v2_router_address")
+    );
 }
 
 #[test]
@@ -1246,6 +1276,7 @@ fn test_treasury_policy_update_request_full() {
         require_simulation: Some(false),
         allow_raw_digest_signing: Some(true),
         block_cross_party_linkage: Some(true),
+        allow_claim_execution: Some(true),
         simulation_freshness_secs: Some(900),
         hot_floor_wei_hex: Some("0xde0b6b3a7640000".to_string()),
         hot_target_wei_hex: Some("0xde0b6b3a7640000".to_string()),
@@ -1263,6 +1294,7 @@ fn test_treasury_policy_update_request_minimal() {
         require_simulation: None,
         allow_raw_digest_signing: None,
         block_cross_party_linkage: None,
+        allow_claim_execution: None,
         simulation_freshness_secs: None,
         hot_floor_wei_hex: None,
         hot_target_wei_hex: None,

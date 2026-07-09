@@ -132,6 +132,11 @@ pub(super) fn plan_step_for_holding(
         claim_adapter: holding.claim_adapter.clone(),
         claim_index_hex: holding.claim_index_hex.clone(),
         claim_proof: holding.claim_proof.clone(),
+        exit_token0_address: None,
+        exit_token1_address: None,
+        exit_amount0_min_hex: None,
+        exit_amount1_min_hex: None,
+        exit_deadline_unix: None,
         amount_hex: holding.amount_hex.clone(),
         destination_address,
         signer_status,
@@ -156,6 +161,10 @@ pub(super) fn assign_step_ordering(steps: &mut [ConsolidationPlanStep]) {
 }
 
 fn push_claim_reward_blockers(holding: &WalletAssetHolding, blockers: &mut Vec<String>) {
+    // Claim execution starts disabled at generation: fresh steps are never
+    // simulated or approved, so W5 cannot pass here. claim_gate::refresh_claim_execution_blocker
+    // is the only code allowed to remove this blocker. W7.3 queue execution
+    // must mark reverted claims operator_action_required and never auto-retry.
     if holding.protocol_address.is_none() {
         blockers.push("missing_claim_contract".into());
     }
@@ -796,6 +805,7 @@ mod tests {
             require_simulation: true,
             allow_raw_digest_signing: false,
             block_cross_party_linkage: false,
+            allow_claim_execution: false,
             simulation_freshness_secs: 900,
             hot_floor_wei_hex: floor_hex.into(),
             hot_target_wei_hex: target_hex.into(),
@@ -1053,6 +1063,26 @@ mod tests {
         );
         assert!(step.blockers.contains(&"claim_execution_disabled".into()));
         assert!(!step.blockers.contains(&"requires_protocol_adapter".into()));
+    }
+
+    #[test]
+    fn eligible_merkle_claim_without_policy_optin_keeps_exact_execution_blocker() {
+        let mut holding = sample_holding("airdrop", "claim-candidate:airdrop:op:list", None);
+        holding.protocol_address = Some("0x1111111111111111111111111111111111111111".into());
+        holding.claim_adapter = Some(CLAIM_ADAPTER_MERKLE_DISTRIBUTOR_V1.into());
+        holding.claim_index_hex = Some("0x7".into());
+        holding.claim_proof = vec![
+            format!("0x{}", "11".repeat(32)),
+            format!("0x{}", "22".repeat(32)),
+        ];
+
+        let step = plan_step_for_holding(&holding, None, "available");
+
+        assert_eq!(step.blockers, vec!["claim_execution_disabled".to_string()]);
+        assert_eq!(step.status, WalletPlanStepStatus::Blocked);
+        assert_eq!(step.simulation_status, WalletSimulationStatus::Required);
+        assert_eq!(step.risk_level, "blocked");
+        assert!(!step.approved);
     }
 
     #[test]

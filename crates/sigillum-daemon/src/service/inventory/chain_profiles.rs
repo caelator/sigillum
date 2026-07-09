@@ -87,6 +87,11 @@ impl SigillumService {
             .and_then(trimmed_optional)
             .map(|address| normalize_address(&address))
             .transpose()?;
+        let uniswap_v2_router_address = body
+            .uniswap_v2_router_address
+            .and_then(trimmed_optional)
+            .map(|address| normalize_address(&address))
+            .transpose()?;
         let mut profile = ChainProfile {
             name: name.clone(),
             chain_family: trimmed_required("chain_family", &body.chain_family)?,
@@ -106,6 +111,7 @@ impl SigillumService {
                 .unwrap_or_default(),
             dormancy_block_window,
             permit2_address,
+            uniswap_v2_router_address,
             explorer_url: body.explorer_url.and_then(trimmed_optional),
             capabilities: unique_strings(
                 body.capabilities.into_iter().filter_map(trimmed_optional),

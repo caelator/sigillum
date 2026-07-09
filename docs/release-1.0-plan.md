@@ -1484,8 +1484,8 @@ Phase W — Wallet-management completion
 - [x] W3.3 local token registry import
 - [x] W3.4 NFT metadata cache + local spam heuristics
 - [x] W3.5 on-chain last-activity signals
-- [ ] W4 DeFi exit adapters: ERC-4626, UniV2 LP, Lido unwrap (Aave v3 exists)
-- [ ] W5 Merkle claim execution enablement
+- [x] W4 DeFi exit adapters: ERC-4626, UniV2 LP, Lido unwrap (Aave v3 exists)
+- [x] W5 Merkle claim execution enablement
 - [ ] W6.1 fund_gas steps with linkage rule
 - [x] W6.2 dynamic fees in planning/preflight
 - [x] W6.3 policy-driven hot floor/refill
@@ -1664,3 +1664,26 @@ Phase H — Ship
   ignores removed from `.cargo/audit.toml` + `deny.toml` after
   `cargo update` reached quick-xml 0.41.0 (audit + deny green with empty
   ignore lists).
+- 2026-07-09 W4 f014959/b3057cb/b3257be: D-11 exit adapter set complete —
+  `erc4626-redeem` (maxRedeem/convertToAssets detection, redeem exit,
+  expected-assets-out evidence), `lido-wsteth-unwrap` (unwrap only, stETH
+  surfaces as review_asset per D-11), `uniswap-v2-remove-liquidity`
+  (dependency-ordered approve→removeLiquidity via W6.4, plan-time
+  amountMins from reserves with 0.5% haircut, per-chain operator-supplied
+  router, no hardcode). Each adapter: detection, preflight-pass,
+  preflight-revert→blocked, gas-shortfall tests; no-adapter positions
+  keep the review_asset fallback.
+- 2026-07-09 W5 393d7fd: `allow_claim_execution` policy opt-in (default
+  false, wallet-inventory schema v16) gating `claim_execution_disabled`
+  behind policy enabled + merkle-distributor-v1 + simulation passed +
+  trusted-or-reviewed claim contract + step approval; per-gate negative
+  tests plus a policy-off byte-identical regression; gate re-evaluated
+  fail-closed at approval and after every simulation; W7.3 revert rule
+  (operator_action_required — proof may be consumed) documented for the
+  execution phase.
+- 2026-07-09 Wave 6 integrated on wave/6-adapters-claims: both branches'
+  independent v15→v16 store bumps collapsed into one v16 (serde-default
+  envelope; both legacy-load tests pass); simulation.rs import union;
+  claim_gate fixture gained W4's exit_* fields; full targeted battery
+  green (315 daemon unit tests + all integration suites, UI 56/56,
+  architecture/fmt/clippy clean).

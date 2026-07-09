@@ -901,6 +901,9 @@ impl Validate for crate::request::ChainProfileUpsertRequest {
         if let Some(permit2_address) = &self.permit2_address {
             check_eth_address("permit2_address", permit2_address)?;
         }
+        if let Some(uniswap_v2_router_address) = &self.uniswap_v2_router_address {
+            check_eth_address("uniswap_v2_router_address", uniswap_v2_router_address)?;
+        }
         check_optional_len("explorer_url", &self.explorer_url, MAX_RPC_URL)?;
         check_vec_items_len("capabilities", &self.capabilities, MAX_LABEL)?;
         if self.builtin == Some(true) {

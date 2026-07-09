@@ -117,8 +117,15 @@ Required discovery classes:
   local risk findings. The risk engine uses the claim contract as the review
   subject and applies local risk-catalog overrides. Candidates with
   `merkle-distributor-v1` evidence can be simulated with provider-backed
-  `eth_call`, but claim execution remains blocked until an explicit execution
-  adapter and operator approval are added.
+  `eth_call`, and claim execution enablement is now implemented as a
+  fail-closed policy opt-in: `TreasuryPolicy.allow_claim_execution`, default
+  off. That opt-in clears the `claim_execution_disabled` blocker only for
+  `merkle-distributor-v1` claims whose simulation passed, whose claim contract
+  is marked trusted in the local risk catalog (or carries an explicit
+  `claim_execution_reviewed` note), and which the operator explicitly approves.
+  The queue execution adapter itself remains future work, and a claim that
+  reverts at execution must surface as `operator_action_required` and is never
+  auto-retried because the proof may be consumed.
 - Allowance and approval discovery, including unlimited ERC-20 approvals, NFT
   operator approvals, known-drainer spenders, and revoke recommendations.
   Bounded ERC-20 allowance probes and NFT operator-approval probes are
@@ -362,14 +369,20 @@ The CLI should have parity for automation:
     batches. This creates auditable execution evidence for native/ERC-20/NFT
     sweeps and approval revokes while keeping direct signing and queue
     execution disabled until signer-specific policy is implemented.
-6. DeFi position adapters. The first implemented slice records
-   operator-configured ERC-20 receipt/share token probes as protocol holdings.
-   Protocol-specific exit adapters, reward accounting, lockup metadata, and
-   valuation remain future work.
+6. DeFi position adapters. The D-11 exit adapter set is now complete: Aave v3
+   withdraw, ERC-4626 redeem, Lido wstETH unwrap, and Uniswap v2 LP
+   `removeLiquidity` exits are implemented. The Uniswap v2 adapter expands LP
+   exits into dependency-ordered `approve` plus `removeLiquidity` steps, derives
+   minimum token amounts from pair reserves at plan time, and requires
+   per-chain operator-configured router addresses. Positions matching no
+   supported adapter remain review-only.
 7. Airdrop/reward discovery with strict claim risk gates. The first trusted
    candidate-ingestion, claim-contract risk-finding, and standard Merkle claim
-   simulation slices are implemented; verified source adapters, richer external
-   risk feeds, and explicit claim execution adapters remain future work.
+   simulation slices are implemented; the enablement gate (policy opt-in,
+   simulation, risk-catalog review, and explicit approval) is implemented for
+   `merkle-distributor-v1`, while verified source adapters, richer external risk
+   feeds, the execution adapter, and revert-to-`operator_action_required`
+   handling remain future work.
 8. Consolidation planner with broader dry-run simulation for dynamic fee
    estimation, gas top-ups, exits, claims, swaps, and treasury routing. Hot-wallet
    refill routing is now policy-driven through

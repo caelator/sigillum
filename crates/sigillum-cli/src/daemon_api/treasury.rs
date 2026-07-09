@@ -18,6 +18,7 @@ pub(super) fn cmd_api_treasury(args: &[String]) {
     const POLICY_UPDATE_USAGE: &str = "sigillum api treasury policy-update <--enabled|--disabled> \
         [--destination 0xADDR[:label]]... [--max-step-wei-hex 0x..] [--max-plan-wei-hex 0x..] \
         [--require-simulation|--no-require-simulation] [--block-cross-party-linkage <true|false>] \
+        [--allow-claim-execution <true|false>] \
         [--simulation-freshness-secs <SECS>] [--hot-floor-wei-hex 0x..] \
         [--hot-target-wei-hex 0x..]";
     const PARTIES_USAGE: &str = "sigillum api treasury parties <list|create|update|delete> \
@@ -67,6 +68,15 @@ pub(super) fn cmd_api_treasury(args: &[String]) {
                         process::exit(1);
                     }
                 });
+            let allow_claim_execution =
+                parse_flag(args, "--allow-claim-execution").map(|value| match value.as_str() {
+                    "true" => true,
+                    "false" => false,
+                    _ => {
+                        eprintln!("Usage: {POLICY_UPDATE_USAGE}");
+                        process::exit(1);
+                    }
+                });
             let request = TreasuryPolicyUpdateRequest {
                 enabled,
                 allowed_destinations,
@@ -83,6 +93,7 @@ pub(super) fn cmd_api_treasury(args: &[String]) {
                     "--disallow-raw-digest-signing",
                 ),
                 block_cross_party_linkage,
+                allow_claim_execution,
                 simulation_freshness_secs: parse_u64_flag(args, "--simulation-freshness-secs"),
                 hot_floor_wei_hex: parse_flag(args, "--hot-floor-wei-hex"),
                 hot_target_wei_hex: parse_flag(args, "--hot-target-wei-hex"),

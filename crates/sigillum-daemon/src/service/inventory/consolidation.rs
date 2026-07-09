@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 use sigillum_api::{
     ConsolidationPlan, ConsolidationPlanApproveRequest, ConsolidationPlanGenerateRequest,
     ConsolidationPlanListResponse, ConsolidationPlanMutationResponse, WalletPlanStatus,
-    WalletPlanStepStatus, WalletSimulationStatus,
+    WalletPlanStepAction, WalletPlanStepStatus, WalletSimulationStatus,
 };
 
 use crate::audit_log::AuditEventSpec;
@@ -11,6 +11,7 @@ use crate::inventory::WalletInventoryState;
 
 use super::super::helpers::{now_unix, random_id};
 use super::super::{ServiceError, ServiceResult, SigillumService};
+use super::claim_gate::{claim_execution_gate_satisfied, refresh_claim_execution_blocker};
 use super::planner::{
     analyze_plan_linkage, apply_linkage_blockers, apply_policy_blockers_to_step,
     assign_step_ordering, build_plan_steps, plan_policy_violations, summarize_plan_steps,
@@ -47,6 +48,9 @@ impl SigillumService {
             return Err(ServiceError::bad_request("chain_id must be greater than 0"));
         }
         let steps = build_plan_steps(&state, &registry, &body, &destination_address);
+        let steps = self
+            .expand_defi_exit_steps(&registry.evm_providers, &state.chain_profiles, steps)
+            .await;
         let mut steps_by_chain = BTreeMap::<u64, Vec<_>>::new();
         for step in steps {
             steps_by_chain.entry(step.chain_id).or_default().push(step);
@@ -137,6 +141,7 @@ impl SigillumService {
         let _guard = self.state.operation_guard().await;
         let mut state = load_inventory_state(&self.state.base_dir)?;
         let policy = state.treasury_policy.clone();
+        let risk_catalog = state.risk_catalog.clone();
         let linkage_state = if policy
             .as_ref()
             .map(|policy| policy.block_cross_party_linkage)
@@ -178,9 +183,8 @@ impl SigillumService {
         }
         let approve_all = body.step_ids.is_empty();
         for step in &mut plan.steps {
-            if step.status == WalletPlanStepStatus::ReviewRequired
-                && (approve_all || body.step_ids.iter().any(|id| id == &step.id))
-            {
+            let requested = approve_all || body.step_ids.iter().any(|id| id == &step.id);
+            if step.status == WalletPlanStepStatus::ReviewRequired && requested {
                 // Approval is the last review gate, so candidates are
                 // re-checked against the CURRENT policy: a step planned
                 // before a policy change must not slip through approval.
@@ -192,6 +196,26 @@ impl SigillumService {
                 }
                 step.approved = true;
                 step.status = WalletPlanStepStatus::Approved;
+            } else if step.status == WalletPlanStepStatus::Blocked
+                && requested
+                && step.action == WalletPlanStepAction::ClaimReward
+                && !step.blockers.is_empty()
+                && step
+                    .blockers
+                    .iter()
+                    .all(|blocker| blocker == "claim_execution_disabled")
+            {
+                // W7.3: reverted claims become operator_action_required; see claim_gate.rs.
+                let mut approval_candidate = step.clone();
+                approval_candidate.approved = true;
+                if claim_execution_gate_satisfied(
+                    policy.as_ref(),
+                    &risk_catalog,
+                    &approval_candidate,
+                ) {
+                    step.approved = true;
+                    refresh_claim_execution_blocker(policy.as_ref(), &risk_catalog, step);
+                }
             }
         }
         plan.updated_at_unix = now_unix();
