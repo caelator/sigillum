@@ -1561,6 +1561,404 @@ async fn evm_provider_routes_and_stealth_send_flow_work_with_internal_auth_resol
 }
 
 #[tokio::test]
+async fn wallet_claim_execution_optin_with_all_gates_unblocks_merkle_claim() {
+    let dir = TempDir::new().unwrap();
+    let (addr, handle) = spawn_daemon(dir.path().to_path_buf()).await;
+    let (rpc_addr, rpc_handle) = spawn_mock_evm_provider().await;
+    let client = reqwest::Client::new();
+    let token = init_default_compartment(&client, addr).await;
+
+    post_json(
+        &client,
+        addr,
+        "/api/api-keys/set",
+        json!({ "key": "alchemy", "value": "rpc-test-token" }),
+        Some(&token),
+    )
+    .await;
+    post_json(
+        &client,
+        addr,
+        "/api/profiles/evm/upsert",
+        json!({
+            "name": "mainnet",
+            "rpc_url": format!("http://{rpc_addr}/"),
+            "auth_token_key": "alchemy",
+            "chain_id": 1,
+            "max_priority_fee_per_gas_hex": "0x59682f00",
+            "max_fee_per_gas_hex": "0x77359400",
+            "native_gas_limit": 21000,
+            "erc20_gas_limit": 65000,
+        }),
+        Some(&token),
+    )
+    .await;
+    let seed = post_json(
+        &client,
+        addr,
+        "/api/profiles/eth-seed/upsert",
+        json!({
+            "name": "seed-main",
+            "label": "Seed main",
+            "mnemonic": "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about",
+            "project_account": 0,
+            "provider_profile": "mainnet",
+        }),
+        Some(&token),
+    )
+    .await;
+    assert_eq!(seed.status(), StatusCode::OK);
+
+    let scan = post_json(
+        &client,
+        addr,
+        "/api/inventory/scan/evm",
+        json!({
+            "wallet_family": "eth-seed",
+            "wallet_profile": "seed-main",
+            "provider_profile": "mainnet",
+            "gap_limit": 1,
+            "max_index": 0,
+            "discover_claim_candidates": true,
+            "claim_candidate_probes": [{
+                "kind": "airdrop",
+                "protocol": "optimism",
+                "claimant_address": "0x9858effd232b4033e47d90003d41ec34ecaeda94",
+                "claim_contract_address": "0x1111111111111111111111111111111111111111",
+                "asset_address": "0x4200000000000000000000000000000000000042",
+                "amount_hex": "0xf4240",
+                "source_label": "op-token-list",
+                "claim_adapter": "merkle-distributor-v1",
+                "claim_index_hex": "0x7",
+                "claim_proof": [
+                    format!("0x{}", "11".repeat(32)),
+                    format!("0x{}", "22".repeat(32))
+                ]
+            }],
+            "claim_candidate_limit": 4
+        }),
+        Some(&token),
+    )
+    .await;
+    let scan_status = scan.status();
+    let scan_json: serde_json::Value = scan.json().await.unwrap();
+    assert_eq!(scan_status, StatusCode::OK, "scan response: {scan_json}");
+
+    let risk = post_json(
+        &client,
+        addr,
+        "/api/risk/catalog/upsert",
+        json!({
+            "address": "0x1111111111111111111111111111111111111111",
+            "risk_level": "trusted"
+        }),
+        Some(&token),
+    )
+    .await;
+    assert_eq!(risk.status(), StatusCode::OK);
+
+    let policy = post_json(
+        &client,
+        addr,
+        "/api/treasury/policy/update",
+        json!({
+            "enabled": true,
+            "allow_claim_execution": true,
+            "allowed_destinations": [{
+                "address": "0x9999999999999999999999999999999999999999",
+                "label": "cold-treasury"
+            }]
+        }),
+        Some(&token),
+    )
+    .await;
+    assert_eq!(policy.status(), StatusCode::OK);
+
+    let plan = post_json(
+        &client,
+        addr,
+        "/api/plans/consolidation/generate",
+        json!({
+            "destination_address": "0x9999999999999999999999999999999999999999",
+        }),
+        Some(&token),
+    )
+    .await;
+    assert_eq!(plan.status(), StatusCode::OK);
+    let plan_json: serde_json::Value = plan.json().await.unwrap();
+    let generated_claim = plan_json["plan"]["steps"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|step| step["action"] == "claim_reward")
+        .unwrap_or_else(|| panic!("missing claim step in {plan_json}"));
+    assert_eq!(generated_claim["status"], "blocked");
+    assert_eq!(generated_claim["simulation_status"], "required");
+    assert_eq!(
+        generated_claim["blockers"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|blocker| blocker.as_str().unwrap())
+            .collect::<Vec<_>>(),
+        vec!["claim_execution_disabled"]
+    );
+
+    let simulate = post_json(
+        &client,
+        addr,
+        "/api/plans/consolidation/simulate",
+        json!({ "plan_id": plan_json["plan"]["id"].as_str().unwrap() }),
+        Some(&token),
+    )
+    .await;
+    let simulate_status = simulate.status();
+    let simulate_json: serde_json::Value = simulate.json().await.unwrap();
+    assert_eq!(
+        simulate_status,
+        StatusCode::OK,
+        "simulate response: {simulate_json}"
+    );
+    let simulated_claim = simulate_json["plan"]["steps"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|step| step["action"] == "claim_reward")
+        .unwrap_or_else(|| panic!("missing simulated claim step in {simulate_json}"));
+    assert_eq!(simulated_claim["simulation_status"], "passed");
+    assert_eq!(simulated_claim["status"], "blocked");
+    assert_eq!(
+        simulated_claim["blockers"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|blocker| blocker.as_str().unwrap())
+            .collect::<Vec<_>>(),
+        vec!["claim_execution_disabled"]
+    );
+
+    let approve = post_json(
+        &client,
+        addr,
+        "/api/plans/consolidation/approve",
+        json!({ "plan_id": plan_json["plan"]["id"].as_str().unwrap() }),
+        Some(&token),
+    )
+    .await;
+    let approve_status = approve.status();
+    let approve_json: serde_json::Value = approve.json().await.unwrap();
+    assert_eq!(
+        approve_status,
+        StatusCode::OK,
+        "approve response: {approve_json}"
+    );
+    let approved_claim = approve_json["plan"]["steps"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|step| step["action"] == "claim_reward")
+        .unwrap_or_else(|| panic!("missing approved claim step in {approve_json}"));
+    assert_eq!(approved_claim["approved"], true);
+    assert_eq!(approved_claim["status"], "approved");
+    assert!(
+        approved_claim["blockers"]
+            .as_array()
+            .is_none_or(|blockers| blockers.is_empty())
+    );
+    assert_eq!(approved_claim["simulation_status"], "passed");
+    assert!(
+        approve_json["plan"]["summary"]["executable_steps"]
+            .as_u64()
+            .unwrap()
+            >= 1
+    );
+
+    handle.abort();
+    rpc_handle.abort();
+}
+
+#[tokio::test]
+async fn wallet_claim_execution_optin_without_reviewed_claim_contract_keeps_blocker() {
+    let dir = TempDir::new().unwrap();
+    let (addr, handle) = spawn_daemon(dir.path().to_path_buf()).await;
+    let (rpc_addr, rpc_handle) = spawn_mock_evm_provider().await;
+    let client = reqwest::Client::new();
+    let token = init_default_compartment(&client, addr).await;
+
+    post_json(
+        &client,
+        addr,
+        "/api/api-keys/set",
+        json!({ "key": "alchemy", "value": "rpc-test-token" }),
+        Some(&token),
+    )
+    .await;
+    post_json(
+        &client,
+        addr,
+        "/api/profiles/evm/upsert",
+        json!({
+            "name": "mainnet",
+            "rpc_url": format!("http://{rpc_addr}/"),
+            "auth_token_key": "alchemy",
+            "chain_id": 1,
+            "max_priority_fee_per_gas_hex": "0x59682f00",
+            "max_fee_per_gas_hex": "0x77359400",
+            "native_gas_limit": 21000,
+            "erc20_gas_limit": 65000,
+        }),
+        Some(&token),
+    )
+    .await;
+    let seed = post_json(
+        &client,
+        addr,
+        "/api/profiles/eth-seed/upsert",
+        json!({
+            "name": "seed-main",
+            "label": "Seed main",
+            "mnemonic": "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about",
+            "project_account": 0,
+            "provider_profile": "mainnet",
+        }),
+        Some(&token),
+    )
+    .await;
+    assert_eq!(seed.status(), StatusCode::OK);
+
+    let scan = post_json(
+        &client,
+        addr,
+        "/api/inventory/scan/evm",
+        json!({
+            "wallet_family": "eth-seed",
+            "wallet_profile": "seed-main",
+            "provider_profile": "mainnet",
+            "gap_limit": 1,
+            "max_index": 0,
+            "discover_claim_candidates": true,
+            "claim_candidate_probes": [{
+                "kind": "airdrop",
+                "protocol": "optimism",
+                "claimant_address": "0x9858effd232b4033e47d90003d41ec34ecaeda94",
+                "claim_contract_address": "0x1111111111111111111111111111111111111111",
+                "asset_address": "0x4200000000000000000000000000000000000042",
+                "amount_hex": "0xf4240",
+                "source_label": "op-token-list",
+                "claim_adapter": "merkle-distributor-v1",
+                "claim_index_hex": "0x7",
+                "claim_proof": [
+                    format!("0x{}", "11".repeat(32)),
+                    format!("0x{}", "22".repeat(32))
+                ]
+            }],
+            "claim_candidate_limit": 4
+        }),
+        Some(&token),
+    )
+    .await;
+    let scan_status = scan.status();
+    let scan_json: serde_json::Value = scan.json().await.unwrap();
+    assert_eq!(scan_status, StatusCode::OK, "scan response: {scan_json}");
+
+    let policy = post_json(
+        &client,
+        addr,
+        "/api/treasury/policy/update",
+        json!({
+            "enabled": true,
+            "allow_claim_execution": true,
+            "allowed_destinations": [{
+                "address": "0x9999999999999999999999999999999999999999",
+                "label": "cold-treasury"
+            }]
+        }),
+        Some(&token),
+    )
+    .await;
+    assert_eq!(policy.status(), StatusCode::OK);
+
+    let plan = post_json(
+        &client,
+        addr,
+        "/api/plans/consolidation/generate",
+        json!({
+            "destination_address": "0x9999999999999999999999999999999999999999",
+        }),
+        Some(&token),
+    )
+    .await;
+    assert_eq!(plan.status(), StatusCode::OK);
+    let plan_json: serde_json::Value = plan.json().await.unwrap();
+
+    let simulate = post_json(
+        &client,
+        addr,
+        "/api/plans/consolidation/simulate",
+        json!({ "plan_id": plan_json["plan"]["id"].as_str().unwrap() }),
+        Some(&token),
+    )
+    .await;
+    let simulate_status = simulate.status();
+    let simulate_json: serde_json::Value = simulate.json().await.unwrap();
+    assert_eq!(
+        simulate_status,
+        StatusCode::OK,
+        "simulate response: {simulate_json}"
+    );
+
+    let approve = post_json(
+        &client,
+        addr,
+        "/api/plans/consolidation/approve",
+        json!({ "plan_id": plan_json["plan"]["id"].as_str().unwrap() }),
+        Some(&token),
+    )
+    .await;
+    let approve_status = approve.status();
+    let approve_json: serde_json::Value = approve.json().await.unwrap();
+    assert_eq!(
+        approve_status,
+        StatusCode::OK,
+        "approve response: {approve_json}"
+    );
+    let approved_claim = approve_json["plan"]["steps"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|step| step["action"] == "claim_reward")
+        .unwrap_or_else(|| panic!("missing claim step in {approve_json}"));
+    assert_eq!(approved_claim["status"], "blocked");
+    assert!(!approved_claim["approved"].as_bool().unwrap_or(false));
+    assert_eq!(
+        approved_claim["blockers"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|blocker| blocker.as_str().unwrap())
+            .collect::<Vec<_>>(),
+        vec!["claim_execution_disabled"]
+    );
+    let executable_claims = approve_json["plan"]["steps"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|step| {
+            step["action"] == "claim_reward"
+                && step["status"] == "approved"
+                && step["simulation_status"] == "passed"
+                && step["blockers"]
+                    .as_array()
+                    .is_none_or(|blockers| blockers.is_empty())
+        })
+        .count();
+    assert_eq!(executable_claims, 0);
+
+    handle.abort();
+    rpc_handle.abort();
+}
+
+#[tokio::test]
 async fn xpub_profiles_export_and_derive_receive_addresses() {
     let dir = TempDir::new().unwrap();
     let (addr, handle) = spawn_daemon(dir.path().to_path_buf()).await;

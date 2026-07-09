@@ -1,4 +1,9 @@
-import type { ActiveCompartment, StatusResponse } from "../contracts";
+import type {
+  ActiveCompartment,
+  StatusResponse,
+  TreasuryPolicy,
+  TreasuryPolicyUpdateRequest,
+} from "../contracts";
 import { clearFields } from "../render/forms";
 import {
   setInlineInfoById,
@@ -578,12 +583,48 @@ export function createSetupWizard(deps: SetupWizardDeps) {
     status.classList.remove("hidden");
   }
 
+  function showClaimExecutionChoiceStatus(message: string): void {
+    const status = document.getElementById("wizClaimExecutionChoiceStatus");
+    if (!status) return;
+    status.textContent = message;
+    status.classList.remove("hidden");
+  }
+
+  function treasuryPolicyUpdateFromCurrent(
+    policy: TreasuryPolicy,
+  ): TreasuryPolicyUpdateRequest {
+    return {
+      enabled: policy.enabled,
+      allowed_destinations: policy.allowed_destinations || [],
+      max_step_native_wei_hex: policy.max_step_native_wei_hex ?? null,
+      max_plan_native_wei_hex: policy.max_plan_native_wei_hex ?? null,
+      require_simulation: policy.require_simulation,
+      block_cross_party_linkage: Boolean(policy.block_cross_party_linkage),
+      allow_claim_execution: Boolean(policy.allow_claim_execution),
+      simulation_freshness_secs: policy.simulation_freshness_secs ?? null,
+      hot_floor_wei_hex: policy.hot_floor_wei_hex ?? null,
+      hot_target_wei_hex: policy.hot_target_wei_hex ?? null,
+    };
+  }
+
+  async function fetchCurrentTreasuryPolicy(): Promise<TreasuryPolicy | null> {
+    const r = await deps.api("GET", "/api/treasury/policy");
+    if (r.error) {
+      throw new Error(String(r.error));
+    }
+    return (r.policy || null) as TreasuryPolicy | null;
+  }
+
   async function wizEnableLinkageProtection(): Promise<void> {
     try {
-      const r = await deps.api("POST", "/api/treasury/policy/update", {
-        enabled: false,
-        block_cross_party_linkage: true,
-      });
+      const policy = await fetchCurrentTreasuryPolicy();
+      const body: TreasuryPolicyUpdateRequest = policy
+        ? {
+            ...treasuryPolicyUpdateFromCurrent(policy),
+            block_cross_party_linkage: true,
+          }
+        : { enabled: false, block_cross_party_linkage: true };
+      const r = await deps.api("POST", "/api/treasury/policy/update", body);
       if (r.error) {
         deps.toast(r.error, "error");
         return;
@@ -604,6 +645,36 @@ export function createSetupWizard(deps: SetupWizardDeps) {
     deps.toast("You can enable payer-linkage protection later in Treasury policy.");
   }
 
+  async function wizEnableClaimExecution(): Promise<void> {
+    try {
+      const policy = await fetchCurrentTreasuryPolicy();
+      const body: TreasuryPolicyUpdateRequest = policy
+        ? {
+            ...treasuryPolicyUpdateFromCurrent(policy),
+            allow_claim_execution: true,
+          }
+        : { enabled: false, allow_claim_execution: true };
+      const r = await deps.api("POST", "/api/treasury/policy/update", body);
+      if (r.error) {
+        deps.toast(r.error, "error");
+        return;
+      }
+      showClaimExecutionChoiceStatus(
+        "Claim execution opt-in recorded. Claims still cannot run until the Treasury policy is enabled and each claim passes simulation, has a trusted or reviewed claim contract in the risk catalog, and is explicitly approved.",
+      );
+      deps.toast("Merkle claim execution opt-in recorded");
+    } catch (e: any) {
+      deps.toast(String(e?.message ?? e), "error");
+    }
+  }
+
+  function wizDeclineClaimExecution(): void {
+    showClaimExecutionChoiceStatus(
+      "You can enable Merkle claim execution later in Treasury policy.",
+    );
+    deps.toast("You can enable Merkle claim execution later in Treasury policy.");
+  }
+
   return {
     reset,
     updateWizardChrome,
@@ -616,7 +687,9 @@ export function createSetupWizard(deps: SetupWizardDeps) {
     wizProceedFido2,
     wizBackFromFido2Pin,
     wizAddCustomComp,
+    wizDeclineClaimExecution,
     wizDeclineLinkageProtection,
+    wizEnableClaimExecution,
     wizEnableLinkageProtection,
     wizRegisterKey,
     wizSetNewPin,

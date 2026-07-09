@@ -350,6 +350,7 @@ test("setup wizard enables payer-linkage protection from done step", async () =>
   const wizard = createSetupWizard({
     api: async (method, path, body) => {
       calls.push({ method, path, body });
+      if (path === "/api/treasury/policy") return { policy: null };
       return {};
     },
     toast: (message, type) => toasts.push({ message, type }),
@@ -362,6 +363,11 @@ test("setup wizard enables payer-linkage protection from done step", async () =>
 
   deepEqual(calls, [
     {
+      method: "GET",
+      path: "/api/treasury/policy",
+      body: undefined,
+    },
+    {
       method: "POST",
       path: "/api/treasury/policy/update",
       body: { enabled: false, block_cross_party_linkage: true },
@@ -372,6 +378,62 @@ test("setup wizard enables payer-linkage protection from done step", async () =>
   deepEqual(toasts.pop(), {
     message: "Payer-linkage protection enabled",
     type: undefined,
+  });
+});
+
+test("setup wizard preserves merkle claim opt-in when enabling payer-linkage protection", async () => {
+  const dom = installDom(["wizLinkageChoiceStatus"]);
+  dom.el("wizLinkageChoiceStatus").classList.add("hidden");
+  const existingPolicy: TreasuryPolicy = {
+    enabled: true,
+    allowed_destinations: [
+      { address: "0x2222222222222222222222222222222222222222", label: "cold" },
+    ],
+    max_step_native_wei_hex: "0x1",
+    max_plan_native_wei_hex: null,
+    hot_floor_wei_hex: "0x2",
+    hot_target_wei_hex: "0x3",
+    require_simulation: true,
+    block_cross_party_linkage: false,
+    allow_claim_execution: true,
+    simulation_freshness_secs: 120,
+    created_at_unix: 1,
+    updated_at_unix: 2,
+  };
+  const calls: Array<{ method: string; path: string; body?: any }> = [];
+
+  const wizard = createSetupWizard({
+    api: async (method, path, body) => {
+      calls.push({ method, path, body });
+      if (path === "/api/treasury/policy") return { policy: existingPolicy };
+      return {};
+    },
+    toast: () => undefined,
+    refresh: () => undefined,
+    submitNewFido2Pin: async () => undefined,
+    friendlyFidoError: (message) => String(message),
+  });
+
+  await wizard.wizEnableLinkageProtection();
+
+  const update = calls.find((call) => call.path === "/api/treasury/policy/update");
+  deepEqual(update, {
+    method: "POST",
+    path: "/api/treasury/policy/update",
+    body: {
+      enabled: true,
+      allowed_destinations: [
+        { address: "0x2222222222222222222222222222222222222222", label: "cold" },
+      ],
+      max_step_native_wei_hex: "0x1",
+      max_plan_native_wei_hex: null,
+      require_simulation: true,
+      block_cross_party_linkage: true,
+      allow_claim_execution: true,
+      simulation_freshness_secs: 120,
+      hot_floor_wei_hex: "0x2",
+      hot_target_wei_hex: "0x3",
+    },
   });
 });
 
@@ -402,6 +464,83 @@ test("setup wizard can defer payer-linkage protection without policy update", ()
   ok((dom.el("wizLinkageChoiceStatus").textContent || "").length > 0);
   deepEqual(toasts.pop(), {
     message: "You can enable payer-linkage protection later in Treasury policy.",
+    type: undefined,
+  });
+});
+
+test("setup wizard enables merkle claim execution opt-in from done step", async () => {
+  const dom = installDom(["wizClaimExecutionChoiceStatus"]);
+  dom.el("wizClaimExecutionChoiceStatus").classList.add("hidden");
+  const calls: Array<{ method: string; path: string; body?: any }> = [];
+  const toasts: Array<{ message: string; type?: string }> = [];
+
+  const wizard = createSetupWizard({
+    api: async (method, path, body) => {
+      calls.push({ method, path, body });
+      if (path === "/api/treasury/policy") return { policy: null };
+      return {};
+    },
+    toast: (message, type) => toasts.push({ message, type }),
+    refresh: () => undefined,
+    submitNewFido2Pin: async () => undefined,
+    friendlyFidoError: (message) => String(message),
+  });
+
+  await wizard.wizEnableClaimExecution();
+
+  deepEqual(calls, [
+    {
+      method: "GET",
+      path: "/api/treasury/policy",
+      body: undefined,
+    },
+    {
+      method: "POST",
+      path: "/api/treasury/policy/update",
+      body: { enabled: false, allow_claim_execution: true },
+    },
+  ]);
+  equal(dom.el("wizClaimExecutionChoiceStatus").classList.contains("hidden"), false);
+  equal(
+    dom.el("wizClaimExecutionChoiceStatus").textContent,
+    "Claim execution opt-in recorded. Claims still cannot run until the Treasury policy is enabled and each claim passes simulation, has a trusted or reviewed claim contract in the risk catalog, and is explicitly approved.",
+  );
+  deepEqual(toasts.pop(), {
+    message: "Merkle claim execution opt-in recorded",
+    type: undefined,
+  });
+});
+
+test("setup wizard can defer merkle claim execution without policy update", () => {
+  const dom = installDom(["wizClaimExecutionChoiceStatus"]);
+  dom.el("wizClaimExecutionChoiceStatus").classList.add("hidden");
+  const calls: Array<{ method: string; path: string; body?: any }> = [];
+  const toasts: Array<{ message: string; type?: string }> = [];
+
+  const wizard = createSetupWizard({
+    api: async (method, path, body) => {
+      calls.push({ method, path, body });
+      return {};
+    },
+    toast: (message, type) => toasts.push({ message, type }),
+    refresh: () => undefined,
+    submitNewFido2Pin: async () => undefined,
+    friendlyFidoError: (message) => String(message),
+  });
+
+  wizard.wizDeclineClaimExecution();
+
+  equal(
+    calls.some((call) => call.path === "/api/treasury/policy/update"),
+    false,
+  );
+  equal(dom.el("wizClaimExecutionChoiceStatus").classList.contains("hidden"), false);
+  equal(
+    dom.el("wizClaimExecutionChoiceStatus").textContent,
+    "You can enable Merkle claim execution later in Treasury policy.",
+  );
+  deepEqual(toasts.pop(), {
+    message: "You can enable Merkle claim execution later in Treasury policy.",
     type: undefined,
   });
 });
@@ -1770,6 +1909,7 @@ test("treasury policy renderer shows configured policy and empty state", () => {
     max_step_native_wei_hex: "0x" + (1500000000000000000n).toString(16),
     max_plan_native_wei_hex: null,
     require_simulation: true,
+    allow_claim_execution: true,
     created_at_unix: 1717900000,
     updated_at_unix: 1717900500,
   };
@@ -1783,6 +1923,7 @@ test("treasury policy renderer shows configured policy and empty state", () => {
   ok(html.includes("maxStep=1.5 ETH"));
   ok(html.includes("maxPlan=-"));
   ok(html.includes("requireSimulation=true"));
+  ok(html.includes("allowClaimExecution=true"));
 
   treasury.renderTreasuryPolicy(null);
   ok(
@@ -1857,6 +1998,7 @@ test("treasury policy loader prefills the form without clobbering operator edits
     "treasuryPolicyHotFloorEth",
     "treasuryPolicyHotTargetEth",
     "treasuryPolicyRequireSim",
+    "treasuryPolicyAllowClaimExec",
   ]);
   const policy: TreasuryPolicy = {
     enabled: true,
@@ -1866,6 +2008,7 @@ test("treasury policy loader prefills the form without clobbering operator edits
     max_step_native_wei_hex: "0x" + (2000000000000000000n).toString(16),
     max_plan_native_wei_hex: "0xde0b6b3a7640000",
     require_simulation: true,
+    allow_claim_execution: true,
     created_at_unix: 1,
     updated_at_unix: 2,
   };
@@ -1877,6 +2020,7 @@ test("treasury policy loader prefills the form without clobbering operator edits
   await treasury.loadTreasuryOverview();
   equal(dom.el("treasuryPolicyEnabled").checked, true);
   equal(dom.el("treasuryPolicyRequireSim").checked, true);
+  equal(dom.el("treasuryPolicyAllowClaimExec").checked, true);
   equal(
     dom.el("treasuryPolicyDestinations").value,
     "0x2222222222222222222222222222222222222222:cold",
@@ -1902,6 +2046,7 @@ test("treasury policy save validates caps and submits the parsed update request"
     "treasuryPolicyMaxStepEth",
     "treasuryPolicyMaxPlanEth",
     "treasuryPolicyRequireSim",
+    "treasuryPolicyAllowClaimExec",
   ]);
   const calls: Array<{ method: string; path: string; body?: any }> = [];
   const toasts: Array<{ message: string; type?: string }> = [];
@@ -1914,6 +2059,7 @@ test("treasury policy save validates caps and submits the parsed update request"
     max_step_native_wei_hex: "0x" + (1500000000000000000n).toString(16),
     max_plan_native_wei_hex: null,
     require_simulation: false,
+    allow_claim_execution: true,
     created_at_unix: 1,
     updated_at_unix: 2,
   };
@@ -1930,6 +2076,7 @@ test("treasury policy save validates caps and submits the parsed update request"
 
   dom.el("treasuryPolicyEnabled").checked = true;
   dom.el("treasuryPolicyRequireSim").checked = false;
+  dom.el("treasuryPolicyAllowClaimExec").checked = true;
   dom.el("treasuryPolicyDestinations").value =
     "0x2222222222222222222222222222222222222222:cold\n0x3333333333333333333333333333333333333333";
   dom.el("treasuryPolicyMaxStepEth").value = "1.5";
@@ -1959,6 +2106,7 @@ test("treasury policy save validates caps and submits the parsed update request"
       max_plan_native_wei_hex: null,
       require_simulation: false,
       block_cross_party_linkage: false,
+      allow_claim_execution: true,
     },
   });
   deepEqual(toasts.pop(), { message: "Treasury policy saved", type: undefined });
@@ -1973,6 +2121,7 @@ test("treasury policy save persists cross-party linkage block toggle", async () 
     "treasuryPolicyEnabled",
     "treasuryPolicyRequireSim",
     "treasuryPolicyBlockLinkage",
+    "treasuryPolicyAllowClaimExec",
     "treasuryPolicyDestinations",
     "treasuryPolicyMaxStepEth",
     "treasuryPolicyMaxPlanEth",
@@ -2002,6 +2151,7 @@ test("treasury policy save posts hot refill caps only when provided", async () =
     "treasuryPolicyEnabled",
     "treasuryPolicyRequireSim",
     "treasuryPolicyBlockLinkage",
+    "treasuryPolicyAllowClaimExec",
     "treasuryPolicyDestinations",
     "treasuryPolicyMaxStepEth",
     "treasuryPolicyMaxPlanEth",
@@ -2056,6 +2206,7 @@ test("treasury policy save posts simulation freshness only when provided", async
     "treasuryPolicyEnabled",
     "treasuryPolicyRequireSim",
     "treasuryPolicyBlockLinkage",
+    "treasuryPolicyAllowClaimExec",
     "treasuryPolicyDestinations",
     "treasuryPolicyMaxStepEth",
     "treasuryPolicyMaxPlanEth",

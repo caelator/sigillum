@@ -461,6 +461,7 @@ export interface TreasuryPolicy {
   hot_target_wei_hex?: string;
   require_simulation: boolean;
   block_cross_party_linkage?: boolean;
+  allow_claim_execution?: boolean;
   simulation_freshness_secs?: number;
   created_at_unix: number;
   updated_at_unix: number;
@@ -475,6 +476,7 @@ export interface TreasuryPolicyUpdateRequest {
   hot_target_wei_hex?: string | null;
   require_simulation?: boolean | null;
   block_cross_party_linkage?: boolean | null;
+  allow_claim_execution?: boolean | null;
   simulation_freshness_secs?: number | null;
 }
 

@@ -357,6 +357,8 @@ export function createTreasuryActions(deps: TreasuryActionsDeps) {
           esc(String(current.require_simulation)) +
           " · blockCrossPartyLinkage=" +
           esc(String(Boolean(current.block_cross_party_linkage))) +
+          " · allowClaimExecution=" +
+          esc(String(Boolean(current.allow_claim_execution))) +
           " · simulationFreshnessSecs=" +
           esc(String(current.simulation_freshness_secs ?? 900)) +
           " · updated=" +
@@ -385,6 +387,7 @@ export function createTreasuryActions(deps: TreasuryActionsDeps) {
             policy.hot_target_wei_hex ?? DEFAULT_HOT_REFILL_WEI_HEX,
             policy.require_simulation,
             policy.block_cross_party_linkage,
+            policy.allow_claim_execution,
             policy.simulation_freshness_secs,
           ]
         : null,
@@ -399,6 +402,10 @@ export function createTreasuryActions(deps: TreasuryActionsDeps) {
     const blockLinkageEl = input("treasuryPolicyBlockLinkage");
     if (blockLinkageEl) {
       blockLinkageEl.checked = policy ? Boolean(policy.block_cross_party_linkage) : false;
+    }
+    const allowClaimExecEl = input("treasuryPolicyAllowClaimExec");
+    if (allowClaimExecEl) {
+      allowClaimExecEl.checked = policy ? Boolean(policy.allow_claim_execution) : false;
     }
     const destinationsEl = input("treasuryPolicyDestinations");
     if (destinationsEl) {
@@ -679,6 +686,7 @@ export function createTreasuryActions(deps: TreasuryActionsDeps) {
       max_plan_native_wei_hex: maxPlanWeiHex,
       require_simulation: Boolean(input("treasuryPolicyRequireSim")?.checked),
       block_cross_party_linkage: Boolean(input("treasuryPolicyBlockLinkage")?.checked),
+      allow_claim_execution: Boolean(input("treasuryPolicyAllowClaimExec")?.checked),
     };
     if (freshnessText) {
       body.simulation_freshness_secs = freshnessSecs;

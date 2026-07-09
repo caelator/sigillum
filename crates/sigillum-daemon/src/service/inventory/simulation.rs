@@ -12,6 +12,7 @@ use crate::service::helpers::{
 };
 use crate::service::{ServiceError, ServiceResult, SigillumService};
 
+use super::claim_gate::refresh_claim_execution_blocker;
 use super::planner::summarize_plan_steps;
 use super::preflight::{PlanStepPreflight, PlanStepPreflightCall, prepare_plan_step_preflight};
 use super::support::{load_inventory_state, save_inventory_state};
@@ -54,6 +55,8 @@ impl SigillumService {
         let mut failed = 0usize;
         let mut unsupported = 0usize;
         let inventory_addresses = state.addresses.clone();
+        let policy = state.treasury_policy.clone();
+        let risk_catalog = state.risk_catalog.clone();
         for step_index in step_indexes {
             let step = state.consolidation_plans[plan_index].steps[step_index].clone();
             let mut outcome = if let Some(blockers) = non_simulation_blockers(&step) {
@@ -82,6 +85,11 @@ impl SigillumService {
             apply_simulation_outcome(
                 &mut state.consolidation_plans[plan_index].steps[step_index],
                 outcome,
+            );
+            refresh_claim_execution_blocker(
+                policy.as_ref(),
+                &risk_catalog,
+                &mut state.consolidation_plans[plan_index].steps[step_index],
             );
         }
 

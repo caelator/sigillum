@@ -153,6 +153,12 @@ pub struct TreasuryPolicy {
     /// Fail-closed: when true, any step the linkage analyzer flags is hard-blocked.
     #[serde(default)]
     pub block_cross_party_linkage: bool,
+    /// Fail-closed opt-in: allows merkle-distributor-v1 claim steps to clear the
+    /// claim_execution_disabled blocker only once every execution gate holds
+    /// (simulation passed, claim contract trusted or operator-reviewed in the
+    /// risk catalog, step explicitly approved).
+    #[serde(default)]
+    pub allow_claim_execution: bool,
     /// Maximum age in seconds of a step's simulation evidence before approval
     /// downgrades the simulation back to required (forces re-simulation).
     #[serde(default = "default_simulation_freshness_secs")]

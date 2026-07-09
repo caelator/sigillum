@@ -58,6 +58,8 @@ export function blockerLabel(code: string): string {
       return "no destination set";
     case "cross_party_linkage":
       return "Destination shared with another payer";
+    case "claim_execution_disabled":
+      return "claim execution disabled (needs policy opt-in, passed simulation, trusted/reviewed claim contract, and approval)";
     default:
       return code;
   }

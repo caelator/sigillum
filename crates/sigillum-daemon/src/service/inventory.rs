@@ -6,6 +6,7 @@ mod allowance_discovery;
 mod chain_profiles;
 mod checkpoints;
 mod claim_discovery;
+mod claim_gate;
 mod consolidation;
 mod defi_adapters;
 mod defi_discovery;
