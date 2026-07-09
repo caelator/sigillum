@@ -71,6 +71,7 @@ impl SigillumService {
             max_fee_per_gas_hex: body.max_fee_per_gas_hex,
             native_gas_limit: body.native_gas_limit,
             erc20_gas_limit: body.erc20_gas_limit,
+            fee_estimation_enabled: body.fee_estimation_enabled.unwrap_or(false),
         };
 
         let _guard = self.state.operation_guard().await;

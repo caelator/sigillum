@@ -19,6 +19,10 @@ pub struct EvmProviderProfile {
     pub native_gas_limit: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub erc20_gas_limit: Option<u64>,
+    /// Opt-in: use live EIP-1559 fee estimation for plan gas verification
+    /// instead of only the static profile fee fields. Default false.
+    #[serde(default)]
+    pub fee_estimation_enabled: bool,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]

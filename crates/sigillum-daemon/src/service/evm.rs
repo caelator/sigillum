@@ -423,6 +423,16 @@ impl SigillumService {
             .await
     }
 
+    pub(super) async fn evm_estimate_fees_for_provider(
+        &self,
+        provider_compartment_id: usize,
+        provider: &sigillum_api::EvmProviderProfile,
+        gas_limit: u64,
+    ) -> ServiceResult<EvmFeeEstimateResponse> {
+        let rpc = self.provider_rpc_for_profile(provider_compartment_id, provider)?;
+        estimate_eip1559_fees(&rpc, provider.chain_id, gas_limit).await
+    }
+
     // ── Balance Observation ───────────────────────────────────────────────
 
     pub(super) async fn evm_native_and_erc20_balance_for_provider(

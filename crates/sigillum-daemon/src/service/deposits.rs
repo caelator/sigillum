@@ -125,6 +125,9 @@ mod tests {
             require_simulation: true,
             allow_raw_digest_signing: false,
             block_cross_party_linkage,
+            simulation_freshness_secs: 900,
+            hot_floor_wei_hex: "0xde0b6b3a7640000".into(),
+            hot_target_wei_hex: "0xde0b6b3a7640000".into(),
             created_at_unix: 1,
             updated_at_unix: 1,
         }

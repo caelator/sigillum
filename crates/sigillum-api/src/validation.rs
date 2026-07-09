@@ -1043,6 +1043,8 @@ impl Validate for crate::request::TreasuryPolicyUpdateRequest {
             &self.max_plan_native_wei_hex,
             MAX_HEX,
         )?;
+        check_optional_len("hot_floor_wei_hex", &self.hot_floor_wei_hex, MAX_HEX)?;
+        check_optional_len("hot_target_wei_hex", &self.hot_target_wei_hex, MAX_HEX)?;
         Ok(())
     }
 }

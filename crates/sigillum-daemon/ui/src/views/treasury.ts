@@ -21,6 +21,7 @@ import {
 import { esc, escAttr, formatTs, statBox, statusPill } from "../render/html";
 
 const WEI_PER_ETH = 10n ** 18n;
+const DEFAULT_HOT_REFILL_WEI_HEX = "0xde0b6b3a7640000";
 
 export function formatWeiHexAsEth(weiHex: string): string {
   if (typeof weiHex !== "string") return "0";
@@ -348,10 +349,16 @@ export function createTreasuryActions(deps: TreasuryActionsDeps) {
           esc(capAsEth(current.max_step_native_wei_hex)) +
           " · maxPlan=" +
           esc(capAsEth(current.max_plan_native_wei_hex)) +
+          " · hotFloor=" +
+          esc(capAsEth(current.hot_floor_wei_hex ?? DEFAULT_HOT_REFILL_WEI_HEX)) +
+          " · hotTarget=" +
+          esc(capAsEth(current.hot_target_wei_hex ?? DEFAULT_HOT_REFILL_WEI_HEX)) +
           " · requireSimulation=" +
           esc(String(current.require_simulation)) +
           " · blockCrossPartyLinkage=" +
           esc(String(Boolean(current.block_cross_party_linkage))) +
+          " · simulationFreshnessSecs=" +
+          esc(String(current.simulation_freshness_secs ?? 900)) +
           " · updated=" +
           esc(formatTs(current.updated_at_unix)) +
           "</div></div></li>"
@@ -374,8 +381,11 @@ export function createTreasuryActions(deps: TreasuryActionsDeps) {
             policy.allowed_destinations || [],
             policy.max_step_native_wei_hex || null,
             policy.max_plan_native_wei_hex || null,
+            policy.hot_floor_wei_hex ?? DEFAULT_HOT_REFILL_WEI_HEX,
+            policy.hot_target_wei_hex ?? DEFAULT_HOT_REFILL_WEI_HEX,
             policy.require_simulation,
             policy.block_cross_party_linkage,
+            policy.simulation_freshness_secs,
           ]
         : null,
     );
@@ -407,6 +417,22 @@ export function createTreasuryActions(deps: TreasuryActionsDeps) {
       maxPlanEl.value = policy?.max_plan_native_wei_hex
         ? formatWeiHexAsEth(policy.max_plan_native_wei_hex)
         : "";
+    }
+    const hotFloorEl = input("treasuryPolicyHotFloorEth");
+    if (hotFloorEl) {
+      hotFloorEl.value = formatWeiHexAsEth(
+        policy?.hot_floor_wei_hex ?? DEFAULT_HOT_REFILL_WEI_HEX,
+      );
+    }
+    const hotTargetEl = input("treasuryPolicyHotTargetEth");
+    if (hotTargetEl) {
+      hotTargetEl.value = formatWeiHexAsEth(
+        policy?.hot_target_wei_hex ?? DEFAULT_HOT_REFILL_WEI_HEX,
+      );
+    }
+    const freshnessEl = input("treasuryPolicyFreshnessSecs");
+    if (freshnessEl) {
+      freshnessEl.value = policy ? String(policy.simulation_freshness_secs ?? 900) : "900";
     }
   }
 
@@ -612,6 +638,38 @@ export function createTreasuryActions(deps: TreasuryActionsDeps) {
       );
       return;
     }
+    const hotFloorText = textValue("treasuryPolicyHotFloorEth");
+    const hotFloorWeiHex = hotFloorText ? parseEthToWeiHex(hotFloorText) : null;
+    const hotFloorInvalid = Boolean(hotFloorText) && hotFloorWeiHex === null;
+    markInvalid("treasuryPolicyHotFloorEth", hotFloorInvalid);
+    if (hotFloorInvalid) {
+      deps.toast(
+        "Hot refill floor must be a decimal ETH amount with up to 18 decimals",
+        "error",
+      );
+      return;
+    }
+    const hotTargetText = textValue("treasuryPolicyHotTargetEth");
+    const hotTargetWeiHex = hotTargetText ? parseEthToWeiHex(hotTargetText) : null;
+    const hotTargetInvalid = Boolean(hotTargetText) && hotTargetWeiHex === null;
+    markInvalid("treasuryPolicyHotTargetEth", hotTargetInvalid);
+    if (hotTargetInvalid) {
+      deps.toast(
+        "Hot refill target must be a decimal ETH amount with up to 18 decimals",
+        "error",
+      );
+      return;
+    }
+    const freshnessText = textValue("treasuryPolicyFreshnessSecs");
+    const freshnessSecs = freshnessText ? parseInt(freshnessText, 10) : null;
+    const freshnessInvalid =
+      Boolean(freshnessText) &&
+      (freshnessSecs === null || Number.isNaN(freshnessSecs) || freshnessSecs <= 0);
+    markInvalid("treasuryPolicyFreshnessSecs", freshnessInvalid);
+    if (freshnessInvalid) {
+      deps.toast("Simulation freshness must be a positive number of seconds", "error");
+      return;
+    }
     const body: TreasuryPolicyUpdateRequest = {
       enabled: Boolean(input("treasuryPolicyEnabled")?.checked),
       allowed_destinations: parseTreasuryDestinationLines(
@@ -622,6 +680,15 @@ export function createTreasuryActions(deps: TreasuryActionsDeps) {
       require_simulation: Boolean(input("treasuryPolicyRequireSim")?.checked),
       block_cross_party_linkage: Boolean(input("treasuryPolicyBlockLinkage")?.checked),
     };
+    if (freshnessText) {
+      body.simulation_freshness_secs = freshnessSecs;
+    }
+    if (hotFloorText) {
+      body.hot_floor_wei_hex = hotFloorWeiHex;
+    }
+    if (hotTargetText) {
+      body.hot_target_wei_hex = hotTargetWeiHex;
+    }
     const saveButton = document.querySelector(
       '[data-action="updateTreasuryPolicy"]',
     );

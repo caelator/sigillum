@@ -164,13 +164,13 @@ fn cmd_api_profiles(args: &[String]) {
                 name: require_flag(
                     args,
                     "--name",
-                    "sigillum api profiles evm upsert --name <NAME> --rpc-url <URL> --chain-id <N>",
+                    "sigillum api profiles evm upsert --name <NAME> --rpc-url <URL> --chain-id <N> [--fee-estimation|--no-fee-estimation]",
                 ),
                 provider: EvmProviderRef {
                     rpc_url: require_flag(
                         args,
                         "--rpc-url",
-                        "sigillum api profiles evm upsert --name <NAME> --rpc-url <URL> --chain-id <N>",
+                        "sigillum api profiles evm upsert --name <NAME> --rpc-url <URL> --chain-id <N> [--fee-estimation|--no-fee-estimation]",
                     ),
                     auth_token_key: parse_flag(args, "--auth-token-key"),
                     compartment_id: parse_usize_flag(args, "--compartment-id"),
@@ -178,12 +178,17 @@ fn cmd_api_profiles(args: &[String]) {
                 chain_id: require_u64_flag(
                     args,
                     "--chain-id",
-                    "sigillum api profiles evm upsert --name <NAME> --rpc-url <URL> --chain-id <N>",
+                    "sigillum api profiles evm upsert --name <NAME> --rpc-url <URL> --chain-id <N> [--fee-estimation|--no-fee-estimation]",
                 ),
                 max_priority_fee_per_gas_hex: parse_flag(args, "--max-priority-fee-per-gas-hex"),
                 max_fee_per_gas_hex: parse_flag(args, "--max-fee-per-gas-hex"),
                 native_gas_limit: parse_u64_flag(args, "--native-gas-limit"),
                 erc20_gas_limit: parse_u64_flag(args, "--erc20-gas-limit"),
+                fee_estimation_enabled: bool_switch(
+                    args,
+                    "--fee-estimation",
+                    "--no-fee-estimation",
+                ),
             };
             run_api_command(args, true, move |client| async move {
                 client.upsert_evm_provider_profile(request).await

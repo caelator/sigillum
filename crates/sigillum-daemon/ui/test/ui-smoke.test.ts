@@ -22,6 +22,7 @@ import { createSelfCheckActions, formatClockTime } from "../src/views/selfcheck"
 import { createSessionActions } from "../src/views/session";
 import { createSetupWizard } from "../src/views/setup";
 import { createShellRenderer } from "../src/views/shell";
+import { createWalletActions } from "../src/views/wallets";
 import {
   createTreasuryActions,
   formatWeiHexAsEth,
@@ -1853,6 +1854,8 @@ test("treasury policy loader prefills the form without clobbering operator edits
     "treasuryPolicyDestinations",
     "treasuryPolicyMaxStepEth",
     "treasuryPolicyMaxPlanEth",
+    "treasuryPolicyHotFloorEth",
+    "treasuryPolicyHotTargetEth",
     "treasuryPolicyRequireSim",
   ]);
   const policy: TreasuryPolicy = {
@@ -1880,7 +1883,11 @@ test("treasury policy loader prefills the form without clobbering operator edits
   );
   equal(dom.el("treasuryPolicyMaxStepEth").value, "2");
   equal(dom.el("treasuryPolicyMaxPlanEth").value, "1");
+  equal(dom.el("treasuryPolicyHotFloorEth").value, "1");
+  equal(dom.el("treasuryPolicyHotTargetEth").value, "1");
   ok(dom.el("treasuryPolicyList").innerHTML.includes("maxPlan=1 ETH"));
+  ok(dom.el("treasuryPolicyList").innerHTML.includes("hotFloor=1 ETH"));
+  ok(dom.el("treasuryPolicyList").innerHTML.includes("hotTarget=1 ETH"));
 
   dom.el("treasuryPolicyDestinations").value = "0xdraft";
   await treasury.loadTreasuryOverview();
@@ -1987,6 +1994,99 @@ test("treasury policy save persists cross-party linkage block toggle", async () 
 
   const update = calls.find((call) => call.path === "/api/treasury/policy/update");
   equal(update?.body.block_cross_party_linkage, true);
+});
+
+test("treasury policy save posts hot refill caps only when provided", async () => {
+  const dom = installDom([
+    "treasuryPolicyList",
+    "treasuryPolicyEnabled",
+    "treasuryPolicyRequireSim",
+    "treasuryPolicyBlockLinkage",
+    "treasuryPolicyDestinations",
+    "treasuryPolicyMaxStepEth",
+    "treasuryPolicyMaxPlanEth",
+    "treasuryPolicyFreshnessSecs",
+    "treasuryPolicyHotFloorEth",
+    "treasuryPolicyHotTargetEth",
+  ]);
+  const calls: Array<{ method: string; path: string; body?: any }> = [];
+  const treasury = createTreasuryActions({
+    api: async (method, path, body) => {
+      calls.push({ method, path, body });
+      if (path === "/api/treasury/policy/update") {
+        return { status: "updated", policy: null };
+      }
+      return {};
+    },
+    toast: () => undefined,
+  });
+
+  dom.el("treasuryPolicyHotFloorEth").value = "1";
+  dom.el("treasuryPolicyHotTargetEth").value = "1";
+  await treasury.updateTreasuryPolicy();
+
+  const withHotCaps = calls.find(
+    (call) => call.path === "/api/treasury/policy/update",
+  );
+  deepEqual(
+    {
+      hot_floor_wei_hex: withHotCaps?.body.hot_floor_wei_hex,
+      hot_target_wei_hex: withHotCaps?.body.hot_target_wei_hex,
+    },
+    {
+      hot_floor_wei_hex: "0xde0b6b3a7640000",
+      hot_target_wei_hex: "0xde0b6b3a7640000",
+    },
+  );
+
+  calls.length = 0;
+  dom.el("treasuryPolicyHotFloorEth").value = "";
+  dom.el("treasuryPolicyHotTargetEth").value = "";
+  await treasury.updateTreasuryPolicy();
+
+  const withoutHotCaps = calls.find(
+    (call) => call.path === "/api/treasury/policy/update",
+  );
+  ok(!("hot_floor_wei_hex" in withoutHotCaps!.body));
+  ok(!("hot_target_wei_hex" in withoutHotCaps!.body));
+});
+
+test("treasury policy save posts simulation freshness only when provided", async () => {
+  const dom = installDom([
+    "treasuryPolicyEnabled",
+    "treasuryPolicyRequireSim",
+    "treasuryPolicyBlockLinkage",
+    "treasuryPolicyDestinations",
+    "treasuryPolicyMaxStepEth",
+    "treasuryPolicyMaxPlanEth",
+    "treasuryPolicyFreshnessSecs",
+  ]);
+  const calls: Array<{ method: string; path: string; body?: any }> = [];
+  const treasury = createTreasuryActions({
+    api: async (method, path, body) => {
+      calls.push({ method, path, body });
+      if (path === "/api/treasury/policy/update") {
+        return { status: "updated", policy: null };
+      }
+      return {};
+    },
+    toast: () => undefined,
+  });
+
+  dom.el("treasuryPolicyFreshnessSecs").value = "120";
+  await treasury.updateTreasuryPolicy();
+  const withFreshness = calls.find(
+    (call) => call.path === "/api/treasury/policy/update",
+  );
+  equal(withFreshness?.body.simulation_freshness_secs, 120);
+
+  calls.length = 0;
+  dom.el("treasuryPolicyFreshnessSecs").value = "";
+  await treasury.updateTreasuryPolicy();
+  const withoutFreshness = calls.find(
+    (call) => call.path === "/api/treasury/policy/update",
+  );
+  ok(!("simulation_freshness_secs" in withoutFreshness!.body));
 });
 
 test("treasury receive allocate and rotate dispatch api calls with toasts", async () => {
@@ -2386,6 +2486,58 @@ test("wallet manager list renders unified wallets with balances and fallbacks", 
   equal(dom.el("walletCreateProviderHint").classList.contains("hidden"), false);
   // With no providers, the inline quick-add is the visible path forward.
   equal(dom.el("walletQuickProvider").classList.contains("hidden"), false);
+});
+
+test("provider profile editor posts fee estimation opt-in", async () => {
+  const dom = installDom([
+    "providerProfileList",
+    "providerName",
+    "providerRpcUrl",
+    "providerChainId",
+    "providerAuthTokenKey",
+    "providerCompartmentId",
+    "providerMaxPriorityFee",
+    "providerMaxFee",
+    "providerNativeGasLimit",
+    "providerErc20GasLimit",
+    "providerFeeEstimation",
+  ]);
+  const calls: Array<{ method: string; path: string; body?: any }> = [];
+  let refreshes = 0;
+  const wallets = createWalletActions({
+    api: async (method, path, body) => {
+      calls.push({ method, path, body });
+      return { status: "ok" };
+    },
+    toast: () => undefined,
+    refresh: () => {
+      refreshes += 1;
+    },
+    copyText: async () => undefined,
+  });
+
+  dom.el("providerName").value = "mainnet";
+  dom.el("providerRpcUrl").value = "https://rpc.example.test";
+  dom.el("providerChainId").value = "1";
+  dom.el("providerFeeEstimation").checked = true;
+
+  await wallets.upsertProviderProfile();
+
+  const upsert = calls.find((call) => call.path === "/api/profiles/evm/upsert");
+  equal(upsert?.body.fee_estimation_enabled, true);
+  equal(dom.el("providerFeeEstimation").checked, false);
+  equal(refreshes, 1);
+
+  wallets.renderProviderProfiles([
+    {
+      name: "mainnet",
+      rpc_url: "https://rpc.example.test",
+      chain_id: 1,
+      compartment_id: null,
+      fee_estimation_enabled: true,
+    },
+  ]);
+  ok(dom.el("providerProfileList").innerHTML.includes("feeEstimation=on"));
 });
 
 test("wallet manager quick-add provider validates, posts, and reloads", async () => {

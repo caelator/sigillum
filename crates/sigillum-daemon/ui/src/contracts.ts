@@ -455,8 +455,11 @@ export interface TreasuryPolicy {
   allowed_destinations?: TreasuryAllowedDestination[];
   max_step_native_wei_hex?: string | null;
   max_plan_native_wei_hex?: string | null;
+  hot_floor_wei_hex?: string;
+  hot_target_wei_hex?: string;
   require_simulation: boolean;
   block_cross_party_linkage?: boolean;
+  simulation_freshness_secs?: number;
   created_at_unix: number;
   updated_at_unix: number;
 }
@@ -466,8 +469,11 @@ export interface TreasuryPolicyUpdateRequest {
   allowed_destinations?: TreasuryAllowedDestination[];
   max_step_native_wei_hex?: string | null;
   max_plan_native_wei_hex?: string | null;
+  hot_floor_wei_hex?: string | null;
+  hot_target_wei_hex?: string | null;
   require_simulation?: boolean | null;
   block_cross_party_linkage?: boolean | null;
+  simulation_freshness_secs?: number | null;
 }
 
 export interface TreasuryReceiveAllocation {

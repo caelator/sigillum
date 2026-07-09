@@ -659,6 +659,173 @@ async fn configure_mainnet_provider(
     assert_eq!(provider.status(), StatusCode::OK);
 }
 
+async fn setup_seed_inventory_for_consolidation(
+    fee_estimation_enabled: Option<bool>,
+) -> (
+    TempDir,
+    SocketAddr,
+    tokio::task::JoinHandle<()>,
+    tokio::task::JoinHandle<()>,
+    reqwest::Client,
+    String,
+) {
+    let dir = TempDir::new().unwrap();
+    let (addr, handle) = spawn_daemon(dir.path().to_path_buf()).await;
+    let (rpc_addr, rpc_handle) = spawn_mock_evm_provider().await;
+    let client = reqwest::Client::new();
+
+    let init = post_json(
+        &client,
+        addr,
+        "/api/compartment/init",
+        json!({
+            "id": 0,
+            "label": "default",
+            "threshold": 1,
+            "passphrase": "correct horse battery staple",
+        }),
+        None,
+    )
+    .await;
+    assert_eq!(init.status(), StatusCode::OK);
+    let init_json: serde_json::Value = init.json().await.unwrap();
+    let token = init_json["session_token"].as_str().unwrap().to_string();
+
+    let key = post_json(
+        &client,
+        addr,
+        "/api/api-keys/set",
+        json!({ "key": "alchemy", "value": "rpc-test-token" }),
+        Some(&token),
+    )
+    .await;
+    assert_eq!(key.status(), StatusCode::OK);
+
+    let mut provider = json!({
+        "name": "mainnet",
+        "rpc_url": format!("http://{rpc_addr}/"),
+        "auth_token_key": "alchemy",
+        "chain_id": 1,
+        "max_priority_fee_per_gas_hex": "0x59682f00",
+        "max_fee_per_gas_hex": "0x12a05f200",
+        "native_gas_limit": 21000,
+        "erc20_gas_limit": 65000,
+    });
+    if let Some(enabled) = fee_estimation_enabled {
+        provider["fee_estimation_enabled"] = json!(enabled);
+    }
+    let provider_response = post_json(
+        &client,
+        addr,
+        "/api/profiles/evm/upsert",
+        provider,
+        Some(&token),
+    )
+    .await;
+    assert_eq!(provider_response.status(), StatusCode::OK);
+
+    let seed = post_json(
+        &client,
+        addr,
+        "/api/profiles/eth-seed/upsert",
+        json!({
+            "name": "seed-main",
+            "label": "Seed main",
+            "mnemonic": "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about",
+            "project_account": 0,
+            "provider_profile": "mainnet",
+        }),
+        Some(&token),
+    )
+    .await;
+    assert_eq!(seed.status(), StatusCode::OK);
+
+    let scan = post_json(
+        &client,
+        addr,
+        "/api/inventory/scan/evm",
+        json!({
+            "wallet_family": "eth-seed",
+            "wallet_profile": "seed-main",
+            "provider_profile": "mainnet",
+            "gap_limit": 1,
+            "max_index": 0,
+        }),
+        Some(&token),
+    )
+    .await;
+    let scan_status = scan.status();
+    let scan_json: serde_json::Value = scan.json().await.unwrap();
+    assert_eq!(scan_status, StatusCode::OK, "scan response: {scan_json}");
+
+    (dir, addr, handle, rpc_handle, client, token)
+}
+
+async fn generate_and_simulate_consolidation_plan(
+    client: &reqwest::Client,
+    addr: SocketAddr,
+    token: &str,
+) -> serde_json::Value {
+    let plan = post_json(
+        client,
+        addr,
+        "/api/plans/consolidation/generate",
+        json!({
+            "destination_address": "0x9999999999999999999999999999999999999999",
+        }),
+        Some(token),
+    )
+    .await;
+    assert_eq!(plan.status(), StatusCode::OK);
+    let plan_json: serde_json::Value = plan.json().await.unwrap();
+
+    let simulate = post_json(
+        client,
+        addr,
+        "/api/plans/consolidation/simulate",
+        json!({ "plan_id": plan_json["plan"]["id"].as_str().unwrap() }),
+        Some(token),
+    )
+    .await;
+    let simulate_status = simulate.status();
+    let simulate_json: serde_json::Value = simulate.json().await.unwrap();
+    assert_eq!(
+        simulate_status,
+        StatusCode::OK,
+        "simulate response: {simulate_json}"
+    );
+    simulate_json
+}
+
+fn passed_sweep_native_step(plan_json: &serde_json::Value) -> &serde_json::Value {
+    plan_json["plan"]["steps"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|step| step["action"] == "sweep_native" && step["simulation_status"] == "passed")
+        .unwrap_or_else(|| panic!("missing passed sweep_native step in {plan_json}"))
+}
+
+fn evidence_contains(step: &serde_json::Value, expected: &str) -> bool {
+    step["simulation_evidence"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|evidence| evidence == expected)
+}
+
+fn evidence_contains_prefix(step: &serde_json::Value, prefix: &str) -> bool {
+    step["simulation_evidence"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|evidence| {
+            evidence
+                .as_str()
+                .is_some_and(|evidence| evidence.starts_with(prefix))
+        })
+}
+
 #[tokio::test]
 async fn chain_registry_routes_seed_builtins_and_manage_custom_profiles() {
     let dir = TempDir::new().unwrap();
@@ -4368,6 +4535,307 @@ async fn deposit_registry_refresh_and_sweep_flow_roundtrip() {
     assert_eq!(deposits.status(), StatusCode::OK);
     let deposits_json: serde_json::Value = deposits.json().await.unwrap();
     assert_eq!(deposits_json["deposits"].as_array().unwrap().len(), 2);
+
+    handle.abort();
+    rpc_handle.abort();
+}
+
+#[tokio::test]
+async fn treasury_policy_update_round_trips_simulation_freshness() {
+    let dir = TempDir::new().unwrap();
+    let (addr, handle) = spawn_daemon(dir.path().to_path_buf()).await;
+    let client = reqwest::Client::new();
+
+    let init = post_json(
+        &client,
+        addr,
+        "/api/compartment/init",
+        json!({
+            "id": 0,
+            "label": "default",
+            "threshold": 1,
+            "passphrase": "correct horse battery staple",
+        }),
+        None,
+    )
+    .await;
+    assert_eq!(init.status(), StatusCode::OK);
+    let init_json: serde_json::Value = init.json().await.unwrap();
+    let token = init_json["session_token"].as_str().unwrap().to_string();
+
+    let update = post_json(
+        &client,
+        addr,
+        "/api/treasury/policy/update",
+        json!({
+            "enabled": true,
+            "simulation_freshness_secs": 120,
+        }),
+        Some(&token),
+    )
+    .await;
+    assert_eq!(update.status(), StatusCode::OK);
+    let update_json: serde_json::Value = update.json().await.unwrap();
+    assert_eq!(
+        update_json["policy"]["simulation_freshness_secs"],
+        json!(120)
+    );
+
+    let read_back = get(&client, addr, "/api/treasury/policy", Some(&token)).await;
+    assert_eq!(read_back.status(), StatusCode::OK);
+    let read_back_json: serde_json::Value = read_back.json().await.unwrap();
+    assert_eq!(
+        read_back_json["policy"]["simulation_freshness_secs"],
+        json!(120)
+    );
+
+    let defaulted = post_json(
+        &client,
+        addr,
+        "/api/treasury/policy/update",
+        json!({
+            "enabled": true,
+        }),
+        Some(&token),
+    )
+    .await;
+    assert_eq!(defaulted.status(), StatusCode::OK);
+    let defaulted_json: serde_json::Value = defaulted.json().await.unwrap();
+    assert_eq!(
+        defaulted_json["policy"]["simulation_freshness_secs"],
+        json!(900)
+    );
+
+    let invalid = post_json(
+        &client,
+        addr,
+        "/api/treasury/policy/update",
+        json!({
+            "enabled": true,
+            "simulation_freshness_secs": 0,
+        }),
+        Some(&token),
+    )
+    .await;
+    assert_eq!(invalid.status(), StatusCode::BAD_REQUEST);
+
+    handle.abort();
+}
+
+#[tokio::test]
+async fn treasury_policy_update_round_trips_hot_floor_and_target() {
+    let dir = TempDir::new().unwrap();
+    let (addr, handle) = spawn_daemon(dir.path().to_path_buf()).await;
+    let client = reqwest::Client::new();
+
+    let init = post_json(
+        &client,
+        addr,
+        "/api/compartment/init",
+        json!({
+            "id": 0,
+            "label": "default",
+            "threshold": 1,
+            "passphrase": "correct horse battery staple",
+        }),
+        None,
+    )
+    .await;
+    assert_eq!(init.status(), StatusCode::OK);
+    let init_json: serde_json::Value = init.json().await.unwrap();
+    let token = init_json["session_token"].as_str().unwrap().to_string();
+
+    let update = post_json(
+        &client,
+        addr,
+        "/api/treasury/policy/update",
+        json!({
+            "enabled": true,
+            "hot_floor_wei_hex": "0x1",
+            "hot_target_wei_hex": "0x2",
+        }),
+        Some(&token),
+    )
+    .await;
+    assert_eq!(update.status(), StatusCode::OK);
+    let update_json: serde_json::Value = update.json().await.unwrap();
+    assert_eq!(update_json["policy"]["hot_floor_wei_hex"], json!("0x1"));
+    assert_eq!(update_json["policy"]["hot_target_wei_hex"], json!("0x2"));
+
+    let read_back = get(&client, addr, "/api/treasury/policy", Some(&token)).await;
+    assert_eq!(read_back.status(), StatusCode::OK);
+    let read_back_json: serde_json::Value = read_back.json().await.unwrap();
+    assert_eq!(read_back_json["policy"]["hot_floor_wei_hex"], json!("0x1"));
+    assert_eq!(read_back_json["policy"]["hot_target_wei_hex"], json!("0x2"));
+
+    let defaulted = post_json(
+        &client,
+        addr,
+        "/api/treasury/policy/update",
+        json!({
+            "enabled": true,
+        }),
+        Some(&token),
+    )
+    .await;
+    assert_eq!(defaulted.status(), StatusCode::OK);
+    let defaulted_json: serde_json::Value = defaulted.json().await.unwrap();
+    assert_eq!(
+        defaulted_json["policy"]["hot_floor_wei_hex"],
+        json!("0xde0b6b3a7640000")
+    );
+    assert_eq!(
+        defaulted_json["policy"]["hot_target_wei_hex"],
+        json!("0xde0b6b3a7640000")
+    );
+
+    let invalid_order = post_json(
+        &client,
+        addr,
+        "/api/treasury/policy/update",
+        json!({
+            "enabled": true,
+            "hot_floor_wei_hex": "0x3",
+            "hot_target_wei_hex": "0x2",
+        }),
+        Some(&token),
+    )
+    .await;
+    assert_eq!(invalid_order.status(), StatusCode::BAD_REQUEST);
+
+    let invalid_floor = post_json(
+        &client,
+        addr,
+        "/api/treasury/policy/update",
+        json!({
+            "enabled": true,
+            "hot_floor_wei_hex": "not-hex",
+            "hot_target_wei_hex": "0x2",
+        }),
+        Some(&token),
+    )
+    .await;
+    assert_eq!(invalid_floor.status(), StatusCode::BAD_REQUEST);
+
+    handle.abort();
+}
+
+#[tokio::test]
+async fn plan_simulation_records_estimated_fee_basis_when_provider_opts_in() {
+    let (_dir, addr, handle, rpc_handle, client, token) =
+        setup_seed_inventory_for_consolidation(Some(true)).await;
+
+    let simulate_json = generate_and_simulate_consolidation_plan(&client, addr, &token).await;
+    let step = passed_sweep_native_step(&simulate_json);
+    assert!(evidence_contains(step, "fee_basis=estimated"));
+    assert!(evidence_contains(step, "max_fee_per_gas_hex=0xd09dc300"));
+    assert!(evidence_contains_prefix(step, "simulated_at_unix="));
+
+    handle.abort();
+    rpc_handle.abort();
+}
+
+#[tokio::test]
+async fn plan_simulation_keeps_static_fee_basis_when_estimation_disabled() {
+    let (_dir, addr, handle, rpc_handle, client, token) =
+        setup_seed_inventory_for_consolidation(None).await;
+
+    let simulate_json = generate_and_simulate_consolidation_plan(&client, addr, &token).await;
+    let step = passed_sweep_native_step(&simulate_json);
+    assert!(evidence_contains(step, "fee_basis=static_profile"));
+    assert!(evidence_contains(step, "max_fee_per_gas_hex=0x12a05f200"));
+    assert!(evidence_contains_prefix(step, "simulated_at_unix="));
+
+    handle.abort();
+    rpc_handle.abort();
+}
+
+#[tokio::test]
+async fn plan_approval_downgrades_stale_simulation_to_required() {
+    let (dir, addr, handle, rpc_handle, client, token) =
+        setup_seed_inventory_for_consolidation(None).await;
+
+    let fresh_simulate_json = generate_and_simulate_consolidation_plan(&client, addr, &token).await;
+    let fresh_plan_id = fresh_simulate_json["plan"]["id"].as_str().unwrap();
+    let fresh_approve = post_json(
+        &client,
+        addr,
+        "/api/plans/consolidation/approve",
+        json!({ "plan_id": fresh_plan_id }),
+        Some(&token),
+    )
+    .await;
+    let fresh_approve_status = fresh_approve.status();
+    let fresh_approve_json: serde_json::Value = fresh_approve.json().await.unwrap();
+    assert_eq!(
+        fresh_approve_status,
+        StatusCode::OK,
+        "fresh approve response: {fresh_approve_json}"
+    );
+    let fresh_step = passed_sweep_native_step(&fresh_approve_json);
+    assert_eq!(fresh_step["simulation_status"], "passed");
+    assert!(
+        fresh_approve_json["plan"]["summary"]["executable_steps"]
+            .as_u64()
+            .unwrap()
+            > 0
+    );
+
+    let stale_simulate_json = generate_and_simulate_consolidation_plan(&client, addr, &token).await;
+    let stale_plan_id = stale_simulate_json["plan"]["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let path = dir.path().join("wallet_inventory.json");
+    let mut envelope: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+    let plans = envelope["data"]["consolidation_plans"]
+        .as_array_mut()
+        .unwrap();
+    let plan = plans
+        .iter_mut()
+        .find(|plan| plan["id"] == stale_plan_id)
+        .unwrap();
+    for step in plan["steps"].as_array_mut().unwrap() {
+        let evidence = step["simulation_evidence"].as_array_mut().unwrap();
+        let simulated_at = evidence
+            .iter_mut()
+            .find(|evidence| {
+                evidence
+                    .as_str()
+                    .is_some_and(|value| value.starts_with("simulated_at_unix="))
+            })
+            .unwrap();
+        *simulated_at = json!("simulated_at_unix=1");
+    }
+    std::fs::write(&path, serde_json::to_vec_pretty(&envelope).unwrap()).unwrap();
+
+    let stale_approve = post_json(
+        &client,
+        addr,
+        "/api/plans/consolidation/approve",
+        json!({ "plan_id": stale_plan_id }),
+        Some(&token),
+    )
+    .await;
+    let stale_approve_status = stale_approve.status();
+    let stale_approve_json: serde_json::Value = stale_approve.json().await.unwrap();
+    assert_eq!(
+        stale_approve_status,
+        StatusCode::OK,
+        "stale approve response: {stale_approve_json}"
+    );
+    let stale_step = stale_approve_json["plan"]["steps"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|step| step["action"] == "sweep_native")
+        .unwrap();
+    assert_eq!(stale_step["simulation_status"], "required");
+    assert_eq!(
+        stale_approve_json["plan"]["summary"]["executable_steps"],
+        json!(0)
+    );
 
     handle.abort();
     rpc_handle.abort();
