@@ -1493,7 +1493,7 @@ Phase W — Wallet-management completion
 - [x] W7.1 execution policy gates + kill switch
 - [x] W7.2 plan-step queue payloads + enqueue validation
 - [x] W7.3 seed-wallet signing execution
-- [ ] W7.4 nonces, receipts, failure classes
+- [x] W7.4 nonces, receipts, failure classes
 - [ ] W7.5 linkage enforcement parity at execution
 - [ ] W8 treasury automation (overflow/refill, hysteresis)
 
@@ -1750,3 +1750,20 @@ Phase H — Ship
   chain executes in dependency order with a 3-sign/3-broadcast audit
   trail; gates-off behavior preserved. Implemented directly by a Sonnet
   agent under the operator's standing fallback directive.
+- 2026-07-09 W7.4 f972dcb..3a99d1d: execution semantics — per-source
+  (address, chain) serialization with an E1-consistent transient skip
+  (no legacy `deferred` wire string; dependency-chained same-batch jobs
+  still resolve in one drain); broadcast-time nonce fetch with one
+  re-fetch on nonce-too-low then operator_action_required; receipt
+  confirmation to the chain registry's `finality_blocks` with new
+  terminal `confirmed` state (queue store v4, additive receipt fields;
+  `sent` = awaiting confirmation for PlanStepExecution only, legacy
+  families byte-identical); bounded receipt-timeout parks with the tx
+  hash (never assumes failure); failure classes — provider error →
+  retrying, revert → operator_action_required (never auto-retried),
+  underpriced → one fee bump within the policy cap then park; kill-9
+  restart resumes receipt polling with no duplicate broadcast (mock
+  counts eth_sendRawTransaction=1). Fixed a real RPC transport bug:
+  JSON-RPC null results (unmined receipt) were parsed as transport
+  errors. Implemented directly by a Sonnet agent under the operator's
+  standing fallback directive.

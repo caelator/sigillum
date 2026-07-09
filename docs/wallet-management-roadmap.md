@@ -401,8 +401,32 @@ The CLI should have parity for automation:
     plan/step/job ids and transaction hashes, never key material. Claim
     failures never auto-retry (a Merkle proof may be partially consumed) and
     park as `operator_action_required` instead. With all gates off (the
-    default), today's behavior is unchanged. Nonce management, receipt-
-    confirmed finality, and fee-bump retry ladders remain future work (W7.4).
+    default), today's behavior is unchanged. Execution semantics are now
+    implemented (W7.4): the nonce is fetched at broadcast time (not
+    enqueue), a `nonce too low` rejection re-fetches once and retries, and
+    an underpriced/replacement-underpriced rejection bumps the fee once
+    within `max_fee_per_gas_cap_hex` (or a documented conservative +25%
+    bump when uncapped) — a repeat rejection either way parks as
+    `operator_action_required`. A broadcast-time revert rejection parks
+    immediately, never retried, generalizing the claim-only rule above to
+    every action family. After broadcast, `sent` truthfully means
+    "awaiting confirmation": the daemon polls `eth_getTransactionReceipt`
+    (at most once per drain/maintenance cycle — never a blocking loop)
+    against the chain registry's `finality_blocks` (W1.1; a conservative
+    12-block default when the chain has no registered profile); a
+    confirmed success moves the job to the new terminal `confirmed` state
+    with gas used and block number recorded, a receipt-discovered revert
+    parks as `operator_action_required` with the same evidence, and a
+    receipt that never appears within a 1-hour wall-clock budget parks
+    carrying the transaction hash — the broadcast is NEVER assumed to have
+    failed. A restart (or daemon crash mid-flight) resumes polling from the
+    persisted transaction hash and broadcast time without re-signing or
+    re-broadcasting. At most one in-flight (broadcast-but-unconfirmed) job
+    per (source address, chain id) may broadcast at a time; a same-source
+    job still queued behind it is skipped with a visible reason until the
+    source frees (dependency-ordered same-source chains, e.g.
+    sweep→revoke→fund_gas on one wallet, are exempt from this and still
+    resolve in one drain batch, as before).
 6. DeFi position adapters. The D-11 exit adapter set is now complete: Aave v3
    withdraw, ERC-4626 redeem, Lido wstETH unwrap, and Uniswap v2 LP
    `removeLiquidity` exits are implemented. The Uniswap v2 adapter expands LP
@@ -436,10 +460,10 @@ The CLI should have parity for automation:
    kill switch that constrain this execution are implemented (see 5b), and
    the enqueue (W7.2) and signing/execution (W7.3) adapters for native/ERC-20/
    NFT sweeps, approval revokes, DeFi exits, `merkle-distributor-v1` claims,
-   and gas top-ups are now built. Swaps stay out of scope for 1.0 (D-13).
-   Nonce management, receipt-confirmed finality, fee-bump retry ladders
-   (W7.4), and treasury automation / overflow-refill routing (W8) remain
-   future work.
+   and gas top-ups are now built. Nonce management, receipt-confirmed
+   finality, and fee-bump retry ladders are now implemented (W7.4; see 5b).
+   Swaps stay out of scope for 1.0 (D-13). Treasury automation /
+   overflow-refill routing (W8) remains future work.
 10. Non-EVM chain families, starting with Bitcoin/UTXO and only then Solana,
    Tron, and Cosmos-style networks.
 

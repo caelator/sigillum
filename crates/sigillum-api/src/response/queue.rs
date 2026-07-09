@@ -5,6 +5,9 @@ use serde::{Deserialize, Serialize};
 mod plan_step;
 pub use plan_step::PlanStepExecutionPayload;
 
+mod receipt;
+pub use receipt::QueueJobReceipt;
+
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum QueueJobPayload {
@@ -118,6 +121,9 @@ pub struct QueueJob {
     pub transaction_hash_hex: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub broadcast_transaction_hash_hex: Option<String>,
+    /// W7.4 receipt confirmation fields, flattened (see `QueueJobReceipt`).
+    #[serde(flatten)]
+    pub receipt: QueueJobReceipt,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]

@@ -18,20 +18,23 @@ pub struct QueueState {
 }
 
 impl JsonDocument for QueueState {
-    // v3 (W7.2) adds the `plan_step_execution` job payload kind; v1/v2 job
-    // shapes are unchanged and keep loading as-is.
-    const SCHEMA: JsonSchema = JsonSchema::new("sigillum.queue", 3);
+    // v3 (W7.2) adds the `plan_step_execution` job payload kind.
+    // v4 (W7.4) adds the `confirmed` job state and the receipt-confirmation
+    // fields (`broadcast_at_unix`, `confirmations`, `receipt_block_number`,
+    // `receipt_gas_used_hex`, `receipt_status`) — all additive/optional, so
+    // v1/v2/v3 job shapes are unchanged and keep loading as-is.
+    const SCHEMA: JsonSchema = JsonSchema::new("sigillum.queue", 4);
 
     fn from_enveloped_json(
         path: &Path,
         version: u32,
         data: serde_json::Value,
     ) -> Result<Self, std::io::Error> {
-        if version != 1 && version != 2 && version != Self::SCHEMA.version {
+        if version != 1 && version != 2 && version != 3 && version != Self::SCHEMA.version {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::InvalidData,
                 format!(
-                    "unsupported {} schema version {} in {}; expected 1, 2, or {}",
+                    "unsupported {} schema version {} in {}; expected 1, 2, 3, or {}",
                     Self::SCHEMA.name,
                     version,
                     path.display(),
@@ -95,6 +98,7 @@ mod tests {
             last_error: None,
             transaction_hash_hex: None,
             broadcast_transaction_hash_hex: None,
+            receipt: Default::default(),
         }
     }
 
@@ -142,7 +146,7 @@ mod tests {
         let saved: serde_json::Value =
             serde_json::from_slice(&std::fs::read(queue_path(dir.path())).unwrap()).unwrap();
         assert_eq!(saved["schema"], json!("sigillum.queue"));
-        assert_eq!(saved["schema_version"], json!(3));
+        assert_eq!(saved["schema_version"], json!(4));
         assert!(saved["data"]["jobs"].is_array());
     }
 
@@ -200,7 +204,7 @@ mod tests {
         save_queue(dir.path(), &loaded).unwrap();
         let saved: serde_json::Value =
             serde_json::from_slice(&std::fs::read(queue_path(dir.path())).unwrap()).unwrap();
-        assert_eq!(saved["schema_version"], json!(3));
+        assert_eq!(saved["schema_version"], json!(4));
         assert_eq!(saved["data"]["jobs"][1]["state"], json!("deferred"));
         assert_eq!(
             saved["data"]["jobs"][2]["state"],
@@ -246,12 +250,77 @@ mod tests {
         save_queue(dir.path(), &loaded).unwrap();
         let saved: serde_json::Value =
             serde_json::from_slice(&std::fs::read(queue_path(dir.path())).unwrap()).unwrap();
-        assert_eq!(saved["schema_version"], json!(3));
+        assert_eq!(saved["schema_version"], json!(4));
         assert_eq!(saved["data"]["jobs"][0]["state"], json!("queued"));
         assert_eq!(
             saved["data"]["jobs"][1]["kind"],
             json!("eth_seed_native_sweep")
         );
+    }
+
+    #[test]
+    fn version_3_queue_envelope_still_loads_without_rewriting_jobs() {
+        // W7.4 schema bump (v3 -> v4): a v3 `plan_step_execution` job saved
+        // before the receipt-confirmation fields existed must still load,
+        // with those new fields absent (not defaulted to some placeholder
+        // that could be mistaken for a real receipt observation).
+        let dir = TempDir::new().unwrap();
+        let path = queue_path(dir.path());
+        let queue = json!({
+            "schema": "sigillum.queue",
+            "schema_version": 3,
+            "data": {
+                "jobs": [
+                    sample_job(),
+                    {
+                        "id": "job_plan_step_v3",
+                        "state": "sent",
+                        "attempts": 1,
+                        "created_at_unix": 1,
+                        "updated_at_unix": 2,
+                        "kind": "plan_step_execution",
+                        "plan_id": "plan_1",
+                        "step_id": "step_1",
+                        "chain_id": 1,
+                        "source_address": "0x0000000000000000000000000000000000000001",
+                        "derivation_path": "m/44'/60'/0'/0/0",
+                        "wallet_family": "eth-seed",
+                        "wallet_profile": "seed-a",
+                        "provider_profile": "mainnet",
+                        "action": "sweep_native",
+                        "asset_kind": "native",
+                        "amount_hex": "0x1",
+                        "call_label": "native.transfer(value)",
+                        "call_target_address": "0x0000000000000000000000000000000000000002",
+                        "call_data_hex": "0x",
+                        "simulation_evidence_hash_hex": "ab".repeat(32),
+                        "prerequisite_job_ids": [],
+                        "transaction_hash_hex": "11".repeat(32)
+                    }
+                ]
+            }
+        });
+        std::fs::write(&path, serde_json::to_vec_pretty(&queue).unwrap()).unwrap();
+
+        let loaded = load_queue(dir.path()).unwrap();
+        assert_eq!(loaded.jobs.len(), 2);
+        let resumed = &loaded.jobs[1];
+        assert_eq!(resumed.state, "sent");
+        assert_eq!(
+            resumed.transaction_hash_hex.as_deref(),
+            Some("11".repeat(32).as_str())
+        );
+        assert_eq!(resumed.receipt.broadcast_at_unix, None);
+        assert_eq!(resumed.receipt.confirmations, None);
+        assert_eq!(resumed.receipt.receipt_block_number, None);
+        assert_eq!(resumed.receipt.receipt_gas_used_hex, None);
+        assert_eq!(resumed.receipt.receipt_status, None);
+
+        save_queue(dir.path(), &loaded).unwrap();
+        let saved: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(queue_path(dir.path())).unwrap()).unwrap();
+        assert_eq!(saved["schema_version"], json!(4));
+        assert_eq!(saved["data"]["jobs"][1]["state"], json!("sent"));
     }
 
     #[test]
@@ -294,13 +363,14 @@ mod tests {
             last_error: None,
             transaction_hash_hex: None,
             broadcast_transaction_hash_hex: None,
+            receipt: Default::default(),
         });
 
         save_queue(dir.path(), &state).unwrap();
 
         let saved: serde_json::Value =
             serde_json::from_slice(&std::fs::read(queue_path(dir.path())).unwrap()).unwrap();
-        assert_eq!(saved["schema_version"], json!(3));
+        assert_eq!(saved["schema_version"], json!(4));
         assert_eq!(
             saved["data"]["jobs"][0]["kind"],
             json!("plan_step_execution")

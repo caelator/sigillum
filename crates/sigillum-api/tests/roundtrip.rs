@@ -491,6 +491,7 @@ fn queue_response_roundtrip() {
             last_error: Some("provider rate limited previous attempt".to_string()),
             transaction_hash_hex: None,
             broadcast_transaction_hash_hex: None,
+            receipt: Default::default(),
         }],
     });
 }

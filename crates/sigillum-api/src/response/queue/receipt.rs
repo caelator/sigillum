@@ -1,0 +1,26 @@
+//! W7.4 receipt-confirmation fields, `#[serde(flatten)]`-ed into `QueueJob`
+//! so the wire shape stays flat (identical to if these fields were declared
+//! directly on `QueueJob`) while keeping `queue.rs` under the house
+//! architecture line cap.
+
+use serde::{Deserialize, Serialize};
+
+/// All `None` until a receipt is observed. `broadcast_at_unix` drives the
+/// confirmation timeout window and lets restart resume polling without
+/// re-broadcasting; `confirmations` is the last observed depth;
+/// `receipt_block_number`/`receipt_gas_used_hex`/`receipt_status`
+/// (`"success"`/`"reverted"`) are recorded for both a confirmed success and
+/// an on-chain revert.
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct QueueJobReceipt {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub broadcast_at_unix: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub confirmations: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub receipt_block_number: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub receipt_gas_used_hex: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub receipt_status: Option<String>,
+}

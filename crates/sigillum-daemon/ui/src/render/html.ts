@@ -29,6 +29,7 @@ export function pillClass(status: unknown): string {
     value.includes("pass") ||
     value.includes("success") ||
     value.includes("sent") ||
+    value.includes("confirm") ||
     value.includes("broadcast") ||
     value.includes("enabled") ||
     value.includes("active") ||

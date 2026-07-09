@@ -1238,6 +1238,7 @@ fn test_queue_job_with_flatten_and_tag_roundtrip() {
         last_error: None,
         transaction_hash_hex: None,
         broadcast_transaction_hash_hex: None,
+        receipt: Default::default(),
     };
     roundtrip_test(job);
 }
@@ -1263,6 +1264,7 @@ fn test_queue_job_with_error_roundtrip() {
         last_error: Some("Insufficient funds".to_string()),
         transaction_hash_hex: None,
         broadcast_transaction_hash_hex: Some("0xbcast".to_string()),
+        receipt: Default::default(),
     };
     roundtrip_test(job);
 }
@@ -1290,6 +1292,7 @@ fn test_queue_job_list_response_roundtrip() {
             last_error: None,
             transaction_hash_hex: None,
             broadcast_transaction_hash_hex: None,
+            receipt: Default::default(),
         }],
     };
     roundtrip_test(resp);
@@ -1320,6 +1323,7 @@ fn test_queue_enqueue_response_roundtrip() {
             last_error: None,
             transaction_hash_hex: None,
             broadcast_transaction_hash_hex: None,
+            receipt: Default::default(),
         },
     };
     roundtrip_test(resp);
@@ -1334,6 +1338,7 @@ fn test_queue_process_response_roundtrip() {
         retrying: 0,
         operator_action_required: 0,
         failed: 1,
+        confirmed: 0,
         failures_by_cause: MaintenanceFailureBreakdown {
             provider_error: 1,
             ..MaintenanceFailureBreakdown::default()
@@ -1358,6 +1363,7 @@ fn test_queue_process_response_roundtrip() {
             last_error: None,
             transaction_hash_hex: Some("0xhash".to_string()),
             broadcast_transaction_hash_hex: None,
+            receipt: Default::default(),
         }],
     };
     roundtrip_test(resp);
@@ -1396,12 +1402,16 @@ fn test_maintenance_run_response_roundtrip() {
         retrying: 1,
         operator_action_required: 0,
         failed: 1,
+        confirmed: 0,
         failures_by_cause: MaintenanceFailureBreakdown {
             provider_error: 1,
             policy_block: 1,
             insufficient_gas: 1,
             validation: 1,
             unknown: 0,
+            on_chain_revert: 0,
+            broadcast_rejected: 0,
+            receipt_timeout: 0,
         },
         deposits: vec![],
         jobs: vec![],

@@ -20,11 +20,13 @@ mod erc721;
 mod errors;
 mod logs;
 mod permit2;
+mod receipt;
 
 use abi::{nft_token_uri_call_data, parse_abi_string_result};
 use errors::{provider_http_error, provider_json_rpc_error};
 pub(in crate::service) use logs::EvmLogEntry;
 use logs::parse_log_entry;
+pub(in crate::service) use receipt::EvmTransactionReceipt;
 
 #[derive(Serialize)]
 struct JsonRpcRequest<'a> {
@@ -37,7 +39,16 @@ struct JsonRpcRequest<'a> {
 #[derive(Deserialize)]
 struct JsonRpcResponse {
     id: u64,
-    result: Option<Value>,
+    // A JSON-RPC `null` result is semantically meaningful for some methods
+    // (`eth_getTransactionReceipt` returns `null` for "not yet mined" — W7.4
+    // receipt polling). Deserializing this as a required `Value` (defaulting
+    // to `Value::Null` when the key is absent) collapses "explicit null" and
+    // "missing key" into the SAME `Value::Null`, so `into_result` never
+    // manufactures a spurious transport error for a valid null result;
+    // per-method parsers (e.g. `parse_receipt`) decide whether `Null` is
+    // acceptable for THEM.
+    #[serde(default)]
+    result: Value,
     error: Option<JsonRpcError>,
 }
 
@@ -294,10 +305,7 @@ impl JsonRpcResponse {
         if let Some(error) = self.error {
             return Err(provider_json_rpc_error(method, error));
         }
-
-        self.result.ok_or_else(|| {
-            ServiceError::internal(format!("Provider response missing result for {method}"))
-        })
+        Ok(self.result)
     }
 }
 

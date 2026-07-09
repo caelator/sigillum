@@ -164,16 +164,24 @@ Current daemon behavior:
 - tracks stealth deposit records, discovers matching ERC-5564 announcements from
   bounded provider log scans, and refreshes balances against configured providers
 - queues direct sends and sweep jobs with explicit persisted states:
-  `queued`, `blocked`, `retrying`, `sent`, `failed_terminal`, and
+  `queued`, `blocked`, `retrying`, `sent`, `confirmed`, `failed_terminal`, and
   `operator_action_required`; legacy `deferred` inputs normalize to
   `blocked` during recovery with a recorded reason, while
   `operator_action_required` is terminal until a future explicit operator
-  action moves it out of that state
+  action moves it out of that state. `sent`/`confirmed` are `PlanStepExecution`-
+  only distinctions (W7.4): `sent` means broadcast-and-awaiting-confirmation,
+  `confirmed` means the receipt reached the chain registry's `finality_blocks`
+  depth (W1.1) with a success status; `EthSeed*`/`EthStealth*` jobs keep
+  `sent` as their pre-W7.4 terminal meaning
 - keeps queue ownership split inside `service/queue/*`: the façade owns public
   enqueue/list methods, `payloads` owns job construction, `processing` owns the
-  drain loop and retry transitions, `sweeps` owns native/ERC-20 sweep execution,
-  and `state` owns normalization, legacy recovery, retry classification, and
-  retry backoff tests
+  drain loop, retry transitions, and per-source serialization (at most one
+  in-flight `PlanStepExecution` job per source address + chain id), `sweeps`
+  owns native/ERC-20 sweep execution, `plan_steps` (+ `plan_steps/signing.rs`
+  and `plan_steps/receipts.rs`) owns `PlanStepExecution` signing, broadcast
+  nonce/fee-bump retry, and post-broadcast receipt confirmation, and `state`
+  owns normalization, legacy recovery, retry classification, and retry
+  backoff tests
 - keeps queue transport ownership aligned across crates: queue request and
   response DTOs live under `sigillum-api/src/request/queue.rs` and
   `sigillum-api/src/response/queue.rs` with top-level re-exports preserved,

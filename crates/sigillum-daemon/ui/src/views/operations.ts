@@ -76,6 +76,28 @@ function describeQueueJob(job: any): string {
   }
 }
 
+// W7.4: truthful post-broadcast receipt info — `sent` means "broadcast,
+// awaiting confirmation"; `confirmed` and a receipt-discovered revert
+// (`operator_action_required` with `receipt_status`) both carry gas used
+// and the mined block number. Empty until a receipt has actually been
+// observed.
+function queueReceiptLine(job: any): string {
+  return (
+    "tx=" +
+    esc(job.transaction_hash_hex || "-") +
+    " · broadcast=" +
+    esc(job.broadcast_transaction_hash_hex || "-") +
+    " · receipt=" +
+    esc(job.receipt_status || (job.state === "sent" ? "pending" : "-")) +
+    " · confirmations=" +
+    esc(String(job.confirmations ?? "-")) +
+    " · block=" +
+    esc(String(job.receipt_block_number ?? "-")) +
+    " · gasUsed=" +
+    esc(job.receipt_gas_used_hex || "-")
+  );
+}
+
 function queueScheduleLine(job: any): string {
   if (job.next_attempt_after_unix) {
     return "nextAttempt=" + formatTs(job.next_attempt_after_unix);
@@ -87,8 +109,16 @@ function queueScheduleLine(job: any): string {
 }
 
 function queueJobCanProcess(job: any): boolean {
-  return !["operator_action_required", "sent", "failed", "failed_terminal"].includes(
-    String(job.state || ""),
+  const state = String(job.state || "");
+  // W7.4: `sent` for a `plan_step_execution` job means "broadcast, awaiting
+  // confirmation" — the operator can still trigger a manual receipt-poll
+  // via Process. Every other kind keeps `sent` as its pre-W7.4 terminal
+  // meaning (broadcast = done, never re-driven).
+  if (state === "sent" && job.kind === "plan_step_execution") {
+    return true;
+  }
+  return !["operator_action_required", "sent", "confirmed", "failed", "failed_terminal"].includes(
+    state,
   );
 }
 
@@ -103,6 +133,12 @@ function failureBreakdownLine(summary: any): string {
     esc(String(failures.insufficient_gas || 0)) +
     " · validation=" +
     esc(String(failures.validation || 0)) +
+    " · on_chain_revert=" +
+    esc(String(failures.on_chain_revert || 0)) +
+    " · broadcast_rejected=" +
+    esc(String(failures.broadcast_rejected || 0)) +
+    " · receipt_timeout=" +
+    esc(String(failures.receipt_timeout || 0)) +
     " · unknown=" +
     esc(String(failures.unknown || 0)) +
     ")"
@@ -439,10 +475,7 @@ export function createOperationsActions(deps: OperationsDeps) {
           " · " +
           esc(queueScheduleLine(job)) +
           "<br>" +
-          "tx=" +
-          esc(job.transaction_hash_hex || "-") +
-          " · broadcast=" +
-          esc(job.broadcast_transaction_hash_hex || "-") +
+          queueReceiptLine(job) +
           (job.last_error ? "<br>lastError=" + esc(job.last_error) : "") +
           "</div></div>" +
           '<div class="entity-actions">' +
