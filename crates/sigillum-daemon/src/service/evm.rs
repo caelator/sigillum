@@ -386,6 +386,32 @@ impl SigillumService {
             .await
     }
 
+    /// Current chain head (`eth_blockNumber`), used by W7.4 receipt
+    /// confirmation to compute confirmation depth against a mined receipt.
+    pub(in crate::service) async fn evm_block_number_for_provider(
+        &self,
+        provider_compartment_id: usize,
+        provider: &sigillum_api::EvmProviderProfile,
+    ) -> ServiceResult<u64> {
+        self.provider_rpc_for_profile(provider_compartment_id, provider)?
+            .get_block_number()
+            .await
+    }
+
+    /// W7.4: poll for a broadcast transaction's receipt. `None` means "no
+    /// receipt yet" (or an unrecognized response shape) — NEVER treated as
+    /// a failure; the caller keeps waiting within its confirmation budget.
+    pub(in crate::service) async fn evm_transaction_receipt_for_provider(
+        &self,
+        provider_compartment_id: usize,
+        provider: &sigillum_api::EvmProviderProfile,
+        transaction_hash_hex: &str,
+    ) -> ServiceResult<Option<rpc::EvmTransactionReceipt>> {
+        self.provider_rpc_for_profile(provider_compartment_id, provider)?
+            .get_transaction_receipt(transaction_hash_hex)
+            .await
+    }
+
     pub(super) async fn evm_logs_for_provider(
         &self,
         provider_compartment_id: usize,

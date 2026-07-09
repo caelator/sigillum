@@ -23,6 +23,14 @@ pub(super) enum QueueFailureCause {
     InsufficientGas,
     Validation,
     Unknown,
+    /// W7.4: on-chain revert discovered via receipt polling.
+    OnChainRevert,
+    /// W7.4: broadcast rejected after the single allowed retry (nonce too
+    /// low twice, or underpriced/replacement-underpriced after the one fee
+    /// bump within the policy cap).
+    BroadcastRejected,
+    /// W7.4: no receipt within the confirmation wall-clock budget.
+    ReceiptTimeout,
 }
 
 pub(super) fn classify_queue_error(
@@ -48,6 +56,27 @@ pub(super) fn classify_queue_error(
 }
 
 pub(super) fn classify_blocked_queue_reason(reason: &str) -> QueueFailureCause {
+    classify_failure_message(None, reason)
+}
+
+/// W7.4: classify an `operator_action_required` park reason for the
+/// maintenance failures-by-cause breakdown. Recognizes the named W7.4
+/// reason prefixes first (`on_chain_revert:`, `broadcast_rejected:`,
+/// `receipt_timeout:`); anything else (e.g. W7.3's
+/// `evidence_hash_tamper:`/`claim_execution_failed:`) falls back to the
+/// generic text classifier, exactly as it would have before this
+/// classification existed (previously `operator_action_required` outcomes
+/// were not counted in `failures_by_cause` at all).
+pub(super) fn classify_operator_action_reason(reason: &str) -> QueueFailureCause {
+    if reason.starts_with("on_chain_revert:") {
+        return QueueFailureCause::OnChainRevert;
+    }
+    if reason.starts_with("broadcast_rejected:") {
+        return QueueFailureCause::BroadcastRejected;
+    }
+    if reason.starts_with("receipt_timeout:") {
+        return QueueFailureCause::ReceiptTimeout;
+    }
     classify_failure_message(None, reason)
 }
 
@@ -261,6 +290,43 @@ mod tests {
         assert_eq!(
             disposition_cause(&disposition),
             QueueFailureCause::Validation
+        );
+    }
+
+    #[test]
+    fn operator_action_reasons_classify_the_new_w7_4_causes() {
+        assert_eq!(
+            classify_operator_action_reason(
+                "on_chain_revert: rejected at broadcast; execution reverted"
+            ),
+            QueueFailureCause::OnChainRevert
+        );
+        assert_eq!(
+            classify_operator_action_reason(
+                "broadcast_rejected: nonce too low after retry; nonce too low"
+            ),
+            QueueFailureCause::BroadcastRejected
+        );
+        assert_eq!(
+            classify_operator_action_reason(
+                "receipt_timeout: no receipt for tx 0xabc within the confirmation window"
+            ),
+            QueueFailureCause::ReceiptTimeout
+        );
+    }
+
+    #[test]
+    fn operator_action_reasons_pre_w7_4_prefixes_fall_back_unchanged() {
+        // W7.3 reasons keep classifying exactly as the generic text
+        // classifier would (no W7.4 prefix match) — no regression in
+        // meaning, just newly counted where previously untracked.
+        assert_eq!(
+            classify_operator_action_reason("evidence_hash_tamper: mismatch"),
+            QueueFailureCause::Unknown
+        );
+        assert_eq!(
+            classify_operator_action_reason("claim_execution_failed: execution reverted"),
+            QueueFailureCause::Unknown
         );
     }
 }

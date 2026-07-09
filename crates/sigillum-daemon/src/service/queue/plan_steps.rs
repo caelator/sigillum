@@ -1,13 +1,19 @@
-//! `PlanStepExecution` queue job execution (W7.3).
+//! `PlanStepExecution` queue job execution (W7.3/W7.4).
 //!
 //! Mirrors the `sweeps.rs` split: this module owns everything specific to
 //! draining a `PlanStepExecution` job, while `service/queue/processing.rs`
 //! keeps the generic drain loop. `plan_steps/signing.rs` owns the actual
-//! sign + broadcast crypto boundary; this file owns the pre-signing guards
-//! (dependency ordering, evidence-hash verification, signer resolution, fee
-//! cap) that must all pass BEFORE any key material is touched.
+//! sign + broadcast crypto boundary (including W7.4's nonce-retry/fee-bump
+//! loop); `plan_steps/receipts.rs` owns post-broadcast semantics (broadcast
+//! error classification, fee bump math, receipt-confirmation polling). This
+//! file owns the pre-signing guards (dependency ordering, evidence-hash
+//! verification, signer resolution, fee cap) that must all pass BEFORE any
+//! key material is touched, PLUS the W7.4 dispatch: a job already in `sent`
+//! (broadcast in a PRIOR drain, possibly before a daemon restart — E2) skips
+//! straight to receipt polling and NEVER re-signs or re-broadcasts.
 //!
-//! Execution order per job (never reordered — each guard fails closed):
+//! Execution order per FRESH job (never reordered — each guard fails
+//! closed):
 //! 1. Dependency ordering (W6.4 / E1): an unmet prerequisite defers this job
 //!    (`blocked`, re-tried next drain); a failed prerequisite halts it the
 //!    same way, naming the prerequisite.
@@ -23,10 +29,20 @@
 //! 4. Fee cap: `max_fee_per_gas_cap_hex`, when the policy sets one, is
 //!    enforced against the job's recorded fee basis before any signing.
 //! 5. Sign + broadcast (`signing.rs`), reusing the payload's prepared call
-//!    fields verbatim. Claim (`ClaimReward`) failures at this stage are
-//!    NEVER retried — the Merkle proof may already be consumed by a single
-//!    broadcast attempt — and convert straight to `operator_action_required`.
+//!    fields verbatim. On a "nonce too low"/underpriced broadcast rejection,
+//!    `signing.rs` retries EXACTLY once (fresh nonce, or one fee bump within
+//!    the policy cap) before parking to `operator_action_required`. A
+//!    broadcast-time revert rejection parks the same way, generalizing the
+//!    W7.3 claim-only rule. Claim (`ClaimReward`) failures at this stage are
+//!    NEVER retried at all — the Merkle proof may already be consumed by a
+//!    single broadcast attempt — and convert straight to
+//!    `operator_action_required`.
+//! 6. A job that JUST reached `sent` is NOT polled for a receipt within the
+//!    same drain call (so `sent` truthfully means "broadcast, awaiting
+//!    confirmation" the instant it is set) — confirmation happens on a
+//!    LATER drain/maintenance cycle via the resume path above.
 
+mod receipts;
 mod signing;
 
 use std::collections::HashMap;
@@ -52,13 +68,31 @@ impl SigillumService {
     /// `job_states` is a snapshot of every OTHER job's id -> state in this
     /// drain batch, refreshed by the caller after each job so
     /// same-batch dependents resolve without waiting for the next drain.
+    #[allow(clippy::too_many_arguments)]
     pub(in crate::service::queue) async fn process_plan_step_execution(
         &self,
         token: &str,
         job_id: &str,
+        job_state: &str,
+        job_transaction_hash_hex: Option<&str>,
+        job_broadcast_at_unix: Option<u64>,
         payload: &PlanStepExecutionPayload,
         job_states: &HashMap<String, String>,
     ) -> ServiceResult<QueueExecution> {
+        // W7.4: a job already in `sent` broadcast in a PRIOR drain call —
+        // possibly before a daemon restart (E2 crash-resumption). NEVER
+        // re-sign or re-broadcast; only continue receipt polling using the
+        // persisted transaction hash.
+        if normalize_queue_state(job_state) == QUEUE_STATE_SENT {
+            return self
+                .resume_plan_step_confirmation(
+                    payload,
+                    job_transaction_hash_hex,
+                    job_broadcast_at_unix,
+                )
+                .await;
+        }
+
         // 1. Dependency ordering (E1 semantics) — cheap, no vault access.
         if let Some(reason) = dependency_block_reason(payload, job_states) {
             return Ok(QueueExecution::Blocked(reason));
@@ -113,8 +147,11 @@ impl SigillumService {
                 Err(error) => return Err(error),
             };
 
-        // 4. Fee cap, checked before any crypto work.
-        if let Some(reason) = self.plan_step_fee_cap_block_reason(payload)? {
+        // 4. Fee cap, checked before any crypto work. The resolved cap
+        //    bytes (if any) are also threaded into signing so the W7.4
+        //    single fee-bump retry stays within the same policy ceiling.
+        let fee_cap = self.resolve_fee_cap_bytes()?;
+        if let Some(reason) = self.plan_step_fee_cap_block_reason(payload, fee_cap)? {
             return Ok(QueueExecution::Blocked(reason));
         }
 
@@ -157,6 +194,7 @@ impl SigillumService {
                 step,
                 signing_key,
                 &session_fingerprint_hex(token),
+                fee_cap,
             )
             .await;
         match outcome {
@@ -172,24 +210,36 @@ impl SigillumService {
         }
     }
 
-    fn plan_step_fee_cap_block_reason(
-        &self,
-        payload: &PlanStepExecutionPayload,
-    ) -> ServiceResult<Option<String>> {
+    /// Resolve the policy's `max_fee_per_gas_cap_hex` (if any) to decoded
+    /// bytes, reused for BOTH the pre-signing block check and the W7.4
+    /// single fee-bump retry ceiling.
+    fn resolve_fee_cap_bytes(&self) -> ServiceResult<Option<[u8; 32]>> {
         let Some(cap_hex) = self
             .current_treasury_policy()?
             .and_then(|policy| policy.max_fee_per_gas_cap_hex)
         else {
             return Ok(None);
         };
+        Ok(Some(
+            decode_quantity_hex(&cap_hex).map_err(map_wallet_error)?,
+        ))
+    }
+
+    fn plan_step_fee_cap_block_reason(
+        &self,
+        payload: &PlanStepExecutionPayload,
+        fee_cap: Option<[u8; 32]>,
+    ) -> ServiceResult<Option<String>> {
+        let Some(cap) = fee_cap else {
+            return Ok(None);
+        };
         let Some(fee_hex) = payload.max_fee_per_gas_hex.as_deref() else {
             return Ok(None);
         };
-        let cap = decode_quantity_hex(&cap_hex).map_err(map_wallet_error)?;
         let fee = decode_quantity_hex(fee_hex).map_err(map_wallet_error)?;
         if compare_u256(&fee, &cap).is_gt() {
             return Ok(Some(format!(
-                "max_fee_per_gas_cap_exceeded: recorded fee {fee_hex} exceeds policy cap {cap_hex}"
+                "max_fee_per_gas_cap_exceeded: recorded fee {fee_hex} exceeds policy cap"
             )));
         }
         Ok(None)

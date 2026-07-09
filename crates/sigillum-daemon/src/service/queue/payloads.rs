@@ -19,6 +19,7 @@ pub(in crate::service) fn queued_job(id: String, now: u64, payload: QueueJobPayl
         last_error: None,
         transaction_hash_hex: None,
         broadcast_transaction_hash_hex: None,
+        receipt: Default::default(),
     }
 }
 

@@ -88,6 +88,26 @@ pub(crate) fn chain_profile_for_id(
         .find(|profile| profile.chain_id == Some(chain_id) && profile.enabled)
 }
 
+/// W7.4: conservative confirmation depth assumed for a `chain_id` with no
+/// registered (or disabled) `ChainProfile`. A plan step's execution payload
+/// always carries a `chain_id`, but nothing guarantees an operator has
+/// registered a profile for it (custom/unlisted chains); fail toward MORE
+/// confirmations rather than fewer. 12 blocks matches the conservative
+/// depth commonly used for pre-finality EVM confirmation (roughly
+/// mainnet's historical "safe" reorg-resistance heuristic).
+pub(crate) const DEFAULT_FINALITY_BLOCKS_WHEN_UNREGISTERED: u64 = 12;
+
+/// Registry-driven confirmation depth for a chain (W1.1's `finality_blocks`,
+/// consumed by W7.4's receipt-confirmation polling). A REGISTERED profile's
+/// `finality_blocks` is honored exactly as configured, including an explicit
+/// `0` (confirm on any mined receipt) — `0` is only a documented DEFAULT for
+/// an unregistered chain when there is no profile to consult at all.
+pub(crate) fn finality_blocks_for_chain(profiles: &[ChainProfile], chain_id: u64) -> u64 {
+    chain_profile_for_id(profiles, chain_id)
+        .map(|profile| profile.finality_blocks)
+        .unwrap_or(DEFAULT_FINALITY_BLOCKS_WHEN_UNREGISTERED)
+}
+
 fn promote_existing_builtin(profile: &mut ChainProfile, spec: BuiltinChainSpec) {
     if profile.name.trim().is_empty() {
         profile.name = spec.name.into();
@@ -103,4 +123,45 @@ fn promote_existing_builtin(profile: &mut ChainProfile, spec: BuiltinChainSpec) 
     profile.source = BUILTIN_CHAIN_SOURCE.into();
     profile.builtin = true;
     profile.enabled = true;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn profile(chain_id: u64, finality_blocks: u64, enabled: bool) -> ChainProfile {
+        let mut profile = builtin_chain_profile(BuiltinChainSpec {
+            name: "test-chain",
+            chain_id,
+            native_symbol: "ETH",
+        });
+        profile.finality_blocks = finality_blocks;
+        profile.enabled = enabled;
+        profile
+    }
+
+    #[test]
+    fn finality_blocks_uses_registered_profile_value_including_zero() {
+        let profiles = vec![profile(1, 0, true), profile(8453, 25, true)];
+        assert_eq!(finality_blocks_for_chain(&profiles, 1), 0);
+        assert_eq!(finality_blocks_for_chain(&profiles, 8453), 25);
+    }
+
+    #[test]
+    fn finality_blocks_falls_back_to_conservative_default_when_unregistered() {
+        let profiles = vec![profile(1, 0, true)];
+        assert_eq!(
+            finality_blocks_for_chain(&profiles, 999_999),
+            DEFAULT_FINALITY_BLOCKS_WHEN_UNREGISTERED
+        );
+    }
+
+    #[test]
+    fn finality_blocks_falls_back_to_conservative_default_when_disabled() {
+        let profiles = vec![profile(1, 3, false)];
+        assert_eq!(
+            finality_blocks_for_chain(&profiles, 1),
+            DEFAULT_FINALITY_BLOCKS_WHEN_UNREGISTERED
+        );
+    }
 }

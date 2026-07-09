@@ -1095,6 +1095,7 @@ impl SigillumService {
                 last_error: None,
                 transaction_hash_hex: None,
                 broadcast_transaction_hash_hex: None,
+                receipt: Default::default(),
             }
         } else {
             let destination_address = if strict_destination {
@@ -1141,6 +1142,7 @@ impl SigillumService {
                 last_error: None,
                 transaction_hash_hex: None,
                 broadcast_transaction_hash_hex: None,
+                receipt: Default::default(),
             }
         };
 

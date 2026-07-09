@@ -285,6 +285,7 @@ mod tests {
             last_error: Some("not ready".into()),
             transaction_hash_hex: None,
             broadcast_transaction_hash_hex: Some("0xfeed".into()),
+            receipt: Default::default(),
         }
     }
 

@@ -54,14 +54,18 @@ check_max_lines "crates/sigillum-daemon/src/ui.rs" 120
 check_max_lines "crates/sigillum-daemon/src/audit_log.rs" 1800
 check_max_lines "crates/sigillum-daemon/src/service/evm.rs" 900
 check_max_lines "crates/sigillum-daemon/src/service/evm/rpc.rs" 340
+check_max_lines "crates/sigillum-daemon/src/service/evm/rpc/receipt.rs" 120
 check_max_lines "crates/sigillum-daemon/src/service/inventory.rs" 750
 check_max_lines "crates/sigillum-daemon/src/service/inventory/plan_execution_enqueue.rs" 1400
 check_max_lines "crates/sigillum-daemon/src/service/queue.rs" 220
+check_max_lines "crates/sigillum-daemon/src/service/queue/outcomes.rs" 180
 check_max_lines "crates/sigillum-daemon/src/service/queue/payloads.rs" 140
 check_max_lines "crates/sigillum-daemon/src/service/queue/plan_steps.rs" 420
+check_max_lines "crates/sigillum-daemon/src/service/queue/plan_steps/receipts.rs" 420
 check_max_lines "crates/sigillum-daemon/src/service/queue/plan_steps/signing.rs" 260
 check_max_lines "crates/sigillum-daemon/src/service/queue/processing.rs" 400
 check_max_lines "crates/sigillum-daemon/src/service/queue/seed_sends.rs" 300
+check_max_lines "crates/sigillum-daemon/src/service/queue/serialization.rs" 240
 check_max_lines "crates/sigillum-daemon/src/service/queue/state.rs" 320
 check_max_lines "crates/sigillum-daemon/src/service/queue/sweeps.rs" 260
 check_max_lines "crates/sigillum-daemon/src/service/profiles.rs" 640
@@ -73,6 +77,7 @@ check_max_lines "crates/sigillum-api/src/request/queue.rs" 120
 check_max_lines "crates/sigillum-api/src/response.rs" 920
 check_max_lines "crates/sigillum-api/src/response/queue.rs" 140
 check_max_lines "crates/sigillum-api/src/response/queue/plan_step.rs" 160
+check_max_lines "crates/sigillum-api/src/response/queue/receipt.rs" 60
 check_max_lines "crates/sigillum-cli/src/main.rs" 1450
 check_max_lines "crates/sigillum-cli/src/daemon_api.rs" 860
 check_max_lines "crates/sigillum-cli/src/daemon_api/plans.rs" 280
@@ -108,19 +113,24 @@ check_required_file "crates/sigillum-daemon/ui/src/app.js"
 check_required_file "crates/sigillum-daemon/ui/src/app.ts"
 check_required_file "crates/sigillum-daemon/ui/src/api.ts"
 check_required_file "crates/sigillum-daemon/src/service/evm/rpc.rs"
+check_required_file "crates/sigillum-daemon/src/service/evm/rpc/receipt.rs"
 check_required_file "crates/sigillum-daemon/src/service/profiles/resolution.rs"
 check_required_file "crates/sigillum-daemon/src/service/profiles/sends.rs"
+check_required_file "crates/sigillum-daemon/src/service/queue/outcomes.rs"
 check_required_file "crates/sigillum-daemon/src/service/queue/payloads.rs"
 check_required_file "crates/sigillum-daemon/src/service/queue/plan_steps.rs"
+check_required_file "crates/sigillum-daemon/src/service/queue/plan_steps/receipts.rs"
 check_required_file "crates/sigillum-daemon/src/service/queue/plan_steps/signing.rs"
 check_required_file "crates/sigillum-daemon/src/service/queue/processing.rs"
 check_required_file "crates/sigillum-daemon/src/service/queue/seed_sends.rs"
+check_required_file "crates/sigillum-daemon/src/service/queue/serialization.rs"
 check_required_file "crates/sigillum-daemon/src/service/queue/state.rs"
 check_required_file "crates/sigillum-daemon/src/service/queue/sweeps.rs"
 check_required_file "crates/sigillum-daemon/src/service/inventory/plan_execution_enqueue.rs"
 check_required_file "crates/sigillum-api/src/request/queue.rs"
 check_required_file "crates/sigillum-api/src/response/queue.rs"
 check_required_file "crates/sigillum-api/src/response/queue/plan_step.rs"
+check_required_file "crates/sigillum-api/src/response/queue/receipt.rs"
 check_required_file "crates/sigillum-client/src/queue.rs"
 check_required_file "crates/sigillum-client/src/plans.rs"
 check_required_file "crates/sigillum-cli/src/daemon_api/queue.rs"
@@ -163,6 +173,7 @@ check_no_inline_tests "crates/sigillum-api/src/request/queue.rs"
 check_no_inline_tests "crates/sigillum-api/src/response.rs"
 check_no_inline_tests "crates/sigillum-api/src/response/queue.rs"
 check_no_inline_tests "crates/sigillum-api/src/response/queue/plan_step.rs"
+check_no_inline_tests "crates/sigillum-api/src/response/queue/receipt.rs"
 check_no_inline_tests "crates/sigillum-client/src/lib.rs"
 check_no_inline_tests "crates/sigillum-client/src/queue.rs"
 check_no_inline_tests "crates/sigillum-client/src/plans.rs"

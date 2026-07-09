@@ -6,11 +6,13 @@
 mod authorization;
 mod failure;
 mod gates;
+mod outcomes;
 mod pause;
 mod payloads;
 mod plan_steps;
 mod processing;
 mod seed_sends;
+mod serialization;
 mod state;
 mod sweeps;
 
@@ -42,6 +44,11 @@ const QUEUE_STATE_QUEUED: &str = "queued";
 const QUEUE_STATE_BLOCKED: &str = "blocked";
 const QUEUE_STATE_RETRYING: &str = "retrying";
 const QUEUE_STATE_SENT: &str = "sent";
+/// W7.4: new first-class state (schema v4). `sent` means "broadcast,
+/// awaiting confirmation"; `confirmed` means the receipt reached the
+/// chain's configured `finality_blocks` depth with a SUCCESS status.
+/// Genuinely terminal — never revisited by the drain loop.
+const QUEUE_STATE_CONFIRMED: &str = "confirmed";
 const QUEUE_STATE_FAILED_TERMINAL: &str = "failed_terminal";
 const QUEUE_STATE_OPERATOR_ACTION_REQUIRED: &str = "operator_action_required";
 const QUEUE_STATE_LEGACY_DEFERRED: &str = "deferred";
@@ -163,5 +170,35 @@ pub(super) enum QueueExecution {
     /// auto-retried. W7.3 uses this for evidence-hash tamper detection and
     /// for any claim (`ClaimReward`) failure — a Merkle proof may be
     /// consumed by a single broadcast attempt, so claims are never retried.
+    /// W7.4 also uses this for a receipt-confirmation timeout (reason
+    /// carries the tx hash — the broadcast is NEVER assumed to have failed)
+    /// and for a broadcast rejected twice (nonce-too-low retry exhausted, or
+    /// underpriced after the one allowed fee bump).
     OperatorActionRequired(String),
+    /// W7.4: an on-chain revert, discovered via receipt polling — never
+    /// auto-retried, with truthful gas/block evidence recorded alongside
+    /// the park reason (distinct from `OperatorActionRequired` because a
+    /// revert always carries mined receipt evidence; a plain
+    /// `OperatorActionRequired` reason may not).
+    RevertedOnChain {
+        reason: String,
+        block_number: u64,
+        gas_used_hex: String,
+    },
+    /// W7.4: the receipt reached the chain's configured finality depth with
+    /// a SUCCESS status — genuinely terminal, distinct from `Sent` (which
+    /// only means "broadcast, awaiting confirmation").
+    Confirmed {
+        block_number: u64,
+        gas_used_hex: String,
+        confirmations: u64,
+    },
+    /// W7.4: still awaiting confirmation. State stays `sent` (unchanged);
+    /// any partial receipt info observed so far (a receipt exists but has
+    /// not yet reached the required depth) is recorded for visibility.
+    AwaitingConfirmation {
+        block_number: Option<u64>,
+        gas_used_hex: Option<String>,
+        confirmations: Option<u64>,
+    },
 }

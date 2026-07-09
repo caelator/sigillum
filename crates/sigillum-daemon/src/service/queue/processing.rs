@@ -1,26 +1,26 @@
 //! Queue processing loop and execution-result state transitions.
+//!
+//! The drain loop itself lives here; per-source serialization (W7.4) is
+//! split into `serialization.rs` and applying a job's outcome to its
+//! persisted fields + the drain tally is split into `outcomes.rs` (house
+//! architecture cap).
 
 use std::collections::HashMap;
 
 use sigillum_api::{
-    EthStealthSendErc20WithProfileRequest, EthStealthSendWithProfileRequest,
-    MaintenanceFailureBreakdown, QueueJobPayload, QueueProcessRequest, QueueProcessResponse,
-    StealthPaymentRef,
+    EthStealthSendErc20WithProfileRequest, EthStealthSendWithProfileRequest, QueueJobPayload,
+    QueueProcessRequest, QueueProcessResponse, StealthPaymentRef,
 };
 
 use crate::audit_log::AuditEventSpec;
 use crate::service::helpers::now_unix;
 use crate::service::{ServiceError, ServiceResult, SigillumService};
 
-use super::failure::{
-    QueueFailureCause, QueueFailureDisposition, classify_blocked_queue_reason, classify_queue_error,
-};
+use super::QueueExecution;
 use super::gates::EXECUTION_PAUSED_REASON;
-use super::state::{mark_job_operator_action_required, queue_job_is_runnable};
-use super::{
-    QUEUE_STATE_BLOCKED, QUEUE_STATE_FAILED_TERMINAL, QUEUE_STATE_RETRYING, QUEUE_STATE_SENT,
-    QueueExecution,
-};
+use super::outcomes::QueueDrainTally;
+use super::serialization;
+use super::state::queue_job_is_runnable;
 
 impl SigillumService {
     pub(crate) async fn process_queue(
@@ -61,12 +61,7 @@ impl SigillumService {
         let limit = policy.queue_process_limit(body.limit);
         let force_target = body.id.is_some();
         let mut processed = Vec::new();
-        let mut succeeded = 0usize;
-        let mut blocked = 0usize;
-        let mut retrying = 0usize;
-        let mut operator_action_required = 0usize;
-        let mut failed = 0usize;
-        let mut failures_by_cause = MaintenanceFailureBreakdown::default();
+        let mut tally = QueueDrainTally::default();
         let mut paused_reason: Option<String> = None;
 
         // Snapshot of every job's id -> state, refreshed after each job so
@@ -79,6 +74,11 @@ impl SigillumService {
             .iter()
             .map(|job| (job.id.clone(), job.state.clone()))
             .collect();
+
+        // W7.4 per-source serialization snapshot: (chain, source) -> the
+        // job id currently occupying it (broadcast, awaiting confirmation).
+        // Refreshed the same way as `job_states` (see `serialization.rs`).
+        let mut in_flight_sources = serialization::build_in_flight_sources(&queue.jobs);
 
         for job in queue.jobs.iter_mut() {
             if processed.len() >= limit {
@@ -98,6 +98,14 @@ impl SigillumService {
 
             let now = now_unix();
             if !queue_job_is_runnable(job, force_target, now) {
+                if body.id.is_some() {
+                    break;
+                }
+                continue;
+            }
+
+            if let Some(reason) = serialization::skip_reason(job, &in_flight_sources) {
+                job.last_error = Some(reason);
                 if body.id.is_some() {
                     break;
                 }
@@ -278,66 +286,34 @@ impl SigillumService {
                         *gas_limit,
                     )
                     .await,
-                // W7.3: plan-step jobs execute once their action-family gate
-                // (checked above) passes; see `plan_steps.rs` for the full
+                // W7.3/W7.4: plan-step jobs execute once their action-family
+                // gate (checked above) passes; see `plan_steps.rs` for the
                 // pre-signing guard chain (dependency ordering, evidence-hash
                 // re-verification, signer resolution, fee cap) that runs
-                // before any key material is touched.
+                // before any key material is touched, and the resume path
+                // (no re-sign/re-broadcast) for a job already `sent`.
                 QueueJobPayload::PlanStepExecution(step_payload) => {
-                    self.process_plan_step_execution(token, &job.id, step_payload, &job_states)
-                        .await
+                    self.process_plan_step_execution(
+                        token,
+                        &job.id,
+                        &job.state,
+                        job.transaction_hash_hex.as_deref(),
+                        job.receipt.broadcast_at_unix,
+                        step_payload,
+                        &job_states,
+                    )
+                    .await
                 }
             }
             };
 
-            match result {
-                Ok(QueueExecution::Sent(sent)) => {
-                    job.state = QUEUE_STATE_SENT.into();
-                    job.last_error = None;
-                    job.transaction_hash_hex = Some(sent.transaction_hash_hex);
-                    job.broadcast_transaction_hash_hex = sent.broadcast_transaction_hash_hex;
-                    succeeded += 1;
-                }
-                Ok(QueueExecution::Blocked(reason)) => {
-                    record_failure_cause(
-                        &mut failures_by_cause,
-                        classify_blocked_queue_reason(&reason),
-                    );
-                    job.state = QUEUE_STATE_BLOCKED.into();
-                    job.last_error = Some(reason);
-                    blocked += 1;
-                }
-                Ok(QueueExecution::OperatorActionRequired(reason)) => {
-                    // E1: terminal-until-human, never auto-retried (W7.3
-                    // evidence-hash tamper detection and claim-revert rule).
-                    mark_job_operator_action_required(job, reason, now);
-                    operator_action_required += 1;
-                }
-                Err(error) => match classify_queue_error(error, job.attempts, now, policy) {
-                    QueueFailureDisposition::Retryable {
-                        reason,
-                        retry_after_unix,
-                        cause,
-                    } => {
-                        record_failure_cause(&mut failures_by_cause, cause);
-                        job.state = QUEUE_STATE_RETRYING.into();
-                        job.last_error = Some(reason);
-                        job.next_attempt_after_unix = Some(retry_after_unix);
-                        retrying += 1;
-                    }
-                    QueueFailureDisposition::FailedTerminal { reason, cause } => {
-                        record_failure_cause(&mut failures_by_cause, cause);
-                        job.state = QUEUE_STATE_FAILED_TERMINAL.into();
-                        job.last_error = Some(reason);
-                        failed += 1;
-                    }
-                },
-            }
+            super::outcomes::apply(job, result, now, policy, &mut tally);
 
             // Refresh the dependency-lookup snapshot immediately so a
             // dependent `PlanStepExecution` job processed later in THIS
             // batch sees this job's just-computed outcome.
             job_states.insert(job.id.clone(), job.state.clone());
+            serialization::refresh(&mut in_flight_sources, job);
 
             processed.push(job.clone());
 
@@ -348,24 +324,15 @@ impl SigillumService {
 
         Ok(QueueProcessResponse {
             processed: processed.len(),
-            succeeded,
-            blocked,
-            retrying,
-            operator_action_required,
-            failed,
-            failures_by_cause,
+            succeeded: tally.succeeded,
+            blocked: tally.blocked,
+            retrying: tally.retrying,
+            operator_action_required: tally.operator_action_required,
+            failed: tally.failed,
+            confirmed: tally.confirmed,
+            failures_by_cause: tally.failures_by_cause,
             paused_reason,
             jobs: processed,
         })
-    }
-}
-
-fn record_failure_cause(breakdown: &mut MaintenanceFailureBreakdown, cause: QueueFailureCause) {
-    match cause {
-        QueueFailureCause::ProviderError => breakdown.provider_error += 1,
-        QueueFailureCause::PolicyBlock => breakdown.policy_block += 1,
-        QueueFailureCause::InsufficientGas => breakdown.insufficient_gas += 1,
-        QueueFailureCause::Validation => breakdown.validation += 1,
-        QueueFailureCause::Unknown => breakdown.unknown += 1,
     }
 }

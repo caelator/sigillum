@@ -1,13 +1,13 @@
 //! Queue state normalization, recovery, and retry classification.
 
-use sigillum_api::QueueJob;
+use sigillum_api::{QueueJob, QueueJobPayload};
 
 use crate::service::helpers::now_unix;
 
 use super::{
-    QUEUE_STATE_BLOCKED, QUEUE_STATE_FAILED_TERMINAL, QUEUE_STATE_LEGACY_DEFERRED,
-    QUEUE_STATE_LEGACY_FAILED, QUEUE_STATE_OPERATOR_ACTION_REQUIRED, QUEUE_STATE_QUEUED,
-    QUEUE_STATE_RETRYING, QUEUE_STATE_SENT,
+    QUEUE_STATE_BLOCKED, QUEUE_STATE_CONFIRMED, QUEUE_STATE_FAILED_TERMINAL,
+    QUEUE_STATE_LEGACY_DEFERRED, QUEUE_STATE_LEGACY_FAILED, QUEUE_STATE_OPERATOR_ACTION_REQUIRED,
+    QUEUE_STATE_QUEUED, QUEUE_STATE_RETRYING, QUEUE_STATE_SENT,
 };
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -44,7 +44,11 @@ pub(in crate::service) fn is_active_queue_state(state: &str) -> bool {
 }
 
 pub(in crate::service) fn is_active_or_completed_queue_state(state: &str) -> bool {
-    is_active_queue_state(state) || normalize_queue_state(state) == QUEUE_STATE_SENT
+    is_active_queue_state(state)
+        || matches!(
+            normalize_queue_state(state),
+            QUEUE_STATE_SENT | QUEUE_STATE_CONFIRMED
+        )
 }
 
 /// Terminal failure (including the legacy `failed` alias).
@@ -72,6 +76,7 @@ pub(in crate::service) fn mark_job_operator_action_required(
 pub(in crate::service) fn queue_status(state: &str) -> String {
     match normalize_queue_state(state) {
         QUEUE_STATE_SENT => "sweep_sent",
+        QUEUE_STATE_CONFIRMED => "sweep_confirmed",
         QUEUE_STATE_FAILED_TERMINAL => "sweep_failed",
         QUEUE_STATE_OPERATOR_ACTION_REQUIRED => "sweep_operator_action_required",
         QUEUE_STATE_BLOCKED => "sweep_blocked",
@@ -121,6 +126,11 @@ pub(super) fn queue_job_is_runnable(job: &QueueJob, force_target: bool, now: u64
         QUEUE_STATE_RETRYING => {
             force_target || job.next_attempt_after_unix.unwrap_or_default() <= now
         }
+        // W7.4: a `PlanStepExecution` job in `sent` only AWAITS
+        // confirmation — revisit it to keep polling (incl. after a
+        // restart: E2). Other kinds keep `sent` as their pre-W7.4 terminal
+        // meaning — never re-driven, byte-identical.
+        QUEUE_STATE_SENT => matches!(job.payload, QueueJobPayload::PlanStepExecution(_)),
         QUEUE_STATE_OPERATOR_ACTION_REQUIRED => false,
         _ => false,
     }
@@ -153,6 +163,7 @@ mod tests {
             last_error: None,
             transaction_hash_hex: None,
             broadcast_transaction_hash_hex: None,
+            receipt: Default::default(),
         }
     }
 
@@ -257,5 +268,51 @@ mod tests {
             10
         ));
         assert!(!queue_job_is_runnable(&sample_job("sent", None), false, 10));
+    }
+
+    fn plan_step_job(state: &str) -> QueueJob {
+        let mut job = sample_job(state, None);
+        job.payload =
+            QueueJobPayload::PlanStepExecution(Box::new(sigillum_api::PlanStepExecutionPayload {
+                plan_id: "plan_1".into(),
+                step_id: "step_1".into(),
+                chain_id: 1,
+                source_address: "0x0000000000000000000000000000000000000001".into(),
+                derivation_path: "m/44'/60'/0'/0/0".into(),
+                wallet_family: "eth-seed".into(),
+                wallet_profile: "seed-a".into(),
+                provider_profile: "mainnet".into(),
+                action: "sweep_native".into(),
+                asset_kind: "native".into(),
+                asset_address: None,
+                amount_hex: "0x1".into(),
+                destination_address: None,
+                call_label: "native.transfer(value)".into(),
+                call_target_address: "0x0000000000000000000000000000000000000002".into(),
+                call_data_hex: "0x".into(),
+                call_value_wei_hex: None,
+                simulation_evidence_hash_hex: "ab".repeat(32),
+                fee_basis: None,
+                max_priority_fee_per_gas_hex: None,
+                max_fee_per_gas_hex: None,
+                prerequisite_job_ids: Vec::new(),
+            }));
+        job
+    }
+
+    // W7.4: `sent` for a `PlanStepExecution` job means "broadcast, awaiting
+    // confirmation" — the drain loop keeps visiting it (E2 crash-resumption
+    // relies on this) until `confirmed` or `operator_action_required`.
+    #[test]
+    fn w7_4_confirmed_state_semantics() {
+        assert!(queue_job_is_runnable(&plan_step_job("sent"), false, 10));
+        assert!(!queue_job_is_runnable(
+            &plan_step_job("confirmed"),
+            false,
+            10
+        ));
+        assert_eq!(queue_status("confirmed"), "sweep_confirmed");
+        assert!(is_active_or_completed_queue_state("confirmed"));
+        assert!(is_active_or_completed_queue_state("sent"));
     }
 }
