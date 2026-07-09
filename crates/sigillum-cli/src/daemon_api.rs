@@ -28,11 +28,10 @@ use std::time::{Duration, Instant};
 
 use serde::Serialize;
 use sigillum_api::request::{
-    ConsolidationPlanApproveRequest, ConsolidationPlanExportRequest,
-    ConsolidationPlanGenerateRequest, ConsolidationPlanSimulateRequest, EthSeedWalletCreateRequest,
-    EthStealthWalletProfileUpsertRequest, EthXpubWalletProfileUpsertRequest,
-    EvmProviderProfileUpsertRequest, EvmProviderRef, Fido2UnlockRequest, MaintenanceRunRequest,
-    PartyDestination, RiskCatalogDeleteRequest, RiskCatalogUpsertRequest, SelfCheckRunRequest,
+    EthSeedWalletCreateRequest, EthStealthWalletProfileUpsertRequest,
+    EthXpubWalletProfileUpsertRequest, EvmProviderProfileUpsertRequest, EvmProviderRef,
+    Fido2UnlockRequest, MaintenanceRunRequest, RiskCatalogDeleteRequest, RiskCatalogUpsertRequest,
+    SelfCheckRunRequest,
 };
 use sigillum_client::{ClientError, SigillumClient};
 use url::Url;
@@ -42,6 +41,7 @@ mod deposits;
 mod evm;
 mod inventory;
 mod inventory_args;
+mod plans;
 mod queue;
 mod receiving;
 mod transit;
@@ -117,7 +117,7 @@ pub fn cmd_api(args: &[String]) {
         "inventory" => inventory::cmd_api_inventory(args),
         "discovery" => cmd_api_discovery(args),
         "risk" => cmd_api_risk(args),
-        "plans" => cmd_api_plans(args),
+        "plans" => plans::cmd_api_plans(args),
         "receiving" => receiving::cmd_api_receiving(args),
         "treasury" => treasury::cmd_api_treasury(args),
         "queue" => queue::cmd_api_queue(args),
@@ -421,96 +421,6 @@ fn cmd_api_risk(args: &[String]) {
     }
 }
 
-/// Dispatch `sigillum api plans <list|generate|approve|simulate|export>`.
-fn cmd_api_plans(args: &[String]) {
-    if args.len() < 2 {
-        eprintln!("Usage: sigillum api plans <list|generate|approve|simulate|export> [...]");
-        process::exit(1);
-    }
-
-    match args[1].as_str() {
-        "list" => run_api_command(args, true, |client| async move {
-            client.list_consolidation_plans().await
-        }),
-        "generate" => {
-            let party_destinations = parse_multi_flag(args, "--party-destination")
-                .into_iter()
-                .map(|value| match value.split_once('=') {
-                    Some((counterparty_id, destination_address)) => PartyDestination {
-                        counterparty_id: counterparty_id.to_string(),
-                        destination_address: destination_address.to_string(),
-                    },
-                    None => {
-                        eprintln!(
-                            "Usage: sigillum api plans generate --party-destination <counterparty_id>=<address>"
-                        );
-                        process::exit(1);
-                    }
-                })
-                .collect();
-            let request = ConsolidationPlanGenerateRequest {
-                destination_address: parse_flag(args, "--destination-address"),
-                wallet_family: parse_flag(args, "--wallet-family"),
-                wallet_profile: parse_flag(args, "--wallet-profile"),
-                provider_profile: parse_flag(args, "--provider-profile"),
-                chain_id: parse_u64_flag(args, "--chain-id"),
-                include_watch_only: flag_option(args, "--include-watch-only"),
-                auto_queue_low_risk: flag_option(args, "--auto-queue-low-risk"),
-                routing_strategy: parse_flag(args, "--routing-strategy"),
-                party_destinations,
-            };
-            run_api_command(args, true, move |client| async move {
-                client.generate_consolidation_plan(request).await
-            });
-        }
-        "approve" => {
-            let request = ConsolidationPlanApproveRequest {
-                plan_id: require_flag(
-                    args,
-                    "--plan-id",
-                    "sigillum api plans approve --plan-id <ID>",
-                ),
-                step_ids: parse_multi_flag(args, "--step-id"),
-            };
-            run_api_command(args, true, move |client| async move {
-                client.approve_consolidation_plan(request).await
-            });
-        }
-        "simulate" => {
-            let request = ConsolidationPlanSimulateRequest {
-                plan_id: require_flag(
-                    args,
-                    "--plan-id",
-                    "sigillum api plans simulate --plan-id <ID>",
-                ),
-                step_ids: parse_multi_flag(args, "--step-id"),
-            };
-            run_api_command(args, true, move |client| async move {
-                client.simulate_consolidation_plan(request).await
-            });
-        }
-        "export" => {
-            let request = ConsolidationPlanExportRequest {
-                plan_id: require_flag(
-                    args,
-                    "--plan-id",
-                    "sigillum api plans export --plan-id <ID> [--format call_manifest|safe_tx_builder] [--safe-address 0x...]",
-                ),
-                step_ids: parse_multi_flag(args, "--step-id"),
-                format: parse_flag(args, "--format"),
-                safe_address: parse_flag(args, "--safe-address"),
-            };
-            run_api_command(args, true, move |client| async move {
-                client.export_consolidation_plan(request).await
-            });
-        }
-        _ => {
-            eprintln!("Usage: sigillum api plans <list|generate|approve|simulate|export> [...]");
-            process::exit(1);
-        }
-    }
-}
-
 /// Dispatch `sigillum api maintenance run [...]`.
 fn cmd_api_maintenance(args: &[String]) {
     if args.len() < 2 || args[1].as_str() != "run" {
@@ -685,7 +595,7 @@ COMMANDS:
   inventory <list|chains|watch|token-registry|scan-evm> [...]  (scan supports --watch-address, --watch-address-file, --include-watch-book, --derivation-pattern, --account-limit, --probe-token-registry)
   discovery <jobs|scan-evm> [...]
   risk <list|catalog|catalog-upsert|catalog-delete> [...]
-  plans <list|generate|approve|simulate|export> [...]
+  plans <list|generate|approve|simulate|export|enqueue-step|enqueue-plan> [...]  (enqueue-step needs --confirm; enqueue-plan needs --confirmation <PHRASE>)
   receiving <overview|refresh-balances|tag-deposit> [...]
   treasury <overview|policy|policy-update|receive-list|receive-allocate|receive-rotate|parties> [...]
   queue <list|process|pause|resume> [...]

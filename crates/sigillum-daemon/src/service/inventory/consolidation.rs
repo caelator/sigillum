@@ -16,7 +16,7 @@ use super::planner::{
     analyze_plan_linkage, apply_linkage_blockers, apply_policy_blockers_to_step,
     assign_step_ordering, build_plan_steps, plan_policy_violations, summarize_plan_steps,
 };
-use super::simulation::parse_simulated_at_unix;
+use super::simulation::{DEFAULT_SIMULATION_FRESHNESS_SECS, simulation_is_stale};
 use super::support::{load_inventory_state, save_inventory_state, trimmed_optional};
 
 impl SigillumService {
@@ -170,18 +170,14 @@ impl SigillumService {
         let freshness_secs = policy
             .as_ref()
             .map(|policy| policy.simulation_freshness_secs)
-            .unwrap_or(900);
+            .unwrap_or(DEFAULT_SIMULATION_FRESHNESS_SECS);
         let now = now_unix();
         for step in &mut plan.steps {
-            if step.simulation_status == WalletSimulationStatus::Passed {
-                let simulated_at = parse_simulated_at_unix(&step.simulation_evidence);
-                if simulated_at
-                    .map(|simulated_at| now.saturating_sub(simulated_at) > freshness_secs)
-                    .unwrap_or(true)
-                {
-                    // Stale or unprovable simulation evidence must be re-run before execution (fail closed).
-                    step.simulation_status = WalletSimulationStatus::Required;
-                }
+            if step.simulation_status == WalletSimulationStatus::Passed
+                && simulation_is_stale(&step.simulation_evidence, freshness_secs, now)
+            {
+                // Stale or unprovable simulation evidence must be re-run before execution (fail closed).
+                step.simulation_status = WalletSimulationStatus::Required;
             }
         }
         let approve_all = body.step_ids.is_empty();

@@ -968,6 +968,7 @@ fn test_wallet_operations_response_roundtrips() {
         linkage_warnings: Vec::new(),
         auto_eligible: false,
         approved: false,
+        queued_job_id: None,
     };
     let plan = ConsolidationPlan {
         id: "plan_1".to_string(),

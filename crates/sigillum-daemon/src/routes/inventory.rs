@@ -12,10 +12,10 @@ use sigillum_api::{
     ConsolidationPlanSimulateRequest, CounterpartyCreateRequest, CounterpartyDeleteRequest,
     CounterpartyUpdateRequest, DiscoveryJobMutationRequest, NftMetadataFetchRequest,
     NftMetadataOptInDeleteRequest, NftMetadataOptInUpsertRequest, NftMetadataSettingsUpdateRequest,
-    RiskCatalogDeleteRequest, RiskCatalogUpsertRequest, TokenRegistryDeleteRequest,
-    TokenRegistryImportRequest, TreasuryPolicyUpdateRequest, TreasuryReceiveAllocateRequest,
-    TreasuryReceiveRotateRequest, WalletInventoryScanRequest, WatchAddressBookDeleteRequest,
-    WatchAddressBookUpsertRequest,
+    PlanEnqueuePlanRequest, PlanEnqueueStepRequest, RiskCatalogDeleteRequest,
+    RiskCatalogUpsertRequest, TokenRegistryDeleteRequest, TokenRegistryImportRequest,
+    TreasuryPolicyUpdateRequest, TreasuryReceiveAllocateRequest, TreasuryReceiveRotateRequest,
+    WalletInventoryScanRequest, WatchAddressBookDeleteRequest, WatchAddressBookUpsertRequest,
 };
 
 use crate::AppState;
@@ -566,4 +566,38 @@ pub(crate) async fn export_consolidation_plan(
     };
     let service = SigillumService::new(state);
     service_response(service.export_consolidation_plan(bearer_token(&headers).as_deref(), body))
+}
+
+pub(crate) async fn enqueue_consolidation_plan_step(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Json(body): Json<PlanEnqueueStepRequest>,
+) -> Response {
+    let body = match validated(Json(body)) {
+        Ok(b) => b,
+        Err(resp) => return resp,
+    };
+    let service = SigillumService::new(state);
+    service_response(
+        service
+            .enqueue_consolidation_plan_step(bearer_token(&headers).as_deref(), body)
+            .await,
+    )
+}
+
+pub(crate) async fn enqueue_consolidation_plan(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Json(body): Json<PlanEnqueuePlanRequest>,
+) -> Response {
+    let body = match validated(Json(body)) {
+        Ok(b) => b,
+        Err(resp) => return resp,
+    };
+    let service = SigillumService::new(state);
+    service_response(
+        service
+            .enqueue_consolidation_plan(bearer_token(&headers).as_deref(), body)
+            .await,
+    )
 }

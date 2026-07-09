@@ -182,7 +182,7 @@ impl SigillumService {
     }
 }
 
-fn gas_topup_policy_enabled(policy: Option<&TreasuryPolicy>) -> bool {
+pub(super) fn gas_topup_policy_enabled(policy: Option<&TreasuryPolicy>) -> bool {
     policy
         .map(|policy| policy.enabled && policy.allow_gas_topups)
         .unwrap_or(false)
@@ -286,6 +286,7 @@ fn fund_gas_step(
         linkage_warnings: Vec::new(),
         auto_eligible: false,
         approved: false,
+        queued_job_id: None,
     }
 }
 
@@ -440,6 +441,7 @@ mod tests {
             linkage_warnings: Vec::new(),
             auto_eligible: false,
             approved: false,
+            queued_job_id: None,
         }
     }
 

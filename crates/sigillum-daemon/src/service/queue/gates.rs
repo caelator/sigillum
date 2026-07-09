@@ -1,6 +1,6 @@
 //! Queue execution gates for post-review treasury plan execution.
 
-use sigillum_api::{QueueJobPayload, TreasuryPolicy};
+use sigillum_api::{QueueJobPayload, TreasuryPolicy, WalletPlanStepAction};
 
 use crate::service::{ServiceError, ServiceResult, SigillumService};
 
@@ -26,6 +26,39 @@ impl ExecutionFamily {
             Self::Claim => "allow_claim_execution",
             Self::GasTopup => "allow_gas_topups",
         }
+    }
+
+    pub(crate) fn as_str(&self) -> &'static str {
+        match self {
+            Self::Sweep => "sweep",
+            Self::Revoke => "revoke",
+            Self::Exit => "exit",
+            Self::Claim => "claim",
+            Self::GasTopup => "gas_topup",
+        }
+    }
+}
+
+/// Execution family for a consolidation plan-step action; `None` means the
+/// action is not executable (`ReviewAsset`) and must never be enqueued.
+pub(crate) fn plan_action_execution_family(
+    action: &WalletPlanStepAction,
+) -> Option<ExecutionFamily> {
+    match action {
+        WalletPlanStepAction::SweepNative
+        | WalletPlanStepAction::SweepErc20
+        | WalletPlanStepAction::SweepNft => Some(ExecutionFamily::Sweep),
+        WalletPlanStepAction::RevokeErc20Approval
+        | WalletPlanStepAction::RevokePermit2Allowance
+        | WalletPlanStepAction::RevokeNftOperatorApproval
+        | WalletPlanStepAction::RevokeApproval
+        | WalletPlanStepAction::ApproveErc20 => Some(ExecutionFamily::Revoke),
+        WalletPlanStepAction::ExitDefiPosition => Some(ExecutionFamily::Exit),
+        WalletPlanStepAction::ClaimReward => Some(ExecutionFamily::Claim),
+        WalletPlanStepAction::FundGas => Some(ExecutionFamily::GasTopup),
+        // ReviewAsset is informational and unknown wire values (D-18 `Other`)
+        // have no execution semantics: neither is ever executable.
+        WalletPlanStepAction::ReviewAsset | WalletPlanStepAction::Other(_) => None,
     }
 }
 
@@ -68,8 +101,7 @@ pub(crate) fn queue_payload_execution_family(payload: &QueueJobPayload) -> Optio
     match payload {
         // EthStealth* variants are the pre-W7 stealth families: deliberately
         // NOT plan execution, so treasury execution gates must not affect them.
-        // EthSeed* variants keep their W7.3 hard block in processing.rs. W7.2's
-        // PlanStepExecution payloads will map to execution families here.
+        // EthSeed* variants keep their W7.3 hard block in processing.rs.
         QueueJobPayload::EthStealthTransfer { .. }
         | QueueJobPayload::EthStealthErc20Transfer { .. }
         | QueueJobPayload::EthStealthNativeSweep { .. }
@@ -77,6 +109,12 @@ pub(crate) fn queue_payload_execution_family(payload: &QueueJobPayload) -> Optio
         | QueueJobPayload::EthSeedTransfer { .. }
         | QueueJobPayload::EthSeedNativeSweep { .. }
         | QueueJobPayload::EthSeedErc20Sweep { .. } => None,
+        // A non-executable action (ReviewAsset) is unreachable by construction
+        // (enqueue refuses it); if such a payload ever appears, gate it under
+        // a family rather than exempting it from gates (fail closed).
+        QueueJobPayload::PlanStepExecution(payload) => {
+            Some(plan_action_execution_family(&payload.action).unwrap_or(ExecutionFamily::Sweep))
+        }
     }
 }
 
@@ -431,5 +469,135 @@ mod tests {
 
         assert_eq!(service.execution_gate_block_reason(&payload).unwrap(), None);
         assert!(service.queue_execution_paused().unwrap());
+    }
+
+    fn plan_step_payload(action: &str) -> QueueJobPayload {
+        QueueJobPayload::PlanStepExecution(Box::new(sigillum_api::PlanStepExecutionPayload {
+            plan_id: "plan_1".into(),
+            step_id: "step_1".into(),
+            chain_id: 1,
+            source_address: "0x1111111111111111111111111111111111111111".into(),
+            derivation_path: "m/44'/60'/0'/0/0".into(),
+            wallet_family: "eth-seed".into(),
+            wallet_profile: "seed-main".into(),
+            provider_profile: "mainnet".into(),
+            action: action.into(),
+            asset_kind: "native".into(),
+            asset_address: None,
+            amount_hex: "0x1".into(),
+            destination_address: Some("0x9999999999999999999999999999999999999999".into()),
+            call_label: "native.transfer(value)".into(),
+            call_target_address: "0x9999999999999999999999999999999999999999".into(),
+            call_data_hex: "0x".into(),
+            call_value_wei_hex: Some("0x1".into()),
+            simulation_evidence_hash_hex: "ab".repeat(32),
+            fee_basis: None,
+            max_priority_fee_per_gas_hex: None,
+            max_fee_per_gas_hex: None,
+            prerequisite_job_ids: Vec::new(),
+        }))
+    }
+
+    #[test]
+    fn plan_step_actions_map_to_execution_families() {
+        let expectations = [
+            ("sweep_native", Some(ExecutionFamily::Sweep)),
+            ("sweep_erc20", Some(ExecutionFamily::Sweep)),
+            ("sweep_nft", Some(ExecutionFamily::Sweep)),
+            ("revoke_erc20_approval", Some(ExecutionFamily::Revoke)),
+            ("revoke_permit2_allowance", Some(ExecutionFamily::Revoke)),
+            (
+                "revoke_nft_operator_approval",
+                Some(ExecutionFamily::Revoke),
+            ),
+            ("revoke_approval", Some(ExecutionFamily::Revoke)),
+            ("approve_erc20", Some(ExecutionFamily::Revoke)),
+            ("exit_defi_position", Some(ExecutionFamily::Exit)),
+            ("claim_reward", Some(ExecutionFamily::Claim)),
+            ("fund_gas", Some(ExecutionFamily::GasTopup)),
+            ("review_asset", None),
+        ];
+        for (action, expected) in expectations {
+            assert_eq!(
+                plan_action_execution_family(&action.into()),
+                expected,
+                "action {action}"
+            );
+        }
+    }
+
+    #[test]
+    fn plan_step_payloads_are_gated_per_action_family() {
+        assert_eq!(
+            queue_payload_execution_family(&plan_step_payload("sweep_native")),
+            Some(ExecutionFamily::Sweep)
+        );
+        assert_eq!(
+            queue_payload_execution_family(&plan_step_payload("claim_reward")),
+            Some(ExecutionFamily::Claim)
+        );
+        // Fail closed: a non-executable action never escapes the gates.
+        assert_eq!(
+            queue_payload_execution_family(&plan_step_payload("review_asset")),
+            Some(ExecutionFamily::Sweep)
+        );
+    }
+
+    #[test]
+    fn plan_step_payload_blocked_by_gates_under_hostile_policy() {
+        let (dir, service) = test_service();
+
+        persist_policy(&dir, None);
+        assert_eq!(
+            service
+                .execution_gate_block_reason(&plan_step_payload("sweep_native"))
+                .unwrap()
+                .as_deref(),
+            Some("execution_gate: plan execution requires an enabled treasury policy")
+        );
+
+        let mut policy = sample_policy();
+        policy.allow_plan_execution = false;
+        policy.allow_sweep_execution = true;
+        persist_policy(&dir, Some(policy));
+        assert_eq!(
+            service
+                .execution_gate_block_reason(&plan_step_payload("sweep_native"))
+                .unwrap()
+                .as_deref(),
+            Some("execution_gate: allow_plan_execution is disabled")
+        );
+
+        let policy = sample_policy();
+        persist_policy(&dir, Some(policy));
+        assert_eq!(
+            service
+                .execution_gate_block_reason(&plan_step_payload("sweep_native"))
+                .unwrap()
+                .as_deref(),
+            Some("execution_gate: allow_sweep_execution is disabled")
+        );
+
+        let mut policy = sample_policy();
+        policy.allow_sweep_execution = true;
+        policy.execution_paused = true;
+        persist_policy(&dir, Some(policy));
+        assert_eq!(
+            service
+                .execution_gate_block_reason(&plan_step_payload("sweep_native"))
+                .unwrap()
+                .as_deref(),
+            Some(EXECUTION_PAUSED_REASON)
+        );
+
+        let mut policy = sample_policy();
+        policy.allow_sweep_execution = true;
+        persist_policy(&dir, Some(policy));
+        assert_eq!(
+            service
+                .execution_gate_block_reason(&plan_step_payload("sweep_native"))
+                .unwrap(),
+            None
+        );
     }
 }

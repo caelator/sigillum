@@ -21,9 +21,15 @@ use sigillum_api::{
 use crate::audit_log::{AuditEventSpec, AuditQueueJobKind};
 
 pub(super) use state::{
-    count_queue_states, is_active_or_completed_queue_state, is_active_queue_state, queue_status,
-    recover_queue_job,
+    count_queue_states, is_active_or_completed_queue_state, is_active_queue_state,
+    mark_job_operator_action_required, queue_job_failed_state, queue_job_operator_action_required,
+    queue_status, recover_queue_job,
 };
+
+// W7.2 plan-step enqueue (service/inventory/plan_execution_enqueue.rs) reuses
+// the queue domain's gate evaluation and job construction.
+pub(in crate::service) use gates::{execution_gate_denial, plan_action_execution_family};
+pub(in crate::service) use payloads::queued_job;
 
 use super::helpers::{now_unix, random_id};
 use super::{ServiceError, ServiceResult, SigillumService};

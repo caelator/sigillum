@@ -19,6 +19,7 @@ mod nft_discovery;
 mod nft_metadata;
 mod observation;
 mod permit2_discovery;
+mod plan_execution_enqueue;
 mod planner;
 mod preflight;
 mod risk;

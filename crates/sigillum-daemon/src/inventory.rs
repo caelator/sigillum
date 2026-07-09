@@ -50,7 +50,9 @@ pub struct WalletInventoryState {
 }
 
 impl JsonDocument for WalletInventoryState {
-    const SCHEMA: JsonSchema = JsonSchema::new("sigillum.wallet-inventory", 18);
+    // v19 (W7.2) adds the optional per-step `queued_job_id` enqueue marker;
+    // v18 and older payloads load unchanged with the marker absent.
+    const SCHEMA: JsonSchema = JsonSchema::new("sigillum.wallet-inventory", 19);
 
     fn from_enveloped_json(
         path: &std::path::Path,
@@ -58,7 +60,7 @@ impl JsonDocument for WalletInventoryState {
         data: serde_json::Value,
     ) -> Result<Self, std::io::Error> {
         match version {
-            1..=18 => {
+            1..=19 => {
                 let mut state: Self = serde_json::from_value(data).map_err(|error| {
                     std::io::Error::new(
                         std::io::ErrorKind::InvalidData,
@@ -368,6 +370,7 @@ mod tests {
                 linkage_warnings: Vec::new(),
                 auto_eligible: false,
                 approved: false,
+                queued_job_id: None,
             }],
         });
         state.risk_catalog.push(sample_risk_catalog_entry());
@@ -725,7 +728,72 @@ mod tests {
         let saved: serde_json::Value =
             serde_json::from_slice(&std::fs::read(wallet_inventory_path(dir.path())).unwrap())
                 .unwrap();
-        assert_eq!(saved["schema_version"], json!(18));
+        assert_eq!(saved["schema_version"], json!(19));
+    }
+
+    #[test]
+    fn legacy_v18_plan_steps_load_without_queued_job_id_and_rewrite_v19() {
+        let dir = TempDir::new().unwrap();
+        let envelope = json!({
+            "schema": "sigillum.wallet-inventory",
+            "schema_version": 18,
+            "data": {
+                "consolidation_plans": [{
+                    "id": "plan_legacy",
+                    "status": "approved",
+                    "chain_id": 1,
+                    "created_at_unix": 1,
+                    "updated_at_unix": 2,
+                    "summary": {
+                        "total_steps": 1,
+                        "blocked_steps": 0,
+                        "review_required_steps": 0,
+                        "approved_steps": 1,
+                        "executable_steps": 1,
+                        "value_items": 1
+                    },
+                    "steps": [{
+                        "id": "step_legacy",
+                        "sequence": 0,
+                        "action": "sweep_native",
+                        "status": "approved",
+                        "wallet_family": "eth-seed",
+                        "wallet_profile": "seed-main",
+                        "provider_profile": "mainnet",
+                        "chain_id": 1,
+                        "address": "0x1111111111111111111111111111111111111111",
+                        "derivation_path": "m/44'/60'/0'/0/0",
+                        "asset_kind": "native",
+                        "amount_hex": "0x1",
+                        "destination_address": "0x9999999999999999999999999999999999999999",
+                        "signer_status": "available",
+                        "simulation_status": "passed",
+                        "risk_level": "low",
+                        "auto_eligible": true,
+                        "approved": true
+                    }]
+                }]
+            },
+        });
+        std::fs::write(
+            wallet_inventory_path(dir.path()),
+            serde_json::to_vec_pretty(&envelope).unwrap(),
+        )
+        .unwrap();
+
+        let loaded = load_wallet_inventory(dir.path()).unwrap();
+        let step = &loaded.consolidation_plans[0].steps[0];
+        assert_eq!(step.queued_job_id, None);
+        assert!(step.approved);
+
+        save_wallet_inventory(dir.path(), &loaded).unwrap();
+        let saved: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(wallet_inventory_path(dir.path())).unwrap())
+                .unwrap();
+        assert_eq!(saved["schema_version"], json!(19));
+        let saved_step = &saved["data"]["consolidation_plans"][0]["steps"][0];
+        assert_eq!(saved_step["id"], json!("step_legacy"));
+        assert!(saved_step.get("queued_job_id").is_none());
     }
 
     #[test]
@@ -737,7 +805,7 @@ mod tests {
             serde_json::from_slice(&std::fs::read(wallet_inventory_path(dir.path())).unwrap())
                 .unwrap();
         assert_eq!(saved["schema"], json!("sigillum.wallet-inventory"));
-        assert_eq!(saved["schema_version"], json!(18));
+        assert_eq!(saved["schema_version"], json!(19));
         assert_eq!(saved["data"]["chain_profiles"].as_array().unwrap().len(), 5);
         assert!(saved["data"]["watch_address_book"].is_array());
         assert!(saved["data"]["jobs"].is_array());

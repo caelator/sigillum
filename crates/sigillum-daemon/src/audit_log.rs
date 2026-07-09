@@ -110,6 +110,7 @@ pub(crate) enum AuditQueueJobKind {
     EthSeedTransfer,
     EthSeedNativeSweep,
     EthSeedErc20Sweep,
+    PlanStepExecution,
 }
 
 impl AuditQueueJobKind {
@@ -122,6 +123,7 @@ impl AuditQueueJobKind {
             Self::EthSeedTransfer => "eth_seed_transfer",
             Self::EthSeedNativeSweep => "eth_seed_native_sweep",
             Self::EthSeedErc20Sweep => "eth_seed_erc20_sweep",
+            Self::PlanStepExecution => "plan_step_execution",
         }
     }
 
@@ -140,6 +142,7 @@ impl AuditQueueJobKind {
             sigillum_api::QueueJobPayload::EthSeedTransfer { .. } => Self::EthSeedTransfer,
             sigillum_api::QueueJobPayload::EthSeedNativeSweep { .. } => Self::EthSeedNativeSweep,
             sigillum_api::QueueJobPayload::EthSeedErc20Sweep { .. } => Self::EthSeedErc20Sweep,
+            sigillum_api::QueueJobPayload::PlanStepExecution { .. } => Self::PlanStepExecution,
         }
     }
 }
@@ -441,6 +444,16 @@ pub(crate) enum AuditEventSpec {
         exported: usize,
         skipped: usize,
     },
+    /// W7.2 plan-step enqueue. Carries ids and the acting session's
+    /// fingerprint only — never raw tokens, calldata, or key material.
+    #[serde(rename = "wallet_consolidation.plan.enqueue_step")]
+    WalletConsolidationPlanEnqueueStep {
+        plan_id: String,
+        step_id: String,
+        job_id: String,
+        action_family: String,
+        session_fingerprint_hex: String,
+    },
     #[serde(rename = "treasury.policy.update")]
     TreasuryPolicyUpdate { enabled: bool, destinations: usize },
     #[serde(rename = "treasury.policy.execution_gate.update")]
@@ -581,6 +594,9 @@ impl AuditEventSpec {
             Self::WalletConsolidationPlanApprove { .. } => "wallet_consolidation.plan.approve",
             Self::WalletConsolidationPlanSimulate { .. } => "wallet_consolidation.plan.simulate",
             Self::WalletConsolidationPlanExport { .. } => "wallet_consolidation.plan.export",
+            Self::WalletConsolidationPlanEnqueueStep { .. } => {
+                "wallet_consolidation.plan.enqueue_step"
+            }
             Self::TreasuryPolicyUpdate { .. } => "treasury.policy.update",
             Self::TreasuryExecutionGateUpdate { .. } => "treasury.policy.execution_gate.update",
             Self::TreasuryReceiveAllocate { .. } => "treasury.receive.allocate",
@@ -954,6 +970,19 @@ impl AuditEventSpec {
                 "format": format,
                 "exported": exported,
                 "skipped": skipped,
+            }),
+            Self::WalletConsolidationPlanEnqueueStep {
+                plan_id,
+                step_id,
+                job_id,
+                action_family,
+                session_fingerprint_hex,
+            } => json!({
+                "plan_id": plan_id,
+                "step_id": step_id,
+                "job_id": job_id,
+                "action_family": action_family,
+                "session_fingerprint_hex": session_fingerprint_hex,
             }),
             Self::TreasuryPolicyUpdate {
                 enabled,

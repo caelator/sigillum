@@ -1491,7 +1491,7 @@ Phase W — Wallet-management completion
 - [x] W6.3 policy-driven hot floor/refill
 - [x] W6.4 step dependency ordering
 - [x] W7.1 execution policy gates + kill switch
-- [ ] W7.2 plan-step queue payloads + enqueue validation
+- [x] W7.2 plan-step queue payloads + enqueue validation
 - [ ] W7.3 seed-wallet signing execution
 - [ ] W7.4 nonces, receipts, failure classes
 - [ ] W7.5 linkage enforcement parity at execution
@@ -1715,3 +1715,22 @@ Phase H — Ship
   Parity doc 134 registrations / 135 endpoints. UI/docs step implemented
   by a Sonnet agent (operator-directed fallback after a Codex CLI
   usage-limit block).
+- 2026-07-09 W7.2 080e56c..d2dd301: `PlanStepExecution` queue payload
+  (queue store v3) carrying plan/step/chain ids, derivation evidence,
+  preflight-prepared call parameters, fee basis, and a canonical
+  simulation-evidence SHA-256 that W7.3 verifies before signing;
+  `POST /api/plans/enqueue-step` (explicit confirm flag) and
+  `enqueue-plan` (typed confirmation `EXECUTE {n} PLAN STEPS TOTAL {wei}
+  WEI`); enqueue re-validates everything server-side — approval,
+  simulation passed + fresh (stale demands re-simulate), unblocked,
+  W7.1 gates, treasury destination/step/plan caps via pre-planted
+  BlockPlanCap/BlockUnsimulated policy actions, linkage, W5 claim gate,
+  W6.1 top-up opt-in — each with a named refusal and negative test;
+  idempotent enqueue markers (inventory v19) with failed→reapprove via
+  operator_action_required; dependency chaining carries prerequisite job
+  ids; drain-time hard block "plan-step execution is not enabled yet"
+  regardless of gates (lifts in W7.3); stealth families byte-identical;
+  UI execute affordances gate-aware with typed-confirmation dialog; CLI
+  `sigillum api plans enqueue-step|enqueue-plan`. 29 new integration
+  tests. Implemented directly by a Sonnet agent under the operator's
+  standing fallback directive.

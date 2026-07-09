@@ -56,6 +56,21 @@ function describeQueueJob(job: any): string {
         " · token " +
         (job.token_address || "-")
       );
+    case "plan_step_execution":
+      return (
+        "plan step · " +
+        (job.action || "-") +
+        " · plan " +
+        (job.plan_id || "-") +
+        " · step " +
+        (job.step_id || "-") +
+        " · from " +
+        (job.source_address || "-") +
+        (job.destination_address ? " · to " + job.destination_address : "") +
+        ((job.prerequisite_job_ids || []).length
+          ? " · dependsOnJobs=" + (job.prerequisite_job_ids || []).join(",")
+          : "")
+      );
     default:
       return kind;
   }

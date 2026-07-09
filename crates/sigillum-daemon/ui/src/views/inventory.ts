@@ -50,6 +50,58 @@ export function inventoryNeedsOperatorReview(view: InventoryViewModel): boolean 
   );
 }
 
+/// Per-family W7.1 execution gate field for each plan-step action.
+/// review_asset is deliberately absent: it is never executable.
+const EXECUTION_FAMILY_GATE: Record<string, string> = {
+  sweep_native: "allow_sweep_execution",
+  sweep_erc20: "allow_sweep_execution",
+  sweep_nft: "allow_sweep_execution",
+  revoke_erc20_approval: "allow_revoke_execution",
+  revoke_permit2_allowance: "allow_revoke_execution",
+  revoke_nft_operator_approval: "allow_revoke_execution",
+  revoke_approval: "allow_revoke_execution",
+  approve_erc20: "allow_revoke_execution",
+  exit_defi_position: "allow_exit_execution",
+  claim_reward: "allow_claim_execution",
+  fund_gas: "allow_gas_topups",
+};
+
+function stepSimulatedAtUnix(step: ConsolidationPlanStep): number | null {
+  let simulatedAt: number | null = null;
+  for (const item of step.simulation_evidence || []) {
+    if (item.startsWith("simulated_at_unix=")) {
+      const value = Number(item.slice("simulated_at_unix=".length));
+      if (Number.isFinite(value)) simulatedAt = value;
+    }
+  }
+  return simulatedAt;
+}
+
+/// Mirror of the daemon's enqueue eligibility gates for the Execute
+/// affordance ONLY: policy on + gates on + not paused + approved + fresh
+/// passed simulation + unblocked + not already enqueued. The daemon
+/// re-validates everything server-side; this never widens what it allows.
+export function stepExecutionEligible(
+  step: ConsolidationPlanStep,
+  policy: Record<string, unknown> | null | undefined,
+  nowSecs: number,
+): boolean {
+  if (!policy || !policy.enabled) return false;
+  if (policy.execution_paused) return false;
+  if (!policy.allow_plan_execution) return false;
+  const gateField = EXECUTION_FAMILY_GATE[step.action];
+  if (!gateField || !policy[gateField]) return false;
+  if (!step.approved || step.status !== "approved") return false;
+  if ((step.blockers || []).length) return false;
+  if (step.simulation_status !== "passed") return false;
+  const simulatedAt = stepSimulatedAtUnix(step);
+  if (simulatedAt === null) return false;
+  const freshnessSecs = Number(policy.simulation_freshness_secs ?? 900);
+  if (nowSecs - simulatedAt > freshnessSecs) return false;
+  if (step.queued_job_id) return false;
+  return true;
+}
+
 export function blockerLabel(code: string): string {
   switch (code) {
     case "missing_party_destination":
@@ -84,6 +136,7 @@ export function createInventoryActions(deps: InventoryActionsDeps) {
   let planRoutingListenerBound = false;
   let planPartyDestinationInputIds: string[] = [];
   let latestChainProfiles: ChainProfile[] = [];
+  let latestTreasuryPolicy: Record<string, unknown> | null = null;
 
   function planRoutingStrategy(): "single" | "per_party" {
     const routingEl = document.getElementById(
@@ -713,12 +766,29 @@ export function createInventoryActions(deps: InventoryActionsDeps) {
           : "";
         const safeAddressInput =
           '<input type="text" class="input-wide plan-safe-address" data-plan-safe-address placeholder="Safe address" autocomplete="off">';
+        const nowSecs = Math.floor(Date.now() / 1000);
+        const anyStepEligible = (plan.steps || []).some((step) =>
+          stepExecutionEligible(step, latestTreasuryPolicy, nowSecs),
+        );
         const stepLines = (plan.steps || [])
           .slice(0, 8)
           .map((step: ConsolidationPlanStep) => {
             const evidence = (step.simulation_evidence || []).join(" | ");
             const linkageWarnings = step.linkage_warnings || [];
             const blockers = (step.blockers || []).map(blockerLabel).join(", ");
+            // Execute appears ONLY when every gate passes; the daemon
+            // re-validates everything at enqueue time regardless.
+            const executeButton = stepExecutionEligible(
+              step,
+              latestTreasuryPolicy,
+              nowSecs,
+            )
+              ? ' <button class="btn-ghost" data-action="enqueuePlanStep" data-arg0="' +
+                escAttr(plan.id) +
+                '" data-arg1="' +
+                escAttr(step.id) +
+                '">Execute</button>'
+              : "";
             return (
               '<div class="entity-meta">' +
               esc(step.action) +
@@ -766,12 +836,14 @@ export function createInventoryActions(deps: InventoryActionsDeps) {
               esc(step.simulation_status || "not_run") +
               " · blockers=" +
               esc(blockers || "-") +
+              (step.queued_job_id ? " · queuedJob=" + esc(step.queued_job_id) : "") +
               (evidence ? "<br>evidence=" + esc(evidence) : "") +
               (linkageWarnings.length
                 ? '<br><span class="linkage-warning">privacy: ' +
                   esc(linkageWarnings.join(", ")) +
                   "</span>"
                 : "") +
+              executeButton +
               "</div>"
             );
           })
@@ -811,6 +883,11 @@ export function createInventoryActions(deps: InventoryActionsDeps) {
           '<button class="btn-ghost" data-action="exportConsolidationPlan" data-arg0="' +
           escAttr(plan.id) +
           '" data-arg1="call_manifest">Call JSON</button>' +
+          (anyStepEligible
+            ? '<button class="btn-primary" data-action="enqueuePlanBulk" data-arg0="' +
+              escAttr(plan.id) +
+              '">Execute All Eligible</button>'
+            : "") +
           '<div class="plan-export-controls">' +
           safeAddressInput +
           '<button class="btn-ghost" data-action="exportConsolidationPlan" data-arg0="' +
@@ -827,17 +904,27 @@ export function createInventoryActions(deps: InventoryActionsDeps) {
     bindPlanRoutingSelect();
     void renderPlanPartyDestinations();
     try {
-      const [chains, watchBook, inventory, tokenRegistry, catalog, risks, plans, nftOptIns] =
-        await Promise.all([
-          deps.api("GET", "/api/chains"),
-          deps.api("GET", "/api/inventory/watch-addresses"),
-          deps.api("GET", "/api/inventory/wallets"),
-          deps.api("GET", "/api/inventory/token-registry"),
-          deps.api("GET", "/api/risk/catalog"),
-          deps.api("GET", "/api/risk/findings"),
-          deps.api("GET", "/api/plans/consolidation"),
-          deps.api("GET", "/api/inventory/nft-metadata/opt-ins"),
-        ]);
+      const [
+        chains,
+        watchBook,
+        inventory,
+        tokenRegistry,
+        catalog,
+        risks,
+        plans,
+        nftOptIns,
+        treasuryPolicy,
+      ] = await Promise.all([
+        deps.api("GET", "/api/chains"),
+        deps.api("GET", "/api/inventory/watch-addresses"),
+        deps.api("GET", "/api/inventory/wallets"),
+        deps.api("GET", "/api/inventory/token-registry"),
+        deps.api("GET", "/api/risk/catalog"),
+        deps.api("GET", "/api/risk/findings"),
+        deps.api("GET", "/api/plans/consolidation"),
+        deps.api("GET", "/api/inventory/nft-metadata/opt-ins"),
+        deps.api("GET", "/api/treasury/policy"),
+      ]);
       if (!chains.error) {
         latestChainProfiles = chains.profiles || [];
         renderChainProfiles(latestChainProfiles);
@@ -847,6 +934,11 @@ export function createInventoryActions(deps: InventoryActionsDeps) {
       if (!tokenRegistry.error) renderTokenRegistry(tokenRegistry.lists || []);
       if (!catalog.error) renderRiskCatalog(catalog.entries || []);
       if (!risks.error) renderRiskFindings(risks.findings || []);
+      // The policy gates decide whether Execute affordances render, so it
+      // must be applied before the plan list renders.
+      latestTreasuryPolicy = treasuryPolicy.error
+        ? null
+        : ((treasuryPolicy.policy as Record<string, unknown> | null) ?? null);
       if (!plans.error) renderConsolidationPlans(plans.plans || []);
       if (!nftOptIns.error) renderNftMetadataOptIns(nftOptIns);
     } catch (_) {}
@@ -1375,6 +1467,70 @@ export function createInventoryActions(deps: InventoryActionsDeps) {
     );
   }
 
+  async function enqueuePlanStep(planId: string, stepId: string): Promise<void> {
+    if (
+      !confirm(
+        "Enqueue plan step " +
+          stepId +
+          " as an execution queue job? The daemon re-validates every gate; " +
+          "queued plan-step jobs stay blocked until execution is enabled (W7.3).",
+      )
+    ) {
+      return;
+    }
+    const r = await deps.api("POST", "/api/plans/enqueue-step", {
+      plan_id: planId,
+      step_id: stepId,
+      confirm: true,
+    });
+    if (r.error) {
+      deps.toast(r.error, "error");
+      return;
+    }
+    deps.toast("Plan step queued as job " + String(r.job?.id || "?"));
+    void loadInventoryOperations();
+  }
+
+  async function enqueuePlanBulk(planId: string): Promise<void> {
+    // Probe with an empty confirmation: the daemon computes the exact
+    // expected phrase from the CURRENTLY eligible steps and returns it in
+    // the machine-readable `action` field (nothing is enqueued).
+    const probe = await deps.api("POST", "/api/plans/enqueue-plan", {
+      plan_id: planId,
+      confirmation: "",
+    });
+    const expected = typeof probe.action === "string" ? probe.action : null;
+    if (!expected) {
+      deps.toast(probe.error || "No plan steps are eligible for enqueue", "error");
+      return;
+    }
+    const typed = prompt(
+      "Typed confirmation required (house pattern).\n\n" +
+        "Type this phrase exactly to enqueue every eligible step:\n\n" +
+        expected,
+    );
+    if (typed === null) return;
+    if (typed.trim() !== expected) {
+      deps.toast("Confirmation phrase does not match. Expected: " + expected, "error");
+      return;
+    }
+    const r = await deps.api("POST", "/api/plans/enqueue-plan", {
+      plan_id: planId,
+      confirmation: typed.trim(),
+    });
+    if (r.error) {
+      deps.toast(r.error, "error");
+      return;
+    }
+    deps.toast(
+      "Enqueued " +
+        String((r.enqueued || []).length) +
+        " step(s); skipped " +
+        String((r.skipped || []).length),
+    );
+    void loadInventoryOperations();
+  }
+
   async function exportInventoryReport(): Promise<void> {
     const [watchBook, inventory, risks, plans] = await Promise.all([
       deps.api("GET", "/api/inventory/watch-addresses"),
@@ -1430,6 +1586,8 @@ export function createInventoryActions(deps: InventoryActionsDeps) {
     approveConsolidationPlan,
     simulateConsolidationPlan,
     exportConsolidationPlan,
+    enqueuePlanStep,
+    enqueuePlanBulk,
     exportInventoryReport,
   };
 }

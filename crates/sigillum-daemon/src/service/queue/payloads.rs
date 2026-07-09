@@ -7,7 +7,7 @@ use sigillum_api::{
 
 use super::QUEUE_STATE_QUEUED;
 
-pub(super) fn queued_job(id: String, now: u64, payload: QueueJobPayload) -> QueueJob {
+pub(in crate::service) fn queued_job(id: String, now: u64, payload: QueueJobPayload) -> QueueJob {
     QueueJob {
         id,
         state: QUEUE_STATE_QUEUED.into(),
