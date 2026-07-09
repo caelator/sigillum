@@ -59,6 +59,9 @@ fn classify_service_error_cause(error: &ServiceError) -> QueueFailureCause {
 }
 
 fn classify_failure_message(status: Option<StatusCode>, message: &str) -> QueueFailureCause {
+    if message.starts_with("execution_gate") || message.starts_with("execution_paused") {
+        return QueueFailureCause::PolicyBlock;
+    }
     let lower = message.to_ascii_lowercase();
     if contains_any(
         &lower,
@@ -209,6 +212,16 @@ mod tests {
     fn maintenance_failure_cause_policy_block() {
         assert_eq!(
             classify_blocked_queue_reason("seed-wallet queue execution is not enabled yet"),
+            QueueFailureCause::PolicyBlock
+        );
+        assert_eq!(
+            classify_blocked_queue_reason("execution_gate: allow_plan_execution is disabled"),
+            QueueFailureCause::PolicyBlock
+        );
+        assert_eq!(
+            classify_blocked_queue_reason(
+                "execution_paused: queue execution is paused by the operator kill switch"
+            ),
             QueueFailureCause::PolicyBlock
         );
         let disposition = classify_queue_error(

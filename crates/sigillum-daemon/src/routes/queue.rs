@@ -105,3 +105,27 @@ pub(crate) async fn process_jobs(
             .await,
     )
 }
+
+pub(crate) async fn pause_execution(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+) -> Response {
+    let service = SigillumService::new(state);
+    service_response(
+        service
+            .set_queue_execution_paused(bearer_token(&headers).as_deref(), true)
+            .await,
+    )
+}
+
+pub(crate) async fn resume_execution(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+) -> Response {
+    let service = SigillumService::new(state);
+    service_response(
+        service
+            .set_queue_execution_paused(bearer_token(&headers).as_deref(), false)
+            .await,
+    )
+}

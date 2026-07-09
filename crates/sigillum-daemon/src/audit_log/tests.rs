@@ -95,6 +95,26 @@ fn nft_metadata_audit_events_use_public_names_and_payloads() {
 }
 
 #[test]
+fn treasury_execution_gate_update_audit_event_is_public() {
+    let event = AuditEventSpec::TreasuryExecutionGateUpdate {
+        gate: "allow_sweep_execution".into(),
+        old_value: false,
+        new_value: true,
+        session_fingerprint_hex: "0123456789abcdef".into(),
+    };
+    let details = event.public_details();
+
+    assert_eq!(event.kind(), "treasury.policy.execution_gate.update");
+    assert_eq!(details["gate"], json!("allow_sweep_execution"));
+    assert_eq!(details["old_value"], json!(false));
+    assert_eq!(details["new_value"], json!(true));
+    assert_eq!(
+        details["session_fingerprint_hex"],
+        json!("0123456789abcdef")
+    );
+}
+
+#[test]
 fn legacy_public_audit_events_still_load() {
     let dir = TempDir::new().unwrap();
     let path = dir.path().join("audit.log");

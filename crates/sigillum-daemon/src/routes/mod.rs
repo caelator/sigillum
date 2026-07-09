@@ -643,6 +643,8 @@ fn queue_routes() -> AppRouter {
             "/api/queue/enqueue/eth-stealth-erc20-sweep",
             post(queue::enqueue_eth_stealth_erc20_sweep),
         )
+        .route("/api/queue/pause", post(queue::pause_execution))
+        .route("/api/queue/resume", post(queue::resume_execution))
         .route("/api/queue/process", post(queue::process_jobs))
 }
 
