@@ -424,7 +424,10 @@ fn apply_zero_value_transaction_gas_policy(
     Ok(())
 }
 
-pub(super) fn zero_value_transaction_gas_limit(
+/// Also reused by W7.3 (`service::queue::plan_steps`) at execution time, so
+/// the gas limit assumed when signing/broadcasting matches the one that was
+/// validated against the wallet's native balance at simulation time.
+pub(in crate::service) fn zero_value_transaction_gas_limit(
     provider: &EvmProviderProfile,
     step: &ConsolidationPlanStep,
 ) -> u64 {
