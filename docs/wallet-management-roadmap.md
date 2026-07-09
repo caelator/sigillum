@@ -367,6 +367,9 @@ The CLI should have parity for automation:
    including the existing Aave v3 withdraw preflight adapter and the generic
    ERC-4626 redeem exit adapter with maxRedeem/convertToAssets interface
    verification, redeem preflight simulation, and expected-assets-out evidence.
+   The Lido wstETH unwrap adapter is now implemented for `unwrap(amount)` only;
+   the stETH withdrawal queue remains out of scope, so stETH holdings stay
+   review-only unless a future adapter is explicitly added.
 7. Airdrop/reward discovery with strict claim risk gates. The first trusted
    candidate-ingestion, claim-contract risk-finding, and standard Merkle claim
    simulation slices are implemented; verified source adapters, richer external

@@ -13,11 +13,14 @@ use tempfile::TempDir;
 const OWNER_ADDRESS: &str = "0x9858effd232b4033e47d90003d41ec34ecaeda94";
 const GOOD_VAULT: &str = "0xdead4626000000000000000000000000000000aa";
 const NON_4626_TOKEN: &str = "0xdead4626000000000000000000000000000000bb";
+const WSTETH_TOKEN: &str = "0xdead4d57e7570000000000000000000000000000";
+const STETH_TOKEN: &str = "0xdead57e7480000000000000000000000000000aa";
 
 #[derive(Clone, Debug)]
 struct RpcConfig {
     native_balance_hex: String,
     redeem_reverts: bool,
+    unwrap_reverts: bool,
 }
 
 #[derive(Clone)]
@@ -123,7 +126,9 @@ fn eth_call_response(config: &RpcConfig, request: &Value) -> Value {
         .unwrap_or_default()
         .to_ascii_lowercase();
 
-    if (to == GOOD_VAULT || to == NON_4626_TOKEN) && data.starts_with("0x70a08231") {
+    if (to == GOOD_VAULT || to == NON_4626_TOKEN || to == WSTETH_TOKEN || to == STETH_TOKEN)
+        && data.starts_with("0x70a08231")
+    {
         return json_rpc_result(request, json!(abi_word(0xf4240)));
     }
 
@@ -138,6 +143,13 @@ fn eth_call_response(config: &RpcConfig, request: &Value) -> Value {
             return json_rpc_error(request, 3, "execution reverted");
         }
         return json_rpc_result(request, json!(abi_word(0xf0000)));
+    }
+
+    if to == WSTETH_TOKEN && data.starts_with("0xde0e9a3e") {
+        if config.unwrap_reverts {
+            return json_rpc_error(request, 3, "execution reverted");
+        }
+        return json_rpc_result(request, json!(abi_word(0xf5000)));
     }
 
     if to == NON_4626_TOKEN && (data.starts_with("0xd905777e") || data.starts_with("0x07a2d13a")) {
@@ -281,10 +293,11 @@ fn default_rpc_config(native_balance_hex: &str) -> RpcConfig {
     RpcConfig {
         native_balance_hex: native_balance_hex.into(),
         redeem_reverts: false,
+        unwrap_reverts: false,
     }
 }
 
-async fn scan_erc4626_probe(setup: &TestDaemon, token_address: &str) -> Value {
+async fn scan_defi_token_probe(setup: &TestDaemon, protocol: &str, token_address: &str) -> Value {
     let scan = post_json(
         &setup.client,
         setup.addr,
@@ -297,7 +310,7 @@ async fn scan_erc4626_probe(setup: &TestDaemon, token_address: &str) -> Value {
             "max_index": 0,
             "discover_defi_token_positions": true,
             "defi_token_probes": [{
-                "protocol": "erc4626",
+                "protocol": protocol,
                 "token_address": token_address,
             }],
             "defi_position_limit": 8,
@@ -309,6 +322,10 @@ async fn scan_erc4626_probe(setup: &TestDaemon, token_address: &str) -> Value {
     let scan_json: Value = scan.json().await.unwrap();
     assert_eq!(scan_status, StatusCode::OK, "scan response: {scan_json}");
     scan_json
+}
+
+async fn scan_erc4626_probe(setup: &TestDaemon, token_address: &str) -> Value {
+    scan_defi_token_probe(setup, "erc4626", token_address).await
 }
 
 async fn generate_consolidation_plan(setup: &TestDaemon, body: Value) -> Value {
@@ -520,6 +537,124 @@ async fn defi_erc4626_gas_shortfall_blocks_step() {
         simulated_step,
         "gas_policy_blocker=insufficient_native_gas"
     ));
+
+    drop(setup);
+}
+
+#[tokio::test]
+async fn defi_lido_wsteth_detection_records_adapter() {
+    let setup = setup_daemon(default_rpc_config("0x0")).await;
+
+    let scan_json = scan_defi_token_probe(&setup, "lido-wsteth", WSTETH_TOKEN).await;
+    let holding = defi_holding(&scan_json, WSTETH_TOKEN);
+
+    assert_eq!(holding["asset_kind"], "defi");
+    assert_eq!(holding["source"], "defi-token-probe:lido-wsteth");
+    assert_eq!(holding["claim_adapter"], "lido-wsteth-unwrap");
+    assert_eq!(holding["amount_hex"], "0xf4240");
+    assert_eq!(holding["protocol_address"], WSTETH_TOKEN);
+
+    drop(setup);
+}
+
+#[tokio::test]
+async fn defi_lido_wsteth_preflight_pass_records_expected_steth_out() {
+    let setup = setup_daemon(default_rpc_config("0xde0b6b3a7640000")).await;
+
+    scan_defi_token_probe(&setup, "lido-wsteth", WSTETH_TOKEN).await;
+    let plan_json = generate_consolidation_plan(&setup, json!({})).await;
+    let step = exit_defi_step(&plan_json, Some("lido-wsteth-unwrap"));
+    assert_eq!(step["status"], "review_required");
+    assert_eq!(step["simulation_status"], "required");
+    let plan_id = plan_json["plan"]["id"].as_str().unwrap();
+    let step_id = step["id"].as_str().unwrap();
+
+    let simulate_json = simulate_step(&setup, plan_id, step_id).await;
+    let simulated_step = step_by_id(&simulate_json, step_id);
+
+    assert_eq!(simulated_step["simulation_status"], "passed");
+    assert!(evidence_contains(
+        simulated_step,
+        "defi_exit_adapter=lido-wsteth-unwrap"
+    ));
+    assert!(evidence_contains(
+        simulated_step,
+        "prepared_call=lido_wsteth.unwrap(amount)"
+    ));
+    assert!(evidence_contains(
+        simulated_step,
+        "expected_assets_out_hex=0xf5000"
+    ));
+    assert!(evidence_contains(
+        simulated_step,
+        "steth_withdrawal_queue=out_of_scope_review_asset"
+    ));
+
+    drop(setup);
+}
+
+#[tokio::test]
+async fn defi_lido_wsteth_preflight_revert_blocks_step() {
+    let mut config = default_rpc_config("0xde0b6b3a7640000");
+    config.unwrap_reverts = true;
+    let setup = setup_daemon(config).await;
+
+    scan_defi_token_probe(&setup, "lido-wsteth", WSTETH_TOKEN).await;
+    let plan_json = generate_consolidation_plan(&setup, json!({})).await;
+    let step = exit_defi_step(&plan_json, Some("lido-wsteth-unwrap"));
+    let plan_id = plan_json["plan"]["id"].as_str().unwrap();
+    let step_id = step["id"].as_str().unwrap();
+
+    let simulate_json = simulate_step(&setup, plan_id, step_id).await;
+    let simulated_step = step_by_id(&simulate_json, step_id);
+
+    assert_eq!(simulated_step["simulation_status"], "failed");
+    assert_eq!(simulated_step["status"], "blocked");
+    assert!(blockers_contain(simulated_step, "simulation_failed"));
+    assert!(evidence_contains_prefix(simulated_step, "eth_call_error="));
+
+    drop(setup);
+}
+
+#[tokio::test]
+async fn defi_lido_wsteth_gas_shortfall_blocks_step() {
+    let setup = setup_daemon(default_rpc_config("0x1")).await;
+
+    scan_defi_token_probe(&setup, "lido-wsteth", WSTETH_TOKEN).await;
+    let plan_json = generate_consolidation_plan(&setup, json!({})).await;
+    let step = exit_defi_step(&plan_json, Some("lido-wsteth-unwrap"));
+    let plan_id = plan_json["plan"]["id"].as_str().unwrap();
+    let step_id = step["id"].as_str().unwrap();
+
+    let simulate_json = simulate_step(&setup, plan_id, step_id).await;
+    let simulated_step = step_by_id(&simulate_json, step_id);
+
+    assert_eq!(simulated_step["simulation_status"], "blocked");
+    assert_eq!(simulated_step["status"], "blocked");
+    assert!(blockers_contain(simulated_step, "simulation_blocked"));
+    assert!(evidence_contains(
+        simulated_step,
+        "gas_policy_blocker=insufficient_native_gas"
+    ));
+
+    drop(setup);
+}
+
+#[tokio::test]
+async fn defi_lido_steth_position_stays_review_fallback() {
+    let setup = setup_daemon(default_rpc_config("0xde0b6b3a7640000")).await;
+
+    let scan_json = scan_defi_token_probe(&setup, "lido-steth", STETH_TOKEN).await;
+    let holding = defi_holding(&scan_json, STETH_TOKEN);
+    assert_eq!(holding["asset_kind"], "defi");
+    assert_eq!(holding["source"], "defi-token-probe:lido-steth");
+    assert!(holding.get("claim_adapter").is_none_or(Value::is_null));
+
+    let plan_json = generate_consolidation_plan(&setup, json!({})).await;
+    let step = exit_defi_step(&plan_json, None);
+
+    assert_eq!(step["status"], "blocked");
+    assert!(blockers_contain(step, "requires_protocol_adapter"));
 
     drop(setup);
 }

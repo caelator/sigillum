@@ -5,7 +5,10 @@ use crate::service::evm::normalize_address;
 use crate::service::{ServiceError, ServiceResult};
 
 use super::claim_discovery::CLAIM_ADAPTER_MERKLE_DISTRIBUTOR_V1;
-use super::defi_adapters::{DEFI_EXIT_ADAPTER_AAVE_V3_WITHDRAW, DEFI_EXIT_ADAPTER_ERC4626_REDEEM};
+use super::defi_adapters::{
+    DEFI_EXIT_ADAPTER_AAVE_V3_WITHDRAW, DEFI_EXIT_ADAPTER_ERC4626_REDEEM,
+    DEFI_EXIT_ADAPTER_LIDO_WSTETH_UNWRAP,
+};
 
 const ERC20_APPROVE_SELECTOR: &str = "095ea7b3";
 const ERC20_TRANSFER_SELECTOR: &str = "a9059cbb";
@@ -252,6 +255,25 @@ pub(super) fn prepare_plan_step_preflight(
                     ],
                 }));
             }
+            if adapter == DEFI_EXIT_ADAPTER_LIDO_WSTETH_UNWRAP {
+                let wsteth = required_address("wstETH contract", step.protocol_address.as_deref())?;
+                let amount = required_quantity("unwrap amount", &step.amount_hex)?;
+                let data_hex = lido_wsteth_unwrap_call_data(&amount)?;
+                return Ok(PlanStepPreflight::Call(PlanStepPreflightCall {
+                    label: "lido_wsteth.unwrap(amount)",
+                    target_address: wsteth.clone(),
+                    data_hex,
+                    value_hex: None,
+                    evidence: vec![
+                        "prepared_call=lido_wsteth.unwrap(amount)".into(),
+                        format!("defi_exit_adapter={DEFI_EXIT_ADAPTER_LIDO_WSTETH_UNWRAP}"),
+                        format!("wsteth={wsteth}"),
+                        format!("amount={amount}"),
+                        "produces_asset=steth".into(),
+                        "steth_withdrawal_queue=out_of_scope_review_asset".into(),
+                    ],
+                }));
+            }
             Ok(PlanStepPreflight::Unsupported {
                 evidence: vec![
                     format!("unsupported_defi_exit_adapter={adapter}"),
@@ -384,6 +406,14 @@ fn erc4626_redeem_call_data(
         encoded_quantity_arg(shares_hex, "redeem shares")?,
         encoded_address_arg(receiver_address)?,
         encoded_address_arg(owner_address)?
+    ))
+}
+
+fn lido_wsteth_unwrap_call_data(amount_hex: &str) -> ServiceResult<String> {
+    Ok(format!(
+        "0x{}{}",
+        function_selector_hex("unwrap(uint256)"),
+        encoded_quantity_arg(amount_hex, "unwrap amount")?
     ))
 }
 
@@ -745,6 +775,64 @@ mod tests {
                 .any(|item| item == "receiver=0x1111111111111111111111111111111111111111")
         );
         assert!(call.evidence.iter().any(|item| item == "shares=0xe8480"));
+    }
+
+    #[test]
+    fn prepares_lido_wsteth_unwrap_call_data() {
+        let mut step = sample_step("exit_defi_position");
+        step.asset_kind = "defi".into();
+        step.asset_address = Some("0xdead4d57e7570000000000000000000000000000".into());
+        step.protocol_address = Some("0xdead4d57e7570000000000000000000000000000".into());
+        step.claim_adapter = Some(DEFI_EXIT_ADAPTER_LIDO_WSTETH_UNWRAP.into());
+        step.amount_hex = "0x000f4240".into();
+
+        let prepared = prepare_plan_step_preflight(&step).unwrap();
+        let PlanStepPreflight::Call(call) = prepared else {
+            panic!("expected call");
+        };
+
+        assert_eq!(call.label, "lido_wsteth.unwrap(amount)");
+        assert_eq!(
+            call.target_address,
+            "0xdead4d57e7570000000000000000000000000000"
+        );
+        assert_eq!(call.data_hex, format!("0xde0e9a3e{}f4240", "0".repeat(59)));
+        assert!(call.evidence.iter().any(|item| {
+            item == &format!("defi_exit_adapter={DEFI_EXIT_ADAPTER_LIDO_WSTETH_UNWRAP}")
+        }));
+        assert!(
+            call.evidence
+                .iter()
+                .any(|item| item == "prepared_call=lido_wsteth.unwrap(amount)")
+        );
+        assert!(
+            call.evidence
+                .iter()
+                .any(|item| item == "wsteth=0xdead4d57e7570000000000000000000000000000")
+        );
+        assert!(call.evidence.iter().any(|item| item == "amount=0xf4240"));
+        assert!(
+            call.evidence
+                .iter()
+                .any(|item| item == "produces_asset=steth")
+        );
+        assert!(
+            call.evidence
+                .iter()
+                .any(|item| item == "steth_withdrawal_queue=out_of_scope_review_asset")
+        );
+    }
+
+    #[test]
+    fn lido_wsteth_unwrap_requires_contract() {
+        let mut step = sample_step("exit_defi_position");
+        step.asset_kind = "defi".into();
+        step.protocol_address = None;
+        step.claim_adapter = Some(DEFI_EXIT_ADAPTER_LIDO_WSTETH_UNWRAP.into());
+
+        let error = prepare_plan_step_preflight(&step).unwrap_err();
+
+        assert!(error.to_string().contains("wstETH contract"));
     }
 
     #[test]

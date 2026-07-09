@@ -12,7 +12,10 @@ use crate::service::helpers::{
 };
 use crate::service::{ServiceError, ServiceResult, SigillumService};
 
-use super::defi_adapters::{DEFI_EXIT_ADAPTER_AAVE_V3_WITHDRAW, DEFI_EXIT_ADAPTER_ERC4626_REDEEM};
+use super::defi_adapters::{
+    DEFI_EXIT_ADAPTER_AAVE_V3_WITHDRAW, DEFI_EXIT_ADAPTER_ERC4626_REDEEM,
+    DEFI_EXIT_ADAPTER_LIDO_WSTETH_UNWRAP,
+};
 use super::planner::summarize_plan_steps;
 use super::preflight::{PlanStepPreflight, PlanStepPreflightCall, prepare_plan_step_preflight};
 use super::support::{load_inventory_state, save_inventory_state};
@@ -533,7 +536,9 @@ fn defi_expected_output_evidence(step: &ConsolidationPlanStep, result_hex: &str)
         return None;
     }
     match step.claim_adapter.as_deref()? {
-        DEFI_EXIT_ADAPTER_AAVE_V3_WITHDRAW | DEFI_EXIT_ADAPTER_ERC4626_REDEEM => Some(format!(
+        DEFI_EXIT_ADAPTER_AAVE_V3_WITHDRAW
+        | DEFI_EXIT_ADAPTER_ERC4626_REDEEM
+        | DEFI_EXIT_ADAPTER_LIDO_WSTETH_UNWRAP => Some(format!(
             "expected_assets_out_hex={}",
             canonical_quantity_hex_from_single_word(result_hex)?
         )),
@@ -1122,6 +1127,20 @@ mod tests {
         );
 
         assert_eq!(evidence, Some("expected_assets_out_hex=0x0".into()));
+    }
+
+    #[test]
+    fn defi_expected_assets_evidence_records_lido_wsteth_unwrap_single_word() {
+        let mut step = sample_step("0xf4240");
+        step.action = "exit_defi_position".into();
+        step.claim_adapter = Some(DEFI_EXIT_ADAPTER_LIDO_WSTETH_UNWRAP.into());
+
+        let evidence = defi_expected_output_evidence(
+            &step,
+            "0x00000000000000000000000000000000000000000000000000000000000f5000",
+        );
+
+        assert_eq!(evidence, Some("expected_assets_out_hex=0xf5000".into()));
     }
 
     #[test]
