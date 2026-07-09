@@ -13,6 +13,7 @@ mod defi_discovery;
 mod defi_exit_planning;
 mod discovery_jobs;
 mod export;
+mod gas_topup;
 mod nft_approval_discovery;
 mod nft_discovery;
 mod nft_metadata;

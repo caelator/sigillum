@@ -1486,7 +1486,7 @@ Phase W — Wallet-management completion
 - [x] W3.5 on-chain last-activity signals
 - [x] W4 DeFi exit adapters: ERC-4626, UniV2 LP, Lido unwrap (Aave v3 exists)
 - [x] W5 Merkle claim execution enablement
-- [ ] W6.1 fund_gas steps with linkage rule
+- [x] W6.1 fund_gas steps with linkage rule
 - [x] W6.2 dynamic fees in planning/preflight
 - [x] W6.3 policy-driven hot floor/refill
 - [x] W6.4 step dependency ordering
@@ -1687,3 +1687,17 @@ Phase H — Ship
   claim_gate fixture gained W4's exit_* fields; full targeted battery
   green (315 daemon unit tests + all integration suites, UI 56/56,
   architecture/fmt/clippy clean).
+- 2026-07-09 W6.1 4b9bba2..a4d607b: planner-emitted `fund_gas` top-up
+  steps (sponsor → source, gas×1.5 capped by `max_gas_topup_wei_hex`,
+  ordered before dependents via W6.4) behind `allow_gas_topups` (default
+  false, schema v17 + legacy test); common-funder linkage added to
+  `analyze_plan_linkage` — cross-party sponsor funding always warns,
+  hard-blocks under `block_cross_party_linkage` (matrix-tested at
+  generation and approval); dependents simulate via explicit
+  `pending_gas_topup_wei_hex` credit from unblocked top-ups only; no
+  sponsor / insufficient balance / policy off preserve today's gas
+  blockers byte-identically; README + architecture privacy caveat
+  narrowed to manual gas funding. Reviewed behavior change: seed control
+  reserves (sponsor/hot/treasury) are no longer generic sweep sources —
+  prevents plans from draining the sponsor gas float (test-covered; W8
+  builds on this).

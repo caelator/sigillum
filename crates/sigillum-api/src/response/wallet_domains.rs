@@ -129,6 +129,7 @@ wire_string_enum! {
         ApproveErc20 => "approve_erc20",
         ExitDefiPosition => "exit_defi_position",
         ClaimReward => "claim_reward",
+        FundGas => "fund_gas",
         ReviewAsset => "review_asset",
     }
 }

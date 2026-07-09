@@ -590,6 +590,13 @@ export function createSetupWizard(deps: SetupWizardDeps) {
     status.classList.remove("hidden");
   }
 
+  function showGasTopupsChoiceStatus(message: string): void {
+    const status = document.getElementById("wizGasTopupsChoiceStatus");
+    if (!status) return;
+    status.textContent = message;
+    status.classList.remove("hidden");
+  }
+
   function treasuryPolicyUpdateFromCurrent(
     policy: TreasuryPolicy,
   ): TreasuryPolicyUpdateRequest {
@@ -601,6 +608,8 @@ export function createSetupWizard(deps: SetupWizardDeps) {
       require_simulation: policy.require_simulation,
       block_cross_party_linkage: Boolean(policy.block_cross_party_linkage),
       allow_claim_execution: Boolean(policy.allow_claim_execution),
+      allow_gas_topups: Boolean(policy.allow_gas_topups),
+      max_gas_topup_wei_hex: policy.max_gas_topup_wei_hex ?? null,
       simulation_freshness_secs: policy.simulation_freshness_secs ?? null,
       hot_floor_wei_hex: policy.hot_floor_wei_hex ?? null,
       hot_target_wei_hex: policy.hot_target_wei_hex ?? null,
@@ -675,6 +684,36 @@ export function createSetupWizard(deps: SetupWizardDeps) {
     deps.toast("You can enable Merkle claim execution later in Treasury policy.");
   }
 
+  async function wizEnableGasTopups(): Promise<void> {
+    try {
+      const policy = await fetchCurrentTreasuryPolicy();
+      const body: TreasuryPolicyUpdateRequest = policy
+        ? {
+            ...treasuryPolicyUpdateFromCurrent(policy),
+            allow_gas_topups: true,
+          }
+        : { enabled: false, allow_gas_topups: true };
+      const r = await deps.api("POST", "/api/treasury/policy/update", body);
+      if (r.error) {
+        deps.toast(r.error, "error");
+        return;
+      }
+      showGasTopupsChoiceStatus(
+        "Sponsor gas top-up opt-in recorded. Top-ups only appear inside reviewed consolidation plans, are capped by the Treasury policy, and cross-party sponsor funding is still linkage-checked.",
+      );
+      deps.toast("Sponsor gas top-up opt-in recorded");
+    } catch (e: any) {
+      deps.toast(String(e?.message ?? e), "error");
+    }
+  }
+
+  function wizDeclineGasTopups(): void {
+    showGasTopupsChoiceStatus(
+      "You can enable sponsor gas top-ups later in Treasury policy.",
+    );
+    deps.toast("You can enable sponsor gas top-ups later in Treasury policy.");
+  }
+
   return {
     reset,
     updateWizardChrome,
@@ -688,8 +727,10 @@ export function createSetupWizard(deps: SetupWizardDeps) {
     wizBackFromFido2Pin,
     wizAddCustomComp,
     wizDeclineClaimExecution,
+    wizDeclineGasTopups,
     wizDeclineLinkageProtection,
     wizEnableClaimExecution,
+    wizEnableGasTopups,
     wizEnableLinkageProtection,
     wizRegisterKey,
     wizSetNewPin,

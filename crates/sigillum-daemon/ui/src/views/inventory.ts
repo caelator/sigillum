@@ -708,7 +708,7 @@ export function createInventoryActions(deps: InventoryActionsDeps) {
         const linkageBanner = linkageFindings.length
           ? '<div class="plan-linkage-banner"><strong>Privacy: this plan would link payers</strong><br>' +
             esc(linkageFindings.join(" | ")) +
-            '<br><span class="linkage-warning">Scope: flags payers that would sweep to the same destination. Does not cover gas-funding links, amount/timing correlation, downstream re-merging, or multi-hop flows — keep per-party destinations separate.</span>' +
+            '<br><span class="linkage-warning">Scope: flags payers that would sweep to the same destination. Sigillum-generated fund_gas top-ups are checked: one sponsor funding different payers warns and is blocked when linkage protection is on. Manual gas funding, amount/timing correlation, downstream re-merging, and multi-hop flows remain operator discipline.</span>' +
             "</div>"
           : "";
         const safeAddressInput =
@@ -730,6 +730,14 @@ export function createInventoryActions(deps: InventoryActionsDeps) {
               esc(String(step.sequence ?? 0)) +
               ((step.depends_on || []).length
                 ? " · dependsOn=" + esc((step.depends_on || []).join(","))
+                : "") +
+              (step.action === "fund_gas"
+                ? " · sponsor=" +
+                  esc(step.address) +
+                  " · funds=" +
+                  esc(step.destination_address || "-") +
+                  " · topup=" +
+                  esc(step.amount_hex)
                 : "") +
               (step.token_id_hex ? " #" + esc(step.token_id_hex) : "") +
               (step.counterparty_address

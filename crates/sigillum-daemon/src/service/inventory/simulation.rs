@@ -20,6 +20,7 @@ use super::defi_adapters::{
 use super::planner::summarize_plan_steps;
 use super::preflight::{PlanStepPreflight, PlanStepPreflightCall, prepare_plan_step_preflight};
 use super::support::{load_inventory_state, save_inventory_state};
+use super::treasury::add_u256;
 
 const DEFAULT_TOKEN_TRANSACTION_GAS_LIMIT: u64 = 65_000;
 const DEFAULT_NFT_SWEEP_GAS_LIMIT: u64 = 100_000;
@@ -59,6 +60,7 @@ impl SigillumService {
         let mut failed = 0usize;
         let mut unsupported = 0usize;
         let inventory_addresses = state.addresses.clone();
+        let plan_steps = state.consolidation_plans[plan_index].steps.clone();
         let policy = state.treasury_policy.clone();
         let risk_catalog = state.risk_catalog.clone();
         for step_index in step_indexes {
@@ -74,6 +76,7 @@ impl SigillumService {
                     &registry.evm_providers,
                     &inventory_addresses,
                     &step,
+                    &plan_steps,
                 )
                 .await
             };
@@ -126,6 +129,7 @@ impl SigillumService {
         providers: &[EvmProviderProfile],
         inventory_addresses: &[WalletInventoryAddress],
         step: &ConsolidationPlanStep,
+        plan_steps: &[ConsolidationPlanStep],
     ) -> PlanSimulationOutcome {
         let provider = match providers.iter().find(|provider| {
             provider.name == step.provider_profile && provider.chain_id == step.chain_id
@@ -164,7 +168,10 @@ impl SigillumService {
         evidence.push(format!("chain_id={}", provider.chain_id));
         evidence.push(format!("from={}", step.address));
         evidence.push(format!("to={}", call.target_address));
-        let fee_basis = if step.action == WalletPlanStepAction::SweepNative {
+        let fee_basis = if matches!(
+            step.action,
+            WalletPlanStepAction::SweepNative | WalletPlanStepAction::FundGas
+        ) {
             let gas_limit = provider.native_gas_limit.unwrap_or(21_000);
             Some(
                 match self
@@ -195,10 +202,22 @@ impl SigillumService {
         } else {
             None
         };
+        let pending_gas_topup_credit = pending_gas_topup_credit_for_step(step, plan_steps);
         if let Err(outcome) = apply_native_sweep_fee_policy(
             provider,
             step,
             &mut call,
+            &mut evidence,
+            fee_basis.as_ref(),
+            pending_gas_topup_credit,
+        ) {
+            return outcome;
+        }
+        if let Err(outcome) = apply_fund_gas_fee_policy(
+            provider,
+            inventory_addresses,
+            step,
+            &call,
             &mut evidence,
             fee_basis.as_ref(),
         ) {
@@ -211,6 +230,7 @@ impl SigillumService {
             &call,
             &mut evidence,
             fee_basis.as_ref(),
+            pending_gas_topup_credit,
         ) {
             return outcome;
         }
@@ -255,7 +275,7 @@ impl SigillumService {
         }
     }
 
-    async fn resolve_fee_basis_for_provider_profile(
+    pub(super) async fn resolve_fee_basis_for_provider_profile(
         &self,
         provider: &EvmProviderProfile,
         gas_limit: u64,
@@ -284,15 +304,15 @@ struct PlanSimulationOutcome {
 }
 
 #[derive(Clone, Debug)]
-struct ResolvedFeeBasis {
-    basis: &'static str,
-    max_priority_fee_per_gas_hex: String,
-    max_fee_per_gas_hex: String,
-    resolved_at_unix: u64,
+pub(super) struct ResolvedFeeBasis {
+    pub(super) basis: &'static str,
+    pub(super) max_priority_fee_per_gas_hex: String,
+    pub(super) max_fee_per_gas_hex: String,
+    pub(super) resolved_at_unix: u64,
 }
 
 #[derive(Clone, Debug)]
-enum FeeBasisResolution {
+pub(super) enum FeeBasisResolution {
     Resolved(ResolvedFeeBasis),
     MissingStatic { missing_field: &'static str },
 }
@@ -323,6 +343,7 @@ fn apply_zero_value_transaction_gas_policy(
     call: &PlanStepPreflightCall,
     evidence: &mut Vec<String>,
     fee_basis: Option<&FeeBasisResolution>,
+    pending_gas_topup_credit: Option<[u8; 32]>,
 ) -> Result<(), PlanSimulationOutcome> {
     if step.action == WalletPlanStepAction::SweepNative || call.value_hex.is_some() {
         return Ok(());
@@ -367,6 +388,9 @@ fn apply_zero_value_transaction_gas_policy(
         }
     };
     let gas_cost = multiply_u256_u64(&max_fee, gas_limit);
+    let available = pending_gas_topup_credit
+        .map(|credit| add_u256(&native_balance, &credit))
+        .unwrap_or(native_balance);
 
     evidence.push(format!("fee_basis={}", basis.basis));
     evidence.push(format!(
@@ -381,12 +405,18 @@ fn apply_zero_value_transaction_gas_policy(
     evidence.push(format!("max_fee_per_gas_hex={}", basis.max_fee_per_gas_hex));
     evidence.push(format!("transaction_gas_limit={gas_limit}"));
     evidence.push(format!("native_balance_wei_hex={native_balance_hex}"));
+    if let Some(credit) = pending_gas_topup_credit {
+        evidence.push(format!(
+            "pending_gas_topup_wei_hex={}",
+            encode_quantity_u256(&credit)
+        ));
+    }
     evidence.push(format!(
         "estimated_gas_cost_wei_hex={}",
         encode_quantity_u256(&gas_cost)
     ));
 
-    if compare_u256(&native_balance, &gas_cost).is_lt() {
+    if compare_u256(&available, &gas_cost).is_lt() {
         evidence.push("gas_policy_blocker=insufficient_native_gas".into());
         return Err(blocked_simulation(evidence));
     }
@@ -394,7 +424,7 @@ fn apply_zero_value_transaction_gas_policy(
     Ok(())
 }
 
-fn zero_value_transaction_gas_limit(
+pub(super) fn zero_value_transaction_gas_limit(
     provider: &EvmProviderProfile,
     step: &ConsolidationPlanStep,
 ) -> u64 {
@@ -422,7 +452,7 @@ fn zero_value_transaction_gas_limit(
     }
 }
 
-fn inventory_native_balance_hex_for_step<'a>(
+pub(super) fn inventory_native_balance_hex_for_step<'a>(
     inventory_addresses: &'a [WalletInventoryAddress],
     step: &ConsolidationPlanStep,
 ) -> Option<&'a str> {
@@ -444,6 +474,7 @@ fn apply_native_sweep_fee_policy(
     call: &mut PlanStepPreflightCall,
     evidence: &mut Vec<String>,
     fee_basis: Option<&FeeBasisResolution>,
+    pending_gas_topup_credit: Option<[u8; 32]>,
 ) -> Result<(), PlanSimulationOutcome> {
     if step.action != WalletPlanStepAction::SweepNative {
         return Ok(());
@@ -479,6 +510,9 @@ fn apply_native_sweep_fee_policy(
         }
     };
     let gas_cost = multiply_u256_u64(&max_fee, gas_limit);
+    let effective_balance = pending_gas_topup_credit
+        .map(|credit| add_u256(&balance, &credit))
+        .unwrap_or(balance);
 
     evidence.push(format!("fee_basis={}", basis.basis));
     evidence.push(format!(
@@ -496,18 +530,144 @@ fn apply_native_sweep_fee_policy(
         "estimated_gas_cost_wei_hex={}",
         encode_quantity_u256(&gas_cost)
     ));
+    if let Some(credit) = pending_gas_topup_credit {
+        evidence.push(format!(
+            "pending_gas_topup_wei_hex={}",
+            encode_quantity_u256(&credit)
+        ));
+    }
 
-    if compare_u256(&balance, &gas_cost).is_le() {
+    if compare_u256(&effective_balance, &gas_cost).is_le() {
         evidence.push("fee_policy_blocker=insufficient_native_balance_after_gas".into());
         return Err(blocked_simulation(evidence));
     }
 
-    let spendable = subtract_u256(&balance, &gas_cost);
+    let spendable = subtract_u256(&effective_balance, &gas_cost);
     let spendable_hex = encode_quantity_u256(&spendable);
     evidence.push(format!("native_sweep_spendable_amount_hex={spendable_hex}"));
     call.value_hex = Some(spendable_hex);
 
     Ok(())
+}
+
+fn apply_fund_gas_fee_policy(
+    provider: &EvmProviderProfile,
+    inventory_addresses: &[WalletInventoryAddress],
+    step: &ConsolidationPlanStep,
+    _call: &PlanStepPreflightCall,
+    evidence: &mut Vec<String>,
+    fee_basis: Option<&FeeBasisResolution>,
+) -> Result<(), PlanSimulationOutcome> {
+    if step.action != WalletPlanStepAction::FundGas {
+        return Ok(());
+    }
+
+    let basis = match fee_basis {
+        Some(FeeBasisResolution::Resolved(basis)) => basis,
+        Some(FeeBasisResolution::MissingStatic { missing_field }) => {
+            evidence.push("fee_policy=missing".into());
+            evidence.push(format!("missing_fee_policy={missing_field}"));
+            return Err(blocked_simulation(evidence));
+        }
+        None => {
+            evidence.push("fee_policy=missing".into());
+            evidence.push("missing_fee_policy=max_priority_fee_per_gas_hex".into());
+            return Err(blocked_simulation(evidence));
+        }
+    };
+
+    let amount = match decode_quantity_hex(&step.amount_hex).map_err(map_wallet_error) {
+        Ok(amount) => amount,
+        Err(error) => {
+            evidence.push(format!("fee_policy_error=invalid_fund_gas_amount:{error}"));
+            return Err(failed_simulation(evidence));
+        }
+    };
+    let sponsor_balance_hex = match inventory_native_balance_hex_for_step(inventory_addresses, step)
+    {
+        Some(balance) => balance,
+        None => {
+            evidence.push("fee_policy=inventory_native_balance".into());
+            evidence.push("fee_policy_blocker=missing_sponsor_inventory_address".into());
+            return Err(blocked_simulation(evidence));
+        }
+    };
+    let sponsor_balance = match decode_quantity_hex(sponsor_balance_hex).map_err(map_wallet_error) {
+        Ok(balance) => balance,
+        Err(error) => {
+            evidence.push(format!(
+                "fee_policy_error=invalid_sponsor_native_balance:{error}"
+            ));
+            return Err(failed_simulation(evidence));
+        }
+    };
+    let max_fee = match decode_quantity_hex(&basis.max_fee_per_gas_hex).map_err(map_wallet_error) {
+        Ok(max_fee) => max_fee,
+        Err(error) => {
+            evidence.push(format!("fee_policy_error=invalid_max_fee_per_gas:{error}"));
+            return Err(failed_simulation(evidence));
+        }
+    };
+
+    let gas_limit = provider.native_gas_limit.unwrap_or(21_000);
+    let gas_cost = multiply_u256_u64(&max_fee, gas_limit);
+    let required = add_u256(&amount, &gas_cost);
+
+    evidence.push(format!("fee_basis={}", basis.basis));
+    evidence.push(format!(
+        "fee_basis_resolved_at_unix={}",
+        basis.resolved_at_unix
+    ));
+    evidence.push("fee_policy=profile_max_fee".into());
+    evidence.push(format!(
+        "max_priority_fee_per_gas_hex={}",
+        basis.max_priority_fee_per_gas_hex
+    ));
+    evidence.push(format!("max_fee_per_gas_hex={}", basis.max_fee_per_gas_hex));
+    evidence.push(format!("native_gas_limit={gas_limit}"));
+    evidence.push(format!(
+        "estimated_gas_cost_wei_hex={}",
+        encode_quantity_u256(&gas_cost)
+    ));
+    evidence.push(format!(
+        "sponsor_native_balance_wei_hex={sponsor_balance_hex}"
+    ));
+    evidence.push(format!(
+        "gas_topup_amount_wei_hex={}",
+        encode_quantity_u256(&amount)
+    ));
+
+    if compare_u256(&sponsor_balance, &required).is_lt() {
+        evidence.push("fee_policy_blocker=insufficient_sponsor_native_for_topup".into());
+        return Err(blocked_simulation(evidence));
+    }
+
+    Ok(())
+}
+
+fn pending_gas_topup_credit_for_step(
+    step: &ConsolidationPlanStep,
+    plan_steps: &[ConsolidationPlanStep],
+) -> Option<[u8; 32]> {
+    let mut credit = None::<[u8; 32]>;
+    for fund_step in plan_steps.iter().filter(|candidate| {
+        candidate.action == WalletPlanStepAction::FundGas
+            && candidate.blockers.is_empty()
+            && step.depends_on.iter().any(|id| id == &candidate.id)
+            && candidate
+                .destination_address
+                .as_deref()
+                .is_some_and(|destination| destination.eq_ignore_ascii_case(&step.address))
+    }) {
+        let Ok(amount) = decode_quantity_hex(&fund_step.amount_hex) else {
+            continue;
+        };
+        credit = Some(match credit {
+            Some(existing) => add_u256(&existing, &amount),
+            None => amount,
+        });
+    }
+    credit
 }
 
 fn blocked_simulation(evidence: &[String]) -> PlanSimulationOutcome {
@@ -759,6 +919,26 @@ mod tests {
         }
     }
 
+    fn sample_fund_gas_step(amount_hex: &str) -> ConsolidationPlanStep {
+        let mut step = sample_step(amount_hex);
+        step.action = WalletPlanStepAction::FundGas;
+        step.asset_kind = "native".into();
+        step.asset_address = None;
+        step.address = "0x4444444444444444444444444444444444444444".into();
+        step.destination_address = Some("0x1111111111111111111111111111111111111111".into());
+        step
+    }
+
+    fn sample_fund_gas_call(amount_hex: &str) -> PlanStepPreflightCall {
+        PlanStepPreflightCall {
+            label: "native.transfer(gas_topup)",
+            target_address: "0x1111111111111111111111111111111111111111".into(),
+            data_hex: "0x".into(),
+            value_hex: Some(amount_hex.into()),
+            evidence: Vec::new(),
+        }
+    }
+
     fn sample_erc20_step() -> ConsolidationPlanStep {
         let mut step = sample_step("0xf4240");
         step.action = "sweep_erc20".into();
@@ -796,14 +976,17 @@ mod tests {
         }
     }
 
-    fn sample_inventory_address(native_balance_wei_hex: &str) -> WalletInventoryAddress {
+    fn sample_inventory_address_at(
+        address: &str,
+        native_balance_wei_hex: &str,
+    ) -> WalletInventoryAddress {
         WalletInventoryAddress {
             id: "addr_1".into(),
             wallet_family: "eth-seed".into(),
             wallet_profile: "seed-main".into(),
             provider_profile: "mainnet".into(),
             chain_id: 1,
-            address: "0x1111111111111111111111111111111111111111".into(),
+            address: address.into(),
             derivation_path: "m/44'/60'/0'/0/0".into(),
             derivation_pattern: Some("project".into()),
             account_index: Some(0),
@@ -819,6 +1002,20 @@ mod tests {
         }
     }
 
+    fn sample_inventory_address(native_balance_wei_hex: &str) -> WalletInventoryAddress {
+        sample_inventory_address_at(
+            "0x1111111111111111111111111111111111111111",
+            native_balance_wei_hex,
+        )
+    }
+
+    fn sample_sponsor_inventory_address(native_balance_wei_hex: &str) -> WalletInventoryAddress {
+        sample_inventory_address_at(
+            "0x4444444444444444444444444444444444444444",
+            native_balance_wei_hex,
+        )
+    }
+
     #[test]
     fn native_sweep_fee_policy_reserves_gas_from_transfer_value() {
         let provider = sample_provider();
@@ -827,8 +1024,15 @@ mod tests {
         let mut evidence = Vec::new();
         let fee_basis = static_fee_basis();
 
-        apply_native_sweep_fee_policy(&provider, &step, &mut call, &mut evidence, Some(&fee_basis))
-            .unwrap();
+        apply_native_sweep_fee_policy(
+            &provider,
+            &step,
+            &mut call,
+            &mut evidence,
+            Some(&fee_basis),
+            None,
+        )
+        .unwrap();
 
         assert_eq!(call.value_hex, Some("0x5bf0".into()));
         assert!(
@@ -862,6 +1066,7 @@ mod tests {
             &mut call,
             &mut evidence,
             Some(&fee_basis),
+            None,
         )
         .unwrap_err();
 
@@ -891,6 +1096,7 @@ mod tests {
             &mut call,
             &mut evidence,
             Some(&fee_basis),
+            None,
         )
         .unwrap_err();
 
@@ -911,8 +1117,15 @@ mod tests {
         let mut evidence = Vec::new();
         let fee_basis = estimated_fee_basis();
 
-        apply_native_sweep_fee_policy(&provider, &step, &mut call, &mut evidence, Some(&fee_basis))
-            .unwrap();
+        apply_native_sweep_fee_policy(
+            &provider,
+            &step,
+            &mut call,
+            &mut evidence,
+            Some(&fee_basis),
+            None,
+        )
+        .unwrap();
 
         assert_eq!(call.value_hex, Some("0x9e8".into()));
         assert!(evidence.iter().any(|item| item == "fee_basis=estimated"));
@@ -947,6 +1160,7 @@ mod tests {
             &mut call,
             &mut evidence,
             Some(&fee_basis),
+            None,
         )
         .unwrap_err();
 
@@ -979,6 +1193,132 @@ mod tests {
     }
 
     #[test]
+    fn fund_gas_fee_policy_records_fee_basis_and_passes_with_funded_sponsor() {
+        let provider = sample_provider();
+        let step = sample_fund_gas_step("0x2f9b8");
+        let call = sample_fund_gas_call("0x2f9b8");
+        let addresses = vec![sample_sponsor_inventory_address("0x39dc8")];
+        let mut evidence = Vec::new();
+        let fee_basis = static_fee_basis();
+
+        apply_fund_gas_fee_policy(
+            &provider,
+            &addresses,
+            &step,
+            &call,
+            &mut evidence,
+            Some(&fee_basis),
+        )
+        .unwrap();
+
+        assert_eq!(call.value_hex, Some("0x2f9b8".into()));
+        assert!(
+            evidence
+                .iter()
+                .any(|item| item == "fee_basis=static_profile")
+        );
+        assert!(
+            evidence
+                .iter()
+                .any(|item| item == "gas_topup_amount_wei_hex=0x2f9b8")
+        );
+        assert!(
+            evidence
+                .iter()
+                .any(|item| item == "sponsor_native_balance_wei_hex=0x39dc8")
+        );
+        assert!(evidence.iter().any(|item| item == "native_gas_limit=21000"));
+    }
+
+    #[test]
+    fn fund_gas_fee_policy_blocks_insufficient_sponsor() {
+        let provider = sample_provider();
+        let step = sample_fund_gas_step("0x2f9b8");
+        let call = sample_fund_gas_call("0x2f9b8");
+        let addresses = vec![sample_sponsor_inventory_address("0x39dc7")];
+        let mut evidence = Vec::new();
+        let fee_basis = static_fee_basis();
+
+        let outcome = apply_fund_gas_fee_policy(
+            &provider,
+            &addresses,
+            &step,
+            &call,
+            &mut evidence,
+            Some(&fee_basis),
+        )
+        .unwrap_err();
+
+        assert_eq!(outcome.status, WalletSimulationStatus::Blocked);
+        assert_eq!(
+            outcome.evidence.last().map(String::as_str),
+            Some("fee_policy_blocker=insufficient_sponsor_native_for_topup")
+        );
+    }
+
+    #[test]
+    fn fund_gas_fee_policy_blocks_missing_sponsor_inventory() {
+        let provider = sample_provider();
+        let step = sample_fund_gas_step("0x2f9b8");
+        let call = sample_fund_gas_call("0x2f9b8");
+        let mut evidence = Vec::new();
+        let fee_basis = static_fee_basis();
+
+        let outcome = apply_fund_gas_fee_policy(
+            &provider,
+            &[],
+            &step,
+            &call,
+            &mut evidence,
+            Some(&fee_basis),
+        )
+        .unwrap_err();
+
+        assert_eq!(outcome.status, WalletSimulationStatus::Blocked);
+        assert!(
+            outcome
+                .evidence
+                .iter()
+                .any(|item| item == "fee_policy_blocker=missing_sponsor_inventory_address")
+        );
+    }
+
+    #[test]
+    fn pending_gas_topup_credit_for_step_only_credits_matching_unblocked_deps() {
+        let funded_address = "0xaAaAaAaAaAaAaAaAaAaAaAaAaAaAaAaAaAaAaAaA";
+        let funded_address_lower = "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+        let mut dependent = sample_erc20_step();
+        dependent.depends_on = vec!["fund_1".into()];
+        dependent.address = funded_address.into();
+
+        let mut matching_fund_step = sample_fund_gas_step("0x2f9b8");
+        matching_fund_step.id = "fund_1".into();
+        matching_fund_step.destination_address = Some(funded_address_lower.into());
+        let credit = pending_gas_topup_credit_for_step(
+            &dependent,
+            std::slice::from_ref(&matching_fund_step),
+        )
+        .expect("matching unblocked fund_gas dependency should credit the step");
+        assert_eq!(encode_quantity_u256(&credit), "0x2f9b8");
+
+        let mut blocked_fund_step = matching_fund_step.clone();
+        blocked_fund_step.blockers = vec!["cross_party_linkage".into()];
+        assert!(pending_gas_topup_credit_for_step(&dependent, &[blocked_fund_step]).is_none());
+
+        let mut unreferenced_fund_step = matching_fund_step.clone();
+        unreferenced_fund_step.id = "fund_2".into();
+        assert!(pending_gas_topup_credit_for_step(&dependent, &[unreferenced_fund_step]).is_none());
+
+        let mut different_destination_fund_step = matching_fund_step;
+        different_destination_fund_step.destination_address =
+            Some("0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb".into());
+        assert!(
+            pending_gas_topup_credit_for_step(&dependent, &[different_destination_fund_step])
+                .is_none()
+        );
+    }
+
+    #[test]
     fn zero_value_gas_policy_accepts_inventory_balance_that_covers_gas() {
         let provider = sample_provider();
         let step = sample_erc20_step();
@@ -994,6 +1334,7 @@ mod tests {
             &call,
             &mut evidence,
             Some(&fee_basis),
+            None,
         )
         .unwrap();
 
@@ -1035,6 +1376,7 @@ mod tests {
             &call,
             &mut evidence,
             Some(&fee_basis),
+            None,
         )
         .unwrap_err();
 
@@ -1045,6 +1387,72 @@ mod tests {
                 .evidence
                 .iter()
                 .any(|item| item == "gas_policy_blocker=insufficient_native_gas")
+        );
+    }
+
+    #[test]
+    fn zero_value_gas_policy_credits_pending_fund_gas_topup() {
+        let provider = sample_provider();
+        let step = sample_erc20_step();
+        let call = sample_erc20_call();
+        let addresses = vec![sample_inventory_address("0x1")];
+        let mut evidence = Vec::new();
+        let fee_basis = static_fee_basis();
+        let credit = decode_quantity_hex("0x1fbd0").unwrap();
+
+        apply_zero_value_transaction_gas_policy(
+            &provider,
+            &addresses,
+            &step,
+            &call,
+            &mut evidence,
+            Some(&fee_basis),
+            Some(credit),
+        )
+        .unwrap();
+
+        assert!(
+            evidence
+                .iter()
+                .any(|item| item == "pending_gas_topup_wei_hex=0x1fbd0")
+        );
+    }
+
+    #[test]
+    fn zero_value_gas_policy_without_credit_is_byte_identical_regression() {
+        let provider = sample_provider();
+        let step = sample_erc20_step();
+        let call = sample_erc20_call();
+        let addresses = vec![sample_inventory_address("0x1")];
+        let mut evidence = Vec::new();
+        let fee_basis = static_fee_basis();
+
+        let outcome = apply_zero_value_transaction_gas_policy(
+            &provider,
+            &addresses,
+            &step,
+            &call,
+            &mut evidence,
+            Some(&fee_basis),
+            None,
+        )
+        .unwrap_err();
+
+        assert_eq!(outcome.status, WalletSimulationStatus::Blocked);
+        assert_eq!(outcome.blocker, Some("simulation_blocked"));
+        assert_eq!(
+            outcome.evidence,
+            vec![
+                "fee_basis=static_profile".to_string(),
+                "fee_basis_resolved_at_unix=1".to_string(),
+                "gas_policy=profile_max_fee".to_string(),
+                "max_priority_fee_per_gas_hex=0x1".to_string(),
+                "max_fee_per_gas_hex=0x2".to_string(),
+                "transaction_gas_limit=65000".to_string(),
+                "native_balance_wei_hex=0x1".to_string(),
+                "estimated_gas_cost_wei_hex=0x1fbd0".to_string(),
+                "gas_policy_blocker=insufficient_native_gas".to_string(),
+            ]
         );
     }
 
@@ -1063,6 +1471,7 @@ mod tests {
             &call,
             &mut evidence,
             Some(&fee_basis),
+            None,
         )
         .unwrap_err();
 
@@ -1072,6 +1481,38 @@ mod tests {
                 .evidence
                 .iter()
                 .any(|item| item == "gas_policy_blocker=missing_inventory_address")
+        );
+    }
+
+    #[test]
+    fn native_sweep_fee_policy_credits_pending_topup_into_spendable() {
+        let provider = sample_provider();
+        let step = sample_step("0x1");
+        let mut call = sample_call();
+        let mut evidence = Vec::new();
+        let fee_basis = static_fee_basis();
+        let credit = decode_quantity_hex("0x10000").unwrap();
+
+        apply_native_sweep_fee_policy(
+            &provider,
+            &step,
+            &mut call,
+            &mut evidence,
+            Some(&fee_basis),
+            Some(credit),
+        )
+        .unwrap();
+
+        assert_eq!(call.value_hex, Some("0x5bf1".into()));
+        assert!(
+            evidence
+                .iter()
+                .any(|item| item == "pending_gas_topup_wei_hex=0x10000")
+        );
+        assert!(
+            evidence
+                .iter()
+                .any(|item| item == "native_sweep_spendable_amount_hex=0x5bf1")
         );
     }
 
@@ -1091,6 +1532,7 @@ mod tests {
             &call,
             &mut evidence,
             Some(&fee_basis),
+            None,
         )
         .unwrap();
 
@@ -1145,6 +1587,7 @@ mod tests {
             &call,
             &mut evidence,
             Some(&fee_basis),
+            None,
         )
         .unwrap();
 

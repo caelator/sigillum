@@ -331,6 +331,7 @@ pub(super) fn build_plan_steps(
             body.chain_id
                 .is_none_or(|chain_id| chain_id == holding.chain_id)
         })
+        .filter(|holding| !is_seed_control_reserve_holding(registry, holding))
     {
         let signer_status = signer_status_for_holding(holding);
         if signer_status == WalletSignerStatus::WatchOnly && body.include_watch_only != Some(true) {
@@ -371,6 +372,33 @@ pub(super) fn build_plan_steps(
     }
 
     steps
+}
+
+fn is_seed_control_reserve_holding(
+    registry: &ProfileRegistry,
+    holding: &WalletAssetHolding,
+) -> bool {
+    if holding.wallet_family != WALLET_FAMILY_ETH_SEED
+        || holding.asset_kind != WalletAssetKind::Native
+    {
+        return false;
+    }
+    let Some(profile) = registry
+        .eth_seed_wallets
+        .iter()
+        .find(|profile| profile.name == holding.wallet_profile)
+    else {
+        return false;
+    };
+
+    [
+        profile.sponsor_address.as_deref(),
+        profile.hot_address.as_deref(),
+        profile.treasury_address.as_deref(),
+    ]
+    .into_iter()
+    .flatten()
+    .any(|address| address.eq_ignore_ascii_case(&holding.address))
 }
 
 fn resolve_default_destination(
@@ -585,6 +613,70 @@ pub(super) fn analyze_plan_linkage(
         }
     }
 
+    let mut steps_by_funder: BTreeMap<String, Vec<(usize, LinkageIdentity)>> = BTreeMap::new();
+    for (index, step) in steps.iter().enumerate() {
+        if step.action != WalletPlanStepAction::FundGas {
+            continue;
+        }
+        let funder_key = normalize_linkage_address(&step.address);
+        if funder_key.is_empty() {
+            continue;
+        }
+        let Some(destination_address) = step.destination_address.as_deref() else {
+            continue;
+        };
+        steps_by_funder.entry(funder_key).or_default().push((
+            index,
+            linkage_identity_for_address(
+                destination_address,
+                &counterparty_by_address,
+                &party_name_by_id,
+            ),
+        ));
+    }
+
+    for (funder, entries) in steps_by_funder {
+        let mut labels_by_identity = BTreeMap::new();
+        for (_, identity) in &entries {
+            labels_by_identity
+                .entry(identity.key.clone())
+                .or_insert_with(|| identity.label.clone());
+        }
+        if labels_by_identity.len() < 2 {
+            continue;
+        }
+
+        let mut all_labels: Vec<String> = labels_by_identity.values().cloned().collect();
+        all_labels.sort();
+        findings.push(format!(
+            "Sponsor {} funds {} parties: {}",
+            short_form(&funder, 10),
+            labels_by_identity.len(),
+            all_labels.join(", ")
+        ));
+
+        for (index, identity) in &entries {
+            let mut others: Vec<String> = labels_by_identity
+                .iter()
+                .filter_map(|(key, label)| {
+                    if key == &identity.key {
+                        None
+                    } else {
+                        Some(label.clone())
+                    }
+                })
+                .collect();
+            others.sort();
+            let warning = format!(
+                "shared gas sponsor links this party with: {}",
+                others.join(", ")
+            );
+            if !steps[*index].linkage_warnings.contains(&warning) {
+                steps[*index].linkage_warnings.push(warning);
+            }
+        }
+    }
+
     findings
 }
 
@@ -593,8 +685,16 @@ fn linkage_identity_for_step(
     counterparty_by_address: &BTreeMap<String, String>,
     party_name_by_id: &BTreeMap<String, String>,
 ) -> LinkageIdentity {
-    let source_address = normalize_linkage_address(&step.address);
-    if let Some(counterparty_id) = counterparty_by_address.get(&source_address) {
+    linkage_identity_for_address(&step.address, counterparty_by_address, party_name_by_id)
+}
+
+fn linkage_identity_for_address(
+    address: &str,
+    counterparty_by_address: &BTreeMap<String, String>,
+    party_name_by_id: &BTreeMap<String, String>,
+) -> LinkageIdentity {
+    let address = normalize_linkage_address(address);
+    if let Some(counterparty_id) = counterparty_by_address.get(&address) {
         return LinkageIdentity {
             key: format!("counterparty:{counterparty_id}"),
             label: party_name_by_id
@@ -605,8 +705,8 @@ fn linkage_identity_for_step(
     }
 
     LinkageIdentity {
-        key: format!("unattributed:{source_address}"),
-        label: format!("unattributed ({})", short_form(&source_address, 10)),
+        key: format!("unattributed:{address}"),
+        label: format!("unattributed ({})", short_form(&address, 10)),
     }
 }
 
@@ -703,6 +803,18 @@ mod tests {
         holding.asset_address = None;
         holding.amount_hex = "0x1".into();
         plan_step_for_holding(&holding, Some(destination_address.into()), "available")
+    }
+
+    fn sample_fund_gas_step(
+        id: &str,
+        sponsor_address: &str,
+        destination_address: &str,
+    ) -> ConsolidationPlanStep {
+        let mut step = sample_sweep_step(sponsor_address, destination_address);
+        step.id = id.into();
+        step.action = WalletPlanStepAction::FundGas;
+        step.amount_hex = "0x100".into();
+        step
     }
 
     #[test]
@@ -806,6 +918,8 @@ mod tests {
             allow_raw_digest_signing: false,
             block_cross_party_linkage: false,
             allow_claim_execution: false,
+            allow_gas_topups: false,
+            max_gas_topup_wei_hex: None,
             simulation_freshness_secs: 900,
             hot_floor_wei_hex: floor_hex.into(),
             hot_target_wei_hex: target_hex.into(),
@@ -826,6 +940,39 @@ mod tests {
         let registry = sample_seed_registry();
         let holding = sample_native_holding_at("0x1111111111111111111111111111111111111111");
         resolve_default_destination(&state, &registry, &holding, &None)
+    }
+
+    #[test]
+    fn build_plan_steps_skips_seed_control_reserve_native_holdings() {
+        let mut registry = sample_seed_registry();
+        registry.eth_seed_wallets[0].sponsor_address =
+            Some("0x4444444444444444444444444444444444444444".into());
+        let state = WalletInventoryState {
+            holdings: vec![
+                sample_native_holding_at("0x1111111111111111111111111111111111111111"),
+                sample_native_holding_at("0x2222222222222222222222222222222222222222"),
+                sample_native_holding_at("0x3333333333333333333333333333333333333333"),
+                sample_native_holding_at("0x4444444444444444444444444444444444444444"),
+            ],
+            ..WalletInventoryState::default()
+        };
+        let body = sample_plan_request(
+            Some("0x5555555555555555555555555555555555555555"),
+            Vec::new(),
+        );
+
+        let steps = build_plan_steps(
+            &state,
+            &registry,
+            &body,
+            &Some("0x5555555555555555555555555555555555555555".into()),
+        );
+
+        assert_eq!(steps.len(), 1);
+        assert_eq!(
+            steps[0].address,
+            "0x1111111111111111111111111111111111111111"
+        );
     }
 
     #[test]
@@ -1401,5 +1548,127 @@ mod tests {
 
         assert!(findings.is_empty());
         assert!(steps.iter().all(|step| step.linkage_warnings.is_empty()));
+    }
+
+    #[test]
+    fn fund_gas_cross_party_sponsor_funding_warns_both_steps() {
+        let sponsor = "0x4444444444444444444444444444444444444444";
+        let acme_address = "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+        let bob_address = "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+        let state = WalletInventoryState {
+            receive_allocations: vec![
+                sample_receive_allocation(acme_address, Some("party_acme")),
+                sample_receive_allocation(bob_address, Some("party_bob")),
+            ],
+            parties: vec![
+                sample_party("party_acme", "Acme"),
+                sample_party("party_bob", "Bob"),
+            ],
+            ..Default::default()
+        };
+        let mut steps = vec![
+            sample_fund_gas_step("fund_acme", sponsor, acme_address),
+            sample_fund_gas_step("fund_bob", sponsor, bob_address),
+        ];
+
+        let findings = analyze_plan_linkage(&state, &mut steps);
+
+        assert_eq!(findings.len(), 1);
+        assert!(findings[0].contains("Sponsor"));
+        assert!(findings[0].contains("funds 2 parties"));
+        assert!(findings[0].contains("Acme"));
+        assert!(findings[0].contains("Bob"));
+        assert_eq!(steps[0].linkage_warnings.len(), 1);
+        assert!(steps[0].linkage_warnings[0].contains("Bob"));
+        assert!(!steps[0].linkage_warnings[0].contains("Acme"));
+        assert_eq!(steps[1].linkage_warnings.len(), 1);
+        assert!(steps[1].linkage_warnings[0].contains("Acme"));
+        assert!(!steps[1].linkage_warnings[0].contains("Bob"));
+    }
+
+    #[test]
+    fn fund_gas_same_party_topups_do_not_warn() {
+        let sponsor = "0x4444444444444444444444444444444444444444";
+        let first_address = "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+        let second_address = "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+        let state = WalletInventoryState {
+            receive_allocations: vec![
+                sample_receive_allocation(first_address, Some("party_acme")),
+                sample_receive_allocation(second_address, Some("party_acme")),
+            ],
+            parties: vec![sample_party("party_acme", "Acme")],
+            ..Default::default()
+        };
+        let mut steps = vec![
+            sample_fund_gas_step("fund_1", sponsor, first_address),
+            sample_fund_gas_step("fund_2", sponsor, second_address),
+        ];
+
+        let findings = analyze_plan_linkage(&state, &mut steps);
+
+        assert!(findings.is_empty());
+        assert!(steps.iter().all(|step| step.linkage_warnings.is_empty()));
+    }
+
+    #[test]
+    fn fund_gas_unattributed_destinations_are_distinct_identities() {
+        let sponsor = "0x4444444444444444444444444444444444444444";
+        let first_address = "0x1111111111111111111111111111111111111111";
+        let second_address = "0x2222222222222222222222222222222222222222";
+        let state = WalletInventoryState::default();
+        let mut steps = vec![
+            sample_fund_gas_step("fund_1", sponsor, first_address),
+            sample_fund_gas_step("fund_2", sponsor, second_address),
+        ];
+
+        let findings = analyze_plan_linkage(&state, &mut steps);
+
+        assert_eq!(findings.len(), 1);
+        assert!(findings[0].contains("funds 2 parties"));
+        assert!(findings[0].contains("unattributed (0x11111111...)"));
+        assert!(findings[0].contains("unattributed (0x22222222...)"));
+        assert_eq!(steps[0].linkage_warnings.len(), 1);
+        assert!(steps[0].linkage_warnings[0].contains("0x22222222..."));
+        assert_eq!(steps[1].linkage_warnings.len(), 1);
+        assert!(steps[1].linkage_warnings[0].contains("0x11111111..."));
+    }
+
+    #[test]
+    fn fund_gas_linkage_hard_blocks_when_policy_blocks_cross_party() {
+        let sponsor = "0x4444444444444444444444444444444444444444";
+        let acme_address = "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+        let bob_address = "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+        let state = WalletInventoryState {
+            receive_allocations: vec![
+                sample_receive_allocation(acme_address, Some("party_acme")),
+                sample_receive_allocation(bob_address, Some("party_bob")),
+            ],
+            parties: vec![
+                sample_party("party_acme", "Acme"),
+                sample_party("party_bob", "Bob"),
+            ],
+            ..Default::default()
+        };
+        let mut steps = vec![
+            sample_fund_gas_step("fund_acme", sponsor, acme_address),
+            sample_fund_gas_step("fund_bob", sponsor, bob_address),
+            sample_sweep_step(
+                "0xcccccccccccccccccccccccccccccccccccccccc",
+                "0x9999999999999999999999999999999999999999",
+            ),
+        ];
+
+        let findings = analyze_plan_linkage(&state, &mut steps);
+        apply_linkage_blockers(&mut steps);
+
+        assert_eq!(findings.len(), 1);
+        for step in &steps[..2] {
+            assert!(step.blockers.contains(&"cross_party_linkage".into()));
+            assert_eq!(step.status, WalletPlanStepStatus::Blocked);
+            assert_eq!(step.risk_level, "blocked");
+        }
+        assert!(steps[2].linkage_warnings.is_empty());
+        assert!(!steps[2].blockers.contains(&"cross_party_linkage".into()));
+        assert_eq!(steps[2].status, WalletPlanStepStatus::ReviewRequired);
     }
 }

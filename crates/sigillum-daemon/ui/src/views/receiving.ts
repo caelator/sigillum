@@ -50,7 +50,7 @@ function renderLinkageWarning(item: ReceivingItem): string {
     '<div class="plan-linkage-banner"><strong>Caution</strong><br>' +
     '<span class="linkage-warning">' +
     esc(item.linkage_warning) +
-    '</span><br><span class="linkage-warning">Scope: flags payers that would sweep to the same destination. Does not cover gas-funding links, amount/timing correlation, downstream re-merging, or multi-hop flows — keep per-party destinations separate.' +
+    '</span><br><span class="linkage-warning">Scope: flags payers that would sweep to the same destination. Sigillum-generated fund_gas top-ups are checked; manual gas funding, amount/timing correlation, downstream re-merging, and multi-hop flows remain operator discipline.' +
     "</span></div>"
   );
 }

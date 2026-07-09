@@ -51,6 +51,23 @@ pub(super) fn prepare_plan_step_preflight(
                 ],
             }))
         }
+        WalletPlanStepAction::FundGas => {
+            let destination =
+                required_address("fund_gas destination", step.destination_address.as_deref())?;
+            let value = required_quantity("fund_gas amount", &step.amount_hex)?;
+            Ok(PlanStepPreflight::Call(PlanStepPreflightCall {
+                label: "native.transfer(gas_topup)",
+                target_address: destination.clone(),
+                data_hex: "0x".into(),
+                value_hex: Some(value.clone()),
+                evidence: vec![
+                    "prepared_call=native.transfer(gas_topup)".into(),
+                    format!("sponsor={}", step.address),
+                    format!("destination={destination}"),
+                    format!("requested_value={value}"),
+                ],
+            }))
+        }
         WalletPlanStepAction::SweepErc20 => {
             let token = required_address("asset contract", step.asset_address.as_deref())?;
             let destination = required_address("destination", step.destination_address.as_deref())?;
@@ -666,6 +683,45 @@ mod tests {
                 .iter()
                 .any(|item| item == "requested_value=0x1")
         );
+    }
+
+    #[test]
+    fn prepares_fund_gas_native_transfer_call() {
+        let mut step = sample_step("fund_gas");
+        step.address = "0x4444444444444444444444444444444444444444".into();
+        step.destination_address = Some("0x9999999999999999999999999999999999999999".into());
+        step.amount_hex = "0x2f9b8".into();
+
+        let prepared = prepare_plan_step_preflight(&step).unwrap();
+        let PlanStepPreflight::Call(call) = prepared else {
+            panic!("expected call");
+        };
+
+        assert_eq!(call.label, "native.transfer(gas_topup)");
+        assert_eq!(
+            call.target_address,
+            "0x9999999999999999999999999999999999999999"
+        );
+        assert_eq!(call.data_hex, "0x");
+        assert_eq!(call.value_hex, Some("0x2f9b8".into()));
+        assert!(
+            call.evidence
+                .contains(&"prepared_call=native.transfer(gas_topup)".into())
+        );
+        assert!(
+            call.evidence
+                .contains(&"sponsor=0x4444444444444444444444444444444444444444".into())
+        );
+    }
+
+    #[test]
+    fn fund_gas_requires_destination() {
+        let mut step = sample_step("fund_gas");
+        step.destination_address = None;
+
+        let error = prepare_plan_step_preflight(&step).unwrap_err();
+
+        assert!(error.to_string().contains("fund_gas destination"));
     }
 
     #[test]

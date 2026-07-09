@@ -388,7 +388,12 @@ The CLI should have parity for automation:
    refill routing is now policy-driven through
    `TreasuryPolicy.hot_floor_wei_hex` / `hot_target_wei_hex` (both default 1
    ETH, preserving prior behavior); the planner routes to the hot address only
-   while its balance is below the floor.
+   while its balance is below the floor. Gas top-ups are implemented: the
+   planner emits policy-gated `fund_gas` steps (opt-in `allow_gas_topups`,
+   per-top-up cap `max_gas_topup_wei_hex`, amount = 1.5x the dependent step's
+   estimated gas) funded from the wallet's sponsor address, ordered before their
+   dependent step via sequence/depends_on, simulated with fee-basis evidence,
+   and subject to the cross-party common-funder linkage rule.
 9. Controlled execution for native/ERC-20 sweeps, gas top-ups, NFT transfers,
    DeFi exits, claims, swaps, and treasury routing.
 10. Non-EVM chain families, starting with Bitcoin/UTXO and only then Solana,
