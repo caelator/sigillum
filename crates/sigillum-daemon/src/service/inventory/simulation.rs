@@ -12,6 +12,7 @@ use crate::service::helpers::{
 };
 use crate::service::{ServiceError, ServiceResult, SigillumService};
 
+use super::defi_adapters::{DEFI_EXIT_ADAPTER_AAVE_V3_WITHDRAW, DEFI_EXIT_ADAPTER_ERC4626_REDEEM};
 use super::planner::summarize_plan_steps;
 use super::preflight::{PlanStepPreflight, PlanStepPreflightCall, prepare_plan_step_preflight};
 use super::support::{load_inventory_state, save_inventory_state};
@@ -223,6 +224,9 @@ impl SigillumService {
         {
             Ok(result) => {
                 evidence.push(format!("eth_call_result={result}"));
+                if let Some(expected_output) = defi_expected_output_evidence(step, &result) {
+                    evidence.push(expected_output);
+                }
                 PlanSimulationOutcome {
                     status: WalletSimulationStatus::Passed,
                     blocker: None,
@@ -521,6 +525,36 @@ fn non_simulation_blockers(step: &ConsolidationPlanStep) -> Option<Vec<String>> 
         None
     } else {
         Some(blockers)
+    }
+}
+
+fn defi_expected_output_evidence(step: &ConsolidationPlanStep, result_hex: &str) -> Option<String> {
+    if step.action != WalletPlanStepAction::ExitDefiPosition {
+        return None;
+    }
+    match step.claim_adapter.as_deref()? {
+        DEFI_EXIT_ADAPTER_AAVE_V3_WITHDRAW | DEFI_EXIT_ADAPTER_ERC4626_REDEEM => Some(format!(
+            "expected_assets_out_hex={}",
+            canonical_quantity_hex_from_single_word(result_hex)?
+        )),
+        _ => None,
+    }
+}
+
+fn canonical_quantity_hex_from_single_word(value: &str) -> Option<String> {
+    let raw = value
+        .trim()
+        .strip_prefix("0x")
+        .or_else(|| value.trim().strip_prefix("0X"))
+        .unwrap_or_else(|| value.trim());
+    if raw.len() != 64 || !raw.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        return None;
+    }
+    let raw = raw.trim_start_matches('0');
+    if raw.is_empty() {
+        Some("0x0".into())
+    } else {
+        Some(format!("0x{}", raw.to_ascii_lowercase()))
     }
 }
 
@@ -1059,6 +1093,68 @@ mod tests {
             evidence
                 .iter()
                 .any(|item| item == "estimated_gas_cost_wei_hex=0x3a980")
+        );
+    }
+
+    #[test]
+    fn defi_expected_assets_evidence_records_aave_single_word() {
+        let mut step = sample_step("0xf4240");
+        step.action = "exit_defi_position".into();
+        step.claim_adapter = Some(DEFI_EXIT_ADAPTER_AAVE_V3_WITHDRAW.into());
+
+        let evidence = defi_expected_output_evidence(
+            &step,
+            "0x00000000000000000000000000000000000000000000000000000000000f0000",
+        );
+
+        assert_eq!(evidence, Some("expected_assets_out_hex=0xf0000".into()));
+    }
+
+    #[test]
+    fn defi_expected_assets_evidence_records_erc4626_zero_word() {
+        let mut step = sample_step("0xf4240");
+        step.action = "exit_defi_position".into();
+        step.claim_adapter = Some(DEFI_EXIT_ADAPTER_ERC4626_REDEEM.into());
+
+        let evidence = defi_expected_output_evidence(
+            &step,
+            "0x0000000000000000000000000000000000000000000000000000000000000000",
+        );
+
+        assert_eq!(evidence, Some("expected_assets_out_hex=0x0".into()));
+    }
+
+    #[test]
+    fn defi_expected_assets_evidence_ignores_malformed_or_unsupported_results() {
+        let mut step = sample_step("0xf4240");
+        step.action = "exit_defi_position".into();
+        step.claim_adapter = Some(DEFI_EXIT_ADAPTER_ERC4626_REDEEM.into());
+        assert_eq!(defi_expected_output_evidence(&step, "0xf0000"), None);
+        assert_eq!(
+            defi_expected_output_evidence(
+                &step,
+                "0x00000000000000000000000000000000000000000000000000000000000f000g",
+            ),
+            None
+        );
+
+        step.claim_adapter = Some("unsupported-adapter".into());
+        assert_eq!(
+            defi_expected_output_evidence(
+                &step,
+                "0x00000000000000000000000000000000000000000000000000000000000f0000",
+            ),
+            None
+        );
+
+        step.action = "sweep_erc20".into();
+        step.claim_adapter = Some(DEFI_EXIT_ADAPTER_AAVE_V3_WITHDRAW.into());
+        assert_eq!(
+            defi_expected_output_evidence(
+                &step,
+                "0x00000000000000000000000000000000000000000000000000000000000f0000",
+            ),
+            None
         );
     }
 

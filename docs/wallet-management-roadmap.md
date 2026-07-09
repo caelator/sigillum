@@ -363,9 +363,10 @@ The CLI should have parity for automation:
     sweeps and approval revokes while keeping direct signing and queue
     execution disabled until signer-specific policy is implemented.
 6. DeFi position adapters. The first implemented slice records
-   operator-configured ERC-20 receipt/share token probes as protocol holdings.
-   Protocol-specific exit adapters, reward accounting, lockup metadata, and
-   valuation remain future work.
+   operator-configured ERC-20 receipt/share token probes as protocol holdings,
+   including the existing Aave v3 withdraw preflight adapter and the generic
+   ERC-4626 redeem exit adapter with maxRedeem/convertToAssets interface
+   verification, redeem preflight simulation, and expected-assets-out evidence.
 7. Airdrop/reward discovery with strict claim risk gates. The first trusted
    candidate-ingestion, claim-contract risk-finding, and standard Merkle claim
    simulation slices are implemented; verified source adapters, richer external

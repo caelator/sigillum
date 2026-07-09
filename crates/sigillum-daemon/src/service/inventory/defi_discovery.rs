@@ -1,8 +1,11 @@
+use sha3::{Digest, Keccak256};
 use sigillum_api::{DefiTokenProbe, EvmProviderProfile};
 
+use crate::service::evm::EvmContractCallPreflight;
 use crate::service::{ServiceError, ServiceResult, SigillumService};
 
 use super::super::evm::normalize_address;
+use super::defi_adapters::{DEFI_EXIT_ADAPTER_ERC4626_REDEEM, adapter_for_protocol};
 
 pub(super) const DISCOVERY_SOURCE_DEFI_TOKEN_PROBE_PREFIX: &str = "defi-token-probe";
 
@@ -27,6 +30,7 @@ pub(super) struct DefiTokenPositionObservation {
     pub(super) protocol: String,
     pub(super) token_address: String,
     pub(super) protocol_address: Option<String>,
+    pub(super) claim_adapter: Option<String>,
     pub(super) amount_hex: String,
 }
 
@@ -88,14 +92,87 @@ impl SigillumService {
                     block_tag,
                 )
                 .await?;
+            let mut protocol_address = probe.protocol_address.clone();
+            let (claim_adapter, amount_hex) = if probe.protocol == "erc4626" {
+                match self
+                    .verified_erc4626_redeem_amount(
+                        provider,
+                        owner_address,
+                        block_tag,
+                        &probe.token_address,
+                    )
+                    .await
+                {
+                    Some(amount_hex) => {
+                        if protocol_address.is_none() {
+                            protocol_address = Some(probe.token_address.clone());
+                        }
+                        (
+                            Some(DEFI_EXIT_ADAPTER_ERC4626_REDEEM.to_string()),
+                            amount_hex,
+                        )
+                    }
+                    None => (None, amount_hex),
+                }
+            } else {
+                (
+                    adapter_for_protocol(&probe.protocol).map(str::to_string),
+                    amount_hex,
+                )
+            };
             observations.push(DefiTokenPositionObservation {
                 protocol: probe.protocol.clone(),
                 token_address: probe.token_address.clone(),
-                protocol_address: probe.protocol_address.clone(),
+                protocol_address,
+                claim_adapter,
                 amount_hex,
             });
         }
         Ok(observations)
+    }
+
+    async fn verified_erc4626_redeem_amount(
+        &self,
+        provider: &EvmProviderProfile,
+        owner_address: &str,
+        block_tag: &str,
+        vault_address: &str,
+    ) -> Option<String> {
+        let max_redeem_data = erc4626_max_redeem_call_data(owner_address).ok()?;
+        let max_redeem_result = self
+            .evm_contract_call_preflight_for_provider(
+                provider.compartment_id,
+                provider,
+                EvmContractCallPreflight {
+                    from_address: owner_address,
+                    target_address: vault_address,
+                    data_hex: &max_redeem_data,
+                    value_hex: None,
+                    block_tag,
+                },
+            )
+            .await
+            .ok()?;
+        let max_redeem_word = strict_single_word_hex(&max_redeem_result)?;
+
+        let convert_to_assets_data = erc4626_convert_to_assets_call_data(&max_redeem_word);
+        let convert_result = self
+            .evm_contract_call_preflight_for_provider(
+                provider.compartment_id,
+                provider,
+                EvmContractCallPreflight {
+                    from_address: owner_address,
+                    target_address: vault_address,
+                    data_hex: &convert_to_assets_data,
+                    value_hex: None,
+                    block_tag,
+                },
+            )
+            .await
+            .ok()?;
+        strict_single_word_hex(&convert_result)?;
+
+        Some(canonical_quantity_hex_from_word(&max_redeem_word))
     }
 }
 
@@ -139,6 +216,53 @@ fn push_unique_probe(probes: &mut Vec<DefiTokenPositionProbe>, next: DefiTokenPo
     }) {
         probes.push(next);
     }
+}
+
+fn erc4626_max_redeem_call_data(owner_address: &str) -> ServiceResult<String> {
+    Ok(format!(
+        "0x{}{}",
+        function_selector_hex("maxRedeem(address)"),
+        encoded_address_arg(owner_address)?
+    ))
+}
+
+fn erc4626_convert_to_assets_call_data(shares_word: &str) -> String {
+    format!(
+        "0x{}{}",
+        function_selector_hex("convertToAssets(uint256)"),
+        shares_word
+    )
+}
+
+fn encoded_address_arg(address: &str) -> ServiceResult<String> {
+    let normalized = normalize_address(address)?;
+    Ok(format!("{}{}", "0".repeat(24), &normalized[2..]))
+}
+
+fn strict_single_word_hex(value: &str) -> Option<String> {
+    let raw = value
+        .trim()
+        .strip_prefix("0x")
+        .or_else(|| value.trim().strip_prefix("0X"))
+        .unwrap_or_else(|| value.trim());
+    if raw.len() != 64 || !raw.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        return None;
+    }
+    Some(raw.to_ascii_lowercase())
+}
+
+fn canonical_quantity_hex_from_word(word: &str) -> String {
+    let raw = word.trim_start_matches('0');
+    if raw.is_empty() {
+        "0x0".into()
+    } else {
+        format!("0x{raw}")
+    }
+}
+
+fn function_selector_hex(signature: &str) -> String {
+    let digest = Keccak256::digest(signature.as_bytes());
+    hex::encode(&digest[..4])
 }
 
 #[cfg(test)]

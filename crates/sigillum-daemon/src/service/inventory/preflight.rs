@@ -5,7 +5,7 @@ use crate::service::evm::normalize_address;
 use crate::service::{ServiceError, ServiceResult};
 
 use super::claim_discovery::CLAIM_ADAPTER_MERKLE_DISTRIBUTOR_V1;
-use super::defi_adapters::DEFI_EXIT_ADAPTER_AAVE_V3_WITHDRAW;
+use super::defi_adapters::{DEFI_EXIT_ADAPTER_AAVE_V3_WITHDRAW, DEFI_EXIT_ADAPTER_ERC4626_REDEEM};
 
 const ERC20_APPROVE_SELECTOR: &str = "095ea7b3";
 const ERC20_TRANSFER_SELECTOR: &str = "a9059cbb";
@@ -210,32 +210,54 @@ pub(super) fn prepare_plan_step_preflight(
                 .ok_or_else(|| {
                     ServiceError::bad_request("defi exit adapter is required for simulation")
                 })?;
-            if adapter != DEFI_EXIT_ADAPTER_AAVE_V3_WITHDRAW {
-                return Ok(PlanStepPreflight::Unsupported {
+            if adapter == DEFI_EXIT_ADAPTER_AAVE_V3_WITHDRAW {
+                let pool = required_address("Aave V3 pool", step.protocol_address.as_deref())?;
+                let asset =
+                    required_address("Aave underlying asset", step.asset_address.as_deref())?;
+                let amount = required_quantity("withdraw amount", &step.amount_hex)?;
+                let recipient =
+                    required_address("withdraw recipient", Some(step.address.as_str()))?;
+                let data_hex = aave_v3_withdraw_call_data(&asset, &amount, &recipient)?;
+                return Ok(PlanStepPreflight::Call(PlanStepPreflightCall {
+                    label: "aaveV3.withdraw(asset,amount,to)",
+                    target_address: pool,
+                    data_hex,
+                    value_hex: None,
                     evidence: vec![
-                        format!("unsupported_defi_exit_adapter={adapter}"),
-                        "reason=no_local_defi_exit_builder_for_adapter".into(),
+                        "prepared_call=aave_v3.withdraw(asset,amount,to)".into(),
+                        format!("defi_exit_adapter={DEFI_EXIT_ADAPTER_AAVE_V3_WITHDRAW}"),
+                        format!("asset={asset}"),
+                        format!("recipient={recipient}"),
+                        format!("amount={amount}"),
                     ],
-                });
+                }));
             }
-            let pool = required_address("Aave V3 pool", step.protocol_address.as_deref())?;
-            let asset = required_address("Aave underlying asset", step.asset_address.as_deref())?;
-            let amount = required_quantity("withdraw amount", &step.amount_hex)?;
-            let recipient = required_address("withdraw recipient", Some(step.address.as_str()))?;
-            let data_hex = aave_v3_withdraw_call_data(&asset, &amount, &recipient)?;
-            Ok(PlanStepPreflight::Call(PlanStepPreflightCall {
-                label: "aaveV3.withdraw(asset,amount,to)",
-                target_address: pool,
-                data_hex,
-                value_hex: None,
+            if adapter == DEFI_EXIT_ADAPTER_ERC4626_REDEEM {
+                let vault = required_address("ERC-4626 vault", step.protocol_address.as_deref())?;
+                let amount = required_quantity("redeem shares", &step.amount_hex)?;
+                let recipient = required_address("redeem receiver", Some(step.address.as_str()))?;
+                let owner = required_address("redeem owner", Some(step.address.as_str()))?;
+                let data_hex = erc4626_redeem_call_data(&amount, &recipient, &owner)?;
+                return Ok(PlanStepPreflight::Call(PlanStepPreflightCall {
+                    label: "erc4626.redeem(shares,receiver,owner)",
+                    target_address: vault.clone(),
+                    data_hex,
+                    value_hex: None,
+                    evidence: vec![
+                        "prepared_call=erc4626.redeem(shares,receiver,owner)".into(),
+                        format!("defi_exit_adapter={DEFI_EXIT_ADAPTER_ERC4626_REDEEM}"),
+                        format!("vault={vault}"),
+                        format!("receiver={recipient}"),
+                        format!("shares={amount}"),
+                    ],
+                }));
+            }
+            Ok(PlanStepPreflight::Unsupported {
                 evidence: vec![
-                    "prepared_call=aave_v3.withdraw(asset,amount,to)".into(),
-                    format!("defi_exit_adapter={DEFI_EXIT_ADAPTER_AAVE_V3_WITHDRAW}"),
-                    format!("asset={asset}"),
-                    format!("recipient={recipient}"),
-                    format!("amount={amount}"),
+                    format!("unsupported_defi_exit_adapter={adapter}"),
+                    "reason=no_local_defi_exit_builder_for_adapter".into(),
                 ],
-            }))
+            })
         }
         action => Ok(PlanStepPreflight::Unsupported {
             evidence: vec![
@@ -348,6 +370,20 @@ fn aave_v3_withdraw_call_data(
         encoded_address_arg(asset_address)?,
         encoded_quantity_arg(amount_hex, "withdraw amount")?,
         encoded_address_arg(recipient_address)?
+    ))
+}
+
+fn erc4626_redeem_call_data(
+    shares_hex: &str,
+    receiver_address: &str,
+    owner_address: &str,
+) -> ServiceResult<String> {
+    Ok(format!(
+        "0x{}{}{}{}",
+        function_selector_hex("redeem(uint256,address,address)"),
+        encoded_quantity_arg(shares_hex, "redeem shares")?,
+        encoded_address_arg(receiver_address)?,
+        encoded_address_arg(owner_address)?
     ))
 }
 
@@ -659,6 +695,68 @@ mod tests {
         assert!(call.evidence.iter().any(|item| {
             item == &format!("defi_exit_adapter={DEFI_EXIT_ADAPTER_AAVE_V3_WITHDRAW}")
         }));
+    }
+
+    #[test]
+    fn prepares_erc4626_redeem_call_data() {
+        let mut step = sample_step("exit_defi_position");
+        step.asset_kind = "defi".into();
+        step.asset_address = Some("0xdead111100000000000000000000000000000001".into());
+        step.protocol_address = Some("0xdead4626000000000000000000000000000000aa".into());
+        step.claim_adapter = Some(DEFI_EXIT_ADAPTER_ERC4626_REDEEM.into());
+        step.amount_hex = "0x000e8480".into();
+
+        let prepared = prepare_plan_step_preflight(&step).unwrap();
+        let PlanStepPreflight::Call(call) = prepared else {
+            panic!("expected call");
+        };
+
+        assert_eq!(call.label, "erc4626.redeem(shares,receiver,owner)");
+        assert_eq!(
+            call.target_address,
+            "0xdead4626000000000000000000000000000000aa"
+        );
+        assert_eq!(
+            call.data_hex,
+            format!(
+                "0x{}{}e8480{}1111111111111111111111111111111111111111{}1111111111111111111111111111111111111111",
+                function_selector_hex("redeem(uint256,address,address)"),
+                "0".repeat(59),
+                "0".repeat(24),
+                "0".repeat(24)
+            )
+        );
+        assert!(call.evidence.iter().any(|item| {
+            item == &format!("defi_exit_adapter={DEFI_EXIT_ADAPTER_ERC4626_REDEEM}")
+        }));
+        assert!(
+            call.evidence
+                .iter()
+                .any(|item| item == "prepared_call=erc4626.redeem(shares,receiver,owner)")
+        );
+        assert!(
+            call.evidence
+                .iter()
+                .any(|item| item == "vault=0xdead4626000000000000000000000000000000aa")
+        );
+        assert!(
+            call.evidence
+                .iter()
+                .any(|item| item == "receiver=0x1111111111111111111111111111111111111111")
+        );
+        assert!(call.evidence.iter().any(|item| item == "shares=0xe8480"));
+    }
+
+    #[test]
+    fn erc4626_redeem_requires_vault() {
+        let mut step = sample_step("exit_defi_position");
+        step.asset_kind = "defi".into();
+        step.protocol_address = None;
+        step.claim_adapter = Some(DEFI_EXIT_ADAPTER_ERC4626_REDEEM.into());
+
+        let error = prepare_plan_step_preflight(&step).unwrap_err();
+
+        assert!(error.to_string().contains("ERC-4626 vault"));
     }
 
     #[test]
