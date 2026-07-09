@@ -110,6 +110,7 @@ pub(crate) enum AuditQueueJobKind {
     EthSeedTransfer,
     EthSeedNativeSweep,
     EthSeedErc20Sweep,
+    PlanStepExecution,
 }
 
 impl AuditQueueJobKind {
@@ -122,6 +123,7 @@ impl AuditQueueJobKind {
             Self::EthSeedTransfer => "eth_seed_transfer",
             Self::EthSeedNativeSweep => "eth_seed_native_sweep",
             Self::EthSeedErc20Sweep => "eth_seed_erc20_sweep",
+            Self::PlanStepExecution => "plan_step_execution",
         }
     }
 
@@ -140,6 +142,7 @@ impl AuditQueueJobKind {
             sigillum_api::QueueJobPayload::EthSeedTransfer { .. } => Self::EthSeedTransfer,
             sigillum_api::QueueJobPayload::EthSeedNativeSweep { .. } => Self::EthSeedNativeSweep,
             sigillum_api::QueueJobPayload::EthSeedErc20Sweep { .. } => Self::EthSeedErc20Sweep,
+            sigillum_api::QueueJobPayload::PlanStepExecution { .. } => Self::PlanStepExecution,
         }
     }
 }

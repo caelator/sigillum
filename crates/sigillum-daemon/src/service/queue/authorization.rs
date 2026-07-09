@@ -49,7 +49,7 @@ pub(super) fn authorize_queue_payload_policy(
     Ok(())
 }
 
-fn queue_payload_wallet_profile(payload: &QueueJobPayload) -> (&str, &'static str) {
+fn queue_payload_wallet_profile(payload: &QueueJobPayload) -> (&str, &str) {
     match payload {
         QueueJobPayload::EthStealthTransfer { wallet_profile, .. }
         | QueueJobPayload::EthStealthErc20Transfer { wallet_profile, .. }
@@ -62,6 +62,10 @@ fn queue_payload_wallet_profile(payload: &QueueJobPayload) -> (&str, &'static st
         | QueueJobPayload::EthSeedErc20Sweep { wallet_profile, .. } => {
             (wallet_profile.as_str(), "eth-seed")
         }
+        QueueJobPayload::PlanStepExecution(payload) => (
+            payload.wallet_profile.as_str(),
+            payload.wallet_family.as_str(),
+        ),
     }
 }
 
@@ -132,5 +136,14 @@ fn queue_payload_policy_check(payload: &QueueJobPayload) -> Option<(&str, &str, 
                 min_amount_hex.as_deref().unwrap_or("0x0"),
             )
         }),
+        QueueJobPayload::PlanStepExecution(payload) => {
+            payload.destination_address.as_deref().map(|destination| {
+                (
+                    destination,
+                    payload.asset_kind.as_str(),
+                    payload.amount_hex.as_str(),
+                )
+            })
+        }
     }
 }

@@ -18,18 +18,20 @@ pub struct QueueState {
 }
 
 impl JsonDocument for QueueState {
-    const SCHEMA: JsonSchema = JsonSchema::new("sigillum.queue", 2);
+    // v3 (W7.2) adds the `plan_step_execution` job payload kind; v1/v2 job
+    // shapes are unchanged and keep loading as-is.
+    const SCHEMA: JsonSchema = JsonSchema::new("sigillum.queue", 3);
 
     fn from_enveloped_json(
         path: &Path,
         version: u32,
         data: serde_json::Value,
     ) -> Result<Self, std::io::Error> {
-        if version != 1 && version != Self::SCHEMA.version {
+        if version != 1 && version != 2 && version != Self::SCHEMA.version {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::InvalidData,
                 format!(
-                    "unsupported {} schema version {} in {}; expected 1 or {}",
+                    "unsupported {} schema version {} in {}; expected 1, 2, or {}",
                     Self::SCHEMA.name,
                     version,
                     path.display(),
@@ -140,7 +142,7 @@ mod tests {
         let saved: serde_json::Value =
             serde_json::from_slice(&std::fs::read(queue_path(dir.path())).unwrap()).unwrap();
         assert_eq!(saved["schema"], json!("sigillum.queue"));
-        assert_eq!(saved["schema_version"], json!(2));
+        assert_eq!(saved["schema_version"], json!(3));
         assert!(saved["data"]["jobs"].is_array());
     }
 
@@ -198,12 +200,116 @@ mod tests {
         save_queue(dir.path(), &loaded).unwrap();
         let saved: serde_json::Value =
             serde_json::from_slice(&std::fs::read(queue_path(dir.path())).unwrap()).unwrap();
-        assert_eq!(saved["schema_version"], json!(2));
+        assert_eq!(saved["schema_version"], json!(3));
         assert_eq!(saved["data"]["jobs"][1]["state"], json!("deferred"));
         assert_eq!(
             saved["data"]["jobs"][2]["state"],
             json!("operator_action_required")
         );
+    }
+
+    #[test]
+    fn version_2_queue_envelope_still_loads_without_rewriting_jobs() {
+        let dir = TempDir::new().unwrap();
+        let path = queue_path(dir.path());
+        let queue = json!({
+            "schema": "sigillum.queue",
+            "schema_version": 2,
+            "data": {
+                "jobs": [
+                    sample_job(),
+                    {
+                        "id": "job_blocked",
+                        "state": "blocked",
+                        "attempts": 1,
+                        "created_at_unix": 1,
+                        "updated_at_unix": 2,
+                        "kind": "eth_seed_native_sweep",
+                        "wallet_profile": "seed-a",
+                        "address": "0x0000000000000000000000000000000000000003",
+                        "derivation_path": "m/44'/60'/0'/0/0",
+                        "last_error": "seed-wallet queue execution is not enabled yet"
+                    }
+                ]
+            }
+        });
+        std::fs::write(&path, serde_json::to_vec_pretty(&queue).unwrap()).unwrap();
+
+        let loaded = load_queue(dir.path()).unwrap();
+        let states = loaded
+            .jobs
+            .iter()
+            .map(|job| job.state.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(states, vec!["queued", "blocked"]);
+
+        save_queue(dir.path(), &loaded).unwrap();
+        let saved: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(queue_path(dir.path())).unwrap()).unwrap();
+        assert_eq!(saved["schema_version"], json!(3));
+        assert_eq!(saved["data"]["jobs"][0]["state"], json!("queued"));
+        assert_eq!(
+            saved["data"]["jobs"][1]["kind"],
+            json!("eth_seed_native_sweep")
+        );
+    }
+
+    #[test]
+    fn plan_step_execution_job_roundtrips_with_evidence_hash() {
+        let dir = TempDir::new().unwrap();
+        let mut state = QueueState::default();
+        state.jobs.push(QueueJob {
+            id: "job_plan_step".into(),
+            state: "queued".into(),
+            attempts: 0,
+            created_at_unix: 1,
+            updated_at_unix: 1,
+            next_attempt_after_unix: None,
+            payload: QueueJobPayload::PlanStepExecution(sigillum_api::PlanStepExecutionPayload {
+                plan_id: "plan_1".into(),
+                step_id: "step_1".into(),
+                chain_id: 1,
+                source_address: "0x0000000000000000000000000000000000000001".into(),
+                derivation_path: "m/44'/60'/0'/0/0".into(),
+                wallet_family: "eth-seed".into(),
+                wallet_profile: "seed-a".into(),
+                provider_profile: "mainnet".into(),
+                action: "sweep_native".into(),
+                asset_kind: "native".into(),
+                asset_address: None,
+                amount_hex: "0x1".into(),
+                destination_address: Some("0x0000000000000000000000000000000000000002".into()),
+                call_label: "native.transfer(value)".into(),
+                call_target_address: "0x0000000000000000000000000000000000000002".into(),
+                call_data_hex: "0x".into(),
+                call_value_wei_hex: Some("0x1".into()),
+                simulation_evidence_hash_hex: "ab".repeat(32),
+                fee_basis: Some("static_profile".into()),
+                max_priority_fee_per_gas_hex: Some("0x1".into()),
+                max_fee_per_gas_hex: Some("0x2".into()),
+                prerequisite_job_ids: vec!["job_dep".into()],
+            }),
+            last_error: None,
+            transaction_hash_hex: None,
+            broadcast_transaction_hash_hex: None,
+        });
+
+        save_queue(dir.path(), &state).unwrap();
+
+        let saved: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(queue_path(dir.path())).unwrap()).unwrap();
+        assert_eq!(saved["schema_version"], json!(3));
+        assert_eq!(
+            saved["data"]["jobs"][0]["kind"],
+            json!("plan_step_execution")
+        );
+        assert_eq!(
+            saved["data"]["jobs"][0]["simulation_evidence_hash_hex"],
+            json!("ab".repeat(32))
+        );
+
+        let loaded = load_queue(dir.path()).unwrap();
+        assert_eq!(loaded.jobs, state.jobs);
     }
 
     #[test]

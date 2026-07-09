@@ -2,6 +2,9 @@
 
 use serde::{Deserialize, Serialize};
 
+mod plan_step;
+pub use plan_step::PlanStepExecutionPayload;
+
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum QueueJobPayload {
@@ -94,6 +97,8 @@ pub enum QueueJobPayload {
         #[serde(skip_serializing_if = "Option::is_none")]
         gas_limit: Option<u64>,
     },
+    /// W7.2 consolidation plan-step job. Hard-blocked at drain time until W7.3.
+    PlanStepExecution(PlanStepExecutionPayload),
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]

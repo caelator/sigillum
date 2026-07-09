@@ -209,6 +209,11 @@ impl SigillumService {
                 | QueueJobPayload::EthSeedErc20Sweep { .. } => Ok(QueueExecution::Blocked(
                     "seed-wallet queue execution is not enabled yet".into(),
                 )),
+                // W7.2 hard block: plan-step jobs stay blocked at drain time
+                // regardless of policy gates. W7.3 lifts this.
+                QueueJobPayload::PlanStepExecution { .. } => Ok(QueueExecution::Blocked(
+                    "plan-step execution is not enabled yet".into(),
+                )),
             }
             };
 
