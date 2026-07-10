@@ -49,6 +49,8 @@ jobs:
         run: cargo install tauri-cli --version 2.11.4 --locked
 
       - name: Run release gate
+        env:
+          SIGILLUM_ADVERSARIAL_PROPTEST_CASES: ${{ github.event_name == 'schedule' && '1024' || '' }}
         run: ./scripts/check-release.sh
 
       - name: Upload browser smoke failure artifacts
