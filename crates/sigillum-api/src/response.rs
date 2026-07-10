@@ -602,6 +602,8 @@ pub struct MaintenanceRunResponse {
     pub confirmed: usize,
     #[serde(default)]
     pub failures_by_cause: MaintenanceFailureBreakdown,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub treasury_automation: Option<TreasuryAutomationRunSummary>,
     pub deposits: Vec<EthStealthDeposit>,
     pub jobs: Vec<QueueJob>,
 }

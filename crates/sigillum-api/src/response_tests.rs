@@ -1414,6 +1414,7 @@ fn test_maintenance_run_response_roundtrip() {
             broadcast_rejected: 0,
             receipt_timeout: 0,
         },
+        treasury_automation: None,
         deposits: vec![],
         jobs: vec![],
     };
@@ -1438,6 +1439,39 @@ fn test_maintenance_run_response_defaults_failure_breakdown() {
         resp.failures_by_cause,
         MaintenanceFailureBreakdown::default()
     );
+    assert!(resp.treasury_automation.is_none());
+}
+
+#[test]
+fn test_maintenance_run_response_treasury_automation_roundtrip() {
+    let resp: MaintenanceRunResponse = serde_json::from_value(serde_json::json!({
+        "status": "ok",
+        "refreshed": 0,
+        "detected": 0,
+        "queued": 0,
+        "processed": 0,
+        "succeeded": 0,
+        "failed": 0,
+        "treasury_automation": {
+            "generated_steps": 2,
+            "enqueued_steps": 1,
+            "skipped_steps": 1,
+            "skipped_reasons": ["simulation_failed"]
+        },
+        "deposits": [],
+        "jobs": []
+    }))
+    .unwrap();
+    assert_eq!(
+        resp.treasury_automation,
+        Some(TreasuryAutomationRunSummary {
+            generated_steps: 2,
+            enqueued_steps: 1,
+            skipped_steps: 1,
+            skipped_reasons: vec!["simulation_failed".to_string()],
+        })
+    );
+    roundtrip_test(resp);
 }
 
 #[test]
@@ -1688,6 +1722,12 @@ fn test_treasury_overview_response_roundtrip() {
             retired_allocations: 1,
             purposes: 2,
         },
+        automation: TreasuryAutomationStatus {
+            enabled: true,
+            hot_overflow_wei_hex: Some("0x2".to_string()),
+            generated_steps: 3,
+            enqueued_steps: 1,
+        },
     };
     roundtrip_test(resp);
 }
@@ -1720,6 +1760,7 @@ fn test_treasury_overview_receive_summary_defaults_when_absent() {
     )
     .unwrap();
     assert_eq!(resp.receive, TreasuryReceiveSummary::default());
+    assert_eq!(resp.automation, TreasuryAutomationStatus::default());
 }
 
 fn sample_receive_allocation() -> TreasuryReceiveAllocation {
