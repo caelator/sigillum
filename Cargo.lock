@@ -4318,7 +4318,7 @@ checksum = "0fda2ff0d084019ba4d7c6f371c95d8fd75ce3524c3cb8fb653a3023f6323e64"
 
 [[package]]
 name = "sigillum"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "sigillum-core",
  "tempfile",
@@ -4326,7 +4326,7 @@ dependencies = [
 
 [[package]]
 name = "sigillum-api"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "hex",
  "serde",
@@ -4336,7 +4336,7 @@ dependencies = [
 
 [[package]]
 name = "sigillum-cli"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "chrono",
  "dirs 5.0.1",
@@ -4362,7 +4362,7 @@ dependencies = [
 
 [[package]]
 name = "sigillum-client"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "axum",
  "hex",
@@ -4379,7 +4379,7 @@ dependencies = [
 
 [[package]]
 name = "sigillum-core"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "aes-gcm",
  "argon2",
@@ -4405,7 +4405,7 @@ dependencies = [
 
 [[package]]
 name = "sigillum-daemon"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "aes-gcm",
  "argon2",
@@ -4440,7 +4440,7 @@ dependencies = [
 
 [[package]]
 name = "sigillum-desktop"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "dirs 5.0.1",
  "sigillum-daemon",
@@ -4453,7 +4453,7 @@ dependencies = [
 
 [[package]]
 name = "sigillum-fido2"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "aes-gcm",
  "blahaj",
@@ -4472,7 +4472,7 @@ dependencies = [
 
 [[package]]
 name = "sigillum-gateway"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "axum",
  "base64 0.22.1",
@@ -4502,7 +4502,7 @@ dependencies = [
 
 [[package]]
 name = "sigillum-generator"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "bip39",
  "data-encoding",
@@ -4513,7 +4513,7 @@ dependencies = [
 
 [[package]]
 name = "sigillum-sdk"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "sigillum-api",
  "sigillum-client",
@@ -4522,7 +4522,7 @@ dependencies = [
 
 [[package]]
 name = "sigillum-server"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "sigillum-daemon",
  "tempfile",

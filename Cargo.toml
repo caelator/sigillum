@@ -16,7 +16,7 @@ members = [
 ]
 
 [workspace.package]
-version = "0.1.0"
+version = "1.0.0"
 edition = "2024"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/caelator/sigillum"
@@ -25,12 +25,12 @@ rust-version = "1.88"
 
 [workspace.dependencies]
 # Core
-sigillum-api = { path = "crates/sigillum-api", version = "0.1.0" }
-sigillum-core = { path = "crates/sigillum-core", version = "0.1.0", default-features = false }
-sigillum-client = { path = "crates/sigillum-client", version = "0.1.0" }
-sigillum-daemon = { path = "crates/sigillum-daemon", version = "0.1.0" }
-sigillum-fido2 = { path = "crates/sigillum-fido2", version = "0.1.0" }
-sigillum-generator = { path = "crates/sigillum-generator", version = "0.1.0" }
+sigillum-api = { path = "crates/sigillum-api", version = "1.0.0" }
+sigillum-core = { path = "crates/sigillum-core", version = "1.0.0", default-features = false }
+sigillum-client = { path = "crates/sigillum-client", version = "1.0.0" }
+sigillum-daemon = { path = "crates/sigillum-daemon", version = "1.0.0" }
+sigillum-fido2 = { path = "crates/sigillum-fido2", version = "1.0.0" }
+sigillum-generator = { path = "crates/sigillum-generator", version = "1.0.0" }
 
 # Crypto
 aes-gcm = "0.10"
