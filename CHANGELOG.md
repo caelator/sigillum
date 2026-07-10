@@ -7,32 +7,6 @@ from 1.0.0 onward, per the stability policy in `docs/stability.md`.
 
 ## [Unreleased]
 
-### Security
-
-- **Daemon authorization** — `require_session()` now requires a full daemon
-  session by default; capability tokens are admitted only through explicit
-  `require_scope()` checks on the routes that declare them. Scoped sessions
-  are hidden from optional observability surfaces such as `/api/status`.
-- **Payment truth** — Deposit refresh and the gateway poller compare observed
-  and expected amounts with full 256-bit semantics; dust transfers no longer
-  satisfy larger payment intents. Gateway lifecycle states report balance
-  observations, not finality-backed confirmations. The privileged third-party
-  invoice-signing callback path was removed.
-- **Queue execution durability** — Every queue family durably records exact
-  signed bytes and hash as `prepared`, persists `submitted_unknown` before RPC,
-  and recovers by receipt lookup or exact-byte resubmission without re-signing.
-- **Kill switch preemption** — Queue pause sets a lock-free latch before
-  acquiring the operation mutex so an in-flight drain can be halted through the
-  HTTP API without waiting for the batch to finish.
-
-### Fixed
-
-- **`sigillum-fido2` no-HID builds** — Compiling with `default-features = false`
-  keeps the API surface but returns explicit errors for hardware-only
-  operations; the release gate now compiles, tests, and lints this configuration.
-- **Chaos crash-boundary proof** — Failpoint subprocess waits were widened so
-  the write-ahead kill-in-flight regression is reliable under load.
-
 ## [1.0.0] - 2026-07-10
 
 ### Added
@@ -141,6 +115,34 @@ from 1.0.0 onward, per the stability policy in `docs/stability.md`.
   check, `cargo audit`, `cargo deny`, whitespace checks, and a tracked-tree
   mutation guard; CI runs the full gate on fixed Ubuntu/macOS version lines with
   immutable action commits and a nightly deep-fuzz schedule.
+
+### Security
+
+- **Daemon authorization** — Full daemon sessions are required by default;
+  capability tokens are admitted only through explicit `require_scope()` checks
+  on the routes that declare them. Scoped sessions are hidden from optional
+  observability surfaces such as `/api/status`.
+- **Payment truth** — Deposit refresh and the gateway poller compare observed
+  and expected amounts with full 256-bit semantics; dust transfers do not
+  satisfy larger payment intents. Gateway lifecycle states report balance
+  observations, not finality-backed confirmations. A privileged third-party
+  invoice-signing callback path is not implemented.
+- **Queue execution durability** — Every queue family durably records exact
+  signed bytes and hash as `prepared`, persists `submitted_unknown` before RPC,
+  and recovers by receipt lookup or exact-byte resubmission without re-signing.
+- **Kill switch preemption** — Queue pause sets a lock-free latch before
+  acquiring the operation mutex so an in-flight drain can be halted through the
+  HTTP API without waiting for the batch to finish.
+
+### Fixed
+
+- **`sigillum-fido2` no-HID builds** — Compiling with `default-features = false`
+  keeps the API surface but returns explicit errors for hardware-only
+  operations; the release gate compiles, tests, and lints this configuration.
+- **Chaos crash-boundary proof** — The write-ahead kill-in-flight regression
+  uses a real subprocess and SIGKILL at the durable `prepared` and
+  `submitted_unknown` barriers, with a test-only minimal unlock fixture so the
+  proof remains reliable across CI runners.
 
 [Unreleased]: https://github.com/caelator/sigillum/compare/v1.0.0...HEAD
 [1.0.0]: https://github.com/caelator/sigillum/releases/tag/v1.0.0
