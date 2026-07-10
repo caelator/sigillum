@@ -39,6 +39,7 @@ async fn spawn_daemon(base_dir: PathBuf) -> (SocketAddr, tokio::task::JoinHandle
 #[derive(Clone, Default)]
 struct RpcState {
     fail_broadcast: Arc<AtomicBool>,
+    broadcast_count: Arc<std::sync::atomic::AtomicUsize>,
 }
 
 fn rpc_response(state: &RpcState, request: &Value) -> Value {
@@ -71,6 +72,7 @@ fn rpc_response(state: &RpcState, request: &Value) -> Value {
                     "error": { "code": -32000, "message": "execution reverted" },
                 });
             }
+            state.broadcast_count.fetch_add(1, Ordering::SeqCst);
             json!(format!("0x{}", "11".repeat(32)))
         }
         other => json!({ "unsupported": other }),
@@ -673,6 +675,213 @@ fn edit_step_depends_on(env: &PlanEnv, plan_id: &str, step_id: &str, depends_on:
         .expect("step exists");
     step["depends_on"] = json!(depends_on);
     write_store(&path, &store);
+}
+
+// ── F5 adversarial execution-path regressions ───────────────────────────
+
+#[tokio::test]
+async fn hostile_inventory_tampered_destination_refused_at_enqueue() {
+    let env = setup_plan_env().await;
+    update_policy(&env, gates_on_policy_body()).await;
+    let (plan_id, step_id) = generate_and_simulate_plan(&env).await;
+    approve_plan(&env, &plan_id).await;
+
+    edit_inventory(&env, |data| {
+        let step = data["consolidation_plans"]
+            .as_array_mut()
+            .unwrap()
+            .iter_mut()
+            .flat_map(|plan| plan["steps"].as_array_mut().unwrap().iter_mut())
+            .find(|step| step["id"] == json!(step_id))
+            .expect("approved step exists");
+        step["destination_address"] = json!("0x8888888888888888888888888888888888888888");
+    });
+
+    let (status, body) = enqueue_step(&env, &plan_id, &step_id).await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    assert_eq!(body["error"], json!("policy_violation"));
+    assert_eq!(body["action"], json!("block_destination"));
+    assert!(queue_jobs(&env).await.is_empty());
+
+    env.shutdown();
+}
+
+#[tokio::test]
+async fn hostile_inventory_garbage_evidence_refused_at_enqueue() {
+    let env = setup_plan_env().await;
+    update_policy(&env, gates_on_policy_body()).await;
+    let (plan_id, step_id) = generate_and_simulate_plan(&env).await;
+    approve_plan(&env, &plan_id).await;
+
+    edit_inventory(&env, |data| {
+        let step = data["consolidation_plans"]
+            .as_array_mut()
+            .unwrap()
+            .iter_mut()
+            .flat_map(|plan| plan["steps"].as_array_mut().unwrap().iter_mut())
+            .find(|step| step["id"] == json!(step_id))
+            .expect("approved step exists");
+        step["simulation_evidence"] = json!([]);
+        step["simulation_status"] = json!("passed");
+    });
+
+    let (status, body) = enqueue_step(&env, &plan_id, &step_id).await;
+    assert!(
+        !status.is_success(),
+        "missing evidence must be refused: {body}"
+    );
+    let refusal_text = format!("{} {}", body["error"], body["message"]);
+    assert!(
+        refusal_text.contains("simulation_stale"),
+        "refusal should mention simulation_stale: {body}"
+    );
+    assert!(queue_jobs(&env).await.is_empty());
+
+    env.shutdown();
+}
+
+#[tokio::test]
+async fn corrupt_inventory_is_quarantined_and_good_state_restored() {
+    let env = setup_plan_env().await;
+    update_policy(&env, gates_on_policy_body()).await;
+    let (plan_id, step_id) = generate_and_simulate_plan(&env).await;
+    approve_plan(&env, &plan_id).await;
+    let (status, body) = enqueue_step(&env, &plan_id, &step_id).await;
+    assert_eq!(status, StatusCode::OK, "enqueue: {body}");
+
+    let policy = get(
+        &env.client,
+        env.addr,
+        "/api/treasury/policy",
+        Some(&env.token),
+    )
+    .await;
+    assert_eq!(policy.status(), StatusCode::OK);
+    let policy_json: Value = policy.json().await.unwrap();
+    assert_eq!(policy_json["policy"]["enabled"], json!(true));
+
+    std::fs::write(inventory_path(&env), b"{ not valid json ]").unwrap();
+
+    let policy = get(
+        &env.client,
+        env.addr,
+        "/api/treasury/policy",
+        Some(&env.token),
+    )
+    .await;
+    assert_eq!(policy.status(), StatusCode::OK);
+    let policy_json: Value = policy.json().await.unwrap();
+    assert_eq!(policy_json["policy"]["enabled"], json!(true));
+
+    let has_quarantine = std::fs::read_dir(&env.base_dir).unwrap().any(|entry| {
+        entry
+            .unwrap()
+            .file_name()
+            .to_string_lossy()
+            .contains(".corrupt-")
+    });
+    assert!(has_quarantine, "corrupt inventory should be quarantined");
+
+    let live_bytes = std::fs::read(inventory_path(&env)).unwrap();
+    serde_json::from_slice::<Value>(&live_bytes).unwrap();
+
+    env.shutdown();
+}
+
+#[tokio::test]
+async fn policy_update_and_drain_serialize_no_torn_state_or_double_broadcast() {
+    let env = setup_plan_env().await;
+    update_policy(&env, gates_on_policy_body()).await;
+    let (plan_id, step_id) = generate_and_simulate_plan(&env).await;
+    approve_plan(&env, &plan_id).await;
+    let (status, body) = enqueue_step(&env, &plan_id, &step_id).await;
+    assert_eq!(status, StatusCode::OK, "enqueue: {body}");
+
+    let drain = post_json(
+        &env.client,
+        env.addr,
+        "/api/queue/process",
+        json!({}),
+        Some(&env.token),
+    );
+    let pause = post_json(
+        &env.client,
+        env.addr,
+        "/api/queue/pause",
+        json!({}),
+        Some(&env.token),
+    );
+    let (drain_res, pause_res) = tokio::join!(drain, pause);
+    assert_eq!(drain_res.status(), StatusCode::OK);
+    assert_eq!(pause_res.status(), StatusCode::OK);
+
+    let broadcasts = env.rpc_state.broadcast_count.load(Ordering::SeqCst);
+    assert!(broadcasts <= 1, "no double broadcast: {broadcasts}");
+
+    let jobs = queue_jobs(&env).await;
+    let job = jobs
+        .iter()
+        .find(|job| job["step_id"] == json!(step_id))
+        .expect("queued job exists");
+    if broadcasts == 1 {
+        assert_eq!(job["state"], json!("sent"), "{job}");
+        assert!(job["transaction_hash_hex"].is_string(), "{job}");
+    } else {
+        assert_ne!(job["state"], json!("sent"), "{job}");
+        assert!(job["transaction_hash_hex"].is_null(), "{job}");
+    }
+
+    let queue_bytes = std::fs::read(queue_path(&env)).unwrap();
+    serde_json::from_slice::<Value>(&queue_bytes).unwrap();
+
+    env.shutdown();
+}
+
+#[tokio::test]
+async fn enqueue_sign_broadcast_events_carry_matching_session_fingerprint() {
+    let env = setup_plan_env().await;
+    update_policy(&env, gates_on_policy_body()).await;
+    let (plan_id, step_id) = generate_and_simulate_plan(&env).await;
+    approve_plan(&env, &plan_id).await;
+    let (status, body) = enqueue_step(&env, &plan_id, &step_id).await;
+    assert_eq!(status, StatusCode::OK, "enqueue: {body}");
+
+    let process_json = process_queue(&env).await;
+    assert_eq!(
+        process_json["succeeded"],
+        json!(1),
+        "process: {process_json}"
+    );
+
+    let events = audit_events(&env).await;
+    let mut fingerprints = Vec::new();
+    for kind in [
+        "wallet_consolidation.plan.enqueue_step",
+        "wallet_consolidation.plan.step_sign",
+        "wallet_consolidation.plan.step_broadcast",
+    ] {
+        let event = events
+            .iter()
+            .find(|event| event["kind"] == json!(kind))
+            .unwrap_or_else(|| panic!("missing audit event {kind}: {events:#?}"));
+        let fp = event["details"]["session_fingerprint_hex"]
+            .as_str()
+            .unwrap_or_else(|| panic!("missing session fingerprint: {event:#?}"));
+        // 8-byte (16 hex char) truncated SHA-256 of the session token, used for
+        // audit attribution without storing the token.
+        assert_eq!(fp.len(), 16, "fingerprint length for {kind}: {event}");
+        assert!(
+            fp.chars().all(|ch| ch.is_ascii_hexdigit()),
+            "fingerprint must be hex for {kind}: {event}"
+        );
+        fingerprints.push(fp.to_string());
+    }
+    assert!(
+        fingerprints.windows(2).all(|pair| pair[0] == pair[1]),
+        "same session identity across enqueue/sign/broadcast: {fingerprints:?}"
+    );
+
+    env.shutdown();
 }
 
 // ── Evidence-hash tamper detection ──────────────────────────────────────

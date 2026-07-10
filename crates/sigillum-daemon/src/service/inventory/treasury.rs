@@ -1478,8 +1478,15 @@ fn validated_cap_hex(field: &str, value: Option<String>) -> ServiceResult<Option
     let Some(value) = value.and_then(trimmed_optional) else {
         return Ok(None);
     };
+    if !has_hex_quantity_prefix(&value) {
+        return Err(ServiceError::bad_request(format!(
+            "{field} must be a 0x-prefixed hex uint256 quantity"
+        )));
+    }
     decode_quantity_hex(&value).map_err(|_| {
-        ServiceError::bad_request(format!("{field} must be a hex uint256 quantity"))
+        ServiceError::bad_request(format!(
+            "{field} must be a 0x-prefixed hex uint256 quantity"
+        ))
     })?;
     Ok(Some(value))
 }
@@ -1492,10 +1499,21 @@ fn validated_required_quantity_hex(
     let value = value
         .and_then(trimmed_optional)
         .unwrap_or_else(|| default_value.to_string());
+    if !has_hex_quantity_prefix(&value) {
+        return Err(ServiceError::bad_request(format!(
+            "{field} must be a 0x-prefixed hex uint256 quantity"
+        )));
+    }
     decode_quantity_hex(&value).map_err(|_| {
-        ServiceError::bad_request(format!("{field} must be a hex uint256 quantity"))
+        ServiceError::bad_request(format!(
+            "{field} must be a 0x-prefixed hex uint256 quantity"
+        ))
     })?;
     Ok(value)
+}
+
+fn has_hex_quantity_prefix(value: &str) -> bool {
+    value.starts_with("0x") || value.starts_with("0X")
 }
 
 /// Treasury policy blockers for a single consolidation plan step.

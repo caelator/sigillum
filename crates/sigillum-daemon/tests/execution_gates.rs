@@ -907,3 +907,142 @@ async fn max_fee_per_gas_cap_hex_is_validated() {
 
     handle.abort();
 }
+
+#[tokio::test]
+async fn treasury_policy_cap_fields_reject_prefixless_hex() {
+    let dir = TempDir::new().unwrap();
+    let (addr, handle) = spawn_daemon(dir.path().to_path_buf()).await;
+    let client = reqwest::Client::new();
+    let init = post_json(
+        &client,
+        addr,
+        "/api/compartment/init",
+        json!({
+            "id": 0,
+            "label": "default",
+            "threshold": 1,
+            "passphrase": "correct horse battery staple",
+        }),
+        None,
+    )
+    .await;
+    assert_eq!(init.status(), StatusCode::OK);
+    let init_json: Value = init.json().await.unwrap();
+    let token = init_json["session_token"].as_str().unwrap().to_string();
+
+    for field in [
+        "max_step_native_wei_hex",
+        "max_plan_native_wei_hex",
+        "max_gas_topup_wei_hex",
+        "max_fee_per_gas_cap_hex",
+    ] {
+        let mut invalid_body = json!({
+            "enabled": true,
+        });
+        invalid_body[field] = json!("1000");
+        let invalid = post_json(
+            &client,
+            addr,
+            "/api/treasury/policy/update",
+            invalid_body,
+            Some(&token),
+        )
+        .await;
+        assert_eq!(invalid.status(), StatusCode::BAD_REQUEST);
+
+        let mut valid_body = json!({
+            "enabled": true,
+        });
+        valid_body[field] = json!("0x1000");
+        let valid = post_json(
+            &client,
+            addr,
+            "/api/treasury/policy/update",
+            valid_body,
+            Some(&token),
+        )
+        .await;
+        assert_eq!(valid.status(), StatusCode::OK);
+    }
+
+    let policy = get(&client, addr, "/api/treasury/policy", Some(&token)).await;
+    assert_eq!(policy.status(), StatusCode::OK);
+    let policy_json: Value = policy.json().await.unwrap();
+    assert_eq!(
+        policy_json["policy"]["max_fee_per_gas_cap_hex"],
+        json!("0x1000")
+    );
+
+    handle.abort();
+}
+
+#[tokio::test]
+async fn treasury_policy_required_fields_reject_prefixless_hex() {
+    let dir = TempDir::new().unwrap();
+    let (addr, handle) = spawn_daemon(dir.path().to_path_buf()).await;
+    let client = reqwest::Client::new();
+    let init = post_json(
+        &client,
+        addr,
+        "/api/compartment/init",
+        json!({
+            "id": 0,
+            "label": "default",
+            "threshold": 1,
+            "passphrase": "correct horse battery staple",
+        }),
+        None,
+    )
+    .await;
+    assert_eq!(init.status(), StatusCode::OK);
+    let init_json: Value = init.json().await.unwrap();
+    let token = init_json["session_token"].as_str().unwrap().to_string();
+
+    let invalid_floor = post_json(
+        &client,
+        addr,
+        "/api/treasury/policy/update",
+        json!({
+            "enabled": true,
+            "hot_floor_wei_hex": "1000",
+        }),
+        Some(&token),
+    )
+    .await;
+    assert_eq!(invalid_floor.status(), StatusCode::BAD_REQUEST);
+
+    let invalid_target = post_json(
+        &client,
+        addr,
+        "/api/treasury/policy/update",
+        json!({
+            "enabled": true,
+            "hot_target_wei_hex": "1000",
+        }),
+        Some(&token),
+    )
+    .await;
+    assert_eq!(invalid_target.status(), StatusCode::BAD_REQUEST);
+
+    let valid = post_json(
+        &client,
+        addr,
+        "/api/treasury/policy/update",
+        json!({
+            "enabled": true,
+            "hot_floor_wei_hex": "0x1000",
+            "hot_target_wei_hex": "0x2000",
+        }),
+        Some(&token),
+    )
+    .await;
+    assert_eq!(valid.status(), StatusCode::OK);
+
+    let policy = get(&client, addr, "/api/treasury/policy", Some(&token)).await;
+    assert_eq!(policy.status(), StatusCode::OK);
+    let policy_json: Value = policy.json().await.unwrap();
+    assert_eq!(policy_json["policy"]["hot_floor_wei_hex"], json!("0x1000"));
+    assert_eq!(policy_json["policy"]["hot_target_wei_hex"], json!("0x2000"));
+
+    handle.abort();
+}
