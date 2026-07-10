@@ -453,6 +453,14 @@ export interface TreasuryOverviewResponse {
   risk: TreasuryRiskSummary;
   plans: TreasuryPlanSummary;
   receive?: TreasuryReceiveSummary;
+  automation?: TreasuryAutomationStatus;
+}
+
+export interface TreasuryAutomationStatus {
+  enabled: boolean;
+  hot_overflow_wei_hex?: string | null;
+  generated_steps: number;
+  enqueued_steps: number;
 }
 
 export interface TreasuryAllowedDestination {
@@ -467,10 +475,12 @@ export interface TreasuryPolicy {
   max_plan_native_wei_hex?: string | null;
   hot_floor_wei_hex?: string;
   hot_target_wei_hex?: string;
+  hot_overflow_wei_hex?: string | null;
   require_simulation: boolean;
   block_cross_party_linkage?: boolean;
   allow_claim_execution?: boolean;
   allow_gas_topups?: boolean;
+  allow_treasury_automation?: boolean;
   max_gas_topup_wei_hex?: string | null;
   allow_plan_execution?: boolean;
   allow_sweep_execution?: boolean;
@@ -490,10 +500,12 @@ export interface TreasuryPolicyUpdateRequest {
   max_plan_native_wei_hex?: string | null;
   hot_floor_wei_hex?: string | null;
   hot_target_wei_hex?: string | null;
+  hot_overflow_wei_hex?: string | null;
   require_simulation?: boolean | null;
   block_cross_party_linkage?: boolean | null;
   allow_claim_execution?: boolean | null;
   allow_gas_topups?: boolean | null;
+  allow_treasury_automation?: boolean | null;
   max_gas_topup_wei_hex?: string | null;
   allow_plan_execution?: boolean | null;
   allow_sweep_execution?: boolean | null;

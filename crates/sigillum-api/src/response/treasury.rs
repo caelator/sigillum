@@ -94,6 +94,33 @@ pub struct TreasuryReceiveSummary {
     pub purposes: usize,
 }
 
+/// Per-maintenance-cycle W8 treasury automation outcome.
+///
+/// `generated_steps` and `enqueued_steps` are reported distinctly because
+/// generation is review-first and enqueue additionally requires the W7.1 gates
+/// and a passed simulation.
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct TreasuryAutomationRunSummary {
+    pub generated_steps: usize,
+    pub enqueued_steps: usize,
+    pub skipped_steps: usize,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub skipped_reasons: Vec<String>,
+}
+
+/// Treasury-console posture for W8 automation.
+///
+/// Counts aggregate steps of plans whose origin is `treasury_automation`;
+/// `enqueued_steps` counts only those with a recorded queue job id.
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct TreasuryAutomationStatus {
+    pub enabled: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hot_overflow_wei_hex: Option<String>,
+    pub generated_steps: usize,
+    pub enqueued_steps: usize,
+}
+
 /// Read-only treasury console aggregation.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct TreasuryOverviewResponse {
@@ -113,6 +140,8 @@ pub struct TreasuryOverviewResponse {
     /// Defaults for payloads produced before receive allocations existed.
     #[serde(default)]
     pub receive: TreasuryReceiveSummary,
+    #[serde(default)]
+    pub automation: TreasuryAutomationStatus,
 }
 
 /// Operator-approved consolidation destination.
@@ -205,6 +234,18 @@ pub struct TreasuryPolicy {
     /// level; it does not itself trigger routing to hot. Default 1 ETH.
     #[serde(default = "default_hot_target_wei_hex")]
     pub hot_target_wei_hex: String,
+    /// Optional hot-wallet overflow threshold; when the hot address balance
+    /// exceeds it, maintenance may plan a hot->treasury sweep of the excess
+    /// above hot_target_wei_hex. None disables overflow detection.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hot_overflow_wei_hex: Option<String>,
+    /// Fail-closed opt-in (default false, Decision Register D-6): when true AND
+    /// the policy is enabled, the maintenance cycle may GENERATE hot-overflow /
+    /// treasury-refill plan steps and auto-enqueue them only when the W7.1
+    /// execution gates hold and simulation passed. Off means maintenance
+    /// behavior is unchanged.
+    #[serde(default)]
+    pub allow_treasury_automation: bool,
     pub created_at_unix: u64,
     pub updated_at_unix: u64,
 }

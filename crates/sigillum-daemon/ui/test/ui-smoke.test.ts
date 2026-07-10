@@ -393,10 +393,12 @@ test("setup wizard preserves merkle claim opt-in when enabling payer-linkage pro
     max_plan_native_wei_hex: null,
     hot_floor_wei_hex: "0x2",
     hot_target_wei_hex: "0x3",
+    hot_overflow_wei_hex: "0x5",
     require_simulation: true,
     block_cross_party_linkage: false,
     allow_claim_execution: true,
     allow_gas_topups: true,
+    allow_treasury_automation: true,
     max_gas_topup_wei_hex: "0x4",
     simulation_freshness_secs: 120,
     created_at_unix: 1,
@@ -437,6 +439,8 @@ test("setup wizard preserves merkle claim opt-in when enabling payer-linkage pro
       simulation_freshness_secs: 120,
       hot_floor_wei_hex: "0x2",
       hot_target_wei_hex: "0x3",
+      hot_overflow_wei_hex: "0x5",
+      allow_treasury_automation: true,
     },
   });
 });
@@ -1139,6 +1143,12 @@ test("operation results include failure cause breakdowns", async () => {
             validation: 1,
             unknown: 0,
           },
+          treasury_automation: {
+            generated_steps: 2,
+            enqueued_steps: 1,
+            skipped_steps: 1,
+            skipped_reasons: ["simulation_not_passed"],
+          },
           deposits: [],
           jobs: [],
         };
@@ -1169,6 +1179,9 @@ test("operation results include failure cause breakdowns", async () => {
   ok(resultBoxes.maintenanceResult.includes("policy_block=1"));
   ok(resultBoxes.maintenanceResult.includes("insufficient_gas=1"));
   ok(resultBoxes.maintenanceResult.includes("validation=1"));
+  ok(resultBoxes.maintenanceResult.includes("automationGenerated=2"));
+  ok(resultBoxes.maintenanceResult.includes("automationEnqueued=1"));
+  ok(resultBoxes.maintenanceResult.includes("automationSkipped=1"));
 });
 
 test("processQueueBatch surfaces a mid-drain pause reason in the result line", async () => {
@@ -2421,9 +2434,11 @@ test("treasury policy loader prefills the form without clobbering operator edits
     "treasuryPolicyMaxPlanEth",
     "treasuryPolicyHotFloorEth",
     "treasuryPolicyHotTargetEth",
+    "treasuryPolicyHotOverflowEth",
     "treasuryPolicyRequireSim",
     "treasuryPolicyAllowClaimExec",
     "treasuryPolicyAllowGasTopups",
+    "treasuryPolicyAllowTreasuryAutomation",
     "treasuryPolicyMaxGasTopupEth",
     "treasuryPolicyAllowPlanExec",
     "treasuryPolicyAllowSweepExec",
@@ -2438,9 +2453,11 @@ test("treasury policy loader prefills the form without clobbering operator edits
     ],
     max_step_native_wei_hex: "0x" + (2000000000000000000n).toString(16),
     max_plan_native_wei_hex: "0xde0b6b3a7640000",
+    hot_overflow_wei_hex: "0x" + (3000000000000000000n).toString(16),
     require_simulation: true,
     allow_claim_execution: true,
     allow_gas_topups: true,
+    allow_treasury_automation: true,
     max_gas_topup_wei_hex: "0x" + (500000000000000000n).toString(16),
     allow_plan_execution: true,
     allow_sweep_execution: true,
@@ -2460,6 +2477,7 @@ test("treasury policy loader prefills the form without clobbering operator edits
   equal(dom.el("treasuryPolicyRequireSim").checked, true);
   equal(dom.el("treasuryPolicyAllowClaimExec").checked, true);
   equal(dom.el("treasuryPolicyAllowGasTopups").checked, true);
+  equal(dom.el("treasuryPolicyAllowTreasuryAutomation").checked, true);
   equal(dom.el("treasuryPolicyAllowPlanExec").checked, true);
   equal(dom.el("treasuryPolicyAllowSweepExec").checked, true);
   equal(dom.el("treasuryPolicyAllowRevokeExec").checked, true);
@@ -2474,9 +2492,12 @@ test("treasury policy loader prefills the form without clobbering operator edits
   equal(dom.el("treasuryPolicyMaxGasTopupEth").value, "0.5");
   equal(dom.el("treasuryPolicyHotFloorEth").value, "1");
   equal(dom.el("treasuryPolicyHotTargetEth").value, "1");
+  equal(dom.el("treasuryPolicyHotOverflowEth").value, "3");
   ok(dom.el("treasuryPolicyList").innerHTML.includes("maxPlan=1 ETH"));
   ok(dom.el("treasuryPolicyList").innerHTML.includes("hotFloor=1 ETH"));
   ok(dom.el("treasuryPolicyList").innerHTML.includes("hotTarget=1 ETH"));
+  ok(dom.el("treasuryPolicyList").innerHTML.includes("hotOverflow=3 ETH"));
+  ok(dom.el("treasuryPolicyList").innerHTML.includes("allowTreasuryAutomation=true"));
 
   dom.el("treasuryPolicyDestinations").value = "0xdraft";
   await treasury.loadTreasuryOverview();
@@ -2493,6 +2514,7 @@ test("treasury policy save validates caps and submits the parsed update request"
     "treasuryPolicyRequireSim",
     "treasuryPolicyAllowClaimExec",
     "treasuryPolicyAllowGasTopups",
+    "treasuryPolicyAllowTreasuryAutomation",
     "treasuryPolicyMaxGasTopupEth",
     "treasuryPolicyAllowPlanExec",
     "treasuryPolicyAllowSweepExec",
@@ -2510,9 +2532,11 @@ test("treasury policy save validates caps and submits the parsed update request"
     ],
     max_step_native_wei_hex: "0x" + (1500000000000000000n).toString(16),
     max_plan_native_wei_hex: null,
+    hot_overflow_wei_hex: "0x" + (3000000000000000000n).toString(16),
     require_simulation: false,
     allow_claim_execution: true,
     allow_gas_topups: true,
+    allow_treasury_automation: true,
     max_gas_topup_wei_hex: "0x" + (250000000000000000n).toString(16),
     allow_plan_execution: true,
     allow_sweep_execution: true,
@@ -2537,6 +2561,7 @@ test("treasury policy save validates caps and submits the parsed update request"
   dom.el("treasuryPolicyRequireSim").checked = false;
   dom.el("treasuryPolicyAllowClaimExec").checked = true;
   dom.el("treasuryPolicyAllowGasTopups").checked = true;
+  dom.el("treasuryPolicyAllowTreasuryAutomation").checked = true;
   dom.el("treasuryPolicyAllowPlanExec").checked = true;
   dom.el("treasuryPolicyAllowSweepExec").checked = true;
   dom.el("treasuryPolicyAllowRevokeExec").checked = false;
@@ -2545,6 +2570,7 @@ test("treasury policy save validates caps and submits the parsed update request"
     "0x2222222222222222222222222222222222222222:cold\n0x3333333333333333333333333333333333333333";
   dom.el("treasuryPolicyMaxStepEth").value = "1.5";
   dom.el("treasuryPolicyMaxPlanEth").value = "not-a-number";
+  dom.el("treasuryPolicyHotOverflowEth").value = "3";
   dom.el("treasuryPolicyMaxGasTopupEth").value = "0.25";
   dom.el("treasuryPolicyMaxFeePerGasGwei").value = "25";
 
@@ -2588,10 +2614,12 @@ test("treasury policy save validates caps and submits the parsed update request"
       ],
       max_step_native_wei_hex: "0x" + (1500000000000000000n).toString(16),
       max_plan_native_wei_hex: null,
+      hot_overflow_wei_hex: "0x" + (3000000000000000000n).toString(16),
       require_simulation: false,
       block_cross_party_linkage: false,
       allow_claim_execution: true,
       allow_gas_topups: true,
+      allow_treasury_automation: true,
       max_gas_topup_wei_hex: "0x" + (250000000000000000n).toString(16),
       allow_plan_execution: true,
       allow_sweep_execution: true,
@@ -2604,6 +2632,8 @@ test("treasury policy save validates caps and submits the parsed update request"
   ok(dom.el("treasuryPolicyList").innerHTML.includes(">enabled<"));
   ok(dom.el("treasuryPolicyList").innerHTML.includes("maxStep=1.5 ETH"));
   ok(dom.el("treasuryPolicyList").innerHTML.includes("maxGasTopup=0.25 ETH"));
+  ok(dom.el("treasuryPolicyList").innerHTML.includes("hotOverflow=3 ETH"));
+  ok(dom.el("treasuryPolicyList").innerHTML.includes("allowTreasuryAutomation=true"));
   ok(dom.el("treasuryPolicyList").innerHTML.includes("allowPlanExecution=true"));
   ok(dom.el("treasuryPolicyList").innerHTML.includes("allowSweepExecution=true"));
   ok(dom.el("treasuryPolicyList").innerHTML.includes("maxFeePerGasCap=25 Gwei"));
@@ -2655,6 +2685,8 @@ test("treasury policy save posts hot refill caps only when provided", async () =
     "treasuryPolicyFreshnessSecs",
     "treasuryPolicyHotFloorEth",
     "treasuryPolicyHotTargetEth",
+    "treasuryPolicyHotOverflowEth",
+    "treasuryPolicyAllowTreasuryAutomation",
   ]);
   const calls: Array<{ method: string; path: string; body?: any }> = [];
   const treasury = createTreasuryActions({
@@ -2670,6 +2702,8 @@ test("treasury policy save posts hot refill caps only when provided", async () =
 
   dom.el("treasuryPolicyHotFloorEth").value = "1";
   dom.el("treasuryPolicyHotTargetEth").value = "1";
+  dom.el("treasuryPolicyHotOverflowEth").value = "2";
+  dom.el("treasuryPolicyAllowTreasuryAutomation").checked = true;
   await treasury.updateTreasuryPolicy();
 
   const withHotCaps = calls.find(
@@ -2679,16 +2713,22 @@ test("treasury policy save posts hot refill caps only when provided", async () =
     {
       hot_floor_wei_hex: withHotCaps?.body.hot_floor_wei_hex,
       hot_target_wei_hex: withHotCaps?.body.hot_target_wei_hex,
+      hot_overflow_wei_hex: withHotCaps?.body.hot_overflow_wei_hex,
+      allow_treasury_automation: withHotCaps?.body.allow_treasury_automation,
     },
     {
       hot_floor_wei_hex: "0xde0b6b3a7640000",
       hot_target_wei_hex: "0xde0b6b3a7640000",
+      hot_overflow_wei_hex: "0x1bc16d674ec80000",
+      allow_treasury_automation: true,
     },
   );
 
   calls.length = 0;
   dom.el("treasuryPolicyHotFloorEth").value = "";
   dom.el("treasuryPolicyHotTargetEth").value = "";
+  dom.el("treasuryPolicyHotOverflowEth").value = "";
+  dom.el("treasuryPolicyAllowTreasuryAutomation").checked = false;
   await treasury.updateTreasuryPolicy();
 
   const withoutHotCaps = calls.find(
@@ -2696,6 +2736,8 @@ test("treasury policy save posts hot refill caps only when provided", async () =
   );
   ok(!("hot_floor_wei_hex" in withoutHotCaps!.body));
   ok(!("hot_target_wei_hex" in withoutHotCaps!.body));
+  ok(!("hot_overflow_wei_hex" in withoutHotCaps!.body));
+  equal(withoutHotCaps!.body.allow_treasury_automation, false);
 });
 
 test("treasury policy save posts simulation freshness only when provided", async () => {

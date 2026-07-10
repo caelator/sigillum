@@ -1130,6 +1130,7 @@ mod tests {
             status: "approved".into(),
             chain_id: 1,
             destination_address: Some("0x9999999999999999999999999999999999999999".into()),
+            origin: None,
             created_at_unix: 1,
             updated_at_unix: 1,
             summary: sigillum_api::ConsolidationPlanSummary {

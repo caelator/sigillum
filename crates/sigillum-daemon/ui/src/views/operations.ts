@@ -615,7 +615,15 @@ export function createOperationsActions(deps: OperationsDeps) {
         esc(String(r.operator_action_required || 0)) +
         " · failed=" +
         esc(String(r.failed || 0)) +
-        failureBreakdownLine(r.failures_by_cause),
+        failureBreakdownLine(r.failures_by_cause) +
+        (r.treasury_automation
+          ? " · automationGenerated=" +
+            esc(String(r.treasury_automation.generated_steps || 0)) +
+            " · automationEnqueued=" +
+            esc(String(r.treasury_automation.enqueued_steps || 0)) +
+            " · automationSkipped=" +
+            esc(String(r.treasury_automation.skipped_steps || 0))
+          : ""),
     );
     lastDeposits = r.deposits || [];
     lastQueueJobs = r.jobs || [];

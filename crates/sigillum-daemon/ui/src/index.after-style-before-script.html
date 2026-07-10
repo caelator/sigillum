@@ -440,6 +440,10 @@
             Allow sponsor gas top-ups (default off)
           </label>
           <label class="checkbox-row">
+            <input type="checkbox" id="treasuryPolicyAllowTreasuryAutomation">
+            Allow treasury automation (maintenance may plan hot-overflow sweeps and treasury refills and auto-enqueue them; steps still pass simulation, treasury policy, linkage checks, and the execution gates)
+          </label>
+          <label class="checkbox-row">
             <input type="checkbox" id="treasuryPolicyAllowPlanExec">
             Allow plan execution (master gate, default off)
           </label>
@@ -469,6 +473,7 @@
         <div class="form-row">
           <input type="text" id="treasuryPolicyHotFloorEth" placeholder="Hot refill floor (ETH, default 1)">
           <input type="text" id="treasuryPolicyHotTargetEth" placeholder="Hot refill target (ETH, default 1)">
+          <input type="text" id="treasuryPolicyHotOverflowEth" placeholder="Hot overflow threshold (ETH, optional)">
           <input type="text" id="treasuryPolicyMaxGasTopupEth" placeholder="Max gas top-up (ETH, optional)">
           <input type="text" id="treasuryPolicyMaxFeePerGasGwei" placeholder="Max fee per gas (gwei, optional)">
         </div>

@@ -501,6 +501,12 @@ pub(crate) enum AuditEventSpec {
         new_value: bool,
         session_fingerprint_hex: String,
     },
+    #[serde(rename = "treasury.automation_run")]
+    TreasuryAutomationRun {
+        generated: usize,
+        enqueued: usize,
+        skipped: usize,
+    },
     /// Derived addresses are intentionally omitted: the audit log records
     /// that an allocation happened, not which address it produced.
     #[serde(rename = "treasury.receive.allocate")]
@@ -644,6 +650,7 @@ impl AuditEventSpec {
             }
             Self::TreasuryPolicyUpdate { .. } => "treasury.policy.update",
             Self::TreasuryExecutionGateUpdate { .. } => "treasury.policy.execution_gate.update",
+            Self::TreasuryAutomationRun { .. } => "treasury.automation_run",
             Self::TreasuryReceiveAllocate { .. } => "treasury.receive.allocate",
             Self::TreasuryReceiveRotate { .. } => "treasury.receive.rotate",
             Self::TreasuryPartyCreate { .. } => "treasury.party.create",
@@ -1095,6 +1102,11 @@ impl AuditEventSpec {
                 "new_value": new_value,
                 "session_fingerprint_hex": session_fingerprint_hex,
             }),
+            Self::TreasuryAutomationRun {
+                generated,
+                enqueued,
+                skipped,
+            } => json!({ "generated": generated, "enqueued": enqueued, "skipped": skipped }),
             Self::TreasuryReceiveAllocate {
                 wallet_profile,
                 purpose,

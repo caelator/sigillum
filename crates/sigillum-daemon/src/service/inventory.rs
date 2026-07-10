@@ -20,7 +20,7 @@ mod nft_metadata;
 mod observation;
 mod permit2_discovery;
 mod plan_execution_enqueue;
-mod planner;
+pub(in crate::service) mod planner;
 mod preflight;
 mod risk;
 mod risk_catalog;
@@ -79,7 +79,7 @@ use super::evm::normalize_address;
 use super::helpers::{map_xpub_error, now_unix, random_id};
 use super::{ServiceError, ServiceResult, SigillumService};
 
-const WALLET_FAMILY_ETH_SEED: &str = "eth-seed";
+pub(in crate::service) const WALLET_FAMILY_ETH_SEED: &str = "eth-seed";
 const WALLET_FAMILY_ETH_XPUB: &str = "eth-xpub";
 const WALLET_FAMILY_ETH_WATCH: &str = "eth-watch";
 const DISCOVERY_SOURCE_LOCAL_RPC: &str = "local-rpc";

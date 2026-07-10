@@ -1,5 +1,6 @@
 import type {
   Counterparty,
+  TreasuryAutomationStatus,
   TreasuryAllowedDestination,
   TreasuryChainSummary,
   TreasuryGroupSummary,
@@ -266,13 +267,16 @@ export function createTreasuryActions(deps: TreasuryActionsDeps) {
   function renderTreasuryRiskAndPlans(
     risk: TreasuryRiskSummary,
     plans: TreasuryPlanSummary,
+    automation?: TreasuryAutomationStatus,
   ): void {
     type RiskPlanRow =
       | { kind: "risk"; risk: TreasuryRiskSummary }
-      | { kind: "plans"; plans: TreasuryPlanSummary };
+      | { kind: "plans"; plans: TreasuryPlanSummary }
+      | { kind: "automation"; automation: TreasuryAutomationStatus };
     const rows: RiskPlanRow[] = [];
     if (risk) rows.push({ kind: "risk", risk });
     if (plans) rows.push({ kind: "plans", plans });
+    if (automation) rows.push({ kind: "automation", automation });
     renderEntityList(
       "treasuryRiskPlanList",
       rows,
@@ -295,6 +299,25 @@ export function createTreasuryActions(deps: TreasuryActionsDeps) {
             esc(String(row.risk.low_findings || 0)) +
             " · total=" +
             esc(String(row.risk.total_findings || 0)) +
+            "</div></div></li>"
+          );
+        }
+        if (row.kind === "automation") {
+          return (
+            '<li><div class="entity-main">' +
+            '<div class="entity-title">Treasury automation ' +
+            statusPill(row.automation.enabled ? "enabled" : "off") +
+            "</div>" +
+            '<div class="entity-meta">' +
+            "overflow=" +
+            esc(capAsEth(row.automation.hot_overflow_wei_hex)) +
+            " · generatedSteps=" +
+            esc(String(row.automation.generated_steps || 0)) +
+            " · enqueuedSteps=" +
+            esc(String(row.automation.enqueued_steps || 0)) +
+            (row.automation.enabled
+              ? "<br>auto-enqueue still requires passed simulation + execution gates"
+              : "") +
             "</div></div></li>"
           );
         }
@@ -354,7 +377,7 @@ export function createTreasuryActions(deps: TreasuryActionsDeps) {
     renderTreasuryChains(overview.chains || []);
     renderTreasuryGroups(overview.groups || [], symbolByChain);
     renderTreasuryRouting(overview.routing || []);
-    renderTreasuryRiskAndPlans(overview.risk, overview.plans);
+    renderTreasuryRiskAndPlans(overview.risk, overview.plans, overview.automation);
   }
 
   function renderTreasuryPolicy(policy: TreasuryPolicy | null): void {
@@ -387,6 +410,8 @@ export function createTreasuryActions(deps: TreasuryActionsDeps) {
           esc(capAsEth(current.hot_floor_wei_hex ?? DEFAULT_HOT_REFILL_WEI_HEX)) +
           " · hotTarget=" +
           esc(capAsEth(current.hot_target_wei_hex ?? DEFAULT_HOT_REFILL_WEI_HEX)) +
+          " · hotOverflow=" +
+          esc(capAsEth(current.hot_overflow_wei_hex)) +
           " · requireSimulation=" +
           esc(String(current.require_simulation)) +
           " · blockCrossPartyLinkage=" +
@@ -395,6 +420,8 @@ export function createTreasuryActions(deps: TreasuryActionsDeps) {
           esc(String(Boolean(current.allow_claim_execution))) +
           " · allowGasTopups=" +
           esc(String(Boolean(current.allow_gas_topups))) +
+          " · allowTreasuryAutomation=" +
+          esc(String(Boolean(current.allow_treasury_automation))) +
           " · maxGasTopup=" +
           esc(capAsEth(current.max_gas_topup_wei_hex)) +
           " · allowPlanExecution=" +
@@ -435,10 +462,12 @@ export function createTreasuryActions(deps: TreasuryActionsDeps) {
             policy.max_plan_native_wei_hex || null,
             policy.hot_floor_wei_hex ?? DEFAULT_HOT_REFILL_WEI_HEX,
             policy.hot_target_wei_hex ?? DEFAULT_HOT_REFILL_WEI_HEX,
+            policy.hot_overflow_wei_hex || null,
             policy.require_simulation,
             policy.block_cross_party_linkage,
             policy.allow_claim_execution,
             policy.allow_gas_topups,
+            policy.allow_treasury_automation,
             policy.max_gas_topup_wei_hex || null,
             policy.allow_plan_execution,
             policy.allow_sweep_execution,
@@ -467,6 +496,12 @@ export function createTreasuryActions(deps: TreasuryActionsDeps) {
     const allowGasTopupsEl = input("treasuryPolicyAllowGasTopups");
     if (allowGasTopupsEl) {
       allowGasTopupsEl.checked = policy ? Boolean(policy.allow_gas_topups) : false;
+    }
+    const allowTreasuryAutomationEl = input("treasuryPolicyAllowTreasuryAutomation");
+    if (allowTreasuryAutomationEl) {
+      allowTreasuryAutomationEl.checked = policy
+        ? Boolean(policy.allow_treasury_automation)
+        : false;
     }
     const allowPlanExecEl = input("treasuryPolicyAllowPlanExec");
     if (allowPlanExecEl) {
@@ -525,6 +560,12 @@ export function createTreasuryActions(deps: TreasuryActionsDeps) {
       hotTargetEl.value = formatWeiHexAsEth(
         policy?.hot_target_wei_hex ?? DEFAULT_HOT_REFILL_WEI_HEX,
       );
+    }
+    const hotOverflowEl = input("treasuryPolicyHotOverflowEth");
+    if (hotOverflowEl) {
+      hotOverflowEl.value = policy?.hot_overflow_wei_hex
+        ? formatWeiHexAsEth(policy.hot_overflow_wei_hex)
+        : "";
     }
     const freshnessEl = input("treasuryPolicyFreshnessSecs");
     if (freshnessEl) {
@@ -779,6 +820,20 @@ export function createTreasuryActions(deps: TreasuryActionsDeps) {
       );
       return;
     }
+    const hotOverflowText = textValue("treasuryPolicyHotOverflowEth");
+    const hotOverflowWeiHex = hotOverflowText
+      ? parseEthToWeiHex(hotOverflowText)
+      : null;
+    const hotOverflowInvalid =
+      Boolean(hotOverflowText) && hotOverflowWeiHex === null;
+    markInvalid("treasuryPolicyHotOverflowEth", hotOverflowInvalid);
+    if (hotOverflowInvalid) {
+      deps.toast(
+        "Hot overflow threshold must be a decimal ETH amount with up to 18 decimals",
+        "error",
+      );
+      return;
+    }
     const freshnessText = textValue("treasuryPolicyFreshnessSecs");
     const freshnessSecs = freshnessText ? parseInt(freshnessText, 10) : null;
     const freshnessInvalid =
@@ -800,6 +855,9 @@ export function createTreasuryActions(deps: TreasuryActionsDeps) {
       block_cross_party_linkage: Boolean(input("treasuryPolicyBlockLinkage")?.checked),
       allow_claim_execution: Boolean(input("treasuryPolicyAllowClaimExec")?.checked),
       allow_gas_topups: Boolean(input("treasuryPolicyAllowGasTopups")?.checked),
+      allow_treasury_automation: Boolean(
+        input("treasuryPolicyAllowTreasuryAutomation")?.checked,
+      ),
       max_gas_topup_wei_hex: maxGasTopupWeiHex,
       allow_plan_execution: Boolean(input("treasuryPolicyAllowPlanExec")?.checked),
       allow_sweep_execution: Boolean(input("treasuryPolicyAllowSweepExec")?.checked),
@@ -815,6 +873,9 @@ export function createTreasuryActions(deps: TreasuryActionsDeps) {
     }
     if (hotTargetText) {
       body.hot_target_wei_hex = hotTargetWeiHex;
+    }
+    if (hotOverflowText) {
+      body.hot_overflow_wei_hex = hotOverflowWeiHex;
     }
     const saveButton = document.querySelector(
       '[data-action="updateTreasuryPolicy"]',

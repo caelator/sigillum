@@ -5051,6 +5051,8 @@ async fn treasury_policy_update_round_trips_hot_floor_and_target() {
             "enabled": true,
             "hot_floor_wei_hex": "0x1",
             "hot_target_wei_hex": "0x2",
+            "hot_overflow_wei_hex": "0x3",
+            "allow_treasury_automation": true,
         }),
         Some(&token),
     )
@@ -5059,12 +5061,25 @@ async fn treasury_policy_update_round_trips_hot_floor_and_target() {
     let update_json: serde_json::Value = update.json().await.unwrap();
     assert_eq!(update_json["policy"]["hot_floor_wei_hex"], json!("0x1"));
     assert_eq!(update_json["policy"]["hot_target_wei_hex"], json!("0x2"));
+    assert_eq!(update_json["policy"]["hot_overflow_wei_hex"], json!("0x3"));
+    assert_eq!(
+        update_json["policy"]["allow_treasury_automation"],
+        json!(true)
+    );
 
     let read_back = get(&client, addr, "/api/treasury/policy", Some(&token)).await;
     assert_eq!(read_back.status(), StatusCode::OK);
     let read_back_json: serde_json::Value = read_back.json().await.unwrap();
     assert_eq!(read_back_json["policy"]["hot_floor_wei_hex"], json!("0x1"));
     assert_eq!(read_back_json["policy"]["hot_target_wei_hex"], json!("0x2"));
+    assert_eq!(
+        read_back_json["policy"]["hot_overflow_wei_hex"],
+        json!("0x3")
+    );
+    assert_eq!(
+        read_back_json["policy"]["allow_treasury_automation"],
+        json!(true)
+    );
 
     let defaulted = post_json(
         &client,
@@ -5086,6 +5101,14 @@ async fn treasury_policy_update_round_trips_hot_floor_and_target() {
         defaulted_json["policy"]["hot_target_wei_hex"],
         json!("0xde0b6b3a7640000")
     );
+    assert_eq!(
+        defaulted_json["policy"]["hot_overflow_wei_hex"],
+        json!(null)
+    );
+    assert_eq!(
+        defaulted_json["policy"]["allow_treasury_automation"],
+        json!(false)
+    );
 
     let invalid_order = post_json(
         &client,
@@ -5100,6 +5123,23 @@ async fn treasury_policy_update_round_trips_hot_floor_and_target() {
     )
     .await;
     assert_eq!(invalid_order.status(), StatusCode::BAD_REQUEST);
+
+    let invalid_overflow = post_json(
+        &client,
+        addr,
+        "/api/treasury/policy/update",
+        json!({
+            "enabled": true,
+            "hot_floor_wei_hex": "0x1",
+            "hot_target_wei_hex": "0x3",
+            "hot_overflow_wei_hex": "0x2",
+        }),
+        Some(&token),
+    )
+    .await;
+    assert_eq!(invalid_overflow.status(), StatusCode::BAD_REQUEST);
+    let invalid_overflow_body = invalid_overflow.text().await.unwrap();
+    assert!(invalid_overflow_body.contains("hot_overflow_wei_hex"));
 
     let invalid_floor = post_json(
         &client,

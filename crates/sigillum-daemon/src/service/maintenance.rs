@@ -3,11 +3,14 @@
 //! Provides batch operations for refreshing deposit balances and processing
 //! queued jobs as a single atomic maintenance transaction.
 
+mod treasury_automation;
+
 use sigillum_api::{MaintenanceRunRequest, MaintenanceRunResponse, QueueProcessRequest};
 
 use crate::audit_log::AuditEventSpec;
 
 use super::{ServiceResult, SigillumService};
+use treasury_automation::merge_failure_breakdowns;
 
 impl SigillumService {
     pub(crate) async fn run_maintenance(
@@ -16,6 +19,7 @@ impl SigillumService {
         body: MaintenanceRunRequest,
     ) -> ServiceResult<MaintenanceRunResponse> {
         let token = self.require_session(token)?;
+        let automation = self.run_treasury_automation(token).await?;
         let _guard = self.state.operation_guard().await;
         let mut deposits =
             crate::deposits::load_deposits(&self.state.base_dir).map_err(|error| {
@@ -70,6 +74,11 @@ impl SigillumService {
             },
         )?;
 
+        let mut failures_by_cause = processed.failures_by_cause;
+        if let Some(automation) = automation.as_ref() {
+            merge_failure_breakdowns(&mut failures_by_cause, &automation.failures);
+        }
+
         Ok(MaintenanceRunResponse {
             status: "ok".into(),
             refreshed: refresh.processed,
@@ -82,7 +91,8 @@ impl SigillumService {
             operator_action_required: processed.operator_action_required,
             failed: processed.failed,
             confirmed: processed.confirmed,
-            failures_by_cause: processed.failures_by_cause,
+            failures_by_cause,
+            treasury_automation: automation.as_ref().map(|outcome| outcome.summary.clone()),
             deposits: deposits.eth_stealth,
             jobs: processed.jobs,
         })

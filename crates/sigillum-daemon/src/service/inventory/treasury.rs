@@ -8,13 +8,14 @@ use sigillum_api::{
     CounterpartyMutationResponse, CounterpartyUpdateRequest, EthStealthDeposit,
     EthStealthDepositRefreshRequest, EvmProviderProfile, ReceivingCoverage, ReceivingItem,
     ReceivingOverviewResponse, ReceivingPartyGroup, ReceivingRefreshResponse, ReceivingTotals,
-    TreasuryAllowedDestination, TreasuryChainSummary, TreasuryGroupSummary,
-    TreasuryOverviewResponse, TreasuryPlanSummary, TreasuryPolicy, TreasuryPolicyMutationResponse,
-    TreasuryPolicyResponse, TreasuryPolicyUpdateRequest, TreasuryReceiveAllocateRequest,
-    TreasuryReceiveAllocation, TreasuryReceiveAllocationListResponse,
-    TreasuryReceiveAllocationMutationResponse, TreasuryReceiveRotateRequest,
-    TreasuryReceiveSummary, TreasuryRiskSummary, TreasuryRoutingStatus,
-    WalletAddressClassification, WalletAssetHolding, WalletAssetKind, WalletInventoryAddress,
+    TreasuryAllowedDestination, TreasuryAutomationStatus, TreasuryChainSummary,
+    TreasuryGroupSummary, TreasuryOverviewResponse, TreasuryPlanSummary, TreasuryPolicy,
+    TreasuryPolicyMutationResponse, TreasuryPolicyResponse, TreasuryPolicyUpdateRequest,
+    TreasuryReceiveAllocateRequest, TreasuryReceiveAllocation,
+    TreasuryReceiveAllocationListResponse, TreasuryReceiveAllocationMutationResponse,
+    TreasuryReceiveRotateRequest, TreasuryReceiveSummary, TreasuryRiskSummary,
+    TreasuryRoutingStatus, WalletAddressClassification, WalletAssetHolding, WalletAssetKind,
+    WalletInventoryAddress,
 };
 use sigillum_core::decode_quantity_hex;
 
@@ -604,6 +605,7 @@ impl SigillumService {
         };
 
         let receive = receive_summary(&state.receive_allocations);
+        let automation = treasury_automation_status(&state);
 
         Ok(TreasuryOverviewResponse {
             generated_at_unix: now_unix(),
@@ -617,6 +619,7 @@ impl SigillumService {
             risk,
             plans,
             receive,
+            automation,
         })
     }
 
@@ -876,6 +879,18 @@ impl SigillumService {
                 "hot_floor_wei_hex must be less than or equal to hot_target_wei_hex",
             ));
         }
+        let hot_overflow_wei_hex =
+            validated_cap_hex("hot_overflow_wei_hex", body.hot_overflow_wei_hex)?;
+        if let Some(hot_overflow_wei_hex) = hot_overflow_wei_hex.as_ref() {
+            let hot_overflow = decode_quantity_hex(hot_overflow_wei_hex).map_err(|_| {
+                ServiceError::bad_request("hot_overflow_wei_hex must be a hex uint256 quantity")
+            })?;
+            if compare_u256(&hot_target, &hot_overflow).is_gt() {
+                return Err(ServiceError::bad_request(
+                    "hot_target_wei_hex must be less than or equal to hot_overflow_wei_hex",
+                ));
+            }
+        }
         let previous_execution_paused = previous_policy
             .as_ref()
             .map(|policy| policy.execution_paused)
@@ -915,6 +930,8 @@ impl SigillumService {
             simulation_freshness_secs: body.simulation_freshness_secs.unwrap_or(900),
             hot_floor_wei_hex,
             hot_target_wei_hex,
+            hot_overflow_wei_hex,
+            allow_treasury_automation: body.allow_treasury_automation.unwrap_or(false),
             created_at_unix: previous_policy
                 .as_ref()
                 .map(|existing| existing.created_at_unix)
@@ -980,6 +997,14 @@ impl SigillumService {
                     .map(|policy| policy.allow_gas_topups)
                     .unwrap_or(false),
                 policy.allow_gas_topups,
+            ),
+            (
+                "allow_treasury_automation",
+                previous_policy
+                    .as_ref()
+                    .map(|policy| policy.allow_treasury_automation)
+                    .unwrap_or(false),
+                policy.allow_treasury_automation,
             ),
             (
                 "execution_paused",
@@ -1341,6 +1366,36 @@ impl SigillumService {
         };
         state.receive_allocations.push(allocation.clone());
         Ok(allocation)
+    }
+}
+
+fn treasury_automation_status(state: &WalletInventoryState) -> TreasuryAutomationStatus {
+    let mut generated_steps = 0usize;
+    let mut enqueued_steps = 0usize;
+    for plan in state
+        .consolidation_plans
+        .iter()
+        .filter(|plan| plan.origin.as_deref() == Some("treasury_automation"))
+    {
+        generated_steps += plan.steps.len();
+        enqueued_steps += plan
+            .steps
+            .iter()
+            .filter(|step| step.queued_job_id.is_some())
+            .count();
+    }
+    TreasuryAutomationStatus {
+        enabled: state
+            .treasury_policy
+            .as_ref()
+            .map(|policy| policy.enabled && policy.allow_treasury_automation)
+            .unwrap_or(false),
+        hot_overflow_wei_hex: state
+            .treasury_policy
+            .as_ref()
+            .and_then(|policy| policy.hot_overflow_wei_hex.clone()),
+        generated_steps,
+        enqueued_steps,
     }
 }
 
@@ -1751,6 +1806,8 @@ mod tests {
             simulation_freshness_secs: 900,
             hot_floor_wei_hex: "0xde0b6b3a7640000".into(),
             hot_target_wei_hex: "0xde0b6b3a7640000".into(),
+            hot_overflow_wei_hex: None,
+            allow_treasury_automation: false,
             created_at_unix: 1,
             updated_at_unix: 2,
         }

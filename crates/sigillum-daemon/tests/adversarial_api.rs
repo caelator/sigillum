@@ -62,6 +62,25 @@ async fn post_json(
     .await
 }
 
+fn strip_generated_at(value: &mut Value) {
+    match value {
+        Value::Object(object) => {
+            if let Some(generated_at) = object.get_mut("generated_at_unix") {
+                *generated_at = Value::Null;
+            }
+            for value in object.values_mut() {
+                strip_generated_at(value);
+            }
+        }
+        Value::Array(values) => {
+            for value in values {
+                strip_generated_at(value);
+            }
+        }
+        _ => {}
+    }
+}
+
 async fn init_session(app: &axum::Router) -> String {
     let (status, body) = post_json(
         app,
@@ -695,8 +714,12 @@ async fn receiving_routes_reject_adversarial_inputs_without_state_changes() {
     );
 
     let after = get_json(&app, "/api/receiving/overview", &token).await;
+    let mut before_norm = before.clone();
+    let mut after_norm = after.clone();
+    strip_generated_at(&mut before_norm);
+    strip_generated_at(&mut after_norm);
     assert_eq!(
-        after, before,
+        after_norm, before_norm,
         "rejected tag mutations must not change state"
     );
 }

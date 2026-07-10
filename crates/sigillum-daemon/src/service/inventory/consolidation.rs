@@ -98,6 +98,7 @@ impl SigillumService {
                 status,
                 chain_id,
                 destination_address: destination_address.clone(),
+                origin: None,
                 created_at_unix: now,
                 updated_at_unix: now,
                 summary,

@@ -59,6 +59,10 @@ pub struct TreasuryPolicyUpdateRequest {
     pub hot_floor_wei_hex: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub hot_target_wei_hex: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hot_overflow_wei_hex: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub allow_treasury_automation: Option<bool>,
 }
 
 /// Allocate a fresh purpose-labeled receive address from a wallet profile.

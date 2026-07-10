@@ -467,7 +467,13 @@ The CLI should have parity for automation:
    per-top-up cap `max_gas_topup_wei_hex`, amount = 1.5x the dependent step's
    estimated gas) funded from the wallet's sponsor address, ordered before their
    dependent step via sequence/depends_on, simulated with fee-basis evidence,
-   and subject to the cross-party common-funder linkage rule.
+   and subject to the cross-party common-funder linkage rule. W8 treasury
+   automation is also implemented in the maintenance cycle behind the
+   fail-closed `allow_treasury_automation` opt-in (default off; off leaves
+   maintenance unchanged): hot balance above
+   `TreasuryPolicy.hot_overflow_wei_hex` plans a hot-to-treasury sweep of the
+   excess above `hot_target_wei_hex`, and hot balance below
+   `hot_floor_wei_hex` plans a treasury-to-hot refill up to target.
 9. Controlled execution for native/ERC-20 sweeps, gas top-ups, NFT transfers,
    DeFi exits, claims, swaps, and treasury routing. The policy gates and
    kill switch that constrain this execution are implemented (see 5b), and
@@ -476,7 +482,12 @@ The CLI should have parity for automation:
    and gas top-ups are now built. Nonce management, receipt-confirmed
    finality, and fee-bump retry ladders are now implemented (W7.4; see 5b).
    Swaps stay out of scope for 1.0 (D-13). Treasury automation /
-   overflow-refill routing (W8) remains future work.
+   overflow-refill routing (W8) is implemented: generated maintenance steps
+   ride the standard plan pipeline (policy blockers, linkage analysis,
+   simulation, approval) and are auto-enqueued only through the W7.2 enqueue
+   path when the W7.1 gates hold and simulation passed. Hysteresis is enforced
+   by floor <= target <= overflow validation plus same-cycle exclusion and
+   re-observation checks.
 10. Non-EVM chain families, starting with Bitcoin/UTXO and only then Solana,
    Tron, and Cosmos-style networks.
 

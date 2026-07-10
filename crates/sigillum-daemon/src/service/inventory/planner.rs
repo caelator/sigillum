@@ -155,7 +155,7 @@ pub(super) fn plan_step_for_holding(
     }
 }
 
-pub(super) fn assign_step_ordering(steps: &mut [ConsolidationPlanStep]) {
+pub(in crate::service) fn assign_step_ordering(steps: &mut [ConsolidationPlanStep]) {
     for (index, step) in steps.iter_mut().enumerate() {
         step.sequence = index as u32;
     }
@@ -239,7 +239,9 @@ fn is_very_large_approval(amount_hex: &str) -> bool {
         .unwrap_or(false)
 }
 
-pub(super) fn summarize_plan_steps(steps: &[ConsolidationPlanStep]) -> ConsolidationPlanSummary {
+pub(in crate::service) fn summarize_plan_steps(
+    steps: &[ConsolidationPlanStep],
+) -> ConsolidationPlanSummary {
     ConsolidationPlanSummary {
         total_steps: steps.len(),
         blocked_steps: steps
@@ -453,7 +455,7 @@ fn resolve_default_destination(
 /// Extend a step with treasury policy blockers, mirroring planner semantics:
 /// any blocker forces blocked status and blocked risk level. Blockers are
 /// deduped because approval re-evaluates steps that generation already marked.
-pub(super) fn apply_policy_blockers_to_step(
+pub(in crate::service) fn apply_policy_blockers_to_step(
     policy: &TreasuryPolicy,
     step: &mut ConsolidationPlanStep,
 ) {
@@ -478,7 +480,7 @@ pub(super) fn apply_policy_blockers_to_step(
 
 /// Fail-closed pass: convert every step that the linkage analyzer warned on
 /// into a hard block, mirroring apply_policy_blockers_to_step semantics.
-pub(super) fn apply_linkage_blockers(steps: &mut [ConsolidationPlanStep]) {
+pub(in crate::service) fn apply_linkage_blockers(steps: &mut [ConsolidationPlanStep]) {
     for step in steps.iter_mut() {
         if step.linkage_warnings.is_empty() {
             continue;
@@ -494,7 +496,7 @@ pub(super) fn apply_linkage_blockers(steps: &mut [ConsolidationPlanStep]) {
 /// Plan-level policy violations: currently only the native plan cap, summed
 /// over steps that can still move value. Blocked steps cannot execute, so
 /// they do not consume cap budget.
-pub(super) fn plan_policy_violations(
+pub(in crate::service) fn plan_policy_violations(
     policy: &TreasuryPolicy,
     steps: &[ConsolidationPlanStep],
 ) -> Vec<String> {
@@ -530,7 +532,7 @@ struct LinkageIdentity {
 }
 
 /// Detect common-recipient privacy linkage without changing plan execution.
-pub(super) fn analyze_plan_linkage(
+pub(in crate::service) fn analyze_plan_linkage(
     state: &WalletInventoryState,
     steps: &mut [ConsolidationPlanStep],
 ) -> Vec<String> {
@@ -930,6 +932,8 @@ mod tests {
             simulation_freshness_secs: 900,
             hot_floor_wei_hex: floor_hex.into(),
             hot_target_wei_hex: target_hex.into(),
+            hot_overflow_wei_hex: None,
+            allow_treasury_automation: false,
             created_at_unix: 1,
             updated_at_unix: 1,
         }
