@@ -1,4 +1,14 @@
 #!/usr/bin/env bash
+# Env toggles:
+#   SIGILLUM_SOAK_SECONDS: total bounded soak duration in seconds.
+#   SIGILLUM_SOAK_INTERVAL_SECONDS: delay between full soak iterations.
+#   SIGILLUM_SOAK_RECEIPT: optional JSON receipt output path.
+#   SIGILLUM_SOAK_KEEP_ARTIFACTS: keep the temp artifact directory when set to 1.
+#   SIGILLUM_SOAK_DAEMON_PORT: daemon loopback port.
+#   SIGILLUM_SOAK_GATEWAY_PORT: gateway loopback port.
+#   SIGILLUM_SOAK_GATEWAY_POLL_INTERVAL_SECONDS: gateway daemon poll interval.
+#   SIGILLUM_SOAK_CHAOS: enable chaos mode when set exactly to 1.
+#   SIGILLUM_SOAK_CHAOS_EVERY: kill/restart the daemon every N iterations in chaos mode.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -8,6 +18,8 @@ DAEMON_PORT="${SIGILLUM_SOAK_DAEMON_PORT:-19843}"
 GATEWAY_PORT="${SIGILLUM_SOAK_GATEWAY_PORT:-19844}"
 SOAK_SECONDS="${SIGILLUM_SOAK_SECONDS:-300}"
 INTERVAL_SECONDS="${SIGILLUM_SOAK_INTERVAL_SECONDS:-5}"
+CHAOS="${SIGILLUM_SOAK_CHAOS:-0}"
+CHAOS_EVERY="${SIGILLUM_SOAK_CHAOS_EVERY:-10}"
 DAEMON_URL="http://127.0.0.1:${DAEMON_PORT}"
 GATEWAY_URL="http://127.0.0.1:${GATEWAY_PORT}"
 BASE_DIR="$(mktemp -d "${TMPDIR:-/tmp}/sigillum-local-soak.XXXXXX")"
@@ -39,6 +51,11 @@ SOAK_START_ISO=""
 ITERATIONS=0
 DOCTOR_RUNS=0
 RECEIPT_WRITTEN=0
+CHAOS_KILL_CYCLES=0
+PENDING_CHAOS_VERIFY=0
+CHAOS_IN_FLIGHT_TEST="chaos_kill_in_flight_plan_step_resumes_terminal_without_duplication"
+CHAOS_IN_FLIGHT_STATUS=""
+CHAOS_IN_FLIGHT_DURATION_SECONDS=""
 
 write_receipt() {
   local status="$1"
@@ -78,6 +95,12 @@ write_receipt() {
   SIGILLUM_SOAK_RECEIPT_DURATION_SECONDS="${duration_seconds}" \
   SIGILLUM_SOAK_RECEIPT_ITERATIONS="${ITERATIONS}" \
   SIGILLUM_SOAK_RECEIPT_DOCTOR_RUNS="${DOCTOR_RUNS}" \
+  SIGILLUM_SOAK_RECEIPT_CHAOS="${CHAOS}" \
+  SIGILLUM_SOAK_RECEIPT_CHAOS_EVERY="${CHAOS_EVERY}" \
+  SIGILLUM_SOAK_RECEIPT_CHAOS_KILL_CYCLES="${CHAOS_KILL_CYCLES}" \
+  SIGILLUM_SOAK_RECEIPT_CHAOS_IN_FLIGHT_TEST="${CHAOS_IN_FLIGHT_TEST}" \
+  SIGILLUM_SOAK_RECEIPT_CHAOS_IN_FLIGHT_STATUS="${CHAOS_IN_FLIGHT_STATUS}" \
+  SIGILLUM_SOAK_RECEIPT_CHAOS_IN_FLIGHT_DURATION_SECONDS="${CHAOS_IN_FLIGHT_DURATION_SECONDS}" \
   SIGILLUM_SOAK_RECEIPT_KEEP_ARTIFACTS="${KEEP_ARTIFACTS}" \
   SIGILLUM_SOAK_RECEIPT_BASE_DIR="${BASE_DIR}" \
   SIGILLUM_SOAK_RECEIPT_DAEMON_LOG="${DAEMON_LOG}" \
@@ -90,6 +113,8 @@ const number = (name) => {
   return Number.isFinite(value) ? value : 0;
 };
 const keepArtifacts = process.env.SIGILLUM_SOAK_RECEIPT_KEEP_ARTIFACTS === "1";
+const chaosEnabled = process.env.SIGILLUM_SOAK_RECEIPT_CHAOS === "1";
+const chaosAssertionStatus = process.env.SIGILLUM_SOAK_RECEIPT_CHAOS_IN_FLIGHT_STATUS || "";
 const dirtyValue = process.env.SIGILLUM_SOAK_RECEIPT_DIRTY;
 const data = {
   schema_version: 1,
@@ -128,6 +153,22 @@ const data = {
       "gateway_health",
       "sigillum_doctor",
     ],
+  },
+  chaos: {
+    enabled: chaosEnabled,
+    every_iterations: chaosEnabled
+      ? number("SIGILLUM_SOAK_RECEIPT_CHAOS_EVERY")
+      : null,
+    kill_cycles: number("SIGILLUM_SOAK_RECEIPT_CHAOS_KILL_CYCLES"),
+    in_flight_assertion: chaosAssertionStatus
+      ? {
+          test: process.env.SIGILLUM_SOAK_RECEIPT_CHAOS_IN_FLIGHT_TEST,
+          status: chaosAssertionStatus,
+          duration_seconds: number(
+            "SIGILLUM_SOAK_RECEIPT_CHAOS_IN_FLIGHT_DURATION_SECONDS",
+          ),
+        }
+      : null,
   },
   artifacts: keepArtifacts
     ? {
@@ -274,8 +315,13 @@ run_doctor() {
 
 start_daemon() {
   echo "==> starting daemon on ${DAEMON_URL}"
-  SIGILLUM_BASE_DIR="${BASE_DIR}" \
-    cargo run -p sigillum-cli --quiet -- daemon --port "${DAEMON_PORT}" >"${DAEMON_LOG}" 2>&1 &
+  if [[ "${CHAOS}" == "1" ]]; then
+    SIGILLUM_BASE_DIR="${BASE_DIR}" \
+      "${ROOT}/target/debug/sigillum" daemon --port "${DAEMON_PORT}" >"${DAEMON_LOG}" 2>&1 &
+  else
+    SIGILLUM_BASE_DIR="${BASE_DIR}" \
+      cargo run -p sigillum-cli --quiet -- daemon --port "${DAEMON_PORT}" >"${DAEMON_LOG}" 2>&1 &
+  fi
   DAEMON_PID="$!"
   wait_for_url "${DAEMON_URL}/api/status" "${DAEMON_PID}" "daemon"
 }
@@ -292,6 +338,46 @@ return data.status === "initialized" &&
   data.session_token.length > 0;
 '
   SESSION_TOKEN="$(json_session_token "${init_response}")"
+}
+
+unlock_daemon() {
+  local unlock_response
+  unlock_response="$(api_post "${DAEMON_URL}/api/unlock" "{\"passphrase\":\"${PASSPHRASE}\"}")"
+  SESSION_TOKEN="$(json_session_token "${unlock_response}")"
+}
+
+run_chaos_in_flight_assertion() {
+  local started_epoch
+  local finished_epoch
+  started_epoch="$(date +%s)"
+  if cargo test -p sigillum-daemon --test execution_semantics chaos_kill_in_flight; then
+    CHAOS_IN_FLIGHT_STATUS="passed"
+  else
+    finished_epoch="$(date +%s)"
+    CHAOS_IN_FLIGHT_DURATION_SECONDS=$((finished_epoch - started_epoch))
+    CHAOS_IN_FLIGHT_STATUS="failed"
+    fail "chaos in-flight plan-step assertion failed"
+  fi
+  finished_epoch="$(date +%s)"
+  CHAOS_IN_FLIGHT_DURATION_SECONDS=$((finished_epoch - started_epoch))
+}
+
+chaos_kill_cycle() {
+  echo "==> chaos kill cycle after iteration ${ITERATIONS}: killing daemon pid ${DAEMON_PID}"
+  if [[ -n "${DAEMON_PID}" ]] && kill -0 "${DAEMON_PID}" >/dev/null 2>&1; then
+    kill -9 "${DAEMON_PID}" >/dev/null 2>&1 || true
+    wait "${DAEMON_PID}" 2>/dev/null || true
+    DAEMON_PID=""
+  fi
+
+  start_daemon
+  unlock_daemon
+
+  if [[ -z "${CHAOS_IN_FLIGHT_STATUS}" ]]; then
+    run_chaos_in_flight_assertion
+  fi
+
+  PENDING_CHAOS_VERIFY=1
 }
 
 start_gateway() {
@@ -358,9 +444,19 @@ fi
 if ! [[ "${INTERVAL_SECONDS}" =~ ^[0-9]+$ ]] || [[ "${INTERVAL_SECONDS}" -lt 1 ]]; then
   fail "SIGILLUM_SOAK_INTERVAL_SECONDS must be a positive integer"
 fi
+if [[ "${CHAOS}" == "1" ]]; then
+  if ! [[ "${CHAOS_EVERY}" =~ ^[0-9]+$ ]] || [[ "${CHAOS_EVERY}" -lt 1 ]]; then
+    fail "SIGILLUM_SOAK_CHAOS_EVERY must be a positive integer"
+  fi
+fi
 
 HARNESS_START_EPOCH="$(date +%s)"
 HARNESS_START_ISO="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+
+if [[ "${CHAOS}" == "1" ]]; then
+  cargo build -p sigillum-cli --quiet
+  cargo test -p sigillum-daemon --test execution_semantics --no-run --quiet
+fi
 
 start_daemon
 initialize_daemon
@@ -374,8 +470,16 @@ while :; do
   ITERATIONS=$((ITERATIONS + 1))
   soak_iteration "${ITERATIONS}"
 
+  if [[ "${PENDING_CHAOS_VERIFY}" == "1" ]]; then
+    CHAOS_KILL_CYCLES=$((CHAOS_KILL_CYCLES + 1))
+    PENDING_CHAOS_VERIFY=0
+  fi
+  if [[ "${CHAOS}" == "1" ]] && ((ITERATIONS % CHAOS_EVERY == 0)); then
+    chaos_kill_cycle
+  fi
+
   now="$(date +%s)"
-  if [[ "${now}" -ge "${deadline}" ]]; then
+  if [[ "${now}" -ge "${deadline}" && "${PENDING_CHAOS_VERIFY}" != "1" ]]; then
     break
   fi
   sleep "${INTERVAL_SECONDS}"
@@ -384,6 +488,9 @@ done
 write_receipt "passed"
 
 echo "local soak checks passed (${ITERATIONS} iteration(s), ${SOAK_SECONDS}s target)"
+if [[ "${CHAOS}" == "1" ]]; then
+  echo "local soak chaos cycles verified: ${CHAOS_KILL_CYCLES}"
+fi
 if [[ -n "${RECEIPT_PATH}" ]]; then
   echo "local soak receipt written to ${RECEIPT_PATH}"
 fi

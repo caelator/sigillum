@@ -1051,3 +1051,149 @@ async fn restart_resumes_receipt_polling_without_duplicate_broadcast() {
     daemon2.abort();
     env.shutdown();
 }
+
+/// F3 chaos-mode assertion invoked by `scripts/check-local-soak.sh` on the
+/// first kill cycle: in-flight plan-step crashes resume without duplication.
+#[tokio::test]
+async fn chaos_kill_in_flight_plan_step_resumes_terminal_without_duplication() {
+    let env = setup_plan_env().await;
+    update_policy(&env, gates_on_policy_body()).await;
+    let (plan_id, step_id) = generate_and_simulate_plan(&env).await;
+    approve_plan(&env, &plan_id).await;
+    let (status, body) = enqueue_step(&env, &plan_id, &step_id).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(
+        env.rpc_state.broadcast_call_count(),
+        0,
+        "enqueue must not broadcast before queue processing"
+    );
+    let jobs = queue_jobs(&env).await;
+    let step_jobs: Vec<_> = jobs
+        .iter()
+        .filter(|job| job["step_id"] == json!(step_id))
+        .collect();
+    assert_eq!(step_jobs.len(), 1, "jobs: {jobs:?}");
+    assert_eq!(step_jobs[0]["state"], json!("queued"), "{}", step_jobs[0]);
+
+    // Kill #1: pre-broadcast window. The queued job is persisted as queued,
+    // but the daemon dies before any raw transaction reaches the mock chain.
+    env.daemon.abort();
+
+    let (addr2, daemon2) = spawn_daemon(env.base_dir.clone()).await;
+    let unlock2 = post_json(
+        &env.client,
+        addr2,
+        "/api/unlock",
+        json!({ "passphrase": COMPARTMENT_PASSPHRASE }),
+        None,
+    )
+    .await;
+    assert_eq!(unlock2.status(), StatusCode::OK, "{unlock2:?}");
+    let unlock2_json: Value = unlock2.json().await.unwrap();
+    let token2 = unlock2_json["session_token"].as_str().unwrap().to_string();
+
+    let process2 = post_json(
+        &env.client,
+        addr2,
+        "/api/queue/process",
+        json!({}),
+        Some(&token2),
+    )
+    .await;
+    assert_eq!(process2.status(), StatusCode::OK);
+    let process2_json: Value = process2.json().await.unwrap();
+    assert_eq!(
+        process2_json["succeeded"],
+        json!(1),
+        "process: {process2_json}"
+    );
+    assert_eq!(env.rpc_state.broadcast_call_count(), 1);
+
+    let jobs2_response = get(&env.client, addr2, "/api/queue/jobs", Some(&token2)).await;
+    assert_eq!(jobs2_response.status(), StatusCode::OK);
+    let jobs2_json: Value = jobs2_response.json().await.unwrap();
+    let jobs2 = jobs2_json["jobs"].as_array().unwrap();
+    let step_jobs2: Vec<_> = jobs2
+        .iter()
+        .filter(|job| job["step_id"] == json!(step_id))
+        .collect();
+    assert_eq!(step_jobs2.len(), 1, "jobs: {jobs2:?}");
+    assert_eq!(step_jobs2[0]["state"], json!("sent"), "{}", step_jobs2[0]);
+    let tx_hash = step_jobs2[0]["transaction_hash_hex"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    // Kill #2: post-broadcast window. The transaction hash is persisted and
+    // only receipt polling should resume after restart.
+    daemon2.abort();
+
+    let (addr3, daemon3) = spawn_daemon(env.base_dir.clone()).await;
+    let unlock3 = post_json(
+        &env.client,
+        addr3,
+        "/api/unlock",
+        json!({ "passphrase": COMPARTMENT_PASSPHRASE }),
+        None,
+    )
+    .await;
+    assert_eq!(unlock3.status(), StatusCode::OK, "{unlock3:?}");
+    let unlock3_json: Value = unlock3.json().await.unwrap();
+    let token3 = unlock3_json["session_token"].as_str().unwrap().to_string();
+
+    env.rpc_state.set_receipt_mode(ReceiptMode::Success {
+        block_number_hex: "0x2a".into(),
+        gas_used_hex: "0x5208".into(),
+    });
+
+    let process3 = post_json(
+        &env.client,
+        addr3,
+        "/api/queue/process",
+        json!({}),
+        Some(&token3),
+    )
+    .await;
+    assert_eq!(process3.status(), StatusCode::OK);
+    let process3_json: Value = process3.json().await.unwrap();
+    assert_eq!(
+        process3_json["confirmed"],
+        json!(1),
+        "process: {process3_json}"
+    );
+    assert_eq!(
+        env.rpc_state.broadcast_call_count(),
+        1,
+        "post-broadcast restart must poll receipts without re-signing"
+    );
+
+    let jobs3_response = get(&env.client, addr3, "/api/queue/jobs", Some(&token3)).await;
+    assert_eq!(jobs3_response.status(), StatusCode::OK);
+    let jobs3_json: Value = jobs3_response.json().await.unwrap();
+    let jobs3 = jobs3_json["jobs"].as_array().unwrap();
+    let step_jobs3: Vec<_> = jobs3
+        .iter()
+        .filter(|job| job["step_id"] == json!(step_id))
+        .collect();
+    assert_eq!(step_jobs3.len(), 1, "jobs: {jobs3:?}");
+    assert_eq!(
+        step_jobs3[0]["state"],
+        json!("confirmed"),
+        "{}",
+        step_jobs3[0]
+    );
+    assert_eq!(
+        step_jobs3[0]["transaction_hash_hex"],
+        json!(tx_hash),
+        "terminal job must keep the original transaction hash"
+    );
+    assert_eq!(
+        step_jobs3[0]["receipt_status"],
+        json!("success"),
+        "{}",
+        step_jobs3[0]
+    );
+
+    daemon3.abort();
+    env.shutdown();
+}

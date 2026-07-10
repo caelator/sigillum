@@ -107,6 +107,16 @@ The receipt records a clean `main` checkout at
 checked surfaces: daemon status, vault API-key write/read canary, gateway
 health, and `sigillum doctor`.
 
+Chaos mode is enabled with `SIGILLUM_SOAK_CHAOS=1`; it `kill -9`s the
+harness's own daemon every `SIGILLUM_SOAK_CHAOS_EVERY` iterations, defaulting
+to 10. A kill cycle is counted only after the next full iteration's doctor and
+canary checks pass against the restarted daemon, and the receipt records those
+cycles in its additive `chaos` object. On the first cycle, the harness also runs
+the bounded in-flight plan-step assertion
+`cargo test -p sigillum-daemon --test execution_semantics chaos_kill_in_flight`,
+reusing the W7.4 crash-resume mock-RPC machinery, and records that assertion's
+result in the receipt.
+
 The local adversarial pass is now executable as `scripts/check-adversarial.sh`
 and wired into the release gate after the full workspace tests. It runs:
 
