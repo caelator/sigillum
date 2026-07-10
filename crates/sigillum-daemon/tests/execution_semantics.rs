@@ -1742,6 +1742,37 @@ fn required_string(job: &Value, field: &str) -> String {
         .to_string()
 }
 
+#[cfg(all(unix, feature = "test-failpoints"))]
+fn prune_decoy_passphrase_kdf_inputs(base_dir: &Path, real_compartment_id: usize) {
+    let real_dir = base_dir
+        .join("compartments")
+        .join(real_compartment_id.to_string());
+    assert!(real_dir.join("passphrase.salt").is_file());
+    assert!(real_dir.join("passphrase_wrapped_key.enc").is_file());
+
+    // Compartment initialization deliberately creates plausible passphrase
+    // files in every decoy slot. Production unlock therefore performs an
+    // Argon2id derivation for each one. That deniability cost is orthogonal to
+    // this queue proof, whose timeout must cover the crash boundary itself.
+    // Keep the real slot and all other vault data, but remove only the decoy
+    // KDF inputs before the subprocess restarts.
+    for id in 0..sigillum_fido2::config::SHARD_SLOTS {
+        if id == real_compartment_id {
+            continue;
+        }
+        let compartment_dir = base_dir.join("compartments").join(id.to_string());
+        for file_name in ["passphrase.salt", "passphrase_wrapped_key.enc"] {
+            let path = compartment_dir.join(file_name);
+            std::fs::remove_file(&path).unwrap_or_else(|error| {
+                panic!(
+                    "failed to remove decoy KDF input {}: {error}",
+                    path.display()
+                )
+            });
+        }
+    }
+}
+
 /// Subprocess entry point used by the crash-boundary proof. A normal test
 /// process returns immediately; only an explicitly marked child drains.
 #[cfg(all(unix, feature = "test-failpoints"))]
@@ -1790,7 +1821,7 @@ fn queue_failpoint_subprocess_helper() {
 #[cfg(all(unix, feature = "test-failpoints"))]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn chaos_kill_in_flight_plan_step_resumes_terminal_without_duplication() {
-    let env = setup_plan_env().await;
+    let mut env = setup_plan_env().await;
     update_policy(&env, gates_on_policy_body()).await;
     let (plan_id, step_id) = generate_and_simulate_plan(&env).await;
     approve_plan(&env, &plan_id).await;
@@ -1798,13 +1829,12 @@ async fn chaos_kill_in_flight_plan_step_resumes_terminal_without_duplication() {
     assert_eq!(status, StatusCode::OK, "{body}");
 
     env.daemon.abort();
-    tokio::time::timeout(Duration::from_secs(5), async {
-        while !env.daemon.is_finished() {
-            tokio::task::yield_now().await;
-        }
-    })
-    .await
-    .expect("parent daemon task should stop before subprocess recovery");
+    let daemon_error = tokio::time::timeout(Duration::from_secs(5), &mut env.daemon)
+        .await
+        .expect("parent daemon task should stop before subprocess recovery")
+        .expect_err("aborted parent daemon task should not exit successfully");
+    assert!(daemon_error.is_cancelled(), "{daemon_error}");
+    prune_decoy_passphrase_kdf_inputs(&env.base_dir, 0);
     let nonce_calls_before_prepare = env.rpc_state.transaction_count_call_count();
     assert_eq!(
         env.rpc_state.broadcast_call_count(),
@@ -1815,6 +1845,7 @@ async fn chaos_kill_in_flight_plan_step_resumes_terminal_without_duplication() {
     // Crash boundary A: exact signed bytes and all integrity bindings are on
     // disk as `prepared`, but the submission marker and RPC call do not exist.
     let prepared_marker = env.base_dir.join("queue-prepared.ready");
+    assert!(!prepared_marker.exists());
     let mut prepared_child = spawn_queue_failpoint_helper(
         &env.base_dir,
         Some((AFTER_PREPARED_PERSIST, &prepared_marker)),
@@ -1841,6 +1872,7 @@ async fn chaos_kill_in_flight_plan_step_resumes_terminal_without_duplication() {
     // still before RPC. Recovery must carry the exact prepared identity over
     // without resolving a signer or nonce again.
     let submitted_marker = env.base_dir.join("queue-submitted-unknown.ready");
+    assert!(!submitted_marker.exists());
     let mut submitted_child = spawn_queue_failpoint_helper(
         &env.base_dir,
         Some((AFTER_SUBMITTED_UNKNOWN_PERSIST, &submitted_marker)),
