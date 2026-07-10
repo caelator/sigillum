@@ -74,6 +74,9 @@ struct EnqueueContext<'a> {
     /// Step ids the linkage analyzer flagged on a FRESH re-evaluation (only
     /// populated when `block_cross_party_linkage` is enabled).
     linked_step_ids: HashSet<String>,
+    /// Freshly recomputed linkage warnings, keyed by step id, for persistence
+    /// back onto the plan regardless of the hard-block policy.
+    linkage_warnings_by_step_id: HashMap<String, Vec<String>>,
 }
 
 /// A refusal with its short named reason (bulk skip list), the full
@@ -100,6 +103,8 @@ impl StepRefusal {
     }
 }
 
+/// Build enqueue context from current state: linkage warnings are always
+/// recomputed fresh, while cross-party hard blocks stay policy-gated.
 fn build_enqueue_context<'a>(
     state: &WalletInventoryState,
     plan: &ConsolidationPlan,
@@ -113,19 +118,26 @@ fn build_enqueue_context<'a>(
     let plan_cap_violated = policy
         .map(|policy| !plan_policy_violations(policy, &plan.steps).is_empty())
         .unwrap_or(false);
+    // Same re-evaluation the approval path performs, on a scratch copy:
+    // enqueue never trusts linkage verdicts recorded earlier.
+    let linkage_state = WalletInventoryState {
+        receive_allocations: state.receive_allocations.clone(),
+        parties: state.parties.clone(),
+        ..Default::default()
+    };
+    let mut scratch = plan.steps.clone();
+    for step in &mut scratch {
+        step.linkage_warnings.clear();
+    }
+    let _ = analyze_plan_linkage(&linkage_state, &mut scratch);
+    let linkage_warnings_by_step_id: HashMap<String, Vec<String>> = scratch
+        .iter()
+        .map(|step| (step.id.clone(), step.linkage_warnings.clone()))
+        .collect();
     let linked_step_ids = if policy
         .map(|policy| policy.block_cross_party_linkage)
         .unwrap_or(false)
     {
-        // Same re-evaluation the approval path performs, on a scratch copy:
-        // enqueue never trusts linkage verdicts recorded earlier.
-        let linkage_state = WalletInventoryState {
-            receive_allocations: state.receive_allocations.clone(),
-            parties: state.parties.clone(),
-            ..Default::default()
-        };
-        let mut scratch = plan.steps.clone();
-        let _ = analyze_plan_linkage(&linkage_state, &mut scratch);
         scratch
             .iter()
             .filter(|step| !step.linkage_warnings.is_empty())
@@ -141,7 +153,32 @@ fn build_enqueue_context<'a>(
         now,
         plan_cap_violated,
         linked_step_ids,
+        linkage_warnings_by_step_id,
     }
+}
+
+fn refresh_plan_linkage_warnings(
+    state: &mut WalletInventoryState,
+    plan_index: usize,
+    ctx: &EnqueueContext<'_>,
+) -> bool {
+    let mut changed = false;
+    let plan = &mut state.consolidation_plans[plan_index];
+    for step in &mut plan.steps {
+        let fresh_warnings = ctx
+            .linkage_warnings_by_step_id
+            .get(&step.id)
+            .cloned()
+            .unwrap_or_default();
+        if step.linkage_warnings != fresh_warnings {
+            step.linkage_warnings = fresh_warnings;
+            changed = true;
+        }
+    }
+    if changed {
+        plan.updated_at_unix = ctx.now;
+    }
+    changed
 }
 
 /// Locate the queue job recorded for `(plan_id, step_id)`. The persisted
@@ -682,6 +719,7 @@ impl SigillumService {
             .ok_or_else(|| ServiceError::not_found("Consolidation plan step not found."))?;
 
         let ctx = build_enqueue_context(&state, &plan, policy.as_ref(), &risk_catalog, now);
+        let linkage_warnings_changed = refresh_plan_linkage_warnings(&mut state, plan_index, &ctx);
         match step_enqueue_verdict(
             &ctx,
             &plan,
@@ -691,9 +729,12 @@ impl SigillumService {
             &HashMap::new(),
         ) {
             Err(refusal) => {
-                self.apply_refusal_side_effects(
+                let refusal_persisted = self.apply_refusal_side_effects(
                     &mut state, plan_index, step_index, &mut queue, &refusal, now,
                 )?;
+                if linkage_warnings_changed && !refusal_persisted {
+                    save_inventory_state(&self.state.base_dir, &state)?;
+                }
                 Err(refusal.error)
             }
             Ok(job) => {
@@ -775,6 +816,9 @@ impl SigillumService {
         }
 
         if batch_jobs.is_empty() {
+            if refresh_plan_linkage_warnings(&mut state, plan_index, &ctx) {
+                save_inventory_state(&self.state.base_dir, &state)?;
+            }
             let first_reason = skipped
                 .first()
                 .map(|skip| format!("{} ({})", skip.step_id, skip.reason))
@@ -806,6 +850,7 @@ impl SigillumService {
 
         // Pass 2 (apply): park failed prior jobs / withdraw approvals for the
         // refused steps, then enqueue the eligible ones in order.
+        let _ = refresh_plan_linkage_warnings(&mut state, plan_index, &ctx);
         for (step_index, refusal) in &refusals {
             self.apply_refusal_state_changes(
                 &mut state,
@@ -855,9 +900,9 @@ impl SigillumService {
         queue: &mut QueueState,
         refusal: &StepRefusal,
         now: u64,
-    ) -> ServiceResult<()> {
+    ) -> ServiceResult<bool> {
         if refusal.park_failed_job_id.is_none() && !refusal.withdraw_step_approval {
-            return Ok(());
+            return Ok(false);
         }
         self.apply_refusal_state_changes(state, plan_index, step_index, queue, refusal, now);
         crate::queue_store::save_queue(&self.state.base_dir, queue)
@@ -867,7 +912,7 @@ impl SigillumService {
         plan.summary = summarize_plan_steps(&plan.steps);
         plan.status = plan_status_for_steps(plan);
         save_inventory_state(&self.state.base_dir, state)?;
-        Ok(())
+        Ok(true)
     }
 
     /// In-memory part of the refusal side effects (persistence is the

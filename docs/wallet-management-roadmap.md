@@ -426,7 +426,20 @@ The CLI should have parity for automation:
     job still queued behind it is skipped with a visible reason until the
     source frees (dependency-ordered same-source chains, e.g.
     sweep→revoke→fund_gas on one wallet, are exempt from this and still
-    resolve in one drain batch, as before).
+    resolve in one drain batch, as before). Linkage enforcement parity at
+    execution is now proven (W7.5): a matrix of tagged/untagged-counterparty,
+    same/distinct-destination, and `block_cross_party_linkage` on/off cases
+    (including `fund_gas` common-funder collisions) exercises the plan-step
+    enqueue path directly, and a policy-flip test shows a plan approved while
+    the linkage policy was off is blocked at enqueue once the policy flips
+    on — parity with the existing treasury-allowlist flip behavior. The
+    matrix surfaced one real gap, now fixed: enqueue-time linkage warnings
+    were only recomputed when `block_cross_party_linkage` was already on, so
+    a plan step could show stale (or missing) linkage warnings while the
+    policy was off; enqueue now always recomputes warnings against current
+    state — matching the stealth-sweep path's "always warn, policy-gate the
+    block" shape — while the hard-block decision itself stays exactly as
+    policy-gated as before.
 6. DeFi position adapters. The D-11 exit adapter set is now complete: Aave v3
    withdraw, ERC-4626 redeem, Lido wstETH unwrap, and Uniswap v2 LP
    `removeLiquidity` exits are implemented. The Uniswap v2 adapter expands LP
