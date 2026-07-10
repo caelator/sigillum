@@ -821,6 +821,18 @@ mod tests {
     }
 
     #[test]
+    fn normalize_linkage_address_folds_case_and_whitespace() {
+        assert_eq!(
+            normalize_linkage_address("  0xABCDef0000000000000000000000000000000001  "),
+            "0xabcdef0000000000000000000000000000000001"
+        );
+        assert_eq!(
+            normalize_linkage_address("  0xABCDef0000000000000000000000000000000001  "),
+            normalize_linkage_address("0xABCDEF0000000000000000000000000000000001")
+        );
+    }
+
+    #[test]
     fn planner_assign_step_ordering_sets_contiguous_sequence() {
         let destination = "0x9999999999999999999999999999999999999999";
         let mut steps = vec![
@@ -1488,6 +1500,42 @@ mod tests {
 
         assert_eq!(findings.len(), 1);
         assert!(findings[0].contains("Destination 0x99999999... links 2 payers"));
+        assert!(findings[0].contains("Acme"));
+        assert!(findings[0].contains("Bob"));
+        assert_eq!(steps[0].linkage_warnings.len(), 1);
+        assert!(steps[0].linkage_warnings[0].contains("Bob"));
+        assert!(!steps[0].linkage_warnings[0].contains("Acme"));
+        assert_eq!(steps[1].linkage_warnings.len(), 1);
+        assert!(steps[1].linkage_warnings[0].contains("Acme"));
+        assert!(!steps[1].linkage_warnings[0].contains("Bob"));
+    }
+
+    #[test]
+    fn analyze_plan_linkage_clusters_case_variant_destinations() {
+        let acme_address = "0xaAaAaAaAaAaAaAaAaAaAaAaAaAaAaAaAaAaAaAaA";
+        let bob_address = "0xbBbBBBBbbBBBbbbBbbBbbbbBBbBbbbbBbBbbBBbB";
+        let destination_lower = "0xabcdefabcdefabcdefabcdefabcdefabcdefabcd";
+        let destination_upper = "0xABCDEFABCDEFABCDEFABCDEFABCDEFABCDEFABCD";
+        let state = WalletInventoryState {
+            parties: vec![
+                sample_party("party_acme", "Acme"),
+                sample_party("party_bob", "Bob"),
+            ],
+            receive_allocations: vec![
+                sample_receive_allocation(acme_address, Some("party_acme")),
+                sample_receive_allocation(bob_address, Some("party_bob")),
+            ],
+            ..Default::default()
+        };
+        let mut steps = vec![
+            sample_sweep_step(acme_address, destination_lower),
+            sample_sweep_step(bob_address, destination_upper),
+        ];
+
+        let findings = analyze_plan_linkage(&state, &mut steps);
+
+        assert_eq!(findings.len(), 1);
+        assert!(findings[0].contains("Destination 0xabcdefab... links 2 payers"));
         assert!(findings[0].contains("Acme"));
         assert!(findings[0].contains("Bob"));
         assert_eq!(steps[0].linkage_warnings.len(), 1);

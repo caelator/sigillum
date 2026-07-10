@@ -1084,6 +1084,32 @@ mod tests {
         );
     }
 
+    /// Every committed field emits its own key line, so embedded delimiters in
+    /// a value cannot erase or forge the following field commitment.
+    #[test]
+    fn evidence_hash_resists_field_delimiter_injection() {
+        let base = sample_step();
+        let call = sample_call();
+
+        let mut case_x = base.clone();
+        case_x.asset_address = None;
+        case_x.amount_hex = "0x1".into();
+
+        let mut case_y = base.clone();
+        case_y.asset_address = Some("\namount_hex=0x1".to_string());
+        case_y.amount_hex = String::new();
+
+        let h_x = plan_step_evidence_hash_hex("plan_1", &case_x, &call);
+        let h_y = plan_step_evidence_hash_hex("plan_1", &case_y, &call);
+
+        assert_ne!(
+            h_x, h_y,
+            "delimiter injection cannot forge a matching evidence commitment"
+        );
+        assert_eq!(h_x.len(), 64);
+        assert_eq!(h_y.len(), 64);
+    }
+
     #[test]
     fn u256_decimal_string_renders_zero_small_and_large_values() {
         assert_eq!(u256_decimal_string(&[0u8; 32]), "0");
