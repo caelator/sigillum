@@ -99,7 +99,11 @@ impl SigillumService {
                 )
                 .await
             {
-                classify_automation_failure(&error, &mut failures);
+                if plan.steps.iter().any(|step| !step.blockers.is_empty()) {
+                    classify_reason("blocked", &mut failures);
+                } else {
+                    classify_automation_failure(&error, &mut failures);
+                }
                 simulation_failed_plan_ids.push(plan.id.clone());
                 selection.skipped_steps += plan.steps.len();
                 push_reason(&mut selection.skipped_reasons, "simulation_failed");
@@ -475,10 +479,10 @@ fn mark_auto_eligible_steps(
                 .unwrap_or(false)
             {
                 Some("automation_disabled")
-            } else if step.simulation_status != WalletSimulationStatus::Passed {
-                Some("simulation_not_passed")
             } else if !step.blockers.is_empty() {
                 Some("blocked")
+            } else if step.simulation_status != WalletSimulationStatus::Passed {
+                Some("simulation_not_passed")
             } else {
                 gate_denial.as_deref()
             };
