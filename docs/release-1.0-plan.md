@@ -1498,9 +1498,9 @@ Phase W — Wallet-management completion
 - [ ] W8 treasury automation (overflow/refill, hysteresis)
 
 Phase F — Assurance
-- [ ] F1 adversarial coverage: receiving/treasury/chains/execution
-- [ ] F2 nightly deep-fuzz
-- [ ] F3 chaos soak mode (+ in-flight job assertion)
+- [x] F1 adversarial coverage: receiving/treasury/chains/execution
+- [x] F2 nightly deep-fuzz
+- [x] F3 chaos soak mode (+ in-flight job assertion)
 - [ ] F4 RC soak receipts per supported host
 - [ ] F5 execution-path security review
 - [ ] F6 testnet execution receipts (human-in-the-loop)
@@ -1762,6 +1762,21 @@ Phase H — Ship
   document that execution enforces the same single-hop destination-axis
   claim as generation/approval. Implemented via codex-exec (quota
   restored) with independent re-verification by the wrapping agent.
+- 2026-07-09 F1 9637893: 57 adversarial cases across receiving/treasury/
+  chains/plans-enqueue (auth, transport abuse, invalid/oversized/overflow
+  inputs, stale/foreign ids, replay → 409 with queue unchanged, TOCTOU
+  gate/destination/linkage flips → 403); every rejection clean 4xx with
+  state asserted unchanged; new tests/adversarial_execution.rs wired
+  into check-adversarial.sh. Finding for F5 disposition:
+  decode_quantity_hex accepts prefix-less strings on policy caps
+  ("1000" persists as 0x1000 = 4096 wei).
+- 2026-07-09 F2: nightly scheduled CI exports
+  SIGILLUM_ADVERSARIAL_PROPTEST_CASES=1024; PRs keep the 256 default.
+- 2026-07-09 F3 98182b8: SIGILLUM_SOAK_CHAOS=1 soak mode with guarded
+  kill -9 cycles, next-iteration doctor+canary requirement, receipt
+  cycle counts, and the W7.4-superset in-flight plan-step assertion
+  recorded in the receipt; real 600s chaos run passed with 3 kill
+  cycles; plain-mode receipt byte-identical apart from additive fields.
 - 2026-07-09 W7.4 f972dcb..3a99d1d: execution semantics — per-source
   (address, chain) serialization with an E1-consistent transient skip
   (no legacy `deferred` wire string; dependency-chained same-batch jobs
