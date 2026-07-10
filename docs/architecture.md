@@ -196,14 +196,18 @@ Current daemon behavior:
   Permit2 allowances, and NFT operator approvals
 - records operator-configured DeFi receipt/share token probes as first-class
   `defi` holdings with protocol provenance, so lending, vault, staking, and LP
-  positions can be surfaced locally before protocol-specific exit adapters exist
+  positions can be surfaced locally; the implemented exit-adapter set covers
+  Aave v3 withdraw, ERC-4626 redeem, Uniswap v2 LP `removeLiquidity`, and Lido
+  wstETH unwrap, while unsupported positions remain review-only
 - records operator-configured trusted claim candidates as first-class `reward`
   or `airdrop` holdings keyed by claimant address, asset contract, claim
   contract, amount, protocol, optional Merkle proof evidence, and source
   provenance; these surface in inventory and consolidation planning. Standard
-  `claim(uint256,address,uint256,bytes32[])` Merkle distributor candidates can
-  be simulated with provider-backed `eth_call`, but claim execution remains
-  blocked behind explicit review and a disabled execution gate.
+  `merkle-distributor-v1` claim candidates can be simulated with provider-backed
+  `eth_call`; execution is a fail-closed policy opt-in under
+  `allow_claim_execution` (default off), gated on a simulation pass,
+  risk-catalog review, and explicit approval. A claim that reverts parks as
+  `operator_action_required` and is never auto-retried
 - emits local risk findings for `reward` and `airdrop` claim candidates, using
   the claim contract as the review subject and applying risk-catalog overrides
   so trusted, high-risk, or critical claim contracts are visible before any
@@ -217,8 +221,34 @@ Current daemon behavior:
 - exports approved, simulated, and unblocked consolidation plan steps as
   source-address-aware call manifests, with optional Safe Transaction
   Builder-compatible batches only when a supplied Safe address matches the
-  step source address; exports are audited and remain unsigned execution
-  evidence rather than automatic queue execution
+  step source address; audited unsigned exports remain available, and Sigillum
+  additionally supports controlled, policy-gated, fail-closed queue execution
+  of approved, simulated, and unblocked plan steps, default off
+- maintains an implemented chain registry with built-ins for Ethereum, Base,
+  Arbitrum One, OP Mainnet, and Polygon PoS, plus operator-defined custom EVM
+  chains
+- keeps consolidation-plan execution fail closed under the
+  default-off `allow_plan_execution` master gate and the default-off per-family
+  `allow_sweep_execution`, `allow_revoke_execution`, `allow_exit_execution`,
+  `allow_claim_execution`, and `allow_gas_topups` gates. The
+  `execution_paused` kill switch is controlled through
+  `POST /api/queue/pause|resume`, and every gate or pause flip emits a typed
+  audit event
+- enqueues plan steps only after server-side re-validation of approval,
+  simulation evidence and freshness, blockers, treasury policy, linkage at
+  parity with plan generation and approval, and execution gates; single-step
+  enqueue requires explicit confirmation, while bulk enqueue requires typed
+  confirmation naming the step count and total value
+- re-verifies the simulation-evidence hash at drain time before any key
+  material is touched; a mismatch parks as `operator_action_required` and is
+  never signed. Broadcast-time execution manages the nonce, permits one bounded
+  fee bump, and confirms the receipt to the chain registry's finality depth
+  before entering the terminal `confirmed` state, with single-in-flight
+  serialization per (source address, chain)
+- runs hot-wallet overflow/refill treasury automation only behind the
+  `allow_treasury_automation` opt-in (default off); generated work still passes
+  through the standard policy, linkage, simulation, approval, and execution
+  gates
 - classifies discovered inventory addresses with signer, gas, value, approval,
   stranded-value, watch-only, and dormant-candidate labels so risk and
   consolidation views can distinguish recoverable value from merely visible
@@ -228,34 +258,25 @@ Current daemon behavior:
 What it intentionally does not do today:
 
 - remote SDK/client abstraction
-- polished remote multi-host client/server story
+- remote or hosted operating modes, including a polished multi-host
+  client/server story
 - multi-host coordination
 - SSE streams
 - remote audit aggregation pipeline
-- deep on-chain indexing beyond provider RPC balance checks, bounded and
-  resumable ERC-20 transfer-log token discovery, bounded and resumable ERC-721
-  transfer-log discovery with `ownerOf` confirmation, bounded and resumable
-  ERC-1155 transfer discovery with `balanceOf` confirmation,
-  operator-bounded ERC-20 allowance probes, operator-bounded Permit2 allowance
-  probes, operator-bounded NFT approval probes,
-  operator-configured DeFi receipt/share token probes, operator-configured
-  trusted claim candidates, standard Merkle claim preflight simulation,
-  claim-contract risk findings, and local operator-managed
-  spender/operator/claim-contract risk catalog overrides
+- deep on-chain indexing beyond the implemented provider-RPC balance checks,
+  bounded EVM transfer-log discovery, and operator-bounded or
+  operator-configured probe surfaces
 - historical receive-address discovery beyond the current EVM seed-account
   receive-branch scanner, project-xpub gap-limit scanner, imported
   receive-branch xpub scanner, imported custom receive-path xpub scanner, and
   imported account-level xpub scanner with optional custom account paths, or
   rich dormant-wallet classification with last-activity timestamps
 - full token registry/indexer scraping, full ERC-1155 batch/history coverage,
-  NFT metadata and spam classification, Permit2 expiration-aware risk scoring,
-  external spender/operator registries, queued execution for approval revokes,
-  NFT claim/swap/exit transaction
-  simulation, dynamic network fee estimation, protocol-specific DeFi exit
-  adapters, or claim execution adapters for airdrops/rewards
-- queued execution of consolidation plans for discovered holdings outside the
-  current stealth deposit sweep flow; consolidation plan exports are the current
-  execution handoff boundary
+  and Permit2 expiration-aware risk scoring
+- external runtime token, spender/operator, and spam registries or feeds (D-15)
+- swap execution or DEX routing (D-13)
+- non-EVM chains (roadmap phase 10)
+- fiat or NFT valuation (D-16)
 
 ## Privacy & Linkage Model
 
@@ -266,9 +287,9 @@ consolidation is linkage-aware: `analyze_plan_linkage` (HD planner) and
 payers would route to the **same destination** — the single-hop common-recipient
 heuristic on Ethereum's account model. The identity model is conservative: a
 tagged party is one identity and each unattributed address is its own distinct
-identity, so the analysis never produces a false negative (two tagged payers to
-one destination are always caught) at the cost of possible false positives. When
-the `block_cross_party_linkage` treasury policy is enabled (an explicit
+identity, so within any one plan two tagged payers routed to one destination are
+always caught, at the cost of possible false positives. When the
+`block_cross_party_linkage` treasury policy is enabled (an explicit
 fail-closed opt-in surfaced in onboarding, default off), warnings become hard
 blockers at plan generation, approval, and stealth-sweep enqueue. Plan-step
 execution enqueue (W7.2) enforces this at parity (W7.5): linkage is
@@ -280,6 +301,16 @@ the policy was off and the policy is flipped on before enqueue. This is the
 same single-hop, destination-axis claim described below, carried through to
 execution — no additional amount/timing or multi-hop guarantee is made at
 this stage either.
+
+The F5 N1 residual caveat is that `analyze_plan_linkage` is per-plan. Two
+counterparties swept to a shared destination through steps in different
+consolidation plans are not clustered, nor are counterparties using a shared
+`fund_gas` sponsor through steps in different plans. This is a
+detection-completeness gap in the advisory analysis; when
+`block_cross_party_linkage` is enabled, the hard block still fires for a
+collision within any single plan. Operators should run one consolidation plan
+per review cycle or set distinct per-party destinations. Cross-plan analysis is
+a candidate for post-1.0 work.
 
 This protection is deliberately scoped to **single-hop, destination-axis**
 linkage. Sigillum-generated `fund_gas` top-ups are modeled by a common-funder

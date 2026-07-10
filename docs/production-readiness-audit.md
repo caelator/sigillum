@@ -3,9 +3,12 @@
 **Date:** June 4, 2026 (updated July 3, 2026)
 **Scope:** local-first, single-host Sigillum source checkout and local-sidecar
 gateway boundary
-**Verdict:** source release gate passed for Sigillum Local-First Operator
-Console v1; broader production completeness remains bounded by the open gaps
-below
+**Verdict:** source release gate passed for the local-first wallet-management
+workstation, including EVM roadmap phases 1-9 and policy-gated, fail-closed
+consolidation-plan execution that is opt-in and defaults off. Wallet management
+is complete for EVM except swap execution, which is deferred per D-13. Non-EVM
+chains (roadmap phase 10) and fiat/NFT valuation (D-16) remain deferred; broader
+production completeness remains bounded by the open gaps below.
 
 ## Evidence Snapshot
 
@@ -168,7 +171,7 @@ pass with empty ignore lists.
 | Desktop app bundle readiness | `scripts/check-desktop.sh` always compiles `sigillum-desktop`; on macOS it runs a debug Tauri bundle build, asserts `.app` and `.dmg` artifacts, and verifies the `.app` code signature | Proven for current checkout on macOS; non-macOS release-gate legs compile the desktop crate and explicitly skip bundle packaging |
 | Long-duration reliability | Recovery and crash tests pass, `scripts/check-local-soak.sh` passed a bounded 300-second local daemon/gateway run with 28 iterations, and a `mac-server` target-host run passed a 3600-second target with 117 iterations | Proven for the current local-first target host; broader host coverage and chaos testing remain future assurance work |
 | External security assurance | Code gates, audit, deny, local adversarial/fuzz gate, SSRF/local-boundary tests, and UI boundary tests pass | Local boundary pass proven for current checkout; independent external penetration test not performed |
-| Full wallet-management product roadmap | Existing docs and tests cover current local wallet, inventory, risk, and plan slices | Not complete; deeper discovery, DeFi/NFT metadata, broader non-EVM support, and richer consolidation execution remain roadmap work |
+| Full wallet-management product roadmap | EVM roadmap phases 1-9 shipped and tested: discovery, inventory, risk, planning, policy-gated fail-closed execution (default off), DeFi exit adapters, and treasury automation | EVM scope is complete except swap execution, which is deferred per D-13; only non-EVM chains (phase 10), swap execution (D-13), and fiat/NFT valuation (D-16) remain deferred |
 
 ## Release Boundary
 
@@ -197,11 +200,12 @@ uses the path in inventory/export/self-check evidence, and warns that the path
 is operator-asserted metadata. Imported account-level xpubs can likewise carry
 `external_account_path`; Sigillum validates the terminal hardened account path,
 derives the receive branch locally, uses the supplied path in inventory/export/
-self-check evidence, and keeps the wallet watch-only. The comprehensive
-wallet-management roadmap is intentionally deferred from this readiness claim:
-rich NFT/DeFi/airdrop inventory, non-EVM chains, automated consolidation
-execution, and hosted or internet-facing wallet operations remain future product
-work.
+self-check evidence, and keeps the wallet watch-only. The EVM wallet-management
+product described by roadmap phases 1-9 has shipped, including NFT/DeFi/airdrop
+inventory and consolidation-plan execution. That execution is a policy-gated,
+fail-closed opt-in and defaults off. Only non-EVM chains (roadmap phase 10), swap
+execution (D-13), fiat/NFT valuation (D-16), and hosted or internet-facing
+wallet operations remain deferred.
 
 ## Remaining Work Before A Broader Completion Claim
 
@@ -212,7 +216,10 @@ the project still needs:
 1. a target-host `sigillum doctor` and soak receipt for each additional host
    being called ready beyond `mac-server`
 2. an independent external penetration test if the claim expands beyond
-   source-verified local-first readiness
+   the source-verified local-first release gate; no external penetration test
+   has been performed, and the release does not claim one (D-4)
+3. public-testnet execution receipts for the four core execution families:
+   native sweep, ERC-20 sweep, revoke, and gas top-up (F6)
 
 Until those are complete, the accurate claim is narrower: the current source
 checkout passes the local-first release gate, and the docs identify the

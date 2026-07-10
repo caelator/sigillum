@@ -106,8 +106,10 @@ Required discovery classes:
   staking, LP positions, vault shares, bridges, vesting/streaming contracts, and
   rewards contracts. The first local slice records operator-configured ERC-20
   receipt/share token probes as `defi` holdings with protocol provenance, which
-  covers many lending, vault, staking, and LP receipt-token positions before
-  protocol-specific exit adapters exist.
+  covers many lending, vault, staking, and LP receipt-token positions. The D-11
+  exit adapter set is implemented for Aave v3 withdraw, ERC-4626 redeem,
+  Uniswap v2 LP `removeLiquidity`, and Lido wstETH unwrap; positions matching no
+  supported adapter remain review-only.
 - Airdrop and reward discovery for claimable or potentially claimable assets,
   with claim-contract risk classification and no blind auto-claiming. The first
   local slice records operator-configured trusted claim candidates as `airdrop`
@@ -123,9 +125,10 @@ Required discovery classes:
   `merkle-distributor-v1` claims whose simulation passed, whose claim contract
   is marked trusted in the local risk catalog (or carries an explicit
   `claim_execution_reviewed` note), and which the operator explicitly approves.
-  The queue execution adapter itself remains future work, and a claim that
-  reverts at execution must surface as `operator_action_required` and is never
-  auto-retried because the proof may be consumed.
+  The queue execution adapter is implemented for eligible
+  `merkle-distributor-v1` claims, and a claim that reverts at execution surfaces
+  as `operator_action_required` and is never auto-retried because the proof may
+  be consumed.
 - Allowance and approval discovery, including unlimited ERC-20 approvals, NFT
   operator approvals, known-drainer spenders, and revoke recommendations.
   Bounded ERC-20 allowance probes and NFT operator-approval probes are
@@ -144,8 +147,8 @@ Required discovery classes:
   planner-assigned sequence numbers and explicit step dependencies, and exports
   emit steps in dependency order while refusing (fail-closed) to export any step
   whose dependency is blocked or skipped, naming the dependency in the skip
-  reason. External spender registries, expiration-aware Permit2 scoring,
-  dynamic fee policy, and direct queue execution remain future work.
+  reason. External spender registries and expiration-aware Permit2 scoring remain
+  future work.
 - Dormant-wallet classification using derived last activity, current value,
   token/NFT/DeFi exposure, gas availability, and whether the private key or
   signing path is actually available. Inventory addresses now carry a derived
@@ -197,7 +200,9 @@ The planner should produce a reviewable execution graph:
 - unstake, withdraw, or exit protocol positions
 - unwrap wrapped native assets where useful
 - sweep native assets, ERC-20s, and NFTs
-- optionally swap dust or long-tail tokens through approved routes
+- optionally swap dust or long-tail tokens through approved routes (swap
+  execution is deferred to post-1.0 per D-13; dust retains the `review_asset`
+  fallback)
 - route assets to hot, treasury, cold, or external destinations
 - leave uneconomic, suspicious, or watch-only assets untouched
 
@@ -221,7 +226,10 @@ approved, simulated, unblocked plan steps can be exported as local call
 manifests grouped by source wallet, chain, and provider. When an operator
 supplies a matching Safe address, Sigillum can also emit a Safe Transaction
 Builder-compatible batch. Suspicious, blocked, unsimulated, unapproved,
-watch-only, and source-mismatched steps are skipped with reasons.
+watch-only, and source-mismatched steps are skipped with reasons. Beyond
+export, Sigillum 1.0 also ships controlled, policy-gated, fail-closed queue
+execution of approved, simulated, unblocked plan steps, default off (swap
+steps excepted, deferred per D-13).
 
 Treasury policy guardrails are implemented on top of this model: an
 operator-managed local policy (destination allowlist plus per-step and
@@ -329,19 +337,23 @@ The CLI should have parity for automation:
 
 ## Phasing
 
-1. Inventory schema and read-only EVM discovery.
-2. Seed/xpub derivation scanning with gap limits and historical address
+As of Sigillum 1.0, phases 1-9 are COMPLETE for EVM networks except swap
+execution, which is deferred per D-13; phase 10 (non-EVM chains) is post-1.0;
+fiat/NFT valuation is out of 1.0 scope (D-16).
+
+1. **COMPLETE (EVM).** Inventory schema and read-only EVM discovery.
+2. **COMPLETE (EVM).** Seed/xpub derivation scanning with gap limits and historical address
    activity.
-3. ERC-20 and native multi-L2 discovery. Bounded ERC-20 transfer-log discovery
+3. **COMPLETE (EVM).** ERC-20 and native multi-L2 discovery. Bounded ERC-20 transfer-log discovery
    is the first implemented slice.
-4. NFT and allowance discovery. Operator-bounded ERC-20 allowance probing,
+4. **COMPLETE (EVM).** NFT and allowance discovery. Operator-bounded ERC-20 allowance probing,
    Permit2 allowance probing, NFT operator-approval probing, a local risk
    catalog, and reviewable approval revoke plan steps are the first
    approval-management slices, and bounded ERC-721/ERC-1155 transfer-log
    discovery with owner/balance confirmation is the first NFT inventory slice.
    The opt-in NFT metadata fetch pipeline and extended local spam heuristics are
    now implemented on top of that transfer-log slice.
-5. Consolidation preflight. Provider-backed `eth_call` simulation is
+5. **COMPLETE (EVM).** Consolidation preflight. Provider-backed `eth_call` simulation is
    implemented for ERC-20 `approve(spender, 0)` revokes and NFT
    `setApprovalForAll(operator, false)` revokes. Permit2 allowance probes now
    retain the Permit2 contract address so `approve(token, spender, 0, 0)`
@@ -359,12 +371,12 @@ The CLI should have parity for automation:
    pass. ERC-721 and ERC-1155 NFT sweep plan steps now build standard
    `safeTransferFrom` calls, require explicit token IDs, and verify enough
    inventoried native gas against a conservative NFT gas floor.
-5a. Wallet archaeology labels. Discovery now classifies addresses for signer
+5a. **COMPLETE (EVM).** Wallet archaeology labels. Discovery now classifies addresses for signer
     availability, watch-only status, gas availability, token/NFT/protocol
     value, stranded value, approval exposure, and dormant-candidate state, and
     the local risk engine emits review findings for watch-only value, stranded
     value, and dormant funded addresses.
-5b. Consolidation execution handoff. Approved, simulated, unblocked plan steps
+5b. **COMPLETE (EVM).** Consolidation execution handoff. Approved, simulated, unblocked plan steps
     can be exported as call manifests or matching-Safe Transaction Builder
     batches. This creates auditable execution evidence for native/ERC-20/NFT
     sweeps and approval revokes while keeping direct signing and queue
@@ -440,14 +452,14 @@ The CLI should have parity for automation:
     state — matching the stealth-sweep path's "always warn, policy-gate the
     block" shape — while the hard-block decision itself stays exactly as
     policy-gated as before.
-6. DeFi position adapters. The D-11 exit adapter set is now complete: Aave v3
+6. **COMPLETE (EVM).** DeFi position adapters. The D-11 exit adapter set is now complete: Aave v3
    withdraw, ERC-4626 redeem, Lido wstETH unwrap, and Uniswap v2 LP
    `removeLiquidity` exits are implemented. The Uniswap v2 adapter expands LP
    exits into dependency-ordered `approve` plus `removeLiquidity` steps, derives
    minimum token amounts from pair reserves at plan time, and requires
    per-chain operator-configured router addresses. Positions matching no
    supported adapter remain review-only.
-7. Airdrop/reward discovery with strict claim risk gates. The first trusted
+7. **COMPLETE (EVM).** Airdrop/reward discovery with strict claim risk gates. The first trusted
    candidate-ingestion, claim-contract risk-finding, and standard Merkle claim
    simulation slices are implemented; the enablement gate (policy opt-in,
    simulation, risk-catalog review, and explicit approval) is implemented for
@@ -457,7 +469,7 @@ The CLI should have parity for automation:
    job as `operator_action_required` and is never auto-retried, since a
    Merkle proof may be partially consumed. Verified source adapters and
    richer external risk feeds remain future work.
-8. Consolidation planner with broader dry-run simulation for dynamic fee
+8. **COMPLETE (EVM) except swap execution (deferred per D-13).** Consolidation planner with broader dry-run simulation for dynamic fee
    estimation, gas top-ups, exits, claims, swaps, and treasury routing. Hot-wallet
    refill routing is now policy-driven through
    `TreasuryPolicy.hot_floor_wei_hex` / `hot_target_wei_hex` (both default 1
@@ -474,7 +486,7 @@ The CLI should have parity for automation:
    `TreasuryPolicy.hot_overflow_wei_hex` plans a hot-to-treasury sweep of the
    excess above `hot_target_wei_hex`, and hot balance below
    `hot_floor_wei_hex` plans a treasury-to-hot refill up to target.
-9. Controlled execution for native/ERC-20 sweeps, gas top-ups, NFT transfers,
+9. **COMPLETE (EVM) except swap execution (deferred per D-13).** Controlled execution for native/ERC-20 sweeps, gas top-ups, NFT transfers,
    DeFi exits, claims, swaps, and treasury routing. The policy gates and
    kill switch that constrain this execution are implemented (see 5b), and
    the enqueue (W7.2) and signing/execution (W7.3) adapters for native/ERC-20/
@@ -488,7 +500,7 @@ The CLI should have parity for automation:
    path when the W7.1 gates hold and simulation passed. Hysteresis is enforced
    by floor <= target <= overflow validation plus same-cycle exclusion and
    re-observation checks.
-10. Non-EVM chain families, starting with Bitcoin/UTXO and only then Solana,
+10. **POST-1.0.** Non-EVM chain families, starting with Bitcoin/UTXO and only then Solana,
    Tron, and Cosmos-style networks.
 
 Completion means a recovered or imported wallet can move from "unknown" to

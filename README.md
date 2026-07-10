@@ -18,10 +18,14 @@ optional local-sidecar gateway for payment previews. It is intended to stay a
 local-on-your-computer system rather than evolve into an internet-facing remote
 secret-management platform.
 
-The current release boundary is Sigillum Local-First Operator Console v1. The
-larger wallet-management workstation roadmap, including deeper wallet discovery,
-NFT/DeFi/airdrop inventory, non-EVM support, and automated consolidation, is
-future product scope rather than part of the current readiness claim.
+Sigillum 1.0 is the local-first wallet-management workstation. The
+wallet-management product in phases 1-9 of the
+[`wallet-management roadmap`](docs/wallet-management-roadmap.md) is shipped for
+EVM networks, except swap execution, which is deferred per D-13.
+Consolidation-plan execution ships as a policy-gated, fail-closed opt-in that
+defaults off. The local-first, single-machine, not-internet-facing boundary is
+unchanged. Non-EVM chains (roadmap phase 10) and fiat/NFT valuation remain
+post-1.0.
 
 ## Current Scope
 
@@ -39,9 +43,9 @@ Implemented and working in this repository:
 - `sigillum-server`: thin facade over the daemon crate for server-side embedding
 - `sigillum`: meta-crate that re-exports the file-backed core
 
-Still missing as a polished product surface:
-
-- more local operator polish around the daemon, gateway sidecar, and desktop workflow
+**1.0 scope boundary:** Sigillum 1.0 targets EVM networks. Non-EVM chains, swap
+execution, fiat/NFT valuation, and remote or hosted operation are explicitly out
+of scope.
 
 ## Architecture
 
@@ -242,7 +246,12 @@ On top of that, the daemon now includes:
   automatic restore/quarantine behavior
 - a maintenance cycle that refreshes deposits, auto-enqueues sweeps, and drains queued work
 
-This means the current boundary is no longer “sign only.” Sigillum can now keep provider credentials internal, monitor deposit balances, sign locally, and optionally broadcast without exposing private wallet material to upstream web services.
+This means the current boundary is no longer “sign only.” Sigillum can now keep
+provider credentials internal, monitor deposit balances, sign locally, and
+optionally broadcast without exposing private wallet material to upstream web
+services. It also offers controlled, policy-gated, fail-closed queue execution
+of consolidation plans, default off, which supersedes the earlier export-only
+handoff while keeping all private wallet material local.
 
 ## Privacy Model — Scope and Limitations
 
@@ -393,24 +402,17 @@ cargo deny check
 
 ## Status
 
-Sigillum now has a shared daemon/client API contract, a service-layer split
-inside the daemon, and a coherent local wallet/deposit/sweep control plane for
-Ethereum stealth custody. The next architectural work is deeper crash recovery,
-richer chain indexing, broader policy automation, and the wallet discovery and
-consolidation roadmap in
-[`docs/wallet-management-roadmap.md`](docs/wallet-management-roadmap.md). That
-roadmap covers seed/xpub gap-limit discovery, multi-account Ethereum seed
-receive scanning, old-wallet classification, L1/L2 holdings, resumable ERC-20
-transfer-log token discovery, the first resumable bounded ERC-721 NFT
-discovery slice, resumable bounded ERC-1155 transfer discovery, DeFi positions,
-airdrops/rewards, ERC-20 allowance probing, bounded NFT operator-approval
-probing, bounded Permit2 allowance probing, and reviewable consolidation
-planning with approval revoke steps. Broader token
-registries, full ERC-1155 batch coverage, NFT metadata/spam classification, DeFi
-adapters, Permit2
-expiration-aware classification, external spender registries, revoke
-transaction builders, simulation, and execution remain roadmap work. The
-product strategy and market comparison are captured in
+Sigillum 1.0 ships the local-first wallet-management workstation for EVM
+networks, with multi-chain discovery, inventory, and risk assessment; a chain
+registry; consolidation planning and policy-gated, fail-closed execution that
+defaults off; DeFi exit adapters; and gas top-ups plus hot-wallet overflow/refill
+treasury automation. The completed EVM scope is documented in
+[`docs/wallet-management-roadmap.md`](docs/wallet-management-roadmap.md).
+
+Wallet management is complete for EVM except swap execution, which is deferred
+per D-13. Non-EVM chains (roadmap phase 10), swap execution (D-13), and fiat/NFT
+valuation (D-16) remain post-1.0. The product strategy and market comparison are
+captured in
 [`docs/wallet-competitive-landscape.md`](docs/wallet-competitive-landscape.md).
 This is not another round of ad hoc transport or route growth and not a shift
 toward internet deployment.
