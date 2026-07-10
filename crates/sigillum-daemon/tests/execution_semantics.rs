@@ -14,11 +14,15 @@ use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 #[cfg(all(unix, feature = "test-failpoints"))]
+use axum::body::Body;
+#[cfg(all(unix, feature = "test-failpoints"))]
 use std::os::unix::process::ExitStatusExt;
 #[cfg(all(unix, feature = "test-failpoints"))]
 use std::time::Duration;
 
 use axum::extract::State;
+#[cfg(all(unix, feature = "test-failpoints"))]
+use axum::http::Request;
 use axum::http::{HeaderMap, header};
 use axum::routing::post;
 use axum::{Json, Router};
@@ -26,6 +30,8 @@ use reqwest::StatusCode;
 use serde_json::{Value, json};
 use sha3::{Digest, Keccak256};
 use tempfile::TempDir;
+#[cfg(all(unix, feature = "test-failpoints"))]
+use tower::util::ServiceExt;
 
 const DESTINATION: &str = "0x9999999999999999999999999999999999999999";
 const SEED_ADDRESS: &str = "0x9858effd232b4033e47d90003d41ec34ecaeda94";
@@ -268,6 +274,37 @@ async fn get(
         request = request.bearer_auth(token);
     }
     request.send().await.unwrap()
+}
+
+#[cfg(all(unix, feature = "test-failpoints"))]
+async fn post_router_json(
+    app: &Router,
+    path: &str,
+    body: Value,
+    token: Option<&str>,
+) -> (StatusCode, Value) {
+    let mut request = Request::builder()
+        .method("POST")
+        .uri(path)
+        .header("content-type", "application/json");
+    if let Some(token) = token {
+        request = request.header("authorization", format!("Bearer {token}"));
+    }
+    let response = app
+        .clone()
+        .oneshot(
+            request
+                .body(Body::from(serde_json::to_vec(&body).unwrap()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let status = response.status();
+    let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let body = serde_json::from_slice(&bytes).unwrap_or(Value::Null);
+    (status, body)
 }
 
 struct PlanEnv {
@@ -1723,28 +1760,27 @@ fn queue_failpoint_subprocess_helper() {
         .build()
         .expect("queue helper runtime builds")
         .block_on(async move {
-            let (addr, daemon) = spawn_daemon(base_dir).await;
-            let client = reqwest::Client::new();
-            let unlock = post_json(
-                &client,
-                addr,
+            // Drive the production router directly. The OS subprocess and
+            // SIGKILL boundary remain real, while readiness no longer depends
+            // on a second loopback listener starting under CI load.
+            let (app, _state) =
+                sigillum_daemon::build_router(base_dir, 0).expect("helper router initializes");
+            let (unlock_status, unlock_json) = post_router_json(
+                &app,
                 "/api/unlock",
                 json!({ "passphrase": COMPARTMENT_PASSPHRASE }),
                 None,
             )
             .await;
-            assert_eq!(unlock.status(), StatusCode::OK);
-            let unlock_json: Value = unlock.json().await.unwrap();
+            assert_eq!(unlock_status, StatusCode::OK, "{unlock_json}");
             let token = unlock_json["session_token"]
                 .as_str()
                 .expect("unlock returns a session token")
                 .to_string();
-            let process =
-                post_json(&client, addr, "/api/queue/process", json!({}), Some(&token)).await;
-            assert_eq!(process.status(), StatusCode::OK);
-            let process_json: Value = process.json().await.unwrap();
+            let (process_status, process_json) =
+                post_router_json(&app, "/api/queue/process", json!({}), Some(&token)).await;
+            assert_eq!(process_status, StatusCode::OK, "{process_json}");
             assert_eq!(process_json["processed"], json!(1), "{process_json}");
-            daemon.abort();
         });
 }
 
@@ -1762,7 +1798,13 @@ async fn chaos_kill_in_flight_plan_step_resumes_terminal_without_duplication() {
     assert_eq!(status, StatusCode::OK, "{body}");
 
     env.daemon.abort();
-    tokio::time::sleep(Duration::from_millis(20)).await;
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while !env.daemon.is_finished() {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("parent daemon task should stop before subprocess recovery");
     let nonce_calls_before_prepare = env.rpc_state.transaction_count_call_count();
     assert_eq!(
         env.rpc_state.broadcast_call_count(),
