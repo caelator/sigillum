@@ -1,5 +1,11 @@
 # Catch-Up Plan
 
+> **BACKGROUND REFERENCE — SUPERSEDED FOR SIGILLUM 1.0.** This plan is a
+> BACKGROUND REFERENCE only. It is superseded by
+> [docs/release-1.0-plan.md](./release-1.0-plan.md), the plan of record for 1.0.
+> Its Phases 1-3 are absorbed into the 1.0 plan and are complete; Phase 4
+> (remote/platform) remains out of 1.0 scope.
+
 ## Goal
 
 Bring the full Sigillum workspace, including `sigillum-gateway`, up to one

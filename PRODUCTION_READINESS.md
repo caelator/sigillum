@@ -1,13 +1,19 @@
 # Sigillum — Production Readiness
 
 **Date:** June 4, 2026 (updated June 19, 2026)
-**Current Verdict:** The target is local-first single-host readiness; internet-facing and remote-platform scope is explicitly unsupported
+**Current Verdict:** Sigillum 1.0 passes the source-verified local-first release
+gate for the shipped EVM wallet-management workstation, including roadmap
+phases 1–9 and policy-gated, fail-closed consolidation-plan execution that is
+an opt-in and defaults off. The supported boundary remains local-first,
+single-host, and not internet-facing; remote-platform scope is explicitly
+unsupported.
 
 ## Summary
 
 Sigillum now meets its current full-workspace release baseline for the
 documented local-first scope. That baseline covers the local daemon, client,
-core, CLI, and the `sigillum-gateway` sidecar:
+core, CLI, the `sigillum-gateway` sidecar, and the shipped EVM
+wallet-management product:
 
 - the workspace needs to stay green on the executable `./scripts/check-release.sh`
   gate, including metadata, architecture guardrails, daemon UI checks, tests,
@@ -25,6 +31,11 @@ core, CLI, and the `sigillum-gateway` sidecar:
 - the passphrase unlock path, daemon state recovery, and gateway/payment flows
   are all part of the same readiness story
 - `sigillum doctor` is the operator preflight for local host readiness
+- EVM roadmap phases 1–9 ship multi-chain discovery, inventory, and risk
+  analysis; the chain registry; consolidation planning; DeFi exit adapters;
+  gas top-ups; and hot-wallet overflow/refill treasury automation
+- consolidation-plan execution ships as a policy-gated, fail-closed opt-in
+  that defaults off
 
 The current evidence and remaining caveats are tracked in
 [docs/production-readiness-audit.md](./docs/production-readiness-audit.md).
@@ -34,12 +45,16 @@ internet-facing deployment. The green bar here is explicitly the single-machine
 operator model described in the README and deployment guide, because that is the
 intended product boundary.
 
-The release scope is **Sigillum Local-First Operator Console v1**. That scope
-includes the local daemon, vault, CLI, session model, current wallet/inventory
-slices, and local-sidecar gateway preview. It explicitly does not include the
-full wallet-management roadmap: deeper seed/xpub gap-limit discovery, rich
-NFT/DeFi/airdrop inventory, non-EVM chains, automated consolidation execution,
-and internet-facing or hosted wallet operations remain future product work.
+The release scope is **Sigillum 1.0**, the local-first wallet-management
+workstation. It includes the local daemon, vault, CLI, session model,
+local-sidecar gateway preview, and the EVM wallet-management product described
+in [docs/wallet-management-roadmap.md](./docs/wallet-management-roadmap.md)
+phases 1–9. Wallet management is complete for EVM except swap execution, which
+is deferred per D-13. Consolidation-plan execution is in scope and ships as a
+policy-gated, fail-closed opt-in that defaults off. Non-EVM chains (roadmap
+phase 10), fiat/NFT valuation (D-16), and remote or hosted operation remain
+future work; the local-first, single-host, not-internet-facing boundary is
+unchanged.
 
 ## What Is Ready
 
@@ -63,27 +78,38 @@ The current repository is in good shape for controlled single-machine use:
 
 ## What Is Not Yet Product-Complete
 
-The main remaining limits are scope and assurance, not the current local-first baseline:
+The main remaining limits are scope and release-candidate assurance evidence,
+not the shipped local-first wallet-management baseline:
 
-- CLI and broader operator ergonomics still lag the daemon/API surface in some
-  areas, but the gap is smaller now that the daemon-backed CLI covers
-  status/session operations plus provider profiles, stealth wallet profiles,
-  deposits, queue inspection, and maintenance runs.
-- The deployment story is intentionally local-only.
-  - no polished remote service boundary
-  - no remote event streaming or multi-host coordination model
-  - no claim that the gateway is an internet-ready boundary because that is not the intended direction
-- The current bar is based on code audit plus workspace verification gates.
-  - no external penetration test
-  - local adversarial/fuzz coverage is automated through
-    `scripts/check-adversarial.sh`, but it is not an independent security audit
-  - a 3600-second target-host daemon/gateway soak passed on `mac-server`, but
-    broader host coverage and chaos testing are still future assurance work
-- Broader operator polish still remains after the new daemon-backed CLI surface.
-- The comprehensive wallet-management workstation remains a roadmap track.
-  Current wallet and inventory slices are inside the local-first release
-  boundary, but broader discovery, NFT/DeFi/airdrop, non-EVM, and automated
-  consolidation claims are deferred.
+- Deployment remains intentionally local-only. There is no supported remote
+  service boundary, remote event streaming, multi-host coordination model, or
+  claim that the gateway is an internet-ready boundary.
+- D-4 defines the assurance claim as the source-verified local-first release
+  gate. No external penetration test has been performed, and the release does
+  not claim one. Automated local adversarial/fuzz coverage through
+  `scripts/check-adversarial.sh` is not an independent security audit.
+- The remaining RC-time evidence is:
+  - per-host doctor/soak receipts beyond the completed `mac-server` soak (F4)
+  - public-testnet execution receipts for the four core execution families:
+    native sweep, ERC-20 sweep, revoke, and gas top-up (F6)
+- Within wallet management, only non-EVM chains (roadmap phase 10), swap
+  execution (D-13), and fiat/NFT valuation (D-16) are deferred.
+
+### Execution-path residual risk (D-17)
+
+With allow_plan_execution and the relevant per-family execution gates enabled,
+a stolen session token on the local machine can move funds. The shipped
+mitigations (typed confirmation at enqueue, per-family fail-closed policy gates,
+gate-flip audit events carrying session fingerprints, the execution_paused kill
+switch, and policy re-reads at both enqueue and queue-drain time) detect and
+bound that misuse; they do not prevent it. FIDO2 tap-to-execute is the named
+post-1.0 hardening candidate. Operators who do not accept this risk leave the
+execution gates off (their default).
+
+The execution-path security review (F5) dispositions are complete and recorded
+in the audit's
+[Execution-path security review (F5)](./docs/production-readiness-audit.md#execution-path-security-review-f5),
+including the N1 cross-plan-linkage residual and the F1 policy-cap hardening.
 
 ## Structural Readiness Gates
 
@@ -105,20 +131,10 @@ route-by-route in
 ## Current Plan Of Record
 
 The active execution plan for the 1.0 release lives in
-[docs/release-1.0-plan.md](./docs/release-1.0-plan.md). The earlier structural
-roadmap in [docs/catchup-plan.md](./docs/catchup-plan.md) remains the
-background reference; its open Phase 1–2 items are absorbed into the 1.0 plan.
-
-The current execution order is:
-
-1. Structural enforcement
-  - CI
-  - doc synchronization
-2. Local operator-surface parity
-3. Gateway correctness and local-sidecar parity
-4. Automation and recovery hardening
-5. `eth-xpub` project-wallet expansion
-6. Remote/platform decision
+[docs/release-1.0-plan.md](./docs/release-1.0-plan.md). Its phases (A-H, W1-W8,
+F, G, H) are the plan of record. The earlier structural roadmap in
+[docs/catchup-plan.md](./docs/catchup-plan.md) remains a background reference;
+its phases 1–3 are absorbed into the 1.0 plan.
 
 ## Short-Term Recommendation
 
@@ -128,8 +144,9 @@ immediate move is:
 1. keep `./scripts/check-release.sh` enforced in CI across Ubuntu and macOS
 2. keep `./scripts/check-adversarial.sh` green and expand it when new API,
    gateway, or UI boundary surfaces are added
-3. expand higher-assurance testing beyond the current `mac-server` long soak,
-   especially recovery, gateway delivery, browser/widget behavior, and chaos runs
-4. close the remaining CLI/operator gaps for wallet/send flows and polish
+3. collect the remaining per-host doctor/soak receipts beyond `mac-server` (F4)
+4. collect public-testnet execution receipts for native sweep, ERC-20 sweep,
+   revoke, and gas top-up (F6)
 5. keep documentation and audits anchored to the local-on-your-computer boundary
-6. then begin `eth-xpub`
+6. keep non-EVM chains, swap execution, fiat/NFT valuation, and remote or hosted
+   modes in their documented post-1.0 scope
