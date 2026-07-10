@@ -205,6 +205,18 @@ pub struct TreasuryPolicy {
     /// level; it does not itself trigger routing to hot. Default 1 ETH.
     #[serde(default = "default_hot_target_wei_hex")]
     pub hot_target_wei_hex: String,
+    /// Optional hot-wallet overflow threshold; when the hot address balance
+    /// exceeds it, maintenance may plan a hot->treasury sweep of the excess
+    /// above hot_target_wei_hex. None disables overflow detection.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hot_overflow_wei_hex: Option<String>,
+    /// Fail-closed opt-in (default false, Decision Register D-6): when true AND
+    /// the policy is enabled, the maintenance cycle may GENERATE hot-overflow /
+    /// treasury-refill plan steps and auto-enqueue them only when the W7.1
+    /// execution gates hold and simulation passed. Off means maintenance
+    /// behavior is unchanged.
+    #[serde(default)]
+    pub allow_treasury_automation: bool,
     pub created_at_unix: u64,
     pub updated_at_unix: u64,
 }

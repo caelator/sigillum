@@ -24,7 +24,8 @@ pub(super) fn cmd_api_treasury(args: &[String]) {
         [--execution-paused <true|false>] [--max-gas-topup-wei-hex 0x..] \
         [--max-fee-per-gas-cap-hex 0x..] \
         [--simulation-freshness-secs <SECS>] [--hot-floor-wei-hex 0x..] \
-        [--hot-target-wei-hex 0x..]";
+        [--hot-target-wei-hex 0x..] [--hot-overflow-wei-hex 0x..] \
+        [--allow-treasury-automation <true|false>]";
     const PARTIES_USAGE: &str = "sigillum api treasury parties <list|create|update|delete> \
         [--id <ID>] [--name <NAME>] [--note <NOTE>] [--sweep-destination <ADDRESS>]";
     const RECEIVE_ALLOCATE_USAGE: &str = "sigillum api treasury receive-allocate \
@@ -79,6 +80,8 @@ pub(super) fn cmd_api_treasury(args: &[String]) {
                 parse_bool_value_flag(args, "--allow-exit-execution", POLICY_UPDATE_USAGE);
             let execution_paused =
                 parse_bool_value_flag(args, "--execution-paused", POLICY_UPDATE_USAGE);
+            let allow_treasury_automation =
+                parse_bool_value_flag(args, "--allow-treasury-automation", POLICY_UPDATE_USAGE);
             let request = TreasuryPolicyUpdateRequest {
                 enabled,
                 allowed_destinations,
@@ -107,6 +110,8 @@ pub(super) fn cmd_api_treasury(args: &[String]) {
                 simulation_freshness_secs: parse_u64_flag(args, "--simulation-freshness-secs"),
                 hot_floor_wei_hex: parse_flag(args, "--hot-floor-wei-hex"),
                 hot_target_wei_hex: parse_flag(args, "--hot-target-wei-hex"),
+                hot_overflow_wei_hex: parse_flag(args, "--hot-overflow-wei-hex"),
+                allow_treasury_automation,
             };
             run_api_command(args, true, move |client| async move {
                 client.update_treasury_policy(request).await

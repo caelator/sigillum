@@ -876,6 +876,18 @@ impl SigillumService {
                 "hot_floor_wei_hex must be less than or equal to hot_target_wei_hex",
             ));
         }
+        let hot_overflow_wei_hex =
+            validated_cap_hex("hot_overflow_wei_hex", body.hot_overflow_wei_hex)?;
+        if let Some(hot_overflow_wei_hex) = hot_overflow_wei_hex.as_ref() {
+            let hot_overflow = decode_quantity_hex(hot_overflow_wei_hex).map_err(|_| {
+                ServiceError::bad_request("hot_overflow_wei_hex must be a hex uint256 quantity")
+            })?;
+            if compare_u256(&hot_target, &hot_overflow).is_gt() {
+                return Err(ServiceError::bad_request(
+                    "hot_target_wei_hex must be less than or equal to hot_overflow_wei_hex",
+                ));
+            }
+        }
         let previous_execution_paused = previous_policy
             .as_ref()
             .map(|policy| policy.execution_paused)
@@ -915,6 +927,8 @@ impl SigillumService {
             simulation_freshness_secs: body.simulation_freshness_secs.unwrap_or(900),
             hot_floor_wei_hex,
             hot_target_wei_hex,
+            hot_overflow_wei_hex,
+            allow_treasury_automation: body.allow_treasury_automation.unwrap_or(false),
             created_at_unix: previous_policy
                 .as_ref()
                 .map(|existing| existing.created_at_unix)
@@ -980,6 +994,14 @@ impl SigillumService {
                     .map(|policy| policy.allow_gas_topups)
                     .unwrap_or(false),
                 policy.allow_gas_topups,
+            ),
+            (
+                "allow_treasury_automation",
+                previous_policy
+                    .as_ref()
+                    .map(|policy| policy.allow_treasury_automation)
+                    .unwrap_or(false),
+                policy.allow_treasury_automation,
             ),
             (
                 "execution_paused",
@@ -1751,6 +1773,8 @@ mod tests {
             simulation_freshness_secs: 900,
             hot_floor_wei_hex: "0xde0b6b3a7640000".into(),
             hot_target_wei_hex: "0xde0b6b3a7640000".into(),
+            hot_overflow_wei_hex: None,
+            allow_treasury_automation: false,
             created_at_unix: 1,
             updated_at_unix: 2,
         }

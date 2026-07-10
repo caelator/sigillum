@@ -1288,6 +1288,8 @@ fn test_treasury_policy_update_request_full() {
         simulation_freshness_secs: Some(900),
         hot_floor_wei_hex: Some("0xde0b6b3a7640000".to_string()),
         hot_target_wei_hex: Some("0xde0b6b3a7640000".to_string()),
+        hot_overflow_wei_hex: Some("0x1bc16d674ec80000".to_string()),
+        allow_treasury_automation: Some(true),
     };
     roundtrip_test(req);
 }
@@ -1314,6 +1316,8 @@ fn test_treasury_policy_update_request_minimal() {
         simulation_freshness_secs: None,
         hot_floor_wei_hex: None,
         hot_target_wei_hex: None,
+        hot_overflow_wei_hex: None,
+        allow_treasury_automation: None,
     };
     let json = serde_json::to_string(&req).unwrap();
     assert!(!json.contains("allow_plan_execution"));
@@ -1322,6 +1326,8 @@ fn test_treasury_policy_update_request_minimal() {
     assert!(!json.contains("allow_exit_execution"));
     assert!(!json.contains("execution_paused"));
     assert!(!json.contains("max_fee_per_gas_cap_hex"));
+    assert!(!json.contains("hot_overflow_wei_hex"));
+    assert!(!json.contains("allow_treasury_automation"));
 
     let omitted: TreasuryPolicyUpdateRequest =
         serde_json::from_str(r#"{"enabled":false}"#).unwrap();
@@ -1331,6 +1337,8 @@ fn test_treasury_policy_update_request_minimal() {
     assert_eq!(omitted.allow_exit_execution, None);
     assert_eq!(omitted.execution_paused, None);
     assert_eq!(omitted.max_fee_per_gas_cap_hex, None);
+    assert_eq!(omitted.hot_overflow_wei_hex, None);
+    assert_eq!(omitted.allow_treasury_automation, None);
 
     roundtrip_test(req);
 }

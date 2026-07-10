@@ -521,6 +521,8 @@ fn treasury_request_roundtrip() {
         simulation_freshness_secs: Some(900),
         hot_floor_wei_hex: Some("0xde0b6b3a7640000".to_string()),
         hot_target_wei_hex: Some("0xde0b6b3a7640000".to_string()),
+        hot_overflow_wei_hex: None,
+        allow_treasury_automation: None,
     });
 }
 
@@ -550,6 +552,8 @@ fn treasury_response_roundtrip() {
             simulation_freshness_secs: 900,
             hot_floor_wei_hex: "0xde0b6b3a7640000".to_string(),
             hot_target_wei_hex: "0xde0b6b3a7640000".to_string(),
+            hot_overflow_wei_hex: None,
+            allow_treasury_automation: false,
             created_at_unix: 1_783_000_000,
             updated_at_unix: 1_783_046_000,
         }),
@@ -603,6 +607,8 @@ fn treasury_policy_gas_topup_defaults_and_roundtrip() {
         simulation_freshness_secs: 900,
         hot_floor_wei_hex: "0xde0b6b3a7640000".to_string(),
         hot_target_wei_hex: "0xde0b6b3a7640000".to_string(),
+        hot_overflow_wei_hex: None,
+        allow_treasury_automation: false,
         created_at_unix: 1_783_000_000,
         updated_at_unix: 1_783_046_000,
     });

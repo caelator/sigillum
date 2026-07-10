@@ -975,6 +975,7 @@ fn test_wallet_operations_response_roundtrips() {
         status: WalletPlanStatus::Blocked,
         chain_id: 1,
         destination_address: Some("0xdestination".to_string()),
+        origin: None,
         created_at_unix: 1,
         updated_at_unix: 2,
         summary: ConsolidationPlanSummary {
@@ -1855,6 +1856,8 @@ fn sample_treasury_policy() -> TreasuryPolicy {
         simulation_freshness_secs: 900,
         hot_floor_wei_hex: "0xde0b6b3a7640000".to_string(),
         hot_target_wei_hex: "0xde0b6b3a7640000".to_string(),
+        hot_overflow_wei_hex: None,
+        allow_treasury_automation: false,
         created_at_unix: 1,
         updated_at_unix: 2,
     }
@@ -1889,6 +1892,8 @@ fn test_treasury_policy_responses_roundtrip() {
             simulation_freshness_secs: 900,
             hot_floor_wei_hex: "0xde0b6b3a7640000".to_string(),
             hot_target_wei_hex: "0xde0b6b3a7640000".to_string(),
+            hot_overflow_wei_hex: None,
+            allow_treasury_automation: false,
             created_at_unix: 1,
             updated_at_unix: 3,
         },
@@ -1915,6 +1920,8 @@ fn test_treasury_policy_require_simulation_defaults_true() {
     assert_eq!(policy.simulation_freshness_secs, 900);
     assert_eq!(policy.hot_floor_wei_hex, "0xde0b6b3a7640000");
     assert_eq!(policy.hot_target_wei_hex, "0xde0b6b3a7640000");
+    assert_eq!(policy.hot_overflow_wei_hex, None);
+    assert!(!policy.allow_treasury_automation);
     assert!(policy.allowed_destinations.is_empty());
 }
 
@@ -1939,6 +1946,7 @@ fn test_consolidation_plan_policy_violations_roundtrip() {
         status: WalletPlanStatus::Blocked,
         chain_id: 1,
         destination_address: Some("0x9999999999999999999999999999999999999999".to_string()),
+        origin: None,
         created_at_unix: 1,
         updated_at_unix: 2,
         summary: ConsolidationPlanSummary {
@@ -1958,11 +1966,34 @@ fn test_consolidation_plan_policy_violations_roundtrip() {
     // Empty violations are skipped on the wire and default back in.
     let empty = ConsolidationPlan {
         policy_violations: Vec::new(),
+        origin: None,
         ..base
     };
     let json = serde_json::to_string(&empty).unwrap();
     assert!(!json.contains("policy_violations"));
     roundtrip_test(empty);
+
+    let legacy: ConsolidationPlan = serde_json::from_str(
+        r#"{
+            "id":"plan_legacy",
+            "status":"approved",
+            "chain_id":1,
+            "destination_address":"0x9999999999999999999999999999999999999999",
+            "created_at_unix":1,
+            "updated_at_unix":2,
+            "summary":{
+                "total_steps":0,
+                "blocked_steps":0,
+                "review_required_steps":0,
+                "approved_steps":0,
+                "executable_steps":0,
+                "value_items":0
+            },
+            "steps":[]
+        }"#,
+    )
+    .unwrap();
+    assert_eq!(legacy.origin, None);
 }
 
 #[test]

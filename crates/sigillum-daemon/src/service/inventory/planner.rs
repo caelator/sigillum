@@ -930,6 +930,8 @@ mod tests {
             simulation_freshness_secs: 900,
             hot_floor_wei_hex: floor_hex.into(),
             hot_target_wei_hex: target_hex.into(),
+            hot_overflow_wei_hex: None,
+            allow_treasury_automation: false,
             created_at_unix: 1,
             updated_at_unix: 1,
         }

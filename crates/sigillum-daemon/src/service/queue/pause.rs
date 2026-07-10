@@ -75,6 +75,8 @@ fn inert_treasury_policy(now: u64) -> TreasuryPolicy {
         simulation_freshness_secs: 900,
         hot_floor_wei_hex: DEFAULT_HOT_BALANCE_WEI_HEX.into(),
         hot_target_wei_hex: DEFAULT_HOT_BALANCE_WEI_HEX.into(),
+        hot_overflow_wei_hex: None,
+        allow_treasury_automation: false,
         created_at_unix: now,
         updated_at_unix: now,
     }

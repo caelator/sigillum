@@ -1064,6 +1064,7 @@ impl Validate for crate::request::TreasuryPolicyUpdateRequest {
         )?;
         check_optional_len("hot_floor_wei_hex", &self.hot_floor_wei_hex, MAX_HEX)?;
         check_optional_len("hot_target_wei_hex", &self.hot_target_wei_hex, MAX_HEX)?;
+        check_optional_len("hot_overflow_wei_hex", &self.hot_overflow_wei_hex, MAX_HEX)?;
         Ok(())
     }
 }
