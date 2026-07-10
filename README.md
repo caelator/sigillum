@@ -340,6 +340,8 @@ The application release contract is a clean checkout with the committed
 Current readiness evidence and caveats are tracked in
 [`docs/production-readiness-audit.md`](docs/production-readiness-audit.md).
 
+The stable and unstable surfaces for 1.0, the SemVer policy, and the recorded execution residual risk are documented in [`docs/stability.md`](docs/stability.md).
+
 Full release gate:
 
 ```bash
