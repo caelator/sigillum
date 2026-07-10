@@ -1,0 +1,14 @@
+Third-party license notices for Sigillum binaries.
+
+{{#each licenses}}
+===============================================================================
+{{{name}}} ({{{id}}})
+
+Used by:
+{{#each used_by}}
+ - {{{crate.name}}} {{{crate.version}}}
+{{/each}}
+
+{{{text}}}
+
+{{/each}}

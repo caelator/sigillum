@@ -1,0 +1,247 @@
+# RC dry-run procedure (run after the 1.0.0 version bump lands on main):
+#   1. git checkout main && git pull --ff-only
+#   2. git tag -a v1.0.0-rc.1 -m "Sigillum 1.0.0-rc.1 dry run" && git push origin v1.0.0-rc.1
+#   3. Watch this workflow in the Actions tab; all four jobs (verify x2 legs, artifacts-macos, artifacts-linux, release) must pass.
+#   4. Verify the DRAFT release contains: the .dmg, the .app.zip, both sigillum-cli tar.gz archives, THIRD-PARTY-NOTICES.txt, and SHA256SUMS.
+#   5. Download the assets and run: shasum -a 256 --check SHA256SUMS --ignore-missing
+#   6. Confirm the release is still a draft and its body contains the CHANGELOG section (or the documented fallback text if CHANGELOG.md has not merged yet).
+#   7. Clean up: gh release delete v1.0.0-rc.1 --yes && git push origin :refs/tags/v1.0.0-rc.1 && git tag -d v1.0.0-rc.1
+
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install system dependencies (Linux)
+        if: runner.os == 'Linux'
+        # Tauri v2 (sigillum-desktop) needs the GTK3/WebKitGTK stack to compile on Linux.
+        run: >
+          sudo apt-get update && sudo apt-get install -y
+          pkg-config libudev-dev
+          libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev
+          librsvg2-dev libxdo-dev libssl-dev
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.88.0"
+          components: clippy, rustfmt
+
+      - name: Cache cargo artifacts
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install cargo-audit
+        run: cargo install cargo-audit --version 0.22.1 --locked
+
+      - name: Install cargo-deny
+        run: cargo install cargo-deny --version 0.19.4 --locked
+
+      - name: Install Tauri CLI (macOS)
+        if: runner.os == 'macOS'
+        run: cargo install tauri-cli --version 2.11.4 --locked
+
+      - name: Run release gate
+        run: ./scripts/check-release.sh
+
+      - name: Upload browser smoke failure artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: browser-smoke-artifacts-${{ matrix.os }}
+          path: |
+            /tmp/sigillum-browser-smoke.*/artifacts/
+            ${{ runner.temp }}/sigillum-browser-smoke.*/artifacts/
+          if-no-files-found: ignore
+
+  artifacts-macos:
+    needs: verify
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.88.0"
+          components: clippy, rustfmt
+
+      - name: Cache cargo artifacts
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install Tauri CLI
+        run: cargo install tauri-cli --version 2.11.4 --locked
+
+      - name: Install cargo-about
+        run: cargo install cargo-about --version 0.9.1 --locked --features cli
+
+      - name: Generate THIRD-PARTY-NOTICES
+        run: cargo about generate --output-file crates/sigillum-desktop/THIRD-PARTY-NOTICES.txt about.hbs
+
+      - name: Build desktop bundle
+        working-directory: crates/sigillum-desktop
+        run: cargo tauri build --config '{"bundle":{"resources":["THIRD-PARTY-NOTICES.txt"]}}'
+
+      - name: Build CLI
+        run: cargo build --release -p sigillum-cli --locked
+
+      - name: Stage artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          TAG="${GITHUB_REF_NAME}"
+          ARCH="$(uname -m)"
+          if [[ "${ARCH}" == "arm64" ]]; then
+            ARCH="aarch64"
+          fi
+          mkdir -p dist
+
+          shopt -s nullglob
+          dmg_files=(target/release/bundle/dmg/Sigillum_*.dmg)
+          if [[ "${#dmg_files[@]}" -ne 1 ]]; then
+            printf 'Expected exactly one Sigillum dmg, found %s\n' "${#dmg_files[@]}" >&2
+            printf 'Matches: %s\n' "${dmg_files[*]:-none}" >&2
+            exit 1
+          fi
+
+          cp "${dmg_files[0]}" "dist/Sigillum-${TAG}-macos-${ARCH}.dmg"
+          ditto -c -k --keepParent target/release/bundle/macos/Sigillum.app "dist/Sigillum-${TAG}-macos-${ARCH}.app.zip"
+          tar -czf "dist/sigillum-cli-${TAG}-macos-${ARCH}.tar.gz" -C target/release sigillum
+          cp crates/sigillum-desktop/THIRD-PARTY-NOTICES.txt dist/THIRD-PARTY-NOTICES.txt
+
+      - name: Upload release artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-artifacts-macos
+          path: dist/*
+          if-no-files-found: error
+
+  artifacts-linux:
+    needs: verify
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install system dependencies (Linux)
+        # Tauri v2 (sigillum-desktop) needs the GTK3/WebKitGTK stack to compile on Linux.
+        run: >
+          sudo apt-get update && sudo apt-get install -y
+          pkg-config libudev-dev
+          libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev
+          librsvg2-dev libxdo-dev libssl-dev
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.88.0"
+          components: clippy, rustfmt
+
+      - name: Cache cargo artifacts
+        uses: Swatinem/rust-cache@v2
+
+      - name: Build CLI
+        run: cargo build --release -p sigillum-cli --locked
+
+      - name: Stage artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          TAG="${GITHUB_REF_NAME}"
+          ARCH="$(uname -m)"
+          mkdir -p dist
+          tar -czf "dist/sigillum-cli-${TAG}-linux-${ARCH}.tar.gz" -C target/release sigillum
+
+      - name: Upload release artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-artifacts-linux
+          path: dist/*
+          if-no-files-found: error
+
+  release:
+    needs: [artifacts-macos, artifacts-linux]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download release artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: release-artifacts-*
+          path: dist
+          merge-multiple: true
+
+      - name: Generate SHA256SUMS
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          cd dist
+          sha256sum -- * > SHA256SUMS
+          cat SHA256SUMS
+
+      - name: Prepare release notes
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          BASE_VERSION="${GITHUB_REF_NAME#v}"
+          BASE_VERSION="${BASE_VERSION%%-*}"
+          NOTES_FILE="${RUNNER_TEMP}/release-notes.md"
+
+          if [[ -f CHANGELOG.md ]]; then
+            awk -v version="${BASE_VERSION}" '
+              $0 ~ "^## \\[" version "\\]" {
+                in_section = 1
+                next
+              }
+              in_section && $0 ~ "^## \\[" {
+                exit
+              }
+              in_section {
+                print
+              }
+            ' CHANGELOG.md > "${NOTES_FILE}"
+          else
+            : > "${NOTES_FILE}"
+          fi
+
+          if [[ ! -s "${NOTES_FILE}" ]]; then
+            {
+              printf 'Draft release for %s.\n\n' "${GITHUB_REF_NAME}"
+              printf 'CHANGELOG.md section [%s] was not available when this draft was generated. Paste the final changelog section here before publishing.\n' "${BASE_VERSION}"
+            } > "${NOTES_FILE}"
+          fi
+
+      - name: Create draft GitHub release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          gh release create "${GITHUB_REF_NAME}" --draft --verify-tag --title "Sigillum ${GITHUB_REF_NAME}" --notes-file "${RUNNER_TEMP}/release-notes.md" dist/*

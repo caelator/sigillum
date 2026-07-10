@@ -103,6 +103,43 @@ coverage. It always compiles `sigillum-desktop`; on macOS it also runs
 the app bundle has a code signature. Set `SIGILLUM_SKIP_DESKTOP_BUNDLE=1` only
 on macOS hosts that cannot build Tauri bundles.
 
+### Third-party license notices
+
+Release binaries ship with a generated `THIRD-PARTY-NOTICES.txt`, containing
+MIT/Apache-style attribution for all bundled Rust dependencies. `cargo deny`
+gates licenses but does not produce attribution, so the release workflow
+(`.github/workflows/release.yml`) generates the file with `cargo-about` pinned
+at `0.9.1`, using the committed `about.toml` accepted-license list that mirrors
+`deny.toml` and the `about.hbs` template at the repo root.
+
+The workflow writes the file to
+`crates/sigillum-desktop/THIRD-PARTY-NOTICES.txt` and then builds with a Tauri
+config overlay:
+
+```bash
+cargo tauri build --config '{"bundle":{"resources":["THIRD-PARTY-NOTICES.txt"]}}'
+```
+
+That overlay merges the file into the bundle resources, so it lands at
+`Sigillum.app/Contents/Resources/THIRD-PARTY-NOTICES.txt` inside the shipped
+`.dmg` and `.app.zip`. The committed `tauri.conf.json` intentionally does not
+list the resource, because Tauri fails a build when a listed resource file is
+missing and the file only exists after generation. Local builds and
+`check-desktop.sh` builds therefore build without notices, and only release
+builds include them.
+
+To reproduce locally:
+
+```bash
+cargo install cargo-about --version 0.9.1 --locked --features cli
+cargo about generate --output-file crates/sigillum-desktop/THIRD-PARTY-NOTICES.txt about.hbs
+cd crates/sigillum-desktop
+cargo tauri build --config '{"bundle":{"resources":["THIRD-PARTY-NOTICES.txt"]}}'
+```
+
+The workflow also attaches `THIRD-PARTY-NOTICES.txt` directly to the GitHub
+release next to `SHA256SUMS`.
+
 ### Verify the download before opening
 
 Compare the `.dmg` checksum with the release `SHA256SUMS` file:
@@ -242,6 +279,19 @@ receipt with the commit, dirty-checkout state, host, timing, iteration count,
 doctor count, and checked surfaces. Set `SIGILLUM_SOAK_KEEP_ARTIFACTS=1` only
 when you need daemon/gateway logs for investigation, because that keeps the
 temporary harness directory on disk.
+
+## Release Dry Run (rc tag)
+
+The release workflow (`.github/workflows/release.yml`) triggers on tags matching
+`v*`. Before tagging `v1.0.0` for real, dry-run it with an rc tag:
+
+1. `git checkout main && git pull --ff-only`
+2. `git tag -a v1.0.0-rc.1 -m "Sigillum 1.0.0-rc.1 dry run" && git push origin v1.0.0-rc.1`
+3. Watch the Release workflow in the Actions tab; the verify matrix (ubuntu + macos), artifacts-macos, artifacts-linux, and release jobs must all pass.
+4. Verify the draft release contains the `.dmg`, the zipped `.app`, both `sigillum-cli` `tar.gz` archives, `THIRD-PARTY-NOTICES.txt`, and `SHA256SUMS`.
+5. Download the assets and run `shasum -a 256 --check SHA256SUMS --ignore-missing`.
+6. Confirm the release is still a draft and its body carries the `CHANGELOG` section for the version, or the documented fallback text when `CHANGELOG.md` has not merged yet.
+7. Clean up: `gh release delete v1.0.0-rc.1 --yes`, then `git push origin :refs/tags/v1.0.0-rc.1` and `git tag -d v1.0.0-rc.1`.
 
 ## Operational Notes
 
