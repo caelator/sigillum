@@ -1404,20 +1404,32 @@ Order within W7 is strict: W7.1 → W7.2 → W7.3 → W7.4 → W7.5.
 
 #### H1 — Release candidate verification (all must pass, in order)
 
-- [ ] Fresh clone of `main` at the RC commit; `./scripts/check-release.sh`
-      passes there.
-- [ ] CI green on the RC commit, both legs.
-- [ ] F4 soak receipts (standard + chaos) reference the RC SHA.
-- [ ] F6 testnet receipts recorded for the four core execution families.
-- [ ] F7 upgrade-path tests green: 0.1-era fixture dir boots and migrates on
-      the RC build; 0.1-era snapshot restores.
-- [ ] Desktop `.dmg` from the G4 rc run installs and reaches the unlock
-      screen on a machine without a dev toolchain.
-- [ ] `sigillum doctor` passes on each supported host.
-- [ ] A full local walkthrough of the completion bar: import a seed →
+RC commit: `a22a98a` (main HEAD). The G4 rc dry-run ran on it as
+`v1.0.0-rc.1` (release.yml run 29071519514, all four jobs green) and was
+reversed (tag + draft release deleted); the five release assets were
+checksum-verified locally against SHA256SUMS. Autonomous items are checked
+below; the remaining items are operator human-gates.
+
+- [x] Fresh clone of `main` at the RC commit; `./scripts/check-release.sh`
+      passes there. (release.yml `verify` jobs — fresh checkout, both OS legs — green)
+- [x] CI green on the RC commit, both legs. (main push-CI run 29071505668, both legs green)
+- [ ] F4 soak receipts (standard + chaos) reference the RC SHA. (operator: mac-server soak at a22a98a)
+- [ ] F6 testnet receipts recorded for the four core execution families. (operator: funded testnet)
+- [x] F7 upgrade-path tests green: 0.1-era fixture dir boots and migrates on
+      the RC build; 0.1-era snapshot restores. (runs inside check-release.sh — green in the RC gate)
+- [~] Desktop `.dmg` from the G4 rc run installs and reaches the unlock
+      screen on a machine without a dev toolchain. (dry-run produced + checksum-verified
+      `Sigillum-v1.0.0-rc.1-macos-aarch64.dmg`; clean-machine install is the operator step)
+- [ ] `sigillum doctor` passes on each supported host. (operator: per-host)
+- [~] A full local walkthrough of the completion bar: import a seed →
       multi-chain scan → review inventory/risk → generate plan → approve →
-      execute against a local mock provider → audit trail complete.
-- [ ] CHANGELOG date filled; G5 docs merged.
+      execute against a local mock provider → audit trail complete. (execute→audit
+      backend CI-proven — dependency_chain_executes_in_order_with_full_audit_trail,
+      enqueue_step_happy_path_persists_job_marker_evidence_hash_and_audit,
+      eth_seed_jobs_are_gate_driven_and_execute_once_gates_pass via spawn_mock_evm_provider,
+      chaos_kill_in_flight_plan_step_resumes_terminal_without_duplication; UI click-through = operator acceptance)
+- [~] CHANGELOG date filled; G5 docs merged. (G5 merged PR #33; `[1.0.0]` date
+      placeholder `2026-07-XX` intentionally filled at H2 publish time)
 
 #### H2 — Tag and release
 
@@ -1509,13 +1521,13 @@ Phase F — Assurance
 Phase G — Release engineering
 - [x] G1 CHANGELOG.md
 - [x] G2 docs/stability.md
-- [ ] G3 version bump to 1.0.0
-- [~] G4 release workflow (rc dry run pending post-G3)
-- [ ] G5 readiness + product docs final sync
+- [x] G3 version bump to 1.0.0
+- [x] G4 release workflow (rc dry run validated on a22a98a, reversed)
+- [x] G5 readiness + product docs final sync
 
 Phase H — Ship
-- [ ] H1 RC verification checklist
-- [ ] H2 v1.0.0 tagged, artifacts published
+- [~] H1 RC verification checklist (autonomous items verified on a22a98a; F4/F6/clean-machine .dmg install/`doctor` per host = operator human-gates)
+- [ ] H2 v1.0.0 tagged, artifacts published (human gate — operator go)
 - [ ] H3 post-release bump + planning issue
 
 ## 6. Work log
@@ -1821,3 +1833,27 @@ Phase H — Ship
 - 2026-07-09 Process: switched implementation to Sonnet agents mid-session after
   a Codex CLI usage-limit block (operator-directed); then to maximum
   parallelism (concurrent PRs, CI-as-authoritative-gate, batched bookkeeping).
+- 2026-07-09 G3 ec01102 (PR #32): workspace version + six internal sigillum-*
+  crate pins bumped 0.1.0→1.0.0; CI green both legs; main now reports 1.0.0.
+- 2026-07-10 G5 0c8a168 (PR #33): final readiness/product docs sync (README,
+  PRODUCTION_READINESS, production-readiness-audit, wallet-management-roadmap,
+  architecture, catchup-plan) so docs describe exactly what shipped — EVM
+  wallet-management phases 1–9 (swaps excepted, D-13), policy-gated execution
+  default-off, D-17 residual risk, no valuation (D-16). Docs-only; both legs
+  green. (Recovery note: an earlier chained push failed and stranded the commit
+  on the local main checkout; re-created the branch at the commit, reset local
+  main to origin, rebased conflict-free onto current main, re-pushed.)
+- 2026-07-10 G4 rc dry-run VALIDATED on RC commit a22a98a: tagged v1.0.0-rc.1;
+  release.yml run 29071519514 all four jobs green (verify ×2, artifacts-macos,
+  artifacts-linux, release); draft release carried the .dmg, .app.zip, both
+  sigillum-cli tarballs, THIRD-PARTY-NOTICES.txt, and SHA256SUMS; all five
+  assets checksum-OK locally; body carried the CHANGELOG [1.0.0] section.
+  Reversed cleanly (release + remote/local tag deleted); main untouched. G4
+  complete.
+- 2026-07-10 H1 partial (RC = a22a98a): autonomous items verified — fresh-clone
+  gate (release verify jobs, both OS), CI-green-both-legs (push-CI 29071505668),
+  F7 upgrade path (in-gate), execute→audit backend (mock-provider + chaos
+  in-flight tests), G5 docs merged. Operator human-gates remain: F4 mac-server
+  soak at the RC SHA, F6 testnet execution receipts, clean-machine .dmg install
+  + unlock, `sigillum doctor` per host. H2 (CHANGELOG date fill + real v1.0.0
+  tag/publish) is the final human gate; H3 follows publish.
