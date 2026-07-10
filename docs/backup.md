@@ -99,3 +99,55 @@ are opened.
 current encrypted data directory and recreates an empty private directory; an
 interruption leaves either the original tree or an archive plus fresh empty
 tree, both of which are valid startup states.
+
+## Version-Upgrade Guarantees (0.1 → 1.0)
+
+Upgrading a 0.1-era data directory to the 1.0 daemon requires **no manual
+migration step**. You install the newer binary and start it against the same
+base directory; every persisted store migrates automatically.
+
+### What migrates automatically
+
+Each schema-versioned JSON store is wrapped in a `{schema, schema_version,
+data}` envelope. The 1.0 daemon reads older versions transparently and, on the
+next write to that store, re-saves it at the current schema version. Across the
+1.0 line the following stores carry forward:
+
+- `profiles.json` — provider, stealth, xpub, and seed wallet profiles
+  (legacy unwrapped documents → current version).
+- `deposits.json` — tracked stealth deposits.
+- `queue.json` — the transaction queue, including any pending job.
+- `wallet_inventory.json` — chain profiles, watch address book, discovered
+  addresses and holdings, the risk catalog and findings, consolidation plans,
+  **treasury policy, receiving allocations, and counterparties** (all held in
+  this store).
+- `token_registry.json` — locally imported ERC-20 token lists.
+
+Audit history migrates from the legacy JSONL log (`audit.log`) into the SQLite
+audit database (`audit.db`) on startup; the old log is preserved as
+`audit.log.migrated` rather than deleted.
+
+Migrations are forward-only and additive: fields introduced by newer schema
+versions take documented defaults when an older document omits them, so no
+operator data is dropped in the process. Passphrase-encrypted snapshots use a
+version-stable format, so a snapshot exported by a 0.1-era daemon restores
+cleanly under 1.0, and the restored stores then migrate on first read exactly
+as an in-place upgrade would.
+
+### Fail-closed on damage
+
+Migration never trades safety for convenience. If a store file cannot be
+parsed, the daemon recovers the matching `.bak` backup and quarantines the
+unreadable file as `<name>.corrupt-<timestamp>` — it is moved aside, never
+overwritten or discarded. A store that cannot be read from either the live file
+or its backup fails closed rather than silently resetting to empty state.
+
+### Verification
+
+These guarantees are proven end to end by
+`crates/sigillum-daemon/tests/upgrade_path.rs` (task F7): a committed
+fixture data directory built at the oldest supported per-store schema versions
+boots on the current daemon and is asserted to migrate every store to its
+current version (queue → v4, wallet inventory → v20, and so on) with no
+quarantine events, the vault canaries intact, the pending queue job preserved,
+and the 0.1-era encrypted snapshot restoring under 1.0.

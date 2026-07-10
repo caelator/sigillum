@@ -1,0 +1,1660 @@
+{
+  "entries": [
+    {
+      "path": ".initialized",
+      "data_hex": "31"
+    },
+    {
+      "path": "audit.key",
+      "data_hex": "d88100cb10effae4730406b46e6bfca9ead78e72d664b7834b938c650a840d8b"
+    },
+    {
+      "path": "audit.log",
+      "data_hex": "7b2264617461223a7b22636f6d706172746d656e745f6964223a302c22637265617465645f61745f756e6978223a312c2264657461696c73223a7b226c6162656c223a2264656661756c74222c227468726573686f6c64223a317d2c226b696e64223a22636f6d706172746d656e742e696e6974227d2c22736368656d61223a22736967696c6c756d2e61756469742d6576656e74222c22736368656d615f76657273696f6e223a317d0a7b2264617461223a7b22636f6d706172746d656e745f6964223a302c22637265617465645f61745f756e6978223a322c2264657461696c73223a7b226b6579223a2263616e6172792d70726f76696465722d746f6b656e227d2c226b696e64223a227365637265742e736574227d2c22736368656d61223a22736967696c6c756d2e61756469742d6576656e74222c22736368656d615f76657273696f6e223a317d0a"
+    },
+    {
+      "path": "compartments/0/api_keys.json",
+      "data_hex": "7b0a20202263616e6172792d6e6f7465223a2022646f2d6e6f742d757365222c0a20202263616e6172792d70726f76696465722d746f6b656e223a2022746573742d746f6b656e2d616263646566220a7d"
+    },
+    {
+      "path": "compartments/0/meta.enc",
+      "data_hex": "ef8447e7eec947546886429733983cdaf133571743d0d7c9f061cf6416c5eb0f1536a8ef1fa48fd8c885af9f322e1bbba10cc139fff398679de543dd27384ae4addca19d84fbdfd08c14e09338f9a15c210d595c468a6ad9224553b1a6e8bf690e010472af068e5d08f43a910ce8554322c435236556e3a81aef87eb9d7c57a6bb8b61106052e6f381420efd951259da16c46477bc8c2d7776107611"
+    },
+    {
+      "path": "compartments/0/passphrase.salt",
+      "data_hex": "cc704bd8937ea4783252b7b79184239118c99866151fc17aafb7cc2f9a027eed"
+    },
+    {
+      "path": "compartments/0/passphrase_wrapped_key.enc",
+      "data_hex": "e27bd7102db83874b35b58408a7fc6c7f54ed50faa1136b5cb42084501aa7b9e9f315e62e1fbb76e499f43f8ef28e1ce4f0d84c2820f2ea7865b9909"
+    },
+    {
+      "path": "compartments/0/vault.enc",
+      "data_hex": "4cd4bfbb31dc3cf6ae5c4ab6857ffde3c51252d4c5de1c90c8039049c7f5"
+    },
+    {
+      "path": "compartments/1/meta.enc",
+      "data_hex": "df0c1b0917c02a5fe8f2c7a0a33b4c710d36d47e5cfe68ed05a98e93e5f6aaf4db6565241c48c1340c11e060c432f9928a4c0def2dd7a1fbf1f944f5178140ddeecf1ccd217c332c7d48e86ca65dee3a71e076aafa7e3799a462359be84b40a6ca8669ac43596c76c3eb9dd1a66f91de006d9ad2a5fbda11faf06727a5fbe5a32963df975a87b7945568fdba285394a0e7afc8dc1df21fcbd12de521"
+    },
+    {
+      "path": "compartments/1/passphrase.salt",
+      "data_hex": "68fd3e3ea30704c35ed9be58cbbd3c7d250ad00f002bdcf0324f54c1e11859a4"
+    },
+    {
+      "path": "compartments/1/passphrase_wrapped_key.enc",
+      "data_hex": "c84e5fad00d7150b167de9123b26608c102d4f2eee1a521d714c603782e2894218e385de0e693f9bf2e390bf6db69daac0adc0d95a4a970e3580e0e5"
+    },
+    {
+      "path": "compartments/1/vault.enc",
+      "data_hex": "0ff7a5f0f0e300af009a0fd96436defcd1819555cdc6a73fbe53b473d819"
+    },
+    {
+      "path": "compartments/10/meta.enc",
+      "data_hex": "3cfc13a809c848db0570c666095318fed15a0d26578b7a886f36a6db1748077d3ea07ab813d6cbb368b8bc8fe2376b737ef44b0c073b4974da5fc50ab4aa5dda6f035bd11585ea0528eec60c55960a05cc5008907040a557a6969227cd9099ba95724fbab06b36b762c416dcb74c98e011a94e1d54f9159839db7f4fce282109b0ed34c15ec9d368aeb1aa03e2950a8171f2af6ebc27f2b179f0d5e3"
+    },
+    {
+      "path": "compartments/10/passphrase.salt",
+      "data_hex": "31fc860c479767ff2d78ab9890ef0e6d7dc13796ed0d1b9bed17b17219b8b522"
+    },
+    {
+      "path": "compartments/10/passphrase_wrapped_key.enc",
+      "data_hex": "557ada2716f7ac440e9a351662c774b305d24c4bb77ad5eed4880fe4d51c74184b6d4df965b6cdb09c47aecb0ab1835f3bd326a9cb6497a0d21a8df9"
+    },
+    {
+      "path": "compartments/10/vault.enc",
+      "data_hex": "c3e760e7163edb301de127344deaae08f2ad2afd5b2ab8d00d1f694d40e5"
+    },
+    {
+      "path": "compartments/11/meta.enc",
+      "data_hex": "9eaba6ab77cbd9c02411f63dd82a5f4d80221ba2f21444d3e57c025c0f3d06c930a92d738b4caff6c2cb3f738ade288ad1b2982231d9afd032149465bcb49cba09e239b12be44b23a3345aa6f459dd46fb08816217746aae4f6ccd1c0ed94666d7d1db26b8517282fd7ed36137bf55f6aa35ca151a1cd85dd74f73893cde21b1972c36f14f29430b73bad8c69d03636011bdb48fd25a5912b12597ce"
+    },
+    {
+      "path": "compartments/11/passphrase.salt",
+      "data_hex": "b17b827855616d2d008ced6da04fa431aaca8d3f147d75f05d3f04d47d05f5cc"
+    },
+    {
+      "path": "compartments/11/passphrase_wrapped_key.enc",
+      "data_hex": "bd539d935272aa0a32083d13803d0af91bd632770a2544c64d393581ce070bf8fb13b0ad4daa804248d19cb8b691c6d9082120d1e58cd1dd7848a38c"
+    },
+    {
+      "path": "compartments/11/vault.enc",
+      "data_hex": "ea477d2e3b4e23afe4e938b6c3cd9b64c78bd626ddced541444637d11303"
+    },
+    {
+      "path": "compartments/12/meta.enc",
+      "data_hex": "0c77a50d5fad5f0811ab13112444eb0c0f42eddf1261a86923c45ba01dcc017964064c1e76f519fcb540db6d757d3ad6d4ebae4ee5790aecc0f7b868c40a243c4799a8221da2d59315703e78dc8876dae62f6b688069869acbe3deca3d5c8fe4c6f9d59d717677b9c194381ad496e46e8f38d270f1b3466161bba5d6788abbff77dca63f57466baeaa33b49850b8f0b14d9ccee8ebad2dc490a82d8e"
+    },
+    {
+      "path": "compartments/12/passphrase.salt",
+      "data_hex": "7e8e728ffc44b656ff697c5b40f999b16f8f592b87a8697343dd2b0b7db2bbc6"
+    },
+    {
+      "path": "compartments/12/passphrase_wrapped_key.enc",
+      "data_hex": "ee8cf2e502fb9e0ca9b3483113d8f7e0fcf561425090d58c40da50d6d263b3353adbfec6b6c13a22fc40c9ecccf0b33dbe074ca710aa450582a0e55c"
+    },
+    {
+      "path": "compartments/12/vault.enc",
+      "data_hex": "6167ba57c7779f5ee099f04692deeb08695a9666090aa76472a111e5cd99"
+    },
+    {
+      "path": "compartments/13/meta.enc",
+      "data_hex": "165cebb0b8fa9e8ea897c02d153fb6069fa4ce60197aead69222b05f902b83653dd90e5f749c98509d622cae1df3a0f7cebc6963f2269b8f20a99f67984a37e77144a59ba63759aeaca0f41f41768cc403861a16d169089a1d8242c79136b63a579e3dd2762ca6661e162211382336a3eb77724fcf9c2bfce886f5cda413293c0143033792c488a3deebc1ac998c3536abe336693c8d5d02a967e707"
+    },
+    {
+      "path": "compartments/13/passphrase.salt",
+      "data_hex": "cc406f88d63feb4131d04d50ee62b469cd65d98c46d82286228703e1a24eecbd"
+    },
+    {
+      "path": "compartments/13/passphrase_wrapped_key.enc",
+      "data_hex": "ca5bdc1022b7c8bfab86df885a703d1583afde944d8aff4c98ae404b6cafa17c9e98c2acf30267decd91ebc783d83de784811f5d9c822ee1df72bff7"
+    },
+    {
+      "path": "compartments/13/vault.enc",
+      "data_hex": "0a75be7d2d8d3ee4d7115015ee3d9e2e70725132c2566bb9fd255d664d16"
+    },
+    {
+      "path": "compartments/14/meta.enc",
+      "data_hex": "43816ff3238164fb8bc9213d129da2c138a57aa6e03e38f00a6b8e18a9b9658c8b3b8ef6608025415df35a4bee37277a9f3e6f8d12bee1f6ab689643f228f4139b475c8f12bf2596d4d8b954e4a079aff2337035f7753b2730c0eebbb310d433a85399cadd344eef776a05badb553edf68d176e77b82b36de671564ab26e192f061363dd07d9527ec8bd55bf81780792e85496b28eebb3ab8b05d58c"
+    },
+    {
+      "path": "compartments/14/passphrase.salt",
+      "data_hex": "921deeed6f5ad37918222e9149a32f73d678608b851d655dafebd45988f94abb"
+    },
+    {
+      "path": "compartments/14/passphrase_wrapped_key.enc",
+      "data_hex": "7266b8117339ec500639d433ef615841c6acb48b00a5faf88dd1512b4b9b733bcf64e30427ca3cb30590d704fda4b81100fa02afb5d9c6992354fb50"
+    },
+    {
+      "path": "compartments/14/vault.enc",
+      "data_hex": "9282745db6f981b34eec8653693bc72a0975b7f8dc4b15a93e0d561e9972"
+    },
+    {
+      "path": "compartments/15/meta.enc",
+      "data_hex": "a3f083a44b3e8581ee07c1bdbc40545df9bf1a0e11b69a5b1a9e007b0d408e62516847c8c4216252e51548a02a50bd96e4f1211d6bb8876e3f82852a74270940593b709973b55e30e973fbc7e448fa51efc42a6cbbf1b85833ef946d0e31e89571789ef9e91c6031c5d24ccf68c5bc4ebef1fda76dbaa3b3595a4d70a6a7701cee62e671c62a9d72e62b6a4eeb0545c7747b63104eb747def9146926"
+    },
+    {
+      "path": "compartments/15/passphrase.salt",
+      "data_hex": "eeb25869bfec7d93f5eb567d5de0106f344de498be88d3504a12e0621e664df6"
+    },
+    {
+      "path": "compartments/15/passphrase_wrapped_key.enc",
+      "data_hex": "a1e16f02266fb4e2216d8151e93827a9e885692bdd6b00d201d32e64f1555f164143595c2b34916cf0a95dcc9487cf3181e11c29b868eabeacf01899"
+    },
+    {
+      "path": "compartments/15/vault.enc",
+      "data_hex": "4c4145217d23d9f4478cc070685775b21a06d86656d69bca776a8e83621b"
+    },
+    {
+      "path": "compartments/16/meta.enc",
+      "data_hex": "48ca037a779c160e239a906aaf4ec375a0af527ac34edd1400a27ba08ed5e85617610b47fd194233faf668c39f91bf0d940d9436f5cb0ade57ea60453fd7e9c5776f2cbf8892774532f03be5f2d96e115d597f138760d499d18d13b1cc86a2ace3a72960b08d2d4dc51e45f266de440d69a79dde8ee307e2b356c7d18b12c8aa7e7543aa1f5d6d83e7db76d2fe4090aef14e8151402640caca47d13b"
+    },
+    {
+      "path": "compartments/16/passphrase.salt",
+      "data_hex": "b1cdcd0996b5b8a824001e7695421d632f9b033c024d58a8b462ac3fd965fe1a"
+    },
+    {
+      "path": "compartments/16/passphrase_wrapped_key.enc",
+      "data_hex": "9abedab6186d05b86e0ce8ebe5360b4ea5050dda26a7d1be0e340e695277bd65df330ec3b38f5300d569f9b450d43a82c57319349f45e1ec8e935459"
+    },
+    {
+      "path": "compartments/16/vault.enc",
+      "data_hex": "fc3288c7355840e7cd592d9ed7eddaca5a0d6482d7ab2940507e882ba38d"
+    },
+    {
+      "path": "compartments/17/meta.enc",
+      "data_hex": "fa35c132cec5c285a9fcf537ab17e4aa2db7bc1f622e3451fbd6c6a5a1691a4721bcec58ea6b5aff62598293350c4208deba58e4ffed8f51ffa79d09bb91d6ae0ee03ebe45904c53d6685a41dd5b90178ab6afc3c0ce0b5156fc8196c038d848fabc88f8712723e7cc4fb2e6528c0e348306ab607cdd22ecacf41cabcd0ace1d7ffc835d5f785af39b6c8c8727e939e0f4f775a75eeb9d1c0640c097"
+    },
+    {
+      "path": "compartments/17/passphrase.salt",
+      "data_hex": "da06f95628adfcc260fc0662535d38169b39cea802b377e132182010ab81aa6d"
+    },
+    {
+      "path": "compartments/17/passphrase_wrapped_key.enc",
+      "data_hex": "13d16f419d4eb7c8e14abc9e9e08fee6ebeea11b98ea058bc3d5be4ee9411bad60863472e329a789124cd055ed99d548537d5aa644567263f2f45175"
+    },
+    {
+      "path": "compartments/17/vault.enc",
+      "data_hex": "fce0b73bfcc0e04937764042758724b993e8687c259148f3d7b7119127d2"
+    },
+    {
+      "path": "compartments/18/meta.enc",
+      "data_hex": "73dfa86ee2829af74a01d33c088f0176268c00d728c4770fc039d7d7602a61c7716a1ae8d8fc67195c6a63a977ffc2c8e207e20e33a36fbbb25ef7c472e4eac850091de351209b359e3911911d448c5a682e79fcb2140d903bee5e1cfabc750eb0df0d560e185b330d7bcca5e63483982301773e3fa913e5a6bcfd0fd0640d3bb892f7eaf637bb2f844ad0866390e355a8183c06f363938d1eb4261a"
+    },
+    {
+      "path": "compartments/18/passphrase.salt",
+      "data_hex": "99b46e19cd64f06f486205204f77882884911c2821814d8761daf2964ba82175"
+    },
+    {
+      "path": "compartments/18/passphrase_wrapped_key.enc",
+      "data_hex": "935c91e210ec8aa441ffb97a7559416ad876c9161cfcf87fe2ffd47113d96d5142e3da327dd7a5f97383ccf0d61a52ea725f2b2b0b8af5e522ad705a"
+    },
+    {
+      "path": "compartments/18/vault.enc",
+      "data_hex": "4937621f245ac3b4395a3ac3dd562ab1f7339c4d71eb9f12f06b736978a7"
+    },
+    {
+      "path": "compartments/19/meta.enc",
+      "data_hex": "a8cd410b791b736d9ffa64be05b235bf5a0491d9ea430bbb8d6b8d1dd2fa6196662d619f4376d7582d160e7ad78454a55ad8df2e1c4f981466b795277fc30813d7e62b3b1570b26b5054d9d99bc1dcf816e232f50849e4d8447231cb44ad44c164663dc65341939cfaf32f4ed49f33a790fb9e8b85f813de3d16ea55b25ea071afce4aab5afdb7b819429ac5a71da1e7e6c9138f5a49eb392cdb22ae"
+    },
+    {
+      "path": "compartments/19/passphrase.salt",
+      "data_hex": "66047347c2c134ed5516514b5c7adc937d97fb38b2bc534aff33eda6686a02f7"
+    },
+    {
+      "path": "compartments/19/passphrase_wrapped_key.enc",
+      "data_hex": "17868291e82ed15b496184100cb6d3518a61f9c37d0c8ccbe41a12b0aff78180df44af331f1b4471a0b8a43a7d37eab98b168ba1c8bc2f752be801c3"
+    },
+    {
+      "path": "compartments/19/vault.enc",
+      "data_hex": "fdad48ea2089517c07a61f90bd4cc7d124a6fc05ce22dc33c8c5a7893772"
+    },
+    {
+      "path": "compartments/2/meta.enc",
+      "data_hex": "8f53057f4b304a1ecef4bc7018510b8885394312bcf95d9539dc62541fcbdd2e6d33835e6dc91728e2fda1fc982cb6a3f6055421299a2f59b8723afd3e70f39401f5715d9ef196f011d79a189981243ca1931e46199686738678ad423ba4295179d57a101b972ba5612bf83284c1fcad1a245aa236a4bfdad10aa2a84c95185c63275ea5e0b182140addac8ce3dd5528a521a6c03805df3c274bfd4f"
+    },
+    {
+      "path": "compartments/2/passphrase.salt",
+      "data_hex": "13231fb62e49a070db6e57ee84377bd20d421fa1611a106138070d00ea046e5c"
+    },
+    {
+      "path": "compartments/2/passphrase_wrapped_key.enc",
+      "data_hex": "6ca1c2a1a904ee8c5d1aaadfd1cb75f343b09f90575de3a8144579e55a0dcf45fe53c88dba7efd0fd4e1d2eafc4121157260bc91be1620e5d8b9a3ae"
+    },
+    {
+      "path": "compartments/2/vault.enc",
+      "data_hex": "78a92f9572deb78ad5630700af83fd3721c1e7ec112026f2351cdd62058d"
+    },
+    {
+      "path": "compartments/20/meta.enc",
+      "data_hex": "58b3647f0f841ce72edb6455a67a9e394f1d286c73ce7dd6a5a51c2be8d7f167877018709a1e5c1f128dee49f76c04613a708d164a0f2af924dd0a0f36ceffc9d0d922790894af20963fde3a81f6acbca8d7b7461c332d5ecd34558251d2c2ad3fa3424ee1c296188d3efc5f30f4d4c6253600b8991841a458cc0311e5418a37590b4ae799b4172ca03001dc183ff7964fe4de74790f344fe5c75a5c"
+    },
+    {
+      "path": "compartments/20/passphrase.salt",
+      "data_hex": "63d63d50846ce8ee020608ac29cab0db150ba5e6a520cbdf03b5a908e5a4d88d"
+    },
+    {
+      "path": "compartments/20/passphrase_wrapped_key.enc",
+      "data_hex": "7f32c97769dc9ae899d0c51b49c6108f457ab95c57cd4f333dd0948314aef3cc0403ef71a7503d9f7e5da9223344faa1617b89f76bd0d896f24fec8c"
+    },
+    {
+      "path": "compartments/20/vault.enc",
+      "data_hex": "38635be272da3e4127f1bdc2eede12f9c9438b8d634fb69f60e808c3a43c"
+    },
+    {
+      "path": "compartments/21/meta.enc",
+      "data_hex": "437bf02a1e7138a4b25c670bc40852a4869205b7d538cb0a2a892f16a14ac997e708e5fbb871c9f1e1e7e39b4d6baab4e77b13f77e6e5d0d4ffe4417cf7ff1411ba23f7edd7df91445584aa0194961174e72ab51ec973318596e79a0f5c124464c80e8c3b5207d63c5a832095ce2136577ea3f939eb9bbd5cec05d08c80c7712bf21a2f11847cd31fa56808f6a317ec9401c1005018dcee66b06fcb6"
+    },
+    {
+      "path": "compartments/21/passphrase.salt",
+      "data_hex": "38364d794c51ba05ad2d6b137d2712fdee686e27a90e44e0f756aa57d5410537"
+    },
+    {
+      "path": "compartments/21/passphrase_wrapped_key.enc",
+      "data_hex": "bc59ffd5ddeaa6a08d73665ee0c8fa537128b7613155dd2ce0504429c80f3f61d0cc094b212501e4484ea1397a5079a781dec6fe896bffe4a05f6ae7"
+    },
+    {
+      "path": "compartments/21/vault.enc",
+      "data_hex": "7c326ee3b00f9f91db81d1c500e4bcfd5aa5d5e14a1f632c38fe0daa6182"
+    },
+    {
+      "path": "compartments/22/meta.enc",
+      "data_hex": "a28627c3a5faca3e3915af148dd3d0034ebcf7c6b5f982d725c447f18f02ebea69a14d89a6f5af8ac45deb4650bfdb876fe8943e3a484278aab0bc907dfa5003187b86231d80f66f609475fd820fae311a9212f2d8577077f253194b7e1853b4ac54b49f773f28b3717bb789537ebc96723962206d33364fa3be828d08ed93f7f3b6569e4c17028031a35c00023d9260b69eb8f198632a3db22f1a5a"
+    },
+    {
+      "path": "compartments/22/passphrase.salt",
+      "data_hex": "4940697b6796a12d502730190efb052f1df71d72c6d6c01967c8102961c54c6c"
+    },
+    {
+      "path": "compartments/22/passphrase_wrapped_key.enc",
+      "data_hex": "bd47af27217cd8edd8b5dc1b72c216f53b5de095c47aa0765a5194b2367281e1d80d1f3f33ca90bda0ba8497c447b233e0af90a8e205db645378c1df"
+    },
+    {
+      "path": "compartments/22/vault.enc",
+      "data_hex": "2426526c14cfcb4ba5d80e94778b8bd38cd5ced89ab3b5e261c4b5629a90"
+    },
+    {
+      "path": "compartments/23/meta.enc",
+      "data_hex": "bc3cd77a7a8ff08a832e5b44a9db2073649de9c1dfa210afe55c8ed630d7bc2f671ae9ee8c35d1d80c6df2dfc6aa15096e8dd1f81782a6c714a2e7f9063c40fe6ade1da3e89f7152139c000cc9d8ada6a1a0d5c9d8a49e6e44e6abd559baf783fd4137c8d15584f006e349e1cbec08be7bb75e8d61b751d587f68db7ec723d8acdd9e974e585eaa9a5d06f4f349c207fe86d746c395fb4b59fc3dfa8"
+    },
+    {
+      "path": "compartments/23/passphrase.salt",
+      "data_hex": "af6c15b8c19237a6437d05091f9c0000716d6e19d0ae3a5ff354dcf4eff3767e"
+    },
+    {
+      "path": "compartments/23/passphrase_wrapped_key.enc",
+      "data_hex": "a0c2e1cb9b07de978c2e803b7100abdb20b14149f06f51617a06b2e90781b89a401092e6fa17447f5f29d5f47ecdb291a63ec4bae3ddcaf3ef2add05"
+    },
+    {
+      "path": "compartments/23/vault.enc",
+      "data_hex": "12167c759c87a7075d5f567d0ded0b5b7afe2bc57767d7462fe9dfbca7ca"
+    },
+    {
+      "path": "compartments/24/meta.enc",
+      "data_hex": "d96d68576cf28b5662f8b2c4579d49127eb73ae0d1a2d5c6346e875331231f967c29190486238c94feff5c0cca954408774739eba5cd2d6a65639fe776a01b76001b790f474e60f60e87d320b1dafe07c69b9f267f10015c493008b324fef3551ea729e68df0124ea89e17c84c0b3543110a98ad2a3828a1968f01cd5cd371457ddbdfb23c138792af4ec86c1723de6262ddb8f8d42607fbbf8ae67a"
+    },
+    {
+      "path": "compartments/24/passphrase.salt",
+      "data_hex": "570b456cdad061946a9c45c0a485abd38e90adbe80dd9238b054334b12a6a27a"
+    },
+    {
+      "path": "compartments/24/passphrase_wrapped_key.enc",
+      "data_hex": "9bb617d686acbcf0e89e8c4561aa3c7d43fdbddb70021a0c97c1a387506331ed2a63d1b6ce794a9de0c790d91c035ace6c99c8bb60b25b32bb7e86b4"
+    },
+    {
+      "path": "compartments/24/vault.enc",
+      "data_hex": "b12e483581219dd0c788e2a9c76563768adde6d2eadbec57337ced75dfce"
+    },
+    {
+      "path": "compartments/25/meta.enc",
+      "data_hex": "15b9d5620b6f4f81da44640740fa40f15a43472805348f75820daee32d9a56af7c3793a2e88d4280eea8fb29db60cc5e99f89fd4cb231747ef95ee5c6de805f8311359a578da8e7db78ad6fe5d111bfc87239dcbf764eeec14c9f1a368d2f63311ec2f9b2c44e888a8616225a814fbb928be4906fed70fa6c58b9b9e55e918bb9407703fe30a475e1c72fefd40c9828b675e351cc403184ee87b2487"
+    },
+    {
+      "path": "compartments/25/passphrase.salt",
+      "data_hex": "e05ae274bdc3cae8003c1db093d431a9d7f3c19f09eed4a1b01ac60d4aa59bbd"
+    },
+    {
+      "path": "compartments/25/passphrase_wrapped_key.enc",
+      "data_hex": "3419f9c22e38267efc873915c61d38f21e57da39128ccb69208d951ce4bec519a3a1d1744baa9fa708651399944a58f0250313d39dd6ed783d9f7056"
+    },
+    {
+      "path": "compartments/25/vault.enc",
+      "data_hex": "e14c2c64f37dda8f6b1baebab5b5fab2cef8451f9517459f2889b40fa7d8"
+    },
+    {
+      "path": "compartments/26/meta.enc",
+      "data_hex": "b04dddc9dca582be0f8a4565356b1abfb2be55a417cdb22d147a932bdb76ffdabf102c3ddd422f9236c3cadf57b0ce7b9429e61782b99f2acc72a453a72aafc2d3646a1c54895c5d5b4297986ae281da34e934b39df460c2779f999fbd228db35fdf45dbabc249756b1f5cc201153465eee0941ef60cb54bb899fb5f5f1d60191eb2474ae62b8612485626b17f557341a53102f6d3e6b5aebc25c3f7"
+    },
+    {
+      "path": "compartments/26/passphrase.salt",
+      "data_hex": "f94785c125131e8101b9a337bee1170101f0575580fb84035468eb2c3f7b0e32"
+    },
+    {
+      "path": "compartments/26/passphrase_wrapped_key.enc",
+      "data_hex": "3afca126d5b47b95cb674f72156df9f8ad0742796972145c1efffab5e234443f8726493d512bd995e65f3932b9b3c4bc9afc91cd19297c57c4d49fc6"
+    },
+    {
+      "path": "compartments/26/vault.enc",
+      "data_hex": "d17e7189b7eda8441a64f443bcdd2e09d91bf248bac455f97699f9c38f16"
+    },
+    {
+      "path": "compartments/27/meta.enc",
+      "data_hex": "a2d1dd94a6775049e140784974bc404bb8926adacab1d8afd4e7cd9dca99043062e9646375a8ba183e5c8bfc5db13d0790c27777d7a18d2792b1bb6937b1da83a54956641fa7aee71e0c14febdd7c74fac3885fb380e2e2f96b5eb85c84d340b3b1ae88a36d66656ee719970cae65ef897edcfc5e29dc44faea8b30172fee4b0a7867d4f3ddd0a4b5311661a85ddb62855be96330fc2156fc38103fd"
+    },
+    {
+      "path": "compartments/27/passphrase.salt",
+      "data_hex": "806ab8d84ed5561cf68b2a4230ce333eb654b6c57d04930cadfcf75de75fc00b"
+    },
+    {
+      "path": "compartments/27/passphrase_wrapped_key.enc",
+      "data_hex": "0510e5e310eb4c51dfb60fa3ea16e695b113fc2315a64bcc195d51d902da75a1086d3eaa8c26efc576c3f8a4c993bc23c4337ff48a11286dc9f0286f"
+    },
+    {
+      "path": "compartments/27/vault.enc",
+      "data_hex": "16539bde88fdd5d3427ccf7b1b96117a78e4b272a721508b754308e0b138"
+    },
+    {
+      "path": "compartments/28/meta.enc",
+      "data_hex": "a9d12a514972a044b4482d3184d25c5df65b42e219e9695ccbeb7e8a51707591a5ce844527fedacac2862cebeff2126e9d0dca1145ea44da0bb76ca926a0b9a74a26531c360862fe46f3533e46cb6dc1cfe1efa2923c146a6b25a0e063179f37ae13b18aa79cc00a26211583ee75c4d75605d8985204b85ded4d5db67e307f2f3199e480272f175c6a8062715068664b2f32b653e7b16f897cbc47e4"
+    },
+    {
+      "path": "compartments/28/passphrase.salt",
+      "data_hex": "a87b9db8a52d860ae22f52090156cbf36abc5a2cde863568ce5e0d382650f747"
+    },
+    {
+      "path": "compartments/28/passphrase_wrapped_key.enc",
+      "data_hex": "d871a87c50eb80818a49a212c9cdc9100df4bf2c1cad91d26fd8cbe12cda95ced3981746d15fdf20ee75683dd7f2f57bf9a87c30c4983cbc3d489a7b"
+    },
+    {
+      "path": "compartments/28/vault.enc",
+      "data_hex": "7f30c57e678c35d69f6d08f6e6399274f5edf027645fcde8c31b0dc20a7b"
+    },
+    {
+      "path": "compartments/29/meta.enc",
+      "data_hex": "bd0f7903a4ed17f61ec837744cac49c6e3606786dcd275cd4306580f684b4e25875bd08a865262caee8cbbbe724591ff1b919f31ddbfba62bde6286592917759980fdb23cb8db375d57dee4fab75d77f1cadbcc86b02b097e48c9514ad859cf48a7e5125b156c9e698ba4737074d0bb075c4be2d2ff88fafa69f568987e73a1a1b2ca8b2372714853a1e2d36bef594b5f15f18733ac13124882a9ada"
+    },
+    {
+      "path": "compartments/29/passphrase.salt",
+      "data_hex": "5934fcccc715151c18a7146f8bb1010004ff80ac7bbaa9508c45414a5297d1a2"
+    },
+    {
+      "path": "compartments/29/passphrase_wrapped_key.enc",
+      "data_hex": "d6907eaa72d05e450de439ca8c92b6cfc294276e366575b69aa23e6f25222d73fed54609cbfa3428b55f42f657d53ef2c2c55409fdf84be95038900c"
+    },
+    {
+      "path": "compartments/29/vault.enc",
+      "data_hex": "f6c031c2a105bbc7aa26669c49203dc5ddd7ec327cfd1e9b28a99f6e4bf4"
+    },
+    {
+      "path": "compartments/3/meta.enc",
+      "data_hex": "ff245736e73cb4ac020ead278692ee907c7b8b5b9a668938dc2383aa2a8911f159520921e6e44e2df0b711f2b8bc20b699ebd7416faf66e40e974907beef67e91b3920e46f85288f2978457d27b623a5338b557752aefcf3dcc4ee26d1182065a52d861b792ec51577b2472783f701360f0aab05658463337d2a249c473abf33f8bae62d1014e32ba24c0d211e398825487e967f012ff7e0a9d139d7"
+    },
+    {
+      "path": "compartments/3/passphrase.salt",
+      "data_hex": "156d843229d61d58e04135e4dc86e55fa45b4289976dfdd36ddbca29f8e93fed"
+    },
+    {
+      "path": "compartments/3/passphrase_wrapped_key.enc",
+      "data_hex": "a08fe84681989cc61a66560f752cdf342a0e6190f4e2871693d0eba63a38c1edb917a4c6af249f5f686131ac2459256d830ba2ecafeda924beea192e"
+    },
+    {
+      "path": "compartments/3/vault.enc",
+      "data_hex": "09ecc3a7f1eb9486319550a031c18e202ec0f8a3777066597da94722757d"
+    },
+    {
+      "path": "compartments/30/meta.enc",
+      "data_hex": "63d86c4f6d0631ab066bb33af676f0af9f73f787bec90b51654cd1590082286d28f07ffb21ba56ec2135b3fc8c7d1f549787ee8ed4dec49f5aef45b6a464c1cfee3a7c43b9a4bfbb28f422a7e6b62c0723bac967b34e462e0483391fa888fd6af880326ba8c0a0e99b49d738263b98599a3919796e2d600c86d79305c80f5aae743271c2113d5a9e67b407cad5f2cb3b35f4c77bfa25e29671799a2a"
+    },
+    {
+      "path": "compartments/30/passphrase.salt",
+      "data_hex": "c5baad46eaa85129bd4ec8e0f3d1ac891f2e23b838f0c2fcbd785a382888f60a"
+    },
+    {
+      "path": "compartments/30/passphrase_wrapped_key.enc",
+      "data_hex": "2a83bf4cf1038225a61d9d4a4189cd091bd94c274e07252e5f126ea805149a1398b40aff6c3ff3d8de32a3a104feb6f510db74517da2617236d61bc2"
+    },
+    {
+      "path": "compartments/30/vault.enc",
+      "data_hex": "4133dbc35712a6a366de6979f126384a501a3bb1cd98a7020ca3355a1db7"
+    },
+    {
+      "path": "compartments/31/meta.enc",
+      "data_hex": "f492989a287e32f33262a3c134d2eb536b1a3558166d59503fc1227a0678533b7ffb064dc1a1aeb648f66c25510cf0f30f03eb5ba6d064df40a486282d36e3baeb8f4b450dd5c2ceaf97fa2822f2f62a78ce68d2a2c88f9d93ecdbb29ab3028b4f812214fe672f3d83203788b280112a65f3dfa3143055704c4560e5ce9e2d7b6dbd7a070305be458d079bf56a90d99d5b185c888ed02357aa92f61d"
+    },
+    {
+      "path": "compartments/31/passphrase.salt",
+      "data_hex": "a23a64fb6af9897d82f997159019f390eb5b1dc59d2e5383987d8a807d3ad2b2"
+    },
+    {
+      "path": "compartments/31/passphrase_wrapped_key.enc",
+      "data_hex": "9f6988799ded578d0c174286696310256c30136ad63e94c06f5c6acf196367ee50eaca9edd284d2e23b6bf2d9c53381ba4deb32096726f7238559a0a"
+    },
+    {
+      "path": "compartments/31/vault.enc",
+      "data_hex": "4d9f7d72ade62fb92a80521399419cb304ac93a7806974fbc3357cf3c6e0"
+    },
+    {
+      "path": "compartments/32/meta.enc",
+      "data_hex": "181e652faf3cca6db95d4351791cd37049ef604c6c1b5005784d722e42e30ff6ba1aa9806f31c5531bca61050bde1f5b4857ba18a241de1cefc0adfff85b788ad52bd1c2e45d10037d30d551f27cfa399e481f73264c63b5d74cf8b748c1c8f9a8b7fa8c3e6fee907fbca7f58a5a3b8732b49aad78990372bf5a88230434259794817837d37a59a1278770b309491cc467ba05dcf3a70a4a46be4b1e"
+    },
+    {
+      "path": "compartments/32/passphrase.salt",
+      "data_hex": "f0392dcc4c870848de7d88a01144e7cffa0b4fead7a5a6d590859a6f41e01703"
+    },
+    {
+      "path": "compartments/32/passphrase_wrapped_key.enc",
+      "data_hex": "109eeb3006983ceb83fdb966b2f54a70587553b9ae7795d0461ec6c3859fe45f72d7909a2c0afec9f657126b43e5bf7c6204f3b14d01c5aa93103f28"
+    },
+    {
+      "path": "compartments/32/vault.enc",
+      "data_hex": "9982f9d8e1a2e0965673bd55c79479316a2d6adde5acab8c88e0b4cbdfc3"
+    },
+    {
+      "path": "compartments/33/meta.enc",
+      "data_hex": "6a8b23556cfe6e9cafff9eb0792de67d3094759a65f7ffd8ce31fa1ec6e9213d9273ae51af47f86ba6ae2bfc1b8c6121884d6d6c46a5facdccf4b4899f7884fc788a1bd6813cde791ee4cd8605a3b142e199b9805714c14150792da80f082d414c0305cabdc16a3fde4003c46f6fdc2cf92ea8f57a78c8a47e86f83294de805a9dea49c6c560c3dbc3b9f836ac1ccbd26298b6d3f0f71ecad6e88fae"
+    },
+    {
+      "path": "compartments/33/passphrase.salt",
+      "data_hex": "64f87aad150af803f92410df2239527fde404920968c2fa39b4f14245480eac4"
+    },
+    {
+      "path": "compartments/33/passphrase_wrapped_key.enc",
+      "data_hex": "9e870c5c626d48c77922112aa06f6967c198d96a57607207b3b13db5c09e6d838eab6f3bf6474d5004db4269f9d1800d122d16963f02b0dfcc8c0154"
+    },
+    {
+      "path": "compartments/33/vault.enc",
+      "data_hex": "01c9a11e5d6f28537acd134a578ed02a76d9d0f4abedaed6fa921f1005c0"
+    },
+    {
+      "path": "compartments/34/meta.enc",
+      "data_hex": "0a6c34b15a875c66d9c284e9485c012a56c21af0e3668b50f23dce1124326cba5723ed400cd18f9518fdef532317bb970b015bf3ef67e10076fa3990f85dcb3b5184cb41323237945cb4f521cc23d8df799bb17e57c863a7dedc43f174f563af37ad1d1ab58635316a09f43bceec132153631cab67f1ee039f565168b1fb761fc480bb23007dd0f22d2686d4744f6823191b289ab66c1283b49d78a5"
+    },
+    {
+      "path": "compartments/34/passphrase.salt",
+      "data_hex": "7bc4fcf13117623af45b5d929e3539224ddeb887d15731f6e8bd1d620517b5c5"
+    },
+    {
+      "path": "compartments/34/passphrase_wrapped_key.enc",
+      "data_hex": "b57bff454eb1e96f1d90a57809db502ec072e7e4ab11dc2ce33bb38826d63fe472a1c45745755e5c24161cb7a09d02c01af41bb3f8a0abf06546b108"
+    },
+    {
+      "path": "compartments/34/vault.enc",
+      "data_hex": "0e737655400a827906397c16dcb49a0821553a2dd75375142e8eb5f54f37"
+    },
+    {
+      "path": "compartments/35/meta.enc",
+      "data_hex": "c6b5803eca2619722d3944726712660e435875005d9367ba299f72da7497420fc58aeba4160ab894fbca7db40f52f15d9320ebe04c8eea52fdf7c5ea9a72a4ecf87558fcae58a43d28039335c6a69e3a721da1d73ece836a20253cba80c5a58d08e3cc0cc3cc3bedf0f457283754e3895ac9a716f1052b89650f763ec43631ff33a454e77d5fcbb31dbf461e8bdccb5fc71dad887eac2bdc390ec14b"
+    },
+    {
+      "path": "compartments/35/passphrase.salt",
+      "data_hex": "d0a268fb8b9f19fa9b9b20c437a97d096698fb64e037259657862ac6b9a3774b"
+    },
+    {
+      "path": "compartments/35/passphrase_wrapped_key.enc",
+      "data_hex": "a484091386d0b2ee772a61cbb040e3a9cb4ffbe52b90df51f1402944abb450ddae52eb906c0b95a3d68020b58abd8e1c915cf9185ac0e5286ae65c2c"
+    },
+    {
+      "path": "compartments/35/vault.enc",
+      "data_hex": "095f40c1d2b4b52b9e50ba02b9dd3ac98d109da6d4798a52ff4be28982be"
+    },
+    {
+      "path": "compartments/36/meta.enc",
+      "data_hex": "b0699c052edbc577a96d283b9762fba884cac3d8756a79cc209fabd4ab9563c47a154323bc9c1174b54fde596a7b43ef094b888bdf80fc70adcdb99febbe0844d0682ca3bd4af2b073baddcec870d2e1990279130fbd37094bf40d4d1d48e9c84c9e395af9bccafddb0009012333a42aba6dca0656ade050741c64ad4da857a13c0f5c5633a625a2870c5f911468efce2ca56e10d4de824dc7a0e4af"
+    },
+    {
+      "path": "compartments/36/passphrase.salt",
+      "data_hex": "3d2715d3b08041b2b95f69ebc69997edb4c7b4fcce3e3aaf732ca91f1da6cde4"
+    },
+    {
+      "path": "compartments/36/passphrase_wrapped_key.enc",
+      "data_hex": "eacb9e12a2a18f2e25b1496e79aad4e03adeb5b9a54df6d45f5e89f9eeb1dba0ac351c1f7c35fe71381080a9185761e1b53eba65b9dffb4de15f641d"
+    },
+    {
+      "path": "compartments/36/vault.enc",
+      "data_hex": "6090532fe5c49ffad623c072783e693047dd50875dbcc6db8bdb2b0692e9"
+    },
+    {
+      "path": "compartments/37/meta.enc",
+      "data_hex": "90210a856419922f8a030dc06516a0e86ea04145634bcc16272782db41f15c439183e3fa5216e975542abb48ba825550a457d57f883ac5f991e350c99ceeca2d0994c7ed84655e0eb6e038e4725e11f5aae91d9622c8f273283ae00b769a1ee6f656f2046ebc8d9a44e0555a20015af56d677edf554d88d56d25ed484731c5d6cf761e01c69d6527cfa025c0751a6bde78957b8b7783a157ca09c4c1"
+    },
+    {
+      "path": "compartments/37/passphrase.salt",
+      "data_hex": "07daf81d2cadaff2fcb3609582509421d54bff75c9f14b993d283a016206c296"
+    },
+    {
+      "path": "compartments/37/passphrase_wrapped_key.enc",
+      "data_hex": "d971eb612d4eb805a77d566493fc123007c7a5d728e476717e76f9e02fab37b7af16bd8171c8525504b6febe2e6000b454d32c079a073f219d3ea438"
+    },
+    {
+      "path": "compartments/37/vault.enc",
+      "data_hex": "4e20ca46f132bd8e3c71b53428b2651e2b8b5ffccb291c07d78bf742142e"
+    },
+    {
+      "path": "compartments/38/meta.enc",
+      "data_hex": "0791b889233d898c856ec494354c8cc2dac5c2c2776988b9d9b99bbe0c9365a782a5a1c189c2c4ea52f54d1e639b1d822676e6616ffb534db3af17705198945aaca64d3ddc609160ab4e97029ab361e66472d691eed5084934ef33865d777e875106510405b01fb2590e6878c511d4702198bdbfd9e0840fc52992f642e098c66fd94d9e9078fc6461cbf2d62fc3b0f705d8df959c99ba11636ff869"
+    },
+    {
+      "path": "compartments/38/passphrase.salt",
+      "data_hex": "274e034002420ac96762601766cfbcfb8b2e794d1edb8d1a34f5b0cc4873c71f"
+    },
+    {
+      "path": "compartments/38/passphrase_wrapped_key.enc",
+      "data_hex": "b9b5f6fc49a2b110080c4547eed11b1fcaef8cf796d8749da2b6ca651fc2da37070dec99304679465c2d09c0be19699aa7305e98b421b9198a1db0fc"
+    },
+    {
+      "path": "compartments/38/vault.enc",
+      "data_hex": "a3d4fcfade662df58b2aaed4d223cf368f2f8eb789260896fca9ae4302f8"
+    },
+    {
+      "path": "compartments/39/meta.enc",
+      "data_hex": "b82edb4f1756527bdc52519561dcbaf9bf4e6720ba6678e6c741cbd9adc5f2a81f83cad7b76e8c0c852463e6e69b564837c016da3844345cdff6e27d09416fa6a9ba77e5b2581fb3dbe40a0d8cebc316ec204425e07b7b41bd25f2c0c7c5db9bdc3cf8facd5cddab8573ef7a3efca9289cfc33906275b7a8e5cf0cc4f3254ac37f6e36dbbd7dc2dba7330ce2d61d3c0211ff35c0eeba31dd2cb135c3"
+    },
+    {
+      "path": "compartments/39/passphrase.salt",
+      "data_hex": "3ad6b0e006c9860909c2b1d200e758d5dd0bfb8c489a9d6a5a9720da55f78772"
+    },
+    {
+      "path": "compartments/39/passphrase_wrapped_key.enc",
+      "data_hex": "0065b055107221cf1467755384a32e34b2a8f903264fbaf3ca69dc5a7cbb038b6579630bc63046c993de93111540529c37ffba94c9cbc6218e504319"
+    },
+    {
+      "path": "compartments/39/vault.enc",
+      "data_hex": "683e3344b7eb566c43aacbd0dc4f5d6472274fe891e1efbc41ee043dd9ca"
+    },
+    {
+      "path": "compartments/4/meta.enc",
+      "data_hex": "39134c32cd76641e3e1ae221ea4235a6650837f549abc96d4e2e8a0844fa1f2db3cad3c181f7e600ae40ca32e868663d28d1af030ea5b66c13a1c97aa1c631d7cd736dd63557f8503b5a45b5feba6e851ca5bef0f08cadebf6d010b78eedfcdd278e4beb7a1fb048c02b61c39cacf7b5a996c04d4c7ce9c5467b158ac870d60295e5eefc5253f7fc31e63e059d2f0549fddb6286e1ac52c37ab51005"
+    },
+    {
+      "path": "compartments/4/passphrase.salt",
+      "data_hex": "06f6d0ba97f71caddf3e5d3fa05f34c8c37899a05f15dcefe01d4c96d077734b"
+    },
+    {
+      "path": "compartments/4/passphrase_wrapped_key.enc",
+      "data_hex": "af5ec6964b8df509618bde1aba2d8597399a89b6acb0835a4e68e7631f4fbd84f2858add3827c6b17a584083a3628f6b69f74d51b214e270b5c64dfe"
+    },
+    {
+      "path": "compartments/4/vault.enc",
+      "data_hex": "ca6f7477f099eebbc193ddf472bb303f9bbec4a256bc063522fc1ce12d2d"
+    },
+    {
+      "path": "compartments/40/meta.enc",
+      "data_hex": "eea09d40fc43038beba610fff11c5d658c36536a992d002f22ab01bf22f1eea6781aaf337aab9d66749282c5cd7ea351a50fbfe20261f074ee57e60441cf978d85e37c9310a3d43ff4ba92e3cc81d2fcc4ca37f8b41f6e8654fd13d8e466f8e1d5858eb8bc401b3dc19f29826d16be87a1a619f31bfc7f2ec9954a4a05ee7ddefccb6d7a12b84bcb1a0cf5aa7c1e64070109ecceae27cee34ed6867c"
+    },
+    {
+      "path": "compartments/40/passphrase.salt",
+      "data_hex": "1340e649556007fbf0c1fc850eb61e4d70aa5a4f4860d4e7a03562a30d1a4412"
+    },
+    {
+      "path": "compartments/40/passphrase_wrapped_key.enc",
+      "data_hex": "eb759dee53f144fb6d06abf8bb3fffff16a6546cbc75eff4b09b62a5e0bf9c5bb19adf2071f452f3e0c4093482504f383f95b28316939f630272fffb"
+    },
+    {
+      "path": "compartments/40/vault.enc",
+      "data_hex": "60f5f788294eb483705808cd1e9cdca56c508ee8c99649f32e899ff45a4f"
+    },
+    {
+      "path": "compartments/41/meta.enc",
+      "data_hex": "6ef29f7967ca978767b6d71b39cbb1b5ce476fea630f630304625cd6df144274266787bb6e8de65153ad5dd357d37390d394865a716a8af5c6aa46d21ab2aed1e6acd1063c45d925cf42981a7de35e7071d5e8b61b67fbcdd32e0f30289c03e9bde3de2dfde4fcfb48b06b78f17bd7787d31ba15c0714e40d2791de8ac0a96a46d72fe8f02718e7972294576dd6e37e328134dcaf24e16d6ba3d2a5f"
+    },
+    {
+      "path": "compartments/41/passphrase.salt",
+      "data_hex": "2c307c3ca115e7d1556d716004f7c416cac269f4ee1c7f1773e02c4dc8dfcea8"
+    },
+    {
+      "path": "compartments/41/passphrase_wrapped_key.enc",
+      "data_hex": "f1d8d98b2f233118a7ea2ca28b78f873afcb17b4b780dd9166ff2be55ddaa1c3b4a871c2b99811c776f7973dadc8b080b8f55e03df5a691a0a9c7b51"
+    },
+    {
+      "path": "compartments/41/vault.enc",
+      "data_hex": "9aea771f6abdd14e70a6906950577f5297e17dbdd90b9752d3dfcf09c043"
+    },
+    {
+      "path": "compartments/42/meta.enc",
+      "data_hex": "4d69501132396ca363594ade85fcdbacaba10aeda39f561b971f92f9269a5ed62ed1fcadd49a4c5e124e7289a20450936c970f92c1a47b543ff1c083164c853ed13076603f02a1cba309b4802a40aa36a7e9a986b2235aaf79bda671f15a33be9b2198d5562955c222765993feb25ffa1a537a7e34e5c1e5da5cfea5a4b791f15cd38f1380792ff7050e0bc7f7079465d53c6082f762d0653201bcb9"
+    },
+    {
+      "path": "compartments/42/passphrase.salt",
+      "data_hex": "5c8e9f497d6bef158e9973c3eb85647a82929df56f5df33d0af7f7868561da9e"
+    },
+    {
+      "path": "compartments/42/passphrase_wrapped_key.enc",
+      "data_hex": "bdbcc78d0e3a61f441799a543019a45e424b07aa90ed9cdc21edb5524d88ddeb5c9f74d0fb389db8733d9be30be465a4cc13d0fc804793c5eb3c599b"
+    },
+    {
+      "path": "compartments/42/vault.enc",
+      "data_hex": "b054e17272ea879ad3f2ace92e452efee33fae167a07c7d9001136c9bda0"
+    },
+    {
+      "path": "compartments/43/meta.enc",
+      "data_hex": "05495f32f57059f79c3e4f86b5bdb5d60abd3594c2eef3eeb231a32b39373a46168b858bca00023a87d1bfb5576809bce23034e78039b2881bbb98f98aba3d3a3d483508ec80efda8a731792a54c17d878dad4b84b92f0ae6b4975e741084bc3342d80e663b5ac38202e0497f5e238df7377dcc590f1d2a2fb5b80c55267b409c367b36c85fe91aafbd33b1096454b4ee17202694a555de3c1a03c89"
+    },
+    {
+      "path": "compartments/43/passphrase.salt",
+      "data_hex": "8265a6fce8a43fbd3d4a4fc89e9c5d25753f320ed9f08f7a4728a1d0fd0ceae7"
+    },
+    {
+      "path": "compartments/43/passphrase_wrapped_key.enc",
+      "data_hex": "ca5823adc7c87aa766216ef6eb1d18f3b96418b12174bf66258d75a88c3903cf2420eb7ead7931a8d5f408f69bbcb066cf8723c15f61542e31ea93f5"
+    },
+    {
+      "path": "compartments/43/vault.enc",
+      "data_hex": "99bf86e3bf0449801a98ad279fb303d474ca8cdc0405b686aeef23706ba8"
+    },
+    {
+      "path": "compartments/44/meta.enc",
+      "data_hex": "850014f9b6dae52b5eff51c8d9392d2f59ed2ef309bb86db0903a2b5be9856576f1f896d2cf8208ed02b7d9501934cf6f796030bc50995c72b94a4731c31d11a5c337565c4bf38d8f3b28c054bf2e9ee43a758894ead0b9cd7e04a0108c4dd7f0d453d8fcc0b0104cfc5f6f5a99d4402031a87db4c89862807d72a774c573c9d5435d484ba26b4e007421e37a4d8f3929586d2e13607f3e17b993e30"
+    },
+    {
+      "path": "compartments/44/passphrase.salt",
+      "data_hex": "38836062677f477024726129747ab29cfa69986126edf4a84dae6b6c6f9fed99"
+    },
+    {
+      "path": "compartments/44/passphrase_wrapped_key.enc",
+      "data_hex": "9abadf232448b69748d5633a34842ef89ba113006482957af2672e43817ffbf6bbf6c6721c9d471befcf3dfe9cf667bf7866a4396f9fb6dbf0e7c77c"
+    },
+    {
+      "path": "compartments/44/vault.enc",
+      "data_hex": "b343efac74f6a9948af0f235b22a0a9329a3e4fb560757d8b1e6aa2ea689"
+    },
+    {
+      "path": "compartments/45/meta.enc",
+      "data_hex": "6dad0509882557dba51ca10faf14601110ef41877069d218dc6a7366461d2135e6d49f8a57949e7360e609a3e5309e6eb9ce49c9e367420218781e157651934b3985f24f161c23cdb7d9e14a0017e03bc71cb3d512caad3d368d0bb8bd224a96cc92ae5dea1a62dd0624344eb80106495c6b18f2eccbb7e4f6096bd3daecc12f544188c70b1f113310161744898db320e125b9ead3fdcbef1c76af31"
+    },
+    {
+      "path": "compartments/45/passphrase.salt",
+      "data_hex": "d6a148283701090a65ebd441f0eca0174d1318985f48fee60e70486b80e83889"
+    },
+    {
+      "path": "compartments/45/passphrase_wrapped_key.enc",
+      "data_hex": "dabf4db117308b87750e65fc4e0f31490e5fd712160e52185ef7491cb304e0839466925e0d5b26bb5e28e99b5c37666499417c02df3690bced8ef620"
+    },
+    {
+      "path": "compartments/45/vault.enc",
+      "data_hex": "4d221febdd5bf397a7d1fe3840836f47bad3039bcf7909ef980f31e14857"
+    },
+    {
+      "path": "compartments/46/meta.enc",
+      "data_hex": "5a5fa13cda149559edb4aa9beb9427acc6f6fcc50ff43138939ad56e8f9c5437cc2f9825e1f2c59ec603302ab6b673fae4f34d1e5c3792d5aa47b3447fafa9902a1f59d467b2143da57fae987bed71d7b74c0fa732d2ae7952aea505bced3819e3970e44c68e4fb9e5dd971cd56a8bd1ba78e8966bc65cc6ae1d3d6fd659029e67521ffc5e363e4c370e2c9e1a730626092f7bc49bb88e349e2515c1"
+    },
+    {
+      "path": "compartments/46/passphrase.salt",
+      "data_hex": "75511a8493322c6573ed6492ec4295f77771fb2a2d46441cd918c01b1d60f5e1"
+    },
+    {
+      "path": "compartments/46/passphrase_wrapped_key.enc",
+      "data_hex": "182618aeb331e5af803a2e178769f43d240c8287726f5aa48f8d06b1fd15de4f9b3f7f760837a68744e6a35a1fbf52f59dba64b2572393d0a863f222"
+    },
+    {
+      "path": "compartments/46/vault.enc",
+      "data_hex": "f766faf13d42317576535d6e01b63a09340c499b1e95744191ae0956c3be"
+    },
+    {
+      "path": "compartments/47/meta.enc",
+      "data_hex": "270698aa2988154910e1cd196f27a7ad5a8b25a322fb4e32f9897e59dc2b0af3251ba6c0905fff345b7aa10a5c54a67aa1306f8afa927e01bf65b178e673c8b82d124226f535dcaeff1b29d8cdceff9029a2d95790132e7d5d222ba8e1d4d66e6f3dd5ad2683be083a6e3a6b05d502e8d7099c96151c03c9fbbb40147f2d420cba278a08f0f216dfa7d9f4984cbce32f1d70d4769e3bf63809bb2981"
+    },
+    {
+      "path": "compartments/47/passphrase.salt",
+      "data_hex": "c4bd33bae44b2c13f772f581018069e3471e131d1c2d5444530fa6863731a1fa"
+    },
+    {
+      "path": "compartments/47/passphrase_wrapped_key.enc",
+      "data_hex": "12e73df235edad7fd49d90ef9c1fc6f3b913714218cc3c460262ed9d8810d2e2b148a192fc06f49047354ac9605022e94a397c46382fd96af2f1e636"
+    },
+    {
+      "path": "compartments/47/vault.enc",
+      "data_hex": "f2218a472bd37ef224da5d6ed5df679092264bb7339a4d1be93fa121b86c"
+    },
+    {
+      "path": "compartments/48/meta.enc",
+      "data_hex": "a2fcb43976bc32f551976f62fedac6d2e8dca5bacaead9b189185c4ffb9c8aaee08e6c727dac8667e77af3b183e8b6f29147afdac321cd6e0bafb031261ec5dc19d11902197993a4aecf64421667b8bee7fbae2d25c70137182b1cffb8693986c451fc25a1a580aa447efb18bd12800355a724c87566347b331fac79736b4031e068ee995ad8f89f0dde6a25fe12b2d5b6f7884eba1044d57bb49b76"
+    },
+    {
+      "path": "compartments/48/passphrase.salt",
+      "data_hex": "2fbf83b5c5f916b85ea8c0742150c84d8a062288e97c76fb21e5d108b457a1a8"
+    },
+    {
+      "path": "compartments/48/passphrase_wrapped_key.enc",
+      "data_hex": "913b2c8b5698bc0ce0fc3fcb8a61138437613c19f91e649391c1f87ee35ca64bbd00576f48be18addbd7d9cdee35579941532c368746160f84e4c554"
+    },
+    {
+      "path": "compartments/48/vault.enc",
+      "data_hex": "e7e4a3b23a6f9224691fec282acb3b296d366dddf8605669793dbd101356"
+    },
+    {
+      "path": "compartments/49/meta.enc",
+      "data_hex": "43b13e55415b30156f3aa0580a7948819c5a56244e7bb552d65f8dde69b1c7d9823d09aa2f669cccd243446450c9600b3fc18e3da8840421118680ef212d38bb45669dbb97754db1756ad13ba3e7c898be59db528dea345b84ac07949865c5251e1c08aa5e22c1199993b4c1264914f797f2fd359cef617095dbfb1628df694e6be65ee7e433ee99f6c9ab6bf2dac68f3ee5e5c0791bd56ea60c859b"
+    },
+    {
+      "path": "compartments/49/passphrase.salt",
+      "data_hex": "8f4f5b25db329359f180e70e295120fd10b9f0022d649578a67402b5cd697a41"
+    },
+    {
+      "path": "compartments/49/passphrase_wrapped_key.enc",
+      "data_hex": "8ca7507cdbd7bc7155c5ec8656e65b3e14db19471c0efcd94bb62030f67ce4f274bbb4b3f23b3c564e2904451e98462a0a1c8f01163f314e3401603c"
+    },
+    {
+      "path": "compartments/49/vault.enc",
+      "data_hex": "53e070f5d7a76cff56a5d1758be651b6f42f9bafdbc91a9b1b2e097f0442"
+    },
+    {
+      "path": "compartments/5/meta.enc",
+      "data_hex": "add6273cc3b064c5a3e8ef15717546fbc7ef81b39e05455e2f49885ef6186d5bef38dccdef50d5291f8f7574489ff56e3512e9837e7d007a72913fc18ec5d3cd8aca882144d517a18e873693b02b47e7c32ed565e9741b1a7fb150b11822544f8f8881753ba6ac1daefc75d1c702383781ba307240b0ef91f186ae613ce5e6db99f09521dbfbf3d90f30346a57a46adf55c84a8a8f5a8d506d9d83b7"
+    },
+    {
+      "path": "compartments/5/passphrase.salt",
+      "data_hex": "c0fc5310b56d950c3d8df006b7b11e8eb7d2956de150f2afd7dd2d71da984502"
+    },
+    {
+      "path": "compartments/5/passphrase_wrapped_key.enc",
+      "data_hex": "bf40478ce9bad800bd9d1ccfa07ed750a5ab64ec18ce629d395fedc76158ef5fedb246991c041e2b9a2cb8d507c63b210d300fd36ce842a5bcd0ca8c"
+    },
+    {
+      "path": "compartments/5/vault.enc",
+      "data_hex": "5aba51eb0736ce1fc396718bc20599f604a0203615fd11bdb95101b8f327"
+    },
+    {
+      "path": "compartments/50/meta.enc",
+      "data_hex": "5b996c431df7dd8cebd5ece72e0bd7f6d292373f73b9670181339034001aabb1b0b6d165e8d02201219b6d5427aa178c66f84c005a6998bb38c2c625e2d01fde5ceb6bbee8ef53960cf8cf59a15173c569837d1645be4cf40c38579046c52848a8ea443b9952702f4de874f1cf059d4ed6a8e05f667ae8319eb4fee6e440a04026fa3cd20406aed847b4445ebd37879c1f7ee856e878f84821539498"
+    },
+    {
+      "path": "compartments/50/passphrase.salt",
+      "data_hex": "d8b0733db60f83c4ad919a0321c41c0d6365c7261256ccc9f4d0346f1c820a40"
+    },
+    {
+      "path": "compartments/50/passphrase_wrapped_key.enc",
+      "data_hex": "48c5d359104ca7c7d05ffbd6c61e38d8a66770d07b87dbff9dd9f62b8431f64c8eaa69ce3afc98553d1e0ae28d8f522b82becb232a21c2585c5a1dcc"
+    },
+    {
+      "path": "compartments/50/vault.enc",
+      "data_hex": "440adf6f845b63c3a3c016081602fc1fd030e21f827de509e2e397f5e9b8"
+    },
+    {
+      "path": "compartments/51/meta.enc",
+      "data_hex": "e5dcd2abab68c603c8948ff0c8bd202d1b4f04cc230b6fe6845f92706692093c96bc66022343fc1ce6c184076034dcf71b26604516db1ed7f824d61a492a58df20d5e65c80a60318147e2c382719042e9ae39e96e40d2da62cbf6c3803db86e55c3c2ebadf546225b49a5809a91bbd3e0ae00cb37339831c5f91c863bc2135ad186dfd73b58a200302a438e0daccd69a8898447c28e93eeeb4367293"
+    },
+    {
+      "path": "compartments/51/passphrase.salt",
+      "data_hex": "d9f90c2c2a64eb9175c157954a0cba4491af51bbc38dff625f8997cdd7f6defe"
+    },
+    {
+      "path": "compartments/51/passphrase_wrapped_key.enc",
+      "data_hex": "9a9838caf099185227d8c58848094b716565f3263c7a853058f39a88393628f049a4909c418e73092252c62760327d08f297beea9b6d384caff4f5d7"
+    },
+    {
+      "path": "compartments/51/vault.enc",
+      "data_hex": "a78530af408c64c92650edd628b5867a8c550ca941658d05eb0b5fc82701"
+    },
+    {
+      "path": "compartments/52/meta.enc",
+      "data_hex": "32ae72b17a9f2d86c2f55e5c3c66e567f1d5abd96a169d58e212f651176872d90239dca69d728c6f31b3c2d58124db196bd1aa16f24eb37830373bbff9fe865873d36cec336ec2e579550300bc7dd71c68ca66df856edb5f0aebadeea156cbacd6ab7f57b98b46e2b99a12a7b790dc0c1758afb23338105aecd735da9d4376bd96358fa3b0234c2293e6bdcca93ac5166ff9302261b8145c0f286906"
+    },
+    {
+      "path": "compartments/52/passphrase.salt",
+      "data_hex": "19b3ebcc5ba7b1a5c26020f94200f406c76353be78482187c4bd2f4e08ef9439"
+    },
+    {
+      "path": "compartments/52/passphrase_wrapped_key.enc",
+      "data_hex": "e48bda069eeeae18785f65f230b693b68d05ecf07a63460b37451aab91bfea15ec0f2c719bcfefa8c684582d1678f15e95063cb749ff2101ad593267"
+    },
+    {
+      "path": "compartments/52/vault.enc",
+      "data_hex": "78304c44b8f123d03956cc11f872e43ac4d5c6212b5631476fffbc3590bb"
+    },
+    {
+      "path": "compartments/53/meta.enc",
+      "data_hex": "91436e0a8a18e9eaa61125e0004e1f2cbaca4bc4dc9b7b1418d89646b2c4a2bb8c1750185b55aab8b0baa8b504301bd0b169862f8e845b49cd0e431d9f7da80a2ae112f10e915cf15262747d82ef3f95df44ba174fa3845a1c28caf9e496a862db76c1c73a125c666d87a82096fe77c1763fc52d0a7c0bc8e0c75929d694838fd10ad0e4f28bc621d1814ebc1d9df1afb8ecc82fba5d4115dae1e6a8"
+    },
+    {
+      "path": "compartments/53/passphrase.salt",
+      "data_hex": "f428561c0dcfb04b6a095ca4787e4d83544b16a5a488722aa2e082e401bc17a1"
+    },
+    {
+      "path": "compartments/53/passphrase_wrapped_key.enc",
+      "data_hex": "76bc0e3679996e672b45ed24eeba4ed17c62878aca3d6ceafef3b9c8c5ef1c865d8bc8439077a5633ad8f83f985bb35546a885b527a595c4213d3cbc"
+    },
+    {
+      "path": "compartments/53/vault.enc",
+      "data_hex": "48dce3e1d7e179dc775c4f498de003ea66e5b7a87769bc6199367e2d29bb"
+    },
+    {
+      "path": "compartments/54/meta.enc",
+      "data_hex": "8a0f54a1ff2842794f2c6df31331110b7b1995c5815f582b4d93ea00dfc006b53ad868434b31cb6a621d47a3516f75e2bbc0070b12ea3eed5447edd98e9aba469feeb38e103637ead2155f019d4969b21003ebfd91a5caacb0cc2283a34c8f27295702d1862963c4df449c87854a8bd277a7108415ec05291a46b2def9cc49bc63af668ec936483527f1b87fdd55c2722b45e7504f4dca137be52267"
+    },
+    {
+      "path": "compartments/54/passphrase.salt",
+      "data_hex": "112790207e5d3c12831b3be66274934dac1c58919a885d1ecf8513fbad85b4d1"
+    },
+    {
+      "path": "compartments/54/passphrase_wrapped_key.enc",
+      "data_hex": "cc897401122e843966fa01dbc8d2329789dec729b9c12b0c72c95ee74e653973a6175d122dabb5d830956b97633f388358285b1c7c519ad29b6c267a"
+    },
+    {
+      "path": "compartments/54/vault.enc",
+      "data_hex": "5f6b970ce1a966319c84c21006aed8bf9a924c4c8ead2dd6480383c12a56"
+    },
+    {
+      "path": "compartments/55/meta.enc",
+      "data_hex": "307477202cecda2fc7a94b27b8dc1a2bdf59d1b51c5e57e76b9d835bccfebdeeb9069f66849534ba4c24c9fd3a76af9daa973a35c1eabfd7bb0e535acdde646259e730d088fe5f4a02941632bd066f9761e714d2f2937b7537717b96ee02da7c59a0ecf13d77a43e84512fa0df827910dab455db0070f178a4b5e713409d457dd6a8f7575b56306fa87ee2a6a5de5a092adeafb9ea6e8d746cca9a1d"
+    },
+    {
+      "path": "compartments/55/passphrase.salt",
+      "data_hex": "de6c035f770f300977ed5569c21ca3df35bcdad80fa3169a38ed99d5eecc7bf4"
+    },
+    {
+      "path": "compartments/55/passphrase_wrapped_key.enc",
+      "data_hex": "4099bc4f4ca0f291b958508955deb3d020ba5878d273bcf6189ffbb26efe93e6945c90362ece1d5b52e46212d2263ba87acb699e8606f5343f94052d"
+    },
+    {
+      "path": "compartments/55/vault.enc",
+      "data_hex": "8225afa5421dbd83bc88002385552aa709ceef86e1260c73aac3354eb9a8"
+    },
+    {
+      "path": "compartments/56/meta.enc",
+      "data_hex": "dd5b34dc06329fbfc45fc09462d36693928de75145d2ba62f05c6597f75889fd5f261c7a7f580e88924fa694c9b0710fe549273d1dc4b2bbbc5690fd12145e18f6dcef60faa4736d341f3765119107d4f89d0da910cb49d506bb9828b94c27aab192ed4c9740198fbecd252688f9994a1d015f4fbea792a2397cce77b74662aaeb85cf70f1646f5a707482c83ac51b813eb3353405ea966c2d2a213a"
+    },
+    {
+      "path": "compartments/56/passphrase.salt",
+      "data_hex": "c8122fd7677d12eaa36e8be463afc81742fcdce4f3a3f7478826601aab4b1aaa"
+    },
+    {
+      "path": "compartments/56/passphrase_wrapped_key.enc",
+      "data_hex": "54e7fc85b5b43e7cd971d9dbb11f4683d0a816fad73e5b474d6d92ede6814583725061a822f0c0807107689bbfbea47bbcde9f261e5ccc6a0939d7c4"
+    },
+    {
+      "path": "compartments/56/vault.enc",
+      "data_hex": "4d957458aea411b81f4dffea469681edc4b122d8221216a9d3a8bc3f881c"
+    },
+    {
+      "path": "compartments/57/meta.enc",
+      "data_hex": "587267feda496e9a6cc734145433369cf5ecb65c189c330d1de8a2804d5d64cc592fc27d35c77415057686da812969a9c12f1d9f0d4f14e00f6112ed7fad1afeb58f98b83e779a398057ff294dc65c140ba301f7124911bea9dcae6fad50ee721cbd1d9f6fad35160f9cf0d1a04ceef6b994fac32d57ad4988b4c5fe828719cb8ddbc3af46b135e2ce3862dace9e8c66ab9df42ec8f9708014e47938"
+    },
+    {
+      "path": "compartments/57/passphrase.salt",
+      "data_hex": "6736941b4844dea5d41adf226341b0b1e7c1c04221dfbf51f49acb3c05aef0c1"
+    },
+    {
+      "path": "compartments/57/passphrase_wrapped_key.enc",
+      "data_hex": "2cc8951c0cb986218c5f1f85307c0067dbb11661da108982f6ba0567d6f65e5b11490f2c11ef027fa9040fe8ba7287995fec8078b0a191b95bfd202d"
+    },
+    {
+      "path": "compartments/57/vault.enc",
+      "data_hex": "44dc3d0f555bfd144eac4737878649b06aaf2f95ab0c86a4103749696caa"
+    },
+    {
+      "path": "compartments/58/meta.enc",
+      "data_hex": "c10add3879c9e369aeec830ba4ac78da65ffba63bdbb75953e6609653f14d8637194539d1c492beed082203e38fa79751bfef66db8c3879afa3794aa58af57cec5ee818d6fec06c15b040c12e145a33938568efdef90b18b716114d5280c76354715ee2c6aed6507593eb3641c8851eb08afbde82bbcb191a2ee5a0dfb6862792f2a086bf7ba2ee296fd8840fe89027b15e5e6283118dd3d81226133"
+    },
+    {
+      "path": "compartments/58/passphrase.salt",
+      "data_hex": "338977f76d00fa8a3915584edb83994b399187b23f393ca0d0f5be428ed81b03"
+    },
+    {
+      "path": "compartments/58/passphrase_wrapped_key.enc",
+      "data_hex": "b100b51453c118c96136565a158aff2de3b86d29a75f64030fa7584fab0bc36e3b1c79393cca123ceb1d9143bf4d103be1b1a55c7c90cf6b858453ee"
+    },
+    {
+      "path": "compartments/58/vault.enc",
+      "data_hex": "c910260ab13b1a69b9831e31657d8e04cda0c63841122d3836d05a74b40e"
+    },
+    {
+      "path": "compartments/59/meta.enc",
+      "data_hex": "cc1d817089c2b469f26e97a5df5d1cfbb332604c93cd7884b98cc704be902966b28a7c7d0c8528b57266291b491377c6d3aa39087acd73c364de345b6c68b8c1e17932ee88245eb04df19620276efe0549c7adb69722b9ef55e17b2d0411d5832e88d0cb2e1a9d6d5989131590c2ab2dba96a099b78f37b63516f0ce42afbb8c8b68ad738126721d8c3c91d9f4e8912ee50826dd43be65bc7b6abdca"
+    },
+    {
+      "path": "compartments/59/passphrase.salt",
+      "data_hex": "42b4104b059d26649409093b6aa3f6b45e40eecfc727b065ddd5d241fa7c913d"
+    },
+    {
+      "path": "compartments/59/passphrase_wrapped_key.enc",
+      "data_hex": "171fe7b925fdc9b19c1c88280ce538a612b98025403d6da8b59e4636b570b459e92de4e8534a18880451b0170f1576fe172d738e09380c3ccfb0effd"
+    },
+    {
+      "path": "compartments/59/vault.enc",
+      "data_hex": "c6f01bd3d21b7e8525af06a1c3500a3c05fbb281d13259268e4f35ce0250"
+    },
+    {
+      "path": "compartments/6/meta.enc",
+      "data_hex": "3b2513dc9ae06655cded39c8604e3af636263e05f265da214dc4d2585a9f8767bf755469a79b734eb9e39ff99fe1d5222e059cbda7c058dc62748590b964d2185540ba897fca1ad9510221583b0fb0c354e4aa9868567533ea38863ac17c6bc5db25c87bb433793626f854f4ca231d473c2e2832435f33b204a36260033f7be966c828e651e2c42d5521929456521f079826c40eb0372a24c904f8fa"
+    },
+    {
+      "path": "compartments/6/passphrase.salt",
+      "data_hex": "f8a672f0d637e682609dd44136041a4f6c665bda2aa6ff43d23c122c4e380754"
+    },
+    {
+      "path": "compartments/6/passphrase_wrapped_key.enc",
+      "data_hex": "916f27817c017e8fa5dee1d90e4ed3a9bbdced2831acbe7fc38824c48f6d23705fca2f2cf5d661d2299e8ffeb3fac8f3d02b46cf19e8e1e3d57c2850"
+    },
+    {
+      "path": "compartments/6/vault.enc",
+      "data_hex": "b073e55f3b81e3a7ab421ae6efe74a0e87ee6de661ee828aef7fe74263af"
+    },
+    {
+      "path": "compartments/60/meta.enc",
+      "data_hex": "983d34f7c924b2c1122fa74a7f656fb1a92f28d7f8556c3ef3933c57015e39969d8efcdd1de22d4e52c34f5d4cd6ceb97e25ad8bdfb35ab667016b5acbc5c0a9f6facb5ce756035f0b15aec8ec0222f41739e649ede0731fa752607be801839de3ad3748ab6a2aeae522806c60346016e9211f65d3d164ee4e9783dff25e3369b9841c21c26a80a9466eb496cb2c16522bd4cafee76fea04792bf529"
+    },
+    {
+      "path": "compartments/60/passphrase.salt",
+      "data_hex": "393f2f509d5d7acd12b3d1732e47e748fb672e0d9ef65e2230360aef0072e373"
+    },
+    {
+      "path": "compartments/60/passphrase_wrapped_key.enc",
+      "data_hex": "78695fb3f55f67610d8dc528026d6d6f73306791c613a1bb9978d20b5f4bf93f7ac27fb41fffef7a656b4735497e95a46d3e335e1e74cffb6b2787ec"
+    },
+    {
+      "path": "compartments/60/vault.enc",
+      "data_hex": "34d73c2ab37a46f797c1e57edfc2b833558faa80e5d47202a8071a944232"
+    },
+    {
+      "path": "compartments/61/meta.enc",
+      "data_hex": "d13d7e643504df479660dea7143c8c76f06302975d259e540c418496776d384f6ded8f779e78cf478766452674904a513b6875196e6769a92862a3496af6f559396c35d2910c53cd36e38aa890ed4163b2d0a6c5ef9b5fa39a11d84cb9c1738bb4a46a5d2cbb8e1c68fcb0c67bdd06c68c987036f440700c2bc961c8f6cf2957c94d31d37e4ef143f9263bc8e2cdd18c19894bb88e0159d045f8b7ab"
+    },
+    {
+      "path": "compartments/61/passphrase.salt",
+      "data_hex": "4b799a0bb30638168ca9be45884649e4923f32d9d4c76533e9c1c3f4c4334d3f"
+    },
+    {
+      "path": "compartments/61/passphrase_wrapped_key.enc",
+      "data_hex": "423cae093d82c6b61bd763547285f06a0d93e5fd920f3f66dd3148bfb41f9e078df164bdb2f27a1204f257c2a60b38438a094244f1ea193cf0c6ef9b"
+    },
+    {
+      "path": "compartments/61/vault.enc",
+      "data_hex": "83328169ccbea4e33d25e664c04cc627d9264571d9603fda2c2ef63b2ea8"
+    },
+    {
+      "path": "compartments/62/meta.enc",
+      "data_hex": "580a888f03894612c032a6f09b3c315dc07d5c6adeac12cfa64b990bc062f9f8d834c0d3a2d7fc3af3c4865752edd2fbe12b3e0fa0ca8d7c31c158c431b220b90ecdd71f072ff4a4709b29d3489f0714fc3c57e04482a0703d439c677086d3d450a3e3460c2cbdc14e1e4f651d3ae81e4781f0e9feffe74d24d58e2d113c06705d71fbe76501a9eb7f92815022e31fad989d74e519beb19a7c7f7213"
+    },
+    {
+      "path": "compartments/62/passphrase.salt",
+      "data_hex": "fa577107244b331857c35e181039e857496866f40dedf9f0601786cf67235d43"
+    },
+    {
+      "path": "compartments/62/passphrase_wrapped_key.enc",
+      "data_hex": "e237d6809b8e2981cac9cb00dfba0efb90d11ddfc64e48bd5f0ac411d3a7210704cbbfcea9d13c786925bded243086d30d9504d70c3b8a6910fa09be"
+    },
+    {
+      "path": "compartments/62/vault.enc",
+      "data_hex": "343f9a02467bd871070f225134fc218e0060ecc7aa13d04a20ecd8bf2040"
+    },
+    {
+      "path": "compartments/63/meta.enc",
+      "data_hex": "174d9382d07aeca7f924e3adbd682c953dc2b6bb203365e4a1cd2a63bfcf0d8edcb1a53abeb40139cbe7c78259e138a261cec9a49ba0ef3ee0273270fa7dfa18e10ed7f7f0336ab21e959d3b5299a2b94fe9bfa7608cc232106f7146168cbf8000d81bac5862dda0d5504e9671dc39e2ee437414ed4accd7e0d84e4be1ce954143d846530b2f4b83ecd8f490b14d3186b72d1c93008ee9334f0ccd7a"
+    },
+    {
+      "path": "compartments/63/passphrase.salt",
+      "data_hex": "446be3d47a651d3442f0770ebada9ed120ed989335856c4ea06c833b68199a96"
+    },
+    {
+      "path": "compartments/63/passphrase_wrapped_key.enc",
+      "data_hex": "16e0ce162de312e25c9c1c3a11aa2dc28c79708f38c4ade288a7fbd423a2255da8b7e46f2646f8324a5cbb0c19ee5e38e70f7f8365a73d2d9d022b80"
+    },
+    {
+      "path": "compartments/63/vault.enc",
+      "data_hex": "d00ac5875a69b209989dbafd94176cf7ba7d19428d5bf701d62b3421cfe9"
+    },
+    {
+      "path": "compartments/64/meta.enc",
+      "data_hex": "485385f15bb9860a246d3c7373259a117e42c7888c25feff5e7c5209537d910cf21d0e75307f70ccd750b65224a257ee7332dd7eda3b289f81eab546113c2be58638d186cb95ea2a6663c2e19863a31481ed764546f5d59c044db02c896ed02843c784b6858bb856b4c28a56926e60c15a5b08d4c03a9f7cbb0d4eb293330168487ae751c3e30ad346697e0a2fa341ef24b2322db528aecdcb87fc50"
+    },
+    {
+      "path": "compartments/64/passphrase.salt",
+      "data_hex": "28833ef05a56e6b704b6ff1c49744746686e79f4da713809ac67176d82764c2c"
+    },
+    {
+      "path": "compartments/64/passphrase_wrapped_key.enc",
+      "data_hex": "366161e6aac4381eb26bebdf114f656298814247b316de7bba911df7652f21e25652bc35476bf904599b8ce6a98d81f8e6067cb1a5dfc6ed25358f6e"
+    },
+    {
+      "path": "compartments/64/vault.enc",
+      "data_hex": "c637231140f819785e1774ecae10e71b8491edb5ae3a669f826a107b152b"
+    },
+    {
+      "path": "compartments/65/meta.enc",
+      "data_hex": "d6f53aef3959c9ca09b8fce769afd00964bbc5ba5a983a1f5743093dde2d26028e199939e863890df559e951f426412472e146263f179678e6c06f715c8c3863e5c6321f2544cb9f21ad9989d1349052ca83a4099cc12ae9e3690790607b3ae2481d76ddeebf7adba02cf9a27b067f4ae14531a1d94b10376a9bc32de6b02328d885f898dc61f47b24bf29b905dc53b7e1bb6160ae1ecfcb55d99d59"
+    },
+    {
+      "path": "compartments/65/passphrase.salt",
+      "data_hex": "3d551fd2fbe5e624381efcf79977d73e12493fe54eecdb1cce69ee7a04a8da5e"
+    },
+    {
+      "path": "compartments/65/passphrase_wrapped_key.enc",
+      "data_hex": "bdd64345d4a75f082ea49679b392da1a215fb06e42b93705ee7ba536a9361b798acb74ebd8ac9005d8b466499908b61c31f699c4a27759b8299a8137"
+    },
+    {
+      "path": "compartments/65/vault.enc",
+      "data_hex": "166e6b5d9bd80dcb9b40ce357c2d15fc6620cc1ce4de4c4181cd7e63b3b4"
+    },
+    {
+      "path": "compartments/66/meta.enc",
+      "data_hex": "36a4a76fd6575e01f3e55b3238e901b9a2a0986d421a80841c5afa89d0c7ebacb756aefd9b214cda5a378fcd196e01264d7151bd4295dbbc160da767f12f13a2e6bdc0d7d68ffd03f5101b886170f4fc21cdac152eed5a1f948ed1dd9932b5641eb7ea8bada1362e2b6d466632d7b7ef7e674d06c3b489c70c6fd4b66cea2a593ff7d3939158279e3b5579639fda626c10f67f5135d98e1500a10b67"
+    },
+    {
+      "path": "compartments/66/passphrase.salt",
+      "data_hex": "1598584f0c701e2fab19ca9d6725e703dc4dc0e2c2f75d25989230d1c5ff0445"
+    },
+    {
+      "path": "compartments/66/passphrase_wrapped_key.enc",
+      "data_hex": "482e229b8c6ece907e3a4e72be900cffdd52801308a4752e07be070c494c08b5f18a2e1fe74873fbda8fa4d08a53e59437113db4517617c33de622b1"
+    },
+    {
+      "path": "compartments/66/vault.enc",
+      "data_hex": "d400835d9f230d8ae8e59e75ddb24242b370854bfef016336ca4149ea7fb"
+    },
+    {
+      "path": "compartments/67/meta.enc",
+      "data_hex": "16bb3321860ea0166f49510ff62481c3a4c41991ebddd683e47b9c8dbcbd8efb9458c5eeb4430d859453c65efb6bdd518661c2292bb4643ed0d1c199f362b5d844ff4a0cb4bf1a6df27607ba0ff4b57ab395a0a523ffb77a2afc5b4de96030b60b87ded4f18cbf7ea91c25911080352c25b3e1e2842ac0188dc569cbc654089f61185b6265cc7588cf9f88b3c25337e2bd5a43e4f4a2587548b9e736"
+    },
+    {
+      "path": "compartments/67/passphrase.salt",
+      "data_hex": "47e00a9079e5f428f92f35c9fc6fc6613669acf22f681de897869426e2ee6541"
+    },
+    {
+      "path": "compartments/67/passphrase_wrapped_key.enc",
+      "data_hex": "ab2457107832e35067b9cbe186ffc6df59dbaef271ce1f0cfa4c7430135f69f6cb8cab98927a9827e085ec42dd15558b469d0d78136113e0f6b9dce4"
+    },
+    {
+      "path": "compartments/67/vault.enc",
+      "data_hex": "3a716b9cdea58b7f5339a4d985c17ef6e09b7c1af1e6a03931e75b54a730"
+    },
+    {
+      "path": "compartments/68/meta.enc",
+      "data_hex": "aa64b2d38516758ca272a85fac2790545848fa313c37e91f210978fc74871d9304dc1ad83cf38907e5b5460676cb12af800e73e6cfdad35cb671c6ab39e047f0c570bb53ed3d59d195d130992787a4a6f04fc91b23ac2a9292983419a5da2b48c01f854eded90216f9c7be260bb6f26d46f3a1a695eae72a2f941dd5cda8eacaa7c1c95ebfaa9e2bb6f120f1db054e57de6cd83089e3db13ffb5d8b8"
+    },
+    {
+      "path": "compartments/68/passphrase.salt",
+      "data_hex": "fd54baf6653275b52d3c6e53271e565787dab737fed5e9a7fb021caf9d998f8f"
+    },
+    {
+      "path": "compartments/68/passphrase_wrapped_key.enc",
+      "data_hex": "decfeb1e564b79c953158f4958faa3af2ffb962d44bec408d79bb2d0153c3719ce6fa99e72a0726d9f4bb66964db307b6733fa235e1c6b9d3f050616"
+    },
+    {
+      "path": "compartments/68/vault.enc",
+      "data_hex": "cb70c90ab8ab36dccf74e9fe51f51aa94ac130bbdb5a9dd0cb751825f92c"
+    },
+    {
+      "path": "compartments/69/meta.enc",
+      "data_hex": "1529071192d68ff0cefc93e6dbe896e50dcd9ae8fdc2f0faf612ceec4312a065ff24f194a2e7df804c5b83f42be38da5c91244815a8afd86c16b684e309f8910dddbcd83cbff6bf4972d546deefc211765d72dc4bb3c803b6971886586f4c63aa574c21191d2af15b10382eb61418f0f6e79204a23da24047a54776b15eefbcba607c29e427d25a129c51838c80f22d349c346ce9070c0ae3a6a5da1"
+    },
+    {
+      "path": "compartments/69/passphrase.salt",
+      "data_hex": "61f9e377a62075c1fe709699349152f284b55240a8dcb13f861c64b19de2b2e2"
+    },
+    {
+      "path": "compartments/69/passphrase_wrapped_key.enc",
+      "data_hex": "b6788c8028c941a701e3282da8ae800630eb72ebabf8aab0475e0252f84c9f9099aafc7e3ae7b48c0633444c0de2f9ad5a83ff1b1fff7b04147520e1"
+    },
+    {
+      "path": "compartments/69/vault.enc",
+      "data_hex": "4d897905d5f0fdfe92b4370e81f8b36a70327174fbf6c2055acce22b60a9"
+    },
+    {
+      "path": "compartments/7/meta.enc",
+      "data_hex": "8124bd4495e4080b98a4cb84d5b9b3e9dc43cd7201a896d8594e34ad7217c7d2415c5a933ac931dff6a111de412c42c7d3b1cfc5f3131f3341fda423918d2d707d35a35bfc8f6465957dcc3e8d633b821f84f06b885716add803c4e8adcb6910dd84f48278e0dda6d3e35608ae828868e42b4c1f7fae1a9077eed30aa9d8ddadfc3b5070cae00dd151f2c8702ca7a4f4c72a20e912a3c09bd0928a3b"
+    },
+    {
+      "path": "compartments/7/passphrase.salt",
+      "data_hex": "d0d8d96dd8aa3bb9904cebac6c72c70dba2a344bea3baaf2aa1c1bc57527c457"
+    },
+    {
+      "path": "compartments/7/passphrase_wrapped_key.enc",
+      "data_hex": "42980e551aa16138311621a2c21ce32d477510ad0ce4efd385bbffe8bbaef7374ab42a31201869b517313e3de8a3eba15bc8beefa2d56ef421367fcc"
+    },
+    {
+      "path": "compartments/7/vault.enc",
+      "data_hex": "25e29d2850d3c25987625526a734eab4541b8feb18c05061338ac2a36af8"
+    },
+    {
+      "path": "compartments/70/meta.enc",
+      "data_hex": "8931c2f46f1a2892d86ef1d1457f67da3c1cfe6d4f06241a2d2102d72e47156f585e7495e57e8a8c03c401016c2689c1299ac5d678f57b9073264283f6fcdc9889a778bff9957f1137700c6b869eeed646224eab01ed031a26c132e37b8fdd31b7f3682c3d88eadc1afdbc0ceb8b1b4b659df77a260690b0ead0755493f1c2a8e49cc1e853300c6d9a8be33d8d696b201b39da96ed504b99ae07a8fa"
+    },
+    {
+      "path": "compartments/70/passphrase.salt",
+      "data_hex": "98130831946b927261ed24fc6cf122bd692db8e48674868b8c447c508e3318c8"
+    },
+    {
+      "path": "compartments/70/passphrase_wrapped_key.enc",
+      "data_hex": "05c82af45a535c5b8efd6c26db10a5200c8aec4c1c958ecd1258fbeea7fe45c2ecb013a145ef5935ec751dad71f42c51f33f13aa07f077c087412c50"
+    },
+    {
+      "path": "compartments/70/vault.enc",
+      "data_hex": "3a4e319c71460b714f9b2c565943dab5eb41d47aca213d6c8545a65df39f"
+    },
+    {
+      "path": "compartments/71/meta.enc",
+      "data_hex": "f8e8589625b4dd2bf764ed6ec35543041f256e4ea5d15a3aab6b6ea25c2bea4fc47c9f46d50b4d83310755c924c687dd00aef001d4ab64a6564946e5c0f4aeac590b629c8cc6a82f778972d8e5a37ceee5778930cf3fde3bb1fec62fe118fc27064a11690f3cc384bec8e297263dd4adf5ba53e8ed8ced431484c7269aea48046762b510d6f32e251aa23d3956c9d7ba8d9650aaeefdecf4fad150c7"
+    },
+    {
+      "path": "compartments/71/passphrase.salt",
+      "data_hex": "7c83fe404e6069c2459475809b2ac5067387a00ceaaf91a267936bb784d4a27c"
+    },
+    {
+      "path": "compartments/71/passphrase_wrapped_key.enc",
+      "data_hex": "096cb2c2746810000b1d4d40b6e523ba2aced98824987aff964ab8d23457e2fe947e853f030a491200cadd97ac66d02c842adee064ac87199c355140"
+    },
+    {
+      "path": "compartments/71/vault.enc",
+      "data_hex": "862b5eae4ce9a1b8f71bf7a4c47537b4785691bd50290cde4a4de9ae613e"
+    },
+    {
+      "path": "compartments/72/meta.enc",
+      "data_hex": "964c34133ff5854a41b5929e5082ca61abf2b826a64620808a050c75136912e344132d6a51ea1bb4200a64f492dbe2fe8b3f428d8821f0f295c96c48bdd36b1d775e136a202a7773059626e6981ff7a0012f1e79cca8540f75b01590cfc35a73568fa50d4397753f2fab59f87bbea0fd3d04fd7a12ddb1f9a727fc93f16e056c15cc42c044c03c162de499754b5415f1420e836f0001ed4d0ffd7c3b"
+    },
+    {
+      "path": "compartments/72/passphrase.salt",
+      "data_hex": "4b19f07eb864324f2a15ca64d20a62c679c7d9f6f3c8c6fa727582c771db6aae"
+    },
+    {
+      "path": "compartments/72/passphrase_wrapped_key.enc",
+      "data_hex": "4c68f04104ef9d2869f991113b3dc2d4ffe915fd3582900344f875b9228dd8bdb0ede85ecfca1ef42127ef3d503f93309d013f2b8cb4af6827dfbcc7"
+    },
+    {
+      "path": "compartments/72/vault.enc",
+      "data_hex": "143a038edf897d225b36e775104b4d76ad410b02de7f4b25161806622bcd"
+    },
+    {
+      "path": "compartments/73/meta.enc",
+      "data_hex": "950b15abc48958319ecd60baba62dc53a0084c798c8690fad5563882c065398543b4bfdea664ad033f986b78af7d9de62c02b04bb77d98468049def98863bc785acd76625553213d46f07179e6ccec051dad0eafc05f0c4ee363694e8afae18510e16641cfd329f9f1932cee659931e0a5267af2e1cbb71616ec75be90fba26649b442489934ae5599890d42af2b4e7db178139f92b14d626b5ea175"
+    },
+    {
+      "path": "compartments/73/passphrase.salt",
+      "data_hex": "5a9a0826e9ff3ae9093af73bd784fe73a6c933ee5fdbc77c8aa1f90c0782ca87"
+    },
+    {
+      "path": "compartments/73/passphrase_wrapped_key.enc",
+      "data_hex": "b70015d537f57e418c0185718568c8284c1f7cf439086a56aaffd6413cf2f44e9ba2028548c7459c0948dd3261064286239a99ee393e9e98acde4343"
+    },
+    {
+      "path": "compartments/73/vault.enc",
+      "data_hex": "307ece10b6f27e54ec449024deceb61ffb8ccee0dd66739363c85a8091e8"
+    },
+    {
+      "path": "compartments/74/meta.enc",
+      "data_hex": "6b997c2474bd91590ec9eacf0c6768dc4f1e87f57efcd8f7d16768de0f813fbc91abe30d7643b6206d3dd45a42891bdd0c16ce6f71daf8ad7ae011eed805230c45e2d25499b0bb5975a8c9cb781a5617708981acd7d2fb01d4288570ef2c8bf8f5e57844ce2192bd96f7f453a62039f31e35a1a3184d7ca6605c71dcbb6caa941915d59f73a55055fab421c83b50d2aa10952bce6a005b55f3a9abdd"
+    },
+    {
+      "path": "compartments/74/passphrase.salt",
+      "data_hex": "4f4fcb3d6590ecc81e0c3646150d8ec22dff97e75d03e07e179120b744b087a3"
+    },
+    {
+      "path": "compartments/74/passphrase_wrapped_key.enc",
+      "data_hex": "00b1174e8faefc6b58ea45471bd2fee14754569d9451509cc479ae35fff41e69d50c812564f4dc860432ce33d05c2b3383b615732fbe301aa2f42eb2"
+    },
+    {
+      "path": "compartments/74/vault.enc",
+      "data_hex": "3a97105e367b7dffc2e2f9ad3cfb51a6936c2f2d270f31f955e595ddcdc9"
+    },
+    {
+      "path": "compartments/75/meta.enc",
+      "data_hex": "a388f63ee12ff07b44175d3e28567079efb2759f957f5d165dfe3a5fd1e30686f077f2586e00549214f210fd69e69386c326d892c9e16a82c4a6061af224e067594752a3741e22b28145d56fa42d3030e09c4732720839d6b0006e86189264c9917f86ff0c2b06f1cd905f824b176a6a0d4c9280e2a6c121051116292164a40fa297593368deaecfa4cfaf693d195cdb970d76705aa3189d3fa79de4"
+    },
+    {
+      "path": "compartments/75/passphrase.salt",
+      "data_hex": "67e22f1e1a4d254a40d035cb667178eb3b966caf7a1328c3e6700c34a78d86ae"
+    },
+    {
+      "path": "compartments/75/passphrase_wrapped_key.enc",
+      "data_hex": "e72c642b693d836573e1e6dde8ed4023540f6be48ca4e554928411a4d96723dc93687578794e4e60c26519a05b6ff433972d3627548f5d0305c80dd9"
+    },
+    {
+      "path": "compartments/75/vault.enc",
+      "data_hex": "2590084a1b3d04fe56eef9c5e4e6589602a0900a7fc430950489f0105de8"
+    },
+    {
+      "path": "compartments/76/meta.enc",
+      "data_hex": "c3105483ad4662453ee1a482e7f6086ddcc8f639151097eaee3e70574116f3d74244339f915f0405e7e20806f9de1d2d2cceaa5f4c562ecf8c7f5728b4b3f8046eb16ad70d31a2a24f8c561cd73c2bb06c7f4285c8c7f686fcc53b6cf461499753e27618b01c9626b536c537a5770ec32d1c9caed2b21fb3251aaf653c57cce367629524797bdf9222125492ffec1f541ff26704dba2289a834ea299"
+    },
+    {
+      "path": "compartments/76/passphrase.salt",
+      "data_hex": "9eed4649e8ce0abf557574eddef0d5b84b7d6d85e7bf7a20eb53f15f79d13b68"
+    },
+    {
+      "path": "compartments/76/passphrase_wrapped_key.enc",
+      "data_hex": "062c3bed66ec7982ea7fe7f3729b6286810bf8ca618e9186fe523070d22aedf09b742d3a7fe7fd265046a83f6776a07127fbdc5bdb0b6d52ec343f7c"
+    },
+    {
+      "path": "compartments/76/vault.enc",
+      "data_hex": "a5636c0ed5be55a8198c1a8a3145ec9314ac09a7cc65c5cd941f126b51d6"
+    },
+    {
+      "path": "compartments/77/meta.enc",
+      "data_hex": "efe99e81d0d1f7a6d6226bc1ff309f32d01949953b67934f180efba47414cd6e37b0bc9b85388d0ab51a2de91ae0fecd0025fa1f65ad76766cc2d5c8a5e2729a52cb54bd8cbaaf8b62ada05f7fba1bf7847cebb407145b6b7c7a33b566b4e801e071763534b56778691c9840cf05a9b99c19ed1408f1ca14125ca39a8e1b5e7d9fa867df01dda03b8ffef1aabd14b36aac8999aaab19efdb1d42cbdc"
+    },
+    {
+      "path": "compartments/77/passphrase.salt",
+      "data_hex": "d8d4108efd8f78319bc3772956308827eea6f2f98d7b0fc3c7c4edba0a51bb1a"
+    },
+    {
+      "path": "compartments/77/passphrase_wrapped_key.enc",
+      "data_hex": "ff62f85e7e4793762116c5aa5f62b70c51677e8b5ee07e9e9af36831656f9c4834ed837c65a5c5bc3208125464aca58f859172d86ec17f1b45de9da2"
+    },
+    {
+      "path": "compartments/77/vault.enc",
+      "data_hex": "c3545ce6baa5aa0b2c9fdb9cb36d460c4cdb0e0a3640a2a3d385047daafa"
+    },
+    {
+      "path": "compartments/78/meta.enc",
+      "data_hex": "7919b79ba6390cc6421597c635009425158fbb0d87a941982bfd324fde602caa60eafd8e7f078d99622347fbe0b745f3c7c66f526e0f559958333cd9881f23d5dac22813c2c67815a77f8bddbc1a180c2f940a064d32701a3c1aaee36a54fb344dc2df70eac77b7e9394443f23e7a085d28b3bf23881d9c10900db0d192feb280353a0789c81c191ca2f14c12c2e654a07b90df897b92e52b73a3c46"
+    },
+    {
+      "path": "compartments/78/passphrase.salt",
+      "data_hex": "f1f65143c8a293274d2336a5652ab088c11862273d6f76b4fb01bfaf8c9b3f4f"
+    },
+    {
+      "path": "compartments/78/passphrase_wrapped_key.enc",
+      "data_hex": "04a3065054bd44fd2a65d9fff19332247b6865caec9e6d6397270a1f250639a043cdf100468bb1b1c97c10720ff1ca27c0bde456aa96063833bdbeca"
+    },
+    {
+      "path": "compartments/78/vault.enc",
+      "data_hex": "1c57a62029df244ab3ba4ccda2d122c77cfe35218a21f28d18501de56f0e"
+    },
+    {
+      "path": "compartments/79/meta.enc",
+      "data_hex": "a41c554049c1847cdd941bd20b79ebda332df99ca485f42b454efdcac8aabf9e3e3973a0437f22b41a89449cafe44545d6ef8efa0fe65e127aee93633807d5f3cfce832c5d85598707aa7ed471d8a401c852e580038de26fe862ec449aa80209bd7419d75559de6930597d7de398086f591a61598abff4ee9781b44f6bdf9764b977a2d2827cfad2563a466632762ec0809f055c4bc12be38ee6f6d3"
+    },
+    {
+      "path": "compartments/79/passphrase.salt",
+      "data_hex": "3be4e3fb285c9a7f674dce278ed0a2007a17bea60b144dfec7978fe3520dfb3b"
+    },
+    {
+      "path": "compartments/79/passphrase_wrapped_key.enc",
+      "data_hex": "e89e6d37c7b7f87bf9e4060978332383a6040f7825d096c7ff8e7fce3dbdb153e3c4d8d27cc909844e1c654c32a9f4ef8cf655a4687bd40b94685d19"
+    },
+    {
+      "path": "compartments/79/vault.enc",
+      "data_hex": "433592247036569824950de7da818f2f2672f3eb6c84f4b0742888d2ba02"
+    },
+    {
+      "path": "compartments/8/meta.enc",
+      "data_hex": "90b596c95bd53bfe170f5d4bb651618856fe42c7dbf28629c2d438497c6d292f0e5af14e0db373025228761f81dc97f39d6d7bc226f37962d9b30a793346ad97f91b987a2a59da4b3baf7a7c7540b7ae061a9c76009f10665bd9ea4114f1c3e2faebeb44d120aaceb105e19bcb886a09fc7d644720b7937a9da0cdf72c11e7db6598c0ac2a66fed1aa2c11995b367c620530a01acf58ea7adf8e62b7"
+    },
+    {
+      "path": "compartments/8/passphrase.salt",
+      "data_hex": "d45482410e2bb2ce0e5adbd8dad89e84d57da2160ecbf067ee95ce58c4252966"
+    },
+    {
+      "path": "compartments/8/passphrase_wrapped_key.enc",
+      "data_hex": "4993804680bfcdea46a936ea8b02b0b1729854ed67e547d6e4540b6f7a91d14f65f3842cedf5168438ea1eb8e06c4f7aacbea2c0a6248783b281abdd"
+    },
+    {
+      "path": "compartments/8/vault.enc",
+      "data_hex": "8a5dde73c348a61d895327eb749a4693d1094a8626078eb790ab2e608f23"
+    },
+    {
+      "path": "compartments/80/meta.enc",
+      "data_hex": "195c2d0961ca061a4516c75d274e432f142507a4612c29e139f6c2f4c009768169541dba96617165bc79763e6b0a017349d284a952e6c523199492ae7bd5d8e62456c375cdf69828e98b3504cd4ddfbdd20d1b3a058d09ac96c1436ab228841474d30cebbb23397cf955238ebb1bda95d6515b71913fa1b2279195285ec846cf268246a8509576b5b92e30d046404672ce2ea5aaeffdd6f0c97bf5c8"
+    },
+    {
+      "path": "compartments/80/passphrase.salt",
+      "data_hex": "d8e359bd3be9321e582ae4b8cf57994c85b3e22dd5ab02a678fcfe6c45d09095"
+    },
+    {
+      "path": "compartments/80/passphrase_wrapped_key.enc",
+      "data_hex": "f026d3993b80519ade825a43432d80335da715a9321d1b07d2a73521d8779d81eb3510bee31d7981669e91cb6973ea3fa35f6ba9cf6bce659f30cc2e"
+    },
+    {
+      "path": "compartments/80/vault.enc",
+      "data_hex": "844e0ee727b3ca17585419448934ff5eaa8a0e1e23650414ac387b28b04b"
+    },
+    {
+      "path": "compartments/81/meta.enc",
+      "data_hex": "34388debb80c8a089fd26d8030a95b3c6b7ba8928de18aace8e45745ceda5dad77120ac90c57a7e044fd91fe0d97b840d4ae0e792dabf6120af3be8758f6f631accd4df69db1b5504991bbcabc96599b7d29dffa32b7e5da87def686e95d20338bc48b0adbcc4d3cc4c52115227137e6177da52443bf11233329d5b406be0cd8eba7d87f6781ded6f1e503471f9e148dba9694b04b68f07a0eaccb58"
+    },
+    {
+      "path": "compartments/81/passphrase.salt",
+      "data_hex": "6b3c68d111f8228b5a403fae9c1b15914547a40bad8488742a15898c43af228e"
+    },
+    {
+      "path": "compartments/81/passphrase_wrapped_key.enc",
+      "data_hex": "00a0d7945b15d1932740f4eb37ecc94ce8bc6c9f4990b1639c6646be405354bda673352d54fe0fb4930e34505f70206c21188cf1ee91aa79e973d09d"
+    },
+    {
+      "path": "compartments/81/vault.enc",
+      "data_hex": "b15ba0a32822d408b8cdeb5db05b6f45d7a48046ed246dde2ec2d8dfb10b"
+    },
+    {
+      "path": "compartments/82/meta.enc",
+      "data_hex": "067e78139c44ab5d8b28d209676f3d158f30e53b8a3e4e4259ce82a8c83879814cd92c590c52b5d3b61b123ae21067e221a0405017b928cc60faaf31114cfe1dc37dccb54e94452be7434463539e986dfe6b26f18e260ce91d1e435061fd7b635b52299528708face495202d5efab994990773e3a115233b000467974911b98fde56438368f4ac057015c025de482444586e6a947cb3c6395fde000f"
+    },
+    {
+      "path": "compartments/82/passphrase.salt",
+      "data_hex": "a7c9d0032ed644b64649da5e01d1e83e7742d116ca7b8e39cfa01098f9ce50e0"
+    },
+    {
+      "path": "compartments/82/passphrase_wrapped_key.enc",
+      "data_hex": "d86940920f1c80807ebc2d8245a8d09428b7b42272ca63170fa3a3d7851242392b6fdb20b3cd3e60ffb035889639f6d3adce3ac6754b4aec22760bc4"
+    },
+    {
+      "path": "compartments/82/vault.enc",
+      "data_hex": "1069b62e84ed93723f6e8566822ba915e36c6d0e2559cf49fb9b101e9fd7"
+    },
+    {
+      "path": "compartments/83/meta.enc",
+      "data_hex": "435c44d706ca7b8fbdde44c68461b226434a0b94daacf4ba6b85141b069631fbe80acc3e34f6165f8ce0da5a30eaf47f11d69b233adba25e2405d60d6ff3759763e4093ce33c21e8e5bb84b62ee08afd3df421d7e0aeb88e96ac09c6a4666928e4e9ca45eabc46248e2cdf5859ecc1c91d419296bd0178b95ceece2b854a0142c70a46c45238a8664830e836cb20598b0ea92a6727b91a0a44e00b6f"
+    },
+    {
+      "path": "compartments/83/passphrase.salt",
+      "data_hex": "638988bbe3817466efbbfe662b4e15a17253e55bab4850a77cb5cdd0e5598320"
+    },
+    {
+      "path": "compartments/83/passphrase_wrapped_key.enc",
+      "data_hex": "0c5c944b667ee270cc679dc32cc2d30717761bcecc30c68e1c68a91a754d0201a9f4bce5624404f929d16687cbc1f68b0ffa36824bb7e1640eea8e86"
+    },
+    {
+      "path": "compartments/83/vault.enc",
+      "data_hex": "afe1ad6266eb087006b4bb1ad479fe5acde3552461ff911d3c555e5a730a"
+    },
+    {
+      "path": "compartments/84/meta.enc",
+      "data_hex": "2f440def8d3adab1d43e1c80d9ab0b8d38b5762957f1402d164b44e4b49a530b119b65706463a46fc116e611f1aeaf52872b0f8670845e7cb7af2dc34128703fcbc925e6c7dc8ec95c3ca5b823a4db25a69b0b49f3efacb382ca2004c892b93a63f1047a96928a36b3305ddb8fade5f60325c547e1da2289de62ca7b0c398f33013cdd203d36b20ccd5ee8fe2ff8bfacd390feb534cb56d08b1d3f81"
+    },
+    {
+      "path": "compartments/84/passphrase.salt",
+      "data_hex": "17cb9ce9e0e1acde1aeaceeee2d660f7be6474df08d6a32bc13cc37ccb39a25f"
+    },
+    {
+      "path": "compartments/84/passphrase_wrapped_key.enc",
+      "data_hex": "9fc462eb9ad21f4811f074960d1e4222e450f35de864ecb489c5fcda41f7dff52b2dbc9ecd0e1536ffcbafb7bdb5cbbf9ff8f6c6326fb45fd9cc3eaa"
+    },
+    {
+      "path": "compartments/84/vault.enc",
+      "data_hex": "ea92c6b046bca2557e772daf81b49d2536044517f5051520f2b6300f654f"
+    },
+    {
+      "path": "compartments/85/meta.enc",
+      "data_hex": "42a039face9bc41ee01cf82c9f00de5fe0c8a6147672e020795d9e940d9acb3bb9fb4d74df5498de03d6312a2c0caf9cd180295bb463fc85bced75f2844c6e1e588b2f9b87308668d7793a56d6023f99163bbec7a1004ba7131063891f282c96dbb497f2378bf4ce8a0e9b7b109035e18f53fa2f8719a901d163a584706a4e163ec6faba24b2014b050437dc0f386e35871cbbb71f68e3583bb2b907"
+    },
+    {
+      "path": "compartments/85/passphrase.salt",
+      "data_hex": "2b28360691ba16dbce0987e3ab6fd675dd90824d35964075b6215f984baaf645"
+    },
+    {
+      "path": "compartments/85/passphrase_wrapped_key.enc",
+      "data_hex": "de9c235bc4d12d9e7012c9eb4cad5c95855b282e727a27c038dd13f20946ea0a02083403705d0d82152f07b95330cbdbd2a4ceb550e383c9d7496b84"
+    },
+    {
+      "path": "compartments/85/vault.enc",
+      "data_hex": "1f86c75e9ddb6d00fb0a0cf6f7d53ca5876d071af38f7524beea0b72cc9c"
+    },
+    {
+      "path": "compartments/86/meta.enc",
+      "data_hex": "d1fe943c85c39db8faffed6dd51cf997934ba563416f26dba95cd5cdc35e80dafea8d6e3a37a02bd9f670f6ec467a2d8d6575eeae4a6d90e27eda9117278a1f9ed9022710afc795febcbe990133f12a853a8833d183d44a4593874c6240889282b2bd8de33c68233249c10deace8f312b139e9758a0cbc383d8a75867040d0999fabf67f2f1f2bdf89a5c2193cc80a0b1ad77f18a75a0aed24fd9fa2"
+    },
+    {
+      "path": "compartments/86/passphrase.salt",
+      "data_hex": "afc8cc1b550331b22a13c6d74f9241f3d792e625d12bcb8e44e66d9853e8395a"
+    },
+    {
+      "path": "compartments/86/passphrase_wrapped_key.enc",
+      "data_hex": "de986ef4fb0488dc2540b1e3c4e3f8775faca4460b94159e7be14cf6c9d903745f5df67b52549d253cefbf419c146fd408bcd39cd41ea982b0256102"
+    },
+    {
+      "path": "compartments/86/vault.enc",
+      "data_hex": "f15fec213aa83e527d644b53f53ec8850de97e7717c5b1aec378d9f24d87"
+    },
+    {
+      "path": "compartments/87/meta.enc",
+      "data_hex": "378c268158603abb69e0e171fdb4908975beb42a8e6b6e3d44be9fbf417d19b27348b40d4b6de91f6d9e88ccc8c59627575f80b497330fe47519dc879eb97b6787c708ec2111cad649daa860a5de4817a19a3bd3f7f119de84d96d59886c93e22bab74e394d6bf4549d339e5d06c62bb2f3bb0d89ac5189025dc24b5fab2335d9f15012a612d491cff52e7d7cd1937f395911da87c425cba7ae8f375"
+    },
+    {
+      "path": "compartments/87/passphrase.salt",
+      "data_hex": "dc98d9cf2b177b6ab00bec9bd17669837f50446381eae693f1563a6689b671a4"
+    },
+    {
+      "path": "compartments/87/passphrase_wrapped_key.enc",
+      "data_hex": "53305f88dec038e6875df3dac1c04a7111115cd81f1c6c88b2f6ac8bac344e47733a70a1ec8218e766149df1efa51d998be490d3fcf9cffa16331e26"
+    },
+    {
+      "path": "compartments/87/vault.enc",
+      "data_hex": "0ddbf5c8683e5cdc0a4f64adababf1e191d8876cfe43f86d509b543466e6"
+    },
+    {
+      "path": "compartments/88/meta.enc",
+      "data_hex": "3dece1f56dbabcc4d33e80503d93dd731ec1d89ff759c38d702f6a630e150bbc9f7ed85fa8e963265f53476101c62c5e6437f04816ac616d8332aa35416ec217e74b6f96d25e946e039f940c40f37e0fead74b7371d9a5e2b53a28d8093700cc10ad51f9a764772cdcf7e5e4798f0cbefa4773a128398b8fa0f42e86c6ff70bc56fd5ef3aa4e4a4bef5450889ce0be78dae38a2e6dbce09fc155cf04"
+    },
+    {
+      "path": "compartments/88/passphrase.salt",
+      "data_hex": "8054ec30f1297d9f410b2e7725c5d74861d165c4b414101d180c331f3a80855e"
+    },
+    {
+      "path": "compartments/88/passphrase_wrapped_key.enc",
+      "data_hex": "0f99c9d8dbeae0591fab0719bc49ffccc8c9e2e615f75e9ffa32914cd78d9f9087adabb719cb880777d4925deb98207aa9965494518d5d82dfeb8542"
+    },
+    {
+      "path": "compartments/88/vault.enc",
+      "data_hex": "0bd5563583dccd80edbb5024854ad320fd2115d72bfa7debc5db96c82956"
+    },
+    {
+      "path": "compartments/89/meta.enc",
+      "data_hex": "6387ecb821675425213c8fd26b2519779cee9449abeb5b7f7f92576340085f9cd8a14cb612602a8a31850d59a2433b4ae6ed1e0c1820cedcd1fff3dc705715854747aa7b8ea28ae253f53e6629c0767b6f4b39ef1910b1d7e958cb5dfb508894df3a7182ccb6555ba7fd8fb31763f0af31ced75e8638654fa9d606fc4f2ff9c10bd24cc4830481bbee1e25ba44f8454349616a124b86439445b8756d"
+    },
+    {
+      "path": "compartments/89/passphrase.salt",
+      "data_hex": "0c9e36227514f817cf7af5674ab6d11bb510e86c0d4a1f655bb088459739f15a"
+    },
+    {
+      "path": "compartments/89/passphrase_wrapped_key.enc",
+      "data_hex": "c44ee28dfd85f10be9e6708ed76c34f9b39ab6b010aab13c99bb3f097a447e3dc508e7ff4e09896277322eb764c6f7d53abb86c4a4f5e7103320d120"
+    },
+    {
+      "path": "compartments/89/vault.enc",
+      "data_hex": "ee7b03075397979f25398f681fe5b6fff7e1e8736086abcfdac4c9bd97b6"
+    },
+    {
+      "path": "compartments/9/meta.enc",
+      "data_hex": "ff7c64248e48831d2a5ebd088fcb584b51f43cb9c04640c91f5ddf2ab0385a04cbd04f2709ce04370c03030adcee0f23fdba5b74d136ebf0c06a8b189b281baf3277fc081a391d94de6f0f667ad0025c76d71da352fc218468be47d208f50c2addb21f669bcb358147d46cfe70f66d39e3acafb7c21fc89a8a6a0d9939b1e4fcd8684af0676a22991aa4a06b7faf2158e350b096c94dad502d94899f"
+    },
+    {
+      "path": "compartments/9/passphrase.salt",
+      "data_hex": "a6a0836abe4889f748019f78f175d0bb53acbd9d4e59e36a3776ecd367a25d17"
+    },
+    {
+      "path": "compartments/9/passphrase_wrapped_key.enc",
+      "data_hex": "d1eefe56ae304aca65b5e43c549f1dde564c3e41b2bb5c609f7709d39c40d30bf33d86025e87cb5478a84beff28d08343ec207e036b925aad1d8edce"
+    },
+    {
+      "path": "compartments/9/vault.enc",
+      "data_hex": "36c7c1171b399392648dac7e9f69957d6455257ce0959b4f16eee1ee1488"
+    },
+    {
+      "path": "compartments/90/meta.enc",
+      "data_hex": "a19ae3b534635b07b2adf1198509d4c9dfdf7a21721e4a3422c58aaa451902a26aca12ff697d8ea2a693ad7432f4b0c8300b34a90e79d4b02fd257af5c65dfb5f7f5049b078e0bc578fa03ae31320dbee2ef1426b3ca088465407e6ea2be71bd2a50f6cc6d2ecb75116f96b65955c4b76a38275cd613b3ca467247f5c24406b329c90ef1906737af497a2bdd96f2449444d924424c66b86430b2cd96"
+    },
+    {
+      "path": "compartments/90/passphrase.salt",
+      "data_hex": "46a77457ba86cfc01d82900b948b8e737228a28169f212bdff493bacb9597864"
+    },
+    {
+      "path": "compartments/90/passphrase_wrapped_key.enc",
+      "data_hex": "fe9ccdf0adcdd0b9718c9e38c7f1163f4ceff384f46cc286ff813b0e3b4eb341aabe713edbf4427adb1fa0c7a8471977848f83d0c7156c9285187a6b"
+    },
+    {
+      "path": "compartments/90/vault.enc",
+      "data_hex": "a858e19af6a2158580c652d2d5a6c6ef79ab6d800622f75d29cbb66e9af7"
+    },
+    {
+      "path": "compartments/91/meta.enc",
+      "data_hex": "4f28e6143969bfac4b583feba0a993a423bffee3e0492d1e8ce02efe6d0e4220b8e6f4530f3d190028118ad3fd9bc51823becdf34926a9caaeabefa32553b880b20bd11124b511e75214dca9804abe9085d0f9b0a76d0d5261447c9c1c3d4b396f234f15c5022156b09808569214150c443b565a95043816d28947706338d4492cd9b431ae9ba620151a3f38749a127bb6d46fce9bbf97c2df45f0c1"
+    },
+    {
+      "path": "compartments/91/passphrase.salt",
+      "data_hex": "2d9a2d055b0c06432ad7e9ce1ff1dbcffebe20cdc33d05b9e6259165db2fb86d"
+    },
+    {
+      "path": "compartments/91/passphrase_wrapped_key.enc",
+      "data_hex": "48f8e387acec96534fbe10375034cd410e1cbfce43ee107e0f527d0d98703a82eb969e3cc4278c646acab22cc10edd2bcec2f204a6bb2c6b99ecaeb4"
+    },
+    {
+      "path": "compartments/91/vault.enc",
+      "data_hex": "aaa71773f352e56a758d831a76af4433497d5d65cfd4383795fd167e8978"
+    },
+    {
+      "path": "compartments/92/meta.enc",
+      "data_hex": "d8a7221d57424b3b390c898c5cbe6574aaa18f8c02475644a1774b855d87aa99a1310628c74e1b3506c695ab58903a65db04369f53985a13fa5d9f86a5e16238ec0742065bd7255f67be26995bcdbc4c7e8de7bf329b0759f1ceda70e3039d2b53f66fc0416025716264607a386ac3442deeffa4a843696316d9a7519b250dbfc95c3ba7503bf219ac54e324396090fc9dc4be38decabffcbd396a82"
+    },
+    {
+      "path": "compartments/92/passphrase.salt",
+      "data_hex": "ba3180d768ccd0e46524ea9e2695574cecdc825f4c7884ca5cfb08cfda312b1a"
+    },
+    {
+      "path": "compartments/92/passphrase_wrapped_key.enc",
+      "data_hex": "d6131949a10b34f8cf5b6adfb1cf2f5bdf2b8cef3693a114aaf331fd99698d3ff756a4687d9f37224d62ac8225a250a1fea408814dc849f863992317"
+    },
+    {
+      "path": "compartments/92/vault.enc",
+      "data_hex": "c5cb190a18a834df9932615f4fc6a5a4ce7d8ecc5bd7ac5cffb65f74cd25"
+    },
+    {
+      "path": "compartments/93/meta.enc",
+      "data_hex": "2fc2b2d50614e84fd32e9789989dc699600f3b4c4570c0155dca92aa266af577d15139d985778f027a62643fcf74f103f18d2a80daa55b4b27027d21f0093c71266ab424ff43b48b73b066ffcaa538c40addd9f41c37653f8bd9c12bc56fb10b7a93065e747ab6a8e31baf1a34a6f37d50b0edf0d9c50bd98f6e3e49d2d8e1537151d47f4e120eaa8d370fe7fb8e7f79df9f0b93b0c1fe70a81b8485"
+    },
+    {
+      "path": "compartments/93/passphrase.salt",
+      "data_hex": "9b9ea2c17948d4dfef8b07e8398a5e27b5491a787e772eb7df6dab27c1fb1d36"
+    },
+    {
+      "path": "compartments/93/passphrase_wrapped_key.enc",
+      "data_hex": "b302a9791941ae36e8928889d603077cb7b51ee2311711ac2b070168b1d95bc54ec98bd1e69ce3b262db6f4ace6d4a3a4326377d8fb4b5f67073a44b"
+    },
+    {
+      "path": "compartments/93/vault.enc",
+      "data_hex": "144aa5ef76a33c9857ec4b22d3ab4fca0c34efadc0f1bc7159c501249668"
+    },
+    {
+      "path": "compartments/94/meta.enc",
+      "data_hex": "9bc13eb6e602f2e62fbcab527bb3fc03c6a9ba392d4aa83350aa33eaf691792c5f75c8c7b58c7235970446fd6a24392a6db3eaa0fe3af51d499452a8b247643f4d5e6556dcb60e8ccf544b973188a06c55f2631afe3437f3058705d154f17082adeb807e9ba80c31abc52a0e18196aa1d7619a719a1f3862619aa9690fba8a2226d9da402d44fda9c30db86aa2b301bece1cc9cc55844b695b0f7f0e"
+    },
+    {
+      "path": "compartments/94/passphrase.salt",
+      "data_hex": "a5388177f899ed9e287b6211cdf5d92a56a0ad56fbc9b419ce1b1dc7ce3e2f62"
+    },
+    {
+      "path": "compartments/94/passphrase_wrapped_key.enc",
+      "data_hex": "bb31060206eebdb6a9d01fcd0bd4751be36282f247b0526c6c5bcc773948934d17d0d61efef32f85d1022fb4fd3cada8b781a200601fd11f3d0abdcd"
+    },
+    {
+      "path": "compartments/94/vault.enc",
+      "data_hex": "3460ddac59d0fe395b7486e199e50c1e48fcc4a0c66bfabe0e3cfc536a58"
+    },
+    {
+      "path": "compartments/95/meta.enc",
+      "data_hex": "9a2d1e4e93d68dee48db8c5318507ce4c21a82a33ce396f4d0d2308fb2690b04184bf09b3e67adb2dde869b3e06b42f972fab07f52e963c22dfe3609324565344511eb00f1bfca6eba7f0e131ce2cf74e141f205df785b022f710c13152c146b78f0324e45dede71283c24d9d1eb82b4b349d22694aae3a3dd4c8938672f910d37af969fb048ac9e6c831af0363cf35e232ab33ab73af2eb03ddd1ed"
+    },
+    {
+      "path": "compartments/95/passphrase.salt",
+      "data_hex": "19f8a7279166be5d0b70873a17d908ce7ed528af6cdc38353f957ab058f879ac"
+    },
+    {
+      "path": "compartments/95/passphrase_wrapped_key.enc",
+      "data_hex": "e73ca76883d5acfcdcda98a7a4f850b11c5ef224e870430146b5ba3267410f234acf607188a2d0a0ad0ea3a564b20317d8ac2ed18cf2ee2a0753d2b2"
+    },
+    {
+      "path": "compartments/95/vault.enc",
+      "data_hex": "e722382e4b8287676e24ea189717029e53d84ddfb1e2f8808666d5c8274f"
+    },
+    {
+      "path": "compartments/96/meta.enc",
+      "data_hex": "41dfb0d090dda5896a86002a439b04c0fe591219d87e9063fa4e4d5643032bdd9b357067bd1142124c27dd3de1bdfc2d13e032f0bbc134b5ac66e7ad3f385678fc3862d2309528c98334609ce98f308fa31c0e1254bed81c66b383b8fe237f0aebe6231e8af0cc096a312020c373664e9b2ba0e362378769924f2ebf17c52b83532c1c6610c031dfc255dc3f20ebbb26c5cea218b45d2219fc6ef07f"
+    },
+    {
+      "path": "compartments/96/passphrase.salt",
+      "data_hex": "efeb050d369e9611d961672fd863e6d0fc88a1d9c7c62eab3ab9c6bf5aae4d0a"
+    },
+    {
+      "path": "compartments/96/passphrase_wrapped_key.enc",
+      "data_hex": "3fcf9b242babb8d5a29c859812b862e74b942fa04c60e8b7216d36fb7fddfdfb570d926582c1a5d111284c76e30a43d3459e39b8626533a4b07f5880"
+    },
+    {
+      "path": "compartments/96/vault.enc",
+      "data_hex": "d7b6dcb62a188de8dca19174018b6973c3269a09d566fd3084e3649fad01"
+    },
+    {
+      "path": "compartments/97/meta.enc",
+      "data_hex": "d720fd51960107835fa49b2a44b04589c922eeff2ce62c16a8d51d33f967b38d5d7504434191a852dde54bb5ddf9e9fc723e87d18905d555355180831691c55660db24d205225feb2f88baf9b9d5d2251d224ac3e1e5ab5b060faa71c703a022796159b7c21c8941cd0fd7728c632ba566e9cc1eb7a7cf46a1456d9d928997214ec9eec221187d81933948d1384658028ee837be3ef28609341cfaa3"
+    },
+    {
+      "path": "compartments/97/passphrase.salt",
+      "data_hex": "cf9530c28b90db232d4d0e0b13deec63bf6a90582a35d49f8e3a2d0af8463d0e"
+    },
+    {
+      "path": "compartments/97/passphrase_wrapped_key.enc",
+      "data_hex": "e8b5161760aa11b0755b91105714c7f0a46057d2bf36bcfa52b261825c81b636d9b6c5bbec36503832296432f606777da4d10974a102b14388fca2b9"
+    },
+    {
+      "path": "compartments/97/vault.enc",
+      "data_hex": "1bef6dd769316f6ef1f1fb5aebc6c4fa6b58817799631bc0a60cd193d921"
+    },
+    {
+      "path": "compartments/98/meta.enc",
+      "data_hex": "f5aa805afb3c9d0093393d6c817a19d552c7929f4533bebbad01d7c80b8fa1e85d85af1f101718fa65cf685f9bee374f12481f232caf5cb2624fcad15863236723f85c1d50a750fb41a947efb499be909e1e33d08d6754a5edc5e8774fe0c97c49c83229ecba7f8b1811e0d556912221f0ef3c757981c709d556553c4762e3fc1a1cae80b509992b62b0b8c5ab2c131256d7f948cde8920647c8ce55"
+    },
+    {
+      "path": "compartments/98/passphrase.salt",
+      "data_hex": "23fc46de1ef908601c65bed4d21e3b011a6da5f3812c08422d32fe97ef11b090"
+    },
+    {
+      "path": "compartments/98/passphrase_wrapped_key.enc",
+      "data_hex": "f9dbefc9ae999121ccb02b89cf9969081989063c5dded8218da2be023e81c41eb1075c059e708a0c7a8a5dfaaecb3f02600556024a292a310165119e"
+    },
+    {
+      "path": "compartments/98/vault.enc",
+      "data_hex": "73438b94138590bf750fa2b8fb7e3f49460b51057dad2dc75e03b0acb0a8"
+    },
+    {
+      "path": "compartments/99/meta.enc",
+      "data_hex": "469ce57e6be97ff0fdeeb60470c27f6fbdda33c92cbd47c8edd2ea3b7bba1e72941de4d9475b41c5fa7cabfa641df52d37f049f2557360994dbeea19db00d10b7e9bfd768ee5e82766e42ca60a9205b8635657ab6e57c33332f3338b2c7255652c103373bc9baad9dfb678802723b5d65750c5d498ff7fe467377c6e0aa634b2ad8db046f520f5a833894ad1e5e84f6bad25071110df7a7ee97cae0e"
+    },
+    {
+      "path": "compartments/99/passphrase.salt",
+      "data_hex": "7c7818470f2fc132cd8861082fc5b678db3928efb4c7b2e2f3577e08343b5754"
+    },
+    {
+      "path": "compartments/99/passphrase_wrapped_key.enc",
+      "data_hex": "8d26a5fec177c1b7292885aa2839a57d20cc2d3f1a05991b68f92b9d747b6ed94ae70753d559ed2ad2009356d868f0908cc9db177c8175643b8950ae"
+    },
+    {
+      "path": "compartments/99/vault.enc",
+      "data_hex": "791789fa9fe4990f63edf2b575472b55bba69ba5422dda63f15edc970462"
+    },
+    {
+      "path": "deposits.json",
+      "data_hex": "7b0a20202264617461223a207b0a20202020226574685f737465616c7468223a205b0a2020202020207b0a20202020202020202261737365745f6b696e64223a20226e6174697665222c0a2020202020202020226175746f5f71756575655f7377656570223a2066616c73652c0a202020202020202022637265617465645f61745f756e6978223a20312c0a202020202020202022657068656d6572616c5f7075626c69635f6b65795f686578223a202230783032222c0a2020202020202020226964223a20226465706f7369742d666978747572652d31222c0a20202020202020202270726f76696465725f636f6d706172746d656e745f6964223a20302c0a20202020202020202273686f72745f6e616d65223a2022657468222c0a202020202020202022737461747573223a202270656e64696e67222c0a202020202020202022737465616c74685f61646472657373223a2022307864656164303030303030303030303030303030303030303030303030303030303030303030313031222c0a202020202020202022737465616c74685f6d6574615f61646472657373223a202273743a6574683a66697874757265222c0a202020202020202022757064617465645f61745f756e6978223a20312c0a202020202020202022766965775f7461675f686578223a202230786161222c0a20202020202020202277616c6c6574223a202277616c6c65742d66697874757265222c0a20202020202020202277616c6c65745f636f6d706172746d656e745f6964223a20302c0a20202020202020202277616c6c65745f70726f66696c65223a2022737465616c74682d66697874757265220a2020202020207d0a202020205d0a20207d2c0a202022736368656d61223a2022736967696c6c756d2e6465706f73697473222c0a202022736368656d615f76657273696f6e223a20310a7d"
+    },
+    {
+      "path": "deposits.json.bak",
+      "data_hex": "7b0a20202264617461223a207b0a20202020226574685f737465616c7468223a205b0a2020202020207b0a20202020202020202261737365745f6b696e64223a20226e6174697665222c0a2020202020202020226175746f5f71756575655f7377656570223a2066616c73652c0a202020202020202022637265617465645f61745f756e6978223a20312c0a202020202020202022657068656d6572616c5f7075626c69635f6b65795f686578223a202230783032222c0a2020202020202020226964223a20226465706f7369742d666978747572652d31222c0a20202020202020202270726f76696465725f636f6d706172746d656e745f6964223a20302c0a20202020202020202273686f72745f6e616d65223a2022657468222c0a202020202020202022737461747573223a202270656e64696e67222c0a202020202020202022737465616c74685f61646472657373223a2022307864656164303030303030303030303030303030303030303030303030303030303030303030313031222c0a202020202020202022737465616c74685f6d6574615f61646472657373223a202273743a6574683a66697874757265222c0a202020202020202022757064617465645f61745f756e6978223a20312c0a202020202020202022766965775f7461675f686578223a202230786161222c0a20202020202020202277616c6c6574223a202277616c6c65742d66697874757265222c0a20202020202020202277616c6c65745f636f6d706172746d656e745f6964223a20302c0a20202020202020202277616c6c65745f70726f66696c65223a2022737465616c74682d66697874757265220a2020202020207d0a202020205d0a20207d2c0a202022736368656d61223a2022736967696c6c756d2e6465706f73697473222c0a202022736368656d615f76657273696f6e223a20310a7d"
+    },
+    {
+      "path": "profiles.json",
+      "data_hex": "7b0a2020226574685f736565645f77616c6c657473223a205b0a202020207b0a202020202020226163636f756e745f70617468223a20226d2f3434272f3630272f3027222c0a20202020202022636861696e5f6964223a20312c0a20202020202022636f6d706172746d656e745f6964223a20302c0a2020202020202266697273745f726563656976655f61646472657373223a2022307864656164303030303030303030303030303030303030303030303030303030303030303030303031222c0a202020202020226c6162656c223a2022536565642066697874757265222c0a202020202020226d6e656d6f6e69635f7365637265745f6b6579223a2022736565642f666978747572652f6d6e656d6f6e6963222c0a202020202020226e616d65223a2022736565642d6d61696e222c0a2020202020202270726f6a6563745f6163636f756e74223a20302c0a2020202020202270726f76696465725f70726f66696c65223a20226d61696e6e65742d66697874757265222c0a20202020202022726563656976655f70617468223a20226d2f3434272f3630272f30272f30222c0a20202020202022726563656976655f78707562223a2022787075623646414b453030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030222c0a20202020202022776f72645f636f756e74223a2031320a202020207d0a20205d2c0a2020226574685f737465616c74685f77616c6c657473223a205b0a202020207b0a20202020202022636861696e5f6964223a20312c0a20202020202022636f6d706172746d656e745f6964223a20302c0a202020202020226e616d65223a2022737465616c74682d66697874757265222c0a2020202020202270726f76696465725f70726f66696c65223a20226d61696e6e65742d66697874757265222c0a2020202020202273686f72745f6e616d65223a2022657468222c0a2020202020202277616c6c6574223a202277616c6c65742d66697874757265220a202020207d0a20205d2c0a2020226574685f787075625f77616c6c657473223a205b0a202020207b0a20202020202022636861696e5f6964223a20312c0a20202020202022636f6d706172746d656e745f6964223a20302c0a202020202020226e616d65223a2022787075622d66697874757265222c0a2020202020202270726f6a6563745f6163636f756e74223a20372c0a2020202020202270726f76696465725f70726f66696c65223a20226d61696e6e65742d66697874757265220a202020207d0a20205d2c0a20202265766d5f70726f766964657273223a205b0a202020207b0a20202020202022636861696e5f6964223a20312c0a20202020202022636f6d706172746d656e745f6964223a20302c0a202020202020226e616d65223a20226d61696e6e65742d66697874757265222c0a202020202020227270635f75726c223a202268747470733a2f2f6d61696e6e65742d666978747572652e696e76616c6964220a202020207d0a20205d0a7d"
+    },
+    {
+      "path": "profiles.json.bak",
+      "data_hex": "7b0a2020226574685f736565645f77616c6c657473223a205b0a202020207b0a202020202020226163636f756e745f70617468223a20226d2f3434272f3630272f3027222c0a20202020202022636861696e5f6964223a20312c0a20202020202022636f6d706172746d656e745f6964223a20302c0a2020202020202266697273745f726563656976655f61646472657373223a2022307864656164303030303030303030303030303030303030303030303030303030303030303030303031222c0a202020202020226c6162656c223a2022536565642066697874757265222c0a202020202020226d6e656d6f6e69635f7365637265745f6b6579223a2022736565642f666978747572652f6d6e656d6f6e6963222c0a202020202020226e616d65223a2022736565642d6d61696e222c0a2020202020202270726f6a6563745f6163636f756e74223a20302c0a2020202020202270726f76696465725f70726f66696c65223a20226d61696e6e65742d66697874757265222c0a20202020202022726563656976655f70617468223a20226d2f3434272f3630272f30272f30222c0a20202020202022726563656976655f78707562223a2022787075623646414b453030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030222c0a20202020202022776f72645f636f756e74223a2031320a202020207d0a20205d2c0a2020226574685f737465616c74685f77616c6c657473223a205b0a202020207b0a20202020202022636861696e5f6964223a20312c0a20202020202022636f6d706172746d656e745f6964223a20302c0a202020202020226e616d65223a2022737465616c74682d66697874757265222c0a2020202020202270726f76696465725f70726f66696c65223a20226d61696e6e65742d66697874757265222c0a2020202020202273686f72745f6e616d65223a2022657468222c0a2020202020202277616c6c6574223a202277616c6c65742d66697874757265220a202020207d0a20205d2c0a2020226574685f787075625f77616c6c657473223a205b0a202020207b0a20202020202022636861696e5f6964223a20312c0a20202020202022636f6d706172746d656e745f6964223a20302c0a202020202020226e616d65223a2022787075622d66697874757265222c0a2020202020202270726f6a6563745f6163636f756e74223a20372c0a2020202020202270726f76696465725f70726f66696c65223a20226d61696e6e65742d66697874757265220a202020207d0a20205d2c0a20202265766d5f70726f766964657273223a205b0a202020207b0a20202020202022636861696e5f6964223a20312c0a20202020202022636f6d706172746d656e745f6964223a20302c0a202020202020226e616d65223a20226d61696e6e65742d66697874757265222c0a202020202020227270635f75726c223a202268747470733a2f2f6d61696e6e65742d666978747572652e696e76616c6964220a202020207d0a20205d0a7d"
+    },
+    {
+      "path": "queue.json",
+      "data_hex": "7b0a20202264617461223a207b0a20202020226a6f6273223a205b0a2020202020207b0a202020202020202022617474656d707473223a20302c0a202020202020202022637265617465645f61745f756e6978223a20312c0a20202020202020202264657374696e6174696f6e5f61646472657373223a2022307864656164303030303030303030303030303030303030303030303030303030303030303030303032222c0a202020202020202022657068656d6572616c5f7075626c69635f6b65795f686578223a202230783032222c0a2020202020202020226964223a20226a6f622d666978747572652d31222c0a2020202020202020226b696e64223a20226574685f737465616c74685f6e61746976655f7377656570222c0a2020202020202020227374617465223a2022717565756564222c0a202020202020202022737465616c74685f61646472657373223a2022307864656164303030303030303030303030303030303030303030303030303030303030303030303031222c0a202020202020202022757064617465645f61745f756e6978223a20312c0a20202020202020202277616c6c65745f70726f66696c65223a2022737465616c74682d66697874757265220a2020202020207d0a202020205d0a20207d2c0a202022736368656d61223a2022736967696c6c756d2e7175657565222c0a202022736368656d615f76657273696f6e223a20310a7d"
+    },
+    {
+      "path": "queue.json.bak",
+      "data_hex": "7b0a20202264617461223a207b0a20202020226a6f6273223a205b0a2020202020207b0a202020202020202022617474656d707473223a20302c0a202020202020202022637265617465645f61745f756e6978223a20312c0a20202020202020202264657374696e6174696f6e5f61646472657373223a2022307864656164303030303030303030303030303030303030303030303030303030303030303030303032222c0a202020202020202022657068656d6572616c5f7075626c69635f6b65795f686578223a202230783032222c0a2020202020202020226964223a20226a6f622d666978747572652d31222c0a2020202020202020226b696e64223a20226574685f737465616c74685f6e61746976655f7377656570222c0a2020202020202020227374617465223a2022717565756564222c0a202020202020202022737465616c74685f61646472657373223a2022307864656164303030303030303030303030303030303030303030303030303030303030303030303031222c0a202020202020202022757064617465645f61745f756e6978223a20312c0a20202020202020202277616c6c65745f70726f66696c65223a2022737465616c74682d66697874757265220a2020202020207d0a202020205d0a20207d2c0a202022736368656d61223a2022736967696c6c756d2e7175657565222c0a202022736368656d615f76657273696f6e223a20310a7d"
+    },
+    {
+      "path": "token_registry.json",
+      "data_hex": "7b0a20202264617461223a207b0a20202020226c69737473223a205b0a2020202020207b0a202020202020202022636f6d706172746d656e745f6964223a20302c0a202020202020202022637265617465645f61745f756e6978223a20312c0a202020202020202022656e7472696573223a205b0a202020202020202020207b0a2020202020202020202020202261646472657373223a2022307864656164303030303030303030303030303030303030303030303030303030303030303030616161222c0a20202020202020202020202022636861696e5f6964223a20312c0a20202020202020202020202022646563696d616c73223a2031382c0a2020202020202020202020202273796d626f6c223a202246414b45220a202020202020202020207d0a20202020202020205d2c0a2020202020202020226964223a202272656769737472792d666978747572652d31222c0a2020202020202020226e616d65223a2022666978747572652d6c697374222c0a202020202020202022736f75726365223a20227061737465642d6a736f6e222c0a202020202020202022757064617465645f61745f756e6978223a20320a2020202020207d0a202020205d0a20207d2c0a202022736368656d61223a2022736967696c6c756d2e746f6b656e2d7265676973747279222c0a202022736368656d615f76657273696f6e223a20310a7d"
+    },
+    {
+      "path": "token_registry.json.bak",
+      "data_hex": "7b0a20202264617461223a207b0a20202020226c69737473223a205b0a2020202020207b0a202020202020202022636f6d706172746d656e745f6964223a20302c0a202020202020202022637265617465645f61745f756e6978223a20312c0a202020202020202022656e7472696573223a205b0a202020202020202020207b0a2020202020202020202020202261646472657373223a2022307864656164303030303030303030303030303030303030303030303030303030303030303030616161222c0a20202020202020202020202022636861696e5f6964223a20312c0a20202020202020202020202022646563696d616c73223a2031382c0a2020202020202020202020202273796d626f6c223a202246414b45220a202020202020202020207d0a20202020202020205d2c0a2020202020202020226964223a202272656769737472792d666978747572652d31222c0a2020202020202020226e616d65223a2022666978747572652d6c697374222c0a202020202020202022736f75726365223a20227061737465642d6a736f6e222c0a202020202020202022757064617465645f61745f756e6978223a20320a2020202020207d0a202020205d0a20207d2c0a202022736368656d61223a2022736967696c6c756d2e746f6b656e2d7265676973747279222c0a202022736368656d615f76657273696f6e223a20310a7d"
+    },
+    {
+      "path": "wallet_inventory.json",
+      "data_hex": "7b0a20202264617461223a207b0a2020202022616464726573736573223a205b0a2020202020207b0a20202020202020202261637469766974795f7374617465223a202266756e646564222c0a20202020202020202261646472657373223a2022307864656164303030303030303030303030303030303030303030303030303030303030303030313131222c0a202020202020202022616464726573735f696e646578223a20302c0a20202020202020202264657269766174696f6e5f70617468223a20226d2f3434272f3630272f30272f302f30222c0a20202020202020202266697273745f7365656e5f61745f756e6978223a20312c0a2020202020202020226964223a2022616464725f6c6567616379222c0a2020202020202020226c6173745f636865636b65645f61745f756e6978223a20322c0a2020202020202020226e61746976655f62616c616e63655f7765695f686578223a2022307831222c0a20202020202020202270726f76696465725f70726f66696c65223a20226d61696e6e65742d66697874757265222c0a202020202020202022736f75726365223a20226c6567616379222c0a2020202020202020227472616e73616374696f6e5f636f756e74223a20312c0a20202020202020202277616c6c65745f66616d696c79223a20226574682d73656564222c0a20202020202020202277616c6c65745f70726f66696c65223a2022736565642d6d61696e220a2020202020207d0a202020205d2c0a2020202022636861696e5f70726f66696c6573223a205b0a2020202020207b0a202020202020202022636861696e5f66616d696c79223a202265766d222c0a202020202020202022636861696e5f6964223a203939392c0a202020202020202022637265617465645f61745f756e6978223a20312c0a202020202020202022656e61626c6564223a20747275652c0a2020202020202020226e616d65223a2022637573746f6d2d726f6c6c7570222c0a2020202020202020226e61746976655f73796d626f6c223a2022455448222c0a202020202020202022736f75726365223a20226f70657261746f72222c0a202020202020202022757064617465645f61745f756e6978223a20320a2020202020207d0a202020205d2c0a2020202022636f6e736f6c69646174696f6e5f706c616e73223a205b0a2020202020207b0a202020202020202022637265617465645f61745f756e6978223a20312c0a2020202020202020226964223a2022706c616e5f6c6567616379222c0a202020202020202022737461747573223a20227265766965775f7265717569726564222c0a2020202020202020227374657073223a205b0a202020202020202020207b0a20202020202020202020202022616374696f6e223a202273776565705f6e6174697665222c0a2020202020202020202020202261646472657373223a2022307864656164303030303030303030303030303030303030303030303030303030303030303030313131222c0a20202020202020202020202022616d6f756e745f686578223a2022307831222c0a20202020202020202020202022617070726f766564223a2066616c73652c0a2020202020202020202020202261737365745f6b696e64223a20226e6174697665222c0a202020202020202020202020226175746f5f656c696769626c65223a2066616c73652c0a2020202020202020202020202264657269766174696f6e5f70617468223a20226d2f3434272f3630272f30272f302f30222c0a202020202020202020202020226964223a2022737465705f6c6567616379222c0a2020202020202020202020202270726f76696465725f70726f66696c65223a20226d61696e6e65742d66697874757265222c0a202020202020202020202020227269736b5f6c6576656c223a20226c6f77222c0a202020202020202020202020227369676e65725f737461747573223a2022756e6b6e6f776e222c0a2020202020202020202020202273696d756c6174696f6e5f737461747573223a20226e6f745f72756e222c0a20202020202020202020202022737461747573223a20227265766965775f7265717569726564222c0a2020202020202020202020202277616c6c65745f66616d696c79223a20226574682d73656564222c0a2020202020202020202020202277616c6c65745f70726f66696c65223a2022736565642d6d61696e220a202020202020202020207d0a20202020202020205d2c0a20202020202020202273756d6d617279223a207b0a2020202020202020202022617070726f7665645f7374657073223a20302c0a2020202020202020202022626c6f636b65645f7374657073223a20302c0a202020202020202020202265786563757461626c655f7374657073223a20302c0a20202020202020202020227265766965775f72657175697265645f7374657073223a20312c0a2020202020202020202022746f74616c5f7374657073223a20312c0a202020202020202020202276616c75655f6974656d73223a20310a20202020202020207d2c0a202020202020202022757064617465645f61745f756e6978223a20320a2020202020207d0a202020205d2c0a2020202022686f6c64696e6773223a205b0a2020202020207b0a20202020202020202261646472657373223a2022307864656164303030303030303030303030303030303030303030303030303030303030303030313131222c0a202020202020202022616d6f756e745f686578223a2022307831222c0a20202020202020202261737365745f6b696e64223a20226e6174697665222c0a20202020202020202264657269766174696f6e5f70617468223a20226d2f3434272f3630272f30272f302f30222c0a20202020202020202266697273745f7365656e5f61745f756e6978223a20312c0a2020202020202020226964223a2022686f6c64696e675f6c6567616379222c0a2020202020202020226c6173745f636865636b65645f61745f756e6978223a20322c0a20202020202020202270726f76696465725f70726f66696c65223a20226d61696e6e65742d66697874757265222c0a202020202020202022736f75726365223a20226c6567616379222c0a202020202020202022737461747573223a20226465746563746564222c0a20202020202020202277616c6c65745f66616d696c79223a20226574682d73656564222c0a20202020202020202277616c6c65745f70726f66696c65223a2022736565642d6d61696e220a2020202020207d0a202020205d2c0a202020202270617274696573223a205b0a2020202020207b0a202020202020202022637265617465645f61745f756e6978223a20312c0a2020202020202020226964223a202270617274792d666978747572652d31222c0a2020202020202020226e616d65223a20224669787475726520436f756e7465727061727479222c0a2020202020202020226e6f7465223a202266616b6520757067726164652066697874757265222c0a20202020202020202273776565705f64657374696e6174696f6e5f61646472657373223a2022307864656164303030303030303030303030303030303030303030303030303030303030303030393939220a2020202020207d0a202020205d2c0a2020202022726563656976655f616c6c6f636174696f6e73223a205b0a2020202020207b0a20202020202020202261646472657373223a2022307864656164303030303030303030303030303030303030303030303030303030303030303030323232222c0a202020202020202022616464726573735f696e646578223a20332c0a202020202020202022636f756e74657270617274795f6964223a202270617274792d666978747572652d31222c0a202020202020202022637265617465645f61745f756e6978223a20312c0a20202020202020202264657269766174696f6e5f70617468223a20226d2f3434272f3630272f30272f302f33222c0a2020202020202020226964223a2022616c6c6f632d666978747572652d31222c0a2020202020202020226c6162656c223a20224669787475726520696e766f69636573222c0a202020202020202022707572706f7365223a2022636f756e74657270617274792d66697874757265222c0a202020202020202022737461747573223a2022616374697665222c0a20202020202020202277616c6c65745f66616d696c79223a20226574682d73656564222c0a20202020202020202277616c6c65745f70726f66696c65223a2022736565642d6d61696e220a2020202020207d0a202020205d2c0a20202020227269736b5f636174616c6f67223a205b0a2020202020207b0a20202020202020202261646472657373223a2022307864656164303030303030303030303030303030303030303030303030303030303030303030343434222c0a202020202020202022637265617465645f61745f756e6978223a20312c0a2020202020202020226c6162656c223a20224b6e6f776e20726f75746572222c0a2020202020202020226e6f746573223a205b0a20202020202020202020224f70657261746f722d617070726f766564207370656e646572220a20202020202020205d2c0a2020202020202020227269736b5f6c6576656c223a202274727573746564222c0a202020202020202022736f75726365223a20226f70657261746f72222c0a202020202020202022757064617465645f61745f756e6978223a20320a2020202020207d0a202020205d2c0a20202020227269736b5f66696e64696e6773223a205b0a2020202020207b0a20202020202020202261646472657373223a2022307864656164303030303030303030303030303030303030303030303030303030303030303030313131222c0a20202020202020202263617465676f7279223a2022617070726f76616c222c0a202020202020202022636861696e5f6964223a20312c0a20202020202020202265766964656e6365223a205b0a202020202020202020202266697874757265220a20202020202020205d2c0a20202020202020202266697273745f7365656e5f61745f756e6978223a20312c0a2020202020202020226964223a20227269736b5f666978747572655f31222c0a2020202020202020226c6173745f636865636b65645f61745f756e6978223a20322c0a20202020202020202270726f76696465725f70726f66696c65223a20226d61696e6e65742d66697874757265222c0a2020202020202020227265636f6d6d656e646174696f6e223a2022726576696577222c0a2020202020202020227269736b5f6c6576656c223a20226d656469756d222c0a202020202020202022736f75726365223a20226c6567616379222c0a202020202020202022737461747573223a20226f70656e222c0a2020202020202020227375626a656374223a2022307864656164303030303030303030303030303030303030303030303030303030303030303030343434222c0a2020202020202020227375626a6563745f74797065223a20227370656e646572222c0a20202020202020202277616c6c65745f66616d696c79223a20226574682d73656564222c0a20202020202020202277616c6c65745f70726f66696c65223a2022736565642d6d61696e220a2020202020207d0a202020205d2c0a202020202274726561737572795f706f6c696379223a207b0a20202020202022616c6c6f775f636c61696d5f657865637574696f6e223a2066616c73652c0a20202020202022616c6c6f775f657869745f657865637574696f6e223a2066616c73652c0a20202020202022616c6c6f775f6761735f746f70757073223a2066616c73652c0a20202020202022616c6c6f775f706c616e5f657865637574696f6e223a2066616c73652c0a20202020202022616c6c6f775f7261775f6469676573745f7369676e696e67223a2066616c73652c0a20202020202022616c6c6f775f7265766f6b655f657865637574696f6e223a2066616c73652c0a20202020202022616c6c6f775f73776565705f657865637574696f6e223a2066616c73652c0a20202020202022616c6c6f7765645f64657374696e6174696f6e73223a205b0a20202020202020207b0a202020202020202020202261646472657373223a2022307864656164303030303030303030303030303030303030303030303030303030303030303030393939222c0a20202020202020202020226c6162656c223a2022636f6c642d7472656173757279220a20202020202020207d0a2020202020205d2c0a20202020202022626c6f636b5f63726f73735f70617274795f6c696e6b616765223a2066616c73652c0a20202020202022637265617465645f61745f756e6978223a20312c0a20202020202022656e61626c6564223a20747275652c0a20202020202022657865637574696f6e5f706175736564223a2066616c73652c0a20202020202022686f745f666c6f6f725f7765695f686578223a20223078646530623662336137363430303030222c0a20202020202022686f745f7461726765745f7765695f686578223a20223078646530623662336137363430303030222c0a202020202020226d61785f6665655f7065725f6761735f6361705f686578223a206e756c6c2c0a202020202020226d61785f6761735f746f7075705f7765695f686578223a206e756c6c2c0a202020202020226d61785f706c616e5f6e61746976655f7765695f686578223a206e756c6c2c0a202020202020226d61785f737465705f6e61746976655f7765695f686578223a20223078646530623662336137363430303030222c0a20202020202022726571756972655f73696d756c6174696f6e223a20747275652c0a2020202020202273696d756c6174696f6e5f66726573686e6573735f73656373223a203930302c0a20202020202022757064617465645f61745f756e6978223a20320a202020207d2c0a202020202277617463685f616464726573735f626f6f6b223a205b0a2020202020207b0a20202020202020202261646472657373223a2022307864656164303030303030303030303030303030303030303030303030303030303030303030373737222c0a202020202020202022637265617465645f61745f756e6978223a20312c0a202020202020202022656e61626c6564223a20747275652c0a2020202020202020226964223a202277617463685f666978747572655f31222c0a2020202020202020226c6162656c223a20226f6c642d6c6564676572222c0a202020202020202022736f75726365223a20226f70657261746f72222c0a20202020202020202274616773223a205b0a2020202020202020202022636c69656e74222c0a20202020202020202020226861726477617265220a20202020202020205d2c0a202020202020202022757064617465645f61745f756e6978223a20320a2020202020207d0a202020205d0a20207d2c0a202022736368656d61223a2022736967696c6c756d2e77616c6c65742d696e76656e746f7279222c0a202022736368656d615f76657273696f6e223a2031310a7d"
+    },
+    {
+      "path": "wallet_inventory.json.bak",
+      "data_hex": "7b0a20202264617461223a207b0a2020202022616464726573736573223a205b0a2020202020207b0a20202020202020202261637469766974795f7374617465223a202266756e646564222c0a20202020202020202261646472657373223a2022307864656164303030303030303030303030303030303030303030303030303030303030303030313131222c0a202020202020202022616464726573735f696e646578223a20302c0a20202020202020202264657269766174696f6e5f70617468223a20226d2f3434272f3630272f30272f302f30222c0a20202020202020202266697273745f7365656e5f61745f756e6978223a20312c0a2020202020202020226964223a2022616464725f6c6567616379222c0a2020202020202020226c6173745f636865636b65645f61745f756e6978223a20322c0a2020202020202020226e61746976655f62616c616e63655f7765695f686578223a2022307831222c0a20202020202020202270726f76696465725f70726f66696c65223a20226d61696e6e65742d66697874757265222c0a202020202020202022736f75726365223a20226c6567616379222c0a2020202020202020227472616e73616374696f6e5f636f756e74223a20312c0a20202020202020202277616c6c65745f66616d696c79223a20226574682d73656564222c0a20202020202020202277616c6c65745f70726f66696c65223a2022736565642d6d61696e220a2020202020207d0a202020205d2c0a2020202022636861696e5f70726f66696c6573223a205b0a2020202020207b0a202020202020202022636861696e5f66616d696c79223a202265766d222c0a202020202020202022636861696e5f6964223a203939392c0a202020202020202022637265617465645f61745f756e6978223a20312c0a202020202020202022656e61626c6564223a20747275652c0a2020202020202020226e616d65223a2022637573746f6d2d726f6c6c7570222c0a2020202020202020226e61746976655f73796d626f6c223a2022455448222c0a202020202020202022736f75726365223a20226f70657261746f72222c0a202020202020202022757064617465645f61745f756e6978223a20320a2020202020207d0a202020205d2c0a2020202022636f6e736f6c69646174696f6e5f706c616e73223a205b0a2020202020207b0a202020202020202022637265617465645f61745f756e6978223a20312c0a2020202020202020226964223a2022706c616e5f6c6567616379222c0a202020202020202022737461747573223a20227265766965775f7265717569726564222c0a2020202020202020227374657073223a205b0a202020202020202020207b0a20202020202020202020202022616374696f6e223a202273776565705f6e6174697665222c0a2020202020202020202020202261646472657373223a2022307864656164303030303030303030303030303030303030303030303030303030303030303030313131222c0a20202020202020202020202022616d6f756e745f686578223a2022307831222c0a20202020202020202020202022617070726f766564223a2066616c73652c0a2020202020202020202020202261737365745f6b696e64223a20226e6174697665222c0a202020202020202020202020226175746f5f656c696769626c65223a2066616c73652c0a2020202020202020202020202264657269766174696f6e5f70617468223a20226d2f3434272f3630272f30272f302f30222c0a202020202020202020202020226964223a2022737465705f6c6567616379222c0a2020202020202020202020202270726f76696465725f70726f66696c65223a20226d61696e6e65742d66697874757265222c0a202020202020202020202020227269736b5f6c6576656c223a20226c6f77222c0a202020202020202020202020227369676e65725f737461747573223a2022756e6b6e6f776e222c0a2020202020202020202020202273696d756c6174696f6e5f737461747573223a20226e6f745f72756e222c0a20202020202020202020202022737461747573223a20227265766965775f7265717569726564222c0a2020202020202020202020202277616c6c65745f66616d696c79223a20226574682d73656564222c0a2020202020202020202020202277616c6c65745f70726f66696c65223a2022736565642d6d61696e220a202020202020202020207d0a20202020202020205d2c0a20202020202020202273756d6d617279223a207b0a2020202020202020202022617070726f7665645f7374657073223a20302c0a2020202020202020202022626c6f636b65645f7374657073223a20302c0a202020202020202020202265786563757461626c655f7374657073223a20302c0a20202020202020202020227265766965775f72657175697265645f7374657073223a20312c0a2020202020202020202022746f74616c5f7374657073223a20312c0a202020202020202020202276616c75655f6974656d73223a20310a20202020202020207d2c0a202020202020202022757064617465645f61745f756e6978223a20320a2020202020207d0a202020205d2c0a2020202022686f6c64696e6773223a205b0a2020202020207b0a20202020202020202261646472657373223a2022307864656164303030303030303030303030303030303030303030303030303030303030303030313131222c0a202020202020202022616d6f756e745f686578223a2022307831222c0a20202020202020202261737365745f6b696e64223a20226e6174697665222c0a20202020202020202264657269766174696f6e5f70617468223a20226d2f3434272f3630272f30272f302f30222c0a20202020202020202266697273745f7365656e5f61745f756e6978223a20312c0a2020202020202020226964223a2022686f6c64696e675f6c6567616379222c0a2020202020202020226c6173745f636865636b65645f61745f756e6978223a20322c0a20202020202020202270726f76696465725f70726f66696c65223a20226d61696e6e65742d66697874757265222c0a202020202020202022736f75726365223a20226c6567616379222c0a202020202020202022737461747573223a20226465746563746564222c0a20202020202020202277616c6c65745f66616d696c79223a20226574682d73656564222c0a20202020202020202277616c6c65745f70726f66696c65223a2022736565642d6d61696e220a2020202020207d0a202020205d2c0a202020202270617274696573223a205b0a2020202020207b0a202020202020202022637265617465645f61745f756e6978223a20312c0a2020202020202020226964223a202270617274792d666978747572652d31222c0a2020202020202020226e616d65223a20224669787475726520436f756e7465727061727479222c0a2020202020202020226e6f7465223a202266616b6520757067726164652066697874757265222c0a20202020202020202273776565705f64657374696e6174696f6e5f61646472657373223a2022307864656164303030303030303030303030303030303030303030303030303030303030303030393939220a2020202020207d0a202020205d2c0a2020202022726563656976655f616c6c6f636174696f6e73223a205b0a2020202020207b0a20202020202020202261646472657373223a2022307864656164303030303030303030303030303030303030303030303030303030303030303030323232222c0a202020202020202022616464726573735f696e646578223a20332c0a202020202020202022636f756e74657270617274795f6964223a202270617274792d666978747572652d31222c0a202020202020202022637265617465645f61745f756e6978223a20312c0a20202020202020202264657269766174696f6e5f70617468223a20226d2f3434272f3630272f30272f302f33222c0a2020202020202020226964223a2022616c6c6f632d666978747572652d31222c0a2020202020202020226c6162656c223a20224669787475726520696e766f69636573222c0a202020202020202022707572706f7365223a2022636f756e74657270617274792d66697874757265222c0a202020202020202022737461747573223a2022616374697665222c0a20202020202020202277616c6c65745f66616d696c79223a20226574682d73656564222c0a20202020202020202277616c6c65745f70726f66696c65223a2022736565642d6d61696e220a2020202020207d0a202020205d2c0a20202020227269736b5f636174616c6f67223a205b0a2020202020207b0a20202020202020202261646472657373223a2022307864656164303030303030303030303030303030303030303030303030303030303030303030343434222c0a202020202020202022637265617465645f61745f756e6978223a20312c0a2020202020202020226c6162656c223a20224b6e6f776e20726f75746572222c0a2020202020202020226e6f746573223a205b0a20202020202020202020224f70657261746f722d617070726f766564207370656e646572220a20202020202020205d2c0a2020202020202020227269736b5f6c6576656c223a202274727573746564222c0a202020202020202022736f75726365223a20226f70657261746f72222c0a202020202020202022757064617465645f61745f756e6978223a20320a2020202020207d0a202020205d2c0a20202020227269736b5f66696e64696e6773223a205b0a2020202020207b0a20202020202020202261646472657373223a2022307864656164303030303030303030303030303030303030303030303030303030303030303030313131222c0a20202020202020202263617465676f7279223a2022617070726f76616c222c0a202020202020202022636861696e5f6964223a20312c0a20202020202020202265766964656e6365223a205b0a202020202020202020202266697874757265220a20202020202020205d2c0a20202020202020202266697273745f7365656e5f61745f756e6978223a20312c0a2020202020202020226964223a20227269736b5f666978747572655f31222c0a2020202020202020226c6173745f636865636b65645f61745f756e6978223a20322c0a20202020202020202270726f76696465725f70726f66696c65223a20226d61696e6e65742d66697874757265222c0a2020202020202020227265636f6d6d656e646174696f6e223a2022726576696577222c0a2020202020202020227269736b5f6c6576656c223a20226d656469756d222c0a202020202020202022736f75726365223a20226c6567616379222c0a202020202020202022737461747573223a20226f70656e222c0a2020202020202020227375626a656374223a2022307864656164303030303030303030303030303030303030303030303030303030303030303030343434222c0a2020202020202020227375626a6563745f74797065223a20227370656e646572222c0a20202020202020202277616c6c65745f66616d696c79223a20226574682d73656564222c0a20202020202020202277616c6c65745f70726f66696c65223a2022736565642d6d61696e220a2020202020207d0a202020205d2c0a202020202274726561737572795f706f6c696379223a207b0a20202020202022616c6c6f775f636c61696d5f657865637574696f6e223a2066616c73652c0a20202020202022616c6c6f775f657869745f657865637574696f6e223a2066616c73652c0a20202020202022616c6c6f775f6761735f746f70757073223a2066616c73652c0a20202020202022616c6c6f775f706c616e5f657865637574696f6e223a2066616c73652c0a20202020202022616c6c6f775f7261775f6469676573745f7369676e696e67223a2066616c73652c0a20202020202022616c6c6f775f7265766f6b655f657865637574696f6e223a2066616c73652c0a20202020202022616c6c6f775f73776565705f657865637574696f6e223a2066616c73652c0a20202020202022616c6c6f7765645f64657374696e6174696f6e73223a205b0a20202020202020207b0a202020202020202020202261646472657373223a2022307864656164303030303030303030303030303030303030303030303030303030303030303030393939222c0a20202020202020202020226c6162656c223a2022636f6c642d7472656173757279220a20202020202020207d0a2020202020205d2c0a20202020202022626c6f636b5f63726f73735f70617274795f6c696e6b616765223a2066616c73652c0a20202020202022637265617465645f61745f756e6978223a20312c0a20202020202022656e61626c6564223a20747275652c0a20202020202022657865637574696f6e5f706175736564223a2066616c73652c0a20202020202022686f745f666c6f6f725f7765695f686578223a20223078646530623662336137363430303030222c0a20202020202022686f745f7461726765745f7765695f686578223a20223078646530623662336137363430303030222c0a202020202020226d61785f6665655f7065725f6761735f6361705f686578223a206e756c6c2c0a202020202020226d61785f6761735f746f7075705f7765695f686578223a206e756c6c2c0a202020202020226d61785f706c616e5f6e61746976655f7765695f686578223a206e756c6c2c0a202020202020226d61785f737465705f6e61746976655f7765695f686578223a20223078646530623662336137363430303030222c0a20202020202022726571756972655f73696d756c6174696f6e223a20747275652c0a2020202020202273696d756c6174696f6e5f66726573686e6573735f73656373223a203930302c0a20202020202022757064617465645f61745f756e6978223a20320a202020207d2c0a202020202277617463685f616464726573735f626f6f6b223a205b0a2020202020207b0a20202020202020202261646472657373223a2022307864656164303030303030303030303030303030303030303030303030303030303030303030373737222c0a202020202020202022637265617465645f61745f756e6978223a20312c0a202020202020202022656e61626c6564223a20747275652c0a2020202020202020226964223a202277617463685f666978747572655f31222c0a2020202020202020226c6162656c223a20226f6c642d6c6564676572222c0a202020202020202022736f75726365223a20226f70657261746f72222c0a20202020202020202274616773223a205b0a2020202020202020202022636c69656e74222c0a20202020202020202020226861726477617265220a20202020202020205d2c0a202020202020202022757064617465645f61745f756e6978223a20320a2020202020207d0a202020205d0a20207d2c0a202022736368656d61223a2022736967696c6c756d2e77616c6c65742d696e76656e746f7279222c0a202022736368656d615f76657273696f6e223a2031310a7d"
+    }
+  ]
+}
