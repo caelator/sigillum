@@ -1495,22 +1495,22 @@ Phase W — Wallet-management completion
 - [x] W7.3 seed-wallet signing execution
 - [x] W7.4 nonces, receipts, failure classes
 - [x] W7.5 linkage enforcement parity at execution
-- [ ] W8 treasury automation (overflow/refill, hysteresis)
+- [x] W8 treasury automation (overflow/refill, hysteresis)
 
 Phase F — Assurance
 - [x] F1 adversarial coverage: receiving/treasury/chains/execution
 - [x] F2 nightly deep-fuzz
 - [x] F3 chaos soak mode (+ in-flight job assertion)
 - [ ] F4 RC soak receipts per supported host
-- [ ] F5 execution-path security review
+- [x] F5 execution-path security review
 - [ ] F6 testnet execution receipts (human-in-the-loop)
-- [ ] F7 0.1→1.0 data-dir upgrade verification
+- [x] F7 0.1→1.0 data-dir upgrade verification
 
 Phase G — Release engineering
-- [ ] G1 CHANGELOG.md
-- [ ] G2 docs/stability.md
+- [x] G1 CHANGELOG.md
+- [x] G2 docs/stability.md
 - [ ] G3 version bump to 1.0.0
-- [ ] G4 release workflow + rc dry run
+- [~] G4 release workflow (rc dry run pending post-G3)
 - [ ] G5 readiness + product docs final sync
 
 Phase H — Ship
@@ -1794,3 +1794,30 @@ Phase H — Ship
   JSON-RPC null results (unmined receipt) were parsed as transport
   errors. Implemented directly by a Sonnet agent under the operator's
   standing fallback directive.
+- 2026-07-09 W8 a28cbae (PR #25): treasury automation — hot-overflow/refill
+  steps generated in maintenance behind allow_treasury_automation (default
+  false, schema v20), through the standard plan pipeline and the real W7.2
+  enqueue path; hysteresis proven across 5 cycles; distinct generated/enqueued
+  summaries; automation-off byte-identical. Merge also carried the F1 receiving
+  adversarial flake fix that had begun failing all PRs' merge-CI.
+- 2026-07-09 F1/F2/F3 1d4017c (PR #24): 57 adversarial cases, nightly 1024-case
+  fuzz, chaos soak with W7 in-flight assertion (recorded in earlier work log).
+- 2026-07-09 F5 (PR #30): execution-path security review — five threat
+  dispositions + regression tests in production-readiness-audit.md; fixed the
+  F1 hex-prefix finding (fail-closed 0x-prefix validation on all six policy cap
+  fields; global decode_quantity_hex left tolerant per impact review); findings
+  N1 (cross-plan linkage gap), N2 (typed-confirmation is fat-finger not attacker
+  barrier), N3 (inert canonicalization collision) documented. No critical vuln.
+- 2026-07-09 F7 4bfa48c (PR #29): 0.1→1.0 upgrade verification — committed
+  0.1-era fixture + generator; proves all 15 schema bumps compose on one real
+  data dir (queue v1→v4, inventory v11→v20, deposits v1→v2, audit log→db, etc.),
+  no quarantine, canaries + snapshot restore; guarantees in docs/backup.md.
+- 2026-07-09 G1/G2 4788769 (PR #26): CHANGELOG.md [1.0.0] at feature
+  granularity (date placeholder for H2); docs/stability.md with stable/unstable
+  surface list and the D-17 residual-risk statement; linked from README.
+- 2026-07-09 G4 (PR #27): tag-triggered release.yml (verify mirror + macOS/Linux
+  artifacts + SHA256SUMS + THIRD-PARTY-NOTICES via pinned cargo-about + draft
+  release); rc dry-run procedure documented, execution deferred to post-G3.
+- 2026-07-09 Process: switched implementation to Sonnet agents mid-session after
+  a Codex CLI usage-limit block (operator-directed); then to maximum
+  parallelism (concurrent PRs, CI-as-authoritative-gate, batched bookkeeping).
