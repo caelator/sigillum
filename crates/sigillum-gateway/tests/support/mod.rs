@@ -62,6 +62,9 @@ struct StubState {
     native_deposit_calls: AtomicUsize,
     erc20_deposit_calls: AtomicUsize,
     delete_deposit_calls: AtomicUsize,
+    deposit_list_calls: AtomicUsize,
+    deposit_refresh_calls: AtomicUsize,
+    queue_process_calls: AtomicUsize,
     deleted_deposit_ids: Mutex<Vec<String>>,
 }
 
@@ -72,6 +75,9 @@ pub struct StubDaemonCounts {
     pub native_deposit_calls: usize,
     pub erc20_deposit_calls: usize,
     pub delete_deposit_calls: usize,
+    pub deposit_list_calls: usize,
+    pub deposit_refresh_calls: usize,
+    pub queue_process_calls: usize,
 }
 
 impl StubDaemon {
@@ -85,6 +91,9 @@ impl StubDaemon {
             native_deposit_calls: AtomicUsize::new(0),
             erc20_deposit_calls: AtomicUsize::new(0),
             delete_deposit_calls: AtomicUsize::new(0),
+            deposit_list_calls: AtomicUsize::new(0),
+            deposit_refresh_calls: AtomicUsize::new(0),
+            queue_process_calls: AtomicUsize::new(0),
             deleted_deposit_ids: Mutex::new(Vec::new()),
         });
 
@@ -107,6 +116,9 @@ impl StubDaemon {
                 "/api/deposits/eth-stealth/create-erc20",
                 post(create_erc20_deposit),
             )
+            .route("/api/deposits/eth-stealth", get(list_deposits))
+            .route("/api/deposits/eth-stealth/refresh", post(refresh_deposits))
+            .route("/api/queue/process", post(process_queue))
             .route("/api/deposits/eth-stealth/delete", post(delete_deposit))
             .with_state(state.clone());
 
@@ -138,6 +150,9 @@ impl StubDaemon {
             native_deposit_calls: self.state.native_deposit_calls.load(Ordering::SeqCst),
             erc20_deposit_calls: self.state.erc20_deposit_calls.load(Ordering::SeqCst),
             delete_deposit_calls: self.state.delete_deposit_calls.load(Ordering::SeqCst),
+            deposit_list_calls: self.state.deposit_list_calls.load(Ordering::SeqCst),
+            deposit_refresh_calls: self.state.deposit_refresh_calls.load(Ordering::SeqCst),
+            queue_process_calls: self.state.queue_process_calls.load(Ordering::SeqCst),
         }
     }
 
@@ -178,6 +193,23 @@ impl GatewayHarness {
         admin_key: &str,
         rate_limit_rps: u64,
     ) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
+        Self::spawn_with_payment_preview(stub_url, admin_key, rate_limit_rps, true).await
+    }
+
+    pub async fn spawn_payments_disabled(
+        stub_url: &str,
+        admin_key: &str,
+        rate_limit_rps: u64,
+    ) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
+        Self::spawn_with_payment_preview(stub_url, admin_key, rate_limit_rps, false).await
+    }
+
+    async fn spawn_with_payment_preview(
+        stub_url: &str,
+        admin_key: &str,
+        rate_limit_rps: u64,
+        enable_payment_preview: bool,
+    ) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
         let suite_guard = gateway_suite_lock().clone().lock_owned().await;
         let tempdir = TempDir::new()?;
         let db_path = tempdir.path().join("gateway.db");
@@ -195,11 +227,19 @@ impl GatewayHarness {
             )
             .env("SIGILLUM_DAEMON_URL", stub_url)
             .env("SIGILLUM_DAEMON_SESSION_TOKEN", "stub-session-token")
-            .env("GATEWAY_POLL_INTERVAL_SECS", "3600")
+            .env(
+                "GATEWAY_POLL_INTERVAL_SECS",
+                if enable_payment_preview { "3600" } else { "1" },
+            )
             .env("GATEWAY_RATE_LIMIT_RPS", rate_limit_rps.to_string())
             .env("GATEWAY_AUTH_CACHE_TTL_SECS", "1")
             .stdout(Stdio::null())
             .stderr(Stdio::null());
+        if enable_payment_preview {
+            command.env("GATEWAY_ENABLE_EXPERIMENTAL_PAYMENTS", "1");
+        } else {
+            command.env_remove("GATEWAY_ENABLE_EXPERIMENTAL_PAYMENTS");
+        }
 
         let child = command.spawn()?;
         let harness = Self {
@@ -303,6 +343,37 @@ impl GatewayHarness {
             [],
         )?;
         Ok(())
+    }
+
+    pub async fn install_pending_webhook_retry(
+        &self,
+        project_id: &str,
+    ) -> Result<i64, Box<dyn std::error::Error + Send + Sync>> {
+        let connection = rusqlite::Connection::open(&self.db_path)?;
+        connection.execute(
+            "INSERT INTO payments (id, project_id, amount_wei, chain_id, stealth_address, ephemeral_pub, status, metadata_json) VALUES ('disabled-retry-payment', ?, '0x1', 1, '0x1111111111111111111111111111111111111111', '02', 'pending', '{}')",
+            rusqlite::params![project_id],
+        )?;
+        connection.execute(
+            "INSERT INTO webhook_deliveries (payment_id, event, url, attempt, status_code, response_body, next_retry_at) VALUES ('disabled-retry-payment', 'payment.observed', 'http://example.com/hook', 1, 500, 'retry fixture', '2000-01-01 00:00:00')",
+            [],
+        )?;
+        Ok(connection.last_insert_rowid())
+    }
+
+    pub async fn sqlite_webhook_retry_state(
+        &self,
+        delivery_id: i64,
+    ) -> Result<Option<(i32, Option<String>)>, Box<dyn std::error::Error + Send + Sync>> {
+        let connection = rusqlite::Connection::open(&self.db_path)?;
+        let row = connection
+            .query_row(
+                "SELECT attempt, next_retry_at FROM webhook_deliveries WHERE id = ?",
+                rusqlite::params![delivery_id],
+                |row| Ok((row.get::<_, i32>(0)?, row.get::<_, Option<String>>(1)?)),
+            )
+            .optional()?;
+        Ok(row)
     }
 }
 
@@ -470,6 +541,31 @@ async fn create_erc20_deposit(
         "deposit": deposit_json(&wallet, "erc20", "erc20-deposit-1"),
     }))
     .into_response()
+}
+
+async fn list_deposits(State(state): State<Arc<StubState>>) -> Json<Value> {
+    state.deposit_list_calls.fetch_add(1, Ordering::SeqCst);
+    Json(json!({ "deposits": [] }))
+}
+
+async fn refresh_deposits(State(state): State<Arc<StubState>>) -> Json<Value> {
+    state.deposit_refresh_calls.fetch_add(1, Ordering::SeqCst);
+    Json(json!({
+        "processed": 0,
+        "detected": 0,
+        "queued": 0,
+        "deposits": []
+    }))
+}
+
+async fn process_queue(State(state): State<Arc<StubState>>) -> Json<Value> {
+    state.queue_process_calls.fetch_add(1, Ordering::SeqCst);
+    Json(json!({
+        "processed": 0,
+        "succeeded": 0,
+        "failed": 0,
+        "jobs": []
+    }))
 }
 
 async fn delete_deposit(

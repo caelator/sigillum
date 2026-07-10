@@ -10,7 +10,17 @@ use axum::routing::post;
 use axum::{Json, Router};
 use reqwest::StatusCode;
 use serde_json::json;
+use sha3::{Digest, Keccak256};
 use tempfile::TempDir;
+
+fn submitted_raw_transaction_hash(request: &serde_json::Value) -> serde_json::Value {
+    let raw = request["params"][0]
+        .as_str()
+        .expect("eth_sendRawTransaction carries raw transaction hex");
+    let bytes = hex::decode(raw.strip_prefix("0x").unwrap_or(raw))
+        .expect("submitted raw transaction is valid hex");
+    json!(format!("0x{}", hex::encode(Keccak256::digest(bytes))))
+}
 
 async fn spawn_daemon(base_dir: PathBuf) -> (SocketAddr, tokio::task::JoinHandle<()>) {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -160,7 +170,7 @@ async fn spawn_mock_evm_provider() -> (SocketAddr, tokio::task::JoinHandle<()>) 
                     "logIndex": "0x0"
                 }])
             }
-            "eth_sendRawTransaction" => json!(format!("0x{}", "11".repeat(32))),
+            "eth_sendRawTransaction" => submitted_raw_transaction_hash(request),
             other => json!({ "unsupported": other }),
         };
 
@@ -1520,7 +1530,7 @@ async fn evm_provider_routes_and_stealth_send_flow_work_with_internal_auth_resol
     assert_eq!(send_native_json["broadcast"], true);
     assert_eq!(
         send_native_json["broadcast_transaction_hash_hex"],
-        json!("11".repeat(32))
+        send_native_json["transaction_hash_hex"]
     );
 
     let send_erc20 = post_json(
@@ -2728,7 +2738,7 @@ async fn profile_backed_send_and_queue_flow_persist_internal_configuration() {
     assert_eq!(list_after_json["jobs"][0]["state"], "sent");
     assert_eq!(
         list_after_json["jobs"][0]["broadcast_transaction_hash_hex"],
-        json!("11".repeat(32))
+        list_after_json["jobs"][0]["transaction_hash_hex"]
     );
 
     handle.abort();
@@ -4820,6 +4830,48 @@ async fn deposit_registry_refresh_and_sweep_flow_roundtrip() {
         .unwrap()
         .to_string();
 
+    let underfunded_deposit = post_json(
+        &client,
+        addr,
+        "/api/deposits/eth-stealth/create-native",
+        json!({
+            "wallet_profile": "payments-mainnet",
+            "expected_value_wei_hex": "0x1bc16d674ec80000",
+            "auto_queue_sweep": true,
+            "min_sweep_value_wei_hex": "0x1",
+            "note": "invoice-underfunded"
+        }),
+        Some(&token),
+    )
+    .await;
+    assert_eq!(underfunded_deposit.status(), StatusCode::OK);
+    let underfunded_json: serde_json::Value = underfunded_deposit.json().await.unwrap();
+    let underfunded_id = underfunded_json["deposit"]["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    let underfunded_erc20_deposit = post_json(
+        &client,
+        addr,
+        "/api/deposits/eth-stealth/create-erc20",
+        json!({
+            "wallet_profile": "payments-mainnet",
+            "token_address": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+            "expected_amount_hex": "0x1e8480",
+            "auto_queue_sweep": true,
+            "min_sweep_amount_hex": "0x1"
+        }),
+        Some(&token),
+    )
+    .await;
+    assert_eq!(underfunded_erc20_deposit.status(), StatusCode::OK);
+    let underfunded_erc20_json: serde_json::Value = underfunded_erc20_deposit.json().await.unwrap();
+    let underfunded_erc20_id = underfunded_erc20_json["deposit"]["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
     let refresh = post_json(
         &client,
         addr,
@@ -4830,14 +4882,30 @@ async fn deposit_registry_refresh_and_sweep_flow_roundtrip() {
     .await;
     assert_eq!(refresh.status(), StatusCode::OK);
     let refresh_json: serde_json::Value = refresh.json().await.unwrap();
-    assert_eq!(refresh_json["detected"], 1);
+    assert_eq!(refresh_json["detected"], 3);
     assert_eq!(refresh_json["queued"], 1);
-    assert_eq!(refresh_json["deposits"][0]["chain_id"], 8453);
-    assert_eq!(refresh_json["deposits"][0]["chain_id_assumed"], false);
-    let sweep_job_id = refresh_json["deposits"][0]["queue_job_id"]
-        .as_str()
-        .unwrap()
-        .to_string();
+    let refreshed_deposits = refresh_json["deposits"].as_array().unwrap();
+    let funded = refreshed_deposits
+        .iter()
+        .find(|deposit| deposit["id"] == native_id)
+        .expect("funded deposit should be present");
+    assert_eq!(funded["chain_id"], 8453);
+    assert_eq!(funded["chain_id_assumed"], false);
+    let underfunded = refreshed_deposits
+        .iter()
+        .find(|deposit| deposit["id"] == underfunded_id)
+        .expect("underfunded deposit should be present");
+    assert_eq!(underfunded["status"], "underfunded");
+    assert_eq!(underfunded["observed_amount_hex"], "0xde0b6b3a7640000");
+    assert!(underfunded["queue_job_id"].is_null());
+    let underfunded_erc20 = refreshed_deposits
+        .iter()
+        .find(|deposit| deposit["id"] == underfunded_erc20_id)
+        .expect("underfunded ERC-20 deposit should be present");
+    assert_eq!(underfunded_erc20["status"], "underfunded");
+    assert_eq!(underfunded_erc20["observed_amount_hex"], "0xf4240");
+    assert!(underfunded_erc20["queue_job_id"].is_null());
+    let sweep_job_id = funded["queue_job_id"].as_str().unwrap().to_string();
 
     let process = post_json(
         &client,
@@ -4865,7 +4933,7 @@ async fn deposit_registry_refresh_and_sweep_flow_roundtrip() {
     assert_eq!(refresh_after_json["deposits"][0]["status"], "sweep_sent");
     assert_eq!(
         refresh_after_json["deposits"][0]["broadcast_transaction_hash_hex"],
-        json!("11".repeat(32))
+        process_json["jobs"][0]["transaction_hash_hex"]
     );
 
     let erc20_deposit = post_json(
@@ -4927,12 +4995,12 @@ async fn deposit_registry_refresh_and_sweep_flow_roundtrip() {
     assert_eq!(diagnostics.status(), StatusCode::OK);
     let diagnostics_json: serde_json::Value = diagnostics.json().await.unwrap();
     assert_eq!(diagnostics_json["queue_job_count"], 2);
-    assert_eq!(diagnostics_json["eth_stealth_deposit_count"], 2);
+    assert_eq!(diagnostics_json["eth_stealth_deposit_count"], 4);
 
     let deposits = get(&client, addr, "/api/deposits/eth-stealth", Some(&token)).await;
     assert_eq!(deposits.status(), StatusCode::OK);
     let deposits_json: serde_json::Value = deposits.json().await.unwrap();
-    assert_eq!(deposits_json["deposits"].as_array().unwrap().len(), 2);
+    assert_eq!(deposits_json["deposits"].as_array().unwrap().len(), 4);
 
     handle.abort();
     rpc_handle.abort();

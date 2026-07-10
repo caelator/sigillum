@@ -68,7 +68,7 @@ mkdir -p "${ARTIFACT_DIR}"
 
 echo "==> starting sigillum daemon browser smoke on ${URL}"
 SIGILLUM_BASE_DIR="${BASE_DIR}" \
-  cargo run -p sigillum-cli --quiet -- daemon --port "${PORT}" >"${LOG_FILE}" 2>&1 &
+  cargo run -p sigillum-cli --quiet --locked -- daemon --port "${PORT}" >"${LOG_FILE}" 2>&1 &
 DAEMON_PID="$!"
 wait_for_daemon
 

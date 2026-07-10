@@ -4,7 +4,12 @@
 
 | Version | Supported |
 |---------|-----------|
-| 0.1.x   | Yes       |
+| Unreleased source snapshots | No |
+| v1.0.0 and later | Not yet published |
+
+No released Sigillum version is currently supported. Security support begins
+only after `v1.0.0` is published as a final release; release-candidate builds,
+repository snapshots, and local builds are not supported releases.
 
 ## Reporting a Vulnerability
 
@@ -26,7 +31,10 @@ Sigillum's current security story is explicitly **local-first and single-host**.
 The daemon and optional gateway sidecar are intended to remain inside one
 machine's trust boundary; this document does not claim a hardened
 internet-facing or multi-tenant deployment model because that is outside the
-project's intended scope.
+project’s intended scope. Gateway payment creation is disabled by default and
+remains an experimental preview: balance observations are not finality proof,
+so the gateway exposes only the latest balance observation. With the preview
+disabled, no payment poller or payment-webhook retry loop is started.
 
 ### Threat Model
 
@@ -43,6 +51,7 @@ Sigillum protects against:
 | Timing attacks on key comparison | Constant-time comparison via `subtle` crate (transitive dependency of RustCrypto). |
 | Replay attacks on backup files | Each backup includes a unique timestamp and random nonce. |
 | Local state corruption | Versioned JSON state is atomically written, mirrored to `.bak`, restored from backup when safe, and fails closed when both live and backup are corrupt. |
+| Panic while mutating synchronized state | Daemon security-state, `FileVault`, and gateway database locks abort if poisoned; the client clears its cached token; HID operations return a restart-required error. |
 
 ### What Sigillum does NOT protect against
 
@@ -88,6 +97,18 @@ No OpenSSL. No C bindings for crypto. Pure Rust.
 | `audit.db` | `0o600` | Local SQLite audit database |
 
 All files are created with restrictive permissions.
+
+`queue.json` and its mirrored `.bak` may contain the exact signed transaction
+bytes while a job is `prepared` or `submitted_unknown`. Those bytes cannot be
+used to derive a private key, but any process that can read them can broadcast
+the already-approved transaction. Queue API responses always redact the bytes,
+and terminal or affirmatively broadcast states clear them from the live queue
+document. Backup refresh is best-effort: a failed backup write can leave older
+signed bytes in `queue.json.bak` until a later successful load/save refreshes
+it. Treat read access to the Sigillum data directory and its backups as
+transaction-execution authority: use an owner-only account, full-disk
+encryption, and protected backup retention. Host compromise is outside
+Sigillum's threat model.
 
 Durable atomic replace operations may use same-directory temporary files before
 rename. Those files are created with restrictive permissions, `fsync`'d before

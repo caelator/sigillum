@@ -71,14 +71,18 @@ the W7.1 execution gates:
 
 - `PlanStepExecution` job execution owns `service/queue/plan_steps.rs`
   (pre-signing guards: dependency ordering, evidence-hash re-verification,
-  signer resolution, fee cap) and `service/queue/plan_steps/signing.rs` (the
-  sign + broadcast crypto boundary and its typed sign/broadcast/
-  broadcast-failed audit events).
+  signer resolution, fee cap) and `service/queue/plan_steps/signing.rs` (signing
+  only, with no post-sign network I/O). `service/queue/processing.rs` persists
+  `prepared` and `submitted_unknown` barriers, while
+  `service/queue/broadcast.rs` owns exact-byte submission, recovery, and typed
+  broadcast/broadcast-failed audit events for every queue family.
 - Legacy `EthSeed*` job execution owns `service/queue/seed_sends.rs`,
   mirroring `sweeps.rs`'s balance-check-then-send shape but signing with a
   key derived on demand from the seed wallet's vault-stored mnemonic.
 - Both families gate through the same `ExecutionFamily`/`execution_gate_*`
   machinery `gates.rs` already exposed for `PlanStepExecution`; `queue.rs`'s
   drain loop no longer hard-blocks either family once gates pass.
+- Once a job reaches `prepared`, no queue module may re-sign it. Recovery checks
+  the stored hash and may resubmit only the persisted raw bytes.
 - `scripts/check-architecture.sh` enforces the new module locations and line
   budgets.

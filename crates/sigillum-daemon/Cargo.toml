@@ -11,6 +11,12 @@ rust-version.workspace = true
 keywords = ["vault", "daemon", "server", "web-ui"]
 categories = ["cryptography", "web-programming"]
 
+[features]
+default = []
+# Deterministic crash-boundary hooks used only by opt-in subprocess tests.
+# Default and production builds compile the hook calls to no-ops.
+test-failpoints = []
+
 [dependencies]
 sigillum-api = { workspace = true }
 sigillum-core = { workspace = true, features = ["file-backend"] }

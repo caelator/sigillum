@@ -14,14 +14,17 @@
 //! - **Operation mutex** — an async `tokio::sync::Mutex` that serializes mutating
 //!   operations (writes, key registration, queue processing) for crash safety.
 //!
-//! All mutable interior state is wrapped in [`ResilientMutex`], which transparently
-//! recovers from mutex poisoning so the daemon remains available even if a thread
-//! panics while holding a lock.
+//! All mutable interior state is wrapped in [`ResilientMutex`]. Because this
+//! state contains vault, session, throttle, and lock invariants, poisoning is
+//! treated as unrecoverable: the process aborts instead of using potentially
+//! half-mutated security state. The service supervisor is responsible for a
+//! clean restart.
 
 use std::collections::{HashMap, VecDeque};
 use std::fmt;
 use std::path::PathBuf;
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use rand::RngCore;
@@ -49,27 +52,13 @@ use crate::audit_log::{AuditEventSpec, StoredAuditEvent};
 use crate::operations::{OperationGuard, PendingOperationSpec, list_pending_operations};
 use crate::policy::RuntimePolicy;
 
-/// A resilient wrapper around `std::sync::Mutex<T>` that automatically recovers from poisoning.
+/// A fail-closed wrapper around `std::sync::Mutex<T>`.
 ///
-/// # Why This Exists
-///
-/// In Sigillum's design, the mutex-protected data structures (vaults, unlocked compartments,
-/// sessions, throttle state, and recovery summaries) are always structurally valid and
-/// logically recoverable. A panic within a critical section should not permanently brick
-/// the daemon by poisoning the mutex.
-///
-/// This wrapper implements the pattern `lock().unwrap_or_else(|e| e.into_inner())` at the
-/// type level, ensuring that:
-/// - All lock acquisitions transparently recover from poisoning
-/// - Callers simply use `.lock()` without error handling
-/// - The daemon remains operational even if a thread panics while holding the lock
-///
-/// The protected data remains accessible because:
-/// - If a panic occurred, the data was left in some state (not corrupted)
-/// - The calling code can proceed with the current state or implement recovery logic
-/// - Permanently blocking access would be worse than continuing with the protected value
-///
-/// This is a conscious design choice for a security daemon where availability matters.
+/// A panic while holding security-sensitive state can leave logical invariants
+/// half-applied even when the value remains memory-safe. There is no generic
+/// validator for `T`, so a poisoned lock aborts the process. This preserves the
+/// existing infallible `lock()` API while ensuring no caller silently consumes
+/// unvalidated state after a panic.
 pub struct ResilientMutex<T> {
     inner: Mutex<T>,
 }
@@ -82,14 +71,20 @@ impl<T> ResilientMutex<T> {
         }
     }
 
-    /// Acquire the lock, returning the guarded value.
-    ///
-    /// If the previous holder panicked and poisoned the lock, this automatically
-    /// recovers by calling `into_inner()` on the poison error, making the data
-    /// accessible again.
+    /// Acquire the lock, aborting the process if a previous holder poisoned it.
     pub fn lock(&self) -> std::sync::MutexGuard<'_, T> {
-        self.inner.lock().unwrap_or_else(|e| e.into_inner())
+        match self.inner.lock() {
+            Ok(guard) => guard,
+            Err(_) => abort_on_security_state_poison(),
+        }
     }
+}
+
+fn abort_on_security_state_poison() -> ! {
+    tracing::error!(
+        "security state mutex poisoned; aborting rather than using potentially inconsistent state"
+    );
+    std::process::abort()
 }
 
 impl<T: fmt::Debug> fmt::Debug for ResilientMutex<T> {
@@ -99,10 +94,7 @@ impl<T: fmt::Debug> fmt::Debug for ResilientMutex<T> {
                 .debug_struct("ResilientMutex")
                 .field("value", &*guard)
                 .finish(),
-            Err(e) => f
-                .debug_struct("ResilientMutex")
-                .field("value", e.get_ref())
-                .finish(),
+            Err(_) => abort_on_security_state_poison(),
         }
     }
 }
@@ -186,6 +178,11 @@ pub struct AppState {
     sessions: ResilientMutex<HashMap<String, SessionState>>,
     /// Serializes state-changing operations that touch on-disk data.
     operation_lock: AsyncMutex<()>,
+    /// Preemptive queue kill-switch latch. This deliberately lives outside
+    /// `operation_lock` so a pause request can stop a drain that currently
+    /// holds the disk-operation mutex. The persisted treasury policy remains
+    /// the source of truth across restarts; startup recovery synchronizes it.
+    queue_execution_paused: AtomicBool,
     /// Rate limiter for failed unlock attempts.
     unlock_throttle: ResilientMutex<UnlockThrottle>,
     /// Startup-time reconciliation summary for observability.
@@ -233,6 +230,7 @@ impl AppState {
             unlocked: ResilientMutex::new(HashMap::new()),
             sessions: ResilientMutex::new(HashMap::new()),
             operation_lock: AsyncMutex::new(()),
+            queue_execution_paused: AtomicBool::new(false),
             unlock_throttle: ResilientMutex::new(UnlockThrottle::default()),
             startup_recovery: ResilientMutex::new(StartupRecoverySummary::default()),
             startup_ready: ResilientMutex::new(false),
@@ -322,6 +320,15 @@ impl AppState {
 
     pub async fn operation_guard(&self) -> tokio::sync::MutexGuard<'_, ()> {
         self.operation_lock.lock().await
+    }
+
+    #[must_use]
+    pub fn queue_execution_pause_latched(&self) -> bool {
+        self.queue_execution_paused.load(Ordering::Acquire)
+    }
+
+    pub fn set_queue_execution_pause_latch(&self, paused: bool) {
+        self.queue_execution_paused.store(paused, Ordering::Release);
     }
 
     #[must_use]

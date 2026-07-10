@@ -23,18 +23,21 @@ impl JsonDocument for QueueState {
     // fields (`broadcast_at_unix`, `confirmations`, `receipt_block_number`,
     // `receipt_gas_used_hex`, `receipt_status`) — all additive/optional, so
     // v1/v2/v3 job shapes are unchanged and keep loading as-is.
-    const SCHEMA: JsonSchema = JsonSchema::new("sigillum.queue", 4);
+    // v5 adds the crash-safe pre-broadcast write-ahead fields
+    // (`signed_raw_transaction_hex`, `prepared_at_unix`) and the additive
+    // `prepared`/`submitted_unknown` state strings.
+    const SCHEMA: JsonSchema = JsonSchema::new("sigillum.queue", 5);
 
     fn from_enveloped_json(
         path: &Path,
         version: u32,
         data: serde_json::Value,
     ) -> Result<Self, std::io::Error> {
-        if version != 1 && version != 2 && version != 3 && version != Self::SCHEMA.version {
+        if !matches!(version, 1..=4) && version != Self::SCHEMA.version {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::InvalidData,
                 format!(
-                    "unsupported {} schema version {} in {}; expected 1, 2, 3, or {}",
+                    "unsupported {} schema version {} in {}; expected 1, 2, 3, 4, or {}",
                     Self::SCHEMA.name,
                     version,
                     path.display(),
@@ -146,7 +149,7 @@ mod tests {
         let saved: serde_json::Value =
             serde_json::from_slice(&std::fs::read(queue_path(dir.path())).unwrap()).unwrap();
         assert_eq!(saved["schema"], json!("sigillum.queue"));
-        assert_eq!(saved["schema_version"], json!(4));
+        assert_eq!(saved["schema_version"], json!(5));
         assert!(saved["data"]["jobs"].is_array());
     }
 
@@ -204,7 +207,7 @@ mod tests {
         save_queue(dir.path(), &loaded).unwrap();
         let saved: serde_json::Value =
             serde_json::from_slice(&std::fs::read(queue_path(dir.path())).unwrap()).unwrap();
-        assert_eq!(saved["schema_version"], json!(4));
+        assert_eq!(saved["schema_version"], json!(5));
         assert_eq!(saved["data"]["jobs"][1]["state"], json!("deferred"));
         assert_eq!(
             saved["data"]["jobs"][2]["state"],
@@ -250,7 +253,7 @@ mod tests {
         save_queue(dir.path(), &loaded).unwrap();
         let saved: serde_json::Value =
             serde_json::from_slice(&std::fs::read(queue_path(dir.path())).unwrap()).unwrap();
-        assert_eq!(saved["schema_version"], json!(4));
+        assert_eq!(saved["schema_version"], json!(5));
         assert_eq!(saved["data"]["jobs"][0]["state"], json!("queued"));
         assert_eq!(
             saved["data"]["jobs"][1]["kind"],
@@ -319,7 +322,7 @@ mod tests {
         save_queue(dir.path(), &loaded).unwrap();
         let saved: serde_json::Value =
             serde_json::from_slice(&std::fs::read(queue_path(dir.path())).unwrap()).unwrap();
-        assert_eq!(saved["schema_version"], json!(4));
+        assert_eq!(saved["schema_version"], json!(5));
         assert_eq!(saved["data"]["jobs"][1]["state"], json!("sent"));
     }
 
@@ -370,7 +373,7 @@ mod tests {
 
         let saved: serde_json::Value =
             serde_json::from_slice(&std::fs::read(queue_path(dir.path())).unwrap()).unwrap();
-        assert_eq!(saved["schema_version"], json!(4));
+        assert_eq!(saved["schema_version"], json!(5));
         assert_eq!(
             saved["data"]["jobs"][0]["kind"],
             json!("plan_step_execution")

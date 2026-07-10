@@ -4,17 +4,24 @@
 //! sweeps with deferred execution and retry logic.
 
 mod authorization;
+mod broadcast;
+mod execution;
+mod failpoints;
 mod failure;
 mod gates;
+mod in_flight;
 mod outcomes;
 mod pause;
 mod payloads;
 mod plan_steps;
 mod processing;
+mod replay;
 mod seed_sends;
 mod serialization;
 mod state;
+mod status;
 mod sweeps;
+mod tally;
 
 use sigillum_api::{
     QueueEnqueueResponse, QueueEthStealthErc20SweepRequest, QueueEthStealthErc20TransferRequest,
@@ -24,11 +31,13 @@ use sigillum_api::{
 
 use crate::audit_log::{AuditEventSpec, AuditQueueJobKind};
 
+pub(super) use execution::QueueExecution;
+
 pub(super) use state::{
-    count_queue_states, is_active_or_completed_queue_state, is_active_queue_state,
-    mark_job_operator_action_required, queue_job_failed_state, queue_job_operator_action_required,
-    queue_status, recover_queue_job,
+    is_active_or_completed_queue_state, is_active_queue_state, mark_job_operator_action_required,
+    queue_job_failed_state, queue_job_operator_action_required, recover_queue_job,
 };
+pub(super) use status::{count_queue_states, queue_status};
 
 // W7.2 plan-step enqueue (service/inventory/plan_execution_enqueue.rs) reuses
 // the queue domain's gate evaluation and job construction.
@@ -45,6 +54,13 @@ use super::{ServiceError, ServiceResult, SigillumService};
 const QUEUE_STATE_QUEUED: &str = "queued";
 const QUEUE_STATE_BLOCKED: &str = "blocked";
 const QUEUE_STATE_RETRYING: &str = "retrying";
+/// Signed bytes and their locally-derived hash are durably persisted. No
+/// network submission has started yet, and this job must never be re-signed.
+const QUEUE_STATE_PREPARED: &str = "prepared";
+/// A pre-broadcast marker was durably persisted before the RPC call. The
+/// network outcome may be unknown after a crash; recovery polls by hash or
+/// resubmits the exact prepared bytes.
+const QUEUE_STATE_SUBMITTED_UNKNOWN: &str = "submitted_unknown";
 const QUEUE_STATE_SENT: &str = "sent";
 /// W7.4: new first-class state (schema v4). `sent` means "broadcast,
 /// awaiting confirmation"; `confirmed` means the receipt reached the
@@ -66,7 +82,9 @@ impl SigillumService {
         let _ = self.require_session(token)?;
         let queue = crate::queue_store::load_queue(&self.state.base_dir)
             .map_err(|error| ServiceError::internal(format!("Failed to load queue: {error}")))?;
-        Ok(QueueJobListResponse { jobs: queue.jobs })
+        Ok(QueueJobListResponse {
+            jobs: queue.jobs.into_iter().map(queue_job_for_response).collect(),
+        })
     }
 
     pub(crate) async fn enqueue_eth_stealth_transfer(
@@ -162,45 +180,10 @@ impl SigillumService {
     }
 }
 
-// ── Execution State Types ──────────────────────────────────────────────────
-
-#[allow(clippy::large_enum_variant)]
-pub(super) enum QueueExecution {
-    Sent(sigillum_api::EthStealthSendResponse),
-    Blocked(String),
-    /// Terminal-until-human (E1 `operator_action_required`): never
-    /// auto-retried. W7.3 uses this for evidence-hash tamper detection and
-    /// for any claim (`ClaimReward`) failure — a Merkle proof may be
-    /// consumed by a single broadcast attempt, so claims are never retried.
-    /// W7.4 also uses this for a receipt-confirmation timeout (reason
-    /// carries the tx hash — the broadcast is NEVER assumed to have failed)
-    /// and for a broadcast rejected twice (nonce-too-low retry exhausted, or
-    /// underpriced after the one allowed fee bump).
-    OperatorActionRequired(String),
-    /// W7.4: an on-chain revert, discovered via receipt polling — never
-    /// auto-retried, with truthful gas/block evidence recorded alongside
-    /// the park reason (distinct from `OperatorActionRequired` because a
-    /// revert always carries mined receipt evidence; a plain
-    /// `OperatorActionRequired` reason may not).
-    RevertedOnChain {
-        reason: String,
-        block_number: u64,
-        gas_used_hex: String,
-    },
-    /// W7.4: the receipt reached the chain's configured finality depth with
-    /// a SUCCESS status — genuinely terminal, distinct from `Sent` (which
-    /// only means "broadcast, awaiting confirmation").
-    Confirmed {
-        block_number: u64,
-        gas_used_hex: String,
-        confirmations: u64,
-    },
-    /// W7.4: still awaiting confirmation. State stays `sent` (unchanged);
-    /// any partial receipt info observed so far (a receipt exists but has
-    /// not yet reached the required depth) is recorded for visibility.
-    AwaitingConfirmation {
-        block_number: Option<u64>,
-        gas_used_hex: Option<String>,
-        confirmations: Option<u64>,
-    },
+fn queue_job_for_response(mut job: sigillum_api::QueueJob) -> sigillum_api::QueueJob {
+    // Signed bytes are intentionally persisted for crash-safe replay, but
+    // returning them over list/process/maintenance APIs would grant any API
+    // consumer an unnecessary transaction-submission capability.
+    job.receipt.signed_raw_transaction_hex = None;
+    job
 }

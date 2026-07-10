@@ -46,23 +46,29 @@ pub mod error;
 pub mod hid;
 pub mod types;
 
+#[cfg(feature = "hid")]
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
+#[cfg(any(feature = "hid", test))]
 use rand::RngCore;
+#[cfg(any(feature = "hid", test))]
 use rand::rngs::OsRng;
 use zeroize::Zeroizing;
 
-use config::{
-    CompartmentMeta, Fido2Config, RegisteredKey, SHARD_SLOTS, generate_dummy_shards, load_config,
-    save_config,
-};
+use config::{CompartmentMeta, Fido2Config, SHARD_SLOTS, load_config, save_config};
+#[cfg(any(feature = "hid", test))]
+use config::{RegisteredKey, generate_dummy_shards};
 use error::Fido2Error;
-use types::{Fido2Status, KeyInfo, QuorumEvent};
+#[cfg(feature = "hid")]
+use types::QuorumEvent;
+use types::{Fido2Status, KeyInfo};
 
 /// RAII guard that zeroizes HMAC secrets on drop.
+#[cfg(feature = "hid")]
 struct HmacSecrets(Vec<(usize, [u8; 32])>);
 
+#[cfg(feature = "hid")]
 impl Drop for HmacSecrets {
     fn drop(&mut self) {
         for (_, hmac) in &mut self.0 {
@@ -71,6 +77,7 @@ impl Drop for HmacSecrets {
     }
 }
 
+#[cfg(feature = "hid")]
 impl std::ops::Deref for HmacSecrets {
     type Target = Vec<(usize, [u8; 32])>;
     fn deref(&self) -> &Self::Target {
@@ -78,14 +85,17 @@ impl std::ops::Deref for HmacSecrets {
     }
 }
 
+#[cfg(feature = "hid")]
 impl std::ops::DerefMut for HmacSecrets {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.0
     }
 }
 
+#[cfg(feature = "hid")]
 struct HmacSecretVec(Vec<[u8; 32]>);
 
+#[cfg(feature = "hid")]
 impl Drop for HmacSecretVec {
     fn drop(&mut self) {
         for hmac in &mut self.0 {
@@ -94,6 +104,7 @@ impl Drop for HmacSecretVec {
     }
 }
 
+#[cfg(feature = "hid")]
 impl std::ops::Deref for HmacSecretVec {
     type Target = Vec<[u8; 32]>;
     fn deref(&self) -> &Self::Target {
@@ -101,6 +112,7 @@ impl std::ops::Deref for HmacSecretVec {
     }
 }
 
+#[cfg(feature = "hid")]
 impl std::ops::DerefMut for HmacSecretVec {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.0
@@ -109,6 +121,7 @@ impl std::ops::DerefMut for HmacSecretVec {
 
 /// Byte length of an encrypted tagged shard:
 /// 12 (nonce) + 4 (comp_id) + 33 (shamir share) + 16 (aead tag) = 65 bytes.
+#[cfg(any(feature = "hid", test))]
 const ENCRYPTED_TAGGED_SHARD_BYTES: usize = 65;
 
 /// Result of registering a FIDO2 key.
@@ -153,10 +166,12 @@ impl Fido2Manager {
         save_config(&self.config_path, config)
     }
 
+    #[cfg(feature = "hid")]
     fn normalize_pin(pin: Option<&str>) -> Option<&str> {
         pin.filter(|pin| !pin.is_empty())
     }
 
+    #[cfg(feature = "hid")]
     fn pin_for_round(pins: &[String], round: usize) -> Option<&str> {
         pins.get(round)
             .and_then(|pin| Self::normalize_pin(Some(pin.as_str())))
@@ -212,8 +227,24 @@ impl Fido2Manager {
         Ok(self.load()?.is_fido2_enabled())
     }
 
+    /// Set a PIN through the local HID transport.
+    ///
+    /// Builds compiled without the `hid` feature keep this method in the API
+    /// and return an explicit error instead of pretending the operation is
+    /// available.
     pub fn set_new_pin(&self, pin: &str) -> Result<(), Fido2Error> {
-        hid::set_new_pin(pin)
+        #[cfg(feature = "hid")]
+        {
+            hid::set_new_pin(pin)
+        }
+
+        #[cfg(not(feature = "hid"))]
+        {
+            let _ = pin;
+            Err(Fido2Error::Other(
+                "FIDO2 HID support is disabled in this build".into(),
+            ))
+        }
     }
 
     // ── Compartment meta persistence ────────────────────────────
@@ -307,6 +338,7 @@ impl Fido2Manager {
     /// of the same encrypted size). This prevents an observer of the config file
     /// from learning how many compartments exist — real and dummy shards are
     /// cryptographically indistinguishable without the HMAC-secret.
+    #[cfg(any(feature = "hid", test))]
     fn pad_shards(shards: Vec<String>) -> Vec<String> {
         let real_count = shards.len();
         if real_count >= SHARD_SLOTS {
@@ -959,5 +991,17 @@ mod tests {
 
         assert!(matches!(mgr.status(), Err(Fido2Error::Config(_))));
         assert!(matches!(mgr.list_keys(), Err(Fido2Error::Config(_))));
+    }
+
+    #[cfg(not(feature = "hid"))]
+    #[test]
+    fn pin_setup_reports_disabled_hid_feature() {
+        let (mgr, _dir) = test_manager();
+
+        assert!(matches!(
+            mgr.set_new_pin("1234"),
+            Err(Fido2Error::Other(message))
+                if message == "FIDO2 HID support is disabled in this build"
+        ));
     }
 }

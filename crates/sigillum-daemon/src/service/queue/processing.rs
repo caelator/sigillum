@@ -18,9 +18,9 @@ use crate::service::{ServiceError, ServiceResult, SigillumService};
 
 use super::QueueExecution;
 use super::gates::EXECUTION_PAUSED_REASON;
-use super::outcomes::QueueDrainTally;
 use super::serialization;
 use super::state::queue_job_is_runnable;
+use super::tally::QueueDrainTally;
 
 impl SigillumService {
     pub(crate) async fn process_queue(
@@ -67,8 +67,8 @@ impl SigillumService {
         // Snapshot of every job's id -> state, refreshed after each job so
         // `PlanStepExecution` dependents resolve within the same drain batch
         // (W6.4 ordering) instead of waiting for the next `process_queue`
-        // call. Built once up front because `queue.jobs.iter_mut()` below
-        // holds a mutable borrow of the vector for the loop's duration.
+        // call. The drain uses indexes (rather than `iter_mut`) so it can
+        // durably save the whole queue at the prepare/submission barriers.
         let mut job_states: HashMap<String, String> = queue
             .jobs
             .iter()
@@ -80,7 +80,7 @@ impl SigillumService {
         // Refreshed the same way as `job_states` (see `serialization.rs`).
         let mut in_flight_sources = serialization::build_in_flight_sources(&queue.jobs);
 
-        for job in queue.jobs.iter_mut() {
+        for job_index in 0..queue.jobs.len() {
             if processed.len() >= limit {
                 break;
             }
@@ -90,6 +90,7 @@ impl SigillumService {
                 paused_reason = Some(EXECUTION_PAUSED_REASON.to_string());
                 break;
             }
+            let job = queue.jobs[job_index].clone();
             if let Some(target_id) = body.id.as_deref() {
                 if job.id != target_id {
                     continue;
@@ -97,27 +98,49 @@ impl SigillumService {
             }
 
             let now = now_unix();
-            if !queue_job_is_runnable(job, force_target, now) {
+            if !queue_job_is_runnable(&job, force_target, now) {
                 if body.id.is_some() {
                     break;
                 }
                 continue;
             }
 
-            if let Some(reason) = serialization::skip_reason(job, &in_flight_sources) {
-                job.last_error = Some(reason);
+            if let Some(reason) = serialization::skip_reason(&job, &in_flight_sources) {
+                queue.jobs[job_index].last_error = Some(reason);
                 if body.id.is_some() {
                     break;
                 }
                 continue;
             }
 
-            job.attempts += 1;
-            job.updated_at_unix = now;
-            job.next_attempt_after_unix = None;
+            queue.jobs[job_index].attempts += 1;
+            queue.jobs[job_index].updated_at_unix = now;
+            queue.jobs[job_index].next_attempt_after_unix = None;
+            let job = queue.jobs[job_index].clone();
+            let had_replay_bytes_at_start = job.receipt.signed_raw_transaction_hex.is_some();
+            // A broadcast plan step is receipt-only forever; policy gates
+            // stop fresh signing/submission but must never demote `sent`.
+            let gate_block_reason = if super::in_flight::is_sent_plan_step(&job) {
+                None
+            } else {
+                self.execution_gate_block_reason(&job.payload)?
+            };
+            let in_flight_result = self
+                .process_in_flight_queue_job(
+                    token,
+                    queue,
+                    job_index,
+                    &job,
+                    &job_states,
+                    now,
+                    gate_block_reason.is_none(),
+                )
+                .await?;
 
             #[rustfmt::skip]
-            let result = if let Some(reason) = self.execution_gate_block_reason(&job.payload)? {
+            let result = if let Some(result) = in_flight_result {
+                result
+            } else if let Some(reason) = gate_block_reason {
                 Ok(QueueExecution::Blocked(reason))
             } else {
             match &job.payload {
@@ -145,11 +168,11 @@ impl SigillumService {
                             nonce: *nonce,
                             gas_limit: *gas_limit,
                             estimate_fees: None,
-                            broadcast: Some(true),
+                            broadcast: Some(false),
                         },
                     )
                     .await
-                    .map(QueueExecution::Sent),
+                    .map(QueueExecution::prepared_from_send),
                 QueueJobPayload::EthStealthErc20Transfer {
                     wallet_profile,
                     stealth_address,
@@ -176,11 +199,11 @@ impl SigillumService {
                             nonce: *nonce,
                             gas_limit: *gas_limit,
                             estimate_fees: None,
-                            broadcast: Some(true),
+                            broadcast: Some(false),
                         },
                     )
                     .await
-                    .map(QueueExecution::Sent),
+                    .map(QueueExecution::prepared_from_send),
                 QueueJobPayload::EthStealthNativeSweep {
                     wallet_profile,
                     stealth_address,
@@ -307,17 +330,49 @@ impl SigillumService {
             }
             };
 
-            super::outcomes::apply(job, result, now, policy, &mut tally);
+            super::outcomes::apply(&mut queue.jobs[job_index], result, now, policy, &mut tally);
+
+            // A newly signed job crosses a durable prepare barrier before
+            // any external network call. Then persist `submitted_unknown`
+            // before the call so a crash can only lead to receipt lookup or
+            // exact-byte rebroadcast, never another signature.
+            if queue.jobs[job_index].state == super::QUEUE_STATE_PREPARED
+                && queue.jobs[job_index]
+                    .receipt
+                    .signed_raw_transaction_hex
+                    .is_some()
+                && !had_replay_bytes_at_start
+            {
+                super::broadcast::persist_queue(&self.state.base_dir, queue)?;
+                super::failpoints::hit(super::failpoints::AFTER_PREPARED_PERSIST);
+                if self.state.queue_execution_pause_latched() {
+                    paused_reason = Some(EXECUTION_PAUSED_REASON.to_string());
+                } else {
+                    self.persist_queue_submission_marker(queue, job_index, now)?;
+                    let submitted_job = queue.jobs[job_index].clone();
+                    let broadcast_result = self
+                        .broadcast_prepared_queue_job(token, &submitted_job, false, true)
+                        .await;
+                    super::outcomes::apply(
+                        &mut queue.jobs[job_index],
+                        broadcast_result,
+                        now,
+                        policy,
+                        &mut tally,
+                    );
+                }
+            }
 
             // Refresh the dependency-lookup snapshot immediately so a
             // dependent `PlanStepExecution` job processed later in THIS
             // batch sees this job's just-computed outcome.
+            let job = &queue.jobs[job_index];
             job_states.insert(job.id.clone(), job.state.clone());
             serialization::refresh(&mut in_flight_sources, job);
 
-            processed.push(job.clone());
+            processed.push(super::queue_job_for_response(job.clone()));
 
-            if body.id.is_some() {
+            if body.id.is_some() || paused_reason.is_some() {
                 break;
             }
         }

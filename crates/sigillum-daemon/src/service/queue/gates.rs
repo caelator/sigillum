@@ -148,6 +148,9 @@ impl SigillumService {
         &self,
         payload: &QueueJobPayload,
     ) -> ServiceResult<Option<String>> {
+        if self.state.queue_execution_pause_latched() {
+            return Ok(Some(EXECUTION_PAUSED_REASON.to_string()));
+        }
         let Some(family) = queue_payload_execution_family(payload) else {
             return Ok(None);
         };
@@ -156,6 +159,9 @@ impl SigillumService {
     }
 
     pub(in crate::service) fn queue_execution_paused(&self) -> ServiceResult<bool> {
+        if self.state.queue_execution_pause_latched() {
+            return Ok(true);
+        }
         Ok(self
             .current_treasury_policy()?
             .map(|policy| policy.execution_paused)

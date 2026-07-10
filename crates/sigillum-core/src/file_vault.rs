@@ -19,6 +19,9 @@
 //!   preventing concurrent writes that could lose data.
 //! - **Secure key storage**: The master key uses `PinnedSecretBytes` to prefer mlocked
 //!   memory and zeroize on drop. The key is never exposed outside the Mutex.
+//! - **Fail-closed poison handling**: A panic while holding the master-key or
+//!   write-serialization Mutex aborts the process on its next access. Poisoned
+//!   vault state is never silently recovered.
 //! - **Locked state**: When the master key is `None`, all Tier 2 operations return
 //!   `Err(VaultError::Locked)` to enforce explicit unlock before access.
 //!
@@ -29,7 +32,7 @@
 
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::Mutex;
+use std::sync::{Mutex, MutexGuard};
 
 use aes_gcm::aead::Aead;
 use aes_gcm::{Aes256Gcm, KeyInit, Nonce};
@@ -80,6 +83,24 @@ pub struct FileVault {
     write_lock: Mutex<()>,
 }
 
+/// Acquire a vault security-state lock or terminate the process.
+///
+/// A panic while holding either lock can leave the loaded key or an in-flight
+/// read-modify-write operation logically inconsistent. Rust's poisoned guard
+/// cannot prove those invariants were restored, so consuming its inner value
+/// would risk continuing with ambiguous security state.
+fn lock_vault_state<'a, T>(mutex: &'a Mutex<T>, name: &str) -> MutexGuard<'a, T> {
+    match mutex.lock() {
+        Ok(guard) => guard,
+        Err(_) => abort_on_vault_state_poison(name),
+    }
+}
+
+fn abort_on_vault_state_poison(name: &str) -> ! {
+    eprintln!("vault {name} mutex poisoned; aborting rather than recovering ambiguous state");
+    std::process::abort()
+}
+
 impl FileVault {
     /// Create a new file vault with the given configuration.
     pub fn new(config: VaultConfig) -> Self {
@@ -114,7 +135,7 @@ impl FileVault {
     where
         F: FnOnce(&[u8; 32]) -> T,
     {
-        let mk = self.master_key.lock().unwrap_or_else(|e| e.into_inner());
+        let mk = lock_vault_state(&self.master_key, "master-key");
         mk.as_ref().and_then(|key| key.with_array_32(f))
     }
 
@@ -225,14 +246,14 @@ impl SecretStore for FileVault {
     }
 
     fn set_api_key(&self, key: &str, value: &str) -> Result<(), VaultError> {
-        let _wl = self.write_lock.lock().unwrap_or_else(|e| e.into_inner());
+        let _wl = lock_vault_state(&self.write_lock, "write-serialization");
         let mut store = self.load_api_store()?;
         store.insert(key.to_string(), value.to_string());
         self.save_api_store(&store)
     }
 
     fn delete_api_key(&self, key: &str) -> Result<(), VaultError> {
-        let _wl = self.write_lock.lock().unwrap_or_else(|e| e.into_inner());
+        let _wl = lock_vault_state(&self.write_lock, "write-serialization");
         let mut store = self.load_api_store()?;
         store.remove(key);
         self.save_api_store(&store)
@@ -257,7 +278,7 @@ impl SecretStore for FileVault {
     }
 
     fn set_secret(&self, key: &str, value: &str) -> Result<(), VaultError> {
-        let _wl = self.write_lock.lock().unwrap_or_else(|e| e.into_inner());
+        let _wl = lock_vault_state(&self.write_lock, "write-serialization");
         self.with_master_key(|mk| {
             let mut store = self.load_store(mk)?;
             store.insert(key.to_string(), value.to_string());
@@ -267,7 +288,7 @@ impl SecretStore for FileVault {
     }
 
     fn delete_secret(&self, key: &str) -> Result<(), VaultError> {
-        let _wl = self.write_lock.lock().unwrap_or_else(|e| e.into_inner());
+        let _wl = lock_vault_state(&self.write_lock, "write-serialization");
         self.with_master_key(|mk| {
             let mut store = self.load_store(mk)?;
             store.remove(key);
@@ -298,21 +319,18 @@ impl SecretStore for FileVault {
     }
 
     fn is_unlocked(&self) -> bool {
-        self.master_key
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .is_some()
+        lock_vault_state(&self.master_key, "master-key").is_some()
     }
 }
 
 impl VaultLifecycle for FileVault {
     fn load_master_key(&self, key: [u8; 32]) {
-        let mut mk = self.master_key.lock().unwrap_or_else(|e| e.into_inner());
+        let mut mk = lock_vault_state(&self.master_key, "master-key");
         *mk = Some(PinnedSecretBytes::from_array_32_lossy(key));
     }
 
     fn zeroize_master_key(&self) {
-        let mut mk = self.master_key.lock().unwrap_or_else(|e| e.into_inner());
+        let mut mk = lock_vault_state(&self.master_key, "master-key");
         *mk = None; // Zeroizing<[u8;32]> zeros on drop
     }
 
@@ -332,6 +350,8 @@ mod tests {
     use secrecy::ExposeSecret;
     use tempfile::TempDir;
 
+    const POISON_CHILD_ENV: &str = "SIGILLUM_TEST_POISONED_FILE_VAULT_CHILD";
+
     fn test_vault() -> (FileVault, TempDir) {
         let dir = TempDir::new().unwrap();
         let vault = FileVault::new(VaultConfig {
@@ -346,6 +366,56 @@ mod tests {
         let mut key = [0u8; 32];
         OsRng.fill_bytes(&mut key);
         key
+    }
+
+    #[test]
+    fn file_vault_poison_child() {
+        let Ok(mode) = std::env::var(POISON_CHILD_ENV) else {
+            return;
+        };
+        let (vault, _dir) = test_vault();
+        let vault = std::sync::Arc::new(vault);
+        let poisoner = vault.clone();
+        let poison_mode = mode.clone();
+        let _ = std::thread::spawn(move || match poison_mode.as_str() {
+            "master-key" => {
+                let _guard = poisoner.master_key.lock().unwrap();
+                panic!("intentional master-key poison for subprocess test");
+            }
+            "write-serialization" => {
+                let _guard = poisoner.write_lock.lock().unwrap();
+                panic!("intentional write-lock poison for subprocess test");
+            }
+            other => panic!("unknown poison child mode: {other}"),
+        })
+        .join();
+
+        match mode.as_str() {
+            "master-key" => {
+                let _ = vault.is_unlocked();
+            }
+            "write-serialization" => {
+                let _ = vault.set_api_key("key", "value");
+            }
+            _ => unreachable!(),
+        }
+    }
+
+    #[test]
+    fn poisoned_file_vault_locks_abort_instead_of_recovering() {
+        let current_test_binary = std::env::current_exe().expect("current test binary");
+        for mode in ["master-key", "write-serialization"] {
+            let status = std::process::Command::new(&current_test_binary)
+                .args([
+                    "--exact",
+                    "file_vault::tests::file_vault_poison_child",
+                    "--nocapture",
+                ])
+                .env(POISON_CHILD_ENV, mode)
+                .status()
+                .expect("poison child should launch");
+            assert!(!status.success(), "poisoned {mode} lock must abort");
+        }
     }
 
     // ── Tier 1 tests ──────────────────────────────────────────────

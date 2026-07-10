@@ -16,6 +16,7 @@ use axum::routing::post;
 use axum::{Json, Router};
 use reqwest::StatusCode;
 use serde_json::{Value, json};
+use sha3::{Digest, Keccak256};
 use tempfile::TempDir;
 
 const DESTINATION: &str = "0x9999999999999999999999999999999999999999";
@@ -24,6 +25,15 @@ const SEED_MNEMONIC: &str =
     "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
 const ONE_ETH_HEX: &str = "0xde0b6b3a7640000";
 const RPC_TOKEN: &str = "rpc-test-token";
+
+fn submitted_raw_transaction_hash(request: &Value) -> Value {
+    let raw = request["params"][0]
+        .as_str()
+        .expect("eth_sendRawTransaction carries raw transaction hex");
+    let bytes = hex::decode(raw.strip_prefix("0x").unwrap_or(raw))
+        .expect("submitted raw transaction is valid hex");
+    json!(format!("0x{}", hex::encode(Keccak256::digest(bytes))))
+}
 
 async fn spawn_daemon(base_dir: PathBuf) -> (SocketAddr, tokio::task::JoinHandle<()>) {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -73,7 +83,7 @@ fn rpc_response(state: &RpcState, request: &Value) -> Value {
                 });
             }
             state.broadcast_count.fetch_add(1, Ordering::SeqCst);
-            json!(format!("0x{}", "11".repeat(32)))
+            submitted_raw_transaction_hash(request)
         }
         other => json!({ "unsupported": other }),
     };
@@ -823,12 +833,26 @@ async fn policy_update_and_drain_serialize_no_torn_state_or_double_broadcast() {
         .iter()
         .find(|job| job["step_id"] == json!(step_id))
         .expect("queued job exists");
+    assert!(
+        job.get("signed_raw_transaction_hex").is_none(),
+        "queue APIs redact replayable signed bytes: {job}"
+    );
     if broadcasts == 1 {
         assert_eq!(job["state"], json!("sent"), "{job}");
         assert!(job["transaction_hash_hex"].is_string(), "{job}");
     } else {
         assert_ne!(job["state"], json!("sent"), "{job}");
-        assert!(job["transaction_hash_hex"].is_null(), "{job}");
+        if job["state"] == json!("prepared") {
+            assert!(job["transaction_hash_hex"].is_string(), "{job}");
+            let persisted_job = queue_job_by_step(&env, &step_id);
+            assert!(
+                persisted_job["signed_raw_transaction_hex"].is_string(),
+                "durable queue storage retains exact replay bytes: {persisted_job}"
+            );
+        } else {
+            assert_eq!(job["state"], json!("queued"), "{job}");
+            assert!(job["transaction_hash_hex"].is_null(), "{job}");
+        }
     }
 
     let queue_bytes = std::fs::read(queue_path(&env)).unwrap();

@@ -70,6 +70,11 @@ Standalone `FileVault` defaults to:
 └── vault.enc
 ```
 
+`FileVault` treats a poisoned master-key or write-serialization mutex as an
+unrecoverable invariant failure and aborts the process. It never consumes the
+poisoned inner value; deployments therefore need a supervisor for clean
+restart.
+
 FIDO2 and multi-compartment flows use:
 
 ```text
@@ -164,24 +169,36 @@ Current daemon behavior:
 - tracks stealth deposit records, discovers matching ERC-5564 announcements from
   bounded provider log scans, and refreshes balances against configured providers
 - queues direct sends and sweep jobs with explicit persisted states:
-  `queued`, `blocked`, `retrying`, `sent`, `confirmed`, `failed_terminal`, and
-  `operator_action_required`; legacy `deferred` inputs normalize to
+  `queued`, `blocked`, `retrying`, `prepared`, `submitted_unknown`, `sent`,
+  `confirmed`, `failed_terminal`, and `operator_action_required`; legacy
+  `deferred` inputs normalize to
   `blocked` during recovery with a recorded reason, while
   `operator_action_required` is terminal until a future explicit operator
-  action moves it out of that state. `sent`/`confirmed` are `PlanStepExecution`-
-  only distinctions (W7.4): `sent` means broadcast-and-awaiting-confirmation,
-  `confirmed` means the receipt reached the chain registry's `finality_blocks`
-  depth (W1.1) with a success status; `EthSeed*`/`EthStealth*` jobs keep
-  `sent` as their pre-W7.4 terminal meaning
+  action moves it out of that state. Every queue family first signs to a
+  durably persisted `prepared` record containing the exact raw transaction and
+  its locally derived hash plus payload/binding hashes. The drain persists
+  `submitted_unknown` before the first RPC submission, verifies provider and
+  receipt transaction identity, and recovery may check the receipt or resubmit
+  only those exact bytes; it must never re-sign that job. API responses redact
+  signed bytes, and terminal or affirmatively broadcast states clear them from
+  the live queue document. Backup synchronization is best-effort, so an older
+  `queue.json.bak` can retain signed bytes after a backup-write failure until a
+  later successful refresh. The data directory and every retained backup are
+  transaction-execution authority and require owner-only permissions plus
+  host/full-disk protection. `sent`/`confirmed` are
+  `PlanStepExecution`-only distinctions (W7.4): `sent` means
+  broadcast-and-awaiting-confirmation, and `confirmed` means the receipt
+  reached the chain registry's `finality_blocks` depth (W1.1) with a success
+  status; `EthSeed*`/`EthStealth*` jobs keep `sent` as their terminal success
+  state after the same prepare/submission barriers
 - keeps queue ownership split inside `service/queue/*`: the façade owns public
   enqueue/list methods, `payloads` owns job construction, `processing` owns the
-  drain loop, retry transitions, and per-source serialization (at most one
-  in-flight `PlanStepExecution` job per source address + chain id), `sweeps`
-  owns native/ERC-20 sweep execution, `plan_steps` (+ `plan_steps/signing.rs`
-  and `plan_steps/receipts.rs`) owns `PlanStepExecution` signing, broadcast
-  nonce/fee-bump retry, and post-broadcast receipt confirmation, and `state`
-  owns normalization, legacy recovery, retry classification, and retry
-  backoff tests
+  drain loop and both durable submission barriers, `serialization` limits
+  in-flight `PlanStepExecution` work per source address + chain id, `sweeps`
+  owns native/ERC-20 sweep preparation, `plan_steps/signing.rs` signs without
+  network I/O, `broadcast` owns exact-byte submission and crash recovery for
+  every queue family, `plan_steps/receipts.rs` owns receipt confirmation, and
+  `state` owns normalization and recovery invariants
 - keeps queue transport ownership aligned across crates: queue request and
   response DTOs live under `sigillum-api/src/request/queue.rs` and
   `sigillum-api/src/response/queue.rs` with top-level re-exports preserved,
@@ -233,7 +250,10 @@ Current daemon behavior:
   `allow_claim_execution`, and `allow_gas_topups` gates. The
   `execution_paused` kill switch is controlled through
   `POST /api/queue/pause|resume`, and every gate or pause flip emits a typed
-  audit event
+  audit event. Pause sets an in-memory `AtomicBool` latch before waiting for the
+  queue's operation mutex; the drain checks it between jobs and as the final
+  step before network submission. Durable policy persistence still serializes
+  behind the mutex, and startup restores the latch from that policy
 - enqueues plan steps only after server-side re-validation of approval,
   simulation evidence and freshness, blockers, treasury policy, linkage at
   parity with plan generation and approval, and execution gates; single-step
@@ -241,10 +261,15 @@ Current daemon behavior:
   confirmation naming the step count and total value
 - re-verifies the simulation-evidence hash at drain time before any key
   material is touched; a mismatch parks as `operator_action_required` and is
-  never signed. Broadcast-time execution manages the nonce, permits one bounded
-  fee bump, and confirms the receipt to the chain registry's finality depth
-  before entering the terminal `confirmed` state, with single-in-flight
-  serialization per (source address, chain)
+  never signed. Signing resolves the nonce once, then the exact signed bytes and
+  hash cross a durable `prepared` barrier; `submitted_unknown` crosses a second
+  durable barrier before RPC. A restart checks for a receipt and may resubmit
+  those bytes, but never derives another signature for the job. Deterministic
+  `nonce too low` and underpriced rejections park as
+  `operator_action_required`; no replacement transaction is signed. Receipt
+  polling still confirms to the chain registry's finality depth before entering
+  terminal `confirmed`, with single-in-flight serialization per (source
+  address, chain)
 - runs hot-wallet overflow/refill treasury automation only behind the
   `allow_treasury_automation` opt-in (default off); generated work still passes
   through the standard policy, linkage, simulation, approval, and execution

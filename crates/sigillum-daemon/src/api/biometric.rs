@@ -5,7 +5,7 @@ use crate::audit_log::AuditEventSpec;
 use crate::json_store::{JsonDocument, JsonSchema, load_json_document, save_json_document};
 use crate::service::helpers::decode_hex;
 use crate::service::unlock::PinnedSecretBytes;
-use crate::service::{ServiceError, ServiceResult};
+use crate::service::{ServiceError, ServiceResult, require_full_session_token};
 use k256::ecdsa::signature::Verifier;
 use k256::ecdsa::{Signature, VerifyingKey};
 use serde::{Deserialize, Serialize};
@@ -47,7 +47,7 @@ pub(crate) async fn enroll(
     token: Option<&str>,
     body: BiometricEnrollRequest,
 ) -> ServiceResult<BiometricEnrollResponse> {
-    let token = require_session(&state, token)?;
+    let token = require_full_session_token(&state, token)?;
     let compartment_id = state
         .active_compartment_id_for(token)
         .ok_or_else(|| ServiceError::forbidden("No active compartment."))?;
@@ -185,15 +185,6 @@ pub(crate) async fn unlock(
         }],
         active_compartment_id: Some(enrollment.compartment_id),
     })
-}
-
-fn require_session<'a>(state: &AppState, token: Option<&'a str>) -> ServiceResult<&'a str> {
-    match token {
-        Some(token) if state.verify_token(token) => Ok(token),
-        _ => Err(ServiceError::unauthorized(
-            "Invalid or missing session token.",
-        )),
-    }
 }
 
 fn verify_passphrase_for_compartment(

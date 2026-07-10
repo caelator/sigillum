@@ -13,6 +13,12 @@ The current implementation is designed around:
 
 This is a local unlock flow. It is not a browser WebAuthn flow and not a remote authentication service.
 
+The crate's `hid` feature is enabled by default. With
+`default-features = false`, configuration, storage, and cryptographic helpers
+remain available, but hardware-key operations are unavailable and PIN setup
+returns an explicit disabled-feature error. The release gate verifies this
+configuration independently.
+
 ## High-Level Model
 
 When you register a key, Sigillum:

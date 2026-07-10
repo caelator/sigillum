@@ -42,7 +42,7 @@
 //!    confirmation" the instant it is set) — confirmation happens on a
 //!    LATER drain/maintenance cycle via the resume path above.
 
-mod receipts;
+pub(super) mod receipts;
 mod signing;
 
 use std::collections::HashMap;
@@ -179,13 +179,14 @@ impl SigillumService {
             )));
         }
 
-        // 6. Sign + broadcast. Claim failures never retry (E1/W5 rule): a
-        //    Merkle proof can be consumed by a single broadcast attempt.
+        // 6. Sign only. The drain persists these exact bytes and their hash
+        //    before a separate broadcast phase; once prepared, this job is
+        //    never signed again.
         let action_family = plan_action_execution_family(&payload.action)
             .map(|family| family.as_str())
             .unwrap_or("unknown");
         let outcome = self
-            .sign_and_broadcast_plan_step(
+            .sign_plan_step(
                 job_id,
                 payload,
                 action_family,
@@ -194,7 +195,6 @@ impl SigillumService {
                 step,
                 signing_key,
                 &session_fingerprint_hex(token),
-                fee_cap,
             )
             .await;
         match outcome {

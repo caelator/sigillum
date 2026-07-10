@@ -28,10 +28,11 @@
 //! ## Thread safety
 //!
 //! `SigillumClient` is `Send + Sync`.  The session token is protected by a
-//! `std::sync::Mutex` with poison recovery, making it safe to share across
-//! tasks.
+//! `std::sync::Mutex`. If a panic poisons that lock, the client explicitly
+//! clears the cached token and poison flag, restoring the safe logged-out
+//! invariant before any later request can proceed.
 
-use std::sync::Mutex;
+use std::sync::{Mutex, MutexGuard};
 use std::time::Duration;
 
 use reqwest::Method;
@@ -178,18 +179,33 @@ impl SigillumClient {
 
     /// Return a clone of the current session token, if any.
     pub fn session_token(&self) -> Option<String> {
-        self.session_token
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .clone()
+        self.session_token_state().clone()
     }
 
     pub fn set_session_token(&self, token: impl Into<String>) {
-        *self.session_token.lock().unwrap_or_else(|e| e.into_inner()) = Some(token.into());
+        *self.session_token_state() = Some(token.into());
     }
 
     pub fn clear_session_token(&self) {
-        *self.session_token.lock().unwrap_or_else(|e| e.into_inner()) = None;
+        *self.session_token_state() = None;
+    }
+
+    /// Restore the only safe client-side invariant after a panic: no cached
+    /// authentication. A later explicit unlock or token assignment may then
+    /// establish a fresh session.
+    fn session_token_state(&self) -> MutexGuard<'_, Option<String>> {
+        match self.session_token.lock() {
+            Ok(guard) => guard,
+            Err(poisoned) => {
+                eprintln!(
+                    "client session-token mutex poisoned; clearing cached authentication state"
+                );
+                let mut guard = poisoned.into_inner();
+                *guard = None;
+                self.session_token.clear_poison();
+                guard
+            }
+        }
     }
 
     // ── Lifecycle ───────────────────────────────────────────────

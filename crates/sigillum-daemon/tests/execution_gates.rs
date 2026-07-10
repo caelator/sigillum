@@ -1,8 +1,8 @@
-use std::fs;
 use std::net::SocketAddr;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::time::Duration;
 
 use axum::extract::State;
 use axum::http::{HeaderMap, header};
@@ -10,7 +10,9 @@ use axum::routing::post;
 use axum::{Json, Router};
 use reqwest::StatusCode;
 use serde_json::{Value, json};
+use sha3::{Digest, Keccak256};
 use tempfile::TempDir;
+use tokio::sync::Notify;
 
 const DEFAULT_DESTINATION: &str = "0x1111111111111111111111111111111111111111";
 const RPC_TOKEN: &str = "rpc-test-token";
@@ -18,39 +20,64 @@ const RPC_AUTH: &str = "Bearer rpc-test-token";
 const EXECUTION_PAUSED_REASON: &str =
     "execution_paused: queue execution is paused by the operator kill switch";
 
+fn submitted_raw_transaction_hash(request: &Value) -> Value {
+    let raw = request["params"][0]
+        .as_str()
+        .expect("eth_sendRawTransaction carries raw transaction hex");
+    let bytes = hex::decode(raw.strip_prefix("0x").unwrap_or(raw))
+        .expect("submitted raw transaction is valid hex");
+    json!(format!("0x{}", hex::encode(Keccak256::digest(bytes))))
+}
+
 async fn spawn_daemon(base_dir: PathBuf) -> (SocketAddr, tokio::task::JoinHandle<()>) {
+    let (addr, _state, handle) = spawn_daemon_with_state(base_dir).await;
+    (addr, handle)
+}
+
+async fn spawn_daemon_with_state(
+    base_dir: PathBuf,
+) -> (
+    SocketAddr,
+    Arc<sigillum_daemon::AppState>,
+    tokio::task::JoinHandle<()>,
+) {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
-    let (app, _state) =
+    let (app, state) =
         sigillum_daemon::build_router(base_dir, addr.port()).expect("router should initialize");
     let handle = tokio::spawn(async move {
         axum::serve(listener, app).await.unwrap();
     });
-    (addr, handle)
+    (addr, state, handle)
+}
+
+#[derive(Clone, Default)]
+struct BroadcastControl {
+    first_broadcast_started: Arc<Notify>,
+    release_first_broadcast: Arc<Notify>,
+    broadcast_count: Arc<AtomicUsize>,
 }
 
 #[derive(Clone)]
 struct RpcState {
-    pause_base_dir: Option<PathBuf>,
-    pause_written: Arc<AtomicBool>,
+    broadcast_control: Option<BroadcastControl>,
 }
 
 async fn spawn_mock_evm_provider() -> (SocketAddr, tokio::task::JoinHandle<()>) {
     spawn_mock_evm_provider_with_state(RpcState {
-        pause_base_dir: None,
-        pause_written: Arc::new(AtomicBool::new(false)),
+        broadcast_control: None,
     })
     .await
 }
 
-async fn spawn_pausing_mock_evm_provider(
-    base_dir: PathBuf,
-) -> (SocketAddr, tokio::task::JoinHandle<()>) {
-    spawn_mock_evm_provider_with_state(RpcState {
-        pause_base_dir: Some(base_dir),
-        pause_written: Arc::new(AtomicBool::new(false)),
+async fn spawn_holding_mock_evm_provider()
+-> (SocketAddr, tokio::task::JoinHandle<()>, BroadcastControl) {
+    let control = BroadcastControl::default();
+    let (addr, handle) = spawn_mock_evm_provider_with_state(RpcState {
+        broadcast_control: Some(control.clone()),
     })
-    .await
+    .await;
+    (addr, handle, control)
 }
 
 async fn spawn_mock_evm_provider_with_state(
@@ -73,14 +100,13 @@ async fn spawn_mock_evm_provider_with_state(
         }
 
         let payload = if let Some(requests) = body.as_array() {
-            Value::Array(
-                requests
-                    .iter()
-                    .map(|request| rpc_response(&state, request))
-                    .collect(),
-            )
+            let mut responses = Vec::with_capacity(requests.len());
+            for request in requests {
+                responses.push(rpc_response(&state, request).await);
+            }
+            Value::Array(responses)
         } else {
-            rpc_response(&state, &body)
+            rpc_response(&state, &body).await
         };
 
         (StatusCode::OK, Json(payload))
@@ -97,7 +123,7 @@ async fn spawn_mock_evm_provider_with_state(
     (addr, handle)
 }
 
-fn rpc_response(state: &RpcState, request: &Value) -> Value {
+async fn rpc_response(state: &RpcState, request: &Value) -> Value {
     fn abi_word(value: u64) -> String {
         format!("{value:064x}")
     }
@@ -229,16 +255,14 @@ fn rpc_response(state: &RpcState, request: &Value) -> Value {
             }])
         }
         "eth_sendRawTransaction" => {
-            if let Some(base_dir) = state.pause_base_dir.as_deref() {
-                if state
-                    .pause_written
-                    .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
-                    .is_ok()
-                {
-                    write_execution_pause(base_dir);
+            if let Some(control) = state.broadcast_control.as_ref() {
+                let broadcast_index = control.broadcast_count.fetch_add(1, Ordering::SeqCst);
+                if broadcast_index == 0 {
+                    control.first_broadcast_started.notify_one();
+                    control.release_first_broadcast.notified().await;
                 }
             }
-            json!(format!("0x{}", "11".repeat(32)))
+            submitted_raw_transaction_hash(request)
         }
         other => json!({ "unsupported": other }),
     };
@@ -248,24 +272,6 @@ fn rpc_response(state: &RpcState, request: &Value) -> Value {
         "id": request.get("id").cloned().unwrap_or(json!(1)),
         "result": result,
     })
-}
-
-fn write_execution_pause(base_dir: &Path) {
-    let path = base_dir.join("wallet_inventory.json");
-    let bytes = fs::read(&path).expect("wallet inventory exists before queue processing");
-    let mut envelope: Value =
-        serde_json::from_slice(&bytes).expect("wallet inventory is valid json");
-    envelope["data"]["treasury_policy"] = json!({
-        "enabled": false,
-        "execution_paused": true,
-        "created_at_unix": 1,
-        "updated_at_unix": 1
-    });
-    fs::write(
-        &path,
-        serde_json::to_vec_pretty(&envelope).expect("inventory envelope serializes"),
-    )
-    .expect("wallet inventory pause write succeeds");
 }
 
 async fn post_json(
@@ -440,7 +446,7 @@ fn assert_sent_process_response(process_json: &Value) {
     assert_eq!(process_json["jobs"][0]["state"], json!("sent"));
     assert_eq!(
         process_json["jobs"][0]["broadcast_transaction_hash_hex"],
-        json!("11".repeat(32))
+        process_json["jobs"][0]["transaction_hash_hex"]
     );
     assert!(
         !process_json
@@ -525,8 +531,8 @@ async fn gates_off_with_policy_keeps_stealth_queue_behavior() {
 async fn pause_halts_drain_mid_queue() {
     let dir = TempDir::new().unwrap();
     let base_dir = dir.path().to_path_buf();
-    let (addr, handle) = spawn_daemon(base_dir.clone()).await;
-    let (rpc_addr, rpc_handle) = spawn_pausing_mock_evm_provider(base_dir).await;
+    let (addr, state, handle) = spawn_daemon_with_state(base_dir.clone()).await;
+    let (rpc_addr, rpc_handle, broadcast_control) = spawn_holding_mock_evm_provider().await;
     let client = reqwest::Client::new();
     let setup = setup_stealth_queue(&client, addr, rpc_addr).await;
     let policy = post_json(
@@ -548,13 +554,55 @@ async fn pause_halts_drain_mid_queue() {
     let before_jobs = list_before_json["jobs"].as_array().unwrap().clone();
     assert_eq!(before_jobs.len(), 3);
 
-    let process_json = process_queue(&client, addr, &setup.token).await;
+    let process_task = {
+        let client = client.clone();
+        let token = setup.token.clone();
+        tokio::spawn(async move {
+            post_json(&client, addr, "/api/queue/process", json!({}), Some(&token)).await
+        })
+    };
+
+    tokio::time::timeout(
+        Duration::from_secs(5),
+        broadcast_control.first_broadcast_started.notified(),
+    )
+    .await
+    .expect("the first broadcast should reach the held mock RPC");
+
+    let pause_task = {
+        let client = client.clone();
+        let token = setup.token.clone();
+        tokio::spawn(async move {
+            post_json(&client, addr, "/api/queue/pause", json!({}), Some(&token)).await
+        })
+    };
+
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while !state.queue_execution_pause_latched() {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("the HTTP pause request should latch before the active drain releases its mutex");
+
+    broadcast_control.release_first_broadcast.notify_one();
+
+    let process = process_task.await.expect("queue process task should join");
+    assert_eq!(process.status(), StatusCode::OK);
+    let process_json: Value = process.json().await.unwrap();
     assert_eq!(process_json["processed"], json!(1));
     assert_eq!(process_json["succeeded"], json!(1));
     assert_eq!(
         process_json["paused_reason"],
         json!(EXECUTION_PAUSED_REASON)
     );
+
+    let pause = pause_task.await.expect("queue pause task should join");
+    assert_eq!(pause.status(), StatusCode::OK);
+    let pause_json: Value = pause.json().await.unwrap();
+    assert_eq!(pause_json["status"], json!("paused"));
+    assert_eq!(pause_json["execution_paused"], json!(true));
+    assert_eq!(broadcast_control.broadcast_count.load(Ordering::SeqCst), 1);
 
     let list_after = get(&client, addr, "/api/queue/jobs", Some(&setup.token)).await;
     assert_eq!(list_after.status(), StatusCode::OK);
@@ -564,7 +612,7 @@ async fn pause_halts_drain_mid_queue() {
     assert_eq!(after_jobs[0]["state"], json!("sent"));
     assert_eq!(
         after_jobs[0]["broadcast_transaction_hash_hex"],
-        json!("11".repeat(32))
+        after_jobs[0]["transaction_hash_hex"]
     );
     for index in [1usize, 2] {
         assert_eq!(after_jobs[index]["state"], json!("queued"));
@@ -575,17 +623,74 @@ async fn pause_halts_drain_mid_queue() {
         );
     }
 
+    let paused_policy = get(&client, addr, "/api/treasury/policy", Some(&setup.token)).await;
+    assert_eq!(paused_policy.status(), StatusCode::OK);
+    let paused_policy_json: Value = paused_policy.json().await.unwrap();
+    assert_eq!(
+        paused_policy_json["policy"]["execution_paused"],
+        json!(true)
+    );
+
+    handle.abort();
+    let _ = handle.await;
+    drop(state);
+
+    let (restarted_addr, restarted_state, restarted_handle) =
+        spawn_daemon_with_state(base_dir).await;
+    assert!(restarted_state.queue_execution_pause_latched());
+
+    let unlock = post_json(
+        &client,
+        restarted_addr,
+        "/api/unlock",
+        json!({ "passphrase": "correct horse battery staple" }),
+        None,
+    )
+    .await;
+    assert_eq!(unlock.status(), StatusCode::OK);
+    let unlock_json: Value = unlock.json().await.unwrap();
+    let restarted_token = unlock_json["session_token"]
+        .as_str()
+        .expect("restart unlock returns a session token")
+        .to_string();
+
+    let still_paused = process_queue(&client, restarted_addr, &restarted_token).await;
+    assert_eq!(still_paused["processed"], json!(0));
+    assert_eq!(
+        still_paused["paused_reason"],
+        json!(EXECUTION_PAUSED_REASON)
+    );
+    assert_eq!(broadcast_control.broadcast_count.load(Ordering::SeqCst), 1);
+
     let resume = post_json(
         &client,
-        addr,
+        restarted_addr,
         "/api/queue/resume",
         json!({}),
-        Some(&setup.token),
+        Some(&restarted_token),
     )
     .await;
     assert_eq!(resume.status(), StatusCode::OK);
+    let resume_json: Value = resume.json().await.unwrap();
+    assert_eq!(resume_json["status"], json!("resumed"));
+    assert_eq!(resume_json["execution_paused"], json!(false));
+    assert!(!restarted_state.queue_execution_pause_latched());
 
-    let resumed_process = process_queue(&client, addr, &setup.token).await;
+    let resumed_policy = get(
+        &client,
+        restarted_addr,
+        "/api/treasury/policy",
+        Some(&restarted_token),
+    )
+    .await;
+    assert_eq!(resumed_policy.status(), StatusCode::OK);
+    let resumed_policy_json: Value = resumed_policy.json().await.unwrap();
+    assert_eq!(
+        resumed_policy_json["policy"]["execution_paused"],
+        json!(false)
+    );
+
+    let resumed_process = process_queue(&client, restarted_addr, &restarted_token).await;
     assert_eq!(resumed_process["processed"], json!(2));
     assert_eq!(resumed_process["succeeded"], json!(2));
     assert!(
@@ -594,18 +699,26 @@ async fn pause_halts_drain_mid_queue() {
             .expect("process response is object")
             .contains_key("paused_reason")
     );
-    let final_jobs = get(&client, addr, "/api/queue/jobs", Some(&setup.token)).await;
+    assert_eq!(broadcast_control.broadcast_count.load(Ordering::SeqCst), 3);
+
+    let final_jobs = get(
+        &client,
+        restarted_addr,
+        "/api/queue/jobs",
+        Some(&restarted_token),
+    )
+    .await;
     assert_eq!(final_jobs.status(), StatusCode::OK);
     let final_jobs_json: Value = final_jobs.json().await.unwrap();
     for job in final_jobs_json["jobs"].as_array().unwrap() {
         assert_eq!(job["state"], json!("sent"));
         assert_eq!(
             job["broadcast_transaction_hash_hex"],
-            json!("11".repeat(32))
+            job["transaction_hash_hex"]
         );
     }
 
-    handle.abort();
+    restarted_handle.abort();
     rpc_handle.abort();
 }
 

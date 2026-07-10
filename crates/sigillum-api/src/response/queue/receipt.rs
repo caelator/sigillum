@@ -13,6 +13,23 @@ use serde::{Deserialize, Serialize};
 /// an on-chain revert.
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct QueueJobReceipt {
+    /// Exact signed transaction bytes durably prepared before the first
+    /// network submission. Once present, queue recovery must never sign this
+    /// job again; it may only submit these exact bytes or poll their hash.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub signed_raw_transaction_hex: Option<String>,
+    /// Wall-clock time at which the signed bytes crossed the durable
+    /// prepare barrier.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prepared_at_unix: Option<u64>,
+    /// Hash of the canonical queue payload at preparation time. Recovery
+    /// refuses to submit stored bytes if the job payload changed afterward.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prepared_payload_hash_hex: Option<String>,
+    /// Domain-separated hash over both the canonical queue payload and exact
+    /// signed bytes. This detects cross-job record swaps/corruption.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prepared_binding_hash_hex: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub broadcast_at_unix: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

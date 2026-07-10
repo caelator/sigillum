@@ -1,10 +1,10 @@
-# RC dry-run procedure (run after the 1.0.0 version bump lands on main):
-#   1. git checkout main && git pull --ff-only
+# RC dry-run procedure (run only after the hardening branch and a dated CHANGELOG entry land on main):
+#   1. git checkout main && git pull --ff-only && ./scripts/check-release.sh
 #   2. git tag -a v1.0.0-rc.1 -m "Sigillum 1.0.0-rc.1 dry run" && git push origin v1.0.0-rc.1
-#   3. Watch this workflow in the Actions tab; all four jobs (verify x2 legs, artifacts-macos, artifacts-linux, release) must pass.
+#   3. Watch this workflow in the Actions tab; the contract job, both verify legs, both artifact jobs, and release job must pass.
 #   4. Verify the DRAFT release contains: the .dmg, the .app.zip, both sigillum-cli tar.gz archives, THIRD-PARTY-NOTICES.txt, and SHA256SUMS.
 #   5. Download the assets and run: shasum -a 256 --check SHA256SUMS --ignore-missing
-#   6. Confirm the release is still a draft and its body contains the CHANGELOG section (or the documented fallback text if CHANGELOG.md has not merged yet).
+#   6. Confirm the release is still a draft and its body contains the dated CHANGELOG section.
 #   7. Clean up: gh release delete v1.0.0-rc.1 --yes && git push origin :refs/tags/v1.0.0-rc.1 && git tag -d v1.0.0-rc.1
 
 name: Release
@@ -16,16 +16,61 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
+  release-contract:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout full history
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0
+
+      - name: Validate annotated tag, version, changelog, and main ancestry
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          VERSION="$(awk -F '"' '/^version = "/ { print $2; exit }' Cargo.toml)"
+          TAG="${GITHUB_REF_NAME}"
+          ESCAPED_VERSION="${VERSION//./\\.}"
+
+          if [[ "${TAG}" != "v${VERSION}" && ! "${TAG}" =~ ^v${ESCAPED_VERSION}-rc\.[0-9]+$ ]]; then
+            echo "Release tag ${TAG} does not match workspace version ${VERSION}." >&2
+            exit 1
+          fi
+
+          if [[ "$(git cat-file -t "refs/tags/${TAG}")" != "tag" ]]; then
+            echo "Release tag ${TAG} must be annotated." >&2
+            exit 1
+          fi
+
+          if ! git merge-base --is-ancestor "${GITHUB_SHA}^{commit}" origin/main; then
+            echo "Release tag ${TAG} is not on origin/main history." >&2
+            exit 1
+          fi
+
+          if ! grep -Eq "^## \\[${VERSION}\\] - [0-9]{4}-[0-9]{2}-[0-9]{2}$" CHANGELOG.md; then
+            echo "CHANGELOG.md needs a dated [${VERSION}] section before an RC or release tag." >&2
+            exit 1
+          fi
+
   verify:
+    needs: release-contract
+    timeout-minutes: 90
     strategy:
       matrix:
-        os: [ubuntu-latest, macos-latest]
+        os: [ubuntu-24.04, macos-15]
     runs-on: ${{ matrix.os }}
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
       - name: Install system dependencies (Linux)
         if: runner.os == 'Linux'
@@ -37,13 +82,13 @@ jobs:
           librsvg2-dev libxdo-dev libssl-dev
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable snapshot 2026-07-10
         with:
           toolchain: "1.88.0"
           components: clippy, rustfmt
 
       - name: Cache cargo artifacts
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@23869a5bd66c73db3c0ac40331f3206eb23791dc # v2.9.1
 
       - name: Install cargo-audit
         run: cargo install cargo-audit --version 0.22.1 --locked
@@ -60,7 +105,7 @@ jobs:
 
       - name: Upload browser smoke failure artifacts
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: browser-smoke-artifacts-${{ matrix.os }}
           path: |
@@ -70,20 +115,21 @@ jobs:
 
   artifacts-macos:
     needs: verify
-    runs-on: macos-latest
+    runs-on: macos-15
+    timeout-minutes: 90
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable snapshot 2026-07-10
         with:
           toolchain: "1.88.0"
           components: clippy, rustfmt
 
       - name: Cache cargo artifacts
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@23869a5bd66c73db3c0ac40331f3206eb23791dc # v2.9.1
 
       - name: Install Tauri CLI
         run: cargo install tauri-cli --version 2.11.4 --locked
@@ -92,11 +138,11 @@ jobs:
         run: cargo install cargo-about --version 0.9.1 --locked --features cli
 
       - name: Generate THIRD-PARTY-NOTICES
-        run: cargo about generate --output-file crates/sigillum-desktop/THIRD-PARTY-NOTICES.txt about.hbs
+        run: cargo about generate --locked --output-file crates/sigillum-desktop/THIRD-PARTY-NOTICES.txt about.hbs
 
       - name: Build desktop bundle
         working-directory: crates/sigillum-desktop
-        run: cargo tauri build --config '{"bundle":{"resources":["THIRD-PARTY-NOTICES.txt"]}}'
+        run: cargo tauri build --config '{"bundle":{"resources":["THIRD-PARTY-NOTICES.txt"]}}' -- --locked
 
       - name: Build CLI
         run: cargo build --release -p sigillum-cli --locked
@@ -127,7 +173,7 @@ jobs:
           cp crates/sigillum-desktop/THIRD-PARTY-NOTICES.txt dist/THIRD-PARTY-NOTICES.txt
 
       - name: Upload release artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: release-artifacts-macos
           path: dist/*
@@ -135,11 +181,12 @@ jobs:
 
   artifacts-linux:
     needs: verify
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
       - name: Install system dependencies (Linux)
         # Tauri v2 (sigillum-desktop) needs the GTK3/WebKitGTK stack to compile on Linux.
@@ -150,13 +197,13 @@ jobs:
           librsvg2-dev libxdo-dev libssl-dev
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable snapshot 2026-07-10
         with:
           toolchain: "1.88.0"
           components: clippy, rustfmt
 
       - name: Cache cargo artifacts
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@23869a5bd66c73db3c0ac40331f3206eb23791dc # v2.9.1
 
       - name: Build CLI
         run: cargo build --release -p sigillum-cli --locked
@@ -172,7 +219,7 @@ jobs:
           tar -czf "dist/sigillum-cli-${TAG}-linux-${ARCH}.tar.gz" -C target/release sigillum
 
       - name: Upload release artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: release-artifacts-linux
           path: dist/*
@@ -180,16 +227,17 @@ jobs:
 
   release:
     needs: [artifacts-macos, artifacts-linux]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
     permissions:
       contents: write
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
       - name: Download release artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           pattern: release-artifacts-*
           path: dist
@@ -231,10 +279,8 @@ jobs:
           fi
 
           if [[ ! -s "${NOTES_FILE}" ]]; then
-            {
-              printf 'Draft release for %s.\n\n' "${GITHUB_REF_NAME}"
-              printf 'CHANGELOG.md section [%s] was not available when this draft was generated. Paste the final changelog section here before publishing.\n' "${BASE_VERSION}"
-            } > "${NOTES_FILE}"
+            echo "CHANGELOG.md section [${BASE_VERSION}] is missing or empty." >&2
+            exit 1
           fi
 
       - name: Create draft GitHub release

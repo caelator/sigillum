@@ -1,15 +1,14 @@
 # Sigillum 1.0 Release Plan
 
-**Status:** Active plan of record for the 1.0 release (rev 3 — wallet management IN scope; external Codex architect review applied, findings verified against the repo 2026-07-01)
+**Status:** Active plan of record for the 1.0 release (rev 4 — wallet management IN scope; 2026-07-10 stop-ship hardening semantics reconciled)
 **Baseline verified:** 2026-07-01, branch `feat/private-receiving-desktop` (commits `70a087b`, `1cda1f2` ahead of `main`)
 **Supersedes:** [catchup-plan.md](./catchup-plan.md) Phases 1–3 are absorbed into Phases D–E and W1–W8 below. The
 [wallet-management-roadmap.md](./wallet-management-roadmap.md) product target is **part of 1.0** (EVM scope — see D-9);
 catchup Phase 4 (remote/platform) stays out.
 
 **Operational companion:** [execution-runbook-1.0.md](./execution-runbook-1.0.md)
-records what is already executed, the proven multi-agent method, wave
-sequencing for the remainder, and failure-recovery procedures. Read it before
-executing anything here.
+records current hardening truth, release sequencing, operator gates, and
+failure-recovery procedures. Read it before executing anything here.
 
 This document is written to be executed by an autonomous coding agent with no
 additional context. Every task has an ID, explicit file paths, steps,
@@ -164,10 +163,13 @@ networks. The roadmap's own completion bar is the 1.0 bar:
 Everything under §1, on EVM networks. The gateway keeps its local-sidecar
 preview positioning. Non-goals are in §2.3.
 
-### 2.2 Current state — verified baseline (2026-07-01)
+### 2.2 Historical discovery baseline (2026-07-01; not current truth)
 
-Facts an executor can rely on without re-deriving. Platform facts first, then
-the wallet subsystem.
+This section preserves the initial survey that motivated the plan. Its version,
+workflow, packaging, and product-state claims are intentionally historical and
+must not be used as current repository truth. Executors must re-anchor on the
+current checkout and use `docs/execution-runbook-1.0.md` for the live release
+contract. Platform history comes first, then the wallet subsystem.
 
 **Platform:**
 
@@ -1071,8 +1073,8 @@ Order within W7 is strict: W7.1 → W7.2 → W7.3 → W7.4 → W7.5.
   default false; per-family gates `allow_sweep_execution`,
   `allow_revoke_execution`, `allow_exit_execution` — claims use W5's field,
   top-ups W6.1's; `execution_paused: bool` runtime kill switch;
-  `max_fee_per_gas_cap_hex: Option<String>` — the fee ceiling W7.4's
-  fee-bump logic needs, no other task creates it), onboarding opt-in
+  `max_fee_per_gas_cap_hex: Option<String>` — the fail-closed signing fee
+  ceiling W7.4 uses, no other task creates it), onboarding opt-in
   surface, UI policy editor + a prominent pause control in the operations
   view, CLI `sigillum api treasury policy-update` +
   `sigillum api queue pause|resume`.
@@ -1080,8 +1082,12 @@ Order within W7 is strict: W7.1 → W7.2 → W7.3 → W7.4 → W7.5.
   1. Master gate AND family gate AND not-paused must all hold at BOTH
      enqueue and execution time (re-read policy at each; a policy flip
      between enqueue and drain blocks the job into `blocked` state, per
-     E1). Pause is immediate: no new job starts; an in-flight job finishes
-     its current broadcast attempt or aborts pre-broadcast.
+     E1). Pause is immediate for subsequent work: an RPC already entered may
+     finish, but no later job or new network submission starts after the latch
+     is observed. Pause sets that lock-free latch before waiting for the drain's
+     operation mutex; the drain checks it between jobs and immediately before
+     broadcast. A job already signed stays durably `prepared` and resumes later
+     with the same bytes.
   2. **Every change to an execution gate or the pause flag emits a typed
      audit event** (old value, new value, session) — gate flips are
      security-relevant actions (F5 threat model).
@@ -1131,8 +1137,8 @@ Order within W7 is strict: W7.1 → W7.2 → W7.3 → W7.4 → W7.5.
 
 - **Goal:** lift the hard block at `service/queue/processing.rs:189-193`
   behind the W7.1 gates, and execute `PlanStepExecution` jobs.
-- **Files:** `service/queue/{processing,sweeps}.rs` (new execution module
-  `service/queue/plan_steps.rs` mirroring the sweeps split),
+- **Files:** `service/queue/{processing,sweeps,broadcast}.rs` (new execution
+  module `service/queue/plan_steps.rs` mirroring the sweeps split),
   `service/profiles/{sends,resolution}.rs`, `service/evm.rs` signing paths,
   audit events (`state/audit_keys.rs`).
 - **Steps:**
@@ -1140,14 +1146,17 @@ Order within W7 is strict: W7.1 → W7.2 → W7.3 → W7.4 → W7.5.
      from the profile's seed (receive or control branch) inside the unlocked
      compartment; watch-only sources are unreachable here by construction
      (enqueue validation), but re-check and fail to `blocked` anyway.
-  2. Execute per action family: native/ERC-20/NFT sweep transfers, revoke
+  2. Prepare per action family: native/ERC-20/NFT sweep transfers, revoke
      calls, exit-adapter calls, Merkle claims, gas top-ups — reusing the
      prepared calldata from preflight (never rebuild calldata at execution
-     time; if inputs changed, fail to `operator_action_required`).
+     time; if inputs changed, fail to `operator_action_required`). Signing
+     performs no subsequent network I/O: the drain first persists exact raw
+     bytes and the local transaction hash as `prepared`.
   3. `EthSeed*` legacy variants: route through the same gate checks; with
      gates off the block message is unchanged.
   4. Audit: every execution emits typed audit events (enqueued → signed →
-     broadcast → confirmed/failed) with plan/step/job ids and tx hash.
+     broadcast → confirmed/failed) with plan/step/job ids and tx hash;
+     broadcast occurs only through the shared exact-byte submission module.
 - **Accept:** with gates on, a full mock-RPC plan (sweep + revoke + top-up
   chain) executes in dependency order with audit trail; with gates off,
   processing behavior is byte-identical to today. **Key hygiene:** derived
@@ -1158,27 +1167,41 @@ Order within W7 is strict: W7.1 → W7.2 → W7.3 → W7.4 → W7.5.
 - **Verify:** `cargo test -p sigillum-daemon plan_steps`; full gate.
   **Size:** XL.
 
-##### W7.4 — Execution semantics: nonces, receipts, failure classes
+##### W7.4 — Execution semantics: durable submission, nonces, receipts, failure classes
 
-- **Goal:** execution is safe under concurrency, reorgs, and fee volatility.
-- **Files:** `service/queue/{processing,plan_steps}.rs`, chain registry
-  (`finality_blocks` from W1.1), E1 state machine.
+- **Goal:** execution is safe under crashes, concurrency, reorgs, and fee
+  volatility without ever re-signing a job after its durable prepare barrier.
+- **Files:** `service/queue/{processing,broadcast,serialization,state}.rs`,
+  `service/queue/plan_steps/{signing,receipts}.rs`, queue receipt DTO/store,
+  chain registry (`finality_blocks` from W1.1), E1 state machine.
 - **Steps:**
-  1. **Per-source serialization:** at most one in-flight job per (source
-     address, chain); others wait in `deferred`.
-  2. **Nonce management:** fetch at broadcast time; on `nonce too low`
-     re-fetch once; on repeat → `operator_action_required`.
-  3. **Receipt confirmation:** poll `eth_getTransactionReceipt` until
+  1. **Per-source serialization:** at most one `prepared`,
+     `submitted_unknown`, or broadcast-but-unconfirmed job per (source address,
+     chain); independent siblings remain in their existing state with a visible
+     skip reason rather than using the legacy `deferred` string.
+  2. **One-signature preparation:** resolve the nonce once while signing, then
+     durably persist `state=prepared`, the exact raw transaction bytes, and the
+     locally derived hash before any network I/O. Once prepared, the job may
+     never be re-signed.
+  3. **Crash-safe submission:** durably persist `state=submitted_unknown`
+     before the first RPC call. On restart or an ambiguous transport outcome,
+     check the receipt by stored hash and, when still unresolved, resubmit only
+     the exact prepared bytes.
+  4. **Receipt confirmation:** poll `eth_getTransactionReceipt` until
      `finality_blocks` confirmations; success/revert recorded with gas
      used; timeout window → `operator_action_required` with the tx hash
      (never assume failure of a broadcast tx).
-  4. **Failure classes:** provider/network error → `retryable` (existing
-     backoff); revert → `operator_action_required` (never auto-retry a
-     revert); underpriced/replacement → one fee bump within the policy fee
-     cap, then `operator_action_required`.
-- **Accept:** mock-RPC tests for each: serialization, nonce race, revert,
-  underpriced-then-bump, receipt timeout; kill -9 during in-flight job →
-  restart resumes receipt polling (job not duplicated, ties into E2).
+  5. **Failure classes:** pre-sign provider errors may use existing retry
+     backoff; an ambiguous post-submission result remains `submitted_unknown`;
+     revert, `nonce too low`, and underpriced/replacement-underpriced park as
+     `operator_action_required`. The latter two require an explicit future
+     replacement job and never trigger nonce re-fetch, fee bump, or re-signing.
+     Claims are stricter: any returned submission error parks because a proof
+     may be single-use; a process crash still recovers from the durable marker.
+- **Accept:** tests prove serialization, durable schema compatibility,
+  deterministic rejection without re-signing, ambiguous outcome preservation,
+  receipt/revert/timeout handling, exact-byte crash recovery, and a real
+  concurrent HTTP pause that stops later broadcasts.
 - **Verify:** `cargo test -p sigillum-daemon plan_steps queue`;
   full gate. **Size:** L.
 
@@ -1404,11 +1427,15 @@ Order within W7 is strict: W7.1 → W7.2 → W7.3 → W7.4 → W7.5.
 
 #### H1 — Release candidate verification (all must pass, in order)
 
-RC commit: `a22a98a` (main HEAD). The G4 rc dry-run ran on it as
+Historical RC commit: `a22a98a` (the `main` HEAD at that time). The G4 rc dry-run ran on it as
 `v1.0.0-rc.1` (release.yml run 29071519514, all four jobs green) and was
 reversed (tag + draft release deleted); the five release assets were
 checksum-verified locally against SHA256SUMS. Autonomous items are checked
 below; the remaining items are operator human-gates.
+
+> **Historical RC snapshot:** every receipt below describes `a22a98a`. The
+> 2026-07-10 auth/payment/queue/release hardening supersedes it; none of these
+> checks certifies the current line. A fresh RC must rerun H1 at one new commit.
 
 - [x] Fresh clone of `main` at the RC commit; `./scripts/check-release.sh`
       passes there. (release.yml `verify` jobs — fresh checkout, both OS legs — green)
@@ -1428,8 +1455,9 @@ below; the remaining items are operator human-gates.
       enqueue_step_happy_path_persists_job_marker_evidence_hash_and_audit,
       eth_seed_jobs_are_gate_driven_and_execute_once_gates_pass via spawn_mock_evm_provider,
       chaos_kill_in_flight_plan_step_resumes_terminal_without_duplication; UI click-through = operator acceptance)
-- [~] CHANGELOG date filled; G5 docs merged. (G5 merged PR #33; `[1.0.0]` date
-      placeholder `2026-07-XX` intentionally filled at H2 publish time)
+- [~] CHANGELOG date filled for the next candidate; G5 docs merged. (G5 merged
+      PR #33; the new hardening candidate carries the numeric date required by
+      the release workflow, but still needs merge and fresh-RC evidence)
 
 #### H2 — Tag and release
 
@@ -1502,10 +1530,10 @@ Phase W — Wallet-management completion
 - [x] W6.2 dynamic fees in planning/preflight
 - [x] W6.3 policy-driven hot floor/refill
 - [x] W6.4 step dependency ordering
-- [x] W7.1 execution policy gates + kill switch
+- [x] W7.1 execution policy gates + preemptive kill-switch latch
 - [x] W7.2 plan-step queue payloads + enqueue validation
 - [x] W7.3 seed-wallet signing execution
-- [x] W7.4 nonces, receipts, failure classes
+- [x] W7.4 durable exact-byte submission, nonces, receipts, failure classes
 - [x] W7.5 linkage enforcement parity at execution
 - [x] W8 treasury automation (overflow/refill, hysteresis)
 
@@ -1713,6 +1741,13 @@ Phase H — Ship
   reserves (sponsor/hot/treasury) are no longer generic sweep sources —
   prevents plans from draining the sponsor gas float (test-covered; W8
   builds on this).
+
+> **Historical execution entries:** the W7.1/W7.3/W7.4 lines below remain
+> accurate records of their cited 2026-07-09 commits. Their pause and
+> submission mechanics were superseded on the 2026-07-10 hardening line by the
+> AtomicBool preemption latch and the durable `prepared` ->
+> `submitted_unknown` exact-byte protocol described in the normative W7 text.
+
 - 2026-07-09 W7.1 57cd960..e0624b8: execution policy surface — master
   `allow_plan_execution` + per-family sweep/revoke/exit gates +
   `execution_paused` kill switch + `max_fee_per_gas_cap_hex` (schema v18,
@@ -1855,5 +1890,6 @@ Phase H — Ship
   F7 upgrade path (in-gate), execute→audit backend (mock-provider + chaos
   in-flight tests), G5 docs merged. Operator human-gates remain: F4 mac-server
   soak at the RC SHA, F6 testnet execution receipts, clean-machine .dmg install
-  + unlock, `sigillum doctor` per host. H2 (CHANGELOG date fill + real v1.0.0
-  tag/publish) is the final human gate; H3 follows publish.
+  + unlock, `sigillum doctor` per host. The CHANGELOG date must be committed
+  before the next RC tag; H2 (real v1.0.0 tag/publish) is the final human gate;
+  H3 follows publish.

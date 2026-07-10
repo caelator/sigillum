@@ -730,7 +730,7 @@ async fn upgrade_0_1_datadir_migrates_all_stores() {
         "queue process",
     )
     .await;
-    assert_schema_version(base.path(), "queue.json", 4);
+    assert_schema_version(base.path(), "queue.json", 5);
 
     assert_success(
         post_json(

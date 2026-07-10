@@ -15,6 +15,13 @@ impl SigillumService {
         paused: bool,
     ) -> ServiceResult<QueueExecutionPauseResponse> {
         let token = self.require_session(token)?;
+
+        // Pause must be able to preempt a drain that currently owns the
+        // operation mutex. Set the in-memory latch before waiting for that
+        // mutex. If persistence later fails, retaining `true` is fail-safe.
+        if paused {
+            self.state.set_queue_execution_pause_latch(true);
+        }
         let _guard = self.state.operation_guard().await;
         let mut state =
             crate::inventory::load_wallet_inventory(&self.state.base_dir).map_err(|error| {
@@ -29,11 +36,11 @@ impl SigillumService {
         policy.execution_paused = paused;
         policy.updated_at_unix = now;
         state.treasury_policy = Some(policy);
-        crate::inventory::save_wallet_inventory(&self.state.base_dir, &state).map_err(|error| {
-            ServiceError::internal(format!("Failed to save wallet inventory: {error}"))
-        })?;
 
-        if old != paused {
+        // A resume must not become durable or active until its security
+        // audit event is safely recorded. Pause is already fail-safe via the
+        // preemptive latch and is audited after persistence below.
+        if old != paused && !paused {
             self.record_audit(
                 self.state.active_compartment_id_for(token),
                 AuditEventSpec::TreasuryExecutionGateUpdate {
@@ -44,6 +51,25 @@ impl SigillumService {
                 },
             )?;
         }
+        crate::inventory::save_wallet_inventory(&self.state.base_dir, &state).map_err(|error| {
+            ServiceError::internal(format!("Failed to save wallet inventory: {error}"))
+        })?;
+
+        if old != paused && paused {
+            self.record_audit(
+                self.state.active_compartment_id_for(token),
+                AuditEventSpec::TreasuryExecutionGateUpdate {
+                    gate: "execution_paused".into(),
+                    old_value: old,
+                    new_value: paused,
+                    session_fingerprint_hex: session_fingerprint_hex(token),
+                },
+            )?;
+        }
+
+        // Resume becomes visible only after both audit and durable policy
+        // succeeded. Pause was already latched before the mutex above.
+        self.state.set_queue_execution_pause_latch(paused);
 
         Ok(QueueExecutionPauseResponse {
             status: if paused { "paused" } else { "resumed" }.into(),

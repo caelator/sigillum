@@ -90,12 +90,17 @@ async fn main() {
         project_cache: ProjectCache::new(config.auth_cache_ttl_secs),
     };
 
-    // Start background poller
-    poller::spawn(state.clone());
-    tracing::info!(
-        "Background poller started (interval: {}s)",
-        config.poll_interval_secs
-    );
+    if config.experimental_payments_enabled {
+        poller::spawn(state.clone());
+        tracing::info!(
+            "Experimental payment observation poller started (interval: {}s)",
+            config.poll_interval_secs
+        );
+    } else {
+        tracing::info!(
+            "Experimental payments are disabled; payment observation polling and webhook retries are not running"
+        );
+    }
 
     // Build and start HTTP server with graceful shutdown (R1)
     let app = routes::build_router(state);

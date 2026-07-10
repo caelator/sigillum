@@ -1,4 +1,50 @@
 use super::*;
+
+const POISON_CHILD_ENV: &str = "SIGILLUM_TEST_POISONED_MUTEX_CHILD";
+
+#[test]
+fn resilient_mutex_normal_lock_is_unchanged() {
+    let mutex = ResilientMutex::new(vec![1_u8]);
+    mutex.lock().push(2);
+    assert_eq!(&*mutex.lock(), &[1, 2]);
+}
+
+#[test]
+fn resilient_mutex_poison_child() {
+    let Ok(mode) = std::env::var(POISON_CHILD_ENV) else {
+        return;
+    };
+    let mutex = std::sync::Arc::new(ResilientMutex::new(vec!["secret-state"]));
+    let poisoner = mutex.clone();
+    let _ = std::thread::spawn(move || {
+        let _guard = poisoner.lock();
+        panic!("intentional poison for subprocess test");
+    })
+    .join();
+
+    match mode.as_str() {
+        "lock" => drop(mutex.lock()),
+        "debug" => drop(format!("{mutex:?}")),
+        other => panic!("unknown poison child mode: {other}"),
+    }
+}
+
+#[test]
+fn resilient_mutex_poison_aborts_lock_and_debug_paths() {
+    let current_test_binary = std::env::current_exe().expect("current test binary");
+    for mode in ["lock", "debug"] {
+        let status = std::process::Command::new(&current_test_binary)
+            .args([
+                "--exact",
+                "state::tests::resilient_mutex_poison_child",
+                "--nocapture",
+            ])
+            .env(POISON_CHILD_ENV, mode)
+            .status()
+            .expect("poison child should launch");
+        assert!(!status.success(), "poisoned {mode} path must abort");
+    }
+}
 use tempfile::TempDir;
 
 fn meta(id: usize, threshold: usize, label: &str) -> CompartmentMeta {

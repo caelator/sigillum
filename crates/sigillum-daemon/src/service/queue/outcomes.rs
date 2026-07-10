@@ -1,10 +1,7 @@
 //! Apply one job's `QueueExecution` outcome (or classified error) to its
-//! persisted fields and the drain-cycle tally. Split out of
-//! `processing.rs` to keep the drain loop itself readable (house
-//! architecture cap) — this is where E1's state-transition rules and W7.4's
-//! receipt/failure-cause bookkeeping actually live.
+//! persisted fields and the drain-cycle tally.
 
-use sigillum_api::{MaintenanceFailureBreakdown, QueueJob};
+use sigillum_api::QueueJob;
 
 use crate::policy::RuntimePolicy;
 use crate::service::ServiceError;
@@ -13,41 +10,15 @@ use super::failure::{
     QueueFailureCause, QueueFailureDisposition, classify_blocked_queue_reason,
     classify_operator_action_reason, classify_queue_error,
 };
+use super::replay::clear_replay_bytes;
 use super::state::mark_job_operator_action_required;
+use super::tally::QueueDrainTally;
 use super::{
-    QUEUE_STATE_BLOCKED, QUEUE_STATE_CONFIRMED, QUEUE_STATE_FAILED_TERMINAL, QUEUE_STATE_RETRYING,
-    QUEUE_STATE_SENT, QueueExecution,
+    QUEUE_STATE_BLOCKED, QUEUE_STATE_CONFIRMED, QUEUE_STATE_FAILED_TERMINAL, QUEUE_STATE_PREPARED,
+    QUEUE_STATE_RETRYING, QUEUE_STATE_SENT, QUEUE_STATE_SUBMITTED_UNKNOWN, QueueExecution,
 };
 
-/// Per-drain-call counters, mirroring `QueueProcessResponse`'s fields.
-#[derive(Default)]
-pub(super) struct QueueDrainTally {
-    pub(super) succeeded: usize,
-    pub(super) blocked: usize,
-    pub(super) retrying: usize,
-    pub(super) operator_action_required: usize,
-    pub(super) failed: usize,
-    pub(super) confirmed: usize,
-    pub(super) failures_by_cause: MaintenanceFailureBreakdown,
-}
-
-impl QueueDrainTally {
-    fn record_cause(&mut self, cause: QueueFailureCause) {
-        match cause {
-            QueueFailureCause::ProviderError => self.failures_by_cause.provider_error += 1,
-            QueueFailureCause::PolicyBlock => self.failures_by_cause.policy_block += 1,
-            QueueFailureCause::InsufficientGas => self.failures_by_cause.insufficient_gas += 1,
-            QueueFailureCause::Validation => self.failures_by_cause.validation += 1,
-            QueueFailureCause::Unknown => self.failures_by_cause.unknown += 1,
-            QueueFailureCause::OnChainRevert => self.failures_by_cause.on_chain_revert += 1,
-            QueueFailureCause::BroadcastRejected => self.failures_by_cause.broadcast_rejected += 1,
-            QueueFailureCause::ReceiptTimeout => self.failures_by_cause.receipt_timeout += 1,
-        }
-    }
-}
-
-/// Mutates `job` in place per the E1/W7.4 state-transition rules and
-/// updates `tally` accordingly.
+/// Apply the E1/W7.4 state-transition rules and update the drain tally.
 pub(super) fn apply(
     job: &mut QueueJob,
     result: Result<QueueExecution, ServiceError>,
@@ -56,17 +27,67 @@ pub(super) fn apply(
     tally: &mut QueueDrainTally,
 ) {
     match result {
-        Ok(QueueExecution::Sent(sent)) => {
+        Ok(QueueExecution::Prepared {
+            signed_raw_transaction_hex,
+            transaction_hash_hex,
+        }) => {
+            let payload_hash = match super::broadcast::queue_payload_hash_hex(&job.payload) {
+                Ok(hash) => hash,
+                Err(reason) => {
+                    tally.record_cause(QueueFailureCause::Validation);
+                    mark_job_operator_action_required(
+                        job,
+                        format!("prepared_payload_hash_failed: {reason}"),
+                        now,
+                    );
+                    tally.operator_action_required += 1;
+                    return;
+                }
+            };
+            let binding_hash = match super::broadcast::prepared_binding_hash_hex(
+                &job.payload,
+                &signed_raw_transaction_hex,
+            ) {
+                Ok(hash) => hash,
+                Err(reason) => {
+                    tally.record_cause(QueueFailureCause::Validation);
+                    mark_job_operator_action_required(
+                        job,
+                        format!("prepared_binding_hash_failed: {reason}"),
+                        now,
+                    );
+                    tally.operator_action_required += 1;
+                    return;
+                }
+            };
+            job.state = QUEUE_STATE_PREPARED.into();
+            job.last_error = None;
+            job.next_attempt_after_unix = None;
+            job.transaction_hash_hex = Some(transaction_hash_hex);
+            job.receipt.signed_raw_transaction_hex = Some(signed_raw_transaction_hex);
+            job.receipt.prepared_at_unix = Some(now);
+            job.receipt.prepared_payload_hash_hex = Some(payload_hash);
+            job.receipt.prepared_binding_hash_hex = Some(binding_hash);
+        }
+        Ok(QueueExecution::Broadcasted {
+            broadcast_transaction_hash_hex,
+        }) => {
             job.state = QUEUE_STATE_SENT.into();
             job.last_error = None;
-            job.transaction_hash_hex = Some(sent.transaction_hash_hex);
-            job.broadcast_transaction_hash_hex = sent.broadcast_transaction_hash_hex;
-            // W7.4: stamp the wall-clock broadcast time so receipt
-            // confirmation (and its timeout budget) can resume correctly,
-            // including across a restart (E2). Harmless and unused for
-            // non-`PlanStepExecution` job kinds.
+            job.next_attempt_after_unix = None;
+            job.broadcast_transaction_hash_hex = Some(broadcast_transaction_hash_hex);
+            clear_replay_bytes(job);
+            // Start confirmation timeout from an affirmative provider
+            // acceptance, not from the earlier pre-I/O crash marker.
             job.receipt.broadcast_at_unix = Some(now);
             tally.succeeded += 1;
+        }
+        Ok(QueueExecution::SubmittedUnknown(reason)) => {
+            tally.record_cause(QueueFailureCause::ProviderError);
+            job.state = QUEUE_STATE_SUBMITTED_UNKNOWN.into();
+            job.last_error = Some(reason);
+            job.next_attempt_after_unix = Some(now + policy.queue_retry_delay_secs(job.attempts));
+            tally.retrying += 1;
         }
         Ok(QueueExecution::Blocked(reason)) => {
             tally.record_cause(classify_blocked_queue_reason(&reason));
@@ -80,6 +101,7 @@ pub(super) fn apply(
             // nonce/fee-bump exhaustion and receipt timeout).
             tally.record_cause(classify_operator_action_reason(&reason));
             mark_job_operator_action_required(job, reason, now);
+            clear_replay_bytes(job);
             tally.operator_action_required += 1;
         }
         Ok(QueueExecution::RevertedOnChain {
@@ -91,6 +113,7 @@ pub(super) fn apply(
             // auto-retried, gas/block evidence recorded.
             tally.record_cause(QueueFailureCause::OnChainRevert);
             mark_job_operator_action_required(job, reason, now);
+            clear_replay_bytes(job);
             job.receipt.receipt_block_number = Some(block_number);
             job.receipt.receipt_gas_used_hex = Some(gas_used_hex);
             job.receipt.receipt_status = Some("reverted".into());
@@ -110,6 +133,7 @@ pub(super) fn apply(
             job.receipt.receipt_gas_used_hex = Some(gas_used_hex);
             job.receipt.receipt_status = Some("success".into());
             job.receipt.confirmations = Some(confirmations);
+            clear_replay_bytes(job);
             tally.confirmed += 1;
         }
         Ok(QueueExecution::AwaitingConfirmation {
@@ -148,6 +172,7 @@ pub(super) fn apply(
                 tally.record_cause(cause);
                 job.state = QUEUE_STATE_FAILED_TERMINAL.into();
                 job.last_error = Some(reason);
+                clear_replay_bytes(job);
                 tally.failed += 1;
             }
         },

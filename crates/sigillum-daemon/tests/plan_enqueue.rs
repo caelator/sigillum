@@ -13,12 +13,22 @@ use axum::routing::post;
 use axum::{Json, Router};
 use reqwest::StatusCode;
 use serde_json::{Value, json};
+use sha3::{Digest, Keccak256};
 use tempfile::TempDir;
 
 const DESTINATION: &str = "0x9999999999999999999999999999999999999999";
 const SEED_ADDRESS: &str = "0x9858effd232b4033e47d90003d41ec34ecaeda94";
 const ONE_ETH_HEX: &str = "0xde0b6b3a7640000";
 const ONE_ETH_DECIMAL: &str = "1000000000000000000";
+
+fn submitted_raw_transaction_hash(request: &Value) -> Value {
+    let raw = request["params"][0]
+        .as_str()
+        .expect("eth_sendRawTransaction carries raw transaction hex");
+    let bytes = hex::decode(raw.strip_prefix("0x").unwrap_or(raw))
+        .expect("submitted raw transaction is valid hex");
+    json!(format!("0x{}", hex::encode(Keccak256::digest(bytes))))
+}
 
 async fn spawn_daemon(base_dir: PathBuf) -> (SocketAddr, tokio::task::JoinHandle<()>) {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -57,7 +67,7 @@ async fn spawn_mock_evm_provider() -> (SocketAddr, tokio::task::JoinHandle<()>) 
                 }
             }
             "eth_getLogs" => json!([]),
-            "eth_sendRawTransaction" => json!(format!("0x{}", "11".repeat(32))),
+            "eth_sendRawTransaction" => submitted_raw_transaction_hash(request),
             other => json!({ "unsupported": other }),
         };
         json!({
@@ -1697,11 +1707,8 @@ async fn plan_step_jobs_execute_at_drain_once_all_gates_pass() {
         "job: {}",
         jobs[0]
     );
-    assert!(
-        jobs[0]["broadcast_transaction_hash_hex"]
-            .as_str()
-            .unwrap()
-            .starts_with("11"),
+    assert_eq!(
+        jobs[0]["broadcast_transaction_hash_hex"], jobs[0]["transaction_hash_hex"],
         "job: {}",
         jobs[0]
     );

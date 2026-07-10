@@ -8,7 +8,7 @@
 
 use serde_json::{Value, json};
 
-use crate::service::ServiceResult;
+use crate::service::{ServiceError, ServiceResult};
 
 use super::super::{normalize_hex_blob, parse_quantity_u64};
 use super::ProviderRpcClient;
@@ -32,65 +32,53 @@ impl ProviderRpcClient {
         let value = self
             .request(1, "eth_getTransactionReceipt", json!([hash]))
             .await?;
-        Ok(parse_receipt(&value))
+        parse_receipt(&value, &hash)
     }
 }
 
-fn parse_receipt(value: &Value) -> Option<EvmTransactionReceipt> {
-    let object = value.as_object()?;
-    let status_hex = object.get("status").and_then(Value::as_str)?;
-    let block_number_hex = object.get("blockNumber").and_then(Value::as_str)?;
-    let gas_used_hex = object.get("gasUsed").and_then(Value::as_str)?;
-    let status_success = parse_quantity_u64(&Value::String(status_hex.to_string())).ok()? != 0;
-    let block_number = parse_quantity_u64(&Value::String(block_number_hex.to_string())).ok()?;
-    let gas_used_hex = normalize_hex_blob(gas_used_hex, "gas used").ok()?;
-    Some(EvmTransactionReceipt {
+fn parse_receipt(
+    value: &Value,
+    expected_transaction_hash_hex: &str,
+) -> ServiceResult<Option<EvmTransactionReceipt>> {
+    let Some(object) = value.as_object() else {
+        return Ok(None);
+    };
+    let Some(status_hex) = object.get("status").and_then(Value::as_str) else {
+        return Ok(None);
+    };
+    let Some(block_number_hex) = object.get("blockNumber").and_then(Value::as_str) else {
+        return Ok(None);
+    };
+    let Some(gas_used_hex) = object.get("gasUsed").and_then(Value::as_str) else {
+        return Ok(None);
+    };
+    let transaction_hash_hex = object
+        .get("transactionHash")
+        .and_then(Value::as_str)
+        .ok_or_else(|| {
+            ServiceError::internal(
+                "Invalid provider receipt: missing transactionHash identity binding.",
+            )
+        })?;
+    let transaction_hash_hex = normalize_hex_blob(transaction_hash_hex, "transaction hash")
+        .map_err(|_| ServiceError::internal("Invalid provider receipt transactionHash."))?;
+    if transaction_hash_hex.len() != 66
+        || !transaction_hash_hex.eq_ignore_ascii_case(expected_transaction_hash_hex)
+    {
+        return Err(ServiceError::internal(format!(
+            "Provider receipt transactionHash mismatch: expected {expected_transaction_hash_hex}, received {transaction_hash_hex}."
+        )));
+    }
+    let status_success = parse_quantity_u64(&Value::String(status_hex.to_string()))? != 0;
+    let block_number = parse_quantity_u64(&Value::String(block_number_hex.to_string()))?;
+    let gas_used_hex = normalize_hex_blob(gas_used_hex, "gas used")?;
+    Ok(Some(EvmTransactionReceipt {
         status_success,
         block_number,
         gas_used_hex,
-    })
+    }))
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn parses_a_successful_receipt() {
-        let value = json!({
-            "status": "0x1",
-            "blockNumber": "0x2a",
-            "gasUsed": "0x5208",
-            "transactionHash": "0xaa",
-        });
-        let receipt = parse_receipt(&value).expect("valid receipt");
-        assert!(receipt.status_success);
-        assert_eq!(receipt.block_number, 42);
-        assert_eq!(receipt.gas_used_hex, "0x5208");
-    }
-
-    #[test]
-    fn parses_a_reverted_receipt() {
-        let value = json!({
-            "status": "0x0",
-            "blockNumber": "0x2a",
-            "gasUsed": "0x5208",
-        });
-        let receipt = parse_receipt(&value).expect("valid receipt");
-        assert!(!receipt.status_success);
-    }
-
-    #[test]
-    fn null_result_is_no_receipt_yet() {
-        assert_eq!(parse_receipt(&Value::Null), None);
-    }
-
-    #[test]
-    fn unrecognized_object_shape_is_treated_as_no_receipt_rather_than_an_error() {
-        // Exactly the shape a mock/older provider without receipt support
-        // would return for an unhandled method — must never be mistaken for
-        // a definitive success or failure.
-        let value = json!({ "unsupported": "eth_getTransactionReceipt" });
-        assert_eq!(parse_receipt(&value), None);
-    }
-}
+#[path = "receipt_tests.rs"]
+mod tests;

@@ -1,21 +1,23 @@
 # Production Readiness Audit
 
-**Date:** June 4, 2026 (updated July 3, 2026)
+**Date:** June 4, 2026 (updated July 10, 2026)
 **Scope:** local-first, single-host Sigillum source checkout and local-sidecar
 gateway boundary
-**Verdict:** source release gate passed for the local-first wallet-management
-workstation, including EVM roadmap phases 1-9 and policy-gated, fail-closed
-consolidation-plan execution that is opt-in and defaults off. Wallet management
-is complete for EVM except swap execution, which is deferred per D-13. Non-EVM
-chains (roadmap phase 10) and fiat/NFT valuation (D-16) remain deferred; broader
-production completeness remains bounded by the open gaps below.
+**Verdict:** the earlier RC gate receipts are historical evidence and do not
+certify the current hardening line. Capability authorization, payment truth,
+queue broadcast durability/pause behavior, no-HID compilation, and release
+governance are being re-gated together. The source may be called release-ready
+for the local-first boundary only after the updated `./scripts/check-release.sh`
+passes at one commit and the remaining operator receipts reference that same
+commit. Gateway payments remain disabled-by-default experimental observations,
+not supported 1.0 confirmation semantics.
 
 ## Evidence Snapshot
 
-The current release candidate is considered source-ready for the documented
-single-host boundary only when `./scripts/check-release.sh` passes. The gate
-was added to make the release standard executable instead of scattered across
-README, CI, and readiness notes.
+The current hardening commit is considered source-ready for the documented
+single-host boundary only when `./scripts/check-release.sh` passes without
+mutating tracked files. The gate makes the release standard executable instead
+of scattering it across README, CI, and readiness notes.
 
 The gate covers:
 
@@ -131,10 +133,10 @@ and wired into the release gate after the full workspace tests. It runs:
   the HTTP route boundary
 - `cargo test -p sigillum-cli --test cli_smoke`, including adversarial command
   parsing and `sigillum doctor` no-daemon behavior
-- `cargo test -p sigillum-gateway --test gateway_tests` for auth hashing,
+- `cargo test -p sigillum-gateway --test gateway_tests --locked` for auth hashing,
   HMAC signing, constant-time comparison, amount/address validation, and SSRF
   URL rejection cases
-- `cargo test -p sigillum-gateway --test gateway_integration` for local-sidecar
+- `cargo test -p sigillum-gateway --test gateway_integration --locked` for local-sidecar
   auth, idempotency, scope, rate-limit, rollback, and daemon-side-effect
   boundaries
 - `npm --prefix crates/sigillum-daemon/ui test` for typed DOM boundary tests,
@@ -159,17 +161,18 @@ pass with empty ignore lists.
 
 | Requirement | Current evidence | Status |
 | --- | --- | --- |
-| Build and dependency graph resolve | `cargo metadata --no-deps --format-version 1` inside `./scripts/check-release.sh` | Proven for current checkout |
+| Build and dependency graph resolve | `cargo metadata --locked --no-deps --format-version 1` inside `./scripts/check-release.sh` | Proven only when the current checkout's gate passes without mutating tracked files |
 | Architecture stays within professional boundaries | `./scripts/check-architecture.sh` inside the release gate | Proven for current checkout |
 | Daemon UI compiles and tested source matches generated assets | `npm ci`, `npm audit --audit-level=high`, `npm run typecheck`, `npm test`, `npm run build`, plus generated asset freshness in the release gate | Proven for current checkout |
-| Rust workspace builds, tests, and lints | `cargo fmt --all --check`, `cargo check --workspace`, `cargo test --workspace`, and `cargo clippy --workspace --all-targets -- -D warnings` inside the release gate | Proven for current checkout |
-| Security and supply-chain baseline | `cargo audit` and `cargo deny check` inside the release gate | Proven for current checkout, with accepted duplicate dependency warnings |
+| Rust workspace builds, tests, and lints | Locked workspace check/test/clippy plus independent no-HID FIDO2 check/test/clippy inside the release gate | Proven only when the current checkout's gate passes |
+| Security and supply-chain baseline | `cargo audit --file Cargo.lock` and `cargo deny --locked check` inside the release gate | Proven for the lockfile checked by the gate, with accepted duplicate dependency warnings |
 | Local daemon and gateway loopback integration behavior | Workspace integration tests pass outside the sandbox | Proven for current checkout in an unsandboxed local environment |
-| Target-host operational readiness | `sigillum doctor` passed in `scripts/check-runtime-smoke.sh` for first-run and unlocked temporary daemon states, and the `mac-server` 3600-second soak receipt recorded 117 doctor runs on a clean checkout | Proven for `mac-server`; each additional target host still needs its own doctor/soak receipt |
+| Target-host operational readiness | `sigillum doctor` passes in the isolated runtime smoke; an earlier `mac-server` 3600-second soak recorded 117 doctor runs on an older commit | Historical host baseline only; standard and chaos doctor/soak receipts are required on every supported host at the new RC SHA |
 | Runtime daemon lifecycle behavior | `scripts/check-runtime-smoke.sh` starts the daemon, verifies status, initializes a passphrase compartment, writes and reads vault canaries, locks, unlocks, lists compartments, and runs doctor | Proven for current checkout in an unsandboxed local environment |
+| Queue submission durability and pause | Queue schema v5 persists `prepared` raw bytes/hash and a pre-RPC `submitted_unknown` marker; recovery checks receipts or resubmits exact bytes without re-signing; the real HTTP pause regression latches before the active drain mutex and blocks later broadcasts | Implemented on the current hardening line; fresh full-gate and CI evidence is still required |
 | Runtime browser/UI visual behavior | DOM smoke tests pass, the runtime smoke checks the served UI shell, and `scripts/check-browser-smoke.sh` repeatably drives a headless browser through setup, unlocked operator workspace, vault canary write/reveal, browser-session logout, passphrase re-authentication, and post-auth canary count checks against an isolated local daemon inside the release gate | Proven for current checkout as repeatable automation in an unsandboxed local environment with a Chromium-family browser |
 | Desktop app bundle readiness | `scripts/check-desktop.sh` always compiles `sigillum-desktop`; on macOS it runs a debug Tauri bundle build, asserts `.app` and `.dmg` artifacts, and verifies the `.app` code signature | Proven for current checkout on macOS; non-macOS release-gate legs compile the desktop crate and explicitly skip bundle packaging |
-| Long-duration reliability | Recovery and crash tests pass, `scripts/check-local-soak.sh` passed a bounded 300-second local daemon/gateway run with 28 iterations, and a `mac-server` target-host run passed a 3600-second target with 117 iterations | Proven for the current local-first target host; broader host coverage and chaos testing remain future assurance work |
+| Long-duration reliability | Recovery and crash tests pass, `scripts/check-local-soak.sh` passed a bounded 300-second local daemon/gateway run with 28 iterations, and an older `mac-server` run passed a 3600-second target with 117 iterations | Local automated baseline only; standard plus chaos receipts on each supported host at the new RC SHA remain an H1 gate |
 | External security assurance | Code gates, audit, deny, local adversarial/fuzz gate, SSRF/local-boundary tests, and UI boundary tests pass | Local boundary pass proven for current checkout; independent external penetration test not performed |
 | Full wallet-management product roadmap | EVM roadmap phases 1-9 shipped and tested: discovery, inventory, risk, planning, policy-gated fail-closed execution (default off), DeFi exit adapters, and treasury automation | EVM scope is complete except swap execution, which is deferred per D-13; only non-EVM chains (phase 10), swap execution (D-13), and fiat/NFT valuation (D-16) remain deferred |
 
@@ -181,7 +184,9 @@ documented product boundary:
 - one local operator machine
 - local daemon with bearer session-token auth
 - local vault files and daemon-held unlock state
-- optional local gateway sidecar inside the same trust boundary
+- optional local gateway sidecar inside the same trust boundary; experimental
+  payment creation is disabled by default and balance observations are not
+  payment confirmations
 - no hosted backend and no remote multi-tenant service claim
 
 The gate does not prove internet-facing readiness, hosted service safety,
@@ -189,7 +194,11 @@ multi-host coordination, or arbitrary wallet discovery completeness.
 
 The explicit release scope is **Sigillum Local-First Operator Console v1**. It
 includes the local daemon, vault, CLI, session model, current wallet/inventory
-slices, and local-sidecar gateway preview. Ethereum receive-branch xpub profiles
+slices, and local-sidecar gateway preview. Gateway payments remain outside
+supported 1.0 confirmation semantics: opt-in creation emits observations only,
+reports `latest_balance_observation_at`, and exposes no privileged third-party
+invoice-signing callback.
+Ethereum receive-branch xpub profiles
 now support imported external watch-only public branches through
 `external_receive_xpub`, and Ethereum account-level xpub profiles support
 `external_account_xpub` normalized into receive branches; those profiles are
@@ -221,14 +230,15 @@ the project still needs:
 3. public-testnet execution receipts for the four core execution families:
    native sweep, ERC-20 sweep, revoke, and gas top-up (F6)
 
-Until those are complete, the accurate claim is narrower: the current source
-checkout passes the local-first release gate, and the docs identify the
-remaining assurance and product-completeness work.
+Until those are complete, the accurate claim is narrower: the prior RC proved
+the workflow shape, while the current hardening checkout still needs a fresh
+full gate and same-commit operator receipts. These docs identify the remaining
+assurance and product-completeness work.
 
 ## Execution-path security review (F5)
 
 A focused adversarial review of the W7 queue-execution surface
-(`service/queue/{gates,plan_steps,plan_steps/signing,processing}.rs`,
+(`service/queue/{gates,pause,processing,broadcast,plan_steps,plan_steps/signing}.rs`,
 `service/inventory/plan_execution_enqueue.rs`, `service/inventory/treasury.rs`,
 `service/inventory/planner.rs`) performed before this surface is enabled in any
 receipt. Every execution capability defaults OFF and is opt-in per
@@ -302,29 +312,31 @@ boundary. **Tests.** New `evidence_hash_resists_field_delimiter_injection`
 
 ### Threat 3 — Policy TOCTOU
 
-**Finding.** Both `process_queue` (the drain) and `update_treasury_policy` (and
-pause/resume) acquire the same `operation_guard` async mutex
-(`AsyncMutex<()>`, `state.rs`) for their entire duration, and every gate, pause,
-and cap decision is a FRESH on-disk read (`current_treasury_policy` ->
-`load_wallet_inventory`). **Exploitability of the named windows.** Because the
-mutex makes policy writes and drains mutually exclusive, there is no in-daemon
-window between hash-verify and sign, or between sign and broadcast, in which an
-authenticated policy flip can land: a policy-update request issued during a
-drain BLOCKS until the drain releases the guard, and vice-versa. The kill switch
-is additionally re-checked at the top of every job iteration, so a pause halts
-the queue before the next job starts. **Mitigation.** Serialization by
-`operation_guard` + per-job fresh reads; enqueue and drain both re-derive the
-gate verdict from current state rather than trusting recorded verdicts.
-**Residual risk.** The only way to mutate policy mid-drain is an out-of-band edit
-of `wallet_inventory.json` on disk, which is Threat 1's local-compromise
-boundary, not a concurrency race. **Tests.** New
-`policy_update_and_drain_serialize_no_torn_state_or_double_broadcast`
-(`tests/plan_execution.rs`) runs a drain and a pause concurrently and asserts no
-torn state and never a double broadcast; existing
+**Finding.** `process_queue` and ordinary treasury-policy updates still hold the
+same `operation_guard` async mutex (`AsyncMutex<()>`, `state.rs`) for their
+durations, so non-pause gate/cap updates cannot interleave with the drain.
+Pause has a deliberately separate fast path: `POST /api/queue/pause` sets an
+in-memory `AtomicBool` before it waits for that mutex. The drain reads the latch
+between jobs and again as the final instruction before external broadcast;
+resume clears it only after the durable policy says resumed. Startup restores
+the latch from persisted `TreasuryPolicy.execution_paused`.
+**Exploitability of the named windows.** An authenticated pause can therefore
+preempt a drain even while the HTTP request is still waiting to persist the
+policy. If it lands after signing, the exact signed bytes and hash remain in the
+durable `prepared` state and no RPC occurs. The job may resume later with those
+same bytes; it is never re-signed. Ordinary policy writes remain serialized by
+the mutex. **Mitigation.** The operation mutex protects durable policy and
+queue updates, while the lock-free latch closes the pause-specific preemption
+gap at both job and broadcast boundaries. Enqueue and drain still re-derive
+gate verdicts from current state rather than trusting recorded verdicts.
+**Residual risk.** An out-of-band edit of `wallet_inventory.json` is Threat 1's
+local-compromise boundary, not an in-daemon concurrency race.
+**Tests.** `pause_halts_drain_mid_queue` (`tests/execution_gates.rs`) holds a
+real first RPC broadcast, calls the HTTP pause route concurrently, observes the
+latch before releasing RPC, proves no later job broadcasts, and proves the
+persisted pause survives restart. The existing
 `policy_flip_between_enqueue_and_drain_blocks_with_gate_reason`
-(`tests/plan_enqueue.rs`) and `pause_halts_drain_mid_queue`
-(`tests/execution_gates.rs`) cover the observable enqueue->drain and
-mid-queue-pause windows.
+(`tests/plan_enqueue.rs`) covers the ordinary policy-flip boundary.
 
 ### Threat 4 — Session-token theft → enqueue attempt (D-17 boundary)
 

@@ -2,8 +2,6 @@
 
 use std::net::SocketAddr;
 
-use crate::validate;
-
 #[derive(Debug, thiserror::Error)]
 pub enum ConfigError {
     #[error("invalid GATEWAY_BIND_ADDR `{raw}`: {source}")]
@@ -11,16 +9,6 @@ pub enum ConfigError {
         raw: String,
         source: std::net::AddrParseError,
     },
-    #[error("invalid GATEWAY_BESATAS_WEBHOOK_URL `{url}`: {reason}")]
-    InvalidBesatasWebhookUrl { url: String, reason: String },
-    #[error(
-        "GATEWAY_BESATAS_WEBHOOK_PRIVATE_KEY is required when GATEWAY_BESATAS_WEBHOOK_URL is set"
-    )]
-    BesatasWebhookUrlWithoutPrivateKey,
-    #[error(
-        "GATEWAY_BESATAS_WEBHOOK_URL is required when GATEWAY_BESATAS_WEBHOOK_PRIVATE_KEY is set"
-    )]
-    BesatasWebhookPrivateKeyWithoutUrl,
 }
 
 /// Gateway configuration.
@@ -40,6 +28,8 @@ pub struct GatewayConfig {
     pub poll_interval_secs: u64,
     /// Payment expiry in minutes (default: 60).
     pub payment_expiry_minutes: i64,
+    /// Explicit opt-in for the non-finality-proving payment preview flow.
+    pub experimental_payments_enabled: bool,
     /// Admin API key for project management (required in production).
     pub admin_key_hash: Option<String>,
     /// Allowed CORS origins (comma-separated, default: none).
@@ -50,10 +40,6 @@ pub struct GatewayConfig {
     pub auth_cache_ttl_secs: u64,
     /// Structured JSON logging (default: false, set GATEWAY_LOG_JSON=1).
     pub log_json: bool,
-    /// Optional besatas payment-confirmation webhook URL.
-    pub besatas_webhook_url: Option<String>,
-    /// Ed25519 PKCS#8 private key PEM used to sign besatas callbacks.
-    pub besatas_webhook_private_key: Option<String>,
 }
 
 impl GatewayConfig {
@@ -77,20 +63,6 @@ impl GatewayConfig {
             .map(|s| s.trim().to_string())
             .filter(|s| !s.is_empty())
             .collect();
-        let besatas_webhook_url = std::env::var("GATEWAY_BESATAS_WEBHOOK_URL")
-            .ok()
-            .map(|value| value.trim().to_string())
-            .filter(|value| !value.is_empty());
-        let besatas_webhook_private_key = std::env::var("GATEWAY_BESATAS_WEBHOOK_PRIVATE_KEY")
-            .ok()
-            .map(|value| value.trim().to_string())
-            .filter(|value| !value.is_empty());
-
-        validate_besatas_webhook_config(
-            besatas_webhook_url.as_deref(),
-            besatas_webhook_private_key.as_deref(),
-        )?;
-
         let bind_addr = parse_bind_addr(
             &std::env::var("GATEWAY_BIND_ADDR").unwrap_or_else(|_| "127.0.0.1:8443".into()),
         )?;
@@ -116,6 +88,9 @@ impl GatewayConfig {
                 .ok()
                 .and_then(|v| v.parse().ok())
                 .unwrap_or(60),
+            experimental_payments_enabled: std::env::var("GATEWAY_ENABLE_EXPERIMENTAL_PAYMENTS")
+                .map(|value| matches!(value.trim().to_ascii_lowercase().as_str(), "1" | "true"))
+                .unwrap_or(false),
             admin_key_hash,
             cors_origins,
             rate_limit_rps: std::env::var("GATEWAY_RATE_LIMIT_RPS")
@@ -129,8 +104,6 @@ impl GatewayConfig {
             log_json: std::env::var("GATEWAY_LOG_JSON")
                 .map(|v| v == "1" || v == "true")
                 .unwrap_or(false),
-            besatas_webhook_url,
-            besatas_webhook_private_key,
         })
     }
 }
@@ -142,26 +115,9 @@ fn parse_bind_addr(raw: &str) -> Result<SocketAddr, ConfigError> {
     })
 }
 
-fn validate_besatas_webhook_config(
-    url: Option<&str>,
-    key: Option<&str>,
-) -> Result<(), ConfigError> {
-    match (url, key) {
-        (Some(url), Some(_)) => validate::validate_webhook_url(url).map_err(|reason| {
-            ConfigError::InvalidBesatasWebhookUrl {
-                url: url.to_string(),
-                reason,
-            }
-        }),
-        (Some(_), None) => Err(ConfigError::BesatasWebhookUrlWithoutPrivateKey),
-        (None, Some(_)) => Err(ConfigError::BesatasWebhookPrivateKeyWithoutUrl),
-        (None, None) => Ok(()),
-    }
-}
-
 #[cfg(test)]
 mod tests {
-    use super::{ConfigError, parse_bind_addr, validate_besatas_webhook_config};
+    use super::{ConfigError, parse_bind_addr};
 
     #[test]
     fn parse_bind_addr_rejects_invalid_address() {
@@ -176,34 +132,5 @@ mod tests {
         let addr = parse_bind_addr("127.0.0.1:8443").expect("valid bind address");
 
         assert_eq!(addr.to_string(), "127.0.0.1:8443");
-    }
-
-    #[test]
-    fn validate_besatas_webhook_config_rejects_url_without_key() {
-        assert!(matches!(
-            validate_besatas_webhook_config(Some("https://example.com/hook"), None),
-            Err(ConfigError::BesatasWebhookUrlWithoutPrivateKey)
-        ));
-    }
-
-    #[test]
-    fn validate_besatas_webhook_config_rejects_key_without_url() {
-        assert!(matches!(
-            validate_besatas_webhook_config(None, Some("private-key")),
-            Err(ConfigError::BesatasWebhookPrivateKeyWithoutUrl)
-        ));
-    }
-
-    #[test]
-    fn validate_besatas_webhook_config_rejects_invalid_url_with_key() {
-        assert!(matches!(
-            validate_besatas_webhook_config(Some("not a url"), Some("private-key")),
-            Err(ConfigError::InvalidBesatasWebhookUrl { .. })
-        ));
-    }
-
-    #[test]
-    fn validate_besatas_webhook_config_allows_missing_webhook_config() {
-        assert!(validate_besatas_webhook_config(None, None).is_ok());
     }
 }
