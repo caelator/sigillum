@@ -14,6 +14,7 @@ export PROPTEST_CASES="${SIGILLUM_ADVERSARIAL_PROPTEST_CASES:-256}"
 
 run_step cargo test -p sigillum-core --test fuzz_boundaries
 run_step cargo test -p sigillum-daemon --test adversarial_api
+run_step cargo test -p sigillum-daemon --test adversarial_execution
 run_step cargo test -p sigillum-cli --test cli_smoke
 run_step cargo test -p sigillum-gateway --test gateway_tests
 run_step cargo test -p sigillum-gateway --test gateway_integration
