@@ -613,6 +613,8 @@ export function createSetupWizard(deps: SetupWizardDeps) {
       simulation_freshness_secs: policy.simulation_freshness_secs ?? null,
       hot_floor_wei_hex: policy.hot_floor_wei_hex ?? null,
       hot_target_wei_hex: policy.hot_target_wei_hex ?? null,
+      hot_overflow_wei_hex: policy.hot_overflow_wei_hex ?? null,
+      allow_treasury_automation: Boolean(policy.allow_treasury_automation),
     };
   }
 
