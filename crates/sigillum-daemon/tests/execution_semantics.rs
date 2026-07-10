@@ -7,9 +7,16 @@
 
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
+#[cfg(all(unix, feature = "test-failpoints"))]
+use std::process::{Child, Command, ExitStatus, Stdio};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
+
+#[cfg(all(unix, feature = "test-failpoints"))]
+use std::os::unix::process::ExitStatusExt;
+#[cfg(all(unix, feature = "test-failpoints"))]
+use std::time::Duration;
 
 use axum::extract::State;
 use axum::http::{HeaderMap, header};
@@ -17,6 +24,7 @@ use axum::routing::post;
 use axum::{Json, Router};
 use reqwest::StatusCode;
 use serde_json::{Value, json};
+use sha3::{Digest, Keccak256};
 use tempfile::TempDir;
 
 const DESTINATION: &str = "0x9999999999999999999999999999999999999999";
@@ -26,6 +34,15 @@ const SEED_MNEMONIC: &str =
 const ONE_ETH_HEX: &str = "0xde0b6b3a7640000";
 const RPC_TOKEN: &str = "rpc-test-token";
 const COMPARTMENT_PASSPHRASE: &str = "correct horse battery staple";
+
+fn submitted_raw_transaction_hash(request: &Value) -> Value {
+    let raw = request["params"][0]
+        .as_str()
+        .expect("eth_sendRawTransaction carries raw transaction hex");
+    let bytes = hex::decode(raw.strip_prefix("0x").unwrap_or(raw))
+        .expect("submitted raw transaction is valid hex");
+    json!(format!("0x{}", hex::encode(Keccak256::digest(bytes))))
+}
 
 fn now_unix_test() -> u64 {
     SystemTime::now()
@@ -151,7 +168,7 @@ fn rpc_response(state: &RpcState, request: &Value) -> Value {
                     "error": { "code": -32000, "message": message },
                 });
             }
-            json!(format!("0x{}", "11".repeat(32)))
+            submitted_raw_transaction_hash(request)
         }
         "eth_getTransactionReceipt" => match state.receipt_mode.lock().unwrap().clone() {
             ReceiptMode::Unsupported => json!({ "unsupported": "eth_getTransactionReceipt" }),
@@ -160,6 +177,7 @@ fn rpc_response(state: &RpcState, request: &Value) -> Value {
                 block_number_hex,
                 gas_used_hex,
             } => json!({
+                "transactionHash": request["params"][0].clone(),
                 "status": "0x1",
                 "blockNumber": block_number_hex,
                 "gasUsed": gas_used_hex,
@@ -168,6 +186,7 @@ fn rpc_response(state: &RpcState, request: &Value) -> Value {
                 block_number_hex,
                 gas_used_hex,
             } => json!({
+                "transactionHash": request["params"][0].clone(),
                 "status": "0x0",
                 "blockNumber": block_number_hex,
                 "gasUsed": gas_used_hex,
@@ -500,6 +519,17 @@ fn queue_path(env: &PlanEnv) -> PathBuf {
     env.base_dir.join("queue.json")
 }
 
+fn queue_job_by_step(env: &PlanEnv, step_id: &str) -> Value {
+    let store = read_store(&queue_path(env));
+    store["data"]["jobs"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|job| job["step_id"] == json!(step_id))
+        .cloned()
+        .unwrap_or_else(|| panic!("no persisted queue job for step {step_id}"))
+}
+
 /// Append a crafted step (cloned from an existing one) to the persisted plan.
 fn add_plan_step(
     env: &PlanEnv,
@@ -642,10 +672,10 @@ async fn per_source_serialization_defers_second_job_until_first_confirms() {
     env.shutdown();
 }
 
-// ── 2. Nonce race: re-fetch once, then park ─────────────────────────────
+// ── 2. Nonce race: park without re-signing ──────────────────────────────
 
 #[tokio::test]
-async fn nonce_too_low_retries_once_then_parks_for_operator_review() {
+async fn nonce_too_low_parks_without_resigning() {
     let env = setup_plan_env().await;
     env.rpc_state.set_broadcast_error(Some("nonce too low"));
     update_policy(&env, gates_on_policy_body()).await;
@@ -671,13 +701,13 @@ async fn nonce_too_low_retries_once_then_parks_for_operator_review() {
     );
     assert_eq!(
         env.rpc_state.broadcast_call_count(),
-        2,
-        "exactly one retry after the first nonce-too-low"
+        1,
+        "a prepared transaction is submitted once and never re-signed in place"
     );
     assert_eq!(
         env.rpc_state.transaction_count_call_count() - nonce_calls_before_drain,
-        2,
-        "the nonce must be re-fetched exactly once"
+        1,
+        "the nonce is fetched once while preparing the durable signed bytes"
     );
 
     let jobs = queue_jobs(&env).await;
@@ -690,12 +720,21 @@ async fn nonce_too_low_retries_once_then_parks_for_operator_review() {
         job["last_error"]
             .as_str()
             .unwrap()
-            .starts_with("broadcast_rejected: nonce too low"),
+            .starts_with("broadcast_rejected: prepared transaction nonce"),
         "{job}"
     );
     assert!(
-        job["transaction_hash_hex"].is_null(),
-        "never broadcast: {job}"
+        job["transaction_hash_hex"].is_string(),
+        "operator review retains the prepared hash: {job}"
+    );
+    assert!(
+        job.get("signed_raw_transaction_hex").is_none(),
+        "queue APIs redact replayable signed bytes: {job}"
+    );
+    let persisted_job = queue_job_by_step(&env, &step_id);
+    assert!(
+        persisted_job.get("signed_raw_transaction_hex").is_none(),
+        "terminal jobs discard replayable signed bytes from storage: {persisted_job}"
     );
 
     env.shutdown();
@@ -817,10 +856,10 @@ async fn on_chain_revert_discovered_via_receipt_records_gas_and_block() {
     env.shutdown();
 }
 
-// ── 4. Underpriced: bump once, then park ────────────────────────────────
+// ── 4. Underpriced: park without re-signing ─────────────────────────────
 
 #[tokio::test]
-async fn underpriced_broadcast_bumps_fee_once_then_parks() {
+async fn underpriced_broadcast_parks_without_resigning() {
     let env = setup_plan_env().await;
     env.rpc_state
         .set_broadcast_error(Some("replacement transaction underpriced"));
@@ -847,8 +886,8 @@ async fn underpriced_broadcast_bumps_fee_once_then_parks() {
     );
     assert_eq!(
         env.rpc_state.broadcast_call_count(),
-        2,
-        "exactly one fee-bumped retry after the first underpriced rejection"
+        1,
+        "underpriced prepared bytes are never replaced by an implicit re-sign"
     );
     assert_eq!(
         env.rpc_state.transaction_count_call_count() - nonce_calls_before_drain,
@@ -857,11 +896,7 @@ async fn underpriced_broadcast_bumps_fee_once_then_parks() {
     );
 
     let raw_hexes = env.rpc_state.broadcast_raw_hexes();
-    assert_eq!(raw_hexes.len(), 2);
-    assert_ne!(
-        raw_hexes[0], raw_hexes[1],
-        "the retry must re-sign with a bumped fee (different raw transaction)"
-    );
+    assert_eq!(raw_hexes.len(), 1);
 
     let jobs = queue_jobs(&env).await;
     let job = jobs
@@ -873,8 +908,17 @@ async fn underpriced_broadcast_bumps_fee_once_then_parks() {
         job["last_error"]
             .as_str()
             .unwrap()
-            .starts_with("broadcast_rejected: underpriced"),
+            .starts_with("broadcast_rejected: prepared transaction is underpriced"),
         "{job}"
+    );
+    assert!(
+        job.get("signed_raw_transaction_hex").is_none(),
+        "queue APIs redact replayable signed bytes: {job}"
+    );
+    let persisted_job = queue_job_by_step(&env, &step_id);
+    assert!(
+        persisted_job.get("signed_raw_transaction_hex").is_none(),
+        "terminal jobs discard replayable signed bytes from storage: {persisted_job}"
     );
 
     env.shutdown();
@@ -1052,10 +1096,367 @@ async fn restart_resumes_receipt_polling_without_duplicate_broadcast() {
     env.shutdown();
 }
 
-/// F3 chaos-mode assertion invoked by `scripts/check-local-soak.sh` on the
-/// first kill cycle: in-flight plan-step crashes resume without duplication.
 #[tokio::test]
-async fn chaos_kill_in_flight_plan_step_resumes_terminal_without_duplication() {
+async fn execution_gate_flips_preserve_every_in_flight_plan_step_state() {
+    let env = setup_plan_env().await;
+    update_policy(&env, gates_on_policy_body()).await;
+    let (plan_id, step_id) = generate_and_simulate_plan(&env).await;
+    approve_plan(&env, &plan_id).await;
+    let (status, body) = enqueue_step(&env, &plan_id, &step_id).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+
+    let first = process_queue(&env).await;
+    assert_eq!(first["succeeded"], json!(1), "{first}");
+    let sent_job = queue_job_by_step(&env, &step_id);
+    let job_id = sent_job["id"].as_str().unwrap().to_string();
+    let signed_raw = env
+        .rpc_state
+        .broadcast_raw_hexes()
+        .last()
+        .expect("initial process broadcasts one prepared transaction")
+        .trim_start_matches("0x")
+        .to_string();
+    let broadcasts_after_sign = env.rpc_state.broadcast_call_count();
+    let nonce_calls_after_sign = env.rpc_state.transaction_count_call_count();
+
+    env.rpc_state.set_receipt_mode(ReceiptMode::Pending);
+    update_policy(&env, json!({ "enabled": true })).await;
+
+    // `sent` is irrevocably receipt-only. Disabling the action gate cannot
+    // demote it to `blocked`, restore replay bytes, or enter the signer.
+    let sent_gate_off = process_queue(&env).await;
+    assert_eq!(sent_gate_off["jobs"][0]["state"], json!("sent"));
+    assert_eq!(env.rpc_state.broadcast_call_count(), broadcasts_after_sign);
+    assert_eq!(
+        env.rpc_state.transaction_count_call_count(),
+        nonce_calls_after_sign
+    );
+    let sent_on_disk = queue_job_by_step(&env, &step_id);
+    assert_eq!(sent_on_disk["state"], json!("sent"));
+    assert!(sent_on_disk["signed_raw_transaction_hex"].is_null());
+
+    // A pre-I/O crash snapshot holds its exact bytes while the gate is off.
+    edit_queue_job(&env, &job_id, |job| {
+        job["state"] = json!("prepared");
+        job["signed_raw_transaction_hex"] = json!(signed_raw.clone());
+        job["broadcast_transaction_hash_hex"] = Value::Null;
+        job["broadcast_at_unix"] = Value::Null;
+        job["next_attempt_after_unix"] = Value::Null;
+        job["receipt_status"] = Value::Null;
+    });
+    let prepared_gate_off = process_queue(&env).await;
+    assert_eq!(prepared_gate_off["jobs"][0]["state"], json!("prepared"));
+    assert_eq!(env.rpc_state.broadcast_call_count(), broadcasts_after_sign);
+    assert_eq!(
+        env.rpc_state.transaction_count_call_count(),
+        nonce_calls_after_sign
+    );
+    let prepared_on_disk = queue_job_by_step(&env, &step_id);
+    assert_eq!(
+        prepared_on_disk["signed_raw_transaction_hex"],
+        json!(signed_raw)
+    );
+
+    // Re-enabling permits exactly one first submission of the original bytes.
+    update_policy(&env, gates_on_policy_body()).await;
+    let prepared_gate_on = process_queue(&env).await;
+    assert_eq!(
+        prepared_gate_on["succeeded"],
+        json!(1),
+        "{prepared_gate_on}"
+    );
+    assert_eq!(
+        env.rpc_state.broadcast_call_count(),
+        broadcasts_after_sign + 1
+    );
+    assert_eq!(
+        env.rpc_state.transaction_count_call_count(),
+        nonce_calls_after_sign
+    );
+    assert_eq!(
+        env.rpc_state
+            .broadcast_raw_hexes()
+            .last()
+            .unwrap()
+            .trim_start_matches("0x"),
+        signed_raw
+    );
+
+    // An ambiguous submission always checks its receipt first. With the gate
+    // denied and no receipt it must retain `submitted_unknown` and its bytes.
+    edit_queue_job(&env, &job_id, |job| {
+        job["state"] = json!("submitted_unknown");
+        job["signed_raw_transaction_hex"] = json!(signed_raw.clone());
+        job["broadcast_transaction_hash_hex"] = Value::Null;
+        job["broadcast_at_unix"] = json!(now_unix_test());
+        job["next_attempt_after_unix"] = Value::Null;
+        job["receipt_status"] = Value::Null;
+    });
+    update_policy(&env, json!({ "enabled": true })).await;
+    let broadcasts_before_unknown_hold = env.rpc_state.broadcast_call_count();
+    let unknown_gate_off = process_queue(&env).await;
+    assert_eq!(
+        unknown_gate_off["jobs"][0]["state"],
+        json!("submitted_unknown")
+    );
+    assert_eq!(
+        env.rpc_state.broadcast_call_count(),
+        broadcasts_before_unknown_hold
+    );
+    assert_eq!(
+        env.rpc_state.transaction_count_call_count(),
+        nonce_calls_after_sign
+    );
+    let unknown_on_disk = queue_job_by_step(&env, &step_id);
+    assert_eq!(unknown_on_disk["state"], json!("submitted_unknown"));
+    assert_eq!(
+        unknown_on_disk["signed_raw_transaction_hex"],
+        json!(signed_raw)
+    );
+
+    // Once the gate is restored, a missing receipt permits exactly one
+    // byte-identical resubmission and still never re-enters signing.
+    edit_queue_job(&env, &job_id, |job| {
+        job["next_attempt_after_unix"] = Value::Null;
+    });
+    update_policy(&env, gates_on_policy_body()).await;
+    let unknown_gate_on = process_queue(&env).await;
+    assert_eq!(unknown_gate_on["succeeded"], json!(1), "{unknown_gate_on}");
+    assert_eq!(
+        env.rpc_state.broadcast_call_count(),
+        broadcasts_before_unknown_hold + 1
+    );
+    assert_eq!(
+        env.rpc_state.transaction_count_call_count(),
+        nonce_calls_after_sign
+    );
+    assert_eq!(
+        env.rpc_state
+            .broadcast_raw_hexes()
+            .last()
+            .unwrap()
+            .trim_start_matches("0x"),
+        signed_raw
+    );
+
+    // Repair the exact legacy state created by the old ordering: `blocked`
+    // with raw bytes plus a broadcast marker. Even with the gate off, a
+    // visible receipt confirms by hash without a new broadcast or signature.
+    edit_queue_job(&env, &job_id, |job| {
+        job["state"] = json!("blocked");
+        job["signed_raw_transaction_hex"] = json!(signed_raw.clone());
+        job["broadcast_transaction_hash_hex"] = Value::Null;
+        job["broadcast_at_unix"] = json!(now_unix_test());
+        job["next_attempt_after_unix"] = Value::Null;
+        job["receipt_status"] = Value::Null;
+    });
+    env.rpc_state.set_receipt_mode(ReceiptMode::Success {
+        block_number_hex: "0x1".into(),
+        gas_used_hex: "0x5208".into(),
+    });
+    update_policy(&env, json!({ "enabled": true })).await;
+    let broadcasts_before_legacy_recovery = env.rpc_state.broadcast_call_count();
+    let recovered = process_queue(&env).await;
+    assert_eq!(recovered["confirmed"], json!(1), "{recovered}");
+    assert_eq!(recovered["jobs"][0]["state"], json!("confirmed"));
+    assert_eq!(
+        env.rpc_state.broadcast_call_count(),
+        broadcasts_before_legacy_recovery
+    );
+    assert_eq!(
+        env.rpc_state.transaction_count_call_count(),
+        nonce_calls_after_sign
+    );
+    let confirmed_on_disk = queue_job_by_step(&env, &step_id);
+    assert_eq!(confirmed_on_disk["state"], json!("confirmed"));
+    assert!(confirmed_on_disk["signed_raw_transaction_hex"].is_null());
+
+    env.shutdown();
+}
+
+#[tokio::test]
+async fn prepared_and_submitted_unknown_snapshots_never_resign() {
+    let env = setup_plan_env().await;
+    update_policy(&env, gates_on_policy_body()).await;
+    let (plan_id, step_id) = generate_and_simulate_plan(&env).await;
+    approve_plan(&env, &plan_id).await;
+    let (status, body) = enqueue_step(&env, &plan_id, &step_id).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+
+    // Produce one real signed transaction so the fixture can model the two
+    // durable crash snapshots exactly as they appear on disk.
+    let first = process_queue(&env).await;
+    assert_eq!(first["succeeded"], json!(1), "{first}");
+    let jobs = queue_jobs(&env).await;
+    let job = jobs
+        .iter()
+        .find(|job| job["step_id"] == json!(step_id))
+        .unwrap();
+    assert!(
+        job.get("signed_raw_transaction_hex").is_none(),
+        "queue APIs redact replayable signed bytes: {job}"
+    );
+    let job_id = job["id"].as_str().unwrap().to_string();
+    let transaction_hash_hex = job["transaction_hash_hex"].as_str().unwrap().to_string();
+    let submitted_raw_hexes = env.rpc_state.broadcast_raw_hexes();
+    let signed_raw = submitted_raw_hexes
+        .last()
+        .expect("the initial process submitted one prepared transaction")
+        .trim_start_matches("0x")
+        .to_string();
+    let nonce_calls_after_sign = env.rpc_state.transaction_count_call_count();
+
+    // Crash snapshot A: signed bytes reached stable storage, but no network
+    // call was durably recorded. Restart must submit these bytes verbatim and
+    // must not touch the signer/nonce path.
+    edit_queue_job(&env, &job_id, |job| {
+        job["state"] = json!("prepared");
+        job["signed_raw_transaction_hex"] = json!(signed_raw.clone());
+        job["broadcast_transaction_hash_hex"] = Value::Null;
+        job["broadcast_at_unix"] = Value::Null;
+        job["receipt_status"] = Value::Null;
+    });
+    env.daemon.abort();
+    let (addr2, daemon2) = spawn_daemon(env.base_dir.clone()).await;
+    let unlock2 = post_json(
+        &env.client,
+        addr2,
+        "/api/unlock",
+        json!({ "passphrase": COMPARTMENT_PASSPHRASE }),
+        None,
+    )
+    .await;
+    assert_eq!(unlock2.status(), StatusCode::OK, "{unlock2:?}");
+    let token2 = unlock2.json::<Value>().await.unwrap()["session_token"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let process2 = post_json(
+        &env.client,
+        addr2,
+        "/api/queue/process",
+        json!({}),
+        Some(&token2),
+    )
+    .await;
+    assert_eq!(process2.status(), StatusCode::OK);
+    let process2_json: Value = process2.json().await.unwrap();
+    assert_eq!(process2_json["succeeded"], json!(1), "{process2_json}");
+    assert_eq!(
+        env.rpc_state.transaction_count_call_count(),
+        nonce_calls_after_sign
+    );
+    assert_eq!(
+        env.rpc_state
+            .broadcast_raw_hexes()
+            .last()
+            .unwrap()
+            .trim_start_matches("0x"),
+        signed_raw
+    );
+
+    // Crash snapshot B with no receipt: query first, then idempotently submit
+    // the exact bytes. This still must not re-enter signing.
+    edit_queue_job(&env, &job_id, |job| {
+        job["state"] = json!("submitted_unknown");
+        job["signed_raw_transaction_hex"] = json!(signed_raw.clone());
+        job["broadcast_transaction_hash_hex"] = Value::Null;
+        job["broadcast_at_unix"] = json!(now_unix_test() - 4000);
+    });
+    env.rpc_state.set_receipt_mode(ReceiptMode::Pending);
+    let broadcasts_before_unknown = env.rpc_state.broadcast_call_count();
+    let process_unknown = post_json(
+        &env.client,
+        addr2,
+        "/api/queue/process",
+        json!({}),
+        Some(&token2),
+    )
+    .await;
+    assert_eq!(process_unknown.status(), StatusCode::OK);
+    let process_unknown_json: Value = process_unknown.json().await.unwrap();
+    assert_eq!(
+        process_unknown_json["succeeded"],
+        json!(1),
+        "{process_unknown_json}"
+    );
+    assert_eq!(
+        env.rpc_state.broadcast_call_count(),
+        broadcasts_before_unknown + 1
+    );
+    assert_eq!(
+        env.rpc_state.transaction_count_call_count(),
+        nonce_calls_after_sign
+    );
+    assert_eq!(
+        env.rpc_state
+            .broadcast_raw_hexes()
+            .last()
+            .unwrap()
+            .trim_start_matches("0x"),
+        signed_raw
+    );
+
+    // The same submitted-unknown snapshot with a now-visible receipt is
+    // resolved by hash only: no re-broadcast and still no signing.
+    edit_queue_job(&env, &job_id, |job| {
+        job["state"] = json!("submitted_unknown");
+        job["signed_raw_transaction_hex"] = json!(signed_raw.clone());
+        job["broadcast_transaction_hash_hex"] = Value::Null;
+        job["broadcast_at_unix"] = json!(now_unix_test());
+    });
+    daemon2.abort();
+    env.rpc_state.set_receipt_mode(ReceiptMode::Success {
+        block_number_hex: "0x2a".into(),
+        gas_used_hex: "0x5208".into(),
+    });
+    let broadcasts_before_receipt = env.rpc_state.broadcast_call_count();
+    let (addr3, daemon3) = spawn_daemon(env.base_dir.clone()).await;
+    let unlock3 = post_json(
+        &env.client,
+        addr3,
+        "/api/unlock",
+        json!({ "passphrase": COMPARTMENT_PASSPHRASE }),
+        None,
+    )
+    .await;
+    assert_eq!(unlock3.status(), StatusCode::OK, "{unlock3:?}");
+    let token3 = unlock3.json::<Value>().await.unwrap()["session_token"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let process3 = post_json(
+        &env.client,
+        addr3,
+        "/api/queue/process",
+        json!({}),
+        Some(&token3),
+    )
+    .await;
+    assert_eq!(process3.status(), StatusCode::OK);
+    let process3_json: Value = process3.json().await.unwrap();
+    assert_eq!(process3_json["confirmed"], json!(1), "{process3_json}");
+    assert_eq!(
+        env.rpc_state.broadcast_call_count(),
+        broadcasts_before_receipt
+    );
+    assert_eq!(
+        env.rpc_state.transaction_count_call_count(),
+        nonce_calls_after_sign
+    );
+    assert_eq!(
+        process3_json["jobs"][0]["transaction_hash_hex"],
+        json!(transaction_hash_hex)
+    );
+
+    daemon3.abort();
+    env.shutdown();
+}
+
+/// Earlier in-process abort coverage retained as a fast complement to the
+/// feature-gated real SIGKILL proof below.
+#[tokio::test]
+async fn legacy_in_process_abort_resumes_without_duplicate_broadcast() {
     let env = setup_plan_env().await;
     update_policy(&env, gates_on_policy_body()).await;
     let (plan_id, step_id) = generate_and_simulate_plan(&env).await;
@@ -1195,5 +1596,295 @@ async fn chaos_kill_in_flight_plan_step_resumes_terminal_without_duplication() {
     );
 
     daemon3.abort();
+    env.shutdown();
+}
+
+#[cfg(all(unix, feature = "test-failpoints"))]
+const FAILPOINT_HELPER_ENV: &str = "SIGILLUM_TEST_QUEUE_HELPER";
+#[cfg(all(unix, feature = "test-failpoints"))]
+const FAILPOINT_BASE_DIR_ENV: &str = "SIGILLUM_TEST_QUEUE_BASE_DIR";
+#[cfg(all(unix, feature = "test-failpoints"))]
+const FAILPOINT_ACTIVE_ENV: &str = "SIGILLUM_TEST_FAILPOINT";
+#[cfg(all(unix, feature = "test-failpoints"))]
+const FAILPOINT_READY_PATH_ENV: &str = "SIGILLUM_TEST_FAILPOINT_READY_PATH";
+#[cfg(all(unix, feature = "test-failpoints"))]
+const AFTER_PREPARED_PERSIST: &str = "queue_after_prepared_persist";
+#[cfg(all(unix, feature = "test-failpoints"))]
+const AFTER_SUBMITTED_UNKNOWN_PERSIST: &str = "queue_after_submitted_unknown_persist";
+
+#[cfg(all(unix, feature = "test-failpoints"))]
+fn spawn_queue_failpoint_helper(base_dir: &Path, failpoint: Option<(&str, &Path)>) -> Child {
+    let executable = std::env::current_exe().expect("current test executable is available");
+    let mut command = Command::new(executable);
+    command
+        .arg("--exact")
+        .arg("queue_failpoint_subprocess_helper")
+        .arg("--nocapture")
+        .arg("--test-threads=1")
+        .env(FAILPOINT_HELPER_ENV, "1")
+        .env(FAILPOINT_BASE_DIR_ENV, base_dir)
+        .stdout(Stdio::null())
+        .stderr(Stdio::inherit());
+    if let Some((name, ready_path)) = failpoint {
+        command
+            .env(FAILPOINT_ACTIVE_ENV, name)
+            .env(FAILPOINT_READY_PATH_ENV, ready_path);
+    } else {
+        command
+            .env_remove(FAILPOINT_ACTIVE_ENV)
+            .env_remove(FAILPOINT_READY_PATH_ENV);
+    }
+    command.spawn().expect("queue failpoint helper starts")
+}
+
+#[cfg(all(unix, feature = "test-failpoints"))]
+async fn wait_for_failpoint_marker(child: &mut Child, marker: &Path) {
+    let wait = tokio::time::timeout(Duration::from_secs(120), async {
+        loop {
+            if marker.exists() {
+                return;
+            }
+            if let Some(status) = child.try_wait().expect("helper status is readable") {
+                panic!("queue failpoint helper exited before marker: {status}");
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await;
+    if wait.is_err() {
+        if child
+            .try_wait()
+            .expect("helper status is readable")
+            .is_none()
+        {
+            kill_helper(child);
+        }
+        panic!(
+            "timed out waiting for failpoint marker {}",
+            marker.display()
+        );
+    }
+}
+
+#[cfg(all(unix, feature = "test-failpoints"))]
+async fn wait_for_helper_success(child: &mut Child) -> ExitStatus {
+    match tokio::time::timeout(Duration::from_secs(120), async {
+        loop {
+            if let Some(status) = child.try_wait().expect("helper status is readable") {
+                return status;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    {
+        Ok(status) => {
+            assert!(status.success(), "queue helper failed: {status}");
+            status
+        }
+        Err(_) => {
+            kill_helper(child);
+            panic!("timed out waiting for queue helper to exit");
+        }
+    }
+}
+
+#[cfg(all(unix, feature = "test-failpoints"))]
+fn kill_helper(child: &mut Child) {
+    let result = unsafe { libc::kill(child.id() as libc::pid_t, libc::SIGKILL) };
+    assert_eq!(result, 0, "SIGKILL should reach queue helper");
+    let status = child.wait().expect("killed queue helper is reaped");
+    assert_eq!(status.signal(), Some(libc::SIGKILL));
+}
+
+#[cfg(all(unix, feature = "test-failpoints"))]
+fn required_string(job: &Value, field: &str) -> String {
+    job[field]
+        .as_str()
+        .unwrap_or_else(|| panic!("persisted job field {field} is missing: {job}"))
+        .to_string()
+}
+
+/// Subprocess entry point used by the crash-boundary proof. A normal test
+/// process returns immediately; only an explicitly marked child drains.
+#[cfg(all(unix, feature = "test-failpoints"))]
+#[test]
+fn queue_failpoint_subprocess_helper() {
+    if std::env::var_os(FAILPOINT_HELPER_ENV).is_none() {
+        return;
+    }
+    let base_dir = PathBuf::from(
+        std::env::var_os(FAILPOINT_BASE_DIR_ENV)
+            .expect("queue helper base directory is configured"),
+    );
+    tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(2)
+        .enable_all()
+        .build()
+        .expect("queue helper runtime builds")
+        .block_on(async move {
+            let (addr, daemon) = spawn_daemon(base_dir).await;
+            let client = reqwest::Client::new();
+            let unlock = post_json(
+                &client,
+                addr,
+                "/api/unlock",
+                json!({ "passphrase": COMPARTMENT_PASSPHRASE }),
+                None,
+            )
+            .await;
+            assert_eq!(unlock.status(), StatusCode::OK);
+            let unlock_json: Value = unlock.json().await.unwrap();
+            let token = unlock_json["session_token"]
+                .as_str()
+                .expect("unlock returns a session token")
+                .to_string();
+            let process =
+                post_json(&client, addr, "/api/queue/process", json!({}), Some(&token)).await;
+            assert_eq!(process.status(), StatusCode::OK);
+            let process_json: Value = process.json().await.unwrap();
+            assert_eq!(process_json["processed"], json!(1), "{process_json}");
+            daemon.abort();
+        });
+}
+
+/// Real OS-kill proof for both queue write-ahead barriers. The daemon child
+/// is SIGKILLed only after a synced marker proves the selected durable state
+/// exists and before any RPC submission can begin.
+#[cfg(all(unix, feature = "test-failpoints"))]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn chaos_kill_in_flight_plan_step_resumes_terminal_without_duplication() {
+    let env = setup_plan_env().await;
+    update_policy(&env, gates_on_policy_body()).await;
+    let (plan_id, step_id) = generate_and_simulate_plan(&env).await;
+    approve_plan(&env, &plan_id).await;
+    let (status, body) = enqueue_step(&env, &plan_id, &step_id).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+
+    env.daemon.abort();
+    tokio::time::sleep(Duration::from_millis(20)).await;
+    let nonce_calls_before_prepare = env.rpc_state.transaction_count_call_count();
+    assert_eq!(
+        env.rpc_state.broadcast_call_count(),
+        0,
+        "enqueue must not broadcast"
+    );
+
+    // Crash boundary A: exact signed bytes and all integrity bindings are on
+    // disk as `prepared`, but the submission marker and RPC call do not exist.
+    let prepared_marker = env.base_dir.join("queue-prepared.ready");
+    let mut prepared_child = spawn_queue_failpoint_helper(
+        &env.base_dir,
+        Some((AFTER_PREPARED_PERSIST, &prepared_marker)),
+    );
+    wait_for_failpoint_marker(&mut prepared_child, &prepared_marker).await;
+    let prepared = queue_job_by_step(&env, &step_id);
+    assert_eq!(prepared["state"], json!("prepared"), "{prepared}");
+    let raw = required_string(&prepared, "signed_raw_transaction_hex");
+    let transaction_hash = required_string(&prepared, "transaction_hash_hex");
+    let payload_hash = required_string(&prepared, "prepared_payload_hash_hex");
+    let binding_hash = required_string(&prepared, "prepared_binding_hash_hex");
+    assert!(prepared["prepared_at_unix"].is_number(), "{prepared}");
+    assert!(prepared["broadcast_at_unix"].is_null(), "{prepared}");
+    assert_eq!(
+        env.rpc_state.transaction_count_call_count(),
+        nonce_calls_before_prepare + 1,
+        "only initial preparation resolves a nonce"
+    );
+    let nonce_calls_after_prepare = env.rpc_state.transaction_count_call_count();
+    assert_eq!(env.rpc_state.broadcast_call_count(), 0);
+    kill_helper(&mut prepared_child);
+
+    // Crash boundary B: `submitted_unknown` is durable, but the failpoint is
+    // still before RPC. Recovery must carry the exact prepared identity over
+    // without resolving a signer or nonce again.
+    let submitted_marker = env.base_dir.join("queue-submitted-unknown.ready");
+    let mut submitted_child = spawn_queue_failpoint_helper(
+        &env.base_dir,
+        Some((AFTER_SUBMITTED_UNKNOWN_PERSIST, &submitted_marker)),
+    );
+    wait_for_failpoint_marker(&mut submitted_child, &submitted_marker).await;
+    let submitted = queue_job_by_step(&env, &step_id);
+    assert_eq!(
+        submitted["state"],
+        json!("submitted_unknown"),
+        "{submitted}"
+    );
+    assert_eq!(
+        required_string(&submitted, "signed_raw_transaction_hex"),
+        raw
+    );
+    assert_eq!(
+        required_string(&submitted, "transaction_hash_hex"),
+        transaction_hash
+    );
+    assert_eq!(
+        required_string(&submitted, "prepared_payload_hash_hex"),
+        payload_hash
+    );
+    assert_eq!(
+        required_string(&submitted, "prepared_binding_hash_hex"),
+        binding_hash
+    );
+    assert!(submitted["broadcast_at_unix"].is_number(), "{submitted}");
+    assert_eq!(env.rpc_state.broadcast_call_count(), 0);
+    assert_eq!(
+        env.rpc_state.transaction_count_call_count(),
+        nonce_calls_after_prepare,
+        "submitted_unknown recovery must not re-sign"
+    );
+    kill_helper(&mut submitted_child);
+
+    // With the hooks disabled, recovery polls once, finds no receipt, and
+    // submits the exact bytes once. Provider acceptance clears replay bytes.
+    env.rpc_state.set_receipt_mode(ReceiptMode::Pending);
+    let mut broadcast_child = spawn_queue_failpoint_helper(&env.base_dir, None);
+    wait_for_helper_success(&mut broadcast_child).await;
+    let sent = queue_job_by_step(&env, &step_id);
+    assert_eq!(sent["state"], json!("sent"), "{sent}");
+    assert_eq!(sent["transaction_hash_hex"], json!(transaction_hash));
+    assert_eq!(
+        sent["broadcast_transaction_hash_hex"],
+        json!(transaction_hash)
+    );
+    assert!(
+        sent.get("signed_raw_transaction_hex").is_none(),
+        "accepted submissions discard replayable raw bytes: {sent}"
+    );
+    assert_eq!(sent["prepared_payload_hash_hex"], json!(payload_hash));
+    assert_eq!(sent["prepared_binding_hash_hex"], json!(binding_hash));
+    assert_eq!(env.rpc_state.broadcast_call_count(), 1);
+    assert_eq!(
+        env.rpc_state.broadcast_raw_hexes()[0].trim_start_matches("0x"),
+        raw
+    );
+    assert_eq!(
+        env.rpc_state.transaction_count_call_count(),
+        nonce_calls_after_prepare,
+        "exact-byte recovery must not resolve another nonce"
+    );
+
+    // A final restart confirms by receipt identity only. It cannot broadcast
+    // or sign again, and terminal storage remains free of replayable bytes.
+    env.rpc_state.set_receipt_mode(ReceiptMode::Success {
+        block_number_hex: "0x2a".into(),
+        gas_used_hex: "0x5208".into(),
+    });
+    let mut confirmation_child = spawn_queue_failpoint_helper(&env.base_dir, None);
+    wait_for_helper_success(&mut confirmation_child).await;
+    let confirmed = queue_job_by_step(&env, &step_id);
+    assert_eq!(confirmed["state"], json!("confirmed"), "{confirmed}");
+    assert_eq!(confirmed["transaction_hash_hex"], json!(transaction_hash));
+    assert_eq!(confirmed["receipt_status"], json!("success"));
+    assert_eq!(
+        env.rpc_state.broadcast_call_count(),
+        1,
+        "confirmation restart must not duplicate the broadcast"
+    );
+    assert_eq!(
+        env.rpc_state.transaction_count_call_count(),
+        nonce_calls_after_prepare
+    );
+    assert!(confirmed.get("signed_raw_transaction_hex").is_none());
     env.shutdown();
 }

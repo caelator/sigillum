@@ -8,8 +8,8 @@ use std::collections::HashMap;
 
 use sigillum_api::{QueueJob, QueueJobPayload};
 
-use super::QUEUE_STATE_SENT;
 use super::state::normalize_queue_state;
+use super::{QUEUE_STATE_PREPARED, QUEUE_STATE_SENT, QUEUE_STATE_SUBMITTED_UNKNOWN};
 
 pub(super) type SourceKey = (u64, String);
 
@@ -46,7 +46,10 @@ fn plan_step_depends_on(payload: &QueueJobPayload, occupant_job_id: &str) -> boo
 pub(super) fn build_in_flight_sources(jobs: &[QueueJob]) -> HashMap<SourceKey, String> {
     jobs.iter()
         .filter_map(|job| {
-            if normalize_queue_state(&job.state) == QUEUE_STATE_SENT {
+            if matches!(
+                normalize_queue_state(&job.state),
+                QUEUE_STATE_PREPARED | QUEUE_STATE_SUBMITTED_UNKNOWN | QUEUE_STATE_SENT
+            ) {
                 plan_step_source_key(&job.payload).map(|key| (key, job.id.clone()))
             } else {
                 None
@@ -66,7 +69,10 @@ pub(super) fn skip_reason(
     job: &QueueJob,
     in_flight_sources: &HashMap<SourceKey, String>,
 ) -> Option<String> {
-    if normalize_queue_state(&job.state) == QUEUE_STATE_SENT {
+    if matches!(
+        normalize_queue_state(&job.state),
+        QUEUE_STATE_PREPARED | QUEUE_STATE_SUBMITTED_UNKNOWN | QUEUE_STATE_SENT
+    ) {
         return None;
     }
     let key = plan_step_source_key(&job.payload)?;
@@ -88,7 +94,10 @@ pub(super) fn refresh(map: &mut HashMap<SourceKey, String>, job: &QueueJob) {
     let Some(key) = plan_step_source_key(&job.payload) else {
         return;
     };
-    if normalize_queue_state(&job.state) == QUEUE_STATE_SENT {
+    if matches!(
+        normalize_queue_state(&job.state),
+        QUEUE_STATE_PREPARED | QUEUE_STATE_SUBMITTED_UNKNOWN | QUEUE_STATE_SENT
+    ) {
         map.insert(key, job.id.clone());
     } else if map.get(&key) == Some(&job.id) {
         map.remove(&key);

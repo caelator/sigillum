@@ -350,7 +350,7 @@ run_chaos_in_flight_assertion() {
   local started_epoch
   local finished_epoch
   started_epoch="$(date +%s)"
-  if cargo test -p sigillum-daemon --test execution_semantics chaos_kill_in_flight; then
+  if cargo test -p sigillum-daemon --features test-failpoints --test execution_semantics chaos_kill_in_flight; then
     CHAOS_IN_FLIGHT_STATUS="passed"
   else
     finished_epoch="$(date +%s)"
@@ -455,7 +455,7 @@ HARNESS_START_ISO="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
 
 if [[ "${CHAOS}" == "1" ]]; then
   cargo build -p sigillum-cli --quiet
-  cargo test -p sigillum-daemon --test execution_semantics --no-run --quiet
+  cargo test -p sigillum-daemon --features test-failpoints --test execution_semantics --no-run --quiet
 fi
 
 start_daemon

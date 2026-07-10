@@ -12,6 +12,7 @@ use axum::routing::post;
 use axum::{Json, Router};
 use reqwest::StatusCode;
 use serde_json::{Value, json};
+use sha3::{Digest, Keccak256};
 use tempfile::TempDir;
 
 const SEED_MNEMONIC: &str =
@@ -19,6 +20,15 @@ const SEED_MNEMONIC: &str =
 const RPC_TOKEN: &str = "rpc-test-token";
 const PROFILE: &str = "seed-main";
 const PROVIDER: &str = "mainnet";
+
+fn submitted_raw_transaction_hash(request: &Value) -> Value {
+    let raw = request["params"][0]
+        .as_str()
+        .expect("eth_sendRawTransaction carries raw transaction hex");
+    let bytes = hex::decode(raw.strip_prefix("0x").unwrap_or(raw))
+        .expect("submitted raw transaction is valid hex");
+    json!(format!("0x{}", hex::encode(Keccak256::digest(bytes))))
+}
 
 #[derive(Clone, Default)]
 struct RpcState {
@@ -113,7 +123,7 @@ fn rpc_response(state: &RpcState, request: &Value) -> Value {
                 "gasUsed": "0x5208",
             })
         }
-        "eth_sendRawTransaction" => json!(format!("0x{}", "11".repeat(32))),
+        "eth_sendRawTransaction" => submitted_raw_transaction_hash(request),
         other => json!({ "unsupported": other }),
     };
     json!({

@@ -33,7 +33,6 @@ uuid = { workspace = true }
 # Serialization
 serde = { workspace = true }
 serde_json = { workspace = true }
-base64 = "0.22"
 
 # Crypto / Auth
 sha2 = { workspace = true }
@@ -41,7 +40,6 @@ hex = { workspace = true }
 hmac = { workspace = true }
 rand = { workspace = true }
 subtle = { workspace = true }
-ed25519-dalek = { version = "2", features = ["pkcs8", "pem"] }
 
 # Time
 chrono = { workspace = true }

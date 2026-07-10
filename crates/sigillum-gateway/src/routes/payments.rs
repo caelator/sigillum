@@ -39,6 +39,7 @@ fn created_payment_response(
         "chain_id": chain_id,
         "token_address": deposit.token_address,
         "status": "pending",
+        "latest_balance_observation_at": null,
         "expires_at": expires_at,
         "deposit_id": deposit.id,
     })
@@ -54,6 +55,7 @@ fn existing_payment_response(existing: &db::row::Payment) -> Value {
         "chain_id": existing.chain_id,
         "token_address": existing.token_address,
         "status": existing.status,
+        "latest_balance_observation_at": existing.latest_balance_observation_at,
         "expires_at": existing.expires_at,
         "deposit_id": existing.deposit_id,
         "idempotent": true,
@@ -165,6 +167,11 @@ fn validate_amount_wei(s: &str) -> Result<(), GatewayError> {
             "amount_wei must be valid hex".into(),
         ));
     }
+    if hex_str.bytes().all(|byte| byte == b'0') {
+        return Err(GatewayError::BadRequest(
+            "amount_wei must be greater than zero".into(),
+        ));
+    }
     Ok(())
 }
 
@@ -180,6 +187,13 @@ pub async fn create_payment(
     axum::Extension(project): axum::Extension<Project>,
     Json(body): Json<CreatePaymentRequest>,
 ) -> Result<Json<Value>, GatewayError> {
+    if !state.config.experimental_payments_enabled {
+        return Err(GatewayError::FeatureDisabled(
+            "payment creation is an experimental preview because incoming chain finality is not yet proven; set GATEWAY_ENABLE_EXPERIMENTAL_PAYMENTS=1 to opt in"
+                .into(),
+        ));
+    }
+
     // R4: Validate hex amount
     validate_amount_wei(&body.amount_wei)?;
 
@@ -326,7 +340,7 @@ pub async fn get_payment(
         "metadata": serde_json::from_str::<Value>(&payment.metadata_json).unwrap_or(json!({})),
         "created_at": payment.created_at,
         "expires_at": payment.expires_at,
-        "confirmed_at": payment.confirmed_at,
+        "latest_balance_observation_at": payment.latest_balance_observation_at,
         "swept_at": payment.swept_at,
     })))
 }
@@ -360,7 +374,7 @@ pub async fn list_payments(
                 "token_address": p.token_address,
                 "status": p.status,
                 "created_at": p.created_at,
-                "confirmed_at": p.confirmed_at,
+                "latest_balance_observation_at": p.latest_balance_observation_at,
                 "swept_at": p.swept_at,
             })
         })
@@ -401,4 +415,16 @@ pub async fn cancel_payment(
         "payment_id": id,
         "status": "cancelled",
     })))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::validate_amount_wei;
+
+    #[test]
+    fn amount_validation_rejects_zero_and_accepts_positive_values() {
+        assert!(validate_amount_wei("0x0").is_err());
+        assert!(validate_amount_wei("0x0000").is_err());
+        assert!(validate_amount_wei("0x1").is_ok());
+    }
 }

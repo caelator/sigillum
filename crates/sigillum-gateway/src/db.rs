@@ -42,10 +42,18 @@ impl SqlitePool {
     }
 
     fn connection(&self) -> MutexGuard<'_, Connection> {
-        self.inner
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
+        match self.inner.lock() {
+            Ok(connection) => connection,
+            Err(_) => abort_on_database_state_poison(),
+        }
     }
+}
+
+fn abort_on_database_state_poison() -> ! {
+    eprintln!(
+        "gateway database mutex poisoned; aborting rather than reusing ambiguous connection state"
+    );
+    std::process::abort()
 }
 
 /// Row types returned from queries.
@@ -101,7 +109,7 @@ pub mod row {
         pub metadata_json: String,
         pub created_at: String,
         pub expires_at: Option<String>,
-        pub confirmed_at: Option<String>,
+        pub latest_balance_observation_at: Option<String>,
         pub swept_at: Option<String>,
     }
 
@@ -122,7 +130,7 @@ pub mod row {
                 metadata_json: row.get("metadata_json")?,
                 created_at: row.get("created_at")?,
                 expires_at: row.get("expires_at")?,
-                confirmed_at: row.get("confirmed_at")?,
+                latest_balance_observation_at: row.get("latest_balance_observation_at")?,
                 swept_at: row.get("swept_at")?,
             })
         }
@@ -178,6 +186,7 @@ pub async fn connect(database_url: &str) -> Result<SqlitePool, GatewayError> {
     connection.execute_batch("PRAGMA journal_mode=WAL;")?;
     connection.execute_batch(include_str!("../schema.sql"))?;
     migrate_project_scopes(&connection)?;
+    migrate_payment_observation_state(&connection)?;
 
     Ok(SqlitePool::new(connection))
 }
@@ -201,6 +210,47 @@ fn migrate_project_scopes(connection: &Connection) -> Result<(), rusqlite::Error
         "UPDATE projects SET scopes_json = ? WHERE scopes_json IS NULL OR scopes_json = '' OR scopes_json = '[]'",
         params![default_project_scopes_json()],
     )?;
+    Ok(())
+}
+
+fn migrate_payment_observation_state(connection: &Connection) -> Result<(), rusqlite::Error> {
+    let columns = {
+        let mut statement = connection.prepare("PRAGMA table_info(payments)")?;
+        let columns = statement.query_map([], |row| row.get::<_, String>(1))?;
+        columns.collect::<rusqlite::Result<Vec<_>>>()?
+    };
+    let has_latest_observation = columns
+        .iter()
+        .any(|column| column == "latest_balance_observation_at");
+    if !has_latest_observation {
+        connection.execute(
+            "ALTER TABLE payments ADD COLUMN latest_balance_observation_at TEXT",
+            [],
+        )?;
+    }
+
+    if columns.iter().any(|column| column == "confirmed_at") {
+        connection.execute(
+            "UPDATE payments SET latest_balance_observation_at = COALESCE(latest_balance_observation_at, confirmed_at), status = 'observed' WHERE status = 'confirmed'",
+            [],
+        )?;
+    } else {
+        connection.execute(
+            "UPDATE payments SET status = 'observed' WHERE status = 'confirmed'",
+            [],
+        )?;
+    }
+    let has_webhook_deliveries = connection.query_row(
+        "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'webhook_deliveries')",
+        [],
+        |row| row.get::<_, bool>(0),
+    )?;
+    if has_webhook_deliveries {
+        connection.execute(
+            "UPDATE webhook_deliveries SET event = 'payment.observed' WHERE event = 'payment.confirmed'",
+            [],
+        )?;
+    }
     Ok(())
 }
 
@@ -406,7 +456,7 @@ pub async fn list_payments_by_project(
 pub async fn list_pending_payments(pool: &SqlitePool) -> Result<Vec<row::Payment>, GatewayError> {
     let connection = pool.connection();
     let mut statement = connection.prepare(
-        "SELECT * FROM payments WHERE status IN ('pending', 'confirmed', 'sweeping') ORDER BY created_at",
+        "SELECT * FROM payments WHERE status IN ('pending', 'observed', 'sweeping') ORDER BY created_at",
     )?;
     let rows = statement.query_map([], row::Payment::from_row)?;
     let payments = rows.collect::<rusqlite::Result<Vec<_>>>()?;
@@ -419,7 +469,7 @@ pub async fn update_payment_status(
     status: &str,
 ) -> Result<(), GatewayError> {
     let timestamp_col = match status {
-        "confirmed" => Some("confirmed_at"),
+        "observed" => Some("latest_balance_observation_at"),
         "swept" => Some("swept_at"),
         _ => None,
     };
@@ -496,6 +546,39 @@ mod tests {
 
     use super::*;
 
+    const POISON_CHILD_ENV: &str = "SIGILLUM_TEST_POISONED_GATEWAY_DATABASE_CHILD";
+
+    #[test]
+    fn poisoned_database_connection_child() {
+        if std::env::var_os(POISON_CHILD_ENV).is_none() {
+            return;
+        }
+        let pool = SqlitePool::new(Connection::open_in_memory().expect("in-memory database"));
+        let poisoner = pool.clone();
+        let _ = std::thread::spawn(move || {
+            let _guard = poisoner.inner.lock().unwrap();
+            panic!("intentional gateway database poison");
+        })
+        .join();
+
+        drop(pool.connection());
+    }
+
+    #[test]
+    fn poisoned_database_connection_aborts_instead_of_recovering() {
+        let status =
+            std::process::Command::new(std::env::current_exe().expect("current test binary"))
+                .args([
+                    "--exact",
+                    "db::tests::poisoned_database_connection_child",
+                    "--nocapture",
+                ])
+                .env(POISON_CHILD_ENV, "1")
+                .status()
+                .expect("poison child should launch");
+        assert!(!status.success(), "poisoned database state must abort");
+    }
+
     async fn test_pool() -> Result<(TempDir, SqlitePool), Box<dyn std::error::Error + Send + Sync>>
     {
         let dir = TempDir::new()?;
@@ -539,11 +622,18 @@ mod tests {
         )
         .await?;
 
+        update_payment_status(&pool, "payment-1", "observed").await?;
+        let observed = find_payment_by_id(&pool, "payment-1")
+            .await?
+            .expect("payment should exist");
+        assert_eq!(observed.status, "observed");
+        assert!(observed.latest_balance_observation_at.is_some());
+
         insert_webhook_delivery(
             &pool,
             NewWebhookDelivery {
                 payment_id: "payment-1",
-                event: "payment.confirmed",
+                event: "payment.observed",
                 url: "https://example.com/hook",
                 attempt: 2,
                 status_code: Some(500),
@@ -558,5 +648,34 @@ mod tests {
         assert_eq!(pending[0].attempt, 2);
 
         Ok(())
+    }
+
+    #[test]
+    fn legacy_confirmation_state_migrates_to_latest_balance_observation() {
+        let connection = Connection::open_in_memory().expect("in-memory database");
+        connection
+            .execute_batch(
+                "CREATE TABLE payments (status TEXT NOT NULL, confirmed_at TEXT);\
+                 INSERT INTO payments (status, confirmed_at) VALUES ('confirmed', '2026-07-10 12:00:00');\
+                 CREATE TABLE webhook_deliveries (event TEXT NOT NULL);\
+                 INSERT INTO webhook_deliveries (event) VALUES ('payment.confirmed');",
+            )
+            .expect("legacy fixture");
+
+        migrate_payment_observation_state(&connection).expect("migration should succeed");
+        let (status, observed_at): (String, Option<String>) = connection
+            .query_row(
+                "SELECT status, latest_balance_observation_at FROM payments",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .expect("migrated row");
+
+        assert_eq!(status, "observed");
+        assert_eq!(observed_at.as_deref(), Some("2026-07-10 12:00:00"));
+        let event: String = connection
+            .query_row("SELECT event FROM webhook_deliveries", [], |row| row.get(0))
+            .expect("migrated webhook event");
+        assert_eq!(event, "payment.observed");
     }
 }

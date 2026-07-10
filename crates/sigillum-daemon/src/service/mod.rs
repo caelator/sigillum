@@ -86,6 +86,32 @@ pub(crate) mod capability_scopes {
 
 const DEFAULT_CAPABILITY_SESSION_TTL_SECS: u64 = 60 * 60;
 
+/// Require a valid full daemon session at boundaries that do not expose a
+/// `SigillumService` instance (for example biometric enrollment).
+pub(crate) fn require_full_session_token<'a>(
+    state: &AppState,
+    token: Option<&'a str>,
+) -> ServiceResult<&'a str> {
+    if state.is_locking() {
+        return Err(ServiceError::locked("Daemon is locking."));
+    }
+    let token = match token {
+        Some(token) if state.verify_token(token) => token,
+        _ => {
+            return Err(ServiceError::unauthorized(
+                "Invalid or missing session token.",
+            ));
+        }
+    };
+    if state.session_is_full(token) {
+        Ok(token)
+    } else {
+        Err(ServiceError::forbidden(
+            "A full daemon session is required for this operation.",
+        ))
+    }
+}
+
 /// Façade over all vault operations.
 ///
 /// Holds an `Arc<AppState>` and delegates to domain-specific methods defined
@@ -101,8 +127,12 @@ impl SigillumService {
         Self { state }
     }
 
-    /// Verify that the request carries a valid session token, returning a reference to it.
-    fn require_session<'a>(&self, token: Option<&'a str>) -> ServiceResult<&'a str> {
+    /// Verify that the request carries any valid session token.
+    ///
+    /// Capability-aware entry points must use this primitive and then enforce
+    /// their specific scope. All other service methods go through
+    /// [`Self::require_session`], which deliberately requires a full session.
+    fn require_authenticated_session<'a>(&self, token: Option<&'a str>) -> ServiceResult<&'a str> {
         if self.state.is_locking() {
             return Err(ServiceError::locked("Daemon is locking."));
         }
@@ -114,15 +144,16 @@ impl SigillumService {
         }
     }
 
+    /// Require a full daemon session.
+    ///
+    /// This is the default authorization boundary for every service method
+    /// that is not explicitly capability-scoped.
+    fn require_session<'a>(&self, token: Option<&'a str>) -> ServiceResult<&'a str> {
+        require_full_session_token(&self.state, token)
+    }
+
     fn require_full_session<'a>(&self, token: Option<&'a str>) -> ServiceResult<&'a str> {
-        let token = self.require_session(token)?;
-        if self.state.session_is_full(token) {
-            Ok(token)
-        } else {
-            Err(ServiceError::forbidden(
-                "A full daemon session is required for this operation.",
-            ))
-        }
+        self.require_session(token)
     }
 
     fn require_scope<'a>(
@@ -130,7 +161,7 @@ impl SigillumService {
         token: Option<&'a str>,
         scope: &'static str,
     ) -> ServiceResult<&'a str> {
-        let token = self.require_session(token)?;
+        let token = self.require_authenticated_session(token)?;
         if self.state.session_has_scope(token, scope) {
             Ok(token)
         } else {
@@ -140,12 +171,18 @@ impl SigillumService {
         }
     }
 
-    /// Optionally verify a session token without rejecting unauthenticated callers.
+    /// Optionally verify a full session without rejecting unauthenticated callers.
+    ///
+    /// Capability sessions are intentionally hidden from optional-observability
+    /// surfaces such as `/api/status`; those sessions may only use endpoints
+    /// guarded by an explicit capability scope.
     fn optional_session<'a>(&self, token: Option<&'a str>) -> Option<&'a str> {
         if self.state.is_locking() {
             return None;
         }
-        token.filter(|candidate| self.state.verify_token(candidate))
+        token.filter(|candidate| {
+            self.state.verify_token(candidate) && self.state.session_is_full(candidate)
+        })
     }
 
     /// Append a typed audit event, mapping I/O failures to `ServiceError`.

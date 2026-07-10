@@ -61,17 +61,25 @@ permissions before opening runtime state.
 
 ## Mode 3: Local Gateway Sidecar
 
-Use `sigillum-gateway` when you want a local payment-preview and webhook flow
-surface beside the daemon.
+Use `sigillum-gateway` only when you want an experimental local payment-preview
+and webhook flow surface beside the daemon. Payment creation is disabled by
+default and is outside supported 1.0 payment-confirmation semantics.
 
 Use this mode when:
 
-- you need project-level payment intent creation against a local daemon
+- you are explicitly testing project-level payment observations against a local
+  daemon
 - you want the gateway to stay loopback-bound and single-host
 - you are treating the gateway as a preview surface inside the same local trust boundary
 
 The gateway talks to the daemon over local HTTP and is intended to stay part of
 the same single-machine trust boundary.
+Set `GATEWAY_ENABLE_EXPERIMENTAL_PAYMENTS=1` to opt into payment creation.
+When the flag is absent, the gateway does not start its payment poller and does
+not refresh/list daemon deposits or retry payment webhooks in the background.
+Address-balance reads can produce `payment.observed` events with
+`latest_balance_observation_at`, but do not prove chain finality. No privileged
+third-party invoice-signing callback is implemented.
 Provide a pre-established daemon bearer token through
 `SIGILLUM_DAEMON_SESSION_TOKEN` or `SIGILLUM_SESSION_TOKEN` when the gateway
 needs authenticated daemon operations.
@@ -87,7 +95,7 @@ daemon web console in the native window.
 Install the Tauri v2 CLI, then build from the desktop crate:
 
 ```bash
-cargo install tauri-cli --version '^2' --locked
+cargo install tauri-cli --version 2.11.4 --locked
 cd crates/sigillum-desktop
 cargo tauri build
 ```
@@ -248,6 +256,11 @@ Before calling a source checkout release-ready for this local boundary, run:
 ./scripts/check-release.sh
 ```
 
+The gate requires the committed lockfile for dependency-resolving Cargo
+commands, verifies both default and no-HID FIDO2 configurations, and fails if
+any check changes the tracked tree. Run it without concurrent agents or other
+release gates modifying the checkout.
+
 Before calling a host operationally ready for this local boundary, run:
 
 ```bash
@@ -283,14 +296,16 @@ temporary harness directory on disk.
 ## Release Dry Run (rc tag)
 
 The release workflow (`.github/workflows/release.yml`) triggers on tags matching
-`v*`. Before tagging `v1.0.0` for real, dry-run it with an rc tag:
+`v*`, then rejects tags that are not annotated, do not match the workspace
+version (or its `-rc.N` form), lack a dated changelog section, or are not on
+`main` history. Before tagging `v1.0.0` for real, dry-run it with an rc tag:
 
-1. `git checkout main && git pull --ff-only`
+1. `git checkout main && git pull --ff-only && ./scripts/check-release.sh`
 2. `git tag -a v1.0.0-rc.1 -m "Sigillum 1.0.0-rc.1 dry run" && git push origin v1.0.0-rc.1`
-3. Watch the Release workflow in the Actions tab; the verify matrix (ubuntu + macos), artifacts-macos, artifacts-linux, and release jobs must all pass.
+3. Watch the Release workflow in the Actions tab; the contract job, both verify legs, both artifact jobs, and release job must all pass.
 4. Verify the draft release contains the `.dmg`, the zipped `.app`, both `sigillum-cli` `tar.gz` archives, `THIRD-PARTY-NOTICES.txt`, and `SHA256SUMS`.
 5. Download the assets and run `shasum -a 256 --check SHA256SUMS --ignore-missing`.
-6. Confirm the release is still a draft and its body carries the `CHANGELOG` section for the version, or the documented fallback text when `CHANGELOG.md` has not merged yet.
+6. Confirm the release is still a draft and its body carries the dated `CHANGELOG` section for the version. There is no fallback release body.
 7. Clean up: `gh release delete v1.0.0-rc.1 --yes`, then `git push origin :refs/tags/v1.0.0-rc.1` and `git tag -d v1.0.0-rc.1`.
 
 ## Operational Notes

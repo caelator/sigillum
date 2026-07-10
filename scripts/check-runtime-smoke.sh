@@ -122,10 +122,10 @@ run_doctor() {
   if [[ -n "${token}" ]]; then
     SIGILLUM_BASE_DIR="${BASE_DIR}" \
       SIGILLUM_SESSION_TOKEN="${token}" \
-      cargo run -p sigillum-cli --quiet -- doctor --url "${URL}" >/dev/null
+      cargo run -p sigillum-cli --quiet --locked -- doctor --url "${URL}" >/dev/null
   else
     SIGILLUM_BASE_DIR="${BASE_DIR}" \
-      cargo run -p sigillum-cli --quiet -- doctor --url "${URL}" >/dev/null
+      cargo run -p sigillum-cli --quiet --locked -- doctor --url "${URL}" >/dev/null
   fi
 }
 
@@ -156,11 +156,11 @@ echo "==> building sigillum-cli for runtime smoke"
 # Build before launching: `cargo run --quiet` compiles silently into the
 # daemon log, which can eat the entire readiness window on cold runners
 # and leaves an empty log when it times out.
-cargo build -p sigillum-cli
+cargo build -p sigillum-cli --locked
 
 echo "==> starting sigillum daemon runtime smoke on ${URL}"
 SIGILLUM_BASE_DIR="${BASE_DIR}" \
-  cargo run -p sigillum-cli --quiet -- daemon --port "${PORT}" >"${LOG_FILE}" 2>&1 &
+  cargo run -p sigillum-cli --quiet --locked -- daemon --port "${PORT}" >"${LOG_FILE}" 2>&1 &
 DAEMON_PID="$!"
 wait_for_daemon
 

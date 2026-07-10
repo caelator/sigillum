@@ -56,7 +56,10 @@ These may change in any release without a major-version bump:
   generated `app.js`/`styles.css` assets.
 - The gateway sidecar - `sigillum-gateway` keeps its local-sidecar preview
   positioning; its API keys, payment-intent, and webhook surfaces are preview
-  quality.
+  quality. Payment creation is disabled by default behind
+  `GATEWAY_ENABLE_EXPERIMENTAL_PAYMENTS=1`; balance observations are not finality
+  proof and are exposed only as the latest balance observation. Privileged
+  third-party invoice-signing callbacks are not implemented.
 - The `sigillum-sdk` and `sigillum-server` facade crates.
 - Anything in the documented 1.0 non-goals: non-EVM chains (Bitcoin/UTXO,
   Solana, Tron, Cosmos), swap execution and DEX routing, price/valuation feeds,
@@ -79,8 +82,10 @@ Sigillum 1.0 adds policy-gated execution of consolidation plans. With
 `allow_plan_execution` (and the relevant per-family execution gates) enabled, a
 stolen session token on the local machine can move funds. The shipped mitigations
 — typed confirmation at enqueue, per-family fail-closed policy gates, gate-flip
-audit events carrying session fingerprints, the `execution_paused` kill switch,
-and policy re-reads at both enqueue time and queue-drain time — detect and bound
+audit events carrying session fingerprints, the `execution_paused` kill switch
+latched between jobs and immediately before broadcast, durable exact-byte
+submission recovery that never re-signs a prepared job, and policy re-reads at
+both enqueue time and queue-drain time — detect and bound
 that misuse; they do not prevent it. FIDO2 tap-to-execute is the named post-1.0
 hardening candidate for closing this gap. Operators who do not accept this risk
 should leave the execution gates off (their default), which preserves the

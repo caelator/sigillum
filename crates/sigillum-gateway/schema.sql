@@ -24,11 +24,11 @@ CREATE TABLE IF NOT EXISTS payments (
     ephemeral_pub   TEXT NOT NULL,               -- ephemeral public key hex
     view_tag        TEXT,                        -- view tag hex
     deposit_id      TEXT,                        -- Sigillum deposit tracking ID
-    status          TEXT NOT NULL DEFAULT 'pending',  -- pending|confirmed|sweeping|swept|expired|cancelled
+    status          TEXT NOT NULL DEFAULT 'pending',  -- pending|observed|sweeping|swept|expired|cancelled
     metadata_json   TEXT DEFAULT '{}',           -- arbitrary merchant metadata
     created_at      TEXT NOT NULL DEFAULT (datetime('now')),
     expires_at      TEXT,                        -- payment expiry time
-    confirmed_at    TEXT,
+    latest_balance_observation_at TEXT,
     swept_at        TEXT
 );
 
@@ -40,7 +40,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_payments_idempotency ON payments(project_i
 CREATE TABLE IF NOT EXISTS webhook_deliveries (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     payment_id  TEXT NOT NULL REFERENCES payments(id),
-    event       TEXT NOT NULL,                   -- payment.confirmed, payment.swept, etc.
+    event       TEXT NOT NULL,                   -- payment.observed, payment.swept, etc.
     url         TEXT NOT NULL,
     status_code INTEGER,                         -- HTTP response status
     attempt     INTEGER NOT NULL DEFAULT 1,

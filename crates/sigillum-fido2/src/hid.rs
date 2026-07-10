@@ -11,6 +11,7 @@ use crate::crypto::application_salt;
 use crate::error::Fido2Error;
 
 const FIDO_TIMEOUT_SECS: u64 = 60;
+const FIDO_DEVICE_LOCK_POISONED: &str = "FIDO device access state is inconsistent after a worker panic; restart Sigillum before retrying";
 pub const RP_ID: &str = "sigillum.dev";
 
 static FIDO_DEVICE_LOCK: Mutex<()> = Mutex::new(());
@@ -50,8 +51,11 @@ where
     let (tx, rx) = std::sync::mpsc::channel();
     let label_owned = label.to_string();
     std::thread::spawn(move || {
-        let _guard = FIDO_DEVICE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-        let _ = tx.send(f());
+        let result = match FIDO_DEVICE_LOCK.lock() {
+            Ok(_guard) => f(),
+            Err(_) => Err(Fido2Error::Other(FIDO_DEVICE_LOCK_POISONED.into())),
+        };
+        let _ = tx.send(result);
     });
     rx.recv_timeout(std::time::Duration::from_secs(FIDO_TIMEOUT_SECS))
         .map_err(|_| Fido2Error::Timeout {
@@ -324,8 +328,43 @@ pub fn get_hmac_secret(credential_id: &[u8], pin: Option<&str>) -> Result<[u8; 3
 
 #[cfg(test)]
 mod tests {
-    use super::classify_ctap_error;
+    use super::{FIDO_DEVICE_LOCK, FIDO_DEVICE_LOCK_POISONED, classify_ctap_error};
     use crate::error::Fido2Error;
+
+    const POISON_CHILD_ENV: &str = "SIGILLUM_TEST_POISONED_FIDO_DEVICE_LOCK_CHILD";
+
+    #[test]
+    fn poisoned_hid_lock_child_returns_restart_error() {
+        if std::env::var_os(POISON_CHILD_ENV).is_none() {
+            return;
+        }
+        let _ = std::thread::spawn(|| {
+            let _guard = FIDO_DEVICE_LOCK.lock().unwrap();
+            panic!("intentional FIDO device-lock poison");
+        })
+        .join();
+
+        let error = super::with_fido_timeout("poison-test", || Ok(()))
+            .expect_err("poisoned HID state must fail closed");
+        assert!(
+            matches!(error, Fido2Error::Other(message) if message == FIDO_DEVICE_LOCK_POISONED)
+        );
+    }
+
+    #[test]
+    fn poisoned_hid_lock_requires_restart_instead_of_recovery() {
+        let status =
+            std::process::Command::new(std::env::current_exe().expect("current test binary"))
+                .args([
+                    "--exact",
+                    "hid::tests::poisoned_hid_lock_child_returns_restart_error",
+                    "--nocapture",
+                ])
+                .env(POISON_CHILD_ENV, "1")
+                .status()
+                .expect("poison child should launch");
+        assert!(status.success(), "poisoned HID child should fail closed");
+    }
 
     #[test]
     fn classifies_pin_auth_blocked_errors() {

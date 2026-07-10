@@ -247,6 +247,10 @@
   color: #047857;
 }
 
+.sgw-observed {
+  color: #b45309;
+}
+
 .sgw-expired,
 .sgw-error p {
   color: #b91c1c;

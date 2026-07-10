@@ -24,12 +24,6 @@ use crate::service::{ServiceError, ServiceResult, SigillumService};
 /// restart because `broadcast_at_unix` is persisted (E2).
 pub(in crate::service::queue) const RECEIPT_CONFIRMATION_TIMEOUT_SECS: u64 = 3600;
 
-/// Bump numerator/denominator for the single allowed "underpriced" retry:
-/// +25%, a common replacement-fee-bump magnitude (well above the ~10%
-/// minimum most clients require to accept a replacement).
-const FEE_BUMP_NUMERATOR: u64 = 5;
-const FEE_BUMP_DENOMINATOR: u64 = 4;
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(in crate::service::queue) enum BroadcastErrorClass {
     NonceTooLow,
@@ -55,63 +49,6 @@ pub(in crate::service::queue) fn classify_broadcast_error(
         return Some(BroadcastErrorClass::Revert);
     }
     None
-}
-
-/// Attempt exactly one fee bump within the policy cap. Returns `None` when
-/// there is no room left to bump (already at/above the cap, or the fee
-/// doesn't fit a `u64` at all) — the caller parks to
-/// `operator_action_required` in that case rather than retrying.
-///
-/// When the policy sets NO `max_fee_per_gas_cap_hex`, the fixed +25% single
-/// bump computed below IS the documented conservative ceiling: there is no
-/// additional multiplier to apply, because the bump is a one-time, modest,
-/// non-iterative increase by construction (`signing.rs`'s `fee_bumped` flag
-/// guarantees this function is ever called at most once per job) — an
-/// uncapped policy is bounded by that fixed magnitude, never by an
-/// unbounded or repeated escalation.
-pub(in crate::service::queue) fn bump_fees_within_cap(
-    max_fee_per_gas: [u8; 32],
-    max_priority_fee_per_gas: [u8; 32],
-    fee_cap: Option<[u8; 32]>,
-) -> Option<([u8; 32], [u8; 32])> {
-    let current = u256_to_u64(&max_fee_per_gas)?;
-    let bumped = current
-        .checked_mul(FEE_BUMP_NUMERATOR)?
-        .checked_div(FEE_BUMP_DENOMINATOR)?
-        .max(current.checked_add(1)?);
-    let bumped = match fee_cap {
-        Some(cap) => {
-            let cap = u256_to_u64(&cap)?;
-            if current >= cap {
-                return None;
-            }
-            bumped.min(cap)
-        }
-        None => bumped,
-    };
-    if bumped <= current {
-        return None;
-    }
-    let priority_current = u256_to_u64(&max_priority_fee_per_gas).unwrap_or(0);
-    let priority_bumped = priority_current
-        .checked_mul(FEE_BUMP_NUMERATOR)
-        .and_then(|value| value.checked_div(FEE_BUMP_DENOMINATOR))
-        .unwrap_or(priority_current)
-        .min(bumped);
-    Some((u64_to_u256(bumped), u64_to_u256(priority_bumped)))
-}
-
-fn u256_to_u64(value: &[u8; 32]) -> Option<u64> {
-    if value[..24].iter().any(|byte| *byte != 0) {
-        return None;
-    }
-    Some(u64::from_be_bytes(value[24..].try_into().ok()?))
-}
-
-fn u64_to_u256(value: u64) -> [u8; 32] {
-    let mut out = [0u8; 32];
-    out[24..].copy_from_slice(&value.to_be_bytes());
-    out
 }
 
 /// Outcome of one receipt-poll attempt — at most one
@@ -350,51 +287,5 @@ mod tests {
             Some(BroadcastErrorClass::Revert)
         );
         assert_eq!(classify_broadcast_error("connection reset by peer"), None);
-    }
-
-    fn u256_from_u64(value: u64) -> [u8; 32] {
-        u64_to_u256(value)
-    }
-
-    #[test]
-    fn fee_bump_applies_twenty_five_percent_within_an_explicit_cap() {
-        let current = u256_from_u64(1_000_000_000);
-        let priority = u256_from_u64(1_000_000_000);
-        let cap = u256_from_u64(2_000_000_000);
-        let (bumped, bumped_priority) =
-            bump_fees_within_cap(current, priority, Some(cap)).expect("room to bump");
-        assert_eq!(u256_to_u64(&bumped), Some(1_250_000_000));
-        assert_eq!(u256_to_u64(&bumped_priority), Some(1_250_000_000));
-    }
-
-    #[test]
-    fn fee_bump_clamps_to_an_explicit_cap() {
-        let current = u256_from_u64(1_000_000_000);
-        let priority = u256_from_u64(1_000_000_000);
-        let cap = u256_from_u64(1_100_000_000);
-        let (bumped, _) = bump_fees_within_cap(current, priority, Some(cap)).expect("room to bump");
-        assert_eq!(u256_to_u64(&bumped), Some(1_100_000_000));
-    }
-
-    #[test]
-    fn fee_bump_refuses_when_already_at_or_above_the_cap() {
-        let current = u256_from_u64(2_000_000_000);
-        let priority = u256_from_u64(1_000_000_000);
-        let cap = u256_from_u64(2_000_000_000);
-        assert_eq!(bump_fees_within_cap(current, priority, Some(cap)), None);
-    }
-
-    #[test]
-    fn fee_bump_applies_the_fixed_bounded_bump_when_uncapped() {
-        // No `max_fee_per_gas_cap_hex` configured: the fixed +25% bump
-        // itself is the documented conservative ceiling (bounded, modest,
-        // and — per `signing.rs`'s `fee_bumped` flag — applied at most
-        // once per job, never iteratively).
-        let current = u256_from_u64(1_000_000_000);
-        let priority = u256_from_u64(1_000_000_000);
-        let (bumped, bumped_priority) =
-            bump_fees_within_cap(current, priority, None).expect("room to bump");
-        assert_eq!(u256_to_u64(&bumped), Some(1_250_000_000));
-        assert_eq!(u256_to_u64(&bumped_priority), Some(1_250_000_000));
     }
 }

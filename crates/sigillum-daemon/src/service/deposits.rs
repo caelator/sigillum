@@ -444,6 +444,51 @@ mod tests {
 
         assert!(warning.is_some());
     }
+
+    #[test]
+    fn native_expected_amount_rejects_dust_and_accepts_equal_or_over() {
+        let dust = decode_quantity_hex("0x1").expect("valid dust amount");
+        let exact = decode_quantity_hex("0x64").expect("valid exact amount");
+        let over = decode_quantity_hex("0x65").expect("valid overpayment amount");
+
+        assert!(!observed_amount_meets_expected(&dust, Some("0x64")).unwrap());
+        assert!(observed_amount_meets_expected(&exact, Some("0x64")).unwrap());
+        assert!(observed_amount_meets_expected(&over, Some("0x64")).unwrap());
+    }
+
+    #[test]
+    fn erc20_expected_amount_rejects_dust_and_accepts_equal_or_over() {
+        let dust = decode_quantity_hex("0xff").expect("valid dust amount");
+        let exact = decode_quantity_hex("0x100").expect("valid exact amount");
+        let over = decode_quantity_hex("0x101").expect("valid overpayment amount");
+
+        assert!(!observed_amount_meets_expected(&dust, Some("0x100")).unwrap());
+        assert!(observed_amount_meets_expected(&exact, Some("0x100")).unwrap());
+        assert!(observed_amount_meets_expected(&over, Some("0x100")).unwrap());
+    }
+
+    #[test]
+    fn deposit_without_expected_amount_still_requires_nonzero_observation() {
+        let zero = decode_quantity_hex("0x0").expect("valid zero amount");
+        let nonzero = decode_quantity_hex("0x1").expect("valid nonzero amount");
+
+        assert!(!observed_amount_meets_expected(&zero, None).unwrap());
+        assert!(observed_amount_meets_expected(&nonzero, None).unwrap());
+    }
+
+    #[test]
+    fn native_expected_value_must_be_a_positive_quantity() {
+        assert!(validate_optional_positive_quantity(Some("0x0"), "expected_value_wei").is_err());
+        assert!(validate_optional_positive_quantity(Some("0x"), "expected_value_wei").is_err());
+        assert!(validate_optional_positive_quantity(Some("0x1"), "expected_value_wei").is_ok());
+    }
+
+    #[test]
+    fn erc20_expected_amount_must_be_a_positive_quantity() {
+        assert!(validate_optional_positive_quantity(Some("0x0"), "expected_amount").is_err());
+        assert!(validate_optional_positive_quantity(Some("0x"), "expected_amount").is_err());
+        assert!(validate_optional_positive_quantity(Some("0x1"), "expected_amount").is_ok());
+    }
 }
 
 #[derive(Clone)]
@@ -655,7 +700,10 @@ impl SigillumService {
             self.require_scope(Some(token), super::capability_scopes::QUEUE_ENQUEUE_SWEEP)?;
         }
         let (provider, wallet) = self.resolve_wallet_profile(&body.wallet_profile)?;
-        validate_optional_quantity(body.expected_value_wei_hex.as_deref(), "expected_value_wei")?;
+        validate_optional_positive_quantity(
+            body.expected_value_wei_hex.as_deref(),
+            "expected_value_wei",
+        )?;
         validate_optional_quantity(
             body.min_sweep_value_wei_hex.as_deref(),
             "min_sweep_value_wei",
@@ -691,9 +739,15 @@ impl SigillumService {
         token: Option<&str>,
         body: EthStealthDepositCreateErc20Request,
     ) -> ServiceResult<EthStealthDepositMutationResponse> {
-        let token = self.require_scope(token, super::capability_scopes::DEPOSITS_DELETE)?;
+        let token = self.require_scope(token, super::capability_scopes::DEPOSITS_CREATE)?;
+        if body.auto_queue_sweep.unwrap_or(false) {
+            self.require_scope(Some(token), super::capability_scopes::QUEUE_ENQUEUE_SWEEP)?;
+        }
         let (provider, wallet) = self.resolve_wallet_profile(&body.wallet_profile)?;
-        validate_optional_quantity(body.expected_amount_hex.as_deref(), "expected_amount")?;
+        validate_optional_positive_quantity(
+            body.expected_amount_hex.as_deref(),
+            "expected_amount",
+        )?;
         validate_optional_quantity(body.min_sweep_amount_hex.as_deref(), "min_sweep_amount")?;
         let normalized_token = super::evm::normalize_address(&body.token_address)?;
 
@@ -1252,6 +1306,10 @@ impl SigillumService {
             let (queue_state, _) = sync_eth_stealth_deposit_with_queue(deposit, queue);
             let observed_amount_raw =
                 decode_quantity_hex(&observation.observed_amount_hex).map_err(map_wallet_error)?;
+            let expected_ready = observed_amount_meets_expected(
+                &observed_amount_raw,
+                deposit.expected_amount_hex.as_deref(),
+            )?;
             let min_ready = match deposit.min_sweep_amount_hex.as_deref() {
                 Some(minimum) => compare_u256(
                     &observed_amount_raw,
@@ -1269,6 +1327,8 @@ impl SigillumService {
                 super::queue::queue_status(&job_state)
             } else if is_zero_u256(&observed_amount_raw) {
                 "pending".into()
+            } else if !expected_ready {
+                "underfunded".into()
             } else if deposit.asset_kind == "erc20"
                 && !gas_balance_sufficient_for_erc20(deposit, &plan.provider, &native_balance)?
             {
@@ -1281,7 +1341,12 @@ impl SigillumService {
                 .as_deref()
                 .map(super::queue::is_active_queue_state)
                 .unwrap_or(false);
-            if auto_enqueue && deposit.auto_queue_sweep && !has_active_job && min_ready {
+            if auto_enqueue
+                && deposit.auto_queue_sweep
+                && !has_active_job
+                && expected_ready
+                && min_ready
+            {
                 let enqueue_result = self.enqueue_deposit_sweep_job(
                     DepositSweepJobParams {
                         token,
@@ -1322,6 +1387,38 @@ fn validate_optional_quantity(value: Option<&str>, label: &str) -> ServiceResult
         })?;
     }
     Ok(())
+}
+
+fn validate_optional_positive_quantity(value: Option<&str>, label: &str) -> ServiceResult<()> {
+    let Some(value) = value else {
+        return Ok(());
+    };
+    let quantity = decode_quantity_hex(value)
+        .map_err(|_| ServiceError::bad_request(format!("{label} must be a valid hex quantity")))?;
+    if is_zero_u256(&quantity) {
+        return Err(ServiceError::bad_request(format!(
+            "{label} must be greater than zero"
+        )));
+    }
+    Ok(())
+}
+
+/// A deposit is economically ready only after the observed balance reaches the
+/// amount requested by the creator. Deposits without an explicit expectation
+/// preserve the historical "any non-zero amount" behavior.
+fn observed_amount_meets_expected(
+    observed_amount: &[u8; 32],
+    expected_amount_hex: Option<&str>,
+) -> ServiceResult<bool> {
+    if is_zero_u256(observed_amount) {
+        return Ok(false);
+    }
+
+    let Some(expected_amount_hex) = expected_amount_hex else {
+        return Ok(true);
+    };
+    let expected_amount = decode_quantity_hex(expected_amount_hex).map_err(map_wallet_error)?;
+    Ok(compare_u256(observed_amount, &expected_amount).is_ge())
 }
 
 fn resolve_stealth_sweep_destination(

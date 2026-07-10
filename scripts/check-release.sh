@@ -11,9 +11,10 @@ GENERATED_ASSETS=(
 
 BEFORE_GENERATED="$(mktemp "${TMPDIR:-/tmp}/sigillum-release-before.XXXXXX")"
 AFTER_GENERATED="$(mktemp "${TMPDIR:-/tmp}/sigillum-release-after.XXXXXX")"
+BEFORE_TRACKED="$(mktemp "${TMPDIR:-/tmp}/sigillum-release-tracked-before.XXXXXX")"
 
 cleanup() {
-  rm -f "${BEFORE_GENERATED}" "${AFTER_GENERATED}"
+  rm -f "${BEFORE_GENERATED}" "${AFTER_GENERATED}" "${BEFORE_TRACKED}"
 }
 trap cleanup EXIT
 
@@ -45,8 +46,8 @@ run_step() {
 
 run_cargo_metadata() {
   echo
-  echo "==> cargo metadata --no-deps --format-version 1"
-  cargo metadata --no-deps --format-version 1 >/dev/null
+  echo "==> cargo metadata --locked --no-deps --format-version 1"
+  cargo metadata --locked --no-deps --format-version 1 >/dev/null
 }
 
 run_git_diff_check() {
@@ -87,9 +88,11 @@ require_command shasum
 require_cargo_subcommand audit "cargo install cargo-audit --version 0.22.1 --locked"
 require_cargo_subcommand deny "cargo install cargo-deny --version 0.19.4 --locked"
 
+bash ./scripts/release-tracked-state.sh snapshot "${BEFORE_TRACKED}"
 snapshot_generated_assets
 
 run_cargo_metadata
+run_step bash ./scripts/test-release-tracked-state.sh
 run_step ./scripts/check-architecture.sh
 run_step npm --prefix crates/sigillum-daemon/ui ci --ignore-scripts
 run_step npm --prefix crates/sigillum-daemon/ui audit --audit-level=high
@@ -98,10 +101,14 @@ run_step npm --prefix crates/sigillum-daemon/ui test
 run_step npm --prefix crates/sigillum-daemon/ui run build
 verify_generated_assets_unchanged
 run_step cargo fmt --all --check
-run_step cargo check --workspace
-run_step cargo test --workspace
+run_step cargo check --workspace --locked
+run_step cargo check -p sigillum-fido2 --no-default-features --locked
+run_step cargo test --workspace --locked
+run_step cargo test -p sigillum-daemon --features test-failpoints --test execution_semantics chaos_kill_in_flight_plan_step_resumes_terminal_without_duplication --locked
+run_step cargo test -p sigillum-fido2 --no-default-features --locked
 run_step ./scripts/check-adversarial.sh
-run_step cargo clippy --workspace --all-targets -- -D warnings
+run_step cargo clippy --workspace --all-targets --locked -- -D warnings
+run_step cargo clippy -p sigillum-fido2 --no-default-features --all-targets --locked -- -D warnings
 run_step ./scripts/check-runtime-smoke.sh
 if [[ "${SIGILLUM_SKIP_BROWSER_SMOKE:-0}" == "1" ]]; then
   echo
@@ -110,9 +117,10 @@ else
   run_step ./scripts/check-browser-smoke.sh
 fi
 run_step ./scripts/check-desktop.sh
-run_step cargo audit
-run_step cargo deny check
+run_step cargo audit --file Cargo.lock
+run_step cargo deny --locked check
 run_git_diff_check
+bash ./scripts/release-tracked-state.sh verify "${BEFORE_TRACKED}"
 
 echo
 echo "release checks passed"

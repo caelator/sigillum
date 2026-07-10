@@ -91,10 +91,10 @@ mod webhook_tests {
 
     #[test]
     fn verify_valid_signature() {
-        let sig = sign_payload("my_secret", r#"{"event":"payment.confirmed"}"#);
+        let sig = sign_payload("my_secret", r#"{"event":"payment.observed"}"#);
         assert!(verify_signature(
             "my_secret",
-            r#"{"event":"payment.confirmed"}"#,
+            r#"{"event":"payment.observed"}"#,
             &sig
         ));
     }
@@ -103,14 +103,14 @@ mod webhook_tests {
     fn verify_invalid_signature() {
         assert!(!verify_signature(
             "my_secret",
-            r#"{"event":"payment.confirmed"}"#,
+            r#"{"event":"payment.observed"}"#,
             "0000000000000000000000000000000000000000000000000000000000000000"
         ));
     }
 
     #[test]
     fn verify_tampered_payload() {
-        let sig = sign_payload("my_secret", r#"{"event":"payment.confirmed"}"#);
+        let sig = sign_payload("my_secret", r#"{"event":"payment.observed"}"#);
         assert!(!verify_signature(
             "my_secret",
             r#"{"event":"payment.swept"}"#,
@@ -296,6 +296,9 @@ mod amount_tests {
         if !hex_str.chars().all(|c| c.is_ascii_hexdigit()) {
             return Err("amount_wei must be valid hex".into());
         }
+        if hex_str.bytes().all(|byte| byte == b'0') {
+            return Err("amount_wei must be greater than zero".into());
+        }
         Ok(())
     }
 
@@ -303,8 +306,13 @@ mod amount_tests {
     fn valid_hex_amounts() {
         assert!(validate_amount_wei("0x2386F26FC10000").is_ok());
         assert!(validate_amount_wei("2386F26FC10000").is_ok());
-        assert!(validate_amount_wei("0x0").is_ok());
         assert!(validate_amount_wei("0xff").is_ok());
+    }
+
+    #[test]
+    fn rejects_zero() {
+        assert!(validate_amount_wei("0x0").is_err());
+        assert!(validate_amount_wei("0x0000").is_err());
     }
 
     #[test]
@@ -370,5 +378,17 @@ mod ct_tests {
     #[test]
     fn empty_strings_match() {
         assert!(ct_hash_eq("", ""));
+    }
+}
+
+#[cfg(test)]
+mod widget_truth_tests {
+    const WIDGET_JS: &str = include_str!("../static/widget.js");
+
+    #[test]
+    fn widget_does_not_turn_balance_observations_into_success() {
+        assert!(!WIDGET_JS.contains("Payment confirmed!"));
+        assert!(!WIDGET_JS.contains("Payment complete!"));
+        assert!(WIDGET_JS.contains("chain finality is not proven"));
     }
 }

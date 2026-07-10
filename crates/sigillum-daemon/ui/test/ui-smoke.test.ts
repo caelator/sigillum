@@ -4220,5 +4220,6 @@ test("pillClass maps self-check statuses onto existing pill buckets", () => {
   equal(pillClass("pass"), "pill-good");
   equal(pillClass("fail"), "pill-danger");
   equal(pillClass("warn"), "pill-warn");
+  equal(pillClass("underfunded"), "pill-warn");
   equal(pillClass("something-else"), "pill-neutral");
 });

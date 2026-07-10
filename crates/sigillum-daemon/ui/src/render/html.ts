@@ -24,6 +24,9 @@ export function pillClass(status: unknown): string {
   ) {
     return "pill-danger";
   }
+  if (value.includes("underfunded")) {
+    return "pill-warn";
+  }
   if (
     value.includes("ok") ||
     value.includes("pass") ||

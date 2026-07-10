@@ -22,6 +22,9 @@ pub enum GatewayError {
     #[error("Conflict: {0}")]
     Conflict(String),
 
+    #[error("Feature disabled: {0}")]
+    FeatureDisabled(String),
+
     #[error("Daemon error: {0}")]
     Daemon(#[from] sigillum_client::ClientError),
 
@@ -40,6 +43,10 @@ impl IntoResponse for GatewayError {
                 return (StatusCode::FORBIDDEN, axum::Json(body)).into_response();
             }
             GatewayError::Conflict(msg) => (StatusCode::CONFLICT, msg.clone()),
+            GatewayError::FeatureDisabled(detail) => {
+                let body = json!({ "error": "feature_disabled", "detail": detail });
+                return (StatusCode::SERVICE_UNAVAILABLE, axum::Json(body)).into_response();
+            }
             GatewayError::Daemon(err) => {
                 tracing::error!("Daemon communication error: {err}");
                 (StatusCode::BAD_GATEWAY, "Daemon unavailable".into())

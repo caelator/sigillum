@@ -179,7 +179,7 @@ async fn test_post_compartment_init_returns_token() {
 }
 
 #[tokio::test]
-async fn capability_session_enforces_route_scopes() {
+async fn capability_session_is_default_deny_outside_explicit_scopes() {
     let (mut app, _dir) = test_app();
 
     let (init_status, init_body) = post_request(
@@ -200,6 +200,41 @@ async fn capability_session_enforces_route_scopes() {
         "init should succeed: {init_body:?}"
     );
     let full_token = init_body["session_token"].as_str().unwrap();
+
+    let (provider_status, provider_body) = post_request(
+        &mut app,
+        "/api/profiles/evm/upsert",
+        json!({
+            "name": "mainnet",
+            "rpc_url": "http://127.0.0.1:1",
+            "chain_id": 1
+        }),
+        Some(full_token),
+    )
+    .await;
+    assert_eq!(
+        provider_status,
+        StatusCode::OK,
+        "provider setup should succeed: {provider_body:?}"
+    );
+
+    let (profile_status, profile_body) = post_request(
+        &mut app,
+        "/api/profiles/eth-stealth/upsert",
+        json!({
+            "name": "payments",
+            "wallet": "payments",
+            "short_name": "eth",
+            "provider_profile": "mainnet"
+        }),
+        Some(full_token),
+    )
+    .await;
+    assert_eq!(
+        profile_status,
+        StatusCode::OK,
+        "wallet profile setup should succeed: {profile_body:?}"
+    );
 
     let (mint_status, mint_body) = post_request(
         &mut app,
@@ -228,6 +263,163 @@ async fn capability_session_enforces_route_scopes() {
     assert_eq!(
         provider_body["error"],
         json!("Missing daemon capability scope: evm_providers:read")
+    );
+
+    let (status_status, status_body) = get_request(&app, "/api/status", Some(scoped_token)).await;
+    assert_eq!(status_status, StatusCode::OK);
+    assert_eq!(status_body["locked"], json!(true));
+    assert_eq!(status_body["unlocked_compartments"], json!([]));
+    assert!(status_body["active_compartment"].is_null());
+
+    let sensitive_get_routes = [
+        "/api/diagnostics",
+        "/api/audit",
+        "/api/compartment/list",
+        "/api/api-keys",
+        "/api/secrets",
+        "/api/profiles/eth-xpub",
+        "/api/profiles/eth-seed",
+        "/api/inventory/wallets",
+        "/api/chains",
+        "/api/inventory/watch-addresses",
+        "/api/inventory/token-registry",
+        "/api/discovery/jobs",
+        "/api/risk/findings",
+        "/api/risk/catalog",
+        "/api/plans/consolidation",
+        "/api/treasury/overview",
+        "/api/receiving/overview",
+        "/api/treasury/policy",
+        "/api/treasury/receive-addresses",
+        "/api/treasury/parties",
+        "/api/queue/jobs",
+        "/api/fido2/status",
+    ];
+
+    for path in sensitive_get_routes {
+        let (route_status, route_body) = get_request(&app, path, Some(scoped_token)).await;
+        assert_eq!(
+            route_status,
+            StatusCode::FORBIDDEN,
+            "capability session unexpectedly reached {path}: {route_body:?}"
+        );
+        assert_eq!(
+            route_body["error"],
+            json!("A full daemon session is required for this operation."),
+            "unexpected authorization response for {path}: {route_body:?}"
+        );
+    }
+
+    let sensitive_post_routes = [
+        (
+            "/api/secrets/set",
+            json!({"key": "capability-cannot-write", "value": "blocked"}),
+        ),
+        (
+            "/api/wallets/eth-xpub/export",
+            json!({"wallet_profile": "treasury-receive"}),
+        ),
+        ("/api/treasury/policy/update", json!({"enabled": false})),
+        ("/api/queue/process", json!({})),
+        ("/api/queue/pause", json!({})),
+        (
+            "/api/backup/export",
+            json!({"passphrase": "capability-backup-passphrase"}),
+        ),
+        ("/api/compartment/switch", json!({"id": 0})),
+        ("/api/lock", json!({})),
+        (
+            "/api/auth/capability",
+            json!({"scopes": ["wallet_profiles:read"], "ttl_secs": 60}),
+        ),
+        (
+            "/api/biometric/enroll",
+            json!({
+                "public_key_hex": "02",
+                "passphrase": "capability-cannot-enroll"
+            }),
+        ),
+    ];
+
+    for (path, request_body) in sensitive_post_routes {
+        let (route_status, route_body) =
+            post_request(&app, path, request_body, Some(scoped_token)).await;
+        assert_eq!(
+            route_status,
+            StatusCode::FORBIDDEN,
+            "capability session unexpectedly reached {path}: {route_body:?}"
+        );
+        assert_eq!(
+            route_body["error"],
+            json!("A full daemon session is required for this operation."),
+            "unexpected authorization response for {path}: {route_body:?}"
+        );
+    }
+
+    let (create_mint_status, create_mint_body) = post_request(
+        &app,
+        "/api/auth/capability",
+        json!({"scopes": ["deposits:create"], "ttl_secs": 60}),
+        Some(full_token),
+    )
+    .await;
+    assert_eq!(create_mint_status, StatusCode::OK);
+    let create_token = create_mint_body["session_token"].as_str().unwrap();
+
+    let erc20_request = json!({
+        "wallet_profile": "payments",
+        "token_address": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+        "expected_amount_hex": "0x1",
+        "auto_queue_sweep": false
+    });
+    let (create_status, create_body) = post_request(
+        &app,
+        "/api/deposits/eth-stealth/create-erc20",
+        erc20_request.clone(),
+        Some(create_token),
+    )
+    .await;
+    assert_eq!(
+        create_status,
+        StatusCode::OK,
+        "deposits:create should authorize ERC-20 creation: {create_body:?}"
+    );
+
+    let mut auto_queue_request = erc20_request.clone();
+    auto_queue_request["auto_queue_sweep"] = json!(true);
+    let (auto_queue_status, auto_queue_body) = post_request(
+        &app,
+        "/api/deposits/eth-stealth/create-erc20",
+        auto_queue_request,
+        Some(create_token),
+    )
+    .await;
+    assert_eq!(auto_queue_status, StatusCode::FORBIDDEN);
+    assert_eq!(
+        auto_queue_body["error"],
+        json!("Missing daemon capability scope: queue:enqueue-sweep")
+    );
+
+    let (delete_mint_status, delete_mint_body) = post_request(
+        &app,
+        "/api/auth/capability",
+        json!({"scopes": ["deposits:delete"], "ttl_secs": 60}),
+        Some(full_token),
+    )
+    .await;
+    assert_eq!(delete_mint_status, StatusCode::OK);
+    let delete_token = delete_mint_body["session_token"].as_str().unwrap();
+    let (delete_scope_status, delete_scope_body) = post_request(
+        &app,
+        "/api/deposits/eth-stealth/create-erc20",
+        erc20_request,
+        Some(delete_token),
+    )
+    .await;
+    assert_eq!(delete_scope_status, StatusCode::FORBIDDEN);
+    assert_eq!(
+        delete_scope_body["error"],
+        json!("Missing daemon capability scope: deposits:create")
     );
 }
 

@@ -32,6 +32,24 @@ fn constructor_normalizes_base_url_without_session_token() {
     );
 }
 
+#[test]
+fn poisoned_session_token_lock_restores_logged_out_invariant() {
+    let client =
+        std::sync::Arc::new(SigillumClient::new("http://127.0.0.1:3200").expect("client builds"));
+    client.set_session_token("stale-token");
+    let poisoner = client.clone();
+    let _ = std::thread::spawn(move || {
+        let _guard = poisoner.session_token.lock().unwrap();
+        panic!("intentional session-token poison");
+    })
+    .join();
+
+    assert_eq!(client.session_token(), None);
+    assert!(!client.session_token.is_poisoned());
+    client.set_session_token("fresh-token");
+    assert_eq!(client.session_token().as_deref(), Some("fresh-token"));
+}
+
 async fn unlock() -> Json<serde_json::Value> {
     Json(json!({
         "status": "unlocked",

@@ -1,31 +1,43 @@
 <p align="center">
   <h1 align="center">Sigillum</h1>
   <p align="center">
-    <strong>Local, hardware-aware secret management in Rust.</strong>
+    <strong>Local-first EVM wallet archaeology and controlled recovery.</strong>
   </p>
 </p>
 
-Sigillum is a Rust workspace for managing secrets with a two-tier model:
+Sigillum is a local-first, single-operator EVM treasury workstation. Its
+product is wallet archaeology and controlled recovery: find wallets, assets,
+approvals, NFTs, DeFi positions, rewards, and stranded value; explain
+provenance, risk, signability, and required gas; then build, simulate, approve,
+queue, execute, and audit a consolidation plan without sending private keys to a
+hosted service. Payer-private receiving uses standardized ERC-5564 stealth
+addresses.
+
+That workflow sits in the gap between privacy-oriented local portfolio tools,
+ordinary click-to-sign wallets, and institutional custody platforms. The five
+operator questions in the
+[`wallet-management roadmap`](docs/wallet-management-roadmap.md) define the
+journey from unknown wallets to inventoried, reviewed, and deliberately executed
+or ignored value.
+
+A hardware-aware local vault is the enabling infrastructure, not the product
+identity:
 
 - Tier 1 API keys are stored in plaintext JSON for local automation.
 - Tier 2 secrets are AES-256-GCM encrypted and require an in-memory master key.
 - The master key can be loaded from a passphrase-derived wrapper or from FIDO2-backed shard recovery.
 - A local daemon exposes an embedded web UI and HTTP API for single-machine use.
-- A local-sidecar gateway provides a preview/payment surface that talks to the same local daemon.
+- A local-sidecar gateway provides a disabled-by-default experimental payment
+  preview surface that talks to the same local daemon.
 
-This repository is strongest today as a local vault plus local daemon, with an
-optional local-sidecar gateway for payment previews. It is intended to stay a
-local-on-your-computer system rather than evolve into an internet-facing remote
-secret-management platform.
+Sigillum is intended to stay a local-on-your-computer system rather than evolve
+into an internet-facing remote secret-management platform.
 
-Sigillum 1.0 is the local-first wallet-management workstation. The
-wallet-management product in phases 1-9 of the
-[`wallet-management roadmap`](docs/wallet-management-roadmap.md) is shipped for
-EVM networks, except swap execution, which is deferred per D-13.
-Consolidation-plan execution ships as a policy-gated, fail-closed opt-in that
-defaults off. The local-first, single-machine, not-internet-facing boundary is
-unchanged. Non-EVM chains (roadmap phase 10) and fiat/NFT valuation remain
-post-1.0.
+Sigillum 1.0 ships the EVM wallet-management product in phases 1-9 of the
+roadmap, except swap execution (deferred per D-13). Consolidation-plan execution
+ships as a policy-gated, fail-closed opt-in that defaults off. The local-first,
+single-machine, not-internet-facing boundary is unchanged. Non-EVM chains (roadmap
+phase 10) and fiat/NFT valuation remain post-1.0.
 
 ## Current Scope
 
@@ -38,7 +50,9 @@ Implemented and working in this repository:
 - `sigillum-client`: async client for the local daemon API, including session handling and snapshots
 - `sigillum-cli`: setup flows, local management commands, snapshot commands,
   daemon launcher, and daemon-backed JSON operator commands
-- `sigillum-gateway`: local-sidecar payment preview surface with project API keys, payment intent creation, and webhook delivery
+- `sigillum-gateway`: local-sidecar experimental payment preview with project
+  API keys and webhook delivery; intent creation is disabled by default and is
+  limited to latest balance observations rather than payment confirmations
 - `sigillum-sdk`: integration surface that combines core types with the async daemon client
 - `sigillum-server`: thin facade over the daemon crate for server-side embedding
 - `sigillum`: meta-crate that re-exports the file-backed core
@@ -150,6 +164,13 @@ audit database readability, and common Sigillum environment variables.
 The `sigillum-gateway` crate is a companion local-sidecar surface for payment
 preview and webhook flow testing. It is designed to sit beside the local daemon
 and should not be treated as an internet-facing boundary for this project.
+Payment creation is disabled unless
+`GATEWAY_ENABLE_EXPERIMENTAL_PAYMENTS=1` is set. Without that opt-in, no payment
+poller, daemon deposit refresh/list, or webhook retry loop runs. Even when
+enabled, the lifecycle emits
+`payment.observed` with `latest_balance_observation_at` because address-balance
+reads do not prove chain finality; this surface is not supported 1.0 payment
+processing. No privileged third-party invoice-signing callback is implemented.
 When the gateway needs authenticated daemon operations, provide a pre-
 established local daemon session token through `SIGILLUM_DAEMON_SESSION_TOKEN`
 or `SIGILLUM_SESSION_TOKEN`.
@@ -168,7 +189,7 @@ first so loaded master keys are cleared before exit.
 To build an installable macOS bundle:
 
 ```bash
-cargo install tauri-cli --version '^2' --locked
+cargo install tauri-cli --version 2.11.4 --locked
 cd crates/sigillum-desktop
 cargo tauri build
 ```
@@ -198,6 +219,12 @@ Sigillum currently uses:
 - `ctap-hid-fido2` for USB HID FIDO2 operations
 
 FIDO2 support is based on protecting randomly generated vault master keys with encrypted shard material. The hardware keys protect shard recovery; they do not directly derive the vault master key.
+
+The `sigillum-fido2` crate enables its `hid` feature by default. A
+`default-features = false` build keeps storage and cryptographic helpers but
+cannot perform hardware operations; calls such as PIN setup return an explicit
+disabled-feature error. The release gate compiles, tests, and lints this no-HID
+configuration so the documented feature boundary remains truthful.
 
 Generated passphrases use the bundled BIP-39 English word list and default to
 8 words. Use `sigillum generate passphrase --words N` to override that length.
@@ -241,7 +268,9 @@ On top of that, the daemon now includes:
   approval-risk overrides
 - reviewable consolidation-plan revoke steps for discovered ERC-20, Permit2,
   and NFT operator approvals, with signer and simulation gates before execution
-- persistent queue jobs for direct sends and sweep jobs
+- persistent queue jobs for direct sends and sweeps, with exact signed bytes
+  and hash durably prepared before submission, a pre-RPC
+  `submitted_unknown` marker, and recovery that never re-signs a prepared job
 - atomic sidecar-backed persistence for profile, deposit, and queue state with
   automatic restore/quarantine behavior
 - a maintenance cycle that refreshes deposits, auto-enqueues sweeps, and drains queued work

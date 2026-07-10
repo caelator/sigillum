@@ -6,7 +6,7 @@
 //! the same way as `PlanStepExecution` (`ExecutionFamily::Sweep`, see
 //! `gates.rs`): with gates off the drain loop never reaches this module.
 
-use sigillum_api::{EthSeedWalletProfile, EthStealthSendResponse, EvmProviderProfile};
+use sigillum_api::{EthSeedWalletProfile, EvmProviderProfile};
 use sigillum_core::{
     EthereumEip1559Erc20Transfer, EthereumEip1559Transfer, decode_quantity_hex,
     ethereum_address_from_signing_key, sign_ethereum_erc20_transfer, sign_ethereum_native_transfer,
@@ -53,8 +53,7 @@ impl SigillumService {
         )
         .map_err(map_wallet_error)?;
         drop(signing_key);
-        self.broadcast_and_finish(wallet.compartment_id, &provider, wallet_profile, signed)
-            .await
+        Ok(QueueExecution::prepared_from_signed(signed))
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -115,8 +114,7 @@ impl SigillumService {
         )
         .map_err(map_wallet_error)?;
         drop(signing_key);
-        self.broadcast_and_finish(wallet.compartment_id, &provider, wallet_profile, signed)
-            .await
+        Ok(QueueExecution::prepared_from_signed(signed))
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -188,8 +186,7 @@ impl SigillumService {
         )
         .map_err(map_wallet_error)?;
         drop(signing_key);
-        self.broadcast_and_finish(wallet.compartment_id, &provider, wallet_profile, signed)
-            .await
+        Ok(QueueExecution::prepared_from_signed(signed))
     }
 
     /// Derive the signing key, verify it matches `address` (defense in
@@ -223,42 +220,6 @@ impl SigillumService {
             }
         };
         Ok((signing_key, nonce))
-    }
-
-    async fn broadcast_and_finish(
-        &self,
-        wallet_compartment_id: usize,
-        provider: &EvmProviderProfile,
-        wallet_profile: &str,
-        signed: sigillum_core::EthereumSignedTransaction,
-    ) -> ServiceResult<QueueExecution> {
-        let broadcast_transaction_hash_hex = self
-            .evm_broadcast_raw_transaction_for_provider(
-                provider.compartment_id,
-                provider,
-                &signed.raw_transaction_hex,
-            )
-            .await?;
-        self.record_audit(
-            Some(wallet_compartment_id),
-            crate::audit_log::AuditEventSpec::EvmBroadcast {
-                transaction_hash_hex: broadcast_transaction_hash_hex.clone(),
-            },
-        )?;
-        Ok(QueueExecution::Sent(EthStealthSendResponse {
-            wallet: wallet_profile.into(),
-            kind: signed.kind,
-            chain_id: signed.chain_id,
-            nonce: signed.nonce,
-            from_address: signed.from_address,
-            to_address: signed.to_address,
-            value_hex: signed.value_hex,
-            data_hex: signed.data_hex,
-            raw_transaction_hex: signed.raw_transaction_hex,
-            transaction_hash_hex: signed.transaction_hash_hex,
-            broadcast: true,
-            broadcast_transaction_hash_hex: Some(broadcast_transaction_hash_hex),
-        }))
     }
 }
 

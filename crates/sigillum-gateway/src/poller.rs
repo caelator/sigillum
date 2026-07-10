@@ -1,5 +1,5 @@
-//! Background poller — periodically checks for deposit confirmations, triggers sweeps,
-//! retries failed webhooks, and tracks daemon health.
+//! Experimental background poller for latest deposit balance observations,
+//! sweep progress, webhook delivery, and daemon health.
 
 use sigillum_api::request::EthStealthDepositRefreshRequest;
 use std::sync::atomic::Ordering;
@@ -13,8 +13,45 @@ use crate::webhooks;
 /// Maximum consecutive failures before marking daemon unhealthy.
 const MAX_CONSECUTIVE_FAILURES: u32 = 5;
 
+fn canonical_quantity(value: &str) -> Option<String> {
+    let raw = value
+        .strip_prefix("0x")
+        .or_else(|| value.strip_prefix("0X"))
+        .unwrap_or(value);
+    if raw.is_empty() || !raw.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        return None;
+    }
+    let significant = raw.trim_start_matches('0');
+    Some(if significant.is_empty() {
+        "0".into()
+    } else {
+        significant.to_ascii_lowercase()
+    })
+}
+
+fn observed_amount_meets_payment(observed: Option<&str>, expected: &str) -> bool {
+    let (Some(observed), Some(expected)) = (
+        observed.and_then(canonical_quantity),
+        canonical_quantity(expected),
+    ) else {
+        return false;
+    };
+    if expected == "0" {
+        return false;
+    }
+
+    observed.len() > expected.len()
+        || (observed.len() == expected.len() && observed.as_bytes() >= expected.as_bytes())
+}
+
 /// Spawn the background polling loop.
 pub fn spawn(state: AppState) {
+    if !state.config.experimental_payments_enabled {
+        tracing::warn!(
+            "Refusing to start payment observation poller while experimental payments are disabled"
+        );
+        return;
+    }
     let interval = Duration::from_secs(state.config.poll_interval_secs);
     tokio::spawn(async move {
         let mut ticker = time::interval(interval);
@@ -40,6 +77,10 @@ pub fn spawn(state: AppState) {
 }
 
 async fn poll_cycle(state: &AppState) -> Result<(), Box<dyn std::error::Error>> {
+    if !state.config.experimental_payments_enabled {
+        return Ok(());
+    }
+
     // 1. Expire stale payments
     let expired = db::expire_old_payments(&state.db).await?;
     if expired > 0 {
@@ -76,11 +117,27 @@ async fn poll_cycle(state: &AppState) -> Result<(), Box<dyn std::error::Error>> 
                 None => continue,
             };
 
-            // Map daemon deposit status to gateway payment status
+            // Defense in depth: never trust a lifecycle label alone. Older or
+            // mixed-version daemons may report `funded` without enforcing the
+            // payment's expected amount, so the gateway independently compares
+            // the full 256-bit quantities and fails closed on malformed values.
+            let amount_satisfied = observed_amount_meets_payment(
+                deposit.observed_amount_hex.as_deref(),
+                &payment.amount_wei,
+            );
+
+            // A balance observation is not chain-finality evidence. The
+            // experimental gateway therefore reports only the latest balance
+            // observation for incoming funds.
             let new_status = match deposit.status.as_str() {
-                "confirmed" | "funded" if payment.status == "pending" => Some("confirmed"),
-                "sweep_queued" | "sweeping" if payment.status == "confirmed" => Some("sweeping"),
-                "swept" if payment.status != "swept" => Some("swept"),
+                "funded" if payment.status == "pending" && amount_satisfied => Some("observed"),
+                "sweep_queued" | "sweeping"
+                    if matches!(payment.status.as_str(), "pending" | "observed")
+                        && amount_satisfied =>
+                {
+                    Some("sweeping")
+                }
+                "swept" if payment.status != "swept" && amount_satisfied => Some("swept"),
                 _ => None,
             };
 
@@ -91,7 +148,11 @@ async fn poll_cycle(state: &AppState) -> Result<(), Box<dyn std::error::Error>> 
                     payment.status
                 );
                 db::update_payment_status(&state.db, &payment.id, status).await?;
-                payment.status = status.to_string();
+                let Some(updated_payment) = db::find_payment_by_id(&state.db, &payment.id).await?
+                else {
+                    continue;
+                };
+                payment = updated_payment;
 
                 // Fire webhook
                 let event = format!("payment.{status}");
@@ -104,4 +165,25 @@ async fn poll_cycle(state: &AppState) -> Result<(), Box<dyn std::error::Error>> 
     webhooks::retry_pending(state).await;
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::observed_amount_meets_payment;
+
+    #[test]
+    fn payment_amount_comparison_rejects_dust_and_malformed_observations() {
+        assert!(!observed_amount_meets_payment(Some("0x1"), "0x100"));
+        assert!(!observed_amount_meets_payment(None, "0x100"));
+        assert!(!observed_amount_meets_payment(Some("not-hex"), "0x100"));
+        assert!(!observed_amount_meets_payment(Some("0x100"), "not-hex"));
+        assert!(!observed_amount_meets_payment(Some("0x0"), "0x0"));
+    }
+
+    #[test]
+    fn payment_amount_comparison_accepts_equal_and_overpayment() {
+        assert!(observed_amount_meets_payment(Some("0x0100"), "0x100"));
+        assert!(observed_amount_meets_payment(Some("0x101"), "0x100"));
+        assert!(observed_amount_meets_payment(Some("0xABCD"), "0xabcc"));
+    }
 }

@@ -57,7 +57,7 @@ fi
 require_command codesign
 
 pushd crates/sigillum-desktop >/dev/null
-run_step cargo tauri build --debug
+run_step cargo tauri build --debug -- --locked
 popd >/dev/null
 
 BUNDLE_ROOT="$(find_debug_bundle_root)" || fail "debug Sigillum.app bundle was not produced"

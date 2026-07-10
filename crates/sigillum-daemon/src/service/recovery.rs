@@ -34,6 +34,13 @@ impl SigillumService {
             recover_pending_operations(&self.state.base_dir)?;
         let mut queue = crate::queue_store::load_queue(&self.state.base_dir)?;
         let mut deposits = crate::deposits::load_deposits(&self.state.base_dir)?;
+        let inventory = crate::inventory::load_wallet_inventory(&self.state.base_dir)?;
+        self.state.set_queue_execution_pause_latch(
+            inventory
+                .treasury_policy
+                .as_ref()
+                .is_some_and(|policy| policy.execution_paused),
+        );
         let mut recovered_queue_job_count = 0usize;
 
         for job in &mut queue.jobs {

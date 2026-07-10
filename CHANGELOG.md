@@ -7,7 +7,33 @@ from 1.0.0 onward, per the stability policy in `docs/stability.md`.
 
 ## [Unreleased]
 
-## [1.0.0] - 2026-07-XX
+### Security
+
+- **Daemon authorization** — `require_session()` now requires a full daemon
+  session by default; capability tokens are admitted only through explicit
+  `require_scope()` checks on the routes that declare them. Scoped sessions
+  are hidden from optional observability surfaces such as `/api/status`.
+- **Payment truth** — Deposit refresh and the gateway poller compare observed
+  and expected amounts with full 256-bit semantics; dust transfers no longer
+  satisfy larger payment intents. Gateway lifecycle states report balance
+  observations, not finality-backed confirmations. The privileged third-party
+  invoice-signing callback path was removed.
+- **Queue execution durability** — Every queue family durably records exact
+  signed bytes and hash as `prepared`, persists `submitted_unknown` before RPC,
+  and recovers by receipt lookup or exact-byte resubmission without re-signing.
+- **Kill switch preemption** — Queue pause sets a lock-free latch before
+  acquiring the operation mutex so an in-flight drain can be halted through the
+  HTTP API without waiting for the batch to finish.
+
+### Fixed
+
+- **`sigillum-fido2` no-HID builds** — Compiling with `default-features = false`
+  keeps the API surface but returns explicit errors for hardware-only
+  operations; the release gate now compiles, tests, and lints this configuration.
+- **Chaos crash-boundary proof** — Failpoint subprocess waits were widened so
+  the write-ahead kill-in-flight regression is reliable under load.
+
+## [1.0.0] - 2026-07-10
 
 ### Added
 
@@ -18,7 +44,9 @@ from 1.0.0 onward, per the stability policy in `docs/stability.md`.
   passphrase-encrypted snapshot export/restore, and journaled destructive flows
   with tested crash-point recovery.
 - **Local daemon and operator console** — Local Axum daemon with bearer
-  session-token auth over loopback HTTP, an embedded web operator console
+  session-token auth over loopback HTTP, full-session-by-default authorization
+  with capability tokens admitted only by explicit scope checks, an embedded
+  web operator console
   covering first-time setup, lock/unlock, secret management, FIDO2 key
   management, snapshots, local audit feed, and diagnostics, plus transit-style
   encrypt/decrypt/HMAC endpoints, atomic sidecar-backed persistence with
@@ -51,11 +79,14 @@ from 1.0.0 onward, per the stability policy in `docs/stability.md`.
   events carrying session fingerprints; enqueue with full server-side
   re-validation and typed confirmation naming the step count and total value;
   seed-wallet signing that re-verifies a simulation-evidence hash before
-  touching key material and zeroizes derived keys; broadcast-time nonce
-  management, receipt confirmation to per-chain finality depth with a terminal
-  `confirmed` state, classified failures where provider errors are retried,
-  reverts are parked for the operator and never auto-retried, and underpriced
-  transactions get one bounded fee bump; crash-safe receipt-polling resume; and
+  touching key material and zeroizes derived keys; durable write-ahead of exact
+  signed transaction bytes and hash in `prepared`, a durable
+  `submitted_unknown` marker before RPC, and a preemptive pause latch between
+  jobs and immediately before broadcast; recovery checks receipts or resubmits
+  only the exact bytes and never re-signs the job; deterministic nonce-too-low,
+  underpriced, and revert rejections park for operator action rather than
+  creating a replacement signature; receipt confirmation reaches per-chain
+  finality depth before terminal `confirmed`; and
   linkage enforcement at execution enqueue at parity with plan generation and
   approval.
 - **Treasury, receiving, and linkage policy** — Purpose-labeled receive-address
@@ -81,10 +112,11 @@ from 1.0.0 onward, per the stability policy in `docs/stability.md`.
   `merkle-distributor-v1` claim execution is behind the `allow_claim_execution`
   opt-in and gated on simulation, risk-catalog review, and explicit step
   approval; claim failures park for the operator and are never auto-retried.
-- **Gateway sidecar** — Local-sidecar payment preview surface with project API
-  keys, payment intent creation, and webhook delivery that re-resolves and pins
-  HTTPS targets at send time, positioned beside the local daemon rather than as
-  an internet-facing boundary.
+- **Gateway sidecar** — Disabled-by-default local-sidecar experimental payment
+  observation surface with project API keys, amount-checked observations, and
+  webhook delivery that re-resolves and pins HTTPS targets at send time.
+  Balance reads are not finality proof and do not claim supported 1.0 payment
+  confirmation; privileged third-party invoice signing is not implemented.
 - **Desktop app** — Tauri v2 macOS shell that runs the daemon in-process on a
   fresh loopback port, shares the `~/.sigillum` data directory, keeps a single
   focused instance, shows a tray with live lock state and "Lock now", locks and
@@ -101,12 +133,14 @@ from 1.0.0 onward, per the stability policy in `docs/stability.md`.
   queries, and wallet xpub/stealth export and derive helpers; no sign, send, or
   broadcast commands by design.
 - **Release engineering** — Single release gate at `./scripts/check-release.sh`
-  running cargo metadata and architecture guardrails, daemon UI
+  running locked cargo metadata and architecture guardrails, default and no-HID
+  FIDO2 coverage, daemon UI
   install/typecheck/tests/build with generated-asset freshness checks, Rust
   fmt/tests/clippy, adversarial property-based API fuzzing, a real local-daemon
   runtime smoke with vault write/read canaries, browser smoke, a desktop bundle
-  check, `cargo audit`, `cargo deny`, and whitespace checks; CI runs the full
-  gate on Ubuntu and macOS with a nightly deep-fuzz schedule.
+  check, `cargo audit`, `cargo deny`, whitespace checks, and a tracked-tree
+  mutation guard; CI runs the full gate on fixed Ubuntu/macOS version lines with
+  immutable action commits and a nightly deep-fuzz schedule.
 
 [Unreleased]: https://github.com/caelator/sigillum/compare/v1.0.0...HEAD
 [1.0.0]: https://github.com/caelator/sigillum/releases/tag/v1.0.0

@@ -97,11 +97,11 @@ impl SigillumService {
                     nonce: None,
                     gas_limit: Some(gas_limit),
                     estimate_fees: None,
-                    broadcast: Some(true),
+                    broadcast: Some(false),
                 },
             )
             .await?;
-        Ok(QueueExecution::Sent(sent))
+        Ok(QueueExecution::prepared_from_send(sent))
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -182,10 +182,10 @@ impl SigillumService {
                     nonce: None,
                     gas_limit: Some(gas_limit),
                     estimate_fees: None,
-                    broadcast: Some(true),
+                    broadcast: Some(false),
                 },
             )
             .await?;
-        Ok(QueueExecution::Sent(sent))
+        Ok(QueueExecution::prepared_from_send(sent))
     }
 }

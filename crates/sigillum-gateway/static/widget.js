@@ -232,7 +232,8 @@
     modal = shell.overlay;
     focusModal(shell.card);
 
-    // Start polling for confirmation
+    // Start polling for preview observations. This widget must not promote a
+    // balance read to an economic-finality claim.
     activePaymentId = payment.payment_id;
     void pollPayment(payment.payment_id, status, opts);
   }
@@ -291,17 +292,28 @@
 
       const data = await res.json();
 
-      if (data.status === "confirmed" || data.status === "sweeping") {
-        setStatus(statusEl, "Payment confirmed!", { className: "sgw-confirmed" });
-        if (opts.onSuccess) opts.onSuccess(data);
-        if (opts.successUrl) setTimeout(() => (window.location.href = opts.successUrl), 2000);
+      if (data.status === "observed") {
+        setStatus(statusEl, "Payment amount observed; chain finality is not proven.", {
+          pending: true,
+          className: "sgw-observed",
+        });
+        schedulePoll(paymentId, statusEl, opts);
+        return;
+      }
+
+      if (data.status === "sweeping") {
+        setStatus(statusEl, "Payment amount observed; sweep in progress (preview).", {
+          pending: true,
+          className: "sgw-observed",
+        });
+        schedulePoll(paymentId, statusEl, opts);
         return;
       }
 
       if (data.status === "swept") {
-        setStatus(statusEl, "Payment complete!", { className: "sgw-confirmed" });
-        if (opts.onSuccess) opts.onSuccess(data);
-        if (opts.successUrl) setTimeout(() => (window.location.href = opts.successUrl), 1500);
+        setStatus(statusEl, "Sweep receipt observed; chain finality is not proven.", {
+          className: "sgw-observed",
+        });
         return;
       }
 
