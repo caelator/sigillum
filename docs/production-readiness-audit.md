@@ -1,6 +1,6 @@
 # Production Readiness Audit
 
-**Date:** June 4, 2026 (updated July 10, 2026)
+**Date:** June 4, 2026 (updated July 11, 2026)
 **Scope:** local-first, single-host Sigillum source checkout and local-sidecar
 gateway boundary
 **Verdict:** the earlier RC gate receipts are historical evidence and do not
@@ -50,6 +50,22 @@ The gate covers:
 - RustSec advisory scan through `cargo audit`
 - supply-chain policy through `cargo deny check`
 - final whitespace validation through `git diff --check`
+
+The release-tag contract reads the authoritative remote annotated tag object
+and peeled commit, binds both to the triggering SHA, fetches a missing tag
+object only into a non-tag scratch ref, requires RC numbers to advance the
+retained remote sequence by exactly one, and pins the initial tag-object ID into
+the final draft-release job. Pushed RC tags are permanent receipt anchors, and
+the RC draft/assets remain available through final-draft verification. A final
+`v1.0.0` tag must peel to the identical commit as the RC receipts, or those
+receipts are void and a new RC is required. Final assets receive their own
+checksum verification before publication; only then may the older RC draft be
+removed.
+
+The historical `v1.0.0-rc.1` rehearsal tag was deleted under the superseded
+cleanup procedure. That number remains burned and is not recreated. It is the
+only permitted legacy gap; the retained 1.0.0 RC sequence begins at `rc.2` and
+must remain contiguous thereafter.
 
 The first sandboxed run failed when loopback integration tests could not bind
 local sockets under the execution sandbox. The same release gate passed outside
@@ -166,6 +182,7 @@ pass with empty ignore lists.
 | Daemon UI compiles and tested source matches generated assets | `npm ci`, `npm audit --audit-level=high`, `npm run typecheck`, `npm test`, `npm run build`, plus generated asset freshness in the release gate | Proven for current checkout |
 | Rust workspace builds, tests, and lints | Locked workspace check/test/clippy plus independent no-HID FIDO2 check/test/clippy inside the release gate | Proven only when the current checkout's gate passes |
 | Security and supply-chain baseline | `cargo audit --file Cargo.lock` and `cargo deny --locked check` inside the release gate | Proven for the lockfile checked by the gate, with accepted duplicate dependency warnings |
+| Release identity and monotonicity | Remote direct/peeled tag validation, event-SHA and cross-job tag-object binding, scratch-ref recovery, retained monotonically numbered RC tags, and draft-only release creation | Proven only when the tag workflow passes at the gated `main` SHA; branch/tag protection is a fail-closed pre-merge settings check |
 | Local daemon and gateway loopback integration behavior | Workspace integration tests pass outside the sandbox | Proven for current checkout in an unsandboxed local environment |
 | Target-host operational readiness | `sigillum doctor` passes in the isolated runtime smoke; an earlier `mac-server` 3600-second soak recorded 117 doctor runs on an older commit | Historical host baseline only; standard and chaos doctor/soak receipts are required on every supported host at the new RC SHA |
 | Runtime daemon lifecycle behavior | `scripts/check-runtime-smoke.sh` starts the daemon, verifies status, initializes a passphrase compartment, writes and reads vault canaries, locks, unlocks, lists compartments, and runs doctor | Proven for current checkout in an unsandboxed local environment |

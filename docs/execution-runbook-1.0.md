@@ -2,7 +2,7 @@
 
 **Status:** Active hardening and release handbook
 
-**State recorded:** 2026-07-10, failed RC `v1.0.0-rc.2` at `815d262`
+**State recorded:** 2026-07-11, failed RC `v1.0.0-rc.2` at `815d262`
 
 **Plan authority:** [release-1.0-plan.md](./release-1.0-plan.md)
 
@@ -16,7 +16,10 @@ a commit that contains later hardening changes.
 - The workspace and daemon UI declare version `1.0.0`.
 - There is no final `v1.0.0` release tag or published final release.
 - The `a22a98a` RC dry run proved the workflow shape at that historical commit;
-  it is not release evidence for the current hardening line.
+  it is not release evidence for the current hardening line. Its deleted
+  `v1.0.0-rc.1` tag remains permanently burned and is the sole legacy gap
+  permitted before the retained sequence that starts at `rc.2`; do not
+  recreate it.
 - A fresh RC is required at the release-contract-fix SHA; the code-level
   capability-auth, payment-truth, queue-durability, and no-HID hardening has
   already landed and passed the source gate.
@@ -48,7 +51,10 @@ a commit that contains later hardening changes.
    or build is modifying the same checkout.
 4. Review the complete diff, rerun GitNexus impact checks for materially changed
    symbols, and re-index the repository.
-5. Land through a pull request and require both fixed-runner CI legs to pass.
+5. Before merge, verify that `main` protection requires both fixed-runner CI
+   legs, blocks force-pushes, and that release-tag governance prevents updates
+   and deletion. Remediate missing settings before landing through a pull
+   request, then require both CI legs to pass.
 6. Only then create a new annotated RC tag and complete the operator gates in
    section 5.
 
@@ -77,10 +83,17 @@ CI and release workflows use immutable action commits and explicit
 `scripts/check-release-tag-contract.sh` enforces these rules against the
 authoritative remote direct and peeled tag refs. It does not trust the
 runner-local tag ref, because a tag-triggered checkout can rewrite that ref to
-the peeled commit. `scripts/test-release-tag-contract.sh` reproduces that
-rewrite hermetically and also proves that lightweight, wrong-SHA, off-main,
-malformed, and changelog-invalid tags fail closed. The normal source release
-gate runs this regression test before tag time.
+the peeled commit. If the tag object is absent locally, it fetches the remote
+tag into a non-tag scratch ref and proves that the fetched object still matches
+the authoritative observation. RC tags must also advance the retained remote
+sequence by exactly one. For 1.0.0 only, the already-burned and historically
+deleted `rc.1` is an explicit legacy exception; every tag from `rc.2` onward
+must remain contiguous. The contract job pins the observed tag-object ID into
+the final draft-release job. `scripts/test-release-tag-contract.sh` reproduces
+the checkout rewrite and object-absent cases hermetically and proves that
+lightweight, wrong-SHA, off-main, skipped-number, malformed, and
+changelog-invalid tags fail closed. The normal source release gate runs this
+regression test before tag time.
 
 The release workflow always creates a draft. Asset checksums, release notes,
 and the operator decision are required before publication.
@@ -91,8 +104,9 @@ and the operator decision are required before publication.
 - If checkout has rewritten a runner-local tag ref, diagnose annotation from
   the remote direct and `^{}` refs. Do not weaken the annotated-tag requirement
   or repair the ephemeral local ref as a substitute for remote truth.
-- Never move, delete, or reuse a pushed failed RC tag. Preserve it as historical
-  evidence, land the fix through the normal PR/gate path, and increment `rc.N`.
+- Never move, delete, or reuse any pushed RC tag, whether its workflow failed
+  or passed. Preserve it as historical evidence, land fixes through the normal
+  PR/gate path, and increment `rc.N`.
 - Treat compile errors, test failures, tracked-tree mutations, lockfile drift,
   malformed tags, and missing changelog sections as real release failures.
 - For a new advisory, take a fixed dependency version first. Add a temporary
@@ -116,22 +130,32 @@ and the operator decision are required before publication.
 | H2 | Explicit operator decision to tag and publish `v1.0.0` |
 
 Work may continue on any independent item while one of these gates is waiting.
-Do not mark H1 or H2 complete until every required receipt belongs to the same
-release-candidate commit.
+Do not mark H1 or H2 complete until every required receipt names the same
+release-candidate peeled commit SHA.
 
 ## 6. Fresh RC procedure
 
-1. Fill the `CHANGELOG.md` 1.0.0 date and merge it with the hardening work.
-2. From a clean `main`, run `./scripts/check-release.sh`.
-3. Create and push an annotated `v1.0.0-rc.N` tag. Never reuse an `N` that has
-   already been pushed, even when its workflow failed before creating a draft.
+1. Confirm the dated, non-empty `CHANGELOG.md` 1.0.0 section is on `main`.
+2. Fetch `origin`, start from a clean `main`, record
+   `GATE_SHA=$(git rev-parse HEAD)`, assert it equals `origin/main`, and run
+   `./scripts/check-release.sh`.
+3. Query `git ls-remote --tags --refs origin 'refs/tags/v1.0.0-rc.*'` and require
+   the new `N` to equal the highest retained remote RC number plus one. Reassert
+   `HEAD == GATE_SHA == origin/main`, then create and push the annotated tag.
+   Every pushed `N` is permanently burned, even when no draft was created.
 4. Require the release contract job, both verify legs, both artifact jobs, and
    the draft-release job to pass.
 5. Download the draft assets and verify `SHA256SUMS`.
-6. Complete the section 5 receipts against that exact RC SHA.
-7. Delete the RC draft and tag after the rehearsal.
+6. Complete the section 5 receipts against that exact peeled RC commit SHA.
+7. Record the tag name, tag-object ID, peeled commit SHA, workflow run, and
+   checksum result. Keep the annotated RC tag permanently and retain the RC
+   draft/assets through final-draft verification.
 8. After explicit H2 approval, repeat the clean gate and push annotated
-   `v1.0.0`; verify the draft before publishing it.
+   `v1.0.0` at the identical peeled commit as the receipt-bearing RC. If `main`
+   has moved or any intervening commit is required, the receipts are void and a
+   new monotonically numbered RC is required. Independently checksum and verify
+   the final draft assets before publishing; only after final publication may
+   the older RC draft be deleted.
 
 After publication, perform the post-release version/planning update described
 by H3 in the plan of record.

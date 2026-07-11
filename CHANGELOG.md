@@ -145,8 +145,11 @@ from 1.0.0 onward, per the stability policy in `docs/stability.md`.
   proof remains reliable across CI runners.
 - **Release tag contract** — Annotated-tag validation queries the authoritative
   remote tag and peeled commit instead of a runner-local ref that checkout may
-  rewrite. The normal release gate exercises annotated, lightweight, wrong-SHA,
-  off-main, malformed, and changelog-negative fixtures before tag time.
+  rewrite, safely recovers a locally absent tag object through a non-tag scratch
+  ref, pins tag-object identity across jobs, and enforces monotonic retained RC
+  numbers. The normal release gate exercises annotated, object-absent,
+  lightweight, wrong-SHA, off-main, skipped-number, malformed, and
+  changelog-negative fixtures before tag time.
 
 [Unreleased]: https://github.com/caelator/sigillum/compare/v1.0.0...HEAD
 [1.0.0]: https://github.com/caelator/sigillum/releases/tag/v1.0.0

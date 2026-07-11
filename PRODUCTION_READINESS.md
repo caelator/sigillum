@@ -1,12 +1,14 @@
 # Sigillum — Production Readiness
 
-**Date:** June 4, 2026 (updated July 10, 2026)
+**Date:** June 4, 2026 (updated July 11, 2026)
 **Current Verdict:** the code-level hardening and updated source gates pass on
 the current line, but `v1.0.0-rc.2` is not a valid release candidate. Its remote
 tag is annotated; the tag-time workflow produced a false negative after
 checkout rewrote the runner-local tag ref to the peeled commit, so no draft or
-assets were created. The contract fix must land and a fresh `v1.0.0-rc.3` must
-pass the workflow and same-SHA operator gates.
+assets were created. The contract fix must land, its protected-main SHA must be
+re-gated, and a fresh monotonically numbered `v1.0.0-rc.3` must pass the
+workflow and same-SHA operator gates. Every pushed RC tag remains an immutable
+receipt anchor.
 The supported boundary remains local-first, single-host, and not
 internet-facing; remote-platform scope is explicitly unsupported.
 

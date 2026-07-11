@@ -301,12 +301,16 @@ version (or its `-rc.N` form), lack a dated changelog section, or are not on
 `main` history. Before tagging `v1.0.0` for real, dry-run it with an rc tag:
 
 1. `git checkout main && git pull --ff-only && ./scripts/check-release.sh`
-2. `git tag -a v1.0.0-rc.1 -m "Sigillum 1.0.0-rc.1 dry run" && git push origin v1.0.0-rc.1`
+2. Select the next monotonically increasing RC number from the retained remote
+   `v1.0.0-rc.*` tags, then create and push that annotated tag.
 3. Watch the Release workflow in the Actions tab; the contract job, both verify legs, both artifact jobs, and release job must all pass.
 4. Verify the draft release contains the `.dmg`, the zipped `.app`, both `sigillum-cli` `tar.gz` archives, `THIRD-PARTY-NOTICES.txt`, and `SHA256SUMS`.
 5. Download the assets and run `shasum -a 256 --check SHA256SUMS --ignore-missing`.
 6. Confirm the release is still a draft and its body carries the dated `CHANGELOG` section for the version. There is no fallback release body.
-7. Clean up: `gh release delete v1.0.0-rc.1 --yes`, then `git push origin :refs/tags/v1.0.0-rc.1` and `git tag -d v1.0.0-rc.1`.
+7. Record the tag-object ID, peeled commit, workflow run, and checksum result.
+   Retain the RC draft/assets through final-draft verification and retain every
+   pushed RC tag permanently. Only after final publication may the RC draft be
+   deleted; never move, delete, or reuse its tag number.
 
 ## Operational Notes
 

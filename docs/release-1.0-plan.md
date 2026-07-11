@@ -1401,9 +1401,10 @@ Order within W7 is strict: W7.1 → W7.2 → W7.3 → W7.4 → W7.5.
   `SHA256SUMS` file. Job 4 also attaches a `THIRD-PARTY-NOTICES` file
   generated with a pinned `cargo-about` (MIT/Apache attribution for shipped
   binaries) and includes it in the `.dmg` resources — `cargo deny` gates
-  licenses but does not produce attribution. Dry-run with `v1.0.0-rc.1`,
-  then delete the rc
-  tag/release.
+  licenses but does not produce attribution. Dry-run with the next monotonically
+  numbered annotated RC tag, retain that tag permanently as the receipt anchor,
+  and retain its draft/assets through final-draft verification. Delete only the
+  older RC draft after final publication.
 - **Accept:** rc dry run produces all artifacts + draft release. **Size:** M.
 
 #### G5 — Readiness and product docs final sync

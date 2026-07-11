@@ -5,7 +5,7 @@
 #   4. Verify the DRAFT release contains: the .dmg, the .app.zip, both sigillum-cli tar.gz archives, THIRD-PARTY-NOTICES.txt, and SHA256SUMS.
 #   5. Download the assets and run: shasum -a 256 --check SHA256SUMS --ignore-missing
 #   6. Confirm the release is still a draft and its body contains the dated CHANGELOG section.
-#   7. Complete same-SHA operator receipts, then clean up the successful rehearsal per the runbook. Never reuse a pushed RC number.
+#   7. Retain the RC tag and draft assets through final verification; remove only the RC draft after final publication.
 
 name: Release
 
@@ -17,13 +17,15 @@ permissions:
   contents: read
 
 concurrency:
-  group: release-${{ github.ref }}
+  group: release
   cancel-in-progress: false
 
 jobs:
   release-contract:
     runs-on: ubuntu-24.04
     timeout-minutes: 10
+    outputs:
+      tag_object: ${{ steps.validate.outputs.tag_object }}
 
     steps:
       - name: Checkout full history
@@ -33,6 +35,7 @@ jobs:
           fetch-depth: 0
 
       - name: Validate release tag contract
+        id: validate
         shell: bash
         env:
           RELEASE_TAG: ${{ github.ref_name }}
@@ -205,7 +208,7 @@ jobs:
           if-no-files-found: error
 
   release:
-    needs: [artifacts-macos, artifacts-linux]
+    needs: [release-contract, artifacts-macos, artifacts-linux]
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     permissions:
@@ -271,8 +274,9 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ github.ref_name }}
           RELEASE_SHA: ${{ github.sha }}
+          RELEASE_TAG_OBJECT: ${{ needs.release-contract.outputs.tag_object }}
         run: |
           set -euo pipefail
 
-          bash ./scripts/check-release-tag-contract.sh "${RELEASE_TAG}" "${RELEASE_SHA}" origin
+          bash ./scripts/check-release-tag-contract.sh "${RELEASE_TAG}" "${RELEASE_SHA}" origin "${RELEASE_TAG_OBJECT}"
           gh release create "${RELEASE_TAG}" --draft --verify-tag --title "Sigillum ${RELEASE_TAG}" --notes-file "${RUNNER_TEMP}/release-notes.md" dist/*
