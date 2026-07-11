@@ -143,6 +143,10 @@ from 1.0.0 onward, per the stability policy in `docs/stability.md`.
   uses a real subprocess and SIGKILL at the durable `prepared` and
   `submitted_unknown` barriers, with a test-only minimal unlock fixture so the
   proof remains reliable across CI runners.
+- **Release tag contract** — Annotated-tag validation queries the authoritative
+  remote tag and peeled commit instead of a runner-local ref that checkout may
+  rewrite. The normal release gate exercises annotated, lightweight, wrong-SHA,
+  off-main, malformed, and changelog-negative fixtures before tag time.
 
 [Unreleased]: https://github.com/caelator/sigillum/compare/v1.0.0...HEAD
 [1.0.0]: https://github.com/caelator/sigillum/releases/tag/v1.0.0

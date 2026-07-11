@@ -2,7 +2,7 @@
 
 **Status:** Active hardening and release handbook
 
-**State recorded:** 2026-07-10, `main` at `b647df5`
+**State recorded:** 2026-07-10, failed RC `v1.0.0-rc.2` at `815d262`
 
 **Plan authority:** [release-1.0-plan.md](./release-1.0-plan.md)
 
@@ -17,8 +17,13 @@ a commit that contains later hardening changes.
 - There is no final `v1.0.0` release tag or published final release.
 - The `a22a98a` RC dry run proved the workflow shape at that historical commit;
   it is not release evidence for the current hardening line.
-- A fresh RC is required after the capability-auth, payment-truth,
-  queue-durability, no-HID, and release-governance fixes land.
+- A fresh RC is required at the release-contract-fix SHA; the code-level
+  capability-auth, payment-truth, queue-durability, and no-HID hardening has
+  already landed and passed the source gate.
+- `v1.0.0-rc.2` is an immutable failed-contract receipt, not a valid candidate.
+  Its remote tag is annotated, but the tag-time workflow trusted a runner-local
+  ref that checkout rewrote to the peeled commit. No draft or assets were
+  created. After the contract fix lands, the next attempt is `v1.0.0-rc.3`.
 - Gateway payments are preview-only and disabled by default. Opt-in balance
   observations are not finality proof and must not be represented as supported
   1.0 payment confirmations.
@@ -69,12 +74,25 @@ CI and release workflows use immutable action commits and explicit
 - point to a commit on `origin/main` history;
 - have a dated, non-empty matching `CHANGELOG.md` section.
 
+`scripts/check-release-tag-contract.sh` enforces these rules against the
+authoritative remote direct and peeled tag refs. It does not trust the
+runner-local tag ref, because a tag-triggered checkout can rewrite that ref to
+the peeled commit. `scripts/test-release-tag-contract.sh` reproduces that
+rewrite hermetically and also proves that lightweight, wrong-SHA, off-main,
+malformed, and changelog-invalid tags fail closed. The normal source release
+gate runs this regression test before tag time.
+
 The release workflow always creates a draft. Asset checksums, release notes,
 and the operator decision are required before publication.
 
 ## 4. Failure handling
 
 - Reproduce a failed step alone before classifying it as environmental.
+- If checkout has rewritten a runner-local tag ref, diagnose annotation from
+  the remote direct and `^{}` refs. Do not weaken the annotated-tag requirement
+  or repair the ephemeral local ref as a substitute for remote truth.
+- Never move, delete, or reuse a pushed failed RC tag. Preserve it as historical
+  evidence, land the fix through the normal PR/gate path, and increment `rc.N`.
 - Treat compile errors, test failures, tracked-tree mutations, lockfile drift,
   malformed tags, and missing changelog sections as real release failures.
 - For a new advisory, take a fixed dependency version first. Add a temporary
@@ -105,7 +123,8 @@ release-candidate commit.
 
 1. Fill the `CHANGELOG.md` 1.0.0 date and merge it with the hardening work.
 2. From a clean `main`, run `./scripts/check-release.sh`.
-3. Create and push an annotated `v1.0.0-rc.N` tag.
+3. Create and push an annotated `v1.0.0-rc.N` tag. Never reuse an `N` that has
+   already been pushed, even when its workflow failed before creating a draft.
 4. Require the release contract job, both verify legs, both artifact jobs, and
    the draft-release job to pass.
 5. Download the draft assets and verify `SHA256SUMS`.

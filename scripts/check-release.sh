@@ -93,6 +93,7 @@ snapshot_generated_assets
 
 run_cargo_metadata
 run_step bash ./scripts/test-release-tracked-state.sh
+run_step bash ./scripts/test-release-tag-contract.sh
 run_step ./scripts/check-architecture.sh
 run_step npm --prefix crates/sigillum-daemon/ui ci --ignore-scripts
 run_step npm --prefix crates/sigillum-daemon/ui audit --audit-level=high
