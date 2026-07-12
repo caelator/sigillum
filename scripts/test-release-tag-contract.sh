@@ -66,15 +66,16 @@ VALID_COMMIT="$(git -C "${SOURCE_REPO}" rev-parse HEAD)"
 git -C "${SOURCE_REPO}" remote add origin "${REMOTE_REPO}"
 git -C "${SOURCE_REPO}" push --quiet --set-upstream origin main
 
-ANNOTATED_TAG="v1.0.0-rc.1"
-LIGHTWEIGHT_TAG="v1.0.0-rc.2"
-OFF_MAIN_TAG="v1.0.0-rc.3"
-EMPTY_CHANGELOG_TAG="v1.0.0-rc.4"
-MISSING_CHANGELOG_TAG="v1.0.0-rc.5"
-UNDATED_CHANGELOG_TAG="v1.0.0-rc.6"
-SKIPPED_RC_TAG="v1.0.0-rc.8"
-MISSING_SEQUENCE_TAG="v1.0.0-rc.7"
-HIGHEST_LIGHTWEIGHT_TAG="v1.0.0-rc.9"
+BURNED_RC_TAG="v1.0.0-rc.1"
+ANNOTATED_TAG="v1.0.0-rc.2"
+LIGHTWEIGHT_TAG="v1.0.0-rc.3"
+OFF_MAIN_TAG="v1.0.0-rc.4"
+EMPTY_CHANGELOG_TAG="v1.0.0-rc.5"
+MISSING_CHANGELOG_TAG="v1.0.0-rc.6"
+UNDATED_CHANGELOG_TAG="v1.0.0-rc.7"
+SKIPPED_RC_TAG="v1.0.0-rc.9"
+MISSING_SEQUENCE_TAG="v1.0.0-rc.8"
+HIGHEST_LIGHTWEIGHT_TAG="v1.0.0-rc.10"
 FINAL_TAG="v1.0.0"
 
 git -C "${SOURCE_REPO}" tag -a "${ANNOTATED_TAG}" -m "annotated fixture"
@@ -117,21 +118,33 @@ git -C "${SOURCE_REPO}" tag -a "${FINAL_TAG}" \
 
 # The real 1.0.0 history burned and deleted rc.1 under the superseded policy.
 # Prove that the one documented legacy sequence starting at annotated rc.2 is
-# accepted, then restore rc.2 as the lightweight negative fixture below.
+# accepted.
 git init --quiet --bare "${LEGACY_REMOTE_REPO}"
 git -C "${LEGACY_REMOTE_REPO}" symbolic-ref HEAD refs/heads/main
 git -C "${SOURCE_REPO}" remote add legacy "${LEGACY_REMOTE_REPO}"
 git -C "${SOURCE_REPO}" push --quiet legacy main
-git -C "${SOURCE_REPO}" tag --force -a "${LIGHTWEIGHT_TAG}" \
+git -C "${SOURCE_REPO}" tag --force -a "${ANNOTATED_TAG}" \
   -m "legacy retained rc.2 fixture" "${VALID_COMMIT}"
-git -C "${SOURCE_REPO}" push --quiet legacy "${LIGHTWEIGHT_TAG}"
+git -C "${SOURCE_REPO}" push --quiet legacy "${ANNOTATED_TAG}"
 git clone --quiet "${LEGACY_REMOTE_REPO}" "${LEGACY_RUNNER_REPO}"
 git -C "${LEGACY_RUNNER_REPO}" checkout --quiet --detach "${VALID_COMMIT}"
 (
   cd "${LEGACY_RUNNER_REPO}"
-  bash "${CHECKER}" "${LIGHTWEIGHT_TAG}" "${VALID_COMMIT}" origin
+  bash "${CHECKER}" "${ANNOTATED_TAG}" "${VALID_COMMIT}" origin
 )
-git -C "${SOURCE_REPO}" tag --force "${LIGHTWEIGHT_TAG}" "${VALID_COMMIT}"
+
+# rc.1 was deleted under the superseded cleanup policy and is permanently
+# burned. Recreating it must poison both its own validation and the otherwise
+# valid retained rc.2 sequence.
+git -C "${SOURCE_REPO}" tag -a "${BURNED_RC_TAG}" \
+  -m "recreated burned rc.1 fixture" "${VALID_COMMIT}"
+git -C "${SOURCE_REPO}" push --quiet legacy "${BURNED_RC_TAG}"
+expect_failure_in_repo "${LEGACY_RUNNER_REPO}" "${TMP_ROOT}/burned-rc1.log" \
+  "v1.0.0-rc.1 is permanently burned and must remain absent" \
+  "${BURNED_RC_TAG}" "${VALID_COMMIT}" origin
+expect_failure_in_repo "${LEGACY_RUNNER_REPO}" "${TMP_ROOT}/recreated-rc1.log" \
+  "v1.0.0-rc.1 is permanently burned and must remain absent" \
+  "${ANNOTATED_TAG}" "${VALID_COMMIT}" origin
 
 ANNOTATED_TAG_OBJECT="$(git -C "${SOURCE_REPO}" rev-parse "refs/tags/${ANNOTATED_TAG}")"
 
@@ -242,7 +255,7 @@ expect_failure "${TMP_ROOT}/undated-changelog.log" "needs exactly one dated [1.0
 
 git -C "${SOURCE_REPO}" push --quiet origin "${SKIPPED_RC_TAG}"
 git -C "${RUNNER_REPO}" checkout --quiet --detach "${VALID_COMMIT}"
-expect_failure "${TMP_ROOT}/skipped-rc.log" "expected rc.7" \
+expect_failure "${TMP_ROOT}/skipped-rc.log" "expected rc.8" \
   "${SKIPPED_RC_TAG}" "${VALID_COMMIT}" origin
 
 # Fill the intentionally skipped fixture so final-release tests can exercise a

@@ -191,6 +191,9 @@ if [[ -n "${RC_NUMBER:-}" || "${TAG}" == "v${VERSION}" ]]; then
     esac
     [[ "${remote_rc_number}" =~ ^[1-9][0-9]*$ && "${#remote_rc_number}" -le 9 ]] ||
       fail "remote advertised a malformed RC tag: ${ref_name}"
+    if [[ "${VERSION}" == "1.0.0" && "${remote_rc_number}" -eq 1 ]]; then
+      fail "v1.0.0-rc.1 is permanently burned and must remain absent"
+    fi
     RC_TAG_COUNT=$((RC_TAG_COUNT + 1))
     if [[ "${remote_rc_number}" -gt "${HIGHEST_RC_NUMBER}" ]]; then
       HIGHEST_RC_NUMBER="${remote_rc_number}"
@@ -220,8 +223,11 @@ if [[ -n "${RC_NUMBER:-}" || "${TAG}" == "v${VERSION}" ]]; then
       fail "release tag ${TAG} is not the next RC after rc.${MAX_OTHER_RC}; expected rc.${EXPECTED_RC_NUMBER}"
   fi
 
-  if [[ "${LOWEST_RC_NUMBER}" -ne 1 ]]; then
-    [[ "${VERSION}" == "1.0.0" && "${LOWEST_RC_NUMBER}" -eq 2 ]] ||
+  if [[ "${VERSION}" == "1.0.0" ]]; then
+    [[ "${LOWEST_RC_NUMBER}" -eq 2 ]] ||
+      fail "retained v1.0.0 RC sequence must start at rc.2"
+  else
+    [[ "${LOWEST_RC_NUMBER}" -eq 1 ]] ||
       fail "remote RC sequence starts unexpectedly at rc.${LOWEST_RC_NUMBER}"
   fi
   EXPECTED_RETAINED_RC_COUNT=$((HIGHEST_RC_NUMBER - LOWEST_RC_NUMBER + 1))

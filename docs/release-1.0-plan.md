@@ -1463,10 +1463,42 @@ below; the remaining items are operator human-gates.
 #### H2 — Tag and release
 
 ```bash
-git checkout main && git pull --ff-only
-./scripts/check-release.sh
-git tag -a v1.0.0 -m "Sigillum 1.0.0 — Local-first wallet-management workstation"
-git push origin v1.0.0
+(
+  set -euo pipefail
+
+  RC_TAG=v1.0.0-rc.N # replace with the receipt-bearing retained RC
+  git fetch --prune --tags origin
+  RC_SHA="$(git rev-parse "${RC_TAG}^{commit}")"
+  git switch --detach "${RC_SHA}"
+  test -z "$(git status --porcelain)"
+  test "$(git rev-parse origin/main)" = "${RC_SHA}" || {
+    echo "main moved beyond ${RC_TAG}; create and qualify a new RC" >&2
+    exit 1
+  }
+  bash ./scripts/check-release-tag-contract.sh "${RC_TAG}" "${RC_SHA}" origin
+  ./scripts/check-release.sh
+
+  # The gate is long: refresh and reassert every identity immediately before
+  # creating the immutable final tag.
+  git fetch --prune --tags origin
+  test "$(git rev-parse HEAD)" = "${RC_SHA}"
+  test -z "$(git status --porcelain)"
+  test "$(git rev-parse origin/main)" = "${RC_SHA}" || {
+    echo "main moved during the gate; create and qualify a new RC" >&2
+    exit 1
+  }
+  bash ./scripts/check-release-tag-contract.sh "${RC_TAG}" "${RC_SHA}" origin
+  if git ls-remote --exit-code --tags --refs origin refs/tags/v1.0.0; then
+    echo "remote v1.0.0 already exists" >&2
+    exit 1
+  else
+    test "$?" -eq 2 # exit 2 means the exact remote tag is absent
+  fi
+
+  git tag -a v1.0.0 "${RC_SHA}" \
+    -m "Sigillum 1.0.0 — Local-first wallet-management workstation"
+  git push origin refs/tags/v1.0.0:refs/tags/v1.0.0
+)
 # watch .github/workflows/release.yml, verify artifacts + SHA256SUMS,
 # publish the draft GitHub Release.
 ```
