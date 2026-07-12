@@ -110,6 +110,10 @@ not the shipped local-first wallet-management baseline:
     not evidence for the current hardening candidate (F4)
   - public-testnet execution receipts for the four core execution families:
     native sweep, ERC-20 sweep, revoke, and gas top-up (F6)
+  - one sanitized external evidence bundle containing the same-RC operator
+    receipts; H2 binds its filename and SHA-256 digest into the immutable final
+    tag, verifies the uploaded copy before publication, and H3 records the
+    public linkage in the tracked audit
 - Within wallet management, only non-EVM chains (roadmap phase 10), swap
   execution (D-13), and fiat/NFT valuation (D-16) are deferred.
 

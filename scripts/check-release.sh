@@ -82,9 +82,11 @@ verify_generated_assets_unchanged() {
 require_command cargo
 require_command curl
 require_command git
+require_command jq
 require_command node
 require_command npm
 require_command shasum
+require_command tar
 require_cargo_subcommand audit "cargo install cargo-audit --version 0.22.1 --locked"
 require_cargo_subcommand deny "cargo install cargo-deny --version 0.19.4 --locked"
 
@@ -93,6 +95,7 @@ snapshot_generated_assets
 
 run_cargo_metadata
 run_step bash ./scripts/test-release-tracked-state.sh
+run_step bash ./scripts/test-release-evidence-bundle.sh
 run_step bash ./scripts/test-release-tag-contract.sh
 run_step ./scripts/check-architecture.sh
 run_step npm --prefix crates/sigillum-daemon/ui ci --ignore-scripts

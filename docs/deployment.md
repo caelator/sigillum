@@ -298,11 +298,16 @@ temporary harness directory on disk.
 The release workflow (`.github/workflows/release.yml`) triggers on tags matching
 `v*`, then rejects tags that are not annotated, do not match the workspace
 version (or its `-rc.N` form), lack a dated changelog section, or are not on
-`main` history. Before tagging `v1.0.0` for real, dry-run it with an rc tag:
+`main` history. Before tagging `v1.0.0` for real, dry-run it with an rc tag.
+The authoritative, fail-closed ceremony is section 6 of
+[`execution-runbook-1.0.md`](./execution-runbook-1.0.md); do not replace its
+pinned-SHA and post-gate identity checks with a shorter tag command:
 
-1. `git checkout main && git pull --ff-only && ./scripts/check-release.sh`
+1. Follow the runbook from a clean checkout, pin `GATE_SHA`, and run the full
+   gate.
 2. Select the next monotonically increasing RC number from the retained remote
-   `v1.0.0-rc.*` tags, then create and push that annotated tag.
+   `v1.0.0-rc.*` tags, reassert `HEAD == GATE_SHA == origin/main`, then create
+   and push that annotated tag with an explicit non-force refspec.
 3. Watch the Release workflow in the Actions tab; the contract job, both verify legs, both artifact jobs, and release job must all pass.
 4. Verify the draft release contains the `.dmg`, the zipped `.app`, both `sigillum-cli` `tar.gz` archives, `THIRD-PARTY-NOTICES.txt`, and `SHA256SUMS`.
 5. Download the assets and run `shasum -a 256 --check SHA256SUMS --ignore-missing`.
@@ -311,6 +316,13 @@ version (or its `-rc.N` form), lack a dated changelog section, or are not on
    Retain the RC draft/assets through final-draft verification and retain every
    pushed RC tag permanently. Only after final publication may the RC draft be
    deleted; never move, delete, or reuse its tag number.
+
+Final `v1.0.0` promotion is a separate fail-closed ceremony in H2 of
+[`release-1.0-plan.md`](./release-1.0-plan.md). It binds the exact sanitized
+operator-evidence archive digest into the protected annotated tag, waits for
+the exact final workflow, verifies all generated draft assets, uploads the
+evidence without replacement, re-downloads it, compares it with the tag, and
+only then publishes.
 
 ## Operational Notes
 

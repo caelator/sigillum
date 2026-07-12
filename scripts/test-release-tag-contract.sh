@@ -265,6 +265,66 @@ git -C "${SOURCE_REPO}" push --quiet origin "${MISSING_SEQUENCE_TAG}"
 
 git -C "${SOURCE_REPO}" push --quiet origin "${FINAL_TAG}"
 git -C "${RUNNER_REPO}" checkout --quiet --detach "${VALID_COMMIT}"
+expect_failure "${TMP_ROOT}/final-missing-evidence.log" \
+  "needs exactly one Release-Evidence-File field" \
+  "${FINAL_TAG}" "${VALID_COMMIT}" origin
+
+git -C "${SOURCE_REPO}" tag --force -a "${FINAL_TAG}" \
+  -m "final release fixture" \
+  -m "Release-Evidence-File: wrong-evidence.tar.gz" \
+  -m "Release-Evidence-SHA256: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" \
+  "${VALID_COMMIT}"
+git -C "${SOURCE_REPO}" push --quiet --force origin "${FINAL_TAG}"
+expect_failure "${TMP_ROOT}/final-wrong-evidence-file.log" \
+  "filename must be sigillum-v1.0.0-release-evidence.tar.gz" \
+  "${FINAL_TAG}" "${VALID_COMMIT}" origin
+
+git -C "${SOURCE_REPO}" tag --force -a "${FINAL_TAG}" \
+  -m "final release fixture" \
+  -m "Release-Evidence-File: sigillum-v1.0.0-release-evidence.tar.gz" \
+  -m "Release-Evidence-File: sigillum-v1.0.0-release-evidence.tar.gz" \
+  -m "Release-Evidence-SHA256: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" \
+  "${VALID_COMMIT}"
+git -C "${SOURCE_REPO}" push --quiet --force origin "${FINAL_TAG}"
+expect_failure "${TMP_ROOT}/final-duplicate-evidence-file.log" \
+  "needs exactly one Release-Evidence-File field" \
+  "${FINAL_TAG}" "${VALID_COMMIT}" origin
+
+git -C "${SOURCE_REPO}" tag --force -a "${FINAL_TAG}" \
+  -m "final release fixture" \
+  -m "Release-Evidence-File: sigillum-v1.0.0-release-evidence.tar.gz" \
+  "${VALID_COMMIT}"
+git -C "${SOURCE_REPO}" push --quiet --force origin "${FINAL_TAG}"
+expect_failure "${TMP_ROOT}/final-missing-evidence-digest.log" \
+  "needs exactly one Release-Evidence-SHA256 field" \
+  "${FINAL_TAG}" "${VALID_COMMIT}" origin
+
+git -C "${SOURCE_REPO}" tag --force -a "${FINAL_TAG}" \
+  -m "final release fixture" \
+  -m "Release-Evidence-File: sigillum-v1.0.0-release-evidence.tar.gz" \
+  -m "Release-Evidence-SHA256: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" \
+  -m "Release-Evidence-SHA256: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" \
+  "${VALID_COMMIT}"
+git -C "${SOURCE_REPO}" push --quiet --force origin "${FINAL_TAG}"
+expect_failure "${TMP_ROOT}/final-duplicate-evidence-digest.log" \
+  "needs exactly one Release-Evidence-SHA256 field" \
+  "${FINAL_TAG}" "${VALID_COMMIT}" origin
+
+git -C "${SOURCE_REPO}" tag --force -a "${FINAL_TAG}" \
+  -m "final release fixture" \
+  -m "Release-Evidence-File: sigillum-v1.0.0-release-evidence.tar.gz" \
+  -m "Release-Evidence-SHA256: not-a-digest" "${VALID_COMMIT}"
+git -C "${SOURCE_REPO}" push --quiet --force origin "${FINAL_TAG}"
+expect_failure "${TMP_ROOT}/final-invalid-evidence-digest.log" \
+  "must be 64 lowercase hexadecimal characters" \
+  "${FINAL_TAG}" "${VALID_COMMIT}" origin
+
+git -C "${SOURCE_REPO}" tag --force -a "${FINAL_TAG}" \
+  -m "final release fixture" \
+  -m "Release-Evidence-File: sigillum-v1.0.0-release-evidence.tar.gz" \
+  -m "Release-Evidence-SHA256: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" \
+  "${VALID_COMMIT}"
+git -C "${SOURCE_REPO}" push --quiet --force origin "${FINAL_TAG}"
 (
   cd "${RUNNER_REPO}"
   bash "${CHECKER}" "${FINAL_TAG}" "${VALID_COMMIT}" origin
@@ -275,7 +335,10 @@ git -C "${SOURCE_REPO}" add CHANGELOG.md
 git -C "${SOURCE_REPO}" commit --quiet -m "final descendant fixture"
 FINAL_DESCENDANT_COMMIT="$(git -C "${SOURCE_REPO}" rev-parse HEAD)"
 git -C "${SOURCE_REPO}" tag --force -a "${FINAL_TAG}" \
-  -m "descendant final fixture" "${FINAL_DESCENDANT_COMMIT}"
+  -m "descendant final fixture" \
+  -m "Release-Evidence-File: sigillum-v1.0.0-release-evidence.tar.gz" \
+  -m "Release-Evidence-SHA256: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" \
+  "${FINAL_DESCENDANT_COMMIT}"
 git -C "${SOURCE_REPO}" push --quiet origin main
 git -C "${SOURCE_REPO}" push --quiet --force origin "${FINAL_TAG}"
 git -C "${RUNNER_REPO}" fetch --quiet origin \

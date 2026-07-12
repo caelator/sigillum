@@ -274,6 +274,30 @@ if [[ -n "${RC_NUMBER:-}" || "${TAG}" == "v${VERSION}" ]]; then
       fail "highest retained RC ${HIGHEST_RC_REF} must resolve through a distinct tag object"
     [[ "${HIGHEST_PEELED_COMMIT}" == "${EXPECTED_COMMIT}" ]] ||
       fail "final release ${TAG} must use the same commit as ${HIGHEST_RC_REF}: ${HIGHEST_PEELED_COMMIT}"
+
+    # The operator evidence is produced after the immutable RC exists, so it
+    # cannot be committed into the receipt-bearing release SHA. Bind the exact
+    # sanitized bundle to the protected final tag object instead. The release
+    # is not contract-valid unless both fields are present exactly once.
+    FINAL_TAG_MESSAGE="$(git cat-file tag "${REMOTE_TAG_OBJECT}" | sed '1,/^$/d')"
+    EXPECTED_EVIDENCE_FILE="sigillum-v${VERSION}-release-evidence.tar.gz"
+    EVIDENCE_FILE_FIELD_COUNT="$({
+      grep -Ec '^Release-Evidence-File:' <<< "${FINAL_TAG_MESSAGE}" || true
+    })"
+    [[ "${EVIDENCE_FILE_FIELD_COUNT}" -eq 1 ]] ||
+      fail "final release tag message needs exactly one Release-Evidence-File field"
+    grep -Fx "Release-Evidence-File: ${EXPECTED_EVIDENCE_FILE}" \
+      <<< "${FINAL_TAG_MESSAGE}" >/dev/null ||
+      fail "final release evidence filename must be ${EXPECTED_EVIDENCE_FILE}"
+
+    EVIDENCE_SHA256_FIELD_COUNT="$({
+      grep -Ec '^Release-Evidence-SHA256:' <<< "${FINAL_TAG_MESSAGE}" || true
+    })"
+    [[ "${EVIDENCE_SHA256_FIELD_COUNT}" -eq 1 ]] ||
+      fail "final release tag message needs exactly one Release-Evidence-SHA256 field"
+    grep -Eq '^Release-Evidence-SHA256: [0-9a-f]{64}$' \
+      <<< "${FINAL_TAG_MESSAGE}" ||
+      fail "final release evidence SHA-256 must be 64 lowercase hexadecimal characters"
   fi
 fi
 

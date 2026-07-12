@@ -1,11 +1,14 @@
 # RC dry-run procedure (run only after the hardening branch and a dated CHANGELOG entry land on main):
-#   1. git checkout main && git pull --ff-only && ./scripts/check-release.sh
-#   2. git tag -a v1.0.0-rc.N -m "Sigillum 1.0.0-rc.N" && git push origin v1.0.0-rc.N
+#   1. Follow docs/execution-runbook-1.0.md section 6 exactly. It pins GATE_SHA,
+#      gates a clean detached checkout, and reasserts origin/main after the long gate.
+#   2. Push the annotated RC with the runbook's explicit non-force refspec.
 #   3. Watch this workflow in the Actions tab; the contract job, both verify legs, both artifact jobs, and release job must pass.
 #   4. Verify the DRAFT release contains: the .dmg, the .app.zip, both sigillum-cli tar.gz archives, THIRD-PARTY-NOTICES.txt, and SHA256SUMS.
 #   5. Download the assets and run: shasum -a 256 --check SHA256SUMS --ignore-missing
 #   6. Confirm the release is still a draft and its body contains the dated CHANGELOG section.
 #   7. Retain the RC tag and draft assets through final verification; remove only the RC draft after final publication.
+# Final v1.0.0 promotion is governed by plan H2. Its operator-evidence bundle
+# is uploaded and digest-verified after this workflow creates the final draft.
 
 name: Release
 
