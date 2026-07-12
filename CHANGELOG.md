@@ -7,6 +7,14 @@ from 1.0.0 onward, per the stability policy in `docs/stability.md`.
 
 ## [Unreleased]
 
+### Documentation
+
+- Reframed the public project landing page around Sigillum's local-first EVM
+  wallet-management product, added an indexed documentation map and community
+  health files, clarified the unreleased/unsupported status and invalid RC tag,
+  corrected stale crate descriptions, and enabled private vulnerability
+  reporting.
+
 ## [1.0.0] - 2026-07-10
 
 ### Added
