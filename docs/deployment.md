@@ -293,20 +293,27 @@ doctor count, and checked surfaces. Set `SIGILLUM_SOAK_KEEP_ARTIFACTS=1` only
 when you need daemon/gateway logs for investigation, because that keeps the
 temporary harness directory on disk.
 
-## Release Dry Run (rc tag)
+## Release Dry Run (RC tag)
 
 The release workflow (`.github/workflows/release.yml`) triggers on tags matching
 `v*`, then rejects tags that are not annotated, do not match the workspace
 version (or its `-rc.N` form), lack a dated changelog section, or are not on
-`main` history. Before tagging `v1.0.0` for real, dry-run it with an rc tag:
+`main` history. Before tagging `v1.0.0` for real, dry-run it with a fresh,
+never-before-pushed RC number (`N`):
 
 1. `git checkout main && git pull --ff-only && ./scripts/check-release.sh`
-2. `git tag -a v1.0.0-rc.1 -m "Sigillum 1.0.0-rc.1 dry run" && git push origin v1.0.0-rc.1`
+2. `git tag -a v1.0.0-rc.N -m "Sigillum 1.0.0-rc.N dry run" && git push origin v1.0.0-rc.N`
 3. Watch the Release workflow in the Actions tab; the contract job, both verify legs, both artifact jobs, and release job must all pass.
 4. Verify the draft release contains the `.dmg`, the zipped `.app`, both `sigillum-cli` `tar.gz` archives, `THIRD-PARTY-NOTICES.txt`, and `SHA256SUMS`.
 5. Download the assets and run `shasum -a 256 --check SHA256SUMS --ignore-missing`.
 6. Confirm the release is still a draft and its body carries the dated `CHANGELOG` section for the version. There is no fallback release body.
-7. Clean up: `gh release delete v1.0.0-rc.1 --yes`, then `git push origin :refs/tags/v1.0.0-rc.1` and `git tag -d v1.0.0-rc.1`.
+7. Clean up a successful draft-only rehearsal: `gh release delete v1.0.0-rc.N
+   --yes`, then `git push origin :refs/tags/v1.0.0-rc.N` and `git tag -d
+   v1.0.0-rc.N`. Never reuse that RC number after it has been pushed.
+
+The public `v1.0.0-rc.2` tag is not valid release evidence. It was pushed as a
+lightweight tag and the release contract rejected it; no GitHub Release was
+published. A future rehearsal must use a fresh RC number and an annotated tag.
 
 ## Operational Notes
 

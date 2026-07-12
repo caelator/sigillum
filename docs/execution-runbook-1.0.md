@@ -2,7 +2,7 @@
 
 **Status:** Active hardening and release handbook
 
-**State recorded:** 2026-07-10, `main` at `b647df5`
+**State recorded:** 2026-07-12, `main` at `815d262`
 
 **Plan authority:** [release-1.0-plan.md](./release-1.0-plan.md)
 
@@ -17,6 +17,9 @@ a commit that contains later hardening changes.
 - There is no final `v1.0.0` release tag or published final release.
 - The `a22a98a` RC dry run proved the workflow shape at that historical commit;
   it is not release evidence for the current hardening line.
+- The public `v1.0.0-rc.2` tag is a lightweight tag. The release workflow
+  correctly rejected it because the contract requires an annotated tag, and no
+  GitHub Release was published from it. Never reuse that RC number.
 - A fresh RC is required after the capability-auth, payment-truth,
   queue-durability, no-HID, and release-governance fixes land.
 - Gateway payments are preview-only and disabled by default. Opt-in balance
