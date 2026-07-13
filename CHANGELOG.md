@@ -145,6 +145,18 @@ from 1.0.0 onward, per the stability policy in `docs/stability.md`.
 
 ### Fixed
 
+- **Plan-step dependency finality** — Dependent execution jobs remain unsigned
+  while prerequisites are merely prepared, submitted, or broadcast, and may
+  proceed only after every prerequisite reaches receipt-confirmed success.
+  Crash-recovered prepared authority follows the same rule: unknown submissions
+  remain receipt-observable but cannot be resubmitted early.
+- **Release evidence network and gas-chain contract** — Restricted execution
+  evidence to Ethereum Sepolia (`11155111`) plus Base Sepolia (`84532`),
+  Arbitrum Sepolia (`421614`), or OP Sepolia (`11155420`), rejecting mainnet,
+  arbitrary, and non-integer chain IDs. F6 schema v2 now proves five
+  transactions for four families, including distinct ordered `fund_gas` and
+  dependent-sweep legs bound to their runtime plan, job, step, receipt, address,
+  prerequisite, and broadcast-time identities.
 - **`sigillum-fido2` no-HID builds** — Compiling with `default-features = false`
   keeps the API surface but returns explicit errors for hardware-only
   operations; the release gate compiles, tests, and lints this configuration.

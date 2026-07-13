@@ -26,11 +26,11 @@ fn plan_step_source_key(payload: &QueueJobPayload) -> Option<SourceKey> {
 }
 
 /// A job whose `prerequisite_job_ids` explicitly names `occupant_job_id` is
-/// already safely sequenced AFTER it (W6.4 dependency ordering) — nonce
-/// fetch-at-broadcast-time means it naturally gets the next nonce once its
-/// prerequisite has broadcast. Per-source serialization exists to guard
-/// INDEPENDENT jobs sharing a source, not the same-batch
-/// sweep→revoke→fund_gas chain W7.3 already resolves in one drain call.
+/// already sequenced AFTER it (W6.4 dependency ordering). The dependency gate
+/// still requires the prerequisite to reach `confirmed` before the dependent
+/// may sign; this exemption only prevents the independent-job serialization
+/// check from masking that more specific dependency state. Per-source
+/// serialization exists to guard unrelated jobs sharing a source.
 fn plan_step_depends_on(payload: &QueueJobPayload, occupant_job_id: &str) -> bool {
     match payload {
         QueueJobPayload::PlanStepExecution(step) => step

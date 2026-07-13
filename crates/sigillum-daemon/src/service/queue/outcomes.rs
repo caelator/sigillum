@@ -1,5 +1,4 @@
-//! Apply one job's `QueueExecution` outcome (or classified error) to its
-//! persisted fields and the drain-cycle tally.
+//! Apply one queue execution outcome or classified error to persisted fields and the drain tally.
 
 use sigillum_api::QueueJob;
 
@@ -10,7 +9,7 @@ use super::failure::{
     QueueFailureCause, QueueFailureDisposition, classify_blocked_queue_reason,
     classify_operator_action_reason, classify_queue_error,
 };
-use super::replay::clear_replay_bytes;
+use super::replay::{clear_replay_bytes, hold_prepared};
 use super::state::mark_job_operator_action_required;
 use super::tally::QueueDrainTally;
 use super::{
@@ -69,6 +68,7 @@ pub(super) fn apply(
             job.receipt.prepared_payload_hash_hex = Some(payload_hash);
             job.receipt.prepared_binding_hash_hex = Some(binding_hash);
         }
+        Ok(QueueExecution::PreparedHeld(reason)) => hold_prepared(job, reason, tally),
         Ok(QueueExecution::Broadcasted {
             broadcast_transaction_hash_hex,
         }) => {

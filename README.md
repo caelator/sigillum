@@ -9,8 +9,11 @@
 > Sigillum has not published a supported stable release. Build and evaluate the
 > current source on a non-production machine with test wallets first.
 > `v1.0.0-rc.2` failed the annotated-tag contract, and `v1.0.0-rc.3` later
-> exposed an invalid macOS bundle signature despite a green legacy check. Both
-> tags are immutable failure receipts; the next candidate is `v1.0.0-rc.4`.
+> exposed an invalid macOS bundle signature despite a green legacy check.
+> `v1.0.0-rc.4` fixed signing but exposed an F6 contract that could accept a
+> mainnet as the L2 testnet, reduce a two-transaction gas-top-up chain to one
+> hash, and let a dependent run before its prerequisite confirmed. All three
+> tags are immutable failure receipts; the next candidate is `v1.0.0-rc.5`.
 
 Sigillum is a self-hosted, single-operator workstation for finding EVM wallets
 and assets, understanding their provenance and risk, preparing consolidation

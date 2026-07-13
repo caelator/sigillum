@@ -199,59 +199,154 @@ jq -e --arg rc_sha "${RC_SHA}" '
   fail "F4 chaos receipt does not prove the required clean 600-second RC soak"
 
 jq -e --arg rc_sha "${RC_SHA}" '
+    def flattened_claims:
+      [.executions[] |
+        if .family == "gas_top_up_sweep" then
+          . as $parent |
+          .legs[] |
+          . + {
+            family: $parent.family,
+            network_role: $parent.network_role,
+            chain_id: $parent.chain_id,
+            plan_id: $parent.plan_id
+          }
+        else
+          .
+        end];
     .networks as $networks |
-    .schema_version == 1 and
+    .schema_version == 2 and
     .kind == "sigillum.testnet_execution" and
     .status == "passed" and
     .rc_sha == $rc_sha and
     (.networks | type == "array" and length == 2) and
-    any(.networks[]; .role == "sepolia" and .chain_id == 11155111) and
+    ([.networks[].role] | sort) == ["l2", "sepolia"] and
+    any(.networks[];
+      .role == "sepolia" and
+      (.chain_id |
+        type == "number" and
+        . == floor and
+        . == 11155111)) and
     any(.networks[];
       .role == "l2" and
-      ((.chain_id | type) == "number") and
-      .chain_id > 1 and
-      .chain_id != 11155111) and
+      (.chain_id |
+        type == "number" and
+        . == floor and
+        (. as $id |
+          [84532, 421614, 11155420] | index($id) != null))) and
     (.executions | type == "array" and length == 4) and
-    (["native_sweep", "erc20_sweep", "erc20_revoke", "gas_top_up_sweep"] -
-      [.executions[].family] | length == 0) and
+    ([.executions[].family] | sort) ==
+      ["erc20_revoke", "erc20_sweep", "gas_top_up_sweep", "native_sweep"] and
     (["sepolia", "l2"] - [.executions[].network_role] | length == 0) and
-    ([.executions[].tx_hash] | length == (unique | length)) and
-    ([.executions[].audit_export] | length == (unique | length)) and
     all(.executions[];
       . as $execution |
       any($networks[];
         .role == $execution.network_role and
         .chain_id == $execution.chain_id)) and
-    all(.executions[];
+    all(.executions[] | select(.family != "gas_top_up_sweep");
       .status == "confirmed" and
+      (has("legs") | not) and
       (.tx_hash | test("^0x[0-9a-f]{64}$")) and
-      (.audit_export | test("^f6/audit/[A-Za-z0-9._-]+$")))
+      (.audit_export | test("^f6/audit/[A-Za-z0-9._-]+$"))) and
+    (
+      (.executions[] | select(.family == "gas_top_up_sweep")) as $gas_chain |
+      ($gas_chain | has("tx_hash") | not) and
+      ($gas_chain | has("audit_export") | not) and
+      ($gas_chain.plan_id | type == "string" and length > 0) and
+      $gas_chain.status == "confirmed" and
+      ($gas_chain.legs | type == "array" and length == 2) and
+      [$gas_chain.legs[].role] == ["fund_gas", "dependent_sweep"] and
+      all($gas_chain.legs[];
+        .plan_id == $gas_chain.plan_id and
+        .network_role == $gas_chain.network_role and
+        .chain_id == $gas_chain.chain_id and
+        (.step_id | type == "string" and length > 0) and
+        (.job_id | type == "string" and length > 0) and
+        (.source_address | test("^0x[0-9a-f]{40}$"; "i")) and
+        (.destination_address | test("^0x[0-9a-f]{40}$"; "i")) and
+        (.prerequisite_job_ids | type == "array") and
+        all(.prerequisite_job_ids[]; type == "string" and length > 0) and
+        ([.prerequisite_job_ids[]] | length == (unique | length)) and
+        .queue_state == "confirmed" and
+        .receipt_status == "success" and
+        (.confirmations |
+          type == "number" and . == floor and . > 0) and
+        (.receipt_block_number |
+          type == "number" and . == floor and . >= 0) and
+        (.broadcast_at_unix |
+          type == "number" and . == floor and . > 0) and
+        (.tx_hash | test("^0x[0-9a-f]{64}$")) and
+        (.audit_export | test("^f6/audit/[A-Za-z0-9._-]+$"))) and
+      ($gas_chain.legs[0] as $fund |
+        $gas_chain.legs[1] as $sweep |
+        $fund.action == "fund_gas" and
+        ($sweep.action == "sweep_native" or $sweep.action == "sweep_erc20") and
+        $fund.prerequisite_job_ids == [] and
+        $sweep.prerequisite_job_ids == [$fund.job_id] and
+        $fund.job_id != $sweep.job_id and
+        $fund.step_id != $sweep.step_id and
+        ($fund.destination_address | ascii_downcase) ==
+          ($sweep.source_address | ascii_downcase) and
+        $fund.broadcast_at_unix < $sweep.broadcast_at_unix and
+        $fund.receipt_block_number < $sweep.receipt_block_number)
+    ) and
+    (flattened_claims as $claims |
+      ($claims | length == 5) and
+      ([$claims[].tx_hash] | length == (unique | length)) and
+      ([$claims[].audit_export] | length == (unique | length)))
   ' "${EXTRACTED}/f6/receipts.json" >/dev/null ||
-  fail "F6 receipt does not prove all core families across Sepolia and one L2"
+  fail "F6 receipt does not prove four core families and both ordered gas-top-up chain legs across supported testnets"
 
-while IFS=$'\t' read -r family network_role chain_id tx_hash audit_export; do
+while IFS= read -r claim; do
+  audit_export="$(jq -r '.audit_export' <<<"${claim}")"
   [[ -s "${EXTRACTED}/${audit_export}" ]] ||
     fail "F6 audit export is missing or empty: ${audit_export}"
   jq -e \
     --arg rc_sha "${RC_SHA}" \
-    --arg family "${family}" \
-    --arg network_role "${network_role}" \
-    --argjson chain_id "${chain_id}" \
-    --arg tx_hash "${tx_hash}" '
-      .schema_version == 1 and
+    --argjson claim "${claim}" '
+      .schema_version == 2 and
       .kind == "sigillum.execution_audit" and
       .status == "verified" and
       .rc_sha == $rc_sha and
-      .family == $family and
-      .network_role == $network_role and
-      .chain_id == $chain_id and
-      .tx_hash == $tx_hash and
-      .audit_chain_verified == true
+      .family == $claim.family and
+      .network_role == $claim.network_role and
+      .chain_id == $claim.chain_id and
+      .tx_hash == $claim.tx_hash and
+      .audit_chain_verified == true and
+      (if $claim.family == "gas_top_up_sweep" then
+        .leg_role == $claim.role and
+        .plan_id == $claim.plan_id and
+        .step_id == $claim.step_id and
+        .job_id == $claim.job_id and
+        .action == $claim.action and
+        (.source_address | ascii_downcase) ==
+          ($claim.source_address | ascii_downcase) and
+        (.destination_address | ascii_downcase) ==
+          ($claim.destination_address | ascii_downcase) and
+        .prerequisite_job_ids == $claim.prerequisite_job_ids and
+        .queue_state == $claim.queue_state and
+        .receipt_status == $claim.receipt_status and
+        .confirmations == $claim.confirmations and
+        .receipt_block_number == $claim.receipt_block_number and
+        .broadcast_at_unix == $claim.broadcast_at_unix
+      else
+        true
+      end)
     ' "${EXTRACTED}/${audit_export}" >/dev/null ||
     fail "F6 audit export does not match its execution receipt: ${audit_export}"
-done < <(jq -r '.executions[] |
-  [.family, .network_role, .chain_id, .tx_hash, .audit_export] | @tsv' \
-  "${EXTRACTED}/f6/receipts.json")
+done < <(jq -c '
+  .executions[] |
+  if .family == "gas_top_up_sweep" then
+    . as $parent |
+    .legs[] |
+    . + {
+      family: $parent.family,
+      network_role: $parent.network_role,
+      chain_id: $parent.chain_id,
+      plan_id: $parent.plan_id
+    }
+  else
+    .
+  end' "${EXTRACTED}/f6/receipts.json")
 
 jq -e --arg rc_sha "${RC_SHA}" '
     .schema_version == 1 and

@@ -73,8 +73,10 @@ Read this section before every work session.
   `.github/workflows/ci.yml`).
 - A Chromium-family browser for `scripts/check-browser-smoke.sh`; if the host
   has none, export `SIGILLUM_SKIP_BROWSER_SMOKE=1` and note it in the PR.
-- Task F6 (testnet receipts) needs a human to supply funded Sepolia/L2-testnet
-  accounts and RPC endpoints; it is flagged as human-in-the-loop.
+- Task F6 (testnet receipts) needs a human to supply funded Ethereum Sepolia
+  (`11155111`) plus Base Sepolia (`84532`), Arbitrum Sepolia (`421614`), or OP
+  Sepolia (`11155420`) accounts and RPC endpoints; it is flagged as
+  human-in-the-loop.
 
 ### 0.3 Verification commands
 
@@ -329,7 +331,7 @@ any requires human sign-off recorded here.
 | D-11 | **DeFi exit-adapter set at 1.0:** Aave v3 withdraw (exists), generic ERC-4626 redeem, Uniswap v2 LP removeLiquidity, Lido wstETH unwrap. Nothing else; other positions surface as `review_asset`. | Standard interfaces with dominant TVL coverage; bounded and testable. Uniswap v3 NFT positions and Lido withdrawal queue are disproportionate for 1.0. |
 | D-12 | **Claim execution at 1.0 = `merkle-distributor-v1` adapter only**, gated by simulation pass + explicit step approval + risk-catalog review + a policy opt-in. All other claim types remain review/export-only. | The simulation slice for this adapter already exists; it is the only claim shape safe to automate. |
 | D-13 | **No swap step type at 1.0.** Planner does not emit swap steps; dust keeps the `review_asset` fallback. | The roadmap marks swaps "optionally"; DEX routing/slippage is a large adversarial surface orthogonal to the completion bar. |
-| D-14 | **Execution testing bar:** every execution family needs mock-RPC integration tests (mandatory) AND a recorded public-testnet receipt (Sepolia + one L2 testnet) for native sweep, ERC-20 sweep, revoke, and gas top-up. Adapter exits and Merkle claims: mock-mandatory, testnet best-effort (contract availability permitting). | Real broadcasts need real-network evidence; contract-dependent families should not block on deploying testnet contracts. |
+| D-14 | **Execution testing bar:** every execution family needs mock-RPC integration tests (mandatory) AND recorded public-testnet evidence on Sepolia (`11155111`) plus one supported L2 testnet — Base Sepolia (`84532`), Arbitrum Sepolia (`421614`), or OP Sepolia (`11155420`) — for native sweep, ERC-20 sweep, revoke, and gas top-up. Four families require five transactions: gas top-up must include both receipt-confirmed `fund_gas` and dependent-sweep legs, with the sweep blocked until the top-up reaches finality. Adapter exits and Merkle claims: mock-mandatory, testnet best-effort (contract availability permitting). | Real broadcasts need real-network evidence; contract-dependent families should not block on deploying testnet contracts. The offline bundle checker validates schema-v2 structure and runtime identity bindings, while H2 independently verifies all five claimed transactions on the named public chains. |
 | D-15 | **Registries stay local.** Token lists, spender labels, spam heuristics: operator-imported files + the existing risk catalog. No runtime fetching of external feeds. | Preserves the local-first/no-phone-home boundary; RPC endpoints remain the only outbound surface. |
 | D-16 | **No valuation at 1.0.** Holdings show raw amounts; no fiat/floor pricing. | Price feeds add an external dependency + phone-home surface for cosmetic value; the completion bar doesn't need it. |
 | D-17 | **Quorum model at 1.0 = unlock-time compartment threshold** (already implemented in `service/lifecycle.rs`). Execution adds per-plan explicit approval + typed confirmation at enqueue (W7.2) + policy gates + gate-flip audit events (W7.1), not a second quorum ceremony. **Recorded residual risk:** with `allow_plan_execution` on, a stolen session token on the local machine can move funds — the mitigations above detect and bound it, they do not prevent it. This residual risk MUST be stated in `docs/stability.md` and the readiness docs (G2/G5). FIDO2 tap-to-execute is the named post-1.0 hardening candidate. | The threshold ceremony already exists at unlock; on a single-operator machine the marginal boundary of a second ceremony is real but small, and the risk is honestly documented instead of silently accepted. |
@@ -1328,17 +1330,28 @@ Order within W7 is strict: W7.1 → W7.2 → W7.3 → W7.4 → W7.5.
 
 - **Ordering note:** runs with Phase H, against the RC build. Needs a human
   to fund accounts.
-- **Steps:** with operator-supplied Sepolia + one L2-testnet RPC endpoints
-  and funded seed profiles: execute and record (tx hashes + audit export)
-  one each of native sweep, ERC-20 sweep (faucet token), ERC-20 revoke, gas
-  top-up chain (`fund_gas` → sweep). Adapter exits and a Merkle claim:
+- **Steps:** with operator-supplied Sepolia (`11155111`) plus one supported
+  L2-testnet RPC endpoint — Base Sepolia (`84532`), Arbitrum Sepolia
+  (`421614`), or OP Sepolia (`11155420`) — and funded seed profiles: execute
+  and record five transaction hashes plus audit exports: one each for native
+  sweep, ERC-20 sweep (faucet token), and ERC-20 revoke, plus both legs of the
+  gas top-up chain (`fund_gas` → dependent sweep). Process the top-up to
+  receipt-confirmed finality before allowing the dependent sweep to sign.
+  Adapter exits and a Merkle claim:
   attempt if suitable contracts are available; otherwise record
   "mock-verified only" explicitly. Store the sanitized receipt summary and
   audit export in the external release-evidence bundle. H2 binds that bundle's
   digest into the immutable final tag; H3 records the public bundle link and
   sanitized summary in `docs/production-readiness-audit.md`.
-- **Accept:** the four core families have real-testnet tx evidence at the RC
-  SHA; adapter/claim status recorded honestly either way. **Size:** M
+- **Accept:** the four core families have five real-testnet transactions at the
+  RC SHA. F6 schema v2 binds the two gas legs to one plan/network/chain, their
+  distinct jobs and steps, the top-up destination/dependent source, the
+  prerequisite edge, confirmed successful receipts, and strict block order.
+  Before H2, the operator independently confirms every transaction on the
+  claimed public chain (chain ID, successful receipt, finality, and the family
+  effect represented by its audit export). The offline evidence checker proves
+  archive structure and internal bindings, not live-chain truth. Adapter/claim
+  status is recorded honestly either way. **Size:** M
   (wall-clock + human).
 
 #### F7 — 0.1 → 1.0 data-directory upgrade verification
@@ -1468,23 +1481,32 @@ below; the remaining items are operator human-gates.
 > **RC3 failure:** `v1.0.0-rc.3` at `0a97c18` passed the legacy workflows and
 > produced checksum-valid assets, but its macOS app had no bundle resource seal
 > and failed `codesign --verify --deep --strict`. Its F4, doctor, asset, and any
-> install receipts are void for final promotion. The next candidate is RC4
-> after the signing remediation passes protected-main gates.
+> install receipts are void for final promotion. At that point RC4 became the
+> next candidate, contingent on protected-main signing-remediation gates.
 
-- [ ] Fresh clone of `main` at RC4; `./scripts/check-release.sh` passes there.
-      (No RC4 workflow exists yet.)
-- [ ] CI green on the RC4 commit, both legs. (No qualifying RC4 run yet.)
-- [ ] F4 soak receipts (standard + chaos) reference the RC4 SHA. (No
-      qualifying RC4 receipt yet.)
-- [ ] F6 testnet receipts recorded for the four core execution families. (No
-      qualifying RC4 receipt yet; funded testnet access is required.)
+> **RC4 failure:** `v1.0.0-rc.4` at `f73b861` contains the signing remediation,
+> but its F6 evidence validator accepted any numeric chain other than Sepolia
+> as the L2 and represented the two-transaction gas-top-up chain with one hash.
+> Its queue also treated `sent` (broadcast, unconfirmed) as prerequisite
+> success. Preserve RC4 as immutable failed-contract evidence; no RC4 operator
+> receipt can promote a final tag. The next candidate is RC5 after the runtime,
+> L2 allowlist, and F6 schema-v2 fixes pass protected-main gates.
+
+- [ ] Fresh clone of `main` at RC5; `./scripts/check-release.sh` passes there.
+      (No RC5 workflow exists yet.)
+- [ ] CI green on the RC5 commit, both legs. (No qualifying RC5 run yet.)
+- [ ] F4 soak receipts (standard + chaos) reference the RC5 SHA. (No
+      qualifying RC5 receipt yet.)
+- [ ] F6 testnet receipts record five transactions for the four core execution
+      families, including both confirmed gas-chain legs. (No qualifying RC5
+      receipt yet; funded testnet access is required.)
 - [ ] F7 upgrade-path tests green: 0.1-era fixture dir boots and migrates on
-      the RC4 build; 0.1-era snapshot restores. (The tests remain in the source
-      gate but must rerun at the RC4 SHA.)
-- [ ] Desktop `.dmg` from RC4 strictly verifies, installs, and reaches the unlock
-      screen on a machine without a dev toolchain. (No RC4 artifact exists yet.)
-- [ ] `sigillum doctor` passes on each supported host at the RC4 SHA. (No
-      qualifying RC4 receipt yet.)
+      the RC5 build; 0.1-era snapshot restores. (The tests remain in the source
+      gate but must rerun at the RC5 SHA.)
+- [ ] Desktop `.dmg` from RC5 strictly verifies, installs, and reaches the unlock
+      screen on a machine without a dev toolchain. (No RC5 artifact exists yet.)
+- [ ] `sigillum doctor` passes on each supported host at the RC5 SHA. (No
+      qualifying RC5 receipt yet.)
 - [~] A full local walkthrough of the completion bar: import a seed →
       multi-chain scan → review inventory/risk → generate plan → approve →
       execute against a local mock provider → audit trail complete. (execute→audit
@@ -1745,9 +1767,11 @@ Phase C — Desktop productization
 - [x] C1 real icon set
 - [x] C2 bundling enabled (.app/.dmg)
 - [~] C3 fail-closed env-gated signing and explicit full-bundle ad-hoc default
-      (implemented for RC4; needs protected-main and release-workflow proof)
+      (landed and source-gate proven on protected `main`; the complete claim
+      needs fresh RC5 release-workflow proof)
 - [~] C4 strict source + mounted-dmg verification and negative regressions in
-      the release gate (implemented for RC4; needs protected-main proof)
+      the release gate (landed and source-gate proven on protected `main`; the
+      complete claim needs fresh RC5 release-workflow proof)
 - [x] C5 boot helpers extracted + tested
 - [x] C6 desktop docs
 - [ ] C7 operator console UX redesign (user-directed)
@@ -1801,12 +1825,15 @@ Phase G — Release engineering
 - [x] G2 docs/stability.md
 - [x] G3 version bump to 1.0.0
 - [~] G4 release workflow (historical dry run validated on a22a98a; RC3 exposed
-      a signature false positive; RC4 must prove strict release-bundle verification)
+      a signature false positive; RC4 exposed an evidence-contract false
+      positive and unconfirmed-dependency execution; RC5 must prove all
+      remediations)
 - [x] G5 readiness + product docs final sync
 
 Phase H — Ship
 - [~] H1 RC verification checklist (RC3 void after bundle-signature failure;
-      all source, release, F4/F6, clean-machine, and doctor evidence must bind RC4)
+      RC4 void after the F6 schema and dependency-finality failures; all source,
+      release, F4/F6, clean-machine, and doctor evidence must bind RC5)
 - [ ] H2 v1.0.0 tagged, artifacts published (human gate — operator go)
 - [ ] H3 post-release bump + planning issue
 
@@ -2158,3 +2185,14 @@ Phase H — Ship
   mounted-dmg apps plus CDHash parity; negative regressions cover the RC3 shape,
   tampering, identifier, symlink, path, and dmg-layout failures; the release
   artifact job runs the verifier after adding notices and before upload.
+- 2026-07-12 RC4 FAILURE (`f73b861`): the signing remediation passed the
+  protected-main source gate, but the F6 validator accepted arbitrary numeric
+  chains as the L2 and collapsed a two-transaction gas-top-up chain to one
+  hash. Runtime dependency ordering also treated broadcast-only `sent` as
+  success instead of requiring `confirmed`. Preserve RC4 and its receipts as
+  immutable failed-contract evidence; RC5 must fix dependency finality, require
+  Ethereum Sepolia (`11155111`) plus Base Sepolia (`84532`), Arbitrum Sepolia
+  (`421614`), or OP Sepolia (`11155420`), require F6 schema v2 with five
+  transactions, and re-run every same-SHA gate. Historical release run
+  `29230844456` completed all six jobs and its six-asset unpublished draft,
+  proving the signing fix but not curing the assurance/runtime failures.
