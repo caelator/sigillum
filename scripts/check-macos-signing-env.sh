@@ -58,6 +58,10 @@ if [[ "${signing_mode}" == "adhoc" && ( "${apple_id_count}" == "3" || "${api_key
   fail "notarization credentials require a complete Developer ID signing configuration"
 fi
 
+if [[ "${signing_mode}" == "developer-id" && "${apple_id_count}" == "0" && "${api_key_count}" == "0" ]]; then
+  fail "Developer ID signing requires exactly one complete notarization credential family"
+fi
+
 if [[ "${api_key_count}" == "3" ]]; then
   api_key_path="$(trim_env APPLE_API_KEY_PATH)"
   if [[ ! -f "${api_key_path}" || -L "${api_key_path}" || ! -r "${api_key_path}" || ! -s "${api_key_path}" ]]; then

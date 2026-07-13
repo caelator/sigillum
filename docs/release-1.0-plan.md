@@ -489,9 +489,10 @@ A → (B ∥ C ∥ D) → E → (W1 ∥ W2) → (W3 ∥ W4 ∥ W5 ∥ W6) → W7
   Settings → Privacy & Security → "Open Anyway" flow, `SHA256SUMS`
   verification before opening, and the full-credentials path.
 - **Accept:** clean-shell build yields a strictly verified full-bundle ad-hoc
-  signature; complete Developer ID inputs select the full-signing path; every
-  incomplete credential matrix fails before build; docs cover both paths
-  including the macOS 15 flow.
+  signature; complete Developer ID inputs plus exactly one notarization family
+  select the signed/notarized/stapled path; every incomplete credential matrix
+  or Developer ID-without-notarization configuration fails before build; docs
+  cover both paths including the macOS 15 flow.
   **Size:** S.
 
 #### C4 — Desktop check script in the release gate
@@ -505,7 +506,8 @@ A → (B ∥ C ∥ D) → E → (W1 ∥ W2) → (W3 ∥ W4 ∥ W5 ∥ W6) → W7
   missing hardened runtime, tampering, wrong identifier, CDHash mismatch,
   zero/multiple/wrong-name apps, symlink escape, and paths with spaces. In
   Developer ID mode, require the dmg to be non-ad-hoc and signed by the same
-  team as the app. Print an explicit skip line on other OSes. Wire into
+  team as the app and validate the stapled ticket on source and mounted apps.
+  Print an explicit skip line on other OSes. Wire into
   `check-release.sh` after browser smoke; add tauri-cli install to the CI
   macOS leg if needed; document the toggle in the audit doc.
 - **Accept:** gate runs the desktop step on both OSes; the added macOS CI

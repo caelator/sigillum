@@ -131,6 +131,8 @@ metadata, hardened runtime, and CDHash parity, and runs negative bundle/dmg
 regressions including a CDHash mismatch. Developer ID mode also requires the
 dmg signature team to match the app. Partial,
 mixed, or whitespace-only Apple credential configurations fail closed. The
+Developer ID path also requires one complete notarization family and validates
+the stapled ticket on the source and mounted apps. The
 macOS bundle portion can be skipped with `SIGILLUM_SKIP_DESKTOP_BUNDLE=1` only
 outside CI when the host cannot build Tauri bundles; non-macOS hosts print an
 explicit bundle-skip line after the compile check.

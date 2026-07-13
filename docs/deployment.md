@@ -117,7 +117,8 @@ expected signature mode, hardened runtime, and matching CDHash values. It also
 runs negative regressions for the RC3 linker-only failure, missing hardened runtime,
 tampering, wrong identifiers, CDHash mismatch, symlinks, and malformed dmg
 layouts. Developer ID mode additionally requires the dmg to carry a non-ad-hoc
-Developer ID signature from the same team as the app. Set
+Developer ID signature from the same team as the app and validates the stapled
+notarization ticket on both source and mounted apps. Set
 `SIGILLUM_SKIP_DESKTOP_BUNDLE=1` only
 on non-CI macOS hosts that cannot build Tauri bundles; CI rejects the toggle.
 
@@ -222,7 +223,7 @@ The credential-free path must show `Identifier=com.sigillum.desktop`,
 proof: RC3's linker-only binary printed that line while its bundle failed
 strict verification.
 
-### Full signing and notarization (optional)
+### Full signing and notarization (optional release mode)
 
 Set the complete signing trio before invoking the project wrapper:
 
@@ -230,7 +231,8 @@ Set the complete signing trio before invoking the project wrapper:
 - `APPLE_CERTIFICATE_PASSWORD`
 - `APPLE_SIGNING_IDENTITY`, for example `Developer ID Application: <name>`
 
-For notarization, also set:
+Developer ID mode also requires exactly one complete notarization credential
+family. For Apple ID credentials, set:
 
 - `APPLE_ID`
 - `APPLE_PASSWORD`, using an app-specific password
@@ -247,12 +249,13 @@ one of these states:
 
 - no credentials, or explicit `APPLE_SIGNING_IDENTITY=-`: enforce a complete
   ad-hoc app-bundle signature and do not notarize;
-- all three signing variables, with a non-`-` identity: Developer ID signing,
-  optionally with exactly one complete notarization trio.
+- all three signing variables, with a non-`-` identity, plus exactly one
+  complete notarization trio: Developer ID signing, notarization, and stapling.
 
 Partial signing fields, partial notarization fields, both notarization
-families, notarization with ad-hoc signing, or an unreadable API-key path fail
-before Tauri starts. The project does not require `spctl` for ad-hoc builds;
+families, Developer ID signing without notarization, notarization with ad-hoc
+signing, or an unreadable API-key path fail before Tauri starts. The project
+does not require `spctl` for ad-hoc builds;
 their documented Gatekeeper path remains manual. The GitHub release workflow
 maps the signing and Apple-ID secrets into this same validator and defaults to
 the explicit ad-hoc mode when they are absent.

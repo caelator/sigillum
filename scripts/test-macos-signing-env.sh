@@ -49,7 +49,7 @@ run_success "clean default" adhoc
 run_success "whitespace is absent" adhoc \
   "APPLE_CERTIFICATE=   " "APPLE_CERTIFICATE_PASSWORD= " "APPLE_SIGNING_IDENTITY=  "
 run_success "explicit ad-hoc" adhoc "APPLE_SIGNING_IDENTITY=-"
-run_success "complete Developer ID without notarization" developer-id \
+run_failure "Developer ID without notarization" \
   "APPLE_CERTIFICATE=certificate" "APPLE_CERTIFICATE_PASSWORD=password" \
   "APPLE_SIGNING_IDENTITY=Developer ID Application: Example (TEAM123456)"
 run_success "complete Apple ID notarization" developer-id \

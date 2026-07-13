@@ -41,6 +41,9 @@ require_command codesign
 require_command hdiutil
 require_command mktemp
 require_command /usr/libexec/PlistBuddy
+if [[ "${mode}" == "developer-id" ]]; then
+  require_command xcrun
+fi
 
 VERIFIED_CDHASH=""
 VERIFIED_TEAM_ID=""
@@ -60,6 +63,7 @@ verify_app() {
   local plist_executable=""
   local symlink_path=""
   local cdhash_lines=""
+  local staple_output=""
 
   if [[ ! -d "${app}" || -L "${app}" ]]; then
     fail "${label} app must be a non-symlink directory: ${app}"
@@ -152,6 +156,10 @@ verify_app() {
       fail "${label} app is not signed in the expected Developer ID mode"
     fi
     VERIFIED_TEAM_ID="$(sed -n 's/^TeamIdentifier=//p' <<<"${metadata}")"
+    if ! staple_output="$(xcrun stapler validate "${app}" 2>&1)"; then
+      echo "${staple_output}" >&2
+      fail "${label} Developer ID app has no valid stapled notarization ticket"
+    fi
   fi
 
   cdhash_lines="$(grep '^CDHash=' <<<"${metadata}")"

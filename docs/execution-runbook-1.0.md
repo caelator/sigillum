@@ -77,9 +77,11 @@ a commit that contains later hardening changes.
 - verifies UI lock metadata and generated assets;
 - runs workspace, adversarial, runtime, browser, desktop, audit, and deny gates;
 - on macOS, builds app/dmg bundles through the project signing wrapper, rejects
-  incomplete or mixed Apple credentials, and verifies both the source app and
+  incomplete or mixed Apple credentials, refuses Developer ID without one
+  complete notarization family, and verifies both the source app and
   the app mounted read-only from the dmg with strict bundle, identifier,
-  bound-plist, sealed-resource, signature-mode, and CDHash checks; negative
+  bound-plist, sealed-resource, signature-mode, stapled-ticket (Developer ID),
+  and CDHash checks; negative
   regressions reproduce the RC3 linker-only shape and malformed dmg layouts;
 - exercises the queue's durable prepare/submission state machine and concurrent
   pause behavior; deterministic nonce or fee rejection must park for operator
