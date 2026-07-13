@@ -181,6 +181,7 @@ source_team_id="${VERIFIED_TEAM_ID}"
 if [[ "${mode}" == "developer-id" ]]; then
   dmg_verify_output=""
   dmg_metadata=""
+  dmg_staple_output=""
   if ! dmg_verify_output="$(codesign --verify --strict --verbose=4 "${dmg_path}" 2>&1)"; then
     echo "${dmg_verify_output}" >&2
     fail "Developer ID dmg failed strict code-signature verification"
@@ -194,6 +195,10 @@ if [[ "${mode}" == "developer-id" ]]; then
      ! grep -Fqx "TeamIdentifier=${source_team_id}" <<<"${dmg_metadata}"; then
     echo "${dmg_metadata}" >&2
     fail "dmg is not Developer ID signed by the same team as the app"
+  fi
+  if ! dmg_staple_output="$(xcrun stapler validate "${dmg_path}" 2>&1)"; then
+    echo "${dmg_staple_output}" >&2
+    fail "Developer ID dmg has no valid stapled notarization ticket"
   fi
 fi
 

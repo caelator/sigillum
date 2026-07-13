@@ -71,6 +71,31 @@ cp "${source_dmg}" "${spaces_dir}/Sigillum valid image.dmg"
 "${CHECK}" --mode "${mode}" "${spaces_dir}/Sigillum.app" \
   "${spaces_dir}/Sigillum valid image.dmg" >/dev/null
 
+if [[ "${mode}" == "developer-id" ]]; then
+  ticket_probe_dmg="${TMP_ROOT}/Developer ID dmg ticket failure injection.dmg"
+  cp "${source_dmg}" "${ticket_probe_dmg}"
+  if ! /usr/bin/xcrun stapler validate "${ticket_probe_dmg}" >/dev/null 2>&1; then
+    fail "Developer ID dmg ticket probe must start with a valid real ticket"
+  fi
+  xcrun_shim_dir="${TMP_ROOT}/dmg ticket xcrun shim"
+  mkdir -p "${xcrun_shim_dir}"
+  printf '%s\n' \
+    '#!/usr/bin/env bash' \
+    'set -euo pipefail' \
+    'if [[ "$#" == "3" && "$1" == "stapler" && "$2" == "validate" && "$3" == "${SIGILLUM_FAIL_STAPLER_PATH:?}" ]]; then' \
+    '  printf "%s\n" "injected dmg stapler validation failure" >&2' \
+    '  exit 1' \
+    'fi' \
+    'exec /usr/bin/xcrun "$@"' \
+    >"${xcrun_shim_dir}/xcrun"
+  chmod +x "${xcrun_shim_dir}/xcrun"
+  expect_failure "injected Developer ID dmg ticket validation failure" \
+    "Developer ID dmg has no valid stapled notarization ticket" \
+    env PATH="${xcrun_shim_dir}:${PATH}" \
+      "SIGILLUM_FAIL_STAPLER_PATH=${ticket_probe_dmg}" \
+      "${CHECK}" --mode developer-id "${source_app}" "${ticket_probe_dmg}"
+fi
+
 rc3_app="${TMP_ROOT}/rc3 shape/Sigillum.app"
 mkdir -p "${rc3_app}/Contents/MacOS" "${rc3_app}/Contents/Resources"
 cp "${source_app}/Contents/Info.plist" "${rc3_app}/Contents/Info.plist"
@@ -148,37 +173,39 @@ ln -s /etc/passwd "${internal_link_app}/Contents/Resources/escape"
 expect_failure "internal symlink escape" "internal symlink" \
   "${CHECK}" --mode "${mode}" "${internal_link_app}" "${source_dmg}"
 
-symlink_dmg_source="${TMP_ROOT}/symlink dmg source"
-mkdir -p "${symlink_dmg_source}"
-ln -s "${source_app}" "${symlink_dmg_source}/Sigillum.app"
-symlink_dmg="${TMP_ROOT}/symlink app.dmg"
-create_dmg "${symlink_dmg_source}" "${symlink_dmg}"
-expect_failure "dmg app symlink escape" "non-symlink directory" \
-  "${CHECK}" --mode "${mode}" "${source_app}" "${symlink_dmg}"
+if [[ "${mode}" == "adhoc" ]]; then
+  symlink_dmg_source="${TMP_ROOT}/symlink dmg source"
+  mkdir -p "${symlink_dmg_source}"
+  ln -s "${source_app}" "${symlink_dmg_source}/Sigillum.app"
+  symlink_dmg="${TMP_ROOT}/symlink app.dmg"
+  create_dmg "${symlink_dmg_source}" "${symlink_dmg}"
+  expect_failure "dmg app symlink escape" "non-symlink directory" \
+    "${CHECK}" --mode adhoc "${source_app}" "${symlink_dmg}"
 
-zero_source="${TMP_ROOT}/zero app source"
-mkdir -p "${zero_source}"
-printf '%s\n' 'no application here' >"${zero_source}/README.txt"
-zero_dmg="${TMP_ROOT}/zero apps.dmg"
-create_dmg "${zero_source}" "${zero_dmg}"
-expect_failure "zero-app dmg" "exactly one top-level app" \
-  "${CHECK}" --mode "${mode}" "${source_app}" "${zero_dmg}"
+  zero_source="${TMP_ROOT}/zero app source"
+  mkdir -p "${zero_source}"
+  printf '%s\n' 'no application here' >"${zero_source}/README.txt"
+  zero_dmg="${TMP_ROOT}/zero apps.dmg"
+  create_dmg "${zero_source}" "${zero_dmg}"
+  expect_failure "zero-app dmg" "exactly one top-level app" \
+    "${CHECK}" --mode adhoc "${source_app}" "${zero_dmg}"
 
-multiple_source="${TMP_ROOT}/multiple app source"
-mkdir -p "${multiple_source}"
-copy_app "${multiple_source}/Sigillum.app"
-copy_app "${multiple_source}/Other.app"
-multiple_dmg="${TMP_ROOT}/multiple apps.dmg"
-create_dmg "${multiple_source}" "${multiple_dmg}"
-expect_failure "multiple-app dmg" "exactly one top-level app" \
-  "${CHECK}" --mode "${mode}" "${source_app}" "${multiple_dmg}"
+  multiple_source="${TMP_ROOT}/multiple app source"
+  mkdir -p "${multiple_source}"
+  copy_app "${multiple_source}/Sigillum.app"
+  copy_app "${multiple_source}/Other.app"
+  multiple_dmg="${TMP_ROOT}/multiple apps.dmg"
+  create_dmg "${multiple_source}" "${multiple_dmg}"
+  expect_failure "multiple-app dmg" "exactly one top-level app" \
+    "${CHECK}" --mode adhoc "${source_app}" "${multiple_dmg}"
 
-wrong_name_source="${TMP_ROOT}/wrong name source"
-mkdir -p "${wrong_name_source}"
-copy_app "${wrong_name_source}/Other.app"
-wrong_name_dmg="${TMP_ROOT}/wrong app name.dmg"
-create_dmg "${wrong_name_source}" "${wrong_name_dmg}"
-expect_failure "wrong app name in dmg" "must be named Sigillum.app" \
-  "${CHECK}" --mode "${mode}" "${source_app}" "${wrong_name_dmg}"
+  wrong_name_source="${TMP_ROOT}/wrong name source"
+  mkdir -p "${wrong_name_source}"
+  copy_app "${wrong_name_source}/Other.app"
+  wrong_name_dmg="${TMP_ROOT}/wrong app name.dmg"
+  create_dmg "${wrong_name_source}" "${wrong_name_dmg}"
+  expect_failure "wrong app name in dmg" "must be named Sigillum.app" \
+    "${CHECK}" --mode adhoc "${source_app}" "${wrong_name_dmg}"
+fi
 
 echo "macOS bundle signature regressions passed"

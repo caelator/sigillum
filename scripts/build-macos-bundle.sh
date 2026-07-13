@@ -8,6 +8,10 @@ fail() {
   exit 1
 }
 
+case "$-" in
+  *x*) fail "refusing to handle signing credentials while shell xtrace is enabled" ;;
+esac
+
 trim_env() {
   local name="$1"
   local value="${!name-}"
@@ -26,6 +30,39 @@ normalize_text_env() {
   else
     unset "${name}"
   fi
+}
+
+find_bundle_root() {
+  local profile="$1"
+  local candidate
+  for candidate in \
+    "${ROOT}/target/${profile}/bundle" \
+    "${ROOT}/crates/sigillum-desktop/target/${profile}/bundle"
+  do
+    if [[ -d "${candidate}/macos/Sigillum.app" && -d "${candidate}/dmg" ]]; then
+      printf '%s\n' "${candidate}"
+      return 0
+    fi
+  done
+  return 1
+}
+
+remove_previous_dmgs() {
+  local profile="$1"
+  local dmg_dir
+  local stale_dmg
+  for dmg_dir in \
+    "${ROOT}/target/${profile}/bundle/dmg" \
+    "${ROOT}/crates/sigillum-desktop/target/${profile}/bundle/dmg"
+  do
+    if [[ ! -d "${dmg_dir}" ]]; then
+      continue
+    fi
+    while IFS= read -r -d '' stale_dmg; do
+      rm -f "${stale_dmg}"
+    done < <(find "${dmg_dir}" -mindepth 1 -maxdepth 1 \
+      -type f -name 'Sigillum_*.dmg' -print0)
+  done
 }
 
 if [[ "$(uname -s)" != "Darwin" ]]; then
@@ -63,5 +100,31 @@ else
   fi
 fi
 
+profile="release"
+for arg in "$@"; do
+  if [[ "${arg}" == "--" ]]; then
+    break
+  fi
+  if [[ "${arg}" == "--debug" ]]; then
+    profile="debug"
+  fi
+done
+
+remove_previous_dmgs "${profile}"
 cd "${ROOT}/crates/sigillum-desktop"
-exec cargo tauri build "$@"
+cargo tauri build "$@"
+
+bundle_root="$(find_bundle_root "${profile}")" || \
+  fail "${profile} Sigillum app/dmg bundle root was not produced"
+dmg_files=()
+while IFS= read -r -d '' candidate; do
+  dmg_files+=("${candidate}")
+done < <(find "${bundle_root}/dmg" -mindepth 1 -maxdepth 1 \
+  -type f -name 'Sigillum_*.dmg' -print0)
+if [[ "${#dmg_files[@]}" != "1" ]]; then
+  fail "expected exactly one new ${profile} Sigillum dmg; found ${#dmg_files[@]}"
+fi
+
+if [[ "${signing_mode}" == "developer-id" ]]; then
+  "${ROOT}/scripts/notarize-macos-dmg.sh" "${dmg_files[0]}"
+fi

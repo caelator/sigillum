@@ -6,6 +6,10 @@ fail() {
   exit 1
 }
 
+case "$-" in
+  *x*) fail "refusing to inspect signing credentials while shell xtrace is enabled" ;;
+esac
+
 trim_env() {
   local name="$1"
   local value="${!name-}"

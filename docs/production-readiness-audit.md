@@ -132,7 +132,13 @@ regressions including a CDHash mismatch. Developer ID mode also requires the
 dmg signature team to match the app. Partial,
 mixed, or whitespace-only Apple credential configurations fail closed. The
 Developer ID path also requires one complete notarization family and validates
-the stapled ticket on the source and mounted apps. The
+stapled tickets on the source app, mounted app, and dmg. Mode-independent
+hostile dmg-layout regressions run in the always-on ad-hoc suite. Because the
+pinned Tauri bundler notarizes the app before it creates and signs the dmg, the
+project wrapper performs the dmg submission/stapling step explicitly and an
+offline fake-tool regression checks both credential families and failure
+states. The GitHub release workflow uses the Apple-ID family; API-key
+notarization remains a local/manual wrapper path. The
 macOS bundle portion can be skipped with `SIGILLUM_SKIP_DESKTOP_BUNDLE=1` only
 outside CI when the host cannot build Tauri bundles; non-macOS hosts print an
 explicit bundle-skip line after the compile check.
@@ -209,7 +215,7 @@ pass with empty ignore lists.
 | Runtime daemon lifecycle behavior | `scripts/check-runtime-smoke.sh` starts the daemon, verifies status, initializes a passphrase compartment, writes and reads vault canaries, locks, unlocks, lists compartments, and runs doctor | Proven for current checkout in an unsandboxed local environment |
 | Queue submission durability and pause | Queue schema v5 persists `prepared` raw bytes/hash and a pre-RPC `submitted_unknown` marker; recovery checks receipts or resubmits exact bytes without re-signing; the real HTTP pause regression latches before the active drain mutex and blocks later broadcasts | Implemented on the current hardening line; fresh full-gate and CI evidence is still required |
 | Runtime browser/UI visual behavior | DOM smoke tests pass, the runtime smoke checks the served UI shell, and `scripts/check-browser-smoke.sh` repeatably drives a headless browser through setup, unlocked operator workspace, vault canary write/reveal, browser-session logout, passphrase re-authentication, and post-auth canary count checks against an isolated local daemon inside the release gate | Proven for current checkout as repeatable automation in an unsandboxed local environment with a Chromium-family browser |
-| Desktop app bundle readiness | `scripts/check-desktop.sh` uses the signing wrapper, strictly verifies the source and mounted-dmg app, compares CDHash, and runs RC3/tamper/identifier/layout/symlink regressions; the release artifact job runs the same verifier after adding notices and before upload | RC3 failed this strengthened invariant; proof requires the new source gate and release workflow to pass at the RC4 SHA. Non-macOS release-gate legs remain compile-only. |
+| Desktop app bundle readiness | `scripts/check-desktop.sh` uses the signing wrapper, strictly verifies the source and mounted-dmg app, compares CDHash, and runs RC3/tamper/identifier/layout/symlink regressions; Developer ID mode explicitly submits/staples the post-Tauri dmg and validates tickets on both app copies and the dmg; an offline fake-tool regression covers credential routing and notary/stapler failures; the release artifact job runs the same verifier after adding notices and before upload | RC3 failed this strengthened invariant; proof requires the new source gate and release workflow to pass at the RC4 SHA. Mode-independent hostile dmg-layout regressions run in the always-on ad-hoc suite; non-macOS release-gate legs remain compile-only. |
 | Long-duration reliability | Recovery and crash tests pass, `scripts/check-local-soak.sh` passed a bounded 300-second local daemon/gateway run with 28 iterations, and an older `mac-server` run passed a 3600-second target with 117 iterations | Local automated baseline only; standard plus chaos receipts on each supported host at the new RC SHA remain an H1 gate |
 | External security assurance | Code gates, audit, deny, local adversarial/fuzz gate, SSRF/local-boundary tests, and UI boundary tests pass | Local boundary pass proven for current checkout; independent external penetration test not performed |
 | Full wallet-management product roadmap | EVM roadmap phases 1-9 shipped and tested: discovery, inventory, risk, planning, policy-gated fail-closed execution (default off), DeFi exit adapters, and treasury automation | EVM scope is complete except swap execution, which is deferred per D-13; only non-EVM chains (phase 10), swap execution (D-13), and fiat/NFT valuation (D-16) remain deferred |

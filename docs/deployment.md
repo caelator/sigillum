@@ -117,8 +117,12 @@ expected signature mode, hardened runtime, and matching CDHash values. It also
 runs negative regressions for the RC3 linker-only failure, missing hardened runtime,
 tampering, wrong identifiers, CDHash mismatch, symlinks, and malformed dmg
 layouts. Developer ID mode additionally requires the dmg to carry a non-ad-hoc
-Developer ID signature from the same team as the app and validates the stapled
-notarization ticket on both source and mounted apps. Set
+Developer ID signature from the same team as the app and validates stapled
+notarization tickets on both app copies and the dmg. Mode-independent hostile
+dmg-layout regressions run in the always-on ad-hoc suite. Tauri notarizes and
+staples the app before creating the dmg; the project build wrapper then submits,
+staples, and validates the signed dmg with `scripts/notarize-macos-dmg.sh`.
+Set
 `SIGILLUM_SKIP_DESKTOP_BUNDLE=1` only
 on non-CI macOS hosts that cannot build Tauri bundles; CI rejects the toggle.
 
@@ -250,7 +254,15 @@ one of these states:
 - no credentials, or explicit `APPLE_SIGNING_IDENTITY=-`: enforce a complete
   ad-hoc app-bundle signature and do not notarize;
 - all three signing variables, with a non-`-` identity, plus exactly one
-  complete notarization trio: Developer ID signing, notarization, and stapling.
+  complete notarization trio: Developer ID signing, notarization, and stapling
+  of both app copies and the dmg.
+
+The Developer ID path contacts Apple's notary service for both release and
+`--debug` builds. The credential-routing regression uses fake tools and runs
+offline on both CI platforms; it never submits an artifact or prints credential
+arguments. API-key notarization is supported for local/manual wrapper runs; the
+GitHub release workflow currently forwards the Apple-ID family only and does
+not materialize a `.p8` secret file.
 
 Partial signing fields, partial notarization fields, both notarization
 families, Developer ID signing without notarization, notarization with ad-hoc

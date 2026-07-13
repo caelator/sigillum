@@ -162,9 +162,10 @@ from 1.0.0 onward, per the stability policy in `docs/stability.md`.
 - **macOS release bundle signature** — Replaced the weak signature-metadata
   check that allowed RC3's linker-only app to pass. Credential-free builds now
   explicitly sign the whole app bundle, partial Apple credentials fail closed,
-  Developer ID mode requires notarization and stapling, and both source-gate
-  and release-artifact paths require strict app and
-  read-only-mounted dmg verification with bound plist, sealed resources,
+  Developer ID mode requires notarization and stapling for both app copies and
+  the dmg (including an explicit post-Tauri dmg submission), and both source-gate
+  and release-artifact paths require strict app and read-only-mounted dmg
+  verification with bound plist, sealed resources,
   expected identifier/mode, matching CDHash, and negative regression fixtures.
 
 [Unreleased]: https://github.com/caelator/sigillum/compare/v1.0.0...HEAD

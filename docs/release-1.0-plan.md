@@ -481,7 +481,9 @@ A → (B ∥ C ∥ D) → E → (W1 ∥ W2) → (W3 ∥ W4 ∥ W5 ∥ W6) → W7
 - **Steps:** validate Tauri v2 signing and notarization variables as complete,
   mutually exclusive credential families; fail closed on partial/mixed values.
   With no credentials, set `APPLE_SIGNING_IDENTITY=-` so Tauri signs the whole
-  app bundle. Enforce nonempty `CodeResources`, strict deep verification, the
+  app bundle. With Developer ID credentials, explicitly submit and staple the
+  signed dmg after Tauri creates it because the pinned bundler notarizes the app
+  first. Enforce nonempty `CodeResources`, strict deep verification, the
   exact identifier and executable, bound `Info.plist`, sealed resources, and
   the expected ad-hoc or Developer ID mode in `scripts/check-desktop.sh` (C4).
   Document in `docs/deployment.md`: macOS
@@ -506,8 +508,11 @@ A → (B ∥ C ∥ D) → E → (W1 ∥ W2) → (W3 ∥ W4 ∥ W5 ∥ W6) → W7
   missing hardened runtime, tampering, wrong identifier, CDHash mismatch,
   zero/multiple/wrong-name apps, symlink escape, and paths with spaces. In
   Developer ID mode, require the dmg to be non-ad-hoc and signed by the same
-  team as the app and validate the stapled ticket on source and mounted apps.
-  Print an explicit skip line on other OSes. Wire into
+  team as the app and validate stapled tickets on source app, mounted app, and
+  dmg. Keep mode-independent hostile dmg-layout regressions in the always-on
+  ad-hoc suite; use a scoped stapler-failure injection for the Developer ID dmg
+  ticket error because Tauri deletes its temporary certificate keychain after
+  bundling. Print an explicit skip line on other OSes. Wire into
   `check-release.sh` after browser smoke; add tauri-cli install to the CI
   macOS leg if needed; document the toggle in the audit doc.
 - **Accept:** gate runs the desktop step on both OSes; the added macOS CI

@@ -78,10 +78,11 @@ a commit that contains later hardening changes.
 - runs workspace, adversarial, runtime, browser, desktop, audit, and deny gates;
 - on macOS, builds app/dmg bundles through the project signing wrapper, rejects
   incomplete or mixed Apple credentials, refuses Developer ID without one
-  complete notarization family, and verifies both the source app and
+  complete notarization family, explicitly notarizes/staples the dmg after
+  Tauri creates it, and verifies both the source app and
   the app mounted read-only from the dmg with strict bundle, identifier,
-  bound-plist, sealed-resource, signature-mode, stapled-ticket (Developer ID),
-  and CDHash checks; negative
+  bound-plist, sealed-resource, signature-mode, stapled-ticket (Developer ID
+  app copies and dmg), and CDHash checks; negative
   regressions reproduce the RC3 linker-only shape and malformed dmg layouts;
 - exercises the queue's durable prepare/submission state machine and concurrent
   pause behavior; deterministic nonce or fee rejection must park for operator

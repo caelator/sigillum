@@ -171,7 +171,8 @@ immediate move is:
 1. keep `./scripts/check-release.sh` enforced in CI across Ubuntu and macOS
 2. keep `./scripts/check-adversarial.sh` green and expand it when new API,
    gateway, or UI boundary surfaces are added
-3. collect the remaining per-host doctor/soak receipts beyond `mac-server` (F4)
+3. collect fresh doctor plus standard and chaos soak receipts on the currently
+   supported `mac-server` at the exact new RC SHA (F4)
 4. collect public-testnet execution receipts for native sweep, ERC-20 sweep,
    revoke, and gas top-up (F6)
 5. keep documentation and audits anchored to the local-on-your-computer boundary

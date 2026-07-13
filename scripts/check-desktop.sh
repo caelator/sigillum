@@ -38,6 +38,7 @@ find_debug_bundle_root() {
 
 require_command cargo
 run_step "${ROOT}/scripts/test-macos-signing-env.sh"
+run_step "${ROOT}/scripts/test-macos-dmg-notarize.sh"
 run_step cargo build -p sigillum-desktop --locked
 
 if [[ "${SIGILLUM_SKIP_DESKTOP_BUNDLE:-0}" == "1" && "${CI:-}" == "true" ]]; then
