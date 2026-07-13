@@ -2,7 +2,8 @@
 
 **Status:** Active hardening and release handbook
 
-**State recorded:** 2026-07-12, `main` at `815d262`
+**State recorded:** 2026-07-12, protected `main` at `cb382a7`; failed RC
+`v1.0.0-rc.2` at `815d262`
 
 **Plan authority:** [release-1.0-plan.md](./release-1.0-plan.md)
 
@@ -16,12 +17,17 @@ a commit that contains later hardening changes.
 - The workspace and daemon UI declare version `1.0.0`.
 - There is no final `v1.0.0` release tag or published final release.
 - The `a22a98a` RC dry run proved the workflow shape at that historical commit;
-  it is not release evidence for the current hardening line.
-- The public `v1.0.0-rc.2` tag is a lightweight tag. The release workflow
-  correctly rejected it because the contract requires an annotated tag, and no
-  GitHub Release was published from it. Never reuse that RC number.
-- A fresh RC is required after the capability-auth, payment-truth,
-  queue-durability, no-HID, and release-governance fixes land.
+  it is not release evidence for the current hardening line. Its deleted
+  `v1.0.0-rc.1` tag remains permanently burned and is the sole legacy gap
+  permitted before the retained sequence that starts at `rc.2`; do not
+  recreate it.
+- A fresh RC is required at the release-contract-fix SHA; the code-level
+  capability-auth, payment-truth, queue-durability, and no-HID hardening has
+  already landed and passed the source gate.
+- `v1.0.0-rc.2` is an immutable failed-contract receipt, not a valid candidate.
+  Its remote tag is annotated, but the tag-time workflow trusted a runner-local
+  ref that checkout rewrote to the peeled commit. No draft or assets were
+  created. After the contract fix lands, the next attempt is `v1.0.0-rc.3`.
 - Gateway payments are preview-only and disabled by default. Opt-in balance
   observations are not finality proof and must not be represented as supported
   1.0 payment confirmations.
@@ -46,7 +52,10 @@ a commit that contains later hardening changes.
    or build is modifying the same checkout.
 4. Review the complete diff, rerun GitNexus impact checks for materially changed
    symbols, and re-index the repository.
-5. Land through a pull request and require both fixed-runner CI legs to pass.
+5. Before merge, verify that `main` protection requires both fixed-runner CI
+   legs, blocks force-pushes, and that release-tag governance prevents updates
+   and deletion. Remediate missing settings before landing through a pull
+   request, then require both CI legs to pass.
 6. Only then create a new annotated RC tag and complete the operator gates in
    section 5.
 
@@ -70,7 +79,25 @@ CI and release workflows use immutable action commits and explicit
 - be annotated;
 - equal `v<workspace-version>` or `v<workspace-version>-rc.N`;
 - point to a commit on `origin/main` history;
-- have a dated, non-empty matching `CHANGELOG.md` section.
+- have a dated, non-empty matching `CHANGELOG.md` section;
+- for the final tag, carry exactly one `Release-Evidence-File` field naming
+  `sigillum-v<workspace-version>-release-evidence.tar.gz` and exactly one
+  `Release-Evidence-SHA256` field containing its lowercase SHA-256 digest.
+
+`scripts/check-release-tag-contract.sh` enforces these rules against the
+authoritative remote direct and peeled tag refs. It does not trust the
+runner-local tag ref, because a tag-triggered checkout can rewrite that ref to
+the peeled commit. If the tag object is absent locally, it fetches the remote
+tag into a non-tag scratch ref and proves that the fetched object still matches
+the authoritative observation. RC tags must also advance the retained remote
+sequence by exactly one. For 1.0.0 only, the already-burned and historically
+deleted `rc.1` is an explicit legacy exception; every tag from `rc.2` onward
+must remain contiguous. The contract job pins the observed tag-object ID into
+the final draft-release job. `scripts/test-release-tag-contract.sh` reproduces
+the checkout rewrite and object-absent cases hermetically and proves that
+lightweight, wrong-SHA, off-main, skipped-number, malformed,
+changelog-invalid, and missing or malformed final-evidence tags fail closed.
+The normal source release gate runs this regression test before tag time.
 
 The release workflow always creates a draft. Asset checksums, release notes,
 and the operator decision are required before publication.
@@ -78,6 +105,12 @@ and the operator decision are required before publication.
 ## 4. Failure handling
 
 - Reproduce a failed step alone before classifying it as environmental.
+- If checkout has rewritten a runner-local tag ref, diagnose annotation from
+  the remote direct and `^{}` refs. Do not weaken the annotated-tag requirement
+  or repair the ephemeral local ref as a substitute for remote truth.
+- Never move, delete, or reuse any pushed RC tag, whether its workflow failed
+  or passed. Preserve it as historical evidence, land fixes through the normal
+  PR/gate path, and increment `rc.N`.
 - Treat compile errors, test failures, tracked-tree mutations, lockfile drift,
   malformed tags, and missing changelog sections as real release failures.
 - For a new advisory, take a fixed dependency version first. Add a temporary
@@ -101,21 +134,83 @@ and the operator decision are required before publication.
 | H2 | Explicit operator decision to tag and publish `v1.0.0` |
 
 Work may continue on any independent item while one of these gates is waiting.
-Do not mark H1 or H2 complete until every required receipt belongs to the same
-release-candidate commit.
+Do not mark H1 or H2 complete until every required receipt names the same
+release-candidate peeled commit SHA.
+
+### Release evidence bundle
+
+F4, F6, desktop, doctor, and UI evidence is generated only after the immutable
+RC is created, so it cannot be committed into its own receipt-bearing SHA.
+Preserve the sanitized evidence outside the checkout until final promotion:
+
+1. Create one bundle containing a manifest, the RC tag-object ID and peeled
+   commit SHA, release-workflow run, independently verified asset checksums,
+   F4 receipts, F6 transaction evidence and audit exports, clean-install and
+   doctor evidence, and UI sign-off. Exclude credentials, seeds, bearer tokens,
+   private keys, and unsanitized customer or operator data.
+   The fixed non-empty members are:
+   `MANIFEST.json`, `SHA256SUMS`, `f4/standard.json`, `f4/chaos.json`,
+   `f6/receipts.json`, `desktop/clean-install.json`,
+   `doctor/mac-server.json`, `ui/signoff.json`, and
+   `release/asset-SHA256SUMS`. The doctor receipt is structured, bound to the
+   RC SHA, and records the installed-RC pass. The asset checksum file is the
+   independently verified five-entry `SHA256SUMS` body from the RC draft. F6
+   audit exports live below `f6/audit/` and
+   are referenced by `f6/receipts.json`.
+2. Put `SHA256SUMS` inside the bundle, name the completed archive
+   `sigillum-v1.0.0-release-evidence.tar.gz`, and compute its SHA-256. H2
+   records that exact evidence filename and archive digest in the
+   annotated final tag message, making the protected tag the immutable binding
+   between the released code and its operator evidence.
+   `scripts/check-release-evidence-bundle.sh` rejects missing, empty,
+   unchecksummed, duplicate, unsafe, or linked archive members; requires the
+   manifest to bind the exact RC tag-object ID and peeled SHA; validates the F4
+   configured and actual soak durations, validates four unique F6 transaction
+   hashes plus unique structured audit exports bound to their family, network
+   role and chain ID, transaction, and RC SHA, validates clean install and UI
+   sign-off, and computes the outer archive digest.
+3. The executable H2 ceremony waits for the exact final workflow and all six
+   successful jobs, independently checksums its six generated draft assets,
+   uploads the evidence archive as a seventh asset without replacing an
+   existing asset, then re-fetches and re-verifies all seven live draft assets.
+   The evidence SHA-256 must match the digest in the protected final tag in the
+   last executable checks immediately before publishing.
+4. In H3, update `docs/production-readiness-audit.md` with the public release
+   URL, evidence filename and digest, final tag-object ID, RC peeled SHA, and a
+   sanitized receipt summary. This post-release documentation commit does not
+   alter the released `v1.0.0` commit.
+
+If the bundle changes after the final tag is created, do not publish. The final
+tag is immutable, so restore the exact digest-bound bundle rather than moving
+or recreating the tag.
 
 ## 6. Fresh RC procedure
 
-1. Fill the `CHANGELOG.md` 1.0.0 date and merge it with the hardening work.
-2. From a clean `main`, run `./scripts/check-release.sh`.
-3. Create and push an annotated `v1.0.0-rc.N` tag.
+1. Confirm the dated, non-empty `CHANGELOG.md` 1.0.0 section is on `main`.
+2. Fetch `origin`, start from a clean `main`, record
+   `GATE_SHA=$(git rev-parse HEAD)`, assert it equals `origin/main`, and run
+   `./scripts/check-release.sh`.
+3. Query `git ls-remote --tags --refs origin 'refs/tags/v1.0.0-rc.*'` and require
+   the new `N` to equal the highest retained remote RC number plus one. Reassert
+   `HEAD == GATE_SHA == origin/main`, then create and push the annotated tag.
+   Every pushed `N` is permanently burned, even when no draft was created.
 4. Require the release contract job, both verify legs, both artifact jobs, and
    the draft-release job to pass.
 5. Download the draft assets and verify `SHA256SUMS`.
-6. Complete the section 5 receipts against that exact RC SHA.
-7. Delete the RC draft and tag after the rehearsal.
+6. Complete the section 5 receipts against that exact peeled RC commit SHA and
+   assemble the sanitized release evidence bundle described above.
+7. Record the tag name, tag-object ID, peeled commit SHA, workflow run, asset
+   checksum result, evidence filename, and evidence archive digest. Keep the
+   annotated RC tag permanently and retain the RC draft/assets through
+   final-draft verification.
 8. After explicit H2 approval, repeat the clean gate and push annotated
-   `v1.0.0`; verify the draft before publishing it.
+   `v1.0.0` at the identical peeled commit as the receipt-bearing RC, with the
+   evidence filename and digest in the tag message. If `main` has moved or any
+   intervening commit is required, the receipts are void and a new
+   monotonically numbered RC is required. Independently checksum and verify the
+   final draft assets, upload and reverify the digest-bound evidence bundle,
+   then publish. Only after final publication may the older RC draft be
+   deleted.
 
 After publication, perform the post-release version/planning update described
 by H3 in the plan of record.

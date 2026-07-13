@@ -1,10 +1,14 @@
 # Sigillum — Production Readiness
 
-**Date:** June 4, 2026 (updated July 10, 2026)
-**Current Verdict:** the earlier Sigillum 1.0 RC receipts are historical and do
-not certify the current hardening line. Capability authorization, payment
-truth, queue broadcast durability/pause behavior, no-HID compilation, and
-release governance must pass the updated source gate together before a new RC.
+**Date:** June 4, 2026 (updated July 11, 2026)
+**Current Verdict:** the code-level hardening and updated source gates pass on
+the current line, but `v1.0.0-rc.2` is not a valid release candidate. Its remote
+tag is annotated; the tag-time workflow produced a false negative after
+checkout rewrote the runner-local tag ref to the peeled commit, so no draft or
+assets were created. The contract fix must land, its protected-main SHA must be
+re-gated, and a fresh monotonically numbered `v1.0.0-rc.3` must pass the
+workflow and same-SHA operator gates. Every pushed RC tag remains an immutable
+receipt anchor.
 The supported boundary remains local-first, single-host, and not
 internet-facing; remote-platform scope is explicitly unsupported.
 
@@ -99,11 +103,17 @@ not the shipped local-first wallet-management baseline:
   not claim one. Automated local adversarial/fuzz coverage through
   `scripts/check-adversarial.sh` is not an independent security audit.
 - The remaining RC-time evidence is:
+  - a successful draft release workflow and checksum-verified asset set at the
+    fresh `v1.0.0-rc.3` SHA; `v1.0.0-rc.2` is historical failure evidence only
   - standard and chaos doctor/soak receipts on every supported host at the new
     RC SHA; the earlier `mac-server` receipt is historical baseline evidence,
     not evidence for the current hardening candidate (F4)
   - public-testnet execution receipts for the four core execution families:
     native sweep, ERC-20 sweep, revoke, and gas top-up (F6)
+  - one sanitized external evidence bundle containing the same-RC operator
+    receipts; H2 binds its filename and SHA-256 digest into the immutable final
+    tag, verifies the uploaded copy before publication, and H3 records the
+    public linkage in the tracked audit
 - Within wallet management, only non-EVM chains (roadmap phase 10), swap
   execution (D-13), and fiat/NFT valuation (D-16) are deferred.
 

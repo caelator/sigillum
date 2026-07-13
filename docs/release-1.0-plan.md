@@ -1288,7 +1288,10 @@ Order within W7 is strict: W7.1 → W7.2 → W7.3 → W7.4 → W7.5.
 - **Steps:** on each host named supported in
   `docs/production-readiness-audit.md` (currently `mac-server`): 3600s
   standard soak + 600s chaos soak at the RC commit; record receipt
-  filename, SHA, host, OS in the audit doc.
+  filename, SHA, host, and OS in the sanitized external release-evidence
+  bundle. H2 binds that bundle's digest into the immutable final tag; H3 writes
+  the sanitized summary and bundle link into the audit doc. Receipts cannot be
+  committed into their own receipt-bearing RC SHA.
 - **Accept:** fresh receipts per host at the RC SHA. **Size:** M (wall-clock).
 
 #### F5 — Execution-path security review
@@ -1312,8 +1315,10 @@ Order within W7 is strict: W7.1 → W7.2 → W7.3 → W7.4 → W7.5.
   one each of native sweep, ERC-20 sweep (faucet token), ERC-20 revoke, gas
   top-up chain (`fund_gas` → sweep). Adapter exits and a Merkle claim:
   attempt if suitable contracts are available; otherwise record
-  "mock-verified only" explicitly. Store the receipt summary in
-  `docs/production-readiness-audit.md`.
+  "mock-verified only" explicitly. Store the sanitized receipt summary and
+  audit export in the external release-evidence bundle. H2 binds that bundle's
+  digest into the immutable final tag; H3 records the public bundle link and
+  sanitized summary in `docs/production-readiness-audit.md`.
 - **Accept:** the four core families have real-testnet tx evidence at the RC
   SHA; adapter/claim status recorded honestly either way. **Size:** M
   (wall-clock + human).
@@ -1401,9 +1406,10 @@ Order within W7 is strict: W7.1 → W7.2 → W7.3 → W7.4 → W7.5.
   `SHA256SUMS` file. Job 4 also attaches a `THIRD-PARTY-NOTICES` file
   generated with a pinned `cargo-about` (MIT/Apache attribution for shipped
   binaries) and includes it in the `.dmg` resources — `cargo deny` gates
-  licenses but does not produce attribution. Dry-run with `v1.0.0-rc.1`,
-  then delete the rc
-  tag/release.
+  licenses but does not produce attribution. Dry-run with the next monotonically
+  numbered annotated RC tag, retain that tag permanently as the receipt anchor,
+  and retain its draft/assets through final-draft verification. Delete only the
+  older RC draft after final publication.
 - **Accept:** rc dry run produces all artifacts + draft release. **Size:** M.
 
 #### G5 — Readiness and product docs final sync
@@ -1462,12 +1468,223 @@ below; the remaining items are operator human-gates.
 #### H2 — Tag and release
 
 ```bash
-git checkout main && git pull --ff-only
-./scripts/check-release.sh
-git tag -a v1.0.0 -m "Sigillum 1.0.0 — Local-first wallet-management workstation"
-git push origin v1.0.0
-# watch .github/workflows/release.yml, verify artifacts + SHA256SUMS,
-# publish the draft GitHub Release.
+(
+  set -euo pipefail
+
+  REPO=caelator/sigillum
+  FINAL_TAG=v1.0.0
+  RC_TAG=v1.0.0-rc.N # replace with the receipt-bearing retained RC
+  EVIDENCE_BUNDLE="${EVIDENCE_BUNDLE:?set the absolute path to the sanitized release evidence archive}"
+  EVIDENCE_NAME="$(basename -- "${EVIDENCE_BUNDLE}")"
+  test "${EVIDENCE_NAME}" = "sigillum-v1.0.0-release-evidence.tar.gz"
+  test -f "${EVIDENCE_BUNDLE}"
+
+  git fetch --prune --tags origin
+  RC_REFS="$(git ls-remote --exit-code --tags origin \
+    "refs/tags/${RC_TAG}" "refs/tags/${RC_TAG}^{}")"
+  RC_TAG_OBJECT="$(awk -v ref="refs/tags/${RC_TAG}" \
+    '$2 == ref { print $1 }' <<< "${RC_REFS}")"
+  RC_SHA="$(awk -v ref="refs/tags/${RC_TAG}^{}" \
+    '$2 == ref { print $1 }' <<< "${RC_REFS}")"
+  [[ "${RC_TAG_OBJECT}" =~ ^[0-9a-f]{40}$ ]]
+  [[ "${RC_SHA}" =~ ^[0-9a-f]{40}$ ]]
+  test "${RC_TAG_OBJECT}" != "${RC_SHA}"
+
+  git switch --detach "${RC_SHA}"
+  test -z "$(git status --porcelain)"
+  test "$(git rev-parse origin/main)" = "${RC_SHA}" || {
+    echo "main moved beyond ${RC_TAG}; create and qualify a new RC" >&2
+    exit 1
+  }
+  bash ./scripts/check-release-tag-contract.sh \
+    "${RC_TAG}" "${RC_SHA}" origin "${RC_TAG_OBJECT}"
+  bash ./scripts/check-release-evidence-bundle.sh \
+    "${EVIDENCE_BUNDLE}" "${RC_TAG}" "${RC_SHA}" "${RC_TAG_OBJECT}"
+  EVIDENCE_SHA256="$(shasum -a 256 "${EVIDENCE_BUNDLE}" | awk '{print $1}')"
+  [[ "${EVIDENCE_SHA256}" =~ ^[0-9a-f]{64}$ ]]
+  ./scripts/check-release.sh
+
+  # The gate is long: refresh and reassert every code and evidence identity
+  # immediately before creating the immutable final tag.
+  git fetch --prune --tags origin
+  test "$(git rev-parse HEAD)" = "${RC_SHA}"
+  test -z "$(git status --porcelain)"
+  test "$(git rev-parse origin/main)" = "${RC_SHA}" || {
+    echo "main moved during the gate; create and qualify a new RC" >&2
+    exit 1
+  }
+  bash ./scripts/check-release-tag-contract.sh \
+    "${RC_TAG}" "${RC_SHA}" origin "${RC_TAG_OBJECT}"
+  bash ./scripts/check-release-evidence-bundle.sh \
+    "${EVIDENCE_BUNDLE}" "${RC_TAG}" "${RC_SHA}" "${RC_TAG_OBJECT}"
+  test "$(shasum -a 256 "${EVIDENCE_BUNDLE}" | awk '{print $1}')" = \
+    "${EVIDENCE_SHA256}"
+
+  if git ls-remote --exit-code --tags --refs origin "refs/tags/${FINAL_TAG}"; then
+    # Safe resume after an interrupted H2: the immutable existing tag must
+    # already match the exact RC and evidence binding.
+    bash ./scripts/check-release-tag-contract.sh \
+      "${FINAL_TAG}" "${RC_SHA}" origin
+    EXISTING_FINAL_OBJECT="$(git ls-remote --exit-code --tags --refs origin \
+      "refs/tags/${FINAL_TAG}" | awk '{print $1}')"
+    test "$(git cat-file tag "${EXISTING_FINAL_OBJECT}" |
+      sed -n 's/^Release-Evidence-File: //p')" = "${EVIDENCE_NAME}"
+    test "$(git cat-file tag "${EXISTING_FINAL_OBJECT}" |
+      sed -n 's/^Release-Evidence-SHA256: //p')" = "${EVIDENCE_SHA256}"
+  else
+    test "$?" -eq 2 # exit 2 means the exact remote tag is absent
+    git tag -a "${FINAL_TAG}" "${RC_SHA}" \
+      -m "Sigillum 1.0.0 — Local-first wallet-management workstation" \
+      -m "Release-Evidence-File: ${EVIDENCE_NAME}" \
+      -m "Release-Evidence-SHA256: ${EVIDENCE_SHA256}"
+    git push origin "refs/tags/${FINAL_TAG}:refs/tags/${FINAL_TAG}"
+  fi
+
+  # Wait for the exact final-tag workflow and require all six release jobs.
+  FINAL_RUN_JSON=""
+  for _ in {1..120}; do
+    FINAL_RUN_JSON="$(
+      gh run list -R "${REPO}" --workflow release.yml --event push --limit 20 \
+        --json databaseId,headBranch,headSha,status,conclusion,url,createdAt |
+        jq -c --arg tag "${FINAL_TAG}" --arg sha "${RC_SHA}" '
+          [.[] | select(
+            .headBranch == $tag and
+            .headSha == $sha and
+            (.status != "completed" or .conclusion == "success"))]
+          | sort_by(.createdAt) | last // empty'
+    )"
+    [[ -n "${FINAL_RUN_JSON}" ]] && break
+    sleep 5
+  done
+  [[ -n "${FINAL_RUN_JSON}" ]]
+  FINAL_RUN_ID="$(jq -r '.databaseId' <<< "${FINAL_RUN_JSON}")"
+  gh run watch -R "${REPO}" "${FINAL_RUN_ID}" --exit-status
+  FINAL_RUN_RESULT="$(gh run view -R "${REPO}" "${FINAL_RUN_ID}" \
+    --json headBranch,headSha,conclusion,url,jobs)"
+  jq -e --arg tag "${FINAL_TAG}" --arg sha "${RC_SHA}" '
+    .headBranch == $tag and
+    .headSha == $sha and
+    .conclusion == "success" and
+    (["release-contract", "verify (ubuntu-24.04)", "verify (macos-15)",
+      "artifacts-macos", "artifacts-linux", "release"] -
+      [.jobs[] | select(.conclusion == "success") | .name] | length == 0) and
+    all(.jobs[]; .conclusion == "success")
+  ' <<< "${FINAL_RUN_RESULT}" >/dev/null
+
+  # Require the exact draft and independently verify every generated asset.
+  FINAL_RELEASE="$(gh api "repos/${REPO}/releases?per_page=100" |
+    jq -c --arg tag "${FINAL_TAG}" '
+      [.[] | select(.tag_name == $tag)]
+      | if length == 1 then .[0] else error("expected one final release") end')"
+  jq -e '.draft == true and .published_at == null' \
+    <<< "${FINAL_RELEASE}" >/dev/null
+
+  VERIFY_DIR="$(mktemp -d "${TMPDIR:-/tmp}/sigillum-final-release.XXXXXX")"
+  trap 'rm -rf "${VERIFY_DIR}"' EXIT
+  EXPECTED_ASSETS="${VERIFY_DIR}/expected-assets"
+  REMOTE_ASSETS="${VERIFY_DIR}/remote-assets"
+  printf '%s\n' \
+    "SHA256SUMS" \
+    "Sigillum-v1.0.0-macos-aarch64.app.zip" \
+    "Sigillum-v1.0.0-macos-aarch64.dmg" \
+    "THIRD-PARTY-NOTICES.txt" \
+    "sigillum-cli-v1.0.0-linux-x86_64.tar.gz" \
+    "sigillum-cli-v1.0.0-macos-aarch64.tar.gz" |
+    LC_ALL=C sort > "${EXPECTED_ASSETS}"
+  EVIDENCE_ASSET_COUNT="$(jq -r --arg name "${EVIDENCE_NAME}" \
+    '[.assets[] | select(.name == $name)] | length' <<< "${FINAL_RELEASE}")"
+  test "${EVIDENCE_ASSET_COUNT}" -le 1
+  jq -r --arg name "${EVIDENCE_NAME}" \
+    '.assets[] | select(.name != $name) | .name' \
+    <<< "${FINAL_RELEASE}" | LC_ALL=C sort > "${REMOTE_ASSETS}"
+  cmp -s "${EXPECTED_ASSETS}" "${REMOTE_ASSETS}"
+
+  while IFS=$'\t' read -r asset_name asset_id; do
+    gh api -H 'Accept: application/octet-stream' \
+      "repos/${REPO}/releases/assets/${asset_id}" > "${VERIFY_DIR}/${asset_name}"
+  done < <(jq -r --arg name "${EVIDENCE_NAME}" \
+    '.assets[] | select(.name != $name) | [.name, (.id | tostring)] | @tsv' \
+    <<< "${FINAL_RELEASE}")
+  (
+    cd "${VERIFY_DIR}"
+    shasum -a 256 --check SHA256SUMS
+  )
+
+  # Upload without replacement, re-download, and compare with the protected
+  # tag object immediately before publication.
+  if [[ "${EVIDENCE_ASSET_COUNT}" -eq 0 ]]; then
+    gh release upload -R "${REPO}" "${FINAL_TAG}" "${EVIDENCE_BUNDLE}"
+  fi
+  FINAL_RELEASE="$(gh api "repos/${REPO}/releases?per_page=100" |
+    jq -c --arg tag "${FINAL_TAG}" '
+      [.[] | select(.tag_name == $tag)]
+      | if length == 1 then .[0] else error("expected one final release") end')"
+  EVIDENCE_ASSET_ID="$(jq -r --arg name "${EVIDENCE_NAME}" '
+    [.assets[] | select(.name == $name)]
+    | if length == 1 then .[0].id else error("expected one evidence asset") end' \
+    <<< "${FINAL_RELEASE}")"
+  gh api -H 'Accept: application/octet-stream' \
+    "repos/${REPO}/releases/assets/${EVIDENCE_ASSET_ID}" > \
+    "${VERIFY_DIR}/${EVIDENCE_NAME}"
+
+  bash ./scripts/check-release-tag-contract.sh \
+    "${FINAL_TAG}" "${RC_SHA}" origin
+  FINAL_TAG_OBJECT="$(git ls-remote --exit-code --tags --refs origin \
+    "refs/tags/${FINAL_TAG}" | awk '{print $1}')"
+  TAG_EVIDENCE_SHA256="$(git cat-file tag "${FINAL_TAG_OBJECT}" |
+    sed -n 's/^Release-Evidence-SHA256: //p')"
+  test "${TAG_EVIDENCE_SHA256}" = "${EVIDENCE_SHA256}"
+  test "$(shasum -a 256 "${VERIFY_DIR}/${EVIDENCE_NAME}" | awk '{print $1}')" = \
+    "${TAG_EVIDENCE_SHA256}"
+
+  # Re-fetch and reverify all seven live draft assets immediately before the
+  # publish mutation, closing the draft-asset replacement window.
+  PREPUBLISH_RELEASE="$(gh api "repos/${REPO}/releases?per_page=100" |
+    jq -c --arg tag "${FINAL_TAG}" '
+      [.[] | select(.tag_name == $tag)]
+      | if length == 1 then .[0] else error("expected one final release") end')"
+  jq -e '.draft == true and .published_at == null' \
+    <<< "${PREPUBLISH_RELEASE}" >/dev/null
+  PREPUBLISH_EXPECTED="${VERIFY_DIR}/prepublish-expected-assets"
+  PREPUBLISH_ACTUAL="${VERIFY_DIR}/prepublish-actual-assets"
+  printf '%s\n' \
+    "${EVIDENCE_NAME}" \
+    "SHA256SUMS" \
+    "Sigillum-v1.0.0-macos-aarch64.app.zip" \
+    "Sigillum-v1.0.0-macos-aarch64.dmg" \
+    "THIRD-PARTY-NOTICES.txt" \
+    "sigillum-cli-v1.0.0-linux-x86_64.tar.gz" \
+    "sigillum-cli-v1.0.0-macos-aarch64.tar.gz" |
+    LC_ALL=C sort > "${PREPUBLISH_EXPECTED}"
+  jq -r '.assets[].name' <<< "${PREPUBLISH_RELEASE}" |
+    LC_ALL=C sort > "${PREPUBLISH_ACTUAL}"
+  cmp -s "${PREPUBLISH_EXPECTED}" "${PREPUBLISH_ACTUAL}"
+
+  PREPUBLISH_DIR="${VERIFY_DIR}/prepublish"
+  mkdir -p "${PREPUBLISH_DIR}"
+  while IFS=$'\t' read -r asset_name asset_id; do
+    gh api -H 'Accept: application/octet-stream' \
+      "repos/${REPO}/releases/assets/${asset_id}" > \
+      "${PREPUBLISH_DIR}/${asset_name}"
+  done < <(jq -r '.assets[] | [.name, (.id | tostring)] | @tsv' \
+    <<< "${PREPUBLISH_RELEASE}")
+  (
+    cd "${PREPUBLISH_DIR}"
+    shasum -a 256 --check SHA256SUMS
+  )
+  TAG_EVIDENCE_SHA256="$(git cat-file tag "${FINAL_TAG_OBJECT}" |
+    sed -n 's/^Release-Evidence-SHA256: //p')"
+  test "${TAG_EVIDENCE_SHA256}" = "${EVIDENCE_SHA256}"
+  test "$(shasum -a 256 "${PREPUBLISH_DIR}/${EVIDENCE_NAME}" |
+    awk '{print $1}')" = "${TAG_EVIDENCE_SHA256}"
+
+  FINAL_RELEASE_ID="$(jq -r '.id' <<< "${PREPUBLISH_RELEASE}")"
+  PUBLISHED_RELEASE="$(gh api --method PATCH \
+    "repos/${REPO}/releases/${FINAL_RELEASE_ID}" \
+    -F draft=false -F prerelease=false -f make_latest=true)"
+  jq -e '.draft == false and .prerelease == false and .published_at != null' \
+    <<< "${PUBLISHED_RELEASE}" >/dev/null
+)
 ```
 
 #### H3 — Post-release
