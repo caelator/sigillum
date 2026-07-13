@@ -293,7 +293,7 @@ doctor count, and checked surfaces. Set `SIGILLUM_SOAK_KEEP_ARTIFACTS=1` only
 when you need daemon/gateway logs for investigation, because that keeps the
 temporary harness directory on disk.
 
-## Release Dry Run (rc tag)
+## Release Dry Run (RC tag)
 
 The release workflow (`.github/workflows/release.yml`) triggers on tags matching
 `v*`, then rejects tags that are not annotated, do not match the workspace

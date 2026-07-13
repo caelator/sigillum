@@ -15,15 +15,24 @@ repository snapshots, and local builds are not supported releases.
 
 **Do not open a public issue for security vulnerabilities.**
 
-Email security reports to: **security@caelator.com**
+Use [GitHub private vulnerability reporting](https://github.com/caelator/sigillum/security/advisories/new)
+when it is available. If that path is unavailable, email
+**security@caelator.com**.
 
 Include:
-- Description of the vulnerability
-- Steps to reproduce
-- Impact assessment
-- Suggested fix (if any)
 
-You will receive an acknowledgment within 48 hours. We aim to release a patch within 7 days of confirmation.
+- the affected commit or release identifier;
+- a concise description and safe reproduction using synthetic data;
+- the expected impact and preconditions;
+- suggested remediation, if known.
+
+Do not send production seed phrases, private keys, API credentials, wallet data,
+or full Sigillum data directories. Encrypt sensitive supporting material only
+after agreeing on a safe transfer method with the maintainer.
+
+The project will acknowledge and triage reports as maintainer availability
+allows. No fixed response or remediation SLA is offered while Sigillum has no
+supported stable release.
 
 ## Security Design
 

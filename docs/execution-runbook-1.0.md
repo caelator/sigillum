@@ -2,7 +2,8 @@
 
 **Status:** Active hardening and release handbook
 
-**State recorded:** 2026-07-11, failed RC `v1.0.0-rc.2` at `815d262`
+**State recorded:** 2026-07-12, protected `main` at `cb382a7`; failed RC
+`v1.0.0-rc.2` at `815d262`
 
 **Plan authority:** [release-1.0-plan.md](./release-1.0-plan.md)
 
