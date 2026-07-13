@@ -7,9 +7,10 @@
 
 > [!IMPORTANT]
 > Sigillum has not published a supported stable release. Build and evaluate the
-> current source on a non-production machine with test wallets first. The visible
-> `v1.0.0-rc.2` tag is not a valid release candidate: its release workflow failed
-> the annotated-tag contract, and no GitHub Release was published from it.
+> current source on a non-production machine with test wallets first.
+> `v1.0.0-rc.2` failed the annotated-tag contract, and `v1.0.0-rc.3` later
+> exposed an invalid macOS bundle signature despite a green legacy check. Both
+> tags are immutable failure receipts; the next candidate is `v1.0.0-rc.4`.
 
 Sigillum is a self-hosted, single-operator workstation for finding EVM wallets
 and assets, understanding their provenance and risk, preparing consolidation
@@ -93,12 +94,13 @@ port and uses the same `~/.sigillum` data directory:
 
 ```bash
 cargo install tauri-cli --version 2.11.4 --locked
-cd crates/sigillum-desktop
-cargo tauri build -- --locked
+./scripts/build-macos-bundle.sh -- --locked
 ```
 
-Local builds without Apple credentials are ad-hoc signed, not notarized. Read
-the [deployment guide](docs/deployment.md) before installing the bundle.
+The project wrapper makes credential-free builds explicitly ad-hoc signed and
+fails closed on partial Apple credentials. Read the
+[deployment guide](docs/deployment.md) for strict app/dmg verification before
+installing the bundle.
 
 ### Rust library use
 

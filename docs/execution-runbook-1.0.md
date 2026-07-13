@@ -2,8 +2,8 @@
 
 **Status:** Active hardening and release handbook
 
-**State recorded:** 2026-07-12, protected `main` at `cb382a7`; failed RC
-`v1.0.0-rc.2` at `815d262`
+**State recorded:** 2026-07-12, protected `main` at `0a97c18`; failed RCs
+`v1.0.0-rc.2` at `815d262` and `v1.0.0-rc.3` at `0a97c18`
 
 **Plan authority:** [release-1.0-plan.md](./release-1.0-plan.md)
 
@@ -21,13 +21,22 @@ a commit that contains later hardening changes.
   `v1.0.0-rc.1` tag remains permanently burned and is the sole legacy gap
   permitted before the retained sequence that starts at `rc.2`; do not
   recreate it.
-- A fresh RC is required at the release-contract-fix SHA; the code-level
-  capability-auth, payment-truth, queue-durability, and no-HID hardening has
-  already landed and passed the source gate.
+- The code-level capability-auth, payment-truth, queue-durability, no-HID, and
+  release-tag hardening landed at `0a97c18` and passed the then-current source
+  gate.
 - `v1.0.0-rc.2` is an immutable failed-contract receipt, not a valid candidate.
   Its remote tag is annotated, but the tag-time workflow trusted a runner-local
   ref that checkout rewrote to the peeled commit. No draft or assets were
-  created. After the contract fix lands, the next attempt is `v1.0.0-rc.3`.
+  created.
+- `v1.0.0-rc.3` is an immutable failed-packaging receipt, not a valid
+  candidate. Its workflow and checksums passed, but the macOS app had only a
+  linker signature: strict bundle verification failed, `Info.plist` was not
+  bound, resources were unsealed, and `_CodeSignature/CodeResources` was
+  absent. The weak source check had only looked for a `Signature=` metadata
+  line. RC3 assets and operator receipts cannot certify a final release.
+- The signing remediation must land through protected `main`, pass the
+  strengthened source gate, and use the next retained tag:
+  `v1.0.0-rc.4`.
 - Gateway payments are preview-only and disabled by default. Opt-in balance
   observations are not finality proof and must not be represented as supported
   1.0 payment confirmations.
@@ -36,17 +45,17 @@ a commit that contains later hardening changes.
 
 1. Re-anchor on a clean, current `main`; confirm the GitNexus index matches the
    checked-out commit.
-2. Complete stop-ship hardening in this order:
-   - make generic daemon session authorization full-session-only and keep
-     capability access explicit through scoped checks;
-   - enforce payment amount truth, remove unsupported confirmation claims, and
-     remove the unauthenticated privileged invoice-signing callback path;
-   - persist exact signed transaction bytes (including the committed nonce) and
-     hash as `prepared`, persist `submitted_unknown` before RPC, recover by
-     receipt lookup or exact-byte resubmission without re-signing, and make the
-     queue pause latch preemptive between jobs and immediately before broadcast;
-   - compile, test, and lint `sigillum-fido2` with default features disabled;
-   - harden the release tree, lockfile, workflow, and documentation contracts.
+2. Treat the full-session authorization, payment-truth, exact-byte queue
+   recovery/pause, no-HID, and release-tag fixes at `0a97c18` as a landed
+   baseline. Complete the current RC4 stop-ship remediation in this order:
+   - make credential-free macOS builds explicitly select Tauri identity `-`;
+   - fail closed on partial or mixed Apple signing/notarization inputs;
+   - verify the complete source app and the app mounted read-only from its dmg,
+     and reproduce the RC3 failure plus tamper/layout/symlink negatives;
+   - use the same wrapper and verifier on the release build after the notices
+     overlay and before artifact staging;
+   - synchronize the runbook, readiness audit, deployment guide, changelog,
+     and plan so RC3 is failed evidence and RC4 is the next candidate.
 3. Run focused tests for every changed boundary, then run
    `./scripts/check-release.sh` alone. Never run a full gate while another agent
    or build is modifying the same checkout.
@@ -67,6 +76,14 @@ a commit that contains later hardening changes.
 - checks default and no-HID FIDO2 configurations;
 - verifies UI lock metadata and generated assets;
 - runs workspace, adversarial, runtime, browser, desktop, audit, and deny gates;
+- on macOS, builds app/dmg bundles through the project signing wrapper, rejects
+  incomplete or mixed Apple credentials, refuses Developer ID without one
+  complete notarization family, explicitly notarizes/staples the dmg after
+  Tauri creates it, and verifies both the source app and
+  the app mounted read-only from the dmg with strict bundle, identifier,
+  bound-plist, sealed-resource, signature-mode, stapled-ticket (Developer ID
+  app copies and dmg), and CDHash checks; negative
+  regressions reproduce the RC3 linker-only shape and malformed dmg layouts;
 - exercises the queue's durable prepare/submission state machine and concurrent
   pause behavior; deterministic nonce or fee rejection must park for operator
   action rather than mint a replacement signature;
@@ -111,6 +128,9 @@ and the operator decision are required before publication.
 - Never move, delete, or reuse any pushed RC tag, whether its workflow failed
   or passed. Preserve it as historical evidence, land fixes through the normal
   PR/gate path, and increment `rc.N`.
+- A green artifact job is not sufficient when a shipped bundle fails strict
+  signature verification. Preserve the draft, checksums, and failed app as
+  evidence; do not promote its same-SHA soak, doctor, or install receipts.
 - Treat compile errors, test failures, tracked-tree mutations, lockfile drift,
   malformed tags, and missing changelog sections as real release failures.
 - For a new advisory, take a fixed dependency version first. Add a temporary

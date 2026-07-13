@@ -1,16 +1,18 @@
 # Production Readiness Audit
 
-**Date:** June 4, 2026 (updated July 11, 2026)
+**Date:** June 4, 2026 (updated July 12, 2026)
 **Scope:** local-first, single-host Sigillum source checkout and local-sidecar
 gateway boundary
-**Verdict:** the earlier RC gate receipts are historical evidence and do not
-certify the current hardening line. Capability authorization, payment truth,
-queue broadcast durability/pause behavior, no-HID compilation, and release
-governance are being re-gated together. The source may be called release-ready
-for the local-first boundary only after the updated `./scripts/check-release.sh`
-passes at one commit and the remaining operator receipts reference that same
-commit. Gateway payments remain disabled-by-default experimental observations,
-not supported 1.0 confirmation semantics.
+**Verdict:** there is no valid release candidate. RC2 is an immutable
+annotated-tag-contract failure. RC3 passed the legacy workflows but shipped a
+macOS app without a complete bundle signature; strict verification fails and
+its assets and same-SHA operator receipts cannot certify a final release. The
+source may be called release-ready for the local-first boundary only after the
+strengthened `./scripts/check-release.sh` passes on protected `main`, RC4's
+release app and mounted dmg app pass the same verifier, and the remaining
+operator receipts reference that exact RC4 commit. Gateway payments remain
+disabled-by-default experimental observations, not supported 1.0 confirmation
+semantics.
 
 ## Evidence Snapshot
 
@@ -43,8 +45,11 @@ The gate covers:
   passphrase re-authentication, failing on any browser console or runtime error
 - desktop compile and bundle smoke through `scripts/check-desktop.sh`, which
   always builds `sigillum-desktop` and, on macOS, runs a debug Tauri bundle
-  build, asserts `.app` and `.dmg` outputs, and verifies the `.app` carries a
-  code signature
+  build through the fail-closed signing wrapper, asserts exactly one `.app`
+  and `.dmg`, exercises the release notice-resource overlay, and strictly
+  verifies the source app plus its mounted-dmg copy:
+  exact identifier/executable, bound plist, sealed resources, nonempty
+  `CodeResources`, expected signature mode, and matching CDHash
 - configurable local daemon/gateway soak harness for repeated daemon status,
   vault write/read canaries, gateway health, and `sigillum doctor`
 - RustSec advisory scan through `cargo audit`
@@ -66,6 +71,14 @@ The historical `v1.0.0-rc.1` rehearsal tag was deleted under the superseded
 cleanup procedure. That number remains burned and is not recreated. It is the
 only permitted legacy gap; the retained 1.0.0 RC sequence begins at `rc.2` and
 must remain contiguous thereafter.
+
+`v1.0.0-rc.3` is retained as packaging-failure evidence. Its checksum-valid
+draft assets contained an app for which `codesign -dv` misleadingly printed
+`Signature=adhoc`, while `codesign --verify --deep --strict` failed because the
+bundle had no resource seal. The new verifier rejects that exact linker-only
+shape, mounts the dmg read-only without executing its binary, and requires the
+mounted app to match the already verified source app. The next permitted
+candidate is `v1.0.0-rc.4`.
 
 The first sandboxed run failed when loopback integration tests could not bind
 local sockets under the execution sandbox. The same release gate passed outside
@@ -110,11 +123,25 @@ on hosts without a local browser via `SIGILLUM_SKIP_BROWSER_SMOKE=1`.
 The desktop bundle proof is now repeatable as `scripts/check-desktop.sh`, wired
 into the release gate after the browser smoke. It always compiles
 `sigillum-desktop` with the locked dependency graph. On macOS, it also runs
-`cargo tauri build --debug`, requires the debug `.app` and `.dmg` artifacts,
-and verifies the `.app` is code-signed. The macOS bundle portion can be skipped
-with `SIGILLUM_SKIP_DESKTOP_BUNDLE=1` only when the host cannot build Tauri
-bundles; non-macOS hosts print an explicit bundle-skip line after the compile
-check.
+the project Tauri wrapper with explicit ad-hoc signing when credentials are
+absent, exercises the release notice-resource overlay, requires exactly one
+debug `.app` and `.dmg`, verifies the source and
+mounted apps with `codesign --verify --deep --strict`, validates signature
+metadata, hardened runtime, and CDHash parity, and runs negative bundle/dmg
+regressions including a CDHash mismatch. Developer ID mode also requires the
+dmg signature team to match the app. Partial,
+mixed, or whitespace-only Apple credential configurations fail closed. The
+Developer ID path also requires one complete notarization family and validates
+stapled tickets on the source app, mounted app, and dmg. Mode-independent
+hostile dmg-layout regressions run in the always-on ad-hoc suite. Because the
+pinned Tauri bundler notarizes the app before it creates and signs the dmg, the
+project wrapper performs the dmg submission/stapling step explicitly and an
+offline fake-tool regression checks both credential families and failure
+states. The GitHub release workflow uses the Apple-ID family; API-key
+notarization remains a local/manual wrapper path. The
+macOS bundle portion can be skipped with `SIGILLUM_SKIP_DESKTOP_BUNDLE=1` only
+outside CI when the host cannot build Tauri bundles; non-macOS hosts print an
+explicit bundle-skip line after the compile check.
 
 The configurable reliability harness is `scripts/check-local-soak.sh`. A bounded
 local validation run passed with `SIGILLUM_SOAK_SECONDS=300`,
@@ -188,7 +215,7 @@ pass with empty ignore lists.
 | Runtime daemon lifecycle behavior | `scripts/check-runtime-smoke.sh` starts the daemon, verifies status, initializes a passphrase compartment, writes and reads vault canaries, locks, unlocks, lists compartments, and runs doctor | Proven for current checkout in an unsandboxed local environment |
 | Queue submission durability and pause | Queue schema v5 persists `prepared` raw bytes/hash and a pre-RPC `submitted_unknown` marker; recovery checks receipts or resubmits exact bytes without re-signing; the real HTTP pause regression latches before the active drain mutex and blocks later broadcasts | Implemented on the current hardening line; fresh full-gate and CI evidence is still required |
 | Runtime browser/UI visual behavior | DOM smoke tests pass, the runtime smoke checks the served UI shell, and `scripts/check-browser-smoke.sh` repeatably drives a headless browser through setup, unlocked operator workspace, vault canary write/reveal, browser-session logout, passphrase re-authentication, and post-auth canary count checks against an isolated local daemon inside the release gate | Proven for current checkout as repeatable automation in an unsandboxed local environment with a Chromium-family browser |
-| Desktop app bundle readiness | `scripts/check-desktop.sh` always compiles `sigillum-desktop`; on macOS it runs a debug Tauri bundle build, asserts `.app` and `.dmg` artifacts, and verifies the `.app` code signature | Proven for current checkout on macOS; non-macOS release-gate legs compile the desktop crate and explicitly skip bundle packaging |
+| Desktop app bundle readiness | `scripts/check-desktop.sh` uses the signing wrapper, strictly verifies the source and mounted-dmg app, compares CDHash, and runs RC3/tamper/identifier/layout/symlink regressions; Developer ID mode explicitly submits/staples the post-Tauri dmg and validates tickets on both app copies and the dmg; an offline fake-tool regression covers credential routing and notary/stapler failures; the release artifact job runs the same verifier after adding notices and before upload | RC3 failed this strengthened invariant; proof requires the new source gate and release workflow to pass at the RC4 SHA. Mode-independent hostile dmg-layout regressions run in the always-on ad-hoc suite; non-macOS release-gate legs remain compile-only. |
 | Long-duration reliability | Recovery and crash tests pass, `scripts/check-local-soak.sh` passed a bounded 300-second local daemon/gateway run with 28 iterations, and an older `mac-server` run passed a 3600-second target with 117 iterations | Local automated baseline only; standard plus chaos receipts on each supported host at the new RC SHA remain an H1 gate |
 | External security assurance | Code gates, audit, deny, local adversarial/fuzz gate, SSRF/local-boundary tests, and UI boundary tests pass | Local boundary pass proven for current checkout; independent external penetration test not performed |
 | Full wallet-management product roadmap | EVM roadmap phases 1-9 shipped and tested: discovery, inventory, risk, planning, policy-gated fail-closed execution (default off), DeFi exit adapters, and treasury automation | EVM scope is complete except swap execution, which is deferred per D-13; only non-EVM chains (phase 10), swap execution (D-13), and fiat/NFT valuation (D-16) remain deferred |

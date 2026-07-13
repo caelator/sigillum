@@ -103,9 +103,10 @@ from 1.0.0 onward, per the stability policy in `docs/stability.md`.
   fresh loopback port, shares the `~/.sigillum` data directory, keeps a single
   focused instance, shows a tray with live lock state and "Lock now", locks and
   hides to tray on close, and locks before quit so loaded keys are zeroized;
-  `.app`/`.dmg` bundling with a generated icon set, ad-hoc signing by default
-  with env-gated full signing/notarization; macOS is the supported desktop
-  platform, while Linux desktop is compile-only.
+  `.app`/`.dmg` bundling with a generated icon set, project-enforced full-bundle
+  ad-hoc signing by default with fail-closed env-gated Developer ID signing and
+  notarization; macOS is the supported desktop platform, while Linux desktop
+  is compile-only.
 - **CLI** — Setup flows, `sigillum doctor` host preflight, snapshot commands, a
   daemon launcher, and JSON operator commands under `sigillum api` covering
   sessions, compartment listing, provider/wallet profiles, deposits, inventory
@@ -158,6 +159,14 @@ from 1.0.0 onward, per the stability policy in `docs/stability.md`.
   numbers. The normal release gate exercises annotated, object-absent,
   lightweight, wrong-SHA, off-main, skipped-number, malformed, and
   changelog-negative fixtures before tag time.
+- **macOS release bundle signature** — Replaced the weak signature-metadata
+  check that allowed RC3's linker-only app to pass. Credential-free builds now
+  explicitly sign the whole app bundle, partial Apple credentials fail closed,
+  Developer ID mode requires notarization and stapling for both app copies and
+  the dmg (including an explicit post-Tauri dmg submission), and both source-gate
+  and release-artifact paths require strict app and read-only-mounted dmg
+  verification with bound plist, sealed resources,
+  expected identifier/mode, matching CDHash, and negative regression fixtures.
 
 [Unreleased]: https://github.com/caelator/sigillum/compare/v1.0.0...HEAD
 [1.0.0]: https://github.com/caelator/sigillum/releases/tag/v1.0.0

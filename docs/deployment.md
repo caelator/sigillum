@@ -92,12 +92,12 @@ daemon web console in the native window.
 
 ### Build the bundle
 
-Install the Tauri v2 CLI, then build from the desktop crate:
+Install the Tauri v2 CLI, then build through the project wrapper from the
+workspace root:
 
 ```bash
 cargo install tauri-cli --version 2.11.4 --locked
-cd crates/sigillum-desktop
-cargo tauri build
+./scripts/build-macos-bundle.sh -- --locked
 ```
 
 The build writes, under the workspace root:
@@ -107,9 +107,24 @@ The build writes, under the workspace root:
 
 The release gate runs `scripts/check-desktop.sh` for repeatable desktop
 coverage. It always compiles `sigillum-desktop`; on macOS it also runs
-`cargo tauri build --debug`, requires the debug `.app` and `.dmg`, and verifies
-the app bundle has a code signature. Set `SIGILLUM_SKIP_DESKTOP_BUNDLE=1` only
-on macOS hosts that cannot build Tauri bundles.
+the wrapper in debug mode, requires exactly one debug `.app` and `.dmg`, and
+strictly verifies both the source app and the app mounted read-only from the
+dmg. The debug build uses a deterministic temporary notice file through the
+same Tauri resource overlay as release builds, then removes the source fixture.
+Verification requires the exact identifier and executable, a bound
+`Info.plist`, sealed resources, nonempty `_CodeSignature/CodeResources`, the
+expected signature mode, hardened runtime, and matching CDHash values. It also
+runs negative regressions for the RC3 linker-only failure, missing hardened runtime,
+tampering, wrong identifiers, CDHash mismatch, symlinks, and malformed dmg
+layouts. Developer ID mode additionally requires the dmg to carry a non-ad-hoc
+Developer ID signature from the same team as the app and validates stapled
+notarization tickets on both app copies and the dmg. Mode-independent hostile
+dmg-layout regressions run in the always-on ad-hoc suite. Tauri notarizes and
+staples the app before creating the dmg; the project build wrapper then submits,
+staples, and validates the signed dmg with `scripts/notarize-macos-dmg.sh`.
+Set
+`SIGILLUM_SKIP_DESKTOP_BUNDLE=1` only
+on non-CI macOS hosts that cannot build Tauri bundles; CI rejects the toggle.
 
 ### Third-party license notices
 
@@ -125,25 +140,39 @@ The workflow writes the file to
 config overlay:
 
 ```bash
-cargo tauri build --config '{"bundle":{"resources":["THIRD-PARTY-NOTICES.txt"]}}'
+./scripts/build-macos-bundle.sh \
+  --config '{"bundle":{"resources":{"THIRD-PARTY-NOTICES.txt":"THIRD-PARTY-NOTICES.txt"}}}' \
+  -- --locked
 ```
 
 That overlay merges the file into the bundle resources, so it lands at
 `Sigillum.app/Contents/Resources/THIRD-PARTY-NOTICES.txt` inside the shipped
 `.dmg` and `.app.zip`. The committed `tauri.conf.json` intentionally does not
 list the resource, because Tauri fails a build when a listed resource file is
-missing and the file only exists after generation. Local builds and
-`check-desktop.sh` builds therefore build without notices, and only release
-builds include them.
+missing and the actual file only exists after generation. Raw local builds do
+not include notices unless given the overlay. `check-desktop.sh` uses a
+temporary fixture under ignored `target/` to exercise the identical overlay
+and seal shape; release builds replace that fixture with the generated notice.
 
 To reproduce locally:
 
 ```bash
 cargo install cargo-about --version 0.9.1 --locked --features cli
 cargo about generate --output-file crates/sigillum-desktop/THIRD-PARTY-NOTICES.txt about.hbs
-cd crates/sigillum-desktop
-cargo tauri build --config '{"bundle":{"resources":["THIRD-PARTY-NOTICES.txt"]}}'
+./scripts/build-macos-bundle.sh \
+  --config '{"bundle":{"resources":{"THIRD-PARTY-NOTICES.txt":"THIRD-PARTY-NOTICES.txt"}}}' \
+  -- --locked
+dmg_files=(target/release/bundle/dmg/Sigillum_*.dmg)
+test "${#dmg_files[@]}" -eq 1
+./scripts/check-macos-bundle-signature.sh \
+  --mode adhoc \
+  target/release/bundle/macos/Sigillum.app \
+  "${dmg_files[0]}"
 ```
+
+Use `--mode developer-id` for a fully credentialed Developer ID build. The
+release workflow runs the same verifier after the notices overlay and before
+it stages or uploads any artifact.
 
 The workflow also attaches `THIRD-PARTY-NOTICES.txt` directly to the GitHub
 release next to `SHA256SUMS`.
@@ -171,7 +200,8 @@ mounted image.
 
 ### First launch on macOS 15+ (Gatekeeper)
 
-Default builds are ad-hoc signed. macOS 15 removed the older
+Credential-free builds made through the project wrapper are ad-hoc signed.
+macOS 15 removed the older
 right-click-then-Open bypass for this case, so use the Privacy & Security
 approval flow:
 
@@ -182,31 +212,65 @@ approval flow:
 4. Click `Open Anyway` and authenticate.
 5. Click `Open Anyway` or `Open` in the confirmation dialog.
 
-To verify that a local build is ad-hoc signed:
+To verify an installed credential-free build, require a complete bundle
+signature and inspect the exact metadata:
 
 ```bash
-codesign -dv /Applications/Sigillum.app
+codesign --verify --deep --strict --verbose=4 /Applications/Sigillum.app
+codesign -dv --verbose=4 /Applications/Sigillum.app 2>&1 | \
+  grep -E '^(Identifier=|Signature=|Info\.plist |TeamIdentifier=|Sealed Resources )'
 ```
 
-`codesign` shows `Signature=adhoc` for the default unsigned-credential build.
+The credential-free path must show `Identifier=com.sigillum.desktop`,
+`Signature=adhoc`, `Info.plist entries=...`, `TeamIdentifier=not set`, and
+`Sealed Resources version=2 ...`. A `Signature=adhoc` line by itself is not
+proof: RC3's linker-only binary printed that line while its bundle failed
+strict verification.
 
-### Full signing and notarization (optional)
+### Full signing and notarization (optional release mode)
 
-Set the standard Tauri v2 signing variables before building:
+Set the complete signing trio before invoking the project wrapper:
 
 - `APPLE_CERTIFICATE`: base64-encoded `.p12`
 - `APPLE_CERTIFICATE_PASSWORD`
 - `APPLE_SIGNING_IDENTITY`, for example `Developer ID Application: <name>`
 
-For notarization, also set:
+Developer ID mode also requires exactly one complete notarization credential
+family. For Apple ID credentials, set:
 
 - `APPLE_ID`
 - `APPLE_PASSWORD`, using an app-specific password
 - `APPLE_TEAM_ID`
 
-When these variables are present, `cargo tauri build` signs the bundle and
-notarizes it when the `APPLE_ID` trio is present. When they are absent, the
-build never fails for missing Apple credentials and remains ad-hoc signed.
+Alternatively, use the complete App Store Connect API-key trio:
+
+- `APPLE_API_KEY` (the key ID)
+- `APPLE_API_ISSUER`
+- `APPLE_API_KEY_PATH` (a readable, nonempty `.p8` file)
+
+The wrapper treats empty and whitespace-only values as absent. It accepts only
+one of these states:
+
+- no credentials, or explicit `APPLE_SIGNING_IDENTITY=-`: enforce a complete
+  ad-hoc app-bundle signature and do not notarize;
+- all three signing variables, with a non-`-` identity, plus exactly one
+  complete notarization trio: Developer ID signing, notarization, and stapling
+  of both app copies and the dmg.
+
+The Developer ID path contacts Apple's notary service for both release and
+`--debug` builds. The credential-routing regression uses fake tools and runs
+offline on both CI platforms; it never submits an artifact or prints credential
+arguments. API-key notarization is supported for local/manual wrapper runs; the
+GitHub release workflow currently forwards the Apple-ID family only and does
+not materialize a `.p8` secret file.
+
+Partial signing fields, partial notarization fields, both notarization
+families, Developer ID signing without notarization, notarization with ad-hoc
+signing, or an unreadable API-key path fail before Tauri starts. The project
+does not require `spctl` for ad-hoc builds;
+their documented Gatekeeper path remains manual. The GitHub release workflow
+maps the signing and Apple-ID secrets into this same validator and defaults to
+the explicit ad-hoc mode when they are absent.
 
 ### Runtime behavior
 
