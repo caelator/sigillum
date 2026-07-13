@@ -64,10 +64,11 @@ impl SigillumService {
         let mut tally = QueueDrainTally::default();
         let mut paused_reason: Option<String> = None;
 
-        // Snapshot of every job's id -> state, refreshed after each job so
-        // `PlanStepExecution` dependents resolve within the same drain batch
-        // (W6.4 ordering) instead of waiting for the next `process_queue`
-        // call. The drain uses indexes (rather than `iter_mut`) so it can
+        // Snapshot of every job's id -> state, refreshed after each job so a
+        // prerequisite polled to `confirmed` can unblock a later dependent
+        // within this drain batch (W6.4 ordering). A freshly broadcast
+        // prerequisite remains `sent`, so its dependent waits for a later
+        // confirmation cycle. The drain uses indexes (rather than `iter_mut`) so it can
         // durably save the whole queue at the prepare/submission barriers.
         let mut job_states: HashMap<String, String> = queue
             .jobs

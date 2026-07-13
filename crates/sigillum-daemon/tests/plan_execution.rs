@@ -85,6 +85,17 @@ fn rpc_response(state: &RpcState, request: &Value) -> Value {
             state.broadcast_count.fetch_add(1, Ordering::SeqCst);
             submitted_raw_transaction_hash(request)
         }
+        "eth_getTransactionReceipt" => {
+            let transaction_hash = request["params"][0]
+                .as_str()
+                .expect("receipt lookup carries the transaction hash");
+            json!({
+                "status": "0x1",
+                "blockNumber": "0x10",
+                "gasUsed": "0x5208",
+                "transactionHash": transaction_hash,
+            })
+        }
         other => json!({ "unsupported": other }),
     };
     json!({
@@ -558,7 +569,24 @@ async fn dependency_chain_executes_in_order_with_full_audit_trail() {
     update_policy(&env, gates_on_policy_body()).await;
     let (plan_id, sweep_step_id) = generate_and_simulate_plan(&env).await;
 
-    // Revoke step depends on the sweep step; fund_gas depends on revoke.
+    // Build the production-shaped dependency chain: fund_gas -> sweep -> revoke.
+    let fund_gas_step_id = add_plan_step(&env, &plan_id, &sweep_step_id, |step| {
+        step["action"] = json!("fund_gas");
+        step["asset_kind"] = json!("native");
+        step["asset_address"] = json!(null);
+        step["destination_address"] = json!(SEED_ADDRESS);
+        // Zero keeps the batch's typed-confirmation total equal to the sweep
+        // amount without hand-computing a u256 sum.
+        step["amount_hex"] = json!("0x0");
+        step["depends_on"] = json!([]);
+    });
+    edit_step_depends_on(
+        &env,
+        &plan_id,
+        &sweep_step_id,
+        vec![fund_gas_step_id.clone()],
+    );
+
     let revoke_step_id = add_plan_step(&env, &plan_id, &sweep_step_id, |step| {
         step["action"] = json!("revoke_erc20_approval");
         step["asset_kind"] = json!("approval");
@@ -569,22 +597,6 @@ async fn dependency_chain_executes_in_order_with_full_audit_trail() {
     // `add_plan_step` clones the template (sweep) step, so its `depends_on`
     // must be set as a follow-up edit once the new step's real id is known.
     edit_step_depends_on(&env, &plan_id, &revoke_step_id, vec![sweep_step_id.clone()]);
-
-    let fund_gas_step_id = add_plan_step(&env, &plan_id, &sweep_step_id, |step| {
-        step["action"] = json!("fund_gas");
-        step["asset_kind"] = json!("native");
-        step["asset_address"] = json!(null);
-        step["destination_address"] = json!(DESTINATION);
-        // Zero so the batch's typed-confirmation total below stays exactly
-        // the sweep step's amount, without hand-computing a u256 sum.
-        step["amount_hex"] = json!("0x0");
-    });
-    edit_step_depends_on(
-        &env,
-        &plan_id,
-        &fund_gas_step_id,
-        vec![revoke_step_id.clone()],
-    );
 
     let approved = approve_plan(&env, &plan_id).await;
     let steps = approved["plan"]["steps"].as_array().unwrap();
@@ -609,38 +621,79 @@ async fn dependency_chain_executes_in_order_with_full_audit_trail() {
     let enqueued = body["enqueued"].as_array().unwrap();
     assert_eq!(enqueued.len(), 3, "enqueue-plan: {body}");
 
+    let fund_gas_job = queue_job_by_step(&env, &fund_gas_step_id);
     let sweep_job = queue_job_by_step(&env, &sweep_step_id);
     let revoke_job = queue_job_by_step(&env, &revoke_step_id);
-    let fund_gas_job = queue_job_by_step(&env, &fund_gas_step_id);
+    assert_eq!(
+        sweep_job["prerequisite_job_ids"],
+        json!([fund_gas_job["id"]])
+    );
     assert_eq!(revoke_job["prerequisite_job_ids"], json!([sweep_job["id"]]));
+
+    // A fresh prerequisite only reaches `sent` in its broadcast cycle. Each
+    // dependent must remain unsigned until a later cycle observes the
+    // prerequisite's successful receipt and moves it to `confirmed`.
+    let first_process = process_queue(&env).await;
     assert_eq!(
-        fund_gas_job["prerequisite_job_ids"],
-        json!([revoke_job["id"]])
+        env.rpc_state.broadcast_count.load(Ordering::SeqCst),
+        1,
+        "first process: {first_process}"
+    );
+    assert_eq!(
+        queue_job_by_step(&env, &fund_gas_step_id)["state"],
+        json!("sent")
+    );
+    let sweep_job = queue_job_by_step(&env, &sweep_step_id);
+    assert_eq!(sweep_job["state"], json!("blocked"), "{sweep_job}");
+    assert_eq!(
+        sweep_job["transaction_hash_hex"],
+        json!(null),
+        "dependent must remain unsigned: {sweep_job}"
     );
 
-    // A single drain call resolves the whole chain in order: the job_states
-    // snapshot refreshes after each job, so same-batch dependents execute
-    // without a second `process_queue` call.
-    let process_json = process_queue(&env).await;
+    let second_process = process_queue(&env).await;
     assert_eq!(
-        process_json["succeeded"],
-        json!(3),
-        "process: {process_json}"
+        env.rpc_state.broadcast_count.load(Ordering::SeqCst),
+        2,
+        "second process: {second_process}"
     );
-    assert_eq!(process_json["blocked"], json!(0), "process: {process_json}");
     assert_eq!(
-        process_json["operator_action_required"],
-        json!(0),
-        "process: {process_json}"
+        queue_job_by_step(&env, &fund_gas_step_id)["state"],
+        json!("confirmed")
+    );
+    assert_eq!(
+        queue_job_by_step(&env, &sweep_step_id)["state"],
+        json!("sent")
+    );
+    let revoke_job = queue_job_by_step(&env, &revoke_step_id);
+    assert_eq!(revoke_job["state"], json!("blocked"), "{revoke_job}");
+    assert_eq!(revoke_job["transaction_hash_hex"], json!(null));
+
+    let third_process = process_queue(&env).await;
+    assert_eq!(
+        env.rpc_state.broadcast_count.load(Ordering::SeqCst),
+        3,
+        "third process: {third_process}"
+    );
+    assert_eq!(
+        queue_job_by_step(&env, &sweep_step_id)["state"],
+        json!("confirmed")
+    );
+    assert_eq!(
+        queue_job_by_step(&env, &revoke_step_id)["state"],
+        json!("sent")
     );
 
-    let jobs = queue_jobs(&env).await;
-    for step_id in [&sweep_step_id, &revoke_step_id, &fund_gas_step_id] {
-        let job = jobs
-            .iter()
-            .find(|job| job["step_id"] == json!(step_id))
-            .unwrap();
-        assert_eq!(job["state"], json!("sent"), "job for {step_id}: {job}");
+    let fourth_process = process_queue(&env).await;
+    assert_eq!(
+        env.rpc_state.broadcast_count.load(Ordering::SeqCst),
+        3,
+        "confirmation must not rebroadcast: {fourth_process}"
+    );
+    for step_id in [&fund_gas_step_id, &sweep_step_id, &revoke_step_id] {
+        let job = queue_job_by_step(&env, step_id);
+        assert_eq!(job["state"], json!("confirmed"), "job for {step_id}: {job}");
+        assert_eq!(job["receipt_status"], json!("success"), "{job}");
         assert!(job["transaction_hash_hex"].is_string(), "job: {job}");
     }
 
@@ -664,6 +717,78 @@ async fn dependency_chain_executes_in_order_with_full_audit_trail() {
     assert!(signed_step_ids.contains(&sweep_step_id.as_str()));
     assert!(signed_step_ids.contains(&revoke_step_id.as_str()));
     assert!(signed_step_ids.contains(&fund_gas_step_id.as_str()));
+
+    env.shutdown();
+}
+
+#[tokio::test]
+async fn failed_gas_topup_permanently_blocks_dependent_sweep_before_signing() {
+    let env = setup_plan_env().await;
+    env.rpc_state.fail_broadcast.store(true, Ordering::SeqCst);
+    update_policy(&env, gates_on_policy_body()).await;
+    let (plan_id, sweep_step_id) = generate_and_simulate_plan(&env).await;
+
+    let fund_gas_step_id = add_plan_step(&env, &plan_id, &sweep_step_id, |step| {
+        step["action"] = json!("fund_gas");
+        step["asset_kind"] = json!("native");
+        step["asset_address"] = json!(null);
+        step["destination_address"] = json!(SEED_ADDRESS);
+        step["amount_hex"] = json!("0x0");
+        step["depends_on"] = json!([]);
+    });
+    edit_step_depends_on(
+        &env,
+        &plan_id,
+        &sweep_step_id,
+        vec![fund_gas_step_id.clone()],
+    );
+
+    approve_plan(&env, &plan_id).await;
+    let (mismatch_status, mismatch_body) = enqueue_plan(&env, &plan_id, "").await;
+    assert_eq!(mismatch_status, StatusCode::BAD_REQUEST, "{mismatch_body}");
+    let confirmation = mismatch_body["action"].as_str().unwrap();
+    let (status, body) = enqueue_plan(&env, &plan_id, confirmation).await;
+    assert_eq!(status, StatusCode::OK, "enqueue-plan: {body}");
+
+    let process_json = process_queue(&env).await;
+    assert_eq!(
+        process_json["operator_action_required"],
+        json!(1),
+        "process: {process_json}"
+    );
+    assert_eq!(
+        env.rpc_state.broadcast_count.load(Ordering::SeqCst),
+        0,
+        "provider rejected the top-up and the sweep must never broadcast"
+    );
+
+    let fund_job = queue_job_by_step(&env, &fund_gas_step_id);
+    assert_eq!(
+        fund_job["state"],
+        json!("operator_action_required"),
+        "{fund_job}"
+    );
+    let sweep_job = queue_job_by_step(&env, &sweep_step_id);
+    assert_eq!(sweep_job["state"], json!("blocked"), "{sweep_job}");
+    assert!(
+        sweep_job["last_error"]
+            .as_str()
+            .unwrap()
+            .starts_with("dependency_failed:"),
+        "{sweep_job}"
+    );
+    assert_eq!(sweep_job["transaction_hash_hex"], json!(null));
+
+    let second_process = process_queue(&env).await;
+    assert_eq!(
+        env.rpc_state.broadcast_count.load(Ordering::SeqCst),
+        0,
+        "blocked dependent must remain unsigned: {second_process}"
+    );
+    assert_eq!(
+        queue_job_by_step(&env, &sweep_step_id)["transaction_hash_hex"],
+        json!(null)
+    );
 
     env.shutdown();
 }

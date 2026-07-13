@@ -2,8 +2,9 @@
 
 **Status:** Active hardening and release handbook
 
-**State recorded:** 2026-07-12, protected `main` at `0a97c18`; failed RCs
-`v1.0.0-rc.2` at `815d262` and `v1.0.0-rc.3` at `0a97c18`
+**State recorded:** 2026-07-12, protected `main` at `f73b861`; failed RCs
+`v1.0.0-rc.2` at `815d262`, `v1.0.0-rc.3` at `0a97c18`, and
+`v1.0.0-rc.4` at `f73b861`
 
 **Plan authority:** [release-1.0-plan.md](./release-1.0-plan.md)
 
@@ -34,9 +35,19 @@ a commit that contains later hardening changes.
   bound, resources were unsealed, and `_CodeSignature/CodeResources` was
   absent. The weak source check had only looked for a `Signature=` metadata
   line. RC3 assets and operator receipts cannot certify a final release.
-- The signing remediation must land through protected `main`, pass the
-  strengthened source gate, and use the next retained tag:
-  `v1.0.0-rc.4`.
+- The signing remediation landed through protected `main` and passed the
+  strengthened source gate at `f73b861`.
+- `v1.0.0-rc.4` is an immutable failed-evidence-contract receipt. Its F6
+  validator accepted any numeric non-Sepolia chain as the required L2, so a
+  mainnet or arbitrary chain could satisfy the public-testnet claim; it also
+  represented the two-transaction `fund_gas` → sweep chain with one hash. Its
+  queue treated `sent` (broadcast, unconfirmed) as prerequisite success instead
+  of requiring `confirmed`. No RC4 operator receipt can certify a final
+  release. The next retained candidate is `v1.0.0-rc.5` after the runtime and
+  F6 schema-v2 fixes pass protected-main gates.
+  Historical release run `29230844456` completed all six jobs and uploaded the
+  checksum, CLI, app, dmg, and notices assets to an unpublished draft; that
+  proves the signing remediation, not the invalidated F6/runtime contract.
 - Gateway payments are preview-only and disabled by default. Opt-in balance
   observations are not finality proof and must not be represented as supported
   1.0 payment confirmations.
@@ -45,17 +56,22 @@ a commit that contains later hardening changes.
 
 1. Re-anchor on a clean, current `main`; confirm the GitNexus index matches the
    checked-out commit.
-2. Treat the full-session authorization, payment-truth, exact-byte queue
-   recovery/pause, no-HID, and release-tag fixes at `0a97c18` as a landed
-   baseline. Complete the current RC4 stop-ship remediation in this order:
-   - make credential-free macOS builds explicitly select Tauri identity `-`;
-   - fail closed on partial or mixed Apple signing/notarization inputs;
-   - verify the complete source app and the app mounted read-only from its dmg,
-     and reproduce the RC3 failure plus tamper/layout/symlink negatives;
-   - use the same wrapper and verifier on the release build after the notices
-     overlay and before artifact staging;
-   - synchronize the runbook, readiness audit, deployment guide, changelog,
-     and plan so RC3 is failed evidence and RC4 is the next candidate.
+2. Treat the authorization, payment-truth, queue, tag, and signing remediations
+   through `f73b861` as a landed baseline. Complete the RC5 stop-ship
+   remediation in this order:
+   - require the exact `sepolia` and `l2` role set;
+   - accept only integer chain IDs for Sepolia (`11155111`) and Base Sepolia
+     (`84532`), Arbitrum Sepolia (`421614`), or OP Sepolia (`11155420`);
+   - require each plan-step prerequisite to reach `confirmed`, never merely
+     `sent`, before a dependent can sign or broadcast;
+   - use F6 schema v2 to prove four families with five transactions, including
+     two ordered, receipt-confirmed `fund_gas` and dependent-sweep legs bound by
+     plan, job, step, chain, address, and prerequisite identities;
+   - prove all supported IDs pass and mainnet, arbitrary, and non-integer IDs
+     fail, and prove malformed or single-hash gas chains fail, with internally
+     consistent receipt and audit fixtures;
+   - synchronize the runbook, readiness audit, changelog, and plan so RC4 is
+     failed evidence and RC5 is the next candidate.
 3. Run focused tests for every changed boundary, then run
    `./scripts/check-release.sh` alone. Never run a full gate while another agent
    or build is modifying the same checkout.
@@ -147,7 +163,7 @@ and the operator decision are required before publication.
 | Gate | Required evidence |
 | --- | --- |
 | F4 | Standard and chaos soak receipts on each supported host at the new RC SHA |
-| F6 | Funded testnet receipts for the required execution families, with any mock-only family labeled honestly |
+| F6 | Five funded testnet transactions for four families, including both confirmed legs of `fund_gas` → dependent sweep, with any mock-only family labeled honestly |
 | Desktop | Checksum-verified RC `.dmg` installs and reaches unlock on a clean machine without a dev toolchain |
 | Doctor | `sigillum doctor` passes on every supported host at the new RC |
 | UI | Operator walkthrough/sign-off for the remaining C7 console acceptance surface |
@@ -185,10 +201,21 @@ Preserve the sanitized evidence outside the checkout until final promotion:
    `scripts/check-release-evidence-bundle.sh` rejects missing, empty,
    unchecksummed, duplicate, unsafe, or linked archive members; requires the
    manifest to bind the exact RC tag-object ID and peeled SHA; validates the F4
-   configured and actual soak durations, validates four unique F6 transaction
-   hashes plus unique structured audit exports bound to their family, network
-   role and chain ID, transaction, and RC SHA, validates clean install and UI
-   sign-off, and computes the outer archive digest.
+   configured and actual soak durations, requires Ethereum Sepolia (`11155111`)
+   plus Base Sepolia (`84532`), Arbitrum Sepolia (`421614`), or OP Sepolia
+   (`11155420`), and rejects legacy F6 schema v1. F6 schema v2 validates four
+   families with five unique transaction hashes and audit exports. Its nested
+   gas-top-up claim requires ordered `fund_gas` and dependent-sweep legs with
+   matching plan/network/chain identities, distinct job and step IDs, confirmed
+   successful receipts, top-up destination equal to sweep source, the sweep's
+   prerequisites equal to the single top-up job, and a strictly later sweep
+   broadcast timestamp and receipt block.
+   It also binds every audit export to its transaction and the RC SHA, validates
+   clean install and UI sign-off, and computes the outer archive digest. This
+   is an offline structural check; it does not query a public RPC or explorer.
+   Before H2, independently verify all five F6 transactions on the claimed
+   public chains, including chain ID, successful receipt, finality, and the
+   family effect represented by each audit export.
 3. The executable H2 ceremony waits for the exact final workflow and all six
    successful jobs, independently checksums its six generated draft assets,
    uploads the evidence archive as a seventh asset without replacing an
@@ -217,8 +244,10 @@ or recreating the tag.
 4. Require the release contract job, both verify legs, both artifact jobs, and
    the draft-release job to pass.
 5. Download the draft assets and verify `SHA256SUMS`.
-6. Complete the section 5 receipts against that exact peeled RC commit SHA and
-   assemble the sanitized release evidence bundle described above.
+6. Complete the section 5 receipts against that exact peeled RC commit SHA,
+   independently verify every F6 transaction through the declared public RPC
+   or explorer, and assemble the sanitized release evidence bundle described
+   above.
 7. Record the tag name, tag-object ID, peeled commit SHA, workflow run, asset
    checksum result, evidence filename, and evidence archive digest. Keep the
    annotated RC tag permanently and retain the RC draft/assets through

@@ -56,7 +56,9 @@ use crate::service::{ServiceError, ServiceResult, SigillumService};
 
 use super::gates::plan_action_execution_family;
 use super::state::normalize_queue_state;
-use super::{QUEUE_STATE_FAILED_TERMINAL, QUEUE_STATE_LEGACY_FAILED, QUEUE_STATE_SENT};
+use super::{
+    QUEUE_STATE_CONFIRMED, QUEUE_STATE_FAILED_TERMINAL, QUEUE_STATE_LEGACY_FAILED, QUEUE_STATE_SENT,
+};
 use super::{QUEUE_STATE_OPERATOR_ACTION_REQUIRED, QueueExecution};
 
 const WALLET_FAMILY_ETH_SEED: &str = "eth-seed";
@@ -66,8 +68,10 @@ impl SigillumService {
     /// that has already passed its W7.1 execution-family gate check.
     ///
     /// `job_states` is a snapshot of every OTHER job's id -> state in this
-    /// drain batch, refreshed by the caller after each job so
-    /// same-batch dependents resolve without waiting for the next drain.
+    /// drain batch, refreshed by the caller after each job so a prerequisite
+    /// that reaches `confirmed` while being polled can unblock a later
+    /// dependent in that same drain. A freshly broadcast prerequisite remains
+    /// `sent`, so its dependents wait for a later confirmation cycle.
     #[allow(clippy::too_many_arguments)]
     pub(in crate::service::queue) async fn process_plan_step_execution(
         &self,
@@ -246,16 +250,16 @@ impl SigillumService {
     }
 }
 
-/// A job with unmet prerequisite job ids (not yet succeeded) defers per E1
-/// semantics; a failed (or missing) prerequisite halts dependents to
-/// `blocked`, naming the prerequisite.
-fn dependency_block_reason(
+/// A job with prerequisite ids that have not reached receipt-confirmed success
+/// defers per E1 semantics; a failed (or missing) prerequisite halts dependents
+/// to `blocked`, naming the prerequisite.
+pub(super) fn dependency_block_reason(
     payload: &PlanStepExecutionPayload,
     job_states: &HashMap<String, String>,
 ) -> Option<String> {
     for prerequisite_id in &payload.prerequisite_job_ids {
         match job_states.get(prerequisite_id).map(String::as_str) {
-            Some(state) if normalize_queue_state(state) == QUEUE_STATE_SENT => continue,
+            Some(state) if normalize_queue_state(state) == QUEUE_STATE_CONFIRMED => continue,
             Some(state)
                 if matches!(
                     normalize_queue_state(state),
@@ -353,10 +357,30 @@ mod tests {
     }
 
     #[test]
-    fn dependency_clears_once_prerequisite_succeeds() {
+    fn dependency_defers_while_prerequisite_is_broadcast_but_unconfirmed() {
         let payload = payload_with_prerequisites(vec!["job_a".into()]);
         let mut states = HashMap::new();
         states.insert("job_a".into(), "sent".into());
+        let reason = dependency_block_reason(&payload, &states).unwrap();
+        assert!(reason.starts_with("dependency_pending:"), "{reason}");
+    }
+
+    #[test]
+    fn dependency_defers_while_prerequisite_is_prepared_or_submission_unknown() {
+        let payload = payload_with_prerequisites(vec!["job_a".into()]);
+        for state in ["prepared", "submitted_unknown"] {
+            let mut states = HashMap::new();
+            states.insert("job_a".into(), state.into());
+            let reason = dependency_block_reason(&payload, &states).unwrap();
+            assert!(reason.starts_with("dependency_pending:"), "{reason}");
+        }
+    }
+
+    #[test]
+    fn dependency_clears_once_prerequisite_is_confirmed() {
+        let payload = payload_with_prerequisites(vec!["job_a".into()]);
+        let mut states = HashMap::new();
+        states.insert("job_a".into(), "confirmed".into());
         assert_eq!(dependency_block_reason(&payload, &states), None);
     }
 

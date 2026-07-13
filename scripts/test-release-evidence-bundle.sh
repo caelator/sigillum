@@ -4,10 +4,11 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 CHECKER="${ROOT}/scripts/check-release-evidence-bundle.sh"
 TMP_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/sigillum-release-evidence-test.XXXXXX")"
-RC_TAG="v1.0.0-rc.3"
+RC_TAG="v1.0.0-rc.5"
 RC_SHA="1111111111111111111111111111111111111111"
 RC_TAG_OBJECT="2222222222222222222222222222222222222222"
 BUNDLE_NAME="sigillum-v1.0.0-release-evidence.tar.gz"
+F6_FAILURE="F6 receipt does not prove four core families and both ordered gas-top-up chain legs across supported testnets"
 
 cleanup() {
   rm -rf "${TMP_ROOT}"
@@ -21,6 +22,7 @@ fail() {
 
 write_payload() {
   local payload="$1"
+  local l2_chain_id="${2:-84532}"
   mkdir -p \
     "${payload}/f4" \
     "${payload}/f6/audit" \
@@ -83,13 +85,13 @@ JSON
 
   cat > "${payload}/f6/receipts.json" <<JSON
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "kind": "sigillum.testnet_execution",
   "status": "passed",
   "rc_sha": "${RC_SHA}",
   "networks": [
     {"role": "sepolia", "chain_id": 11155111},
-    {"role": "l2", "chain_id": 84532}
+    {"role": "l2", "chain_id": ${l2_chain_id}}
   ],
   "executions": [
     {
@@ -103,7 +105,7 @@ JSON
     {
       "family": "erc20_sweep",
       "network_role": "l2",
-      "chain_id": 84532,
+      "chain_id": ${l2_chain_id},
       "status": "confirmed",
       "tx_hash": "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
       "audit_export": "f6/audit/erc20-sweep.json"
@@ -119,37 +121,100 @@ JSON
     {
       "family": "gas_top_up_sweep",
       "network_role": "l2",
-      "chain_id": 84532,
+      "chain_id": ${l2_chain_id},
       "status": "confirmed",
-      "tx_hash": "0xdddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
-      "audit_export": "f6/audit/gas-top-up-sweep.json"
+      "plan_id": "plan-gas-top-up",
+      "legs": [
+        {
+          "role": "fund_gas",
+          "action": "fund_gas",
+          "plan_id": "plan-gas-top-up",
+          "step_id": "step-fund-gas",
+          "job_id": "job-fund-gas",
+          "network_role": "l2",
+          "chain_id": ${l2_chain_id},
+          "source_address": "0x1111111111111111111111111111111111111111",
+          "destination_address": "0x2222222222222222222222222222222222222222",
+          "prerequisite_job_ids": [],
+          "queue_state": "confirmed",
+          "receipt_status": "success",
+          "confirmations": 2,
+          "receipt_block_number": 100,
+          "broadcast_at_unix": 1000,
+          "tx_hash": "0xdddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+          "audit_export": "f6/audit/gas-top-up.json"
+        },
+        {
+          "role": "dependent_sweep",
+          "action": "sweep_native",
+          "plan_id": "plan-gas-top-up",
+          "step_id": "step-dependent-sweep",
+          "job_id": "job-dependent-sweep",
+          "network_role": "l2",
+          "chain_id": ${l2_chain_id},
+          "source_address": "0x2222222222222222222222222222222222222222",
+          "destination_address": "0x3333333333333333333333333333333333333333",
+          "prerequisite_job_ids": ["job-fund-gas"],
+          "queue_state": "confirmed",
+          "receipt_status": "success",
+          "confirmations": 2,
+          "receipt_block_number": 101,
+          "broadcast_at_unix": 1001,
+          "tx_hash": "0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+          "audit_export": "f6/audit/gas-dependent-sweep.json"
+        }
+      ]
     }
   ]
 }
 JSON
 
-  while IFS=$'\t' read -r family network_role chain_id tx_hash audit_export; do
+  while IFS= read -r claim; do
+    audit_export="$(jq -r '.audit_export' <<<"${claim}")"
     jq -n \
       --arg rc_sha "${RC_SHA}" \
-      --arg family "${family}" \
-      --arg network_role "${network_role}" \
-      --argjson chain_id "${chain_id}" \
-      --arg tx_hash "${tx_hash}" '
-        {
-          schema_version: 1,
+      --argjson claim "${claim}" '
+        ({
+          schema_version: 2,
           kind: "sigillum.execution_audit",
           status: "verified",
           rc_sha: $rc_sha,
-          family: $family,
-          network_role: $network_role,
-          chain_id: $chain_id,
-          tx_hash: $tx_hash,
+          family: $claim.family,
+          network_role: $claim.network_role,
+          chain_id: $claim.chain_id,
+          tx_hash: $claim.tx_hash,
           audit_chain_verified: true
-        }
+        } +
+        (if $claim.family == "gas_top_up_sweep" then {
+          leg_role: $claim.role,
+          plan_id: $claim.plan_id,
+          step_id: $claim.step_id,
+          job_id: $claim.job_id,
+          action: $claim.action,
+          source_address: $claim.source_address,
+          destination_address: $claim.destination_address,
+          prerequisite_job_ids: $claim.prerequisite_job_ids,
+          queue_state: $claim.queue_state,
+          receipt_status: $claim.receipt_status,
+          confirmations: $claim.confirmations,
+          receipt_block_number: $claim.receipt_block_number,
+          broadcast_at_unix: $claim.broadcast_at_unix
+        } else {} end))
       ' > "${payload}/${audit_export}"
-  done < <(jq -r '.executions[] |
-    [.family, .network_role, .chain_id, .tx_hash, .audit_export] | @tsv' \
-    "${payload}/f6/receipts.json")
+  done < <(jq -c '
+    .executions[] |
+    if .family == "gas_top_up_sweep" then
+      . as $parent |
+      .legs[] |
+      . + {
+        family: $parent.family,
+        network_role: $parent.network_role,
+        chain_id: $parent.chain_id,
+        plan_id: $parent.plan_id
+      }
+    else
+      .
+    end' "${payload}/f6/receipts.json")
 
   cat > "${payload}/desktop/clean-install.json" <<JSON
 {
@@ -224,10 +289,48 @@ archive_payload() {
 
 build_valid_case() {
   local case_name="$1"
+  local l2_chain_id="${2:-84532}"
+  local case_dir="${TMP_ROOT}/${case_name}"
+  local payload="${case_dir}/payload"
+  mkdir -p "${case_dir}"
+  write_payload "${payload}" "${l2_chain_id}"
+  generate_sums "${payload}"
+  archive_payload "${payload}" "${case_dir}/${BUNDLE_NAME}"
+  printf '%s\n' "${case_dir}/${BUNDLE_NAME}"
+}
+
+build_receipt_mutation_case() {
+  local case_name="$1"
+  local filter="$2"
   local case_dir="${TMP_ROOT}/${case_name}"
   local payload="${case_dir}/payload"
   mkdir -p "${case_dir}"
   write_payload "${payload}"
+  jq "${filter}" "${payload}/f6/receipts.json" > "${case_dir}/receipts.tmp"
+  mv "${case_dir}/receipts.tmp" "${payload}/f6/receipts.json"
+  generate_sums "${payload}"
+  archive_payload "${payload}" "${case_dir}/${BUNDLE_NAME}"
+  printf '%s\n' "${case_dir}/${BUNDLE_NAME}"
+}
+
+build_gas_broadcast_time_case() {
+  local case_name="$1"
+  local sweep_broadcast_at_unix="$2"
+  local case_dir="${TMP_ROOT}/${case_name}"
+  local payload="${case_dir}/payload"
+  mkdir -p "${case_dir}"
+  write_payload "${payload}"
+  jq --argjson timestamp "${sweep_broadcast_at_unix}" '
+    (.executions[] | select(.family == "gas_top_up_sweep") | .legs[1] |
+      .broadcast_at_unix) = $timestamp
+  ' "${payload}/f6/receipts.json" > "${case_dir}/receipts.tmp"
+  mv "${case_dir}/receipts.tmp" "${payload}/f6/receipts.json"
+  jq --argjson timestamp "${sweep_broadcast_at_unix}" \
+    '.broadcast_at_unix = $timestamp' \
+    "${payload}/f6/audit/gas-dependent-sweep.json" > \
+    "${case_dir}/audit.tmp"
+  mv "${case_dir}/audit.tmp" \
+    "${payload}/f6/audit/gas-dependent-sweep.json"
   generate_sums "${payload}"
   archive_payload "${payload}" "${case_dir}/${BUNDLE_NAME}"
   printf '%s\n' "${case_dir}/${BUNDLE_NAME}"
@@ -249,6 +352,16 @@ expect_failure() {
 
 VALID_BUNDLE="$(build_valid_case valid)"
 bash "${CHECKER}" "${VALID_BUNDLE}" "${RC_TAG}" "${RC_SHA}" "${RC_TAG_OBJECT}"
+
+for supported_l2 in \
+  "base-sepolia 84532" \
+  "arbitrum-sepolia 421614" \
+  "op-sepolia 11155420"; do
+  read -r case_name chain_id <<< "${supported_l2}"
+  supported_bundle="$(build_valid_case "${case_name}" "${chain_id}")"
+  bash "${CHECKER}" "${supported_bundle}" "${RC_TAG}" "${RC_SHA}" \
+    "${RC_TAG_OBJECT}"
+done
 
 MISSING_CASE="${TMP_ROOT}/missing"
 mkdir -p "${MISSING_CASE}"
@@ -387,7 +500,7 @@ mv "${REPLAY_CASE}/receipts.tmp" "${REPLAY_CASE}/payload/f6/receipts.json"
 generate_sums "${REPLAY_CASE}/payload"
 archive_payload "${REPLAY_CASE}/payload" "${REPLAY_CASE}/${BUNDLE_NAME}"
 expect_failure "${REPLAY_CASE}/${BUNDLE_NAME}" \
-  "F6 receipt does not prove all core families across Sepolia and one L2"
+  "${F6_FAILURE}"
 
 MALFORMED_AUDIT_CASE="${TMP_ROOT}/f6-malformed-audit"
 mkdir -p "${MALFORMED_AUDIT_CASE}"
@@ -414,7 +527,123 @@ mv "${WRONG_CHAIN_CASE}/receipts.tmp" \
 generate_sums "${WRONG_CHAIN_CASE}/payload"
 archive_payload "${WRONG_CHAIN_CASE}/payload" "${WRONG_CHAIN_CASE}/${BUNDLE_NAME}"
 expect_failure "${WRONG_CHAIN_CASE}/${BUNDLE_NAME}" \
-  "F6 receipt does not prove all core families across Sepolia and one L2"
+  "${F6_FAILURE}"
+
+for unsupported_l2 in \
+  "base-mainnet 8453" \
+  "arbitrum-mainnet 42161" \
+  "op-mainnet 10" \
+  "unknown-chain 999999" \
+  "non-integer-chain 84532.5"; do
+  read -r case_name chain_id <<< "${unsupported_l2}"
+  unsupported_bundle="$(build_valid_case "${case_name}" "${chain_id}")"
+  expect_failure "${unsupported_bundle}" "${F6_FAILURE}"
+done
+
+legacy_schema_bundle="$(build_receipt_mutation_case \
+  f6-legacy-schema-v1 '.schema_version = 1')"
+expect_failure "${legacy_schema_bundle}" "${F6_FAILURE}"
+
+single_hash_gas_bundle="$(build_receipt_mutation_case f6-single-hash-gas-chain \
+  '(.executions[] | select(.family == "gas_top_up_sweep")) |=
+    (del(.legs, .plan_id) + {
+      tx_hash: "0xdddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+      audit_export: "f6/audit/gas-top-up.json"
+    })')"
+expect_failure "${single_hash_gas_bundle}" "${F6_FAILURE}"
+
+reversed_legs_bundle="$(build_receipt_mutation_case \
+  f6-reversed-gas-legs \
+  '(.executions[] | select(.family == "gas_top_up_sweep") | .legs) |= reverse')"
+expect_failure "${reversed_legs_bundle}" "${F6_FAILURE}"
+
+mismatched_address_bundle="$(build_receipt_mutation_case \
+  f6-mismatched-gas-address \
+  '(.executions[] | select(.family == "gas_top_up_sweep") | .legs[1] |
+    .source_address) = "0x4444444444444444444444444444444444444444"')"
+expect_failure "${mismatched_address_bundle}" "${F6_FAILURE}"
+
+missing_prerequisite_bundle="$(build_receipt_mutation_case \
+  f6-missing-gas-prerequisite \
+  '(.executions[] | select(.family == "gas_top_up_sweep") | .legs[1] |
+    .prerequisite_job_ids) = []')"
+expect_failure "${missing_prerequisite_bundle}" "${F6_FAILURE}"
+
+EXTRA_PREREQUISITE_CASE="${TMP_ROOT}/f6-extra-gas-prerequisite"
+mkdir -p "${EXTRA_PREREQUISITE_CASE}"
+write_payload "${EXTRA_PREREQUISITE_CASE}/payload"
+jq '(.executions[] | select(.family == "gas_top_up_sweep") | .legs[1] |
+    .prerequisite_job_ids) += ["job-unevidenced"]' \
+  "${EXTRA_PREREQUISITE_CASE}/payload/f6/receipts.json" > \
+  "${EXTRA_PREREQUISITE_CASE}/receipts.tmp"
+mv "${EXTRA_PREREQUISITE_CASE}/receipts.tmp" \
+  "${EXTRA_PREREQUISITE_CASE}/payload/f6/receipts.json"
+jq '.prerequisite_job_ids += ["job-unevidenced"]' \
+  "${EXTRA_PREREQUISITE_CASE}/payload/f6/audit/gas-dependent-sweep.json" > \
+  "${EXTRA_PREREQUISITE_CASE}/audit.tmp"
+mv "${EXTRA_PREREQUISITE_CASE}/audit.tmp" \
+  "${EXTRA_PREREQUISITE_CASE}/payload/f6/audit/gas-dependent-sweep.json"
+generate_sums "${EXTRA_PREREQUISITE_CASE}/payload"
+archive_payload "${EXTRA_PREREQUISITE_CASE}/payload" \
+  "${EXTRA_PREREQUISITE_CASE}/${BUNDLE_NAME}"
+expect_failure "${EXTRA_PREREQUISITE_CASE}/${BUNDLE_NAME}" "${F6_FAILURE}"
+
+duplicate_job_bundle="$(build_receipt_mutation_case f6-duplicate-gas-job \
+  '(.executions[] | select(.family == "gas_top_up_sweep") | .legs[1] |
+    .job_id) = "job-fund-gas"')"
+expect_failure "${duplicate_job_bundle}" "${F6_FAILURE}"
+
+duplicate_leg_hash_bundle="$(build_receipt_mutation_case \
+  f6-duplicate-gas-transaction \
+  '(.executions[] | select(.family == "gas_top_up_sweep") | .legs[1] |
+    .tx_hash) = "0xdddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"')"
+expect_failure "${duplicate_leg_hash_bundle}" "${F6_FAILURE}"
+
+reversed_broadcast_bundle="$(build_gas_broadcast_time_case \
+  f6-reversed-gas-broadcast-time 999)"
+expect_failure "${reversed_broadcast_bundle}" "${F6_FAILURE}"
+
+equal_broadcast_bundle="$(build_gas_broadcast_time_case \
+  f6-equal-gas-broadcast-time 1000)"
+expect_failure "${equal_broadcast_bundle}" "${F6_FAILURE}"
+
+unordered_blocks_bundle="$(build_receipt_mutation_case \
+  f6-unordered-gas-blocks \
+  '(.executions[] | select(.family == "gas_top_up_sweep") | .legs[1] |
+    .receipt_block_number) = 100')"
+expect_failure "${unordered_blocks_bundle}" "${F6_FAILURE}"
+
+zero_confirmations_bundle="$(build_receipt_mutation_case \
+  f6-zero-gas-confirmations \
+  '(.executions[] | select(.family == "gas_top_up_sweep") | .legs[0] |
+    .confirmations) = 0')"
+expect_failure "${zero_confirmations_bundle}" "${F6_FAILURE}"
+
+wrong_dependent_action_bundle="$(build_receipt_mutation_case \
+  f6-wrong-dependent-action \
+  '(.executions[] | select(.family == "gas_top_up_sweep") | .legs[1] |
+    .action) = "revoke_erc20_approval"')"
+expect_failure "${wrong_dependent_action_bundle}" "${F6_FAILURE}"
+
+leg_chain_mismatch_bundle="$(build_receipt_mutation_case \
+  f6-gas-leg-chain-mismatch \
+  '(.executions[] | select(.family == "gas_top_up_sweep") | .legs[1] |
+    .chain_id) = 11155111')"
+expect_failure "${leg_chain_mismatch_bundle}" "${F6_FAILURE}"
+
+GAS_AUDIT_MISMATCH_CASE="${TMP_ROOT}/f6-gas-audit-mismatch"
+mkdir -p "${GAS_AUDIT_MISMATCH_CASE}"
+write_payload "${GAS_AUDIT_MISMATCH_CASE}/payload"
+jq '.job_id = "unrelated-job"' \
+  "${GAS_AUDIT_MISMATCH_CASE}/payload/f6/audit/gas-dependent-sweep.json" > \
+  "${GAS_AUDIT_MISMATCH_CASE}/audit.tmp"
+mv "${GAS_AUDIT_MISMATCH_CASE}/audit.tmp" \
+  "${GAS_AUDIT_MISMATCH_CASE}/payload/f6/audit/gas-dependent-sweep.json"
+generate_sums "${GAS_AUDIT_MISMATCH_CASE}/payload"
+archive_payload "${GAS_AUDIT_MISMATCH_CASE}/payload" \
+  "${GAS_AUDIT_MISMATCH_CASE}/${BUNDLE_NAME}"
+expect_failure "${GAS_AUDIT_MISMATCH_CASE}/${BUNDLE_NAME}" \
+  "F6 audit export does not match its execution receipt"
 
 F6_CASE="${TMP_ROOT}/f6-missing-family"
 mkdir -p "${F6_CASE}"
@@ -424,6 +653,7 @@ jq 'del(.executions[] | select(.family == "erc20_revoke"))' \
 mv "${F6_CASE}/receipts.tmp" "${F6_CASE}/payload/f6/receipts.json"
 generate_sums "${F6_CASE}/payload"
 archive_payload "${F6_CASE}/payload" "${F6_CASE}/${BUNDLE_NAME}"
-expect_failure "${F6_CASE}/${BUNDLE_NAME}" "F6 receipt does not prove all core families across Sepolia and one L2"
+expect_failure "${F6_CASE}/${BUNDLE_NAME}" \
+  "${F6_FAILURE}"
 
 echo "release evidence bundle tests passed"
