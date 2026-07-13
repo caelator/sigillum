@@ -1647,6 +1647,7 @@ fn test_switch_compartment_response_roundtrip() {
         status: "switched".to_string(),
         compartment_id: 2,
         compartment_label: "vault2".to_string(),
+        session_token: "rotated-token".to_string(),
     };
     roundtrip_test(resp);
 }

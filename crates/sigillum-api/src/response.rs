@@ -203,6 +203,7 @@ pub struct SwitchCompartmentResponse {
     pub status: String,
     pub compartment_id: usize,
     pub compartment_label: String,
+    pub session_token: String,
 }
 
 // ── Snapshot ────────────────────────────────────

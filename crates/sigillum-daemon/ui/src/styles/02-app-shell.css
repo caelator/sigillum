@@ -35,7 +35,7 @@
   gap: var(--space-4);
   min-height: 64px;
   padding: var(--space-3) var(--gutter);
-  background: rgba(11, 14, 20, 0.86);
+  background: rgba(13, 17, 23, 0.86);
   -webkit-backdrop-filter: blur(10px);
   backdrop-filter: blur(10px);
   border-bottom: 1px solid var(--border);

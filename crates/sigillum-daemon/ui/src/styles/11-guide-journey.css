@@ -222,9 +222,15 @@
   color: var(--danger-text);
 }
 
-/* Inline help: circled "?" with a pure-CSS tooltip read from data-tip.
-   Keyboard reachable (give it tabindex="0"); ✓ reduced-motion safe via the
-   global transition kill-switch in section 20. */
+/* Inline help: JS progressively adds a real role=tooltip child and keeps the
+   data-tip pseudo-element as a no-script visual fallback. */
+
+.help-tip-wrapper {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  vertical-align: text-top;
+}
 
 .help-tip {
   position: relative;
@@ -261,8 +267,12 @@
   content: "?";
 }
 
-.help-tip::after {
+.help-tip:not([data-help-tip-enhanced])::after {
   content: attr(data-tip);
+}
+
+.help-tip-content,
+.help-tip:not([data-help-tip-enhanced])::after {
   position: absolute;
   bottom: calc(100% + 8px);
   left: 50%;
@@ -286,26 +296,46 @@
   text-align: left;
   opacity: 0;
   visibility: hidden;
-  pointer-events: none;
+  pointer-events: auto;
+  cursor: default;
   transition: opacity var(--t-fast), transform var(--t-fast),
     visibility var(--t-fast);
 }
 
-.help-tip:hover::after,
-.help-tip:focus-visible::after {
+.help-tip-wrapper[data-help-tip-open="true"] > .help-tip-content,
+.help-tip:not([data-help-tip-enhanced]):hover::after,
+.help-tip:not([data-help-tip-enhanced]):focus-visible::after {
   opacity: 1;
   visibility: visible;
   transform: translate(-50%, 0);
 }
 
 /* Flip below when the tip would clip against the viewport / topbar */
-.help-tip[data-tip-down]::after {
+.help-tip-wrapper[data-tip-down] > .help-tip-content,
+.help-tip:not([data-help-tip-enhanced])[data-tip-down]::after {
   bottom: auto;
   top: calc(100% + 8px);
   transform: translate(-50%, -4px);
 }
 
-.help-tip[data-tip-down]:hover::after,
-.help-tip[data-tip-down]:focus-visible::after {
+.help-tip-wrapper[data-tip-down][data-help-tip-open="true"] > .help-tip-content,
+.help-tip:not([data-help-tip-enhanced])[data-tip-down]:hover::after,
+.help-tip:not([data-help-tip-enhanced])[data-tip-down]:focus-visible::after {
   transform: translate(-50%, 0);
+}
+
+@media (max-width: 600px) {
+  .help-tip-content,
+  .help-tip-wrapper[data-tip-down] > .help-tip-content {
+    position: fixed;
+    inset: auto 16px 16px;
+    width: auto;
+    max-width: none;
+    transform: translateY(4px);
+  }
+
+  .help-tip-wrapper[data-help-tip-open="true"] > .help-tip-content,
+  .help-tip-wrapper[data-tip-down][data-help-tip-open="true"] > .help-tip-content {
+    transform: none;
+  }
 }

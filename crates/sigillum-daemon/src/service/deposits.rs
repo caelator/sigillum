@@ -531,6 +531,7 @@ impl SigillumService {
         body: EthStealthAnnouncementScanRequest,
     ) -> ServiceResult<EthStealthAnnouncementScanResponse> {
         let token = self.require_scope(token, super::capability_scopes::DEPOSITS_CREATE)?;
+        let session_context = self.capture_session_operation_context(Some(token))?;
         if body.auto_queue_sweep.unwrap_or(false) {
             self.require_scope(Some(token), super::capability_scopes::QUEUE_ENQUEUE_SWEEP)?;
         }
@@ -582,7 +583,7 @@ impl SigillumService {
             )
             .await?;
 
-        let _guard = self.state.operation_guard().await;
+        let _guard = self.acquire_session_operation(&session_context).await?;
         let mut deposits = crate::deposits::load_deposits(&self.state.base_dir)
             .map_err(|error| ServiceError::internal(format!("Failed to load deposits: {error}")))?;
         let now = now_unix();
@@ -696,6 +697,7 @@ impl SigillumService {
         body: EthStealthDepositCreateNativeRequest,
     ) -> ServiceResult<EthStealthDepositMutationResponse> {
         let token = self.require_scope(token, super::capability_scopes::DEPOSITS_CREATE)?;
+        let session_context = self.capture_session_operation_context(Some(token))?;
         if body.auto_queue_sweep.unwrap_or(false) {
             self.require_scope(Some(token), super::capability_scopes::QUEUE_ENQUEUE_SWEEP)?;
         }
@@ -711,6 +713,7 @@ impl SigillumService {
 
         self.persist_new_deposit(
             token,
+            &session_context,
             &wallet,
             &provider,
             body.ephemeral_private_key_hex,
@@ -740,6 +743,7 @@ impl SigillumService {
         body: EthStealthDepositCreateErc20Request,
     ) -> ServiceResult<EthStealthDepositMutationResponse> {
         let token = self.require_scope(token, super::capability_scopes::DEPOSITS_CREATE)?;
+        let session_context = self.capture_session_operation_context(Some(token))?;
         if body.auto_queue_sweep.unwrap_or(false) {
             self.require_scope(Some(token), super::capability_scopes::QUEUE_ENQUEUE_SWEEP)?;
         }
@@ -753,6 +757,7 @@ impl SigillumService {
 
         self.persist_new_deposit(
             token,
+            &session_context,
             &wallet,
             &provider,
             body.ephemeral_private_key_hex,
@@ -783,6 +788,7 @@ impl SigillumService {
     async fn persist_new_deposit(
         &self,
         token: &str,
+        session_context: &super::SessionOperationContext,
         wallet: &EthStealthWalletProfile,
         provider: &EvmProviderProfile,
         ephemeral_private_key_hex: Option<String>,
@@ -839,7 +845,7 @@ impl SigillumService {
             counterparty_id: None,
         };
 
-        let _guard = self.state.operation_guard().await;
+        let _guard = self.acquire_session_operation(session_context).await?;
         let mut state = crate::deposits::load_deposits(&self.state.base_dir)
             .map_err(|error| ServiceError::internal(format!("Failed to load deposits: {error}")))?;
         state.eth_stealth.push(deposit.clone());
@@ -873,7 +879,8 @@ impl SigillumService {
         body: EthStealthDepositDeleteRequest,
     ) -> ServiceResult<EthStealthDepositMutationResponse> {
         let token = self.require_scope(token, super::capability_scopes::DEPOSITS_DELETE)?;
-        let _guard = self.state.operation_guard().await;
+        let session_context = self.capture_session_operation_context(Some(token))?;
+        let _guard = self.acquire_session_operation(&session_context).await?;
         let mut state = crate::deposits::load_deposits(&self.state.base_dir)
             .map_err(|error| ServiceError::internal(format!("Failed to load deposits: {error}")))?;
         let index = state
@@ -904,7 +911,8 @@ impl SigillumService {
         body: ReceivingDepositTagRequest,
     ) -> ServiceResult<EthStealthDepositMutationResponse> {
         let token = self.require_scope(token, super::capability_scopes::DEPOSITS_DELETE)?;
-        let _guard = self.state.operation_guard().await;
+        let session_context = self.capture_session_operation_context(Some(token))?;
+        let _guard = self.acquire_session_operation(&session_context).await?;
         let counterparty_id = body
             .counterparty_id
             .as_deref()
@@ -968,10 +976,11 @@ impl SigillumService {
         body: EthStealthDepositRefreshRequest,
     ) -> ServiceResult<EthStealthDepositRefreshResponse> {
         let token = self.require_scope(token, super::capability_scopes::DEPOSITS_REFRESH)?;
+        let session_context = self.capture_session_operation_context(Some(token))?;
         if body.auto_enqueue.unwrap_or(false) {
             self.require_scope(Some(token), super::capability_scopes::QUEUE_ENQUEUE_SWEEP)?;
         }
-        let _guard = self.state.operation_guard().await;
+        let _guard = self.acquire_session_operation(&session_context).await?;
         let mut deposits = crate::deposits::load_deposits(&self.state.base_dir)
             .map_err(|error| ServiceError::internal(format!("Failed to load deposits: {error}")))?;
         let mut queue = crate::queue_store::load_queue(&self.state.base_dir)
@@ -1005,7 +1014,8 @@ impl SigillumService {
         body: EthStealthDepositEnqueueSweepRequest,
     ) -> ServiceResult<EthStealthDepositEnqueueSweepResponse> {
         let token = self.require_session(token)?;
-        let _guard = self.state.operation_guard().await;
+        let session_context = self.capture_session_operation_context(Some(token))?;
+        let _guard = self.acquire_session_operation(&session_context).await?;
         let mut deposits = crate::deposits::load_deposits(&self.state.base_dir)
             .map_err(|error| ServiceError::internal(format!("Failed to load deposits: {error}")))?;
         let mut queue = crate::queue_store::load_queue(&self.state.base_dir)

@@ -19,6 +19,7 @@ use tempfile::TempDir;
 use tower::util::ServiceExt;
 
 use sigillum_daemon::{AppState, build_router};
+use sigillum_fido2::config::CompartmentMeta;
 
 // ============================================================================
 // H4: Route Handler Integration Tests
@@ -664,6 +665,104 @@ async fn test_post_lock_invalidates_session() {
     // Verify token no longer works
     let (post_lock_status, _) = get_request(&mut app, "/api/secrets", Some(token)).await;
     assert_eq!(post_lock_status, StatusCode::UNAUTHORIZED);
+}
+
+/// A compartment switch commits token rotation before the response carrying
+/// the successor reaches the caller. The old token must be rejected everywhere
+/// else but remain a bounded emergency credential for `/api/lock`.
+#[tokio::test]
+async fn test_post_lock_accepts_immediate_predecessor_after_switch() {
+    let (app, state, _dir) = test_app_with_state();
+    state.unlock_compartment(
+        0,
+        [6u8; 32],
+        CompartmentMeta {
+            id: 0,
+            label: "daily".into(),
+            threshold: 1,
+            passphrase_mode: None,
+        },
+    );
+    state.unlock_compartment(
+        1,
+        [7u8; 32],
+        CompartmentMeta {
+            id: 1,
+            label: "secure".into(),
+            threshold: 2,
+            passphrase_mode: None,
+        },
+    );
+    let predecessor = state.create_session(Some(0));
+
+    let (switch_status, switch_body) = post_request(
+        &app,
+        "/api/compartment/switch",
+        json!({"id": 1}),
+        Some(&predecessor),
+    )
+    .await;
+    assert_eq!(
+        switch_status,
+        StatusCode::OK,
+        "switch failed: {switch_body:?}"
+    );
+    let successor = switch_body["session_token"]
+        .as_str()
+        .expect("switch response must carry replacement token");
+
+    let (stale_read_status, _) = get_request(&app, "/api/secrets", Some(&predecessor)).await;
+    assert_eq!(stale_read_status, StatusCode::UNAUTHORIZED);
+    assert!(state.verify_token(successor));
+
+    let (lock_status, lock_body) =
+        post_request(&app, "/api/lock", json!({}), Some(&predecessor)).await;
+    assert_eq!(
+        lock_status,
+        StatusCode::OK,
+        "predecessor lock failed: {lock_body:?}"
+    );
+    assert_eq!(lock_body["status"], json!("locked"));
+    assert!(!state.is_unlocked());
+
+    let (post_lock_status, _) = get_request(&app, "/api/secrets", Some(successor)).await;
+    assert_eq!(post_lock_status, StatusCode::UNAUTHORIZED);
+}
+
+/// POST /api/lock latches the daemon's locking state before it waits for a
+/// mutation already holding the operation mutex. New authorization must fail
+/// immediately while the lock request drains that operation.
+#[tokio::test]
+async fn test_post_lock_latches_before_operation_drain() {
+    let (app, state, _dir) = test_app_with_state();
+    state.unlock_compartment(
+        0,
+        [6u8; 32],
+        CompartmentMeta {
+            id: 0,
+            label: "default".into(),
+            threshold: 1,
+            passphrase_mode: None,
+        },
+    );
+    let token = state.create_session(Some(0));
+    let held_operation = state.operation_guard().await;
+
+    let mut lock_request = Box::pin(post_request(&app, "/api/lock", json!({}), Some(&token)));
+    tokio::select! {
+        biased;
+        _ = &mut lock_request => panic!("lock request must wait for the held operation mutex"),
+        () = tokio::task::yield_now() => {}
+    }
+
+    assert!(state.is_locking(), "HTTP lock must latch before draining");
+    let (blocked_status, _) = get_request(&app, "/api/secrets", Some(&token)).await;
+    assert_eq!(blocked_status, StatusCode::LOCKED);
+
+    drop(held_operation);
+    let (lock_status, lock_body) = lock_request.await;
+    assert_eq!(lock_status, StatusCode::OK, "lock failed: {lock_body:?}");
+    assert!(!state.is_unlocked());
 }
 
 /// POST /api/unlock after init with correct passphrase succeeds.

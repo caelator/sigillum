@@ -1,8 +1,12 @@
 // @ts-nocheck
-
 import "./styles/app.css";
-
-import { clearSessionToken, readSessionToken, requestWithSession } from "./api/session";
+import {
+  SessionContextChangedError,
+  clearSessionToken,
+  isSessionContextChangedError,
+  readSessionToken,
+} from "./api/session";
+import { createSessionCoordinator } from "./api/sessionCoordinator";
 import { handleActionEvent as handleDispatchedActionEvent } from "./actions/dispatcher";
 import {
   setHiddenById as setHidden,
@@ -13,24 +17,30 @@ import { clearFields, showResultBox } from "./render/forms";
 import { esc, escAttr, formatTs, statBox } from "./render/html";
 import {
   clearRefreshTimer,
+  createRefreshRunner,
   markRefreshCompleted,
   scheduleRefresh,
   shouldAutoRefresh,
   updateRefreshMeta,
 } from "./state/refresh";
-import { deriveUiMode } from "./state/status";
+import { clearStaleTokenForLockedMode, deriveUiMode } from "./state/status";
 import { createFido2Actions } from "./views/fido2";
+import { enhanceHelpTips } from "./views/helpTips";
 import { createInventoryActions } from "./views/inventory";
 import { createJourneyActions } from "./views/journey";
+import { createLockUnconfirmedRenderer } from "./views/lockUnconfirmed";
 import { createOperationsActions } from "./views/operations";
 import { createReceivingActions } from "./views/receiving";
 import { createSelfCheckActions } from "./views/selfcheck";
 import { createSessionActions } from "./views/session";
+import { createSessionPrivacyGuard } from "./views/sessionPrivacy";
 import { createShellRenderer } from "./views/shell";
 import { createSetupWizard } from "./views/setup";
+import { createStatusStripRenderer } from "./views/statusStrip";
 import { createTreasuryActions } from "./views/treasury";
 import { createWalletManagerActions } from "./views/walletManager";
 import { createWalletActions } from "./views/wallets";
+import { createWorkspaceController } from "./views/workspace";
 
 const SETUP_RESET_CONFIRMATION = 'RESET LOCAL SIGILLUM DATA';
 const OPERATOR_CARD_IDS = [
@@ -45,8 +55,11 @@ const OPERATOR_CARD_IDS = [
   'profilesCard',
   'xpubCard',
   'receivingCard',
+  'treasuryReceivingCard',
+  'treasuryOverviewCard',
   'treasuryCard',
   'inventoryCard',
+  'consolidationCard',
   'depositsCard',
   'queueCard',
   'maintenanceCard',
@@ -54,60 +67,23 @@ const OPERATOR_CARD_IDS = [
   'backupCard',
   'auditCard',
   'diagCard',
-];
-const WORKSPACE_SECTION_KEY = 'sigillumWorkspaceSection';
-const DEFAULT_WORKSPACE_SECTION = 'receiving';
-const WORKSPACE_SECTIONS = [
-  {
-    id: 'receiving',
-    label: 'Receiving',
-    summary: 'Active receive addresses and stealth deposits, grouped by counterparty.',
-  },
-  {
-    id: 'treasury',
-    label: 'Treasury',
-    summary: 'Tracked balances, wallet groups, routing readiness, policy, and receive addresses.',
-  },
-  {
-    id: 'wallets',
-    label: 'Wallets',
-    summary: 'Provider endpoints, stealth wallets, and deterministic receive trees.',
-  },
-  {
-    id: 'operations',
-    label: 'Operations',
-    summary: 'Inventory discovery, tracked deposits, queue execution, and maintenance cycles.',
-  },
-  {
-    id: 'secrets',
-    label: 'Secrets',
-    summary: 'Encrypted secrets, connection keys, compartments, and secret movement.',
-  },
-  {
-    id: 'security',
-    label: 'Security',
-    summary: 'Hardware keys, encrypted snapshots, and the local audit trail.',
-  },
-  {
-    id: 'system',
-    label: 'System',
-    summary: 'Daemon health, runtime policy, and the operator guide.',
-  },
+  'selfCheckCard',
 ];
 let currentStatus = null;
 let currentUiMode = 'loading';
-let activeWorkspaceSection = DEFAULT_WORKSPACE_SECTION;
-let refreshPromise = null;
-let refreshQueued = false;
 let lastApiKeys = [];
 let lastSecretKeys = [];
 let nextStepPrimaryTarget = null;
 let nextStepSecondaryTarget = null;
+const revealTimers = new Set();
 
-try {
-  activeWorkspaceSection =
-    window.sessionStorage.getItem(WORKSPACE_SECTION_KEY) || DEFAULT_WORKSPACE_SECTION;
-} catch (_) {}
+const workspaceController = createWorkspaceController();
+const jumpToCard = id => workspaceController.jumpToCard(id);
+const jumpToField = (cardId, inputId) =>
+  workspaceController.jumpToField(cardId, inputId);
+const selectWorkspaceSection = sectionId =>
+  workspaceController.selectWorkspaceSection(sectionId);
+const syncSectionNav = () => workspaceController.sync();
 
 function setCardsHidden(ids, hidden) {
   ids.forEach(id => setHidden(id, hidden));
@@ -130,166 +106,16 @@ function resetVaultCounts() {
   setText('compartmentCount', '-');
 }
 
-function visibleWorkspaceCards() {
-  return Array.from(document.querySelectorAll('main .card[data-workspace-section]'))
-    .filter(card => !card.classList.contains('hidden'));
-}
-
-function availableWorkspaceSections() {
-  const visibleSections = new Set(
-    visibleWorkspaceCards()
-      .map(card => card.dataset.workspaceSection)
-      .filter(Boolean)
-  );
-  return WORKSPACE_SECTIONS.filter(section => visibleSections.has(section.id));
-}
-
-function firstVisibleCardInSection(sectionId) {
-  return visibleWorkspaceCards().find(
-    card => card.dataset.workspaceSection === sectionId
-  );
-}
-
-function focusCard(card) {
-  if (!card) return;
-  if (!card.hasAttribute('tabindex')) card.setAttribute('tabindex', '-1');
-  card.focus({ preventScroll: true });
-}
-
-function storeWorkspaceSection(sectionId) {
-  try {
-    window.sessionStorage.setItem(WORKSPACE_SECTION_KEY, sectionId);
-  } catch (_) {}
-}
-
-function ensureActiveWorkspaceSection() {
-  const sections = availableWorkspaceSections();
-  if (!sections.length) {
-    activeWorkspaceSection = DEFAULT_WORKSPACE_SECTION;
-    return;
-  }
-  if (!sections.some(section => section.id === activeWorkspaceSection)) {
-    activeWorkspaceSection =
-      sections.some(section => section.id === DEFAULT_WORKSPACE_SECTION)
-        ? DEFAULT_WORKSPACE_SECTION
-        : sections[0].id;
-    storeWorkspaceSection(activeWorkspaceSection);
-  }
-}
-
-function syncWorkspaceSections() {
-  ensureActiveWorkspaceSection();
-  const targetSection = activeWorkspaceSection;
-  document.querySelectorAll('main .card[data-workspace-section]').forEach(card => {
-    card.classList.toggle(
-      'section-hidden',
-      Boolean(targetSection) && card.dataset.workspaceSection !== targetSection
-    );
-  });
-}
-
-function syncTopbar() {
-  const titleEl = document.getElementById('topbarTitle');
-  const summaryEl = document.getElementById('topbarSummary');
-  if (!titleEl || !summaryEl) return;
-  const section = WORKSPACE_SECTIONS.find(
-    candidate => candidate.id === activeWorkspaceSection
-  );
-  if (currentUiMode === 'unlocked' && section) {
-    titleEl.textContent = section.label;
-    summaryEl.textContent = section.summary;
-    return;
-  }
-  titleEl.textContent = 'Sigillum';
-  summaryEl.textContent = 'Local treasury daemon';
-}
-
-function syncSectionNav() {
-  const nav = document.getElementById('sectionNav');
-  const main = document.querySelector('main');
-  if (!nav) return;
-
-  const sections = availableWorkspaceSections();
-  if (sections.length <= 1) {
-    nav.classList.add('hidden');
-    nav.innerHTML = '';
-    if (main) main.classList.remove('has-nav');
-    syncWorkspaceSections();
-    syncTopbar();
-    return;
-  }
-
-  ensureActiveWorkspaceSection();
-  nav.innerHTML = sections.map(section => {
-    const isActive = section.id === activeWorkspaceSection;
-    return (
-      '<button type="button" class="nav-item' +
-        (isActive ? ' active' : '') +
-        '"' + (isActive ? ' aria-current="page"' : '') +
-        ' data-action="selectWorkspaceSection" data-arg0="' + escAttr(section.id) + '"' +
-        ' title="' + escAttr(section.summary) + '">' +
-        esc(section.label) +
-      '</button>'
-    );
-  }).join('');
-  nav.classList.remove('hidden');
-  if (main) main.classList.add('has-nav');
-  syncWorkspaceSections();
-  syncTopbar();
-}
-
-function selectWorkspaceSection(sectionId) {
-  activeWorkspaceSection = sectionId;
-  storeWorkspaceSection(sectionId);
-  syncSectionNav();
-  const firstCard = firstVisibleCardInSection(sectionId);
-  if (firstCard) {
-    firstCard.scrollIntoView({ behavior: 'smooth', block: 'start' });
-    focusCard(firstCard);
-  }
-}
-
-function jumpToCard(id) {
-  const el = document.getElementById(id);
-  if (!el || el.classList.contains('hidden')) return;
-  const targetSection = el.dataset.workspaceSection;
-  if (targetSection && targetSection !== activeWorkspaceSection) {
-    activeWorkspaceSection = targetSection;
-    storeWorkspaceSection(targetSection);
-    syncSectionNav();
-  }
-  requestAnimationFrame(() => {
-    if (!el.classList.contains('hidden') && !el.classList.contains('section-hidden')) {
-      el.scrollIntoView({ behavior: 'smooth', block: 'start' });
-      focusCard(el);
-    }
-  });
-}
-
-// Jump to a card AND drop the caret into the field the operator needs next.
-// Used by actionable empty states ("Create a wallet", "Save an address", …).
-function jumpToField(cardId, inputId) {
-  jumpToCard(cardId);
-  setTimeout(() => {
-    const field = document.getElementById(inputId);
-    if (!field) return;
-    if (typeof field.scrollIntoView === 'function') {
-      field.scrollIntoView({ behavior: 'smooth', block: 'center' });
-    }
-    if (typeof field.focus === 'function') field.focus({ preventScroll: true });
-  }, 120);
-}
-
 function focusWalletCreate() {
   jumpToField('walletManagerCard', 'walletCreateName');
 }
 
 function focusTreasuryReceive() {
-  jumpToField('treasuryCard', 'treasuryReceivePurpose');
+  jumpToField('treasuryReceivingCard', 'treasuryReceivePurpose');
 }
 
 function focusTreasuryParty() {
-  jumpToField('treasuryCard', 'treasuryPartyName');
+  jumpToField('treasuryReceivingCard', 'treasuryPartyName');
 }
 
 function focusWatchBook() {
@@ -322,7 +148,7 @@ function heroSecondaryAction() {
     if (input) input.focus();
     return;
   }
-  jumpToCard('profilesCard');
+  jumpToCard('walletManagerCard');
 }
 
 function renderHeroContext(items) {
@@ -360,10 +186,10 @@ function updateNextStepCard() {
 
   let nextStep = {
     title: 'Choose the next concrete operation',
-    summary: 'The vault is live. Run maintenance, inspect queue work, review audit history, and verify local daemon health from the workspace sections.',
+    summary: 'The vault is live. Run maintenance, inspect queue work, review audit history, and verify local daemon health from the five workspace destinations.',
     items: [
-      { title: 'Operations', body: 'Maintenance refreshes deposits and drains queue work with the current local policy settings.' },
-      { title: 'Security & system', body: 'Snapshots, audit trail, and diagnostics help you validate and recover the local daemon state.' },
+      { title: 'Move', body: 'Maintenance refreshes deposits and drains queue work with the current local policy settings.' },
+      { title: 'Overview + Vault', body: 'Self-check, audit history, snapshots, and diagnostics help you validate and recover the local daemon state.' },
     ],
     primaryLabel: 'Open maintenance',
     primaryTarget: 'maintenanceCard',
@@ -408,10 +234,10 @@ function updateNextStepCard() {
         { title: 'Stealth wallet', body: 'Use this when you want tracked deposits, sweep queues, and maintenance workflows today.' },
         { title: 'Seed or xpub receive wallet', body: 'Use this when you want deterministic receive-address previews and multiple wallet profiles visible in one place.' },
       ],
-      primaryLabel: 'Open wallets',
-      primaryTarget: 'profilesCard',
-      secondaryLabel: 'Read operator guide',
-      secondaryTarget: 'guideCard',
+      primaryLabel: 'Open wallet hub',
+      primaryTarget: 'walletManagerCard',
+      secondaryLabel: 'Open providers + stealth',
+      secondaryTarget: 'profilesCard',
       note: 'Stealth is the current end-to-end operator path. Xpub profiles can feed read-only inventory discovery, while sweeping still requires a signer-backed wallet path.',
     };
   } else if (!hasStealthWalletProfiles && (hasXpubWalletProfiles || hasSeedWalletProfiles)) {
@@ -524,7 +350,7 @@ function updateHeroState(mode, active, unlocked) {
   const activeLabel = active ? (active.compartment_label || ('Compartment ' + active.compartment_id)) : 'No active compartment';
   setText('statusEyebrow', 'Vault unlocked');
   setText('statusTitle', 'Treasury workspace');
-  setText('statusSummary', 'Every operator surface on this machine is live. Use the sidebar to move between treasury, wallets, operations, secrets, security, and system.');
+  setText('statusSummary', 'Every operator surface on this machine is live. Use Overview, Receive, Portfolio, Move, and Vault to stay oriented.');
   setText('heroModeValue', activeLabel);
   setText('heroModeDetail', unlocked.length > 1
     ? 'Multiple compartments are unlocked. Use the sidebar switcher to choose which compartment new operations target.'
@@ -534,7 +360,7 @@ function updateHeroState(mode, active, unlocked) {
   setTrustedHtml('statusContext', renderHeroContext([
     { title: 'Protected values', body: 'Use Encrypted Secrets for sensitive data and Connection Keys for values the daemon needs during operator workflows.' },
     { title: 'Wallet families', body: 'Stealth wallets drive deposits and queue workflows today, while xpub receive wallets export public receive branches and preview deterministic addresses.' },
-    { title: 'Operator loop', body: 'Deposits, queue, maintenance, snapshots, audit, and diagnostics each live in a dedicated workspace section.' },
+    { title: 'Operator loop', body: 'Receive holds incoming funds, Move holds queue and maintenance work, Overview holds audit and self-check, and Vault holds snapshots and diagnostics.' },
   ]));
 }
 
@@ -572,10 +398,30 @@ function renderActiveCompartment(active, unlocked) {
   setText('compartmentCount', unlocked.length);
 }
 
-async function api(method, path, body) {
-  return requestWithSession(method, path, body);
-}
-
+const lockUnconfirmedRenderer = createLockUnconfirmedRenderer();
+const sessionCoordinator = createSessionCoordinator({
+  privacyGeneration: () => sessionPrivacyGuard.generation(),
+  scrubPrivateWorkspace: () => sessionPrivacyGuard.scrub(),
+  resetPrivateState: () => selfCheckActions.resetSession(),
+  setTransitionUi: active => setPrivateWorkspaceTransition(active),
+  renderTransitionState: label => renderSessionTransitionState(label),
+  closeSessionUi: forcePrivateReset => closeSessionUi(forcePrivateReset),
+  showLockUnconfirmed: lockUnconfirmedRenderer.render,
+  clearLockUnconfirmed: lockUnconfirmedRenderer.clear,
+  isUnlockedUi: () => currentUiMode === 'unlocked',
+  markRefreshQueued: queueRefresh,
+  refresh: () => refresh(),
+});
+const {
+  api,
+  beginEmergencyLockTransition,
+  beginTransition: beginSessionTransition,
+  captureContext: captureSessionContext,
+  endTransition: endSessionTransition,
+  initializeLockUnconfirmedState,
+  isContextCurrent: isSessionContextCurrent,
+  retryUnconfirmedLock,
+} = sessionCoordinator;
 function toast(msg, type = 'success') {
   const el = document.createElement('div');
   el.className = 'toast toast-' + type;
@@ -650,14 +496,13 @@ const selfCheckActions = createSelfCheckActions({
   api,
   toast,
 });
+const statusStripRenderer = createStatusStripRenderer();
 
 const journeyActions = createJourneyActions({
   api,
   toast,
   jumpToCard,
   refreshTreasury: () => treasuryActions.loadTreasuryOverview(),
-  // Throttled (5-min TTL) silent self-check feeding the status strip chip.
-  ensureSelfCheck: () => selfCheckActions.ensureFreshSelfCheck(),
 });
 
 const operationsActions = createOperationsActions({
@@ -668,10 +513,101 @@ const operationsActions = createOperationsActions({
   updateNextStepCard: () => updateNextStepCard(),
 });
 
+const sessionPrivacyGuard = createSessionPrivacyGuard({
+  cardIds: OPERATOR_CARD_IDS,
+  resetters: [
+    walletActions.resetSession,
+    walletManagerActions.resetSession,
+    inventoryActions.resetSession,
+    treasuryActions.resetSession,
+    receivingActions.resetSession,
+    operationsActions.resetSession,
+    fido2Actions.resetSession,
+    () => {
+      revealTimers.forEach(timer => clearTimeout(timer));
+      revealTimers.clear();
+      lastApiKeys = [];
+      lastSecretKeys = [];
+      nextStepPrimaryTarget = null;
+      nextStepSecondaryTarget = null;
+    },
+  ],
+  enhanceRestoredUi: () => enhanceUiChrome(),
+});
+
+function setPrivateWorkspaceTransition(active) {
+  if (active) {
+    document.body.dataset.sessionTransition = 'true';
+    setCardsHidden(OPERATOR_CARD_IDS, true);
+  } else {
+    delete document.body.dataset.sessionTransition;
+  }
+  OPERATOR_CARD_IDS.forEach(id => {
+    const card = document.getElementById(id);
+    if (!card) return;
+    if (active) {
+      card.setAttribute('inert', '');
+      card.setAttribute('aria-busy', 'true');
+    } else {
+      card.removeAttribute('inert');
+      card.removeAttribute('aria-busy');
+    }
+  });
+  ['statusCard', 'setupCard', 'authCard', 'compSwitcher', 'sectionNav'].forEach(id => {
+    const element = document.getElementById(id);
+    if (!element) return;
+    if (active) element.setAttribute('inert', '');
+    else element.removeAttribute('inert');
+  });
+  // Lock is an emergency control, so both Lock surfaces stay operable while
+  // every other workspace action is paused. Logout and self-check are not
+  // preemptive and therefore remain blocked until reconciliation completes.
+  const logoutButton = document.querySelector('#lockForm [data-action="logoutSession"]');
+  if (logoutButton) logoutButton.disabled = active;
+  const stripSelfCheck = document.getElementById('stripSelfCheck');
+  if (stripSelfCheck) stripSelfCheck.disabled = active;
+}
+
+function renderSessionTransitionState(label) {
+  resetVaultCounts();
+  const switcher = document.getElementById('compSwitcher');
+  if (switcher) switcher.innerHTML = '';
+  setHidden('compSwitcher', true);
+  setText('compartmentBadge', '');
+  setHidden('compartmentBadge', true);
+  setText('heroModeValue', label);
+  setText('heroModeDetail', 'Private controls are paused until the resulting session state is loaded.');
+  setTrustedHtml('statusContext', '');
+  if (currentUiMode === 'unlocked') {
+    statusStripRenderer.renderUnlocked({
+      compartment_id: currentStatus?.active_compartment?.compartment_id ?? null,
+      compartment_label: label,
+      api_key_count: 0,
+      secret_count: null,
+    }, null);
+  }
+}
+
+function closeSessionUi(forcePrivateReset = false) {
+  // Session loss is fail-closed even while background requests settle.
+  currentStatus = null;
+  shellRenderer.applyLockedUi(forcePrivateReset);
+  syncSectionNav();
+}
+
+function closeToSetupUi(forcePrivateReset = false) {
+  currentStatus = null;
+  shellRenderer.applySetupUi(forcePrivateReset);
+  syncSectionNav();
+}
 const sessionActions = createSessionActions({
   api,
   toast,
   refresh: () => refresh(),
+  onSessionClosed: closeSessionUi,
+  beginSessionTransition,
+  beginLockTransition: beginEmergencyLockTransition,
+  endSessionTransition,
 });
 
 const shellRenderer = createShellRenderer({
@@ -688,22 +624,67 @@ const shellRenderer = createShellRenderer({
   renderCompartmentSwitcher,
   renderActiveCompartment,
   buildPushSelectors,
+  resetStatusStrip: statusStripRenderer.reset,
+  resetSelfCheck: selfCheckActions.resetSession,
+  scrubPrivateWorkspace: sessionPrivacyGuard.scrub,
 });
+
+function renderCurrentStatusStrip(summary = selfCheckActions.lastSelfCheckSummary()) {
+  if (currentUiMode !== 'unlocked') return;
+  statusStripRenderer.renderUnlocked(currentStatus?.active_compartment, summary);
+}
+
+async function runSelfCheckAndUpdateStatus() {
+  await selfCheckActions.runSelfCheck();
+  renderCurrentStatusStrip();
+}
 
 async function runRefreshCycle() {
   const sessionTokenAtStart = readSessionToken();
-  const s = await api('GET', '/api/status');
+  const priorActiveCompartmentId =
+    currentUiMode === 'unlocked'
+      ? currentStatus?.active_compartment?.compartment_id ?? null
+      : null;
+  const s = await sessionCoordinator.runRefreshRequests(() => api('GET', '/api/status'));
   const sessionTokenAfterStatus = readSessionToken();
-  currentStatus = s;
   const active = s.active_compartment;
   const unlocked = s.unlocked_compartments || [];
   const mode = deriveUiMode(s);
 
-  // Not initialized — show setup wizard
+  // Paint status only into the exact browser session that sent the request.
+  if (sessionTokenAtStart !== sessionTokenAfterStatus) {
+    queueRefresh();
+    throw new SessionContextChangedError();
+  }
+  clearStaleTokenForLockedMode(mode, sessionTokenAfterStatus, clearSessionToken);
+
+  // Treat an active-compartment change as a privacy boundary too.
+  const nextActiveCompartmentId = active?.compartment_id ?? null;
+  if (
+    sessionTokenAfterStatus &&
+    currentUiMode === 'unlocked' &&
+    mode === 'unlocked' &&
+    priorActiveCompartmentId !== null &&
+    priorActiveCompartmentId !== nextActiveCompartmentId
+  ) {
+    sessionPrivacyGuard.scrub();
+    selfCheckActions.resetSession();
+    resetVaultCounts();
+    setText('compartmentBadge', '');
+    setHidden('compartmentBadge', true);
+  }
+  currentStatus = s;
+
+  // An unlocked payload without a browser session is never paintable.
+  if (mode === 'unlocked' && !sessionTokenAfterStatus) {
+    queueRefresh();
+    throw new SessionContextChangedError();
+  }
+
   if (mode === 'setup') {
     shellRenderer.applySetupUi();
     syncSectionNav();
-    setupWizard.wizDetectDevice();
+    await sessionCoordinator.runRefreshRequests(() => setupWizard.wizDetectDevice());
     return;
   }
 
@@ -711,19 +692,31 @@ async function runRefreshCycle() {
   setHidden('authCard', false);
 
   if (mode === 'locked') {
-    if (!sessionTokenAtStart && sessionTokenAfterStatus) {
-      refreshQueued = true;
-      return;
-    }
     shellRenderer.applyLockedUi();
     syncSectionNav();
-    fido2Actions.showUnlockTabs();
+    await sessionCoordinator.runRefreshRequests(() => fido2Actions.showUnlockTabs());
     return;
   }
 
   shellRenderer.applyUnlockedUi(active, unlocked);
+  // Enforce destination exclusivity before network-backed cards load.
+  syncSectionNav();
+  statusStripRenderer.renderUnlocked(active, selfCheckActions.lastSelfCheckSummary());
+  const workspacePrivacyGeneration = sessionPrivacyGuard.generation();
+  // Ambient probes stay TTL-cached outside the blocking refresh fan-out.
+  const selfCheckSessionToken = sessionTokenAfterStatus;
+  const selfCheckPrivacyGeneration = sessionPrivacyGuard.generation();
+  void sessionCoordinator.runRefreshRequests(() => selfCheckActions.ensureFreshSelfCheck()).then(summary => {
+    if (
+      document.body.dataset.mode === 'unlocked' &&
+      readSessionToken() === selfCheckSessionToken &&
+      sessionPrivacyGuard.generation() === selfCheckPrivacyGeneration
+    ) {
+      statusStripRenderer.renderUnlocked(currentStatus?.active_compartment, summary);
+    }
+  });
 
-  await Promise.all([
+  await sessionCoordinator.runRefreshRequests(() => Promise.all([
     loadSecrets(),
     loadApiKeys(),
     walletActions.loadProfiles(),
@@ -738,39 +731,45 @@ async function runRefreshCycle() {
     loadCompartments(),
     loadAudit(),
     loadDiagnostics(),
-  ]);
+  ]));
+  const verifiedStatus = await sessionCoordinator.runRefreshRequests(
+    () => api('GET', '/api/status'),
+  );
+  clearStaleTokenForLockedMode(
+    deriveUiMode(verifiedStatus), readSessionToken(), clearSessionToken,
+  );
+  if (
+    readSessionToken() !== sessionTokenAfterStatus ||
+    sessionPrivacyGuard.generation() !== workspacePrivacyGeneration ||
+    deriveUiMode(verifiedStatus) !== 'unlocked' ||
+    verifiedStatus.active_compartment?.compartment_id !== nextActiveCompartmentId
+  ) {
+    queueRefresh();
+    throw new SessionContextChangedError();
+  }
   updateNextStepCard();
   syncSectionNav();
 }
 
-async function refresh() {
-  if (refreshPromise) {
-    refreshQueued = true;
-    return refreshPromise;
-  }
-
+const refreshRunner = createRefreshRunner(async () => {
   updateRefreshMeta('busy');
-  refreshPromise = (async () => {
-    try {
-      await runRefreshCycle();
-      markRefreshCompleted();
-    } catch (e) {
+  try {
+    await runRefreshCycle();
+    markRefreshCompleted();
+  } catch (e) {
+    if (!isSessionContextChangedError(e)) {
       console.error('refresh failed', e);
       updateRefreshMeta('error');
-    } finally {
-      const rerun = refreshQueued;
-      refreshQueued = false;
-      refreshPromise = null;
-
-      if (rerun) {
-        void refresh();
-      } else {
-        scheduleRefresh(refresh);
-      }
     }
-  })();
+  }
+}, () => scheduleRefresh(refresh));
 
-  return refreshPromise;
+function queueRefresh() {
+  refreshRunner.queue();
+}
+
+function refresh() {
+  return refreshRunner.run();
 }
 
 function buildPushSelectors(unlocked) {
@@ -792,10 +791,42 @@ function buildPushSelectors(unlocked) {
 }
 
 async function switchCompartment(id) {
-  const r = await api('POST', '/api/compartment/switch', { id });
-  if (r.error) { toast(r.error, 'error'); return; }
-  toast('Switched to compartment #' + id);
-  refresh();
+  const path = '/api/compartment/switch';
+  let transitionContext = null;
+  try {
+    // Advance the generation before the server can change the token's active
+    // compartment. Old reads are rejected, old controls are inert, and new
+    // requests stay blocked while earlier mutations drain against the old one.
+    transitionContext = await beginSessionTransition(
+      path,
+      'Switching compartments…',
+    );
+    const r = await api(
+      'POST',
+      path,
+      { id },
+      transitionContext,
+    );
+    if (r.error) {
+      toast(r.error, 'error');
+      return;
+    }
+    const activeCompartment = {
+      compartment_id: Number(r.compartment_id ?? id),
+      compartment_label: String(r.compartment_label || ('Compartment ' + id)),
+      api_key_count: 0,
+      secret_count: null,
+    };
+    if (currentStatus) currentStatus.active_compartment = activeCompartment;
+    statusStripRenderer.renderUnlocked(activeCompartment, null);
+    toast('Switched to compartment #' + id);
+  } catch (error) {
+    if (!isSessionContextChangedError(error)) {
+      toast(String(error?.message || error || 'Compartment switch failed'), 'error');
+    }
+  } finally {
+    await endSessionTransition(transitionContext);
+  }
 }
 
 async function pushSecret() {
@@ -923,10 +954,12 @@ function showRevealedValue(li, btn, value) {
   div.textContent = value;
   li.appendChild(div);
   btn.textContent = 'Hide';
-  setTimeout(() => {
+  const timer = setTimeout(() => {
+    revealTimers.delete(timer);
     const el = li.querySelector('.secret-value');
     if (el) { el.remove(); btn.textContent = 'Reveal'; }
   }, 30000);
+  revealTimers.add(timer);
 }
 
 async function revealApiKey(key, btn) {
@@ -1025,6 +1058,7 @@ async function restoreSnapshot(
     return;
   }
   if (!confirm('Restore this snapshot? Current on-disk Sigillum data will be replaced and you will need to unlock again.')) return;
+  const restoreContext = captureSessionContext();
 
   let snapshotHex;
   try {
@@ -1035,17 +1069,40 @@ async function restoreSnapshot(
     return;
   }
 
-  const r = await api('POST', '/api/backup/restore', {
-    passphrase,
-    snapshot_hex: snapshotHex,
-  });
-  if (r.error) { toast(r.error, 'error'); return; }
+  if (!isSessionContextCurrent(restoreContext)) {
+    passphraseInput.value = '';
+    fileInput.value = '';
+    toast('Snapshot restore cancelled because the browser session changed.', 'error');
+    return;
+  }
 
-  clearSessionToken();
-  passphraseInput.value = '';
-  fileInput.value = '';
-  toast(successMessage);
-  refresh();
+  const path = '/api/backup/restore';
+  let transitionContext = null;
+  try {
+    transitionContext = await beginSessionTransition(
+      path,
+      'Restoring snapshot…',
+      restoreContext,
+    );
+    const r = await api('POST', path, {
+      passphrase,
+      snapshot_hex: snapshotHex,
+    }, transitionContext);
+    if (r.error) { toast(r.error, 'error'); return; }
+
+    clearSessionToken();
+    closeSessionUi(true);
+    passphraseInput.value = '';
+    fileInput.value = '';
+    toast(successMessage);
+  } catch (error) {
+    if (!isSessionContextChangedError(error)) throw error;
+    passphraseInput.value = '';
+    fileInput.value = '';
+    toast('Snapshot restore cancelled because the browser session changed.', 'error');
+  } finally {
+    await endSessionTransition(transitionContext);
+  }
 }
 
 function restoreSetupSnapshot() {
@@ -1079,26 +1136,33 @@ async function resetLocalData(confirmId = 'setupResetConfirm') {
     return;
   }
 
-  const r = await api('POST', '/api/setup/reset', { confirmation });
-  if (r.error) { toast(r.error, 'error'); return; }
+  const path = '/api/setup/reset';
+  let transitionContext = null;
+  try {
+    transitionContext = await beginSessionTransition(path, 'Resetting local data…');
+    const r = await api('POST', path, { confirmation }, transitionContext);
+    if (r.error) { toast(r.error, 'error'); return; }
 
-  clearSessionToken();
-  clearFields([
-    'setupResetConfirm',
-    'authResetConfirm',
-    'backupResetConfirm',
-    'setupRestorePass',
-    'authRestorePass',
-    'backupRestorePass',
-  ]);
-  ['setupRestoreFile', 'authRestoreFile', 'backupRestoreFile'].forEach(id => {
-    const el = document.getElementById(id);
-    if (el) el.value = '';
-  });
-  toast(r.archived_to
-    ? 'Previous data archived to ' + r.archived_to + '. Starting first-run setup.'
-    : 'Local Sigillum data cleared. Starting first-run setup.');
-  refresh();
+    clearSessionToken();
+    closeToSetupUi(true);
+    clearFields([
+      'setupResetConfirm',
+      'authResetConfirm',
+      'backupResetConfirm',
+      'setupRestorePass',
+      'authRestorePass',
+      'backupRestorePass',
+    ]);
+    ['setupRestoreFile', 'authRestoreFile', 'backupRestoreFile'].forEach(id => {
+      const el = document.getElementById(id);
+      if (el) el.value = '';
+    });
+    toast(r.archived_to
+      ? 'Previous data archived to ' + r.archived_to + '. Starting first-run setup.'
+      : 'Local Sigillum data cleared. Starting first-run setup.');
+  } finally {
+    await endSessionTransition(transitionContext);
+  }
 }
 
 function formatAuditEvent(event) {
@@ -1222,6 +1286,7 @@ async function loadDiagnostics() {
 }
 
 const UI_ACTIONS = {
+  acknowledgeDaemonRestart: () => sessionCoordinator.acknowledgeDaemonRestart(window.prompt('Type I STOPPED SIGILLUM only after stopping or restarting the daemon.') || ''),
   allocateTreasuryReceiveAddress: treasuryActions.allocateTreasuryReceiveAddress,
   allocateWalletReceiveAddress: walletManagerActions.allocateWalletReceiveAddress,
   approveConsolidationPlan: inventoryActions.approveConsolidationPlan,
@@ -1300,6 +1365,7 @@ const UI_ACTIONS = {
   refreshWalletManager: walletManagerActions.refreshWalletManager,
   refreshWorkspace: () => refresh(),
   resetLocalData,
+  retryUnconfirmedLock,
   restoreAuthSnapshot,
   restoreSetupSnapshot,
   restoreSnapshot,
@@ -1308,12 +1374,12 @@ const UI_ACTIONS = {
   revealSecretButton,
   rotateTreasuryReceiveAddress: treasuryActions.rotateTreasuryReceiveAddress,
   runMaintenanceCycle: operationsActions.runMaintenanceCycle,
-  runSelfCheck: selfCheckActions.runSelfCheck,
+  runSelfCheck: runSelfCheckAndUpdateStatus,
   runSelfCheckFromTreasury: async () => {
-    // Run from the Treasury card head, then land on the results so the
+    // Run from the Portfolio roll-up, then land on the Overview results so the
     // operator actually sees what was just verified.
-    await selfCheckActions.runSelfCheck();
-    jumpToCard('diagCard');
+    await runSelfCheckAndUpdateStatus();
+    jumpToCard('selfCheckCard');
   },
   scanEthStealthAnnouncements: operationsActions.scanEthStealthAnnouncements,
   scanInventoryEvm: inventoryActions.scanInventoryEvm,
@@ -1407,6 +1473,7 @@ document.addEventListener('change', handleActionEvent);
 window.addEventListener('beforeunload', clearRefreshTimer);
 
 function enhanceUiChrome() {
+  enhanceHelpTips();
   document.querySelectorAll('button:not([type])').forEach(button => {
     button.type = 'button';
   });
@@ -1430,4 +1497,4 @@ function enhanceUiChrome() {
 }
 
 enhanceUiChrome();
-void refresh();
+if (!initializeLockUnconfirmedState()) void refresh();

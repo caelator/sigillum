@@ -39,7 +39,11 @@ pub(crate) async fn fido2_set_pin(
         Err(resp) => return resp,
     };
     let service = SigillumService::new(state);
-    service_response(service.fido2_set_pin(bearer_token(&headers).as_deref(), body))
+    service_response(
+        service
+            .fido2_set_pin(bearer_token(&headers).as_deref(), body)
+            .await,
+    )
 }
 
 pub(crate) async fn fido2_list(State(state): State<Arc<AppState>>, headers: HeaderMap) -> Response {

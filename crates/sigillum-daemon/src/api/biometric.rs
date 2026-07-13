@@ -17,6 +17,7 @@ use sigillum_core::payload::biometric::BiometricUnlockPayload;
 use sigillum_core::{VaultLifecycle, utils::derive_key_with_salt, utils::load_wrapped_master_key};
 use sigillum_fido2::Fido2Manager;
 use sigillum_fido2::config::CompartmentMeta;
+use subtle::ConstantTimeEq;
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 struct BiometricEnrollment {
@@ -47,10 +48,17 @@ pub(crate) async fn enroll(
     token: Option<&str>,
     body: BiometricEnrollRequest,
 ) -> ServiceResult<BiometricEnrollResponse> {
-    let token = require_full_session_token(&state, token)?;
+    let token = require_full_session_token(&state, token)?.to_owned();
     let compartment_id = state
-        .active_compartment_id_for(token)
+        .active_compartment_id_for(&token)
         .ok_or_else(|| ServiceError::forbidden("No active compartment."))?;
+    let _guard = state.operation_guard().await;
+    require_full_session_token(&state, Some(&token))?;
+    if state.active_compartment_id_for(&token) != Some(compartment_id) {
+        return Err(ServiceError::conflict(
+            "Session compartment changed while biometric enrollment was waiting.",
+        ));
+    }
 
     verify_passphrase_for_compartment(&state, compartment_id, &body.passphrase)?;
 
@@ -66,7 +74,7 @@ pub(crate) async fn enroll(
         .ok_or_else(|| ServiceError::forbidden("Active compartment is not unlocked."))?;
 
     let vault_key = state
-        .with_active_vault_for(token, |vault| vault.extract_master_key())
+        .with_active_vault_for(&token, |vault| vault.extract_master_key())
         .flatten()
         .ok_or_else(|| ServiceError::forbidden("Active compartment is not unlocked."))?;
 
@@ -102,6 +110,9 @@ pub(crate) async fn unlock(
     state: Arc<AppState>,
     body: BiometricUnlockRequest,
 ) -> ServiceResult<UnlockResponse> {
+    let lock_generation = state
+        .unlock_generation_if_ready()
+        .ok_or_else(|| ServiceError::locked("Daemon is locking."))?;
     if state.is_unlocked() {
         return Err(ServiceError::conflict("Vault is already unlocked."));
     }
@@ -134,57 +145,80 @@ pub(crate) async fn unlock(
     let mut pinned = PinnedSecretBytes::new(payload.key.to_vec()).map_err(|error| {
         ServiceError::internal(format!("Failed to pin biometric key material: {error}"))
     })?;
-    let master_key = pinned.as_array_32().ok_or_else(|| {
-        ServiceError::bad_request("Biometric helper returned an invalid vault key length.")
-    })?;
-
-    let verified_meta = load_meta_for_key(&state, enrollment.compartment_id, &master_key)?;
-    state.ensure_vault(enrollment.compartment_id);
-    let verified = state
-        .with_vault(enrollment.compartment_id, |vault| {
-            vault.load_master_key(master_key);
-            let verified = vault.verify_master_key();
-            if !verified {
-                vault.zeroize_master_key();
-            }
-            verified
-        })
-        .unwrap_or(false);
-    pinned.zeroize();
-
-    if !verified {
-        state.record_unlock_failure();
-        return Err(ServiceError::unauthorized(
-            "Biometric proof was valid but the vault key was rejected.",
+    let _guard = state.operation_guard().await;
+    if state.unlock_generation_if_ready() != Some(lock_generation) {
+        pinned.zeroize();
+        return Err(ServiceError::locked(
+            "A lock began while biometric unlock was in progress.",
         ));
     }
 
-    state.reset_unlock_throttle();
-    state.unlock_compartment(enrollment.compartment_id, master_key, verified_meta.clone());
-    let session_token = state.create_session(Some(enrollment.compartment_id));
-    state
-        .record_audit_event(
-            Some(enrollment.compartment_id),
-            AuditEventSpec::UnlockBiometric {
-                compartment_id: enrollment.compartment_id,
-                fingerprint_hex: enrollment.fingerprint_hex.clone(),
-            },
-        )
-        .map_err(|error| ServiceError::internal(format!("Failed to write audit log: {error}")))?;
+    let result = pinned
+        .with_array_32(|master_key| {
+            let verified_meta = load_meta_for_key(&state, enrollment.compartment_id, master_key)?;
+            state
+                .commit_unlock_if_current(lock_generation, || {
+                    state.ensure_vault(enrollment.compartment_id);
+                    let verified = state
+                        .with_vault(enrollment.compartment_id, |vault| {
+                            vault.load_master_key(*master_key);
+                            let verified = vault.verify_master_key();
+                            if !verified {
+                                vault.zeroize_master_key();
+                            }
+                            verified
+                        })
+                        .unwrap_or(false);
 
-    Ok(UnlockResponse {
-        status: "unlocked".into(),
-        method: "biometric".into(),
-        cascading: Some(false),
-        session_token,
-        unlocked_compartments: vec![UnlockedCompartment {
-            id: verified_meta.id,
-            label: verified_meta.label,
-            threshold: verified_meta.threshold,
-            passphrase_mode: verified_meta.passphrase_mode,
-        }],
-        active_compartment_id: Some(enrollment.compartment_id),
-    })
+                    if !verified {
+                        state.record_unlock_failure();
+                        return Err(ServiceError::unauthorized(
+                            "Biometric proof was valid but the vault key was rejected.",
+                        ));
+                    }
+
+                    state.reset_unlock_throttle();
+                    state.unlock_compartment(
+                        enrollment.compartment_id,
+                        *master_key,
+                        verified_meta.clone(),
+                    );
+                    let session_token = state.create_session(Some(enrollment.compartment_id));
+                    state
+                        .record_audit_event(
+                            Some(enrollment.compartment_id),
+                            AuditEventSpec::UnlockBiometric {
+                                compartment_id: enrollment.compartment_id,
+                                fingerprint_hex: enrollment.fingerprint_hex.clone(),
+                            },
+                        )
+                        .map_err(|error| {
+                            ServiceError::internal(format!("Failed to write audit log: {error}"))
+                        })?;
+
+                    Ok(UnlockResponse {
+                        status: "unlocked".into(),
+                        method: "biometric".into(),
+                        cascading: Some(false),
+                        session_token,
+                        unlocked_compartments: vec![UnlockedCompartment {
+                            id: verified_meta.id,
+                            label: verified_meta.label,
+                            threshold: verified_meta.threshold,
+                            passphrase_mode: verified_meta.passphrase_mode,
+                        }],
+                        active_compartment_id: Some(enrollment.compartment_id),
+                    })
+                })
+                .ok_or_else(|| {
+                    ServiceError::locked("A lock began while biometric unlock was in progress.")
+                })?
+        })
+        .ok_or_else(|| {
+            ServiceError::bad_request("Biometric helper returned an invalid vault key length.")
+        })?;
+    pinned.zeroize();
+    result
 }
 
 fn verify_passphrase_for_compartment(
@@ -209,12 +243,9 @@ fn verify_passphrase_for_compartment(
     };
     let verified = state
         .with_vault(compartment_id, |vault| {
-            vault.load_master_key(*master_key);
-            let verified = vault.verify_master_key();
-            if !verified {
-                vault.zeroize_master_key();
-            }
-            verified
+            vault
+                .with_master_key(|loaded| bool::from(loaded.ct_eq(master_key.as_ref())))
+                .unwrap_or(false)
         })
         .unwrap_or(false);
 
@@ -268,4 +299,187 @@ fn enrollment_fingerprint(bytes: &[u8]) -> String {
 
     let digest = Sha256::digest(bytes);
     hex::encode(&digest[..16])
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use k256::ecdsa::signature::Signer;
+    use k256::ecdsa::{Signature, SigningKey};
+    use sigillum_api::request::{
+        BiometricEnrollRequest, BiometricUnlockRequest, CompartmentInitRequest,
+        CompartmentSwitchRequest,
+    };
+    use sigillum_core::VaultLifecycle;
+    use sigillum_core::payload::biometric::BiometricUnlockPayload;
+    use sigillum_fido2::config::CompartmentMeta;
+    use tempfile::TempDir;
+
+    use super::{enroll, unlock, verify_passphrase_for_compartment};
+    use crate::AppState;
+    use crate::service::SigillumService;
+
+    const PASSPHRASE: &str = "biometric-race-passphrase";
+
+    async fn initialized_state() -> (TempDir, Arc<AppState>, SigillumService, String) {
+        let dir = TempDir::new().unwrap();
+        let state =
+            Arc::new(AppState::new(dir.path().to_path_buf()).expect("app state should initialize"));
+        let service = SigillumService::new(state.clone());
+        let initialized = service
+            .init_compartment(
+                None,
+                CompartmentInitRequest {
+                    id: 0,
+                    passphrase: PASSPHRASE.into(),
+                    label: Some("default".into()),
+                    threshold: Some(1),
+                },
+            )
+            .await
+            .unwrap();
+        (dir, state, service, initialized.session_token)
+    }
+
+    fn signing_key() -> SigningKey {
+        SigningKey::from_bytes((&[7u8; 32]).into()).unwrap()
+    }
+
+    fn enroll_request(signing_key: &SigningKey) -> BiometricEnrollRequest {
+        BiometricEnrollRequest {
+            public_key_hex: hex::encode(
+                signing_key
+                    .verifying_key()
+                    .to_encoded_point(true)
+                    .as_bytes(),
+            ),
+            passphrase: PASSPHRASE.into(),
+        }
+    }
+
+    #[tokio::test]
+    async fn biometric_enroll_rejects_token_rotated_while_waiting() {
+        let (_dir, state, service, session) = initialized_state().await;
+        state.unlock_compartment(
+            1,
+            [8u8; 32],
+            CompartmentMeta {
+                id: 1,
+                label: "secure".into(),
+                threshold: 2,
+                passphrase_mode: None,
+            },
+        );
+        let signing_key = signing_key();
+        let held_operation = state.operation_guard().await;
+
+        let mut switch = Box::pin(
+            service.switch_compartment(Some(&session), CompartmentSwitchRequest { id: 1 }),
+        );
+        tokio::select! {
+            biased;
+            result = &mut switch => panic!("switch must wait for the operation mutex: {result:?}"),
+            () = tokio::task::yield_now() => {}
+        }
+        let mut enrollment = Box::pin(enroll(
+            state.clone(),
+            Some(&session),
+            enroll_request(&signing_key),
+        ));
+        tokio::select! {
+            biased;
+            result = &mut enrollment => panic!("enrollment must wait for the operation mutex: {result:?}"),
+            () = tokio::task::yield_now() => {}
+        }
+
+        drop(held_operation);
+        let switched = switch.await.unwrap();
+        let error = enrollment
+            .await
+            .expect_err("old-token enrollment must fail after rotation");
+        assert_eq!(error.status(), axum::http::StatusCode::UNAUTHORIZED);
+        assert!(!state.biometric_enrollment_path().exists());
+        assert_eq!(
+            state.active_compartment_id_for(&switched.session_token),
+            Some(1)
+        );
+    }
+
+    #[tokio::test]
+    async fn lock_generation_preempts_biometric_unlock_waiting_for_operation_mutex() {
+        let (_dir, state, service, session) = initialized_state().await;
+        let signing_key = signing_key();
+        let enrollment = enroll(state.clone(), Some(&session), enroll_request(&signing_key))
+            .await
+            .unwrap();
+        let master_key: [u8; 32] = hex::decode(&enrollment.vault_key_hex)
+            .unwrap()
+            .try_into()
+            .unwrap();
+        let meta = state.unlocked_compartments().into_iter().next().unwrap();
+        state.lock_all();
+
+        let (challenge_id, nonce, _) = state.issue_biometric_challenge();
+        let proof: Signature = signing_key.sign(&nonce);
+        let payload = BiometricUnlockPayload::new(
+            challenge_id,
+            proof.to_der().as_bytes().to_vec(),
+            1,
+            master_key.to_vec(),
+        )
+        .unwrap();
+
+        let held_operation = state.operation_guard().await;
+        let mut biometric_unlock = Box::pin(unlock(
+            state.clone(),
+            BiometricUnlockRequest {
+                payload_hex: hex::encode(payload.encode()),
+            },
+        ));
+        tokio::select! {
+            biased;
+            result = &mut biometric_unlock => panic!("biometric unlock must wait for the operation mutex: {result:?}"),
+            () = tokio::task::yield_now() => {}
+        }
+
+        // Model a concurrent unlock winning first, followed immediately by a
+        // real lock request while the original biometric attempt is queued.
+        state.unlock_compartment(0, master_key, meta);
+        let intervening_session = state.create_session(Some(0));
+        let mut lock = Box::pin(service.lock_all(Some(&intervening_session)));
+        tokio::select! {
+            biased;
+            result = &mut lock => panic!("lock must wait for the operation mutex: {result:?}"),
+            () = tokio::task::yield_now() => {}
+        }
+        assert!(state.is_locking());
+
+        drop(held_operation);
+        let error = biometric_unlock
+            .await
+            .expect_err("stale biometric unlock must not reopen after a lock");
+        assert_eq!(error.status(), axum::http::StatusCode::LOCKED);
+        assert_eq!(lock.await.unwrap().status, "locked");
+        assert!(!state.is_unlocked());
+        assert_eq!(state.session_count(), 0);
+    }
+
+    #[tokio::test]
+    async fn passphrase_confirmation_does_not_replace_live_master_key() {
+        let (_dir, state, _service, session) = initialized_state().await;
+        let before = state
+            .with_vault(0, |vault| vault.extract_master_key())
+            .flatten()
+            .unwrap();
+
+        verify_passphrase_for_compartment(&state, 0, PASSPHRASE).unwrap();
+
+        let after = state
+            .with_vault(0, |vault| vault.extract_master_key())
+            .flatten()
+            .unwrap();
+        assert_eq!(&*after, &*before);
+        assert!(state.verify_token(&session));
+    }
 }

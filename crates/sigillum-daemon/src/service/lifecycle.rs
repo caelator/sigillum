@@ -29,6 +29,7 @@ impl SigillumService {
         token: Option<&str>,
         body: PassphraseRequest,
     ) -> ServiceResult<UnlockResponse> {
+        let unlock_context = self.capture_unlock_operation_context()?;
         if self.state.is_unlocked() && self.optional_session(token).is_some() {
             return Err(ServiceError::conflict("Vault is already unlocked."));
         }
@@ -44,47 +45,49 @@ impl SigillumService {
         super::helpers::require_valid_passphrase(&passphrase)?;
 
         if let Some(response) = self
-            .reauthenticate_unlocked_passphrase(passphrase.as_str())
+            .reauthenticate_unlocked_passphrase(passphrase.as_str(), &unlock_context)
             .await?
         {
             return Ok(response);
         }
 
-        let mut unlocked_metas = Vec::new();
-
         let passphrase_matches =
             scan_passphrase_matches(self.state.base_dir.clone(), passphrase.as_str()).await?;
-        let _guard = self.state.operation_guard().await;
+        let _guard = self.acquire_unlock_operation(&unlock_context).await?;
 
-        for (id, master_key, meta) in passphrase_matches {
-            self.state.ensure_vault(id);
-            let verified = self.state.with_vault(id, |vault| {
-                vault.load_master_key(master_key);
-                let verified = vault.verify_master_key();
-                if !verified {
-                    vault.zeroize_master_key();
+        self.commit_unlock(&unlock_context, || {
+            let mut unlocked_metas = Vec::new();
+            for (id, master_key, meta) in passphrase_matches {
+                self.state.ensure_vault(id);
+                let verified = self.state.with_vault(id, |vault| {
+                    vault.load_master_key(master_key);
+                    let verified = vault.verify_master_key();
+                    if !verified {
+                        vault.zeroize_master_key();
+                    }
+                    verified
+                });
+                if verified == Some(true) {
+                    unlocked_metas.push(meta.clone());
+                    self.state.unlock_compartment(id, master_key, meta);
                 }
-                verified
-            });
-            if verified == Some(true) {
-                unlocked_metas.push(meta.clone());
-                self.state.unlock_compartment(id, master_key, meta);
             }
-        }
 
-        if unlocked_metas.is_empty() {
-            self.state.record_unlock_failure();
-            return Err(ServiceError::unauthorized(
-                "No compartment matched this passphrase.",
-            ));
-        }
+            if unlocked_metas.is_empty() {
+                self.state.record_unlock_failure();
+                return Err(ServiceError::unauthorized(
+                    "No compartment matched this passphrase.",
+                ));
+            }
 
-        self.passphrase_unlock_response(unlocked_metas)
+            self.passphrase_unlock_response(unlocked_metas)
+        })
     }
 
     async fn reauthenticate_unlocked_passphrase(
         &self,
         passphrase: &str,
+        unlock_context: &super::UnlockOperationContext,
     ) -> ServiceResult<Option<UnlockResponse>> {
         if !self.state.is_unlocked() {
             return Ok(None);
@@ -129,7 +132,11 @@ impl SigillumService {
         if matched_metas.is_empty() {
             return Ok(None);
         }
-        Ok(Some(self.passphrase_unlock_response(matched_metas)?))
+        let _guard = self.acquire_unlock_operation(unlock_context).await?;
+        let response = self.commit_unlock(unlock_context, || {
+            self.passphrase_unlock_response(matched_metas)
+        })?;
+        Ok(Some(response))
     }
 
     fn passphrase_unlock_response(
@@ -166,10 +173,29 @@ impl SigillumService {
     }
 
     pub(crate) async fn lock_all(&self, token: Option<&str>) -> ServiceResult<LockResponse> {
-        let _ = self.require_session(token)?;
-        let _guard = self.state.operation_guard().await;
-        self.state.lock_all();
-        self.record_audit(None, AuditEventSpec::LockAll)?;
+        let _ = self.require_lock_session(token)?;
+        if !self.state.begin_locking() {
+            return Err(ServiceError::locked("Daemon is already locking."));
+        }
+
+        // The lock intent is latched before waiting for the operation mutex, so
+        // new authorization fails immediately and already-queued authenticated
+        // mutations revalidate to 423 before they can execute. Run the drain in
+        // its own task so an HTTP disconnect cannot cancel a latched lock and
+        // strand the daemon indefinitely in `Locking`.
+        let state = self.state.clone();
+        tokio::spawn(async move {
+            let _guard = state.operation_guard().await;
+            state.lock_all();
+            state
+                .record_audit_event(None, AuditEventSpec::LockAll)
+                .map_err(|error| {
+                    ServiceError::internal(format!("Failed to write audit log: {error}"))
+                })
+        })
+        .await
+        .map_err(|error| ServiceError::internal(format!("Lock task failed: {error}")))??;
+
         Ok(LockResponse {
             status: "locked".into(),
             message: "All compartments locked. Master keys zeroized.".into(),
@@ -181,7 +207,8 @@ impl SigillumService {
         token: Option<&str>,
     ) -> ServiceResult<SessionRevokeResponse> {
         let token = self.require_session(token)?.to_string();
-        let _guard = self.state.operation_guard().await;
+        let session_context = self.capture_session_operation_context(Some(&token))?;
+        let _guard = self.acquire_session_operation(&session_context).await?;
         let compartment_id = self.state.active_compartment_id_for(&token);
         self.state.revoke_session(&token);
         self.record_audit(compartment_id, AuditEventSpec::SessionRevoke)?;
@@ -191,12 +218,13 @@ impl SigillumService {
         })
     }
 
-    pub(crate) fn mint_capability_session(
+    pub(crate) async fn mint_capability_session(
         &self,
         token: Option<&str>,
         body: CapabilitySessionRequest,
     ) -> ServiceResult<CapabilitySessionResponse> {
         let token = self.require_full_session(token)?;
+        let session_context = self.capture_session_operation_context(Some(token))?;
         let unknown = body
             .scopes
             .iter()
@@ -207,7 +235,8 @@ impl SigillumService {
             )));
         }
         let ttl = Duration::from_secs(body.ttl_secs.unwrap_or(DEFAULT_CAPABILITY_SESSION_TTL_SECS));
-        let active = self.state.active_compartment_id_for(token);
+        let _guard = self.acquire_session_operation(&session_context).await?;
+        let active = session_context.active_compartment_id;
         let (session_token, expires_at_unix) =
             self.state
                 .create_capability_session(active, body.scopes.clone(), ttl);

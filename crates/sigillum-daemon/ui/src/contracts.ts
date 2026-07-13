@@ -4,28 +4,39 @@ export interface ErrorResponse {
 }
 
 export interface ActiveCompartment {
+  compartment_id: number;
+  compartment_label: string;
+  api_key_count: number;
+  secret_count: number | null;
+}
+
+export interface UnlockedCompartment {
   id: number;
   label: string;
   threshold: number;
-  api_key_count: number;
-  secret_count?: number | null;
+  passphrase_mode?: string;
+}
+
+export interface Fido2StatusResponse {
+  enabled: boolean;
+  key_count: number;
 }
 
 export interface StatusResponse {
   initialized: boolean;
   locked: boolean;
-  active_compartment?: ActiveCompartment | null;
-  unlocked_compartments: ActiveCompartment[];
-  session_token?: string;
+  active_compartment?: ActiveCompartment;
+  unlocked_compartments: UnlockedCompartment[];
+  fido2?: Fido2StatusResponse;
 }
 
 export interface UnlockResponse {
   status: string;
   method: string;
-  cascading?: boolean | null;
+  cascading?: boolean;
   session_token: string;
-  unlocked_compartments: ActiveCompartment[];
-  active_compartment_id?: number | null;
+  unlocked_compartments: UnlockedCompartment[];
+  active_compartment_id?: number;
 }
 
 export interface LockResponse {
@@ -36,6 +47,13 @@ export interface LockResponse {
 export interface SessionRevokeResponse {
   status: string;
   requires_reauth: boolean;
+}
+
+export interface SwitchCompartmentResponse {
+  status: string;
+  compartment_id: number;
+  compartment_label: string;
+  session_token: string;
 }
 
 export interface ChainProfile {

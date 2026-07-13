@@ -1,7 +1,8 @@
 use reqwest::Method;
 use sigillum_api::request::{
     CounterpartyCreateRequest, CounterpartyDeleteRequest, CounterpartyUpdateRequest,
-    TreasuryPolicyUpdateRequest, TreasuryReceiveAllocateRequest, TreasuryReceiveRotateRequest,
+    TreasuryPolicyEnableOptInRequest, TreasuryPolicyUpdateRequest, TreasuryReceiveAllocateRequest,
+    TreasuryReceiveRotateRequest,
 };
 use sigillum_api::response::{
     CounterpartyListResponse, CounterpartyMutationResponse, TreasuryOverviewResponse,
@@ -28,6 +29,16 @@ impl SigillumClient {
     ) -> Result<TreasuryPolicyMutationResponse, ClientError> {
         let builder = self
             .request(Method::POST, "/api/treasury/policy/update")
+            .json(&request);
+        self.send(builder).await
+    }
+
+    pub async fn enable_treasury_policy_opt_in(
+        &self,
+        request: TreasuryPolicyEnableOptInRequest,
+    ) -> Result<TreasuryPolicyMutationResponse, ClientError> {
+        let builder = self
+            .request(Method::POST, "/api/treasury/policy/enable-opt-in")
             .json(&request);
         self.send(builder).await
     }

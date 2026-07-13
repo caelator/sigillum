@@ -28,6 +28,8 @@
     18. Pin modal
     19. Utilities
     20. Scrollbars, selection, motion & responsive
+    21. C7 console metrics, persistent status & semantic states
+    22. Fail-closed lock confirmation alert
    ═══════════════════════════════════════════════════════════════════════════ */
 
 @import "./00-design-tokens.css";
@@ -44,3 +46,5 @@
 @import "./11-guide-journey.css";
 @import "./12-modal-utilities-responsive.css";
 @import "./13-onboarding.css";
+@import "./14-console-c7.css";
+@import "./15-lock-unconfirmed.css";

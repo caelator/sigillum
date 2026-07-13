@@ -57,6 +57,7 @@ impl SigillumService {
         body: CompartmentAddRequest,
     ) -> ServiceResult<CompartmentAddedResponse> {
         let _ = self.require_session(token)?;
+        let session_context = self.capture_session_operation_context(token)?;
         if body.label.is_empty() {
             return Err(ServiceError::bad_request("label is required"));
         }
@@ -64,7 +65,7 @@ impl SigillumService {
             return Err(ServiceError::bad_request("threshold must be >= 1"));
         }
 
-        let _guard = self.state.operation_guard().await;
+        let _guard = self.acquire_session_operation(&session_context).await?;
         let unlocked = self.state.unlocked_compartments();
         if unlocked.is_empty() {
             return Err(ServiceError::forbidden("Access denied."));
@@ -126,7 +127,8 @@ impl SigillumService {
         body: CompartmentRemoveRequest,
     ) -> ServiceResult<CompartmentRemovedResponse> {
         let _ = self.require_session(token)?;
-        let _guard = self.state.operation_guard().await;
+        let session_context = self.capture_session_operation_context(token)?;
+        let _guard = self.acquire_session_operation(&session_context).await?;
         if !self.state.is_unlocked() {
             return Err(ServiceError::forbidden("Access denied."));
         }
@@ -189,11 +191,24 @@ impl SigillumService {
         } else {
             None
         };
+        let existing_session_context = existing_session
+            .as_deref()
+            .map(|token| self.capture_session_operation_context(Some(token)))
+            .transpose()?;
 
         let passphrase = Zeroizing::new(body.passphrase);
         super::helpers::require_valid_passphrase(&passphrase)?;
 
-        let _guard = self.state.operation_guard().await;
+        let _guard = if let Some(context) = existing_session_context.as_ref() {
+            self.acquire_session_operation(context).await?
+        } else {
+            self.state.operation_guard().await
+        };
+        if existing_session_context.is_none() && self.state.is_initialized() {
+            return Err(ServiceError::conflict(
+                "Sigillum was initialized while this request was waiting.",
+            ));
+        }
         let journal = self.begin_operation(
             PendingOperationSpec::compartment_init(body.label.clone(), body.threshold),
             Some(format!("compartment/{}", body.id)),
@@ -273,18 +288,15 @@ impl SigillumService {
         body: CompartmentSwitchRequest,
     ) -> ServiceResult<SwitchCompartmentResponse> {
         let token = self.require_session(token)?;
-        let _guard = self.state.operation_guard().await;
-        self.state
-            .switch_active_for(token, body.id)
-            .map_err(ServiceError::forbidden)?;
-
+        let session_context = self.capture_session_operation_context(Some(token))?;
+        let _guard = self.acquire_session_operation(&session_context).await?;
         let label = self
             .state
             .unlocked_compartments()
             .into_iter()
             .find(|meta| meta.id == body.id)
             .map(|meta| meta.label)
-            .unwrap_or_default();
+            .ok_or_else(|| ServiceError::forbidden("compartment not unlocked"))?;
 
         self.record_audit(
             Some(body.id),
@@ -292,11 +304,16 @@ impl SigillumService {
                 label: label.clone(),
             },
         )?;
+        let session_token = self
+            .state
+            .rotate_session_active_for(token, body.id)
+            .map_err(ServiceError::forbidden)?;
 
         Ok(SwitchCompartmentResponse {
             status: "switched".into(),
             compartment_id: body.id,
             compartment_label: label,
+            session_token,
         })
     }
 }

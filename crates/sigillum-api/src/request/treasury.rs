@@ -65,6 +65,26 @@ pub struct TreasuryPolicyUpdateRequest {
     pub allow_treasury_automation: Option<bool>,
 }
 
+/// A treasury-policy opt-in that the setup wizard may only enable.
+///
+/// This deliberately excludes every disable operation and every other policy
+/// field so a stale wizard response cannot replace a newer policy document.
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub enum TreasuryPolicyOptIn {
+    #[serde(rename = "block_cross_party_linkage")]
+    BlockCrossPartyLinkage,
+    #[serde(rename = "allow_claim_execution")]
+    AllowClaimExecution,
+    #[serde(rename = "allow_gas_topups")]
+    AllowGasTopups,
+}
+
+/// Enable one setup-wizard treasury opt-in without replacing the policy.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct TreasuryPolicyEnableOptInRequest {
+    pub opt_in: TreasuryPolicyOptIn,
+}
+
 /// Allocate a fresh purpose-labeled receive address from a wallet profile.
 ///
 /// The daemon derives the next unused receive index for the profile locally

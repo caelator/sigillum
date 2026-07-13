@@ -55,7 +55,8 @@ Sigillum protects against:
 | Memory dump / core dump | Master key held in `Zeroizing<[u8; 32]>` — overwritten on drop. `SecretString` prevents heap scanning for values. |
 | Phishing for unlock material | FIDO2 unlock remains phishing-resistant at the credential layer. Passphrase unlock exists as a local fallback path and should be treated like any other secret. |
 | Single key compromise | Shamir's Secret Sharing requires M-of-N keys. One stolen key is useless alone. |
-| Unauthorized API access (daemon mode) | Bearer session tokens over local HTTP, with the gateway remaining a local-sidecar preview surface in this phase. |
+| Unauthorized or cross-compartment API access (daemon mode) | Bearer session tokens over local HTTP; compartment switches rotate the token, retain only an immediate bounded Lock-only predecessor, and queued mutations revalidate token plus compartment after serialization. Browser tabs publish hard pending/settled boundaries and scrub on peer transitions; browser and Rust clients adopt authority only from exact typed session-establishment responses and reject stale generations. The gateway remains a local-sidecar preview surface in this phase. |
+| Lock racing an unlock or transaction broadcast | Lock latches before draining active work. Unlock commits are generation-bound, and provider submissions share a linearized admission boundary with Lock, so nothing new is admitted after Lock wins. |
 | Accidental secret logging | `SecretString` has no `Display` or `Debug` impl. Secrets cannot be printed without explicit `expose_secret()`. |
 | Timing attacks on key comparison | Constant-time comparison via `subtle` crate (transitive dependency of RustCrypto). |
 | Replay attacks on backup files | Each backup includes a unique timestamp and random nonce. |

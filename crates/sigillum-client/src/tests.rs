@@ -1,12 +1,16 @@
 use std::net::SocketAddr;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
+use axum::extract::State;
 use axum::http::{HeaderMap, StatusCode, header};
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use serde_json::json;
 use sigillum_api::request::{
-    CounterpartyCreateRequest, CounterpartyDeleteRequest, CounterpartyUpdateRequest, Eip1559Fees,
-    EvmProviderRef, NftMetadataFetchRequest, NftMetadataOptInDeleteRequest,
+    CompartmentDefinition, CompartmentSwitchRequest, CounterpartyCreateRequest,
+    CounterpartyDeleteRequest, CounterpartyUpdateRequest, Eip1559Fees, EvmProviderRef,
+    Fido2SetupRequest, Fido2UnlockRequest, NftMetadataFetchRequest, NftMetadataOptInDeleteRequest,
     NftMetadataOptInUpsertRequest, NftMetadataSettingsUpdateRequest,
     QueueEthStealthErc20SweepRequest, QueueEthStealthNativeSweepRequest,
     QueueEthStealthTransferRequest, QueueProcessRequest, ReceivingDepositTagRequest,
@@ -20,6 +24,9 @@ struct TestState;
 
 const NFT_METADATA_CONTRACT: &str = "0xdead00000000000000000000000000000000dead";
 const NFT_METADATA_GATEWAY: &str = "https://ipfs.example.invalid/ipfs/";
+const SESSION_T: &str = "1111111111111111111111111111111111111111111111111111111111111111";
+const SESSION_T2: &str = "2222222222222222222222222222222222222222222222222222222222222222";
+const SESSION_T3: &str = "3333333333333333333333333333333333333333333333333333333333333333";
 
 #[test]
 fn constructor_normalizes_base_url_without_session_token() {
@@ -54,8 +61,13 @@ async fn unlock() -> Json<serde_json::Value> {
     Json(json!({
         "status": "unlocked",
         "method": "passphrase",
-        "session_token": "test-token",
-        "unlocked_compartments": [],
+        "session_token": SESSION_T,
+        "unlocked_compartments": [{
+            "id": 0,
+            "label": "default",
+            "threshold": 1
+        }],
+        "active_compartment_id": 0
     }))
 }
 
@@ -64,7 +76,7 @@ async fn api_keys(headers: HeaderMap) -> (StatusCode, Json<serde_json::Value>) {
         .get(header::AUTHORIZATION)
         .and_then(|v| v.to_str().ok())
         .unwrap_or("");
-    if auth != "Bearer test-token" {
+    if auth != "Bearer test-token" && auth != format!("Bearer {SESSION_T}") {
         return (
             StatusCode::UNAUTHORIZED,
             Json(json!({ "error": "missing auth" })),
@@ -78,7 +90,7 @@ async fn nft_metadata_optins_route(headers: HeaderMap) -> (StatusCode, Json<serd
         .get(header::AUTHORIZATION)
         .and_then(|v| v.to_str().ok())
         .unwrap_or("");
-    if auth != "Bearer test-token" {
+    if auth != "Bearer test-token" && auth != format!("Bearer {SESSION_T}") {
         return (
             StatusCode::UNAUTHORIZED,
             Json(json!({ "error": "missing auth" })),
@@ -107,7 +119,7 @@ async fn nft_metadata_optin_upsert_route(
         .get(header::AUTHORIZATION)
         .and_then(|v| v.to_str().ok())
         .unwrap_or("");
-    if auth != "Bearer test-token" {
+    if auth != "Bearer test-token" && auth != format!("Bearer {SESSION_T}") {
         return (
             StatusCode::UNAUTHORIZED,
             Json(json!({ "error": "missing auth" })),
@@ -139,7 +151,7 @@ async fn nft_metadata_optin_delete_route(
         .get(header::AUTHORIZATION)
         .and_then(|v| v.to_str().ok())
         .unwrap_or("");
-    if auth != "Bearer test-token" {
+    if auth != "Bearer test-token" && auth != format!("Bearer {SESSION_T}") {
         return (
             StatusCode::UNAUTHORIZED,
             Json(json!({ "error": "missing auth" })),
@@ -1031,7 +1043,7 @@ async fn token_registry_list_route(headers: HeaderMap) -> (StatusCode, Json<serd
         .get(header::AUTHORIZATION)
         .and_then(|v| v.to_str().ok())
         .unwrap_or("");
-    if auth != "Bearer test-token" {
+    if auth != "Bearer test-token" && auth != format!("Bearer {SESSION_T}") {
         return (
             StatusCode::UNAUTHORIZED,
             Json(json!({ "error": "missing auth" })),
@@ -1053,7 +1065,7 @@ async fn token_registry_import_route(
         .get(header::AUTHORIZATION)
         .and_then(|v| v.to_str().ok())
         .unwrap_or("");
-    if auth != "Bearer test-token" {
+    if auth != "Bearer test-token" && auth != format!("Bearer {SESSION_T}") {
         return (
             StatusCode::UNAUTHORIZED,
             Json(json!({ "error": "missing auth" })),
@@ -1079,7 +1091,7 @@ async fn token_registry_delete_route(
         .get(header::AUTHORIZATION)
         .and_then(|v| v.to_str().ok())
         .unwrap_or("");
-    if auth != "Bearer test-token" {
+    if auth != "Bearer test-token" && auth != format!("Bearer {SESSION_T}") {
         return (
             StatusCode::UNAUTHORIZED,
             Json(json!({ "error": "missing auth" })),
@@ -1898,6 +1910,1105 @@ async fn spawn_test_server() -> Option<SocketAddr> {
     Some(addr)
 }
 
+async fn spawn_router(app: Router) -> Option<SocketAddr> {
+    let listener = match tokio::net::TcpListener::bind("127.0.0.1:0").await {
+        Ok(listener) => listener,
+        Err(error) => {
+            eprintln!("skipping loopback test: sandbox blocks loopback bind: {error}");
+            return None;
+        }
+    };
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        axum::serve(listener, app).await.unwrap();
+    });
+    Some(addr)
+}
+
+#[derive(Clone)]
+struct DelayedResponseState {
+    entered: Arc<tokio::sync::Notify>,
+    release: Arc<tokio::sync::Notify>,
+    response: serde_json::Value,
+    status: StatusCode,
+}
+
+async fn delayed_session_response(
+    State(state): State<DelayedResponseState>,
+    headers: HeaderMap,
+) -> (StatusCode, Json<serde_json::Value>) {
+    let auth = headers
+        .get(header::AUTHORIZATION)
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or("");
+    assert!(
+        auth.is_empty() || auth == format!("Bearer {SESSION_T}"),
+        "unexpected request authorization: {auth:?}"
+    );
+    state.entered.notify_one();
+    state.release.notified().await;
+    (state.status, Json(state.response))
+}
+
+#[derive(Clone, Copy)]
+enum EstablishingTransition {
+    Passphrase,
+    Biometric,
+    Fido2Unlock,
+    Fido2Setup,
+}
+
+impl EstablishingTransition {
+    fn path(self) -> &'static str {
+        match self {
+            Self::Passphrase => "/api/unlock",
+            Self::Biometric => "/api/biometric/unlock",
+            Self::Fido2Unlock => "/api/fido2/unlock",
+            Self::Fido2Setup => "/api/fido2/setup",
+        }
+    }
+
+    fn response(self) -> serde_json::Value {
+        match self {
+            Self::Passphrase => unlock_response("passphrase"),
+            Self::Biometric => unlock_response("biometric"),
+            Self::Fido2Unlock => unlock_response("fido2"),
+            Self::Fido2Setup => json!({
+                "status": "setup_complete",
+                "is_first_key": true,
+                "total_keys": 1,
+                "compartments": 1,
+                "unlocked": true,
+                "session_token": SESSION_T2
+            }),
+        }
+    }
+}
+
+fn unlock_response(method: &str) -> serde_json::Value {
+    json!({
+        "status": "unlocked",
+        "method": method,
+        "session_token": SESSION_T2,
+        "unlocked_compartments": [{
+            "id": 0,
+            "label": "default",
+            "threshold": 1
+        }],
+        "active_compartment_id": 0
+    })
+}
+
+async fn assert_aborted_establishing_transition_completes(kind: EstablishingTransition) {
+    let entered = Arc::new(tokio::sync::Notify::new());
+    let release = Arc::new(tokio::sync::Notify::new());
+    let app = Router::new()
+        .route(kind.path(), post(delayed_session_response))
+        .with_state(DelayedResponseState {
+            entered: entered.clone(),
+            release: release.clone(),
+            response: kind.response(),
+            status: StatusCode::OK,
+        });
+    let addr = spawn_router(app)
+        .await
+        .expect("loopback is required for establishing-transition cancellation test");
+    let client = Arc::new(SigillumClient::new(format!("http://{addr}")).unwrap());
+
+    let caller = tokio::spawn({
+        let client = client.clone();
+        async move {
+            match kind {
+                EstablishingTransition::Passphrase => client
+                    .unlock_with_passphrase("passphrase")
+                    .await
+                    .map(|_| ()),
+                EstablishingTransition::Biometric => {
+                    client.biometric_unlock("payload".into()).await.map(|_| ())
+                }
+                EstablishingTransition::Fido2Unlock => client
+                    .fido2_unlock(Fido2UnlockRequest {
+                        pins: Vec::new(),
+                        tap_count: 1,
+                    })
+                    .await
+                    .map(|_| ()),
+                EstablishingTransition::Fido2Setup => client
+                    .fido2_setup(Fido2SetupRequest {
+                        pin: None,
+                        label: "primary".into(),
+                        compartments: vec![CompartmentDefinition {
+                            label: "default".into(),
+                            threshold: 1,
+                            passphrase_mode: None,
+                        }],
+                        passphrase: None,
+                    })
+                    .await
+                    .map(|_| ()),
+            }
+        }
+    });
+    entered.notified().await;
+
+    // Dropping the public future must detach only the waiter, never the owned
+    // transition worker that holds the writer gate and adopts the issued token.
+    caller.abort();
+    assert!(caller.await.unwrap_err().is_cancelled());
+    release.notify_one();
+    let transition = tokio::time::timeout(
+        std::time::Duration::from_secs(2),
+        client.session_transition.read(),
+    )
+    .await
+    .expect("owned establishing worker must release the transition gate");
+    drop(transition);
+    assert_eq!(client.session_token().as_deref(), Some(SESSION_T2));
+}
+
+#[derive(Clone)]
+struct SwitchResponseState {
+    response: serde_json::Value,
+}
+
+async fn switch_response(
+    State(state): State<SwitchResponseState>,
+    headers: HeaderMap,
+) -> Json<serde_json::Value> {
+    let expected = format!("Bearer {SESSION_T}");
+    assert_eq!(
+        headers
+            .get(header::AUTHORIZATION)
+            .and_then(|value| value.to_str().ok()),
+        Some(expected.as_str())
+    );
+    Json(state.response)
+}
+
+async fn confirmed_lock_response(headers: HeaderMap) -> Json<serde_json::Value> {
+    let expected = format!("Bearer {SESSION_T}");
+    assert_eq!(
+        headers
+            .get(header::AUTHORIZATION)
+            .and_then(|value| value.to_str().ok()),
+        Some(expected.as_str())
+    );
+    Json(json!({ "status": "locked" }))
+}
+
+#[derive(Clone)]
+struct TransitionOrderingState {
+    switch_entered: Arc<tokio::sync::Notify>,
+    switch_release: Arc<tokio::sync::Notify>,
+    status_calls: Arc<AtomicUsize>,
+}
+
+async fn delayed_rotating_switch(
+    State(state): State<TransitionOrderingState>,
+    headers: HeaderMap,
+) -> Json<serde_json::Value> {
+    let expected = format!("Bearer {SESSION_T}");
+    assert_eq!(
+        headers
+            .get(header::AUTHORIZATION)
+            .and_then(|value| value.to_str().ok()),
+        Some(expected.as_str())
+    );
+    state.switch_entered.notify_one();
+    state.switch_release.notified().await;
+    Json(json!({
+        "status": "switched",
+        "compartment_id": 2,
+        "compartment_label": "secure",
+        "session_token": SESSION_T2
+    }))
+}
+
+async fn counted_status(State(state): State<TransitionOrderingState>) -> Json<serde_json::Value> {
+    state.status_calls.fetch_add(1, Ordering::SeqCst);
+    Json(json!({
+        "locked": false,
+        "initialized": true,
+        "active_compartment": null,
+        "unlocked_compartments": [],
+        "fido2": null
+    }))
+}
+
+#[derive(Clone)]
+struct EmergencyLockState {
+    operation_entered: Arc<tokio::sync::Notify>,
+    operation_release: Arc<tokio::sync::Notify>,
+    lock_entered: Arc<tokio::sync::Notify>,
+    lock_release: Arc<tokio::sync::Notify>,
+    expected_lock_token: &'static str,
+}
+
+async fn held_status_for_emergency_lock(
+    State(state): State<EmergencyLockState>,
+    headers: HeaderMap,
+) -> Json<serde_json::Value> {
+    let expected = format!("Bearer {SESSION_T}");
+    assert_eq!(
+        headers
+            .get(header::AUTHORIZATION)
+            .and_then(|value| value.to_str().ok()),
+        Some(expected.as_str())
+    );
+    state.operation_entered.notify_one();
+    state.operation_release.notified().await;
+    Json(json!({
+        "locked": false,
+        "initialized": true,
+        "active_compartment": null,
+        "unlocked_compartments": [],
+        "fido2": null
+    }))
+}
+
+async fn held_unlock_for_emergency_lock(
+    State(state): State<EmergencyLockState>,
+    headers: HeaderMap,
+) -> Json<serde_json::Value> {
+    assert!(headers.get(header::AUTHORIZATION).is_none());
+    state.operation_entered.notify_one();
+    state.operation_release.notified().await;
+    Json(unlock_response("passphrase"))
+}
+
+async fn held_emergency_lock(
+    State(state): State<EmergencyLockState>,
+    headers: HeaderMap,
+) -> Json<serde_json::Value> {
+    let expected = format!("Bearer {}", state.expected_lock_token);
+    assert_eq!(
+        headers
+            .get(header::AUTHORIZATION)
+            .and_then(|value| value.to_str().ok()),
+        Some(expected.as_str())
+    );
+    state.lock_entered.notify_one();
+    state.lock_release.notified().await;
+    Json(json!({ "status": "locked" }))
+}
+
+async fn counted_unlock_request(
+    State(calls): State<Arc<AtomicUsize>>,
+    headers: HeaderMap,
+) -> Json<serde_json::Value> {
+    assert!(headers.get(header::AUTHORIZATION).is_none());
+    calls.fetch_add(1, Ordering::SeqCst);
+    Json(unlock_response("passphrase"))
+}
+
+#[derive(Clone)]
+struct FallbackQueueState {
+    switch_entered: Arc<tokio::sync::Notify>,
+    switch_release: Arc<tokio::sync::Notify>,
+    unlock_calls: Arc<AtomicUsize>,
+}
+
+async fn delayed_ambiguous_switch(
+    State(state): State<FallbackQueueState>,
+    headers: HeaderMap,
+) -> Json<serde_json::Value> {
+    let expected = format!("Bearer {SESSION_T}");
+    assert_eq!(
+        headers
+            .get(header::AUTHORIZATION)
+            .and_then(|value| value.to_str().ok()),
+        Some(expected.as_str())
+    );
+    state.switch_entered.notify_one();
+    state.switch_release.notified().await;
+    Json(json!({
+        "status": "switched",
+        "compartment_id": 2,
+        "compartment_label": "secure",
+        "session_token": SESSION_T
+    }))
+}
+
+async fn counted_queued_unlock(State(state): State<FallbackQueueState>) -> Json<serde_json::Value> {
+    state.unlock_calls.fetch_add(1, Ordering::SeqCst);
+    Json(unlock_response("passphrase"))
+}
+
+async fn confirmed_fallback_lock(
+    State(_state): State<FallbackQueueState>,
+    headers: HeaderMap,
+) -> Json<serde_json::Value> {
+    let expected = format!("Bearer {SESSION_T}");
+    assert_eq!(
+        headers
+            .get(header::AUTHORIZATION)
+            .and_then(|value| value.to_str().ok()),
+        Some(expected.as_str())
+    );
+    Json(json!({ "status": "locked" }))
+}
+
+#[derive(Clone)]
+struct SerializedSwitchState {
+    first_entered: Arc<tokio::sync::Notify>,
+    first_release: Arc<tokio::sync::Notify>,
+    calls: Arc<AtomicUsize>,
+}
+
+async fn serialized_switch_response(
+    State(state): State<SerializedSwitchState>,
+    headers: HeaderMap,
+    Json(request): Json<CompartmentSwitchRequest>,
+) -> Json<serde_json::Value> {
+    state.calls.fetch_add(1, Ordering::SeqCst);
+    let auth = headers
+        .get(header::AUTHORIZATION)
+        .and_then(|value| value.to_str().ok());
+    match request.id {
+        2 => {
+            let expected = format!("Bearer {SESSION_T}");
+            assert_eq!(auth, Some(expected.as_str()));
+            state.first_entered.notify_one();
+            state.first_release.notified().await;
+            Json(json!({
+                "status": "switched",
+                "compartment_id": 2,
+                "compartment_label": "secure",
+                "session_token": SESSION_T2
+            }))
+        }
+        3 => {
+            let expected = format!("Bearer {SESSION_T2}");
+            assert_eq!(auth, Some(expected.as_str()));
+            Json(json!({
+                "status": "switched",
+                "compartment_id": 3,
+                "compartment_label": "treasury",
+                "session_token": SESSION_T3
+            }))
+        }
+        id => panic!("unexpected compartment id {id}"),
+    }
+}
+
+#[tokio::test]
+async fn late_unauthorized_response_cannot_clear_newer_session() {
+    let entered = Arc::new(tokio::sync::Notify::new());
+    let release = Arc::new(tokio::sync::Notify::new());
+    let app = Router::new()
+        .route("/api/status", get(delayed_session_response))
+        .with_state(DelayedResponseState {
+            entered: entered.clone(),
+            release: release.clone(),
+            response: json!({ "error": "expired" }),
+            status: StatusCode::UNAUTHORIZED,
+        });
+    let Some(addr) = spawn_router(app).await else {
+        return;
+    };
+    let client = Arc::new(SigillumClient::new(format!("http://{addr}")).unwrap());
+    client.set_session_token(SESSION_T);
+    let pending = tokio::spawn({
+        let client = client.clone();
+        async move { client.status().await }
+    });
+    entered.notified().await;
+    client.set_session_token(SESSION_T2);
+    release.notify_one();
+
+    assert!(matches!(
+        pending.await.unwrap(),
+        Err(ClientError::SessionContextChanged)
+    ));
+    assert_eq!(client.session_token().as_deref(), Some(SESSION_T2));
+}
+
+#[tokio::test]
+async fn malformed_unauthorized_response_still_clears_session_boundary() {
+    let app = Router::new().route(
+        "/api/status",
+        get(|| async { (StatusCode::UNAUTHORIZED, "not-json") }),
+    );
+    let Some(addr) = spawn_router(app).await else {
+        return;
+    };
+    let client = SigillumClient::new(format!("http://{addr}")).unwrap();
+    client.set_session_token(SESSION_T);
+
+    assert!(matches!(
+        client.status().await,
+        Err(ClientError::Api {
+            status: StatusCode::UNAUTHORIZED,
+            ..
+        })
+    ));
+    assert_eq!(client.session_token(), None);
+}
+
+#[tokio::test]
+async fn malformed_locked_response_clears_global_session_boundary() {
+    let app = Router::new().route(
+        "/api/status",
+        get(|| async { (StatusCode::LOCKED, "not-json") }),
+    );
+    let Some(addr) = spawn_router(app).await else {
+        return;
+    };
+    let client = SigillumClient::new(format!("http://{addr}")).unwrap();
+    client.set_session_token(SESSION_T);
+
+    assert!(matches!(
+        client.status().await,
+        Err(ClientError::Api {
+            status: StatusCode::LOCKED,
+            ..
+        })
+    ));
+    assert_eq!(client.session_token(), None);
+}
+
+#[tokio::test]
+async fn late_success_response_is_rejected_after_explicit_session_change() {
+    let entered = Arc::new(tokio::sync::Notify::new());
+    let release = Arc::new(tokio::sync::Notify::new());
+    let app = Router::new()
+        .route("/api/status", get(delayed_session_response))
+        .with_state(DelayedResponseState {
+            entered: entered.clone(),
+            release: release.clone(),
+            response: json!({
+                "locked": false,
+                "initialized": true,
+                "active_compartment": null,
+                "unlocked_compartments": [],
+                "fido2": null
+            }),
+            status: StatusCode::OK,
+        });
+    let Some(addr) = spawn_router(app).await else {
+        return;
+    };
+    let client = Arc::new(SigillumClient::new(format!("http://{addr}")).unwrap());
+    client.set_session_token(SESSION_T);
+    let pending = tokio::spawn({
+        let client = client.clone();
+        async move { client.status().await }
+    });
+    entered.notified().await;
+    client.set_session_token(SESSION_T2);
+    release.notify_one();
+
+    assert!(matches!(
+        pending.await.unwrap(),
+        Err(ClientError::SessionContextChanged)
+    ));
+    assert_eq!(client.session_token().as_deref(), Some(SESSION_T2));
+}
+
+#[tokio::test]
+async fn late_unlock_response_cannot_overwrite_newer_session() {
+    let entered = Arc::new(tokio::sync::Notify::new());
+    let release = Arc::new(tokio::sync::Notify::new());
+    let app = Router::new()
+        .route("/api/unlock", post(delayed_session_response))
+        .with_state(DelayedResponseState {
+            entered: entered.clone(),
+            release: release.clone(),
+            response: json!({
+                "status": "unlocked",
+                "method": "passphrase",
+                "session_token": SESSION_T2,
+                "unlocked_compartments": []
+            }),
+            status: StatusCode::OK,
+        });
+    let Some(addr) = spawn_router(app).await else {
+        return;
+    };
+    let client = Arc::new(SigillumClient::new(format!("http://{addr}")).unwrap());
+    let pending = tokio::spawn({
+        let client = client.clone();
+        async move { client.unlock_with_passphrase("passphrase").await }
+    });
+    entered.notified().await;
+    client.set_session_token(SESSION_T3);
+    release.notify_one();
+
+    assert!(matches!(
+        pending.await.unwrap(),
+        Err(ClientError::SessionContextChanged)
+    ));
+    assert_eq!(client.session_token().as_deref(), Some(SESSION_T3));
+}
+
+#[tokio::test]
+async fn aborted_passphrase_unlock_still_adopts_issued_session() {
+    assert_aborted_establishing_transition_completes(EstablishingTransition::Passphrase).await;
+}
+
+#[tokio::test]
+async fn aborted_biometric_unlock_still_adopts_issued_session() {
+    assert_aborted_establishing_transition_completes(EstablishingTransition::Biometric).await;
+}
+
+#[tokio::test]
+async fn aborted_fido2_unlock_still_adopts_issued_session() {
+    assert_aborted_establishing_transition_completes(EstablishingTransition::Fido2Unlock).await;
+}
+
+#[tokio::test]
+async fn aborted_fido2_setup_still_adopts_issued_session() {
+    assert_aborted_establishing_transition_completes(EstablishingTransition::Fido2Setup).await;
+}
+
+#[tokio::test]
+async fn malformed_establishing_response_requires_daemon_restart() {
+    let app = Router::new().route(
+        "/api/unlock",
+        post(|| async {
+            Json(json!({
+                "status": "unlocked",
+                "session_token": SESSION_T2,
+                "unlocked_compartments": []
+            }))
+        }),
+    );
+    let Some(addr) = spawn_router(app).await else {
+        return;
+    };
+    let client = SigillumClient::new(format!("http://{addr}")).unwrap();
+
+    assert!(matches!(
+        client.unlock_with_passphrase("passphrase").await,
+        Err(ClientError::SessionTransitionLockUnconfirmed(_))
+    ));
+    assert_eq!(client.session_token(), None);
+}
+
+#[tokio::test]
+async fn unlock_requires_active_compartment_in_unlocked_set() {
+    for response in [
+        json!({
+            "status": "unlocked",
+            "method": "passphrase",
+            "session_token": SESSION_T2,
+            "unlocked_compartments": [],
+            "active_compartment_id": 0
+        }),
+        json!({
+            "status": "unlocked",
+            "method": "passphrase",
+            "session_token": SESSION_T2,
+            "unlocked_compartments": [{
+                "id": 1,
+                "label": "other",
+                "threshold": 1
+            }],
+            "active_compartment_id": 0
+        }),
+    ] {
+        let app = Router::new().route("/api/unlock", post(move || async move { Json(response) }));
+        let Some(addr) = spawn_router(app).await else {
+            return;
+        };
+        let client = SigillumClient::new(format!("http://{addr}")).unwrap();
+
+        assert!(matches!(
+            client.unlock_with_passphrase("passphrase").await,
+            Err(ClientError::SessionTransitionLockUnconfirmed(_))
+        ));
+        assert_eq!(client.session_token(), None);
+    }
+}
+
+#[tokio::test]
+async fn fido2_setup_requires_nonzero_keys_and_exact_compartment_count() {
+    for (total_keys, compartments) in [(0, 1), (1, 2)] {
+        let app = Router::new().route(
+            "/api/fido2/setup",
+            post(move || async move {
+                Json(json!({
+                    "status": "setup_complete",
+                    "is_first_key": true,
+                    "total_keys": total_keys,
+                    "compartments": compartments,
+                    "unlocked": true,
+                    "session_token": SESSION_T2
+                }))
+            }),
+        );
+        let Some(addr) = spawn_router(app).await else {
+            return;
+        };
+        let client = SigillumClient::new(format!("http://{addr}")).unwrap();
+        let request = Fido2SetupRequest {
+            pin: None,
+            label: "primary".into(),
+            compartments: vec![CompartmentDefinition {
+                label: "default".into(),
+                threshold: 1,
+                passphrase_mode: None,
+            }],
+            passphrase: None,
+        };
+
+        assert!(matches!(
+            client.fido2_setup(request).await,
+            Err(ClientError::SessionTransitionLockUnconfirmed(_))
+        ));
+        assert_eq!(client.session_token(), None);
+    }
+}
+
+async fn run_switch_response_test(
+    response: serde_json::Value,
+) -> (
+    Result<SwitchCompartmentResponse, ClientError>,
+    SigillumClient,
+) {
+    let app = Router::new()
+        .route("/api/compartment/switch", post(switch_response))
+        .route("/api/lock", post(confirmed_lock_response))
+        .with_state(SwitchResponseState { response });
+    let addr = spawn_router(app)
+        .await
+        .expect("loopback is required for switch response tests");
+    let client = SigillumClient::new(format!("http://{addr}")).unwrap();
+    client.set_session_token(SESSION_T);
+    let result = client.switch_compartment(2).await;
+    (result, client)
+}
+
+#[tokio::test]
+async fn valid_compartment_switch_atomically_adopts_rotated_token() {
+    let (result, client) = run_switch_response_test(json!({
+        "status": "switched",
+        "compartment_id": 2,
+        "compartment_label": "secure",
+        "session_token": SESSION_T2
+    }))
+    .await;
+
+    assert_eq!(result.unwrap().session_token, SESSION_T2);
+    assert_eq!(client.session_token().as_deref(), Some(SESSION_T2));
+}
+
+#[tokio::test]
+async fn switch_excludes_stale_generic_request_before_rotated_token_adoption() {
+    let switch_entered = Arc::new(tokio::sync::Notify::new());
+    let switch_release = Arc::new(tokio::sync::Notify::new());
+    let status_calls = Arc::new(AtomicUsize::new(0));
+    let app = Router::new()
+        .route("/api/compartment/switch", post(delayed_rotating_switch))
+        .route("/api/status", get(counted_status))
+        .with_state(TransitionOrderingState {
+            switch_entered: switch_entered.clone(),
+            switch_release: switch_release.clone(),
+            status_calls: status_calls.clone(),
+        });
+    let addr = spawn_router(app)
+        .await
+        .expect("loopback is required for transition ordering test");
+    let client = Arc::new(SigillumClient::new(format!("http://{addr}")).unwrap());
+    client.set_session_token(SESSION_T);
+
+    let switching = tokio::spawn({
+        let client = client.clone();
+        async move { client.switch_compartment(2).await }
+    });
+    switch_entered.notified().await;
+
+    // Capture T while the daemon has committed to the switch but its T2
+    // response is deliberately withheld. The read side must wait for the
+    // transition and reject this stale builder before it reaches the daemon.
+    let stale_builder = client.request(Method::GET, "/api/status");
+    let stale_request = tokio::spawn({
+        let client = client.clone();
+        async move { client.send::<StatusResponse>(stale_builder).await }
+    });
+    tokio::task::yield_now().await;
+    assert_eq!(status_calls.load(Ordering::SeqCst), 0);
+
+    switch_release.notify_one();
+    assert_eq!(switching.await.unwrap().unwrap().session_token, SESSION_T2);
+    assert!(matches!(
+        stale_request.await.unwrap(),
+        Err(ClientError::SessionContextChanged)
+    ));
+    assert_eq!(status_calls.load(Ordering::SeqCst), 0);
+    assert_eq!(client.session_token().as_deref(), Some(SESSION_T2));
+}
+
+#[tokio::test]
+async fn aborted_switch_caller_cannot_abandon_rotated_session() {
+    let switch_entered = Arc::new(tokio::sync::Notify::new());
+    let switch_release = Arc::new(tokio::sync::Notify::new());
+    let status_calls = Arc::new(AtomicUsize::new(0));
+    let app = Router::new()
+        .route("/api/compartment/switch", post(delayed_rotating_switch))
+        .route("/api/status", get(counted_status))
+        .with_state(TransitionOrderingState {
+            switch_entered: switch_entered.clone(),
+            switch_release: switch_release.clone(),
+            status_calls: status_calls.clone(),
+        });
+    let addr = spawn_router(app)
+        .await
+        .expect("loopback is required for switch cancellation test");
+    let client = Arc::new(SigillumClient::new(format!("http://{addr}")).unwrap());
+    client.set_session_token(SESSION_T);
+
+    let caller = tokio::spawn({
+        let client = client.clone();
+        async move { client.switch_compartment(2).await }
+    });
+    switch_entered.notified().await;
+
+    // The daemon has committed T -> T2 but withholds the response. Cancel the
+    // public caller, then prove its owned worker retains the writer gate and
+    // finishes adoption before any request captured with stale T can run.
+    caller.abort();
+    assert!(caller.await.unwrap_err().is_cancelled());
+    let stale_builder = client.request(Method::GET, "/api/status");
+    let stale_request = tokio::spawn({
+        let client = client.clone();
+        async move { client.send::<StatusResponse>(stale_builder).await }
+    });
+    tokio::task::yield_now().await;
+    assert_eq!(status_calls.load(Ordering::SeqCst), 0);
+
+    switch_release.notify_one();
+    let stale_result = tokio::time::timeout(std::time::Duration::from_secs(2), stale_request)
+        .await
+        .expect("owned switch worker must finish after caller cancellation")
+        .unwrap();
+    assert!(matches!(
+        stale_result,
+        Err(ClientError::SessionContextChanged)
+    ));
+    assert_eq!(status_calls.load(Ordering::SeqCst), 0);
+    assert_eq!(client.session_token().as_deref(), Some(SESSION_T2));
+}
+
+#[tokio::test]
+async fn emergency_lock_prevents_inflight_switch_token_resurrection() {
+    let switch_entered = Arc::new(tokio::sync::Notify::new());
+    let switch_release = Arc::new(tokio::sync::Notify::new());
+    let status_calls = Arc::new(AtomicUsize::new(0));
+    let app = Router::new()
+        .route("/api/compartment/switch", post(delayed_rotating_switch))
+        .route("/api/lock", post(confirmed_lock_response))
+        .with_state(TransitionOrderingState {
+            switch_entered: switch_entered.clone(),
+            switch_release: switch_release.clone(),
+            status_calls,
+        });
+    let addr = spawn_router(app)
+        .await
+        .expect("loopback is required for switch-versus-Lock test");
+    let client = Arc::new(SigillumClient::new(format!("http://{addr}")).unwrap());
+    client.set_session_token(SESSION_T);
+
+    let switching = tokio::spawn({
+        let client = client.clone();
+        async move { client.switch_compartment(2).await }
+    });
+    switch_entered.notified().await;
+
+    assert_eq!(client.lock().await.unwrap().status, "locked");
+    assert_eq!(client.session_token(), None);
+    switch_release.notify_one();
+
+    assert!(matches!(
+        switching.await.unwrap(),
+        Err(ClientError::SessionContextChanged)
+    ));
+    assert_eq!(client.session_token(), None);
+}
+
+#[tokio::test]
+async fn confirmed_fallback_lock_rejects_preboundary_queued_unlock() {
+    let switch_entered = Arc::new(tokio::sync::Notify::new());
+    let switch_release = Arc::new(tokio::sync::Notify::new());
+    let unlock_calls = Arc::new(AtomicUsize::new(0));
+    let app = Router::new()
+        .route("/api/compartment/switch", post(delayed_ambiguous_switch))
+        .route("/api/unlock", post(counted_queued_unlock))
+        .route("/api/lock", post(confirmed_fallback_lock))
+        .with_state(FallbackQueueState {
+            switch_entered: switch_entered.clone(),
+            switch_release: switch_release.clone(),
+            unlock_calls: unlock_calls.clone(),
+        });
+    let addr = spawn_router(app)
+        .await
+        .expect("loopback is required for fallback-boundary queue test");
+    let client = Arc::new(SigillumClient::new(format!("http://{addr}")).unwrap());
+    client.set_session_token(SESSION_T);
+
+    let switching = tokio::spawn({
+        let client = client.clone();
+        async move { client.switch_compartment(2).await }
+    });
+    switch_entered.notified().await;
+    let queued_unlock = tokio::spawn({
+        let client = client.clone();
+        async move { client.unlock_with_passphrase("passphrase").await }
+    });
+    while Arc::strong_count(&client.session_transition) < 3 {
+        tokio::task::yield_now().await;
+    }
+    tokio::task::yield_now().await;
+    switch_release.notify_one();
+
+    assert!(matches!(
+        switching.await.unwrap(),
+        Err(ClientError::SessionTransitionLocked(_))
+    ));
+    assert!(matches!(
+        queued_unlock.await.unwrap(),
+        Err(ClientError::SessionContextChanged)
+    ));
+    assert_eq!(unlock_calls.load(Ordering::SeqCst), 0);
+    assert_eq!(client.session_token(), None);
+}
+
+#[tokio::test]
+async fn concurrent_compartment_switches_serialize_token_rotation() {
+    let first_entered = Arc::new(tokio::sync::Notify::new());
+    let first_release = Arc::new(tokio::sync::Notify::new());
+    let calls = Arc::new(AtomicUsize::new(0));
+    let app = Router::new()
+        .route("/api/compartment/switch", post(serialized_switch_response))
+        .with_state(SerializedSwitchState {
+            first_entered: first_entered.clone(),
+            first_release: first_release.clone(),
+            calls: calls.clone(),
+        });
+    let addr = spawn_router(app)
+        .await
+        .expect("loopback is required for serialized switch test");
+    let client = Arc::new(SigillumClient::new(format!("http://{addr}")).unwrap());
+    client.set_session_token(SESSION_T);
+
+    let first = tokio::spawn({
+        let client = client.clone();
+        async move { client.switch_compartment(2).await }
+    });
+    first_entered.notified().await;
+    let second = tokio::spawn({
+        let client = client.clone();
+        async move { client.switch_compartment(3).await }
+    });
+    tokio::task::yield_now().await;
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+
+    first_release.notify_one();
+    assert_eq!(first.await.unwrap().unwrap().session_token, SESSION_T2);
+    assert_eq!(second.await.unwrap().unwrap().session_token, SESSION_T3);
+    assert_eq!(calls.load(Ordering::SeqCst), 2);
+    assert_eq!(client.session_token().as_deref(), Some(SESSION_T3));
+}
+
+#[tokio::test]
+async fn malformed_compartment_switch_response_confirms_fallback_lock() {
+    let (result, client) = run_switch_response_test(json!({
+        "status": "switched",
+        "session_token": SESSION_T2
+    }))
+    .await;
+
+    assert!(matches!(
+        result,
+        Err(ClientError::SessionTransitionLocked(_))
+    ));
+    assert_eq!(client.session_token(), None);
+}
+
+#[tokio::test]
+async fn same_token_compartment_switch_response_is_rejected() {
+    let (result, client) = run_switch_response_test(json!({
+        "status": "switched",
+        "compartment_id": 2,
+        "compartment_label": "secure",
+        "session_token": SESSION_T
+    }))
+    .await;
+
+    assert!(matches!(
+        result,
+        Err(ClientError::SessionTransitionLocked(_))
+    ));
+    assert_eq!(client.session_token(), None);
+}
+
+#[tokio::test]
+async fn wrong_compartment_switch_response_is_rejected() {
+    let (result, client) = run_switch_response_test(json!({
+        "status": "switched",
+        "compartment_id": 7,
+        "compartment_label": "wrong",
+        "session_token": SESSION_T2
+    }))
+    .await;
+
+    assert!(matches!(
+        result,
+        Err(ClientError::SessionTransitionLocked(_))
+    ));
+    assert_eq!(client.session_token(), None);
+}
+
+#[tokio::test]
+async fn ambiguous_switch_reports_when_fallback_lock_is_unconfirmed() {
+    let app = Router::new()
+        .route("/api/compartment/switch", post(switch_response))
+        .route(
+            "/api/lock",
+            post(|| async {
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(json!({ "error": "lock unavailable" })),
+                )
+            }),
+        )
+        .with_state(SwitchResponseState {
+            response: json!({
+                "status": "switched",
+                "compartment_id": 2,
+                "compartment_label": "secure",
+                "session_token": SESSION_T
+            }),
+        });
+    let Some(addr) = spawn_router(app).await else {
+        return;
+    };
+    let client = SigillumClient::new(format!("http://{addr}")).unwrap();
+    client.set_session_token(SESSION_T);
+
+    assert!(matches!(
+        client.switch_compartment(2).await,
+        Err(ClientError::SessionTransitionLockUnconfirmed(_))
+    ));
+    assert_eq!(client.session_token(), None);
+}
+
+#[tokio::test]
+async fn fallback_lock_requires_structural_locked_confirmation() {
+    let app = Router::new()
+        .route("/api/compartment/switch", post(switch_response))
+        .route(
+            "/api/lock",
+            post(|| async { Json(json!({ "status": "ok" })) }),
+        )
+        .with_state(SwitchResponseState {
+            response: json!({
+                "status": "switched",
+                "compartment_id": 2,
+                "compartment_label": "secure",
+                "session_token": SESSION_T
+            }),
+        });
+    let Some(addr) = spawn_router(app).await else {
+        return;
+    };
+    let client = SigillumClient::new(format!("http://{addr}")).unwrap();
+    client.set_session_token(SESSION_T);
+
+    assert!(matches!(
+        client.switch_compartment(2).await,
+        Err(ClientError::SessionTransitionLockUnconfirmed(_))
+    ));
+    assert_eq!(client.session_token(), None);
+}
+
+#[tokio::test]
+async fn fallback_lock_rejects_misleading_locked_response_with_error() {
+    let app = Router::new()
+        .route("/api/compartment/switch", post(switch_response))
+        .route(
+            "/api/lock",
+            post(|| async {
+                Json(json!({
+                    "status": "locked",
+                    "error": "Lock was not confirmed"
+                }))
+            }),
+        )
+        .with_state(SwitchResponseState {
+            response: json!({
+                "status": "switched",
+                "compartment_id": 2,
+                "compartment_label": "secure",
+                "session_token": SESSION_T
+            }),
+        });
+    let Some(addr) = spawn_router(app).await else {
+        return;
+    };
+    let client = SigillumClient::new(format!("http://{addr}")).unwrap();
+    client.set_session_token(SESSION_T);
+
+    assert!(matches!(
+        client.switch_compartment(2).await,
+        Err(ClientError::SessionTransitionLockUnconfirmed(_))
+    ));
+    assert_eq!(client.session_token(), None);
+}
+
+#[tokio::test]
+async fn explicit_switch_api_rejection_does_not_trigger_fallback_lock() {
+    let app = Router::new().route(
+        "/api/compartment/switch",
+        post(|| async {
+            (
+                StatusCode::CONFLICT,
+                Json(json!({ "error": "compartment not unlocked" })),
+            )
+        }),
+    );
+    let Some(addr) = spawn_router(app).await else {
+        return;
+    };
+    let client = SigillumClient::new(format!("http://{addr}")).unwrap();
+    client.set_session_token(SESSION_T);
+
+    assert!(matches!(
+        client.switch_compartment(2).await,
+        Err(ClientError::Api {
+            status: StatusCode::CONFLICT,
+            ..
+        })
+    ));
+    assert_eq!(client.session_token().as_deref(), Some(SESSION_T));
+}
+
+#[tokio::test]
+async fn server_error_during_switch_triggers_confirmed_fallback_lock() {
+    let app = Router::new()
+        .route(
+            "/api/compartment/switch",
+            post(|| async {
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(json!({ "error": "switch completion is unknown" })),
+                )
+            }),
+        )
+        .route("/api/lock", post(confirmed_lock_response));
+    let Some(addr) = spawn_router(app).await else {
+        return;
+    };
+    let client = SigillumClient::new(format!("http://{addr}")).unwrap();
+    client.set_session_token(SESSION_T);
+
+    assert!(matches!(
+        client.switch_compartment(2).await,
+        Err(ClientError::SessionTransitionLocked(_))
+    ));
+    assert_eq!(client.session_token(), None);
+}
+
 #[tokio::test]
 async fn unlock_stores_session_for_follow_up_requests() {
     let Some(addr) = spawn_test_server().await else {
@@ -1907,7 +3018,7 @@ async fn unlock_stores_session_for_follow_up_requests() {
 
     let unlocked = client.unlock_with_passphrase("passphrase").await.unwrap();
     assert_eq!(unlocked.status, "unlocked");
-    assert_eq!(client.session_token().as_deref(), Some("test-token"));
+    assert_eq!(client.session_token().as_deref(), Some(SESSION_T));
 
     let keys = client.list_api_keys().await.unwrap();
     assert_eq!(keys, vec!["alpha".to_string(), "beta".to_string()]);
@@ -2085,6 +3196,322 @@ async fn revoke_session_clears_cached_token() {
     assert_eq!(response.status, "revoked");
     assert!(response.requires_reauth);
     assert!(client.session_token().is_none());
+}
+
+#[tokio::test]
+async fn emergency_lock_bypasses_hung_generic_request() {
+    let operation_entered = Arc::new(tokio::sync::Notify::new());
+    let operation_release = Arc::new(tokio::sync::Notify::new());
+    let lock_entered = Arc::new(tokio::sync::Notify::new());
+    let lock_release = Arc::new(tokio::sync::Notify::new());
+    lock_release.notify_one();
+    let app = Router::new()
+        .route("/api/status", get(held_status_for_emergency_lock))
+        .route("/api/lock", post(held_emergency_lock))
+        .with_state(EmergencyLockState {
+            operation_entered: operation_entered.clone(),
+            operation_release: operation_release.clone(),
+            lock_entered: lock_entered.clone(),
+            lock_release,
+            expected_lock_token: SESSION_T,
+        });
+    let addr = spawn_router(app)
+        .await
+        .expect("loopback is required for emergency Lock test");
+    let client = Arc::new(SigillumClient::new(format!("http://{addr}")).unwrap());
+    client.set_session_token(SESSION_T);
+    let held_request = tokio::spawn({
+        let client = client.clone();
+        async move { client.status().await }
+    });
+    operation_entered.notified().await;
+
+    let lock_result = tokio::time::timeout(std::time::Duration::from_secs(2), client.lock())
+        .await
+        .expect("emergency Lock must not wait for the held read-side request")
+        .unwrap();
+    assert_eq!(lock_result.status, "locked");
+    lock_entered.notified().await;
+    assert_eq!(client.session_token(), None);
+
+    operation_release.notify_one();
+    assert!(matches!(
+        held_request.await.unwrap(),
+        Err(ClientError::SessionContextChanged)
+    ));
+}
+
+#[tokio::test]
+async fn lock_intent_hides_token_refuses_replacement_and_rejects_second_lock() {
+    let operation_entered = Arc::new(tokio::sync::Notify::new());
+    let operation_release = Arc::new(tokio::sync::Notify::new());
+    let lock_entered = Arc::new(tokio::sync::Notify::new());
+    let lock_release = Arc::new(tokio::sync::Notify::new());
+    let app = Router::new()
+        .route("/api/lock", post(held_emergency_lock))
+        .with_state(EmergencyLockState {
+            operation_entered,
+            operation_release,
+            lock_entered: lock_entered.clone(),
+            lock_release: lock_release.clone(),
+            expected_lock_token: SESSION_T,
+        });
+    let addr = spawn_router(app)
+        .await
+        .expect("loopback is required for Lock intent test");
+    let client = Arc::new(SigillumClient::new(format!("http://{addr}")).unwrap());
+    client.set_session_token(SESSION_T);
+
+    let locking = tokio::spawn({
+        let client = client.clone();
+        async move { client.lock().await }
+    });
+    lock_entered.notified().await;
+    assert_eq!(client.session_token(), None);
+    assert_eq!(
+        client.session_token.lock().unwrap().as_deref(),
+        Some(SESSION_T)
+    );
+    let generation = client.session_boundary_generation();
+
+    client.set_session_token(SESSION_T3);
+    assert_eq!(
+        client.session_token.lock().unwrap().as_deref(),
+        Some(SESSION_T)
+    );
+    client.clear_session_token();
+    assert_eq!(
+        client.session_token.lock().unwrap().as_deref(),
+        Some(SESSION_T)
+    );
+    assert!(matches!(
+        client.lock().await,
+        Err(ClientError::SessionContextChanged)
+    ));
+    assert_eq!(client.session_boundary_generation(), generation);
+
+    lock_release.notify_one();
+    assert_eq!(locking.await.unwrap().unwrap().status, "locked");
+    assert_eq!(client.session_token(), None);
+}
+
+#[tokio::test]
+async fn preboundary_queued_unlock_never_reaches_daemon_after_lock_intent() {
+    let unlock_calls = Arc::new(AtomicUsize::new(0));
+    let app = Router::new()
+        .route("/api/unlock", post(counted_unlock_request))
+        .with_state(unlock_calls.clone());
+    let addr = spawn_router(app)
+        .await
+        .expect("loopback is required for queued unlock test");
+    let client = Arc::new(SigillumClient::new(format!("http://{addr}")).unwrap());
+    let held_read = client.session_transition.read().await;
+
+    let unlocking = tokio::spawn({
+        let client = client.clone();
+        async move { client.unlock_with_passphrase("passphrase").await }
+    });
+    while Arc::strong_count(&client.session_transition) < 2 {
+        tokio::task::yield_now().await;
+    }
+    tokio::task::yield_now().await;
+    let locking = tokio::spawn({
+        let client = client.clone();
+        async move { client.lock().await }
+    });
+    tokio::time::timeout(std::time::Duration::from_secs(2), async {
+        while client.session_lock_state.load(Ordering::SeqCst) == 0 {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("Lock must publish intent before the held read is released");
+    drop(held_read);
+
+    assert!(matches!(
+        unlocking.await.unwrap(),
+        Err(ClientError::SessionContextChanged)
+    ));
+    assert!(matches!(
+        locking.await.unwrap(),
+        Err(ClientError::SessionTransitionLockUnconfirmed(_))
+    ));
+    assert_eq!(unlock_calls.load(Ordering::SeqCst), 0);
+    assert!(matches!(
+        client.status().await,
+        Err(ClientError::SessionStateUnconfirmed)
+    ));
+}
+
+#[tokio::test]
+async fn aborted_lock_caller_does_not_cancel_emergency_lock_worker() {
+    let operation_entered = Arc::new(tokio::sync::Notify::new());
+    let operation_release = Arc::new(tokio::sync::Notify::new());
+    let lock_entered = Arc::new(tokio::sync::Notify::new());
+    let lock_release = Arc::new(tokio::sync::Notify::new());
+    let app = Router::new()
+        .route("/api/lock", post(held_emergency_lock))
+        .with_state(EmergencyLockState {
+            operation_entered,
+            operation_release,
+            lock_entered: lock_entered.clone(),
+            lock_release: lock_release.clone(),
+            expected_lock_token: SESSION_T,
+        });
+    let addr = spawn_router(app)
+        .await
+        .expect("loopback is required for Lock cancellation test");
+    let client = Arc::new(SigillumClient::new(format!("http://{addr}")).unwrap());
+    client.set_session_token(SESSION_T);
+
+    let caller = tokio::spawn({
+        let client = client.clone();
+        async move { client.lock().await }
+    });
+    lock_entered.notified().await;
+    caller.abort();
+    assert!(caller.await.unwrap_err().is_cancelled());
+    lock_release.notify_one();
+
+    tokio::time::timeout(std::time::Duration::from_secs(2), async {
+        loop {
+            let raw_token = client.session_token.lock().unwrap().clone();
+            let lock_state = client.session_lock_state.load(Ordering::SeqCst);
+            if raw_token.is_none() && lock_state == 0 {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("owned Lock worker must clear authority after caller cancellation");
+}
+
+#[tokio::test]
+async fn no_token_lock_waits_for_inflight_unlock_then_locks_new_session() {
+    let operation_entered = Arc::new(tokio::sync::Notify::new());
+    let operation_release = Arc::new(tokio::sync::Notify::new());
+    let lock_entered = Arc::new(tokio::sync::Notify::new());
+    let lock_release = Arc::new(tokio::sync::Notify::new());
+    let app = Router::new()
+        .route("/api/unlock", post(held_unlock_for_emergency_lock))
+        .route("/api/lock", post(held_emergency_lock))
+        .with_state(EmergencyLockState {
+            operation_entered: operation_entered.clone(),
+            operation_release: operation_release.clone(),
+            lock_entered: lock_entered.clone(),
+            lock_release: lock_release.clone(),
+            expected_lock_token: SESSION_T2,
+        });
+    let addr = spawn_router(app)
+        .await
+        .expect("loopback is required for Lock-versus-unlock test");
+    let client = Arc::new(SigillumClient::new(format!("http://{addr}")).unwrap());
+
+    let unlocking = tokio::spawn({
+        let client = client.clone();
+        async move { client.unlock_with_passphrase("passphrase").await }
+    });
+    operation_entered.notified().await;
+    let locking = tokio::spawn({
+        let client = client.clone();
+        async move { client.lock().await }
+    });
+    tokio::task::yield_now().await;
+
+    operation_release.notify_one();
+    assert!(matches!(
+        unlocking.await.unwrap(),
+        Err(ClientError::SessionContextChanged)
+    ));
+    lock_entered.notified().await;
+    assert_eq!(client.session_token(), None);
+    assert_eq!(
+        client.session_token.lock().unwrap().as_deref(),
+        Some(SESSION_T2)
+    );
+    lock_release.notify_one();
+    assert_eq!(locking.await.unwrap().unwrap().status, "locked");
+    assert_eq!(client.session_token(), None);
+}
+
+#[tokio::test]
+async fn lock_already_in_progress_response_clears_cached_token() {
+    let app = Router::new().route(
+        "/api/lock",
+        post(|headers: HeaderMap| async move {
+            let expected = format!("Bearer {SESSION_T}");
+            assert_eq!(
+                headers
+                    .get(header::AUTHORIZATION)
+                    .and_then(|value| value.to_str().ok()),
+                Some(expected.as_str())
+            );
+            (
+                StatusCode::LOCKED,
+                Json(json!({ "error": "vault Lock is already in progress" })),
+            )
+        }),
+    );
+    let addr = spawn_router(app)
+        .await
+        .expect("loopback is required for Lock transition test");
+    let client = SigillumClient::new(format!("http://{addr}")).unwrap();
+    client.set_session_token(SESSION_T);
+
+    assert_eq!(client.lock().await.unwrap().status, "locked");
+    assert_eq!(client.session_token(), None);
+}
+
+#[tokio::test]
+async fn fresh_unlock_is_allowed_after_confirmed_lock_boundary() {
+    let app = Router::new()
+        .route("/api/lock", post(confirmed_lock_response))
+        .route(
+            "/api/unlock",
+            post(|| async { Json(unlock_response("passphrase")) }),
+        );
+    let addr = spawn_router(app)
+        .await
+        .expect("loopback is required for post-Lock unlock test");
+    let client = SigillumClient::new(format!("http://{addr}")).unwrap();
+    client.set_session_token(SESSION_T);
+
+    assert_eq!(client.lock().await.unwrap().status, "locked");
+    let response = client.unlock_with_passphrase("passphrase").await.unwrap();
+    assert_eq!(response.session_token, SESSION_T2);
+    assert_eq!(client.session_token().as_deref(), Some(SESSION_T2));
+}
+
+#[tokio::test]
+async fn lock_rejects_misleading_success_response_with_error() {
+    let app = Router::new().route(
+        "/api/lock",
+        post(|| async {
+            Json(json!({
+                "status": "locked",
+                "error": "Lock was not confirmed"
+            }))
+        }),
+    );
+    let addr = spawn_router(app)
+        .await
+        .expect("loopback is required for Lock response validation test");
+    let client = SigillumClient::new(format!("http://{addr}")).unwrap();
+    client.set_session_token(SESSION_T);
+
+    assert!(matches!(
+        client.lock().await,
+        Err(ClientError::SessionTransitionLockUnconfirmed(_))
+    ));
+    assert_eq!(client.session_token(), None);
+    assert!(matches!(
+        client.status().await,
+        Err(ClientError::SessionStateUnconfirmed)
+    ));
+    client.set_session_token(SESSION_T3);
+    assert_eq!(client.session_token(), None);
+    assert_eq!(*client.session_token.lock().unwrap(), None);
 }
 
 #[tokio::test]

@@ -6,6 +6,7 @@ import type {
   ReceivingDepositTagRequest,
   ReceivingRefreshResponse,
 } from "../contracts";
+import { isSessionContextChangedError } from "../api/session";
 import { setTextById as setText } from "../render/dom";
 import { esc, escAttr, formatTs, pillClass, statBox, statusPill } from "../render/html";
 import { formatWeiHexAsEth } from "./treasury";
@@ -211,38 +212,51 @@ export function createReceivingActions(deps: ReceivingActionsDeps) {
   let receivingParties: Counterparty[] = [];
   let stealthDepositIdByAddress: Record<string, string> = {};
 
+  function resetSession(): void {
+    receivingParties = [];
+    stealthDepositIdByAddress = {};
+  }
+
   async function loadReceivingOverview(): Promise<void> {
     try {
-      const r = await deps.api("GET", "/api/receiving/overview");
+      const optionalMetadata = async (path: string): Promise<any | null> => {
+        try {
+          return await deps.api("GET", path);
+        } catch (error) {
+          if (isSessionContextChangedError(error)) throw error;
+          return null;
+        }
+      };
+      // Start every compartment-scoped read in the same synchronous turn.
+      // A generation change then rejects the whole snapshot instead of letting
+      // a later request begin under the replacement compartment.
+      const [r, parties, deposits] = await Promise.all([
+        deps.api("GET", "/api/receiving/overview"),
+        optionalMetadata("/api/treasury/parties"),
+        optionalMetadata("/api/deposits/eth-stealth"),
+      ]);
       if (r.error) {
         deps.toast(r.error, "error");
         return;
       }
       const overview = r as ReceivingOverviewResponse;
-      renderReceivingOverview(overview, receivingParties, stealthDepositIdByAddress);
-      try {
-        const parties = await deps.api("GET", "/api/treasury/parties");
-        if (!parties.error) receivingParties = parties.parties || [];
-      } catch (_) {
-        // Overview rendering should not depend on optional selector metadata.
+      const nextReceivingParties =
+        parties && !parties.error ? parties.parties || [] : [];
+      const nextStealthDepositIdByAddress: Record<string, string> = {};
+      if (deposits && !deposits.error) {
+        (deposits.deposits || []).forEach((deposit: any) => {
+          if (deposit?.id && deposit?.stealth_address) {
+            nextStealthDepositIdByAddress[
+              String(deposit.stealth_address).toLowerCase()
+            ] = String(deposit.id);
+          }
+        });
       }
-      try {
-        const deposits = await deps.api("GET", "/api/deposits/eth-stealth");
-        if (!deposits.error) {
-          stealthDepositIdByAddress = {};
-          (deposits.deposits || []).forEach((deposit: any) => {
-            if (deposit?.id && deposit?.stealth_address) {
-              stealthDepositIdByAddress[String(deposit.stealth_address).toLowerCase()] = String(
-                deposit.id,
-              );
-            }
-          });
-        }
-      } catch (_) {
-        // Keep the overview usable even if the deposit registry is unavailable.
-      }
+      receivingParties = nextReceivingParties;
+      stealthDepositIdByAddress = nextStealthDepositIdByAddress;
       renderReceivingOverview(overview, receivingParties, stealthDepositIdByAddress);
-    } catch (_) {
+    } catch (error) {
+      if (isSessionContextChangedError(error)) throw error;
       deps.toast("Receiving overview unavailable", "error");
     }
   }
@@ -274,13 +288,14 @@ export function createReceivingActions(deps: ReceivingActionsDeps) {
         );
       }
       await loadReceivingOverview();
-    } catch (_) {
+    } catch (error) {
+      if (isSessionContextChangedError(error)) throw error;
       deps.toast("Receiving balance refresh unavailable", "error");
     }
   }
 
   function focusReceivingAllocate(): void {
-    deps.jumpToField("treasuryCard", "treasuryReceivePurpose");
+    deps.jumpToField("treasuryReceivingCard", "treasuryReceivePurpose");
   }
 
   function focusReceivingStealth(): void {
@@ -313,6 +328,7 @@ export function createReceivingActions(deps: ReceivingActionsDeps) {
   }
 
   return {
+    resetSession,
     loadReceivingOverview,
     refreshReceivingBalances,
     renderReceivingOverview,

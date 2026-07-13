@@ -1,9 +1,5 @@
-import type {
-  ActiveCompartment,
-  StatusResponse,
-  TreasuryPolicy,
-  TreasuryPolicyUpdateRequest,
-} from "../contracts";
+import type { ActiveCompartment, StatusResponse } from "../contracts";
+import { isSessionContextChangedError } from "../api/session";
 import { clearFields } from "../render/forms";
 import {
   setInlineInfoById,
@@ -36,7 +32,7 @@ export function setupRequirements(status: StatusResponse | null): SetupRequireme
 }
 
 export function compartmentLabel(compartment: ActiveCompartment | null | undefined): string {
-  return compartment?.label ?? "No active compartment";
+  return compartment?.compartment_label ?? "No active compartment";
 }
 
 interface WizardCompartment {
@@ -290,7 +286,8 @@ export function createSetupWizard(deps: SetupWizardDeps) {
             "No FIDO2 device detected right now. You can insert a hardware key and retry, or choose passphrase-only.";
         }
       }
-    } catch (_) {
+    } catch (error) {
+      if (isSessionContextChangedError(error)) throw error;
       const hint = document.getElementById("wizDeviceHint");
       if (hint) {
         hint.textContent =
@@ -322,6 +319,7 @@ export function createSetupWizard(deps: SetupWizardDeps) {
       deps.toast(initR.error, "error");
       return;
     }
+    clearFields(["wizPassphrase", "wizPassphraseConfirm"]);
 
     setTextById("wizDoneMsg", "Vault Created");
     setTextById("wizDoneDetail", 'Compartment "' + label + '" initialized. You are unlocked.');
@@ -355,7 +353,8 @@ export function createSetupWizard(deps: SetupWizardDeps) {
               " detected. You can register keys one at a time, swapping devices in between.",
           );
         }
-      } catch (_) {
+      } catch (error) {
+        if (isSessionContextChangedError(error)) throw error;
         // Detection is advisory only; never block the wizard on it.
       }
     }
@@ -488,6 +487,16 @@ export function createSetupWizard(deps: SetupWizardDeps) {
       return;
     }
 
+    // The setup card is hidden, not destroyed, after the new session opens.
+    // Erase primary credentials before either completing or moving into the
+    // additional-key step so they never persist in hidden DOM.
+    clearFields([
+      "wizFido2Pin",
+      "wizFallbackPass",
+      "wizNewFido2Pin",
+      "wizNewFido2PinConfirm",
+    ]);
+
     wizRegisteredKeyCount = r.total_keys || 1;
     wizPrimaryKeyLabel = label;
     if (wizRequiredKeyCount > wizRegisteredKeyCount) {
@@ -597,45 +606,11 @@ export function createSetupWizard(deps: SetupWizardDeps) {
     status.classList.remove("hidden");
   }
 
-  function treasuryPolicyUpdateFromCurrent(
-    policy: TreasuryPolicy,
-  ): TreasuryPolicyUpdateRequest {
-    return {
-      enabled: policy.enabled,
-      allowed_destinations: policy.allowed_destinations || [],
-      max_step_native_wei_hex: policy.max_step_native_wei_hex ?? null,
-      max_plan_native_wei_hex: policy.max_plan_native_wei_hex ?? null,
-      require_simulation: policy.require_simulation,
-      block_cross_party_linkage: Boolean(policy.block_cross_party_linkage),
-      allow_claim_execution: Boolean(policy.allow_claim_execution),
-      allow_gas_topups: Boolean(policy.allow_gas_topups),
-      max_gas_topup_wei_hex: policy.max_gas_topup_wei_hex ?? null,
-      simulation_freshness_secs: policy.simulation_freshness_secs ?? null,
-      hot_floor_wei_hex: policy.hot_floor_wei_hex ?? null,
-      hot_target_wei_hex: policy.hot_target_wei_hex ?? null,
-      hot_overflow_wei_hex: policy.hot_overflow_wei_hex ?? null,
-      allow_treasury_automation: Boolean(policy.allow_treasury_automation),
-    };
-  }
-
-  async function fetchCurrentTreasuryPolicy(): Promise<TreasuryPolicy | null> {
-    const r = await deps.api("GET", "/api/treasury/policy");
-    if (r.error) {
-      throw new Error(String(r.error));
-    }
-    return (r.policy || null) as TreasuryPolicy | null;
-  }
-
   async function wizEnableLinkageProtection(): Promise<void> {
     try {
-      const policy = await fetchCurrentTreasuryPolicy();
-      const body: TreasuryPolicyUpdateRequest = policy
-        ? {
-            ...treasuryPolicyUpdateFromCurrent(policy),
-            block_cross_party_linkage: true,
-          }
-        : { enabled: false, block_cross_party_linkage: true };
-      const r = await deps.api("POST", "/api/treasury/policy/update", body);
+      const r = await deps.api("POST", "/api/treasury/policy/enable-opt-in", {
+        opt_in: "block_cross_party_linkage",
+      });
       if (r.error) {
         deps.toast(r.error, "error");
         return;
@@ -645,6 +620,7 @@ export function createSetupWizard(deps: SetupWizardDeps) {
       );
       deps.toast("Payer-linkage protection enabled");
     } catch (e: any) {
+      if (isSessionContextChangedError(e)) throw e;
       deps.toast(String(e?.message ?? e), "error");
     }
   }
@@ -658,14 +634,9 @@ export function createSetupWizard(deps: SetupWizardDeps) {
 
   async function wizEnableClaimExecution(): Promise<void> {
     try {
-      const policy = await fetchCurrentTreasuryPolicy();
-      const body: TreasuryPolicyUpdateRequest = policy
-        ? {
-            ...treasuryPolicyUpdateFromCurrent(policy),
-            allow_claim_execution: true,
-          }
-        : { enabled: false, allow_claim_execution: true };
-      const r = await deps.api("POST", "/api/treasury/policy/update", body);
+      const r = await deps.api("POST", "/api/treasury/policy/enable-opt-in", {
+        opt_in: "allow_claim_execution",
+      });
       if (r.error) {
         deps.toast(r.error, "error");
         return;
@@ -675,6 +646,7 @@ export function createSetupWizard(deps: SetupWizardDeps) {
       );
       deps.toast("Merkle claim execution opt-in recorded");
     } catch (e: any) {
+      if (isSessionContextChangedError(e)) throw e;
       deps.toast(String(e?.message ?? e), "error");
     }
   }
@@ -688,14 +660,9 @@ export function createSetupWizard(deps: SetupWizardDeps) {
 
   async function wizEnableGasTopups(): Promise<void> {
     try {
-      const policy = await fetchCurrentTreasuryPolicy();
-      const body: TreasuryPolicyUpdateRequest = policy
-        ? {
-            ...treasuryPolicyUpdateFromCurrent(policy),
-            allow_gas_topups: true,
-          }
-        : { enabled: false, allow_gas_topups: true };
-      const r = await deps.api("POST", "/api/treasury/policy/update", body);
+      const r = await deps.api("POST", "/api/treasury/policy/enable-opt-in", {
+        opt_in: "allow_gas_topups",
+      });
       if (r.error) {
         deps.toast(r.error, "error");
         return;
@@ -705,6 +672,7 @@ export function createSetupWizard(deps: SetupWizardDeps) {
       );
       deps.toast("Sponsor gas top-up opt-in recorded");
     } catch (e: any) {
+      if (isSessionContextChangedError(e)) throw e;
       deps.toast(String(e?.message ?? e), "error");
     }
   }

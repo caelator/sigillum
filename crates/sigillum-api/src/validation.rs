@@ -1069,6 +1069,12 @@ impl Validate for crate::request::TreasuryPolicyUpdateRequest {
     }
 }
 
+impl Validate for crate::request::TreasuryPolicyEnableOptInRequest {
+    fn validate(&self) -> Result<(), String> {
+        Ok(())
+    }
+}
+
 impl Validate for crate::request::TreasuryReceiveAllocateRequest {
     fn validate(&self) -> Result<(), String> {
         if self.wallet_profile.trim().is_empty() {

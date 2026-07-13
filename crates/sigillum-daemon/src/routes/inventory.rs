@@ -14,8 +14,9 @@ use sigillum_api::{
     NftMetadataOptInDeleteRequest, NftMetadataOptInUpsertRequest, NftMetadataSettingsUpdateRequest,
     PlanEnqueuePlanRequest, PlanEnqueueStepRequest, RiskCatalogDeleteRequest,
     RiskCatalogUpsertRequest, TokenRegistryDeleteRequest, TokenRegistryImportRequest,
-    TreasuryPolicyUpdateRequest, TreasuryReceiveAllocateRequest, TreasuryReceiveRotateRequest,
-    WalletInventoryScanRequest, WatchAddressBookDeleteRequest, WatchAddressBookUpsertRequest,
+    TreasuryPolicyEnableOptInRequest, TreasuryPolicyUpdateRequest, TreasuryReceiveAllocateRequest,
+    TreasuryReceiveRotateRequest, WalletInventoryScanRequest, WatchAddressBookDeleteRequest,
+    WatchAddressBookUpsertRequest,
 };
 
 use crate::AppState;
@@ -399,6 +400,23 @@ pub(crate) async fn update_treasury_policy(
     service_response(
         service
             .update_treasury_policy(bearer_token(&headers).as_deref(), body)
+            .await,
+    )
+}
+
+pub(crate) async fn enable_treasury_policy_opt_in(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Json(body): Json<TreasuryPolicyEnableOptInRequest>,
+) -> Response {
+    let body = match validated(Json(body)) {
+        Ok(body) => body,
+        Err(response) => return response,
+    };
+    let service = SigillumService::new(state);
+    service_response(
+        service
+            .enable_treasury_policy_opt_in(bearer_token(&headers).as_deref(), body)
             .await,
     )
 }

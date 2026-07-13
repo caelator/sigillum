@@ -2,8 +2,12 @@ import { deepEqual, equal, ok } from "node:assert/strict";
 import { test } from "node:test";
 
 import {
+  DaemonHttpError,
+  SessionContextChangedError,
   clearSessionToken,
+  daemonHttpStatus,
   readSessionToken,
+  requestFailClosedLockWithToken,
   requestWithSession,
   writeSessionToken,
 } from "../src/api/session";
@@ -22,7 +26,15 @@ import { createSelfCheckActions, formatClockTime } from "../src/views/selfcheck"
 import { createSessionActions } from "../src/views/session";
 import { createSetupWizard } from "../src/views/setup";
 import { createShellRenderer } from "../src/views/shell";
+import { createStatusStripRenderer } from "../src/views/statusStrip";
 import { createWalletActions } from "../src/views/wallets";
+import {
+  DEFAULT_WORKSPACE_DESTINATION,
+  WORKSPACE_DESTINATIONS,
+  WORKSPACE_DESTINATION_KEY,
+  createWorkspaceController,
+  normalizeWorkspaceDestination,
+} from "../src/views/workspace";
 import {
   createTreasuryActions,
   formatWeiHexAsEth,
@@ -49,6 +61,13 @@ import type {
 import { installDom } from "./dom-fixture";
 
 test("shell renderer applies setup, locked, and unlocked DOM state", () => {
+  const operatorCardIds = [
+    "opCard",
+    "treasuryOverviewCard",
+    "treasuryReceivingCard",
+    "consolidationCard",
+    "selfCheckCard",
+  ];
   const dom = installDom([
     "compartmentBadge",
     "setupCard",
@@ -77,11 +96,15 @@ test("shell renderer applies setup, locked, and unlocked DOM state", () => {
     "auditCard",
     "diagCard",
     "opCard",
+    "treasuryOverviewCard",
+    "treasuryReceivingCard",
+    "consolidationCard",
+    "selfCheckCard",
   ]);
   let mode = "";
   const calls: string[] = [];
   const renderer = createShellRenderer({
-    operatorCardIds: ["opCard"],
+    operatorCardIds,
     setUiMode: (next) => {
       mode = next;
     },
@@ -97,6 +120,9 @@ test("shell renderer applies setup, locked, and unlocked DOM state", () => {
     renderCompartmentSwitcher: () => calls.push("switcher"),
     renderActiveCompartment: () => calls.push("active"),
     buildPushSelectors: () => calls.push("push-selectors"),
+    resetStatusStrip: () => calls.push("strip:reset"),
+    resetSelfCheck: () => calls.push("selfcheck:reset"),
+    scrubPrivateWorkspace: () => calls.push("privacy:scrub"),
   });
 
   renderer.applySetupUi();
@@ -104,21 +130,41 @@ test("shell renderer applies setup, locked, and unlocked DOM state", () => {
   equal(document.body.dataset.mode, "setup");
   equal(dom.el("setupCard").classList.contains("hidden"), false);
   equal(dom.el("authCard").classList.contains("hidden"), true);
+  operatorCardIds.forEach((id) =>
+    equal(dom.el(id).classList.contains("hidden"), true),
+  );
 
   // The periodic refresh re-applies setup mode; the wizard must only be
   // reset when ENTERING setup, or in-progress choices get wiped mid-flow.
   equal(calls.filter((entry) => entry === "wizard:reset").length, 1);
+  equal(calls.filter((entry) => entry === "privacy:scrub").length, 1);
   renderer.applySetupUi();
   renderer.applySetupUi();
   equal(calls.filter((entry) => entry === "wizard:reset").length, 1);
+  equal(calls.filter((entry) => entry === "privacy:scrub").length, 1);
+
+  // A destructive reset that remains in setup mode is still a hard context
+  // boundary and must discard the previous wizard plan.
+  renderer.applySetupUi(true);
+  equal(calls.filter((entry) => entry === "wizard:reset").length, 2);
+  equal(calls.filter((entry) => entry === "privacy:scrub").length, 2);
 
   renderer.applyLockedUi();
   equal(mode, "locked");
   equal(document.body.dataset.mode, "locked");
   equal(dom.el("lockForm").classList.contains("hidden"), true);
   equal(dom.el("authRecovery").classList.contains("hidden"), false);
+  operatorCardIds.forEach((id) =>
+    equal(dom.el(id).classList.contains("hidden"), true),
+  );
+  equal(calls.filter((entry) => entry === "privacy:scrub").length, 3);
 
-  renderer.applyUnlockedUi({ compartment_id: 1 }, [
+  renderer.applyUnlockedUi({
+    compartment_id: 1,
+    compartment_label: "daily",
+    api_key_count: 0,
+    secret_count: 0,
+  }, [
     { id: 1, label: "daily" },
     { id: 2, label: "secure" },
   ]);
@@ -128,10 +174,38 @@ test("shell renderer applies setup, locked, and unlocked DOM state", () => {
   equal(dom.el("receivingCard").classList.contains("hidden"), false);
   equal(dom.el("treasuryCard").classList.contains("hidden"), false);
   equal(dom.el("walletManagerCard").classList.contains("hidden"), false);
+  operatorCardIds.forEach((id) =>
+    equal(dom.el(id).classList.contains("hidden"), false),
+  );
+  equal(calls.filter((entry) => entry === "strip:reset").length, 5);
   ok(calls.includes("push-selectors"));
+
+  // A successful Lock now/logout transition must be immediately private and
+  // still leave a usable passphrase path even if refresh work is slow.
+  renderer.applyLockedUi();
+  equal(dom.el("unlockPassphrase").classList.contains("hidden"), false);
+  equal(dom.el("unlockFido2").classList.contains("hidden"), true);
+  equal(dom.el("unlockTabs").classList.contains("hidden"), true);
+  operatorCardIds.forEach((id) =>
+    equal(dom.el(id).classList.contains("hidden"), true),
+  );
+  equal(calls.filter((entry) => entry === "privacy:scrub").length, 4);
+
+  // A daemon reset can force setup directly from an unlocked render. No
+  // unlocked-only session chrome may survive that authoritative mode change.
+  renderer.applyUnlockedUi({ compartment_id: 1 }, [{ id: 1, label: "daily" }]);
+  dom.el("compSwitcher").innerHTML = "stale compartments";
+  dom.el("compartmentBadge").textContent = "daily";
+  dom.el("compartmentBadge").classList.remove("hidden");
+  renderer.applySetupUi(true);
+  equal(dom.el("lockForm").classList.contains("hidden"), true);
+  equal(dom.el("compSwitcher").classList.contains("hidden"), true);
+  equal(dom.el("compSwitcher").innerHTML, "");
+  equal(dom.el("compartmentBadge").textContent, "");
+  equal(dom.el("compartmentBadge").classList.contains("hidden"), true);
 });
 
-test("session requests persist fresh tokens and clear stale tokens on 401", async () => {
+test("session transport attaches a token but never mutates token storage", async () => {
   installDom();
   clearSessionToken();
   writeSessionToken("old-token");
@@ -147,14 +221,140 @@ test("session requests persist fresh tokens and clear stale tokens on 401", asyn
   await requestWithSession("POST", "/api/example", { ok: true });
   equal(captured.headers.Authorization, "Bearer old-token");
   equal(captured.body, '{"ok":true}');
-  equal(readSessionToken(), "new-token");
+  equal(readSessionToken(), "old-token");
 
   (globalThis as any).fetch = async () => ({
     status: 401,
     json: async () => ({ error: "expired" }),
   });
   await requestWithSession("GET", "/api/expired");
-  equal(readSessionToken(), null);
+  equal(readSessionToken(), "old-token");
+  clearSessionToken();
+});
+
+test("raw switch and Lock responses defer all token mutation to the coordinator", async () => {
+  installDom();
+  clearSessionToken();
+  writeSessionToken("predecessor-session");
+  (globalThis as any).fetch = async (path: string) => ({
+    status: path === "/api/compartment/switch" ? 200 : 401,
+    json: async () => path === "/api/compartment/switch"
+      ? { status: "switched", compartment_id: 2, session_token: "replacement" }
+      : { error: "unauthorized", session_token: "unexpected" },
+  });
+
+  await requestWithSession("POST", "/api/compartment/switch", { id: 2 });
+  equal(readSessionToken(), "predecessor-session");
+  await requestWithSession("POST", "/api/lock");
+  equal(readSessionToken(), "predecessor-session");
+  clearSessionToken();
+});
+
+test("session transport rejects malformed HTTP bodies while preserving status", async () => {
+  installDom();
+  const cases = [
+    { status: 400, json: async () => { throw new Error("empty"); } },
+    { status: 400, json: async () => ({}) },
+    { status: 500, json: async () => [] },
+    { status: 200, json: async () => "not-an-object" },
+    { status: 204, json: async () => { throw new Error("empty"); } },
+  ];
+  for (const response of cases) {
+    (globalThis as any).fetch = async () => response;
+    const error = await requestWithSession("GET", "/api/example")
+      .then(() => null, (caught) => caught);
+    ok(error instanceof DaemonHttpError);
+    equal(error.status, response.status);
+  }
+
+  (globalThis as any).fetch = async () => ({
+    status: 400,
+    json: async () => ({ error: "typed rejection" }),
+  });
+  const typed = await requestWithSession("POST", "/api/example");
+  equal(typed.error, "typed rejection");
+  equal(daemonHttpStatus(typed), 400);
+});
+
+test("emergency Lock helper requires structural locked proof or HTTP 423", async () => {
+  installDom();
+  const cases = [
+    { status: 200, payload: { status: "locked" }, expected: true },
+    { status: 200, payload: { status: "ok" }, expected: false },
+    {
+      status: 200,
+      payload: { status: "locked", error: "not actually locked" },
+      expected: false,
+    },
+    { status: 423, payload: { error: "Lock in progress" }, expected: true },
+    { status: 401, payload: { error: "unauthorized" }, expected: false },
+  ];
+  for (const testCase of cases) {
+    let authorization = "";
+    (globalThis as any).fetch = async (_path: string, init: any) => {
+      authorization = init.headers.Authorization;
+      return {
+        status: testCase.status,
+        json: async () => testCase.payload,
+      };
+    };
+    equal(
+      await requestFailClosedLockWithToken("isolated-token"),
+      testCase.expected,
+    );
+    equal(authorization, "Bearer isolated-token");
+  }
+
+  (globalThis as any).fetch = async () => ({
+    status: 200,
+    json: async () => { throw new Error("malformed response"); },
+  });
+  equal(await requestFailClosedLockWithToken("isolated-token"), false);
+});
+
+test("a late 401 cannot clear a newer reauthenticated session", async () => {
+  installDom();
+  clearSessionToken();
+  writeSessionToken("old-session");
+  let settle: ((response: unknown) => void) | undefined;
+  (globalThis as any).fetch = () =>
+    new Promise((resolve) => {
+      settle = resolve;
+    });
+
+  const staleRequest = requestWithSession("GET", "/api/slow-old-session");
+  await Promise.resolve();
+  writeSessionToken("new-session");
+  settle?.({
+    status: 401,
+    json: async () => ({ error: "old session expired" }),
+  });
+  await staleRequest;
+
+  equal(readSessionToken(), "new-session");
+});
+
+test("a late token response cannot overwrite a newer session", async () => {
+  installDom();
+  clearSessionToken();
+  let settle: ((response: unknown) => void) | undefined;
+  (globalThis as any).fetch = () =>
+    new Promise((resolve) => {
+      settle = resolve;
+    });
+
+  const staleUnlock = requestWithSession("POST", "/api/unlock", {
+    passphrase: "old-attempt",
+  });
+  await Promise.resolve();
+  writeSessionToken("new-session");
+  settle?.({
+    status: 200,
+    json: async () => ({ session_token: "stale-session" }),
+  });
+  await staleUnlock;
+
+  equal(readSessionToken(), "new-session");
 });
 
 test("session actions drive unlock, lock, and browser logout workflow", async () => {
@@ -164,7 +364,10 @@ test("session actions drive unlock, lock, and browser logout workflow", async ()
   const calls: Array<{ method: string; path: string; body?: any }> = [];
   const toasts: Array<{ message: string; type?: string }> = [];
   let refreshCount = 0;
+  let sessionClosedCount = 0;
+  const closeOrder: string[] = [];
   let confirmResult = false;
+  const transitions: string[] = [];
   const actions = createSessionActions({
     api: async (method, path, body) => {
       calls.push({ method, path, body });
@@ -187,6 +390,25 @@ test("session actions drive unlock, lock, and browser logout workflow", async ()
     toast: (message, type) => toasts.push({ message, type }),
     refresh: () => {
       refreshCount += 1;
+      closeOrder.push("refresh");
+    },
+    onSessionClosed: () => {
+      sessionClosedCount += 1;
+      closeOrder.push("closed");
+    },
+    beginSessionTransition: async (path) => {
+      transitions.push("begin-regular:" + path);
+      return { path };
+    },
+    beginLockTransition: async (path) => {
+      transitions.push("begin-emergency:" + path);
+      return { path };
+    },
+    endSessionTransition: async (context) => {
+      const path = String((context as { path?: unknown } | null)?.path || "");
+      transitions.push("end:" + path);
+      refreshCount += 1;
+      closeOrder.push("refresh");
     },
     confirm: () => confirmResult,
   });
@@ -231,9 +453,11 @@ test("session actions drive unlock, lock, and browser logout workflow", async ()
   deepEqual(toasts.pop(), { message: "Unlock failed: bad passphrase.", type: "error" });
 
   writeSessionToken("still-active");
+  closeOrder.length = 0;
   await actions.lock();
   equal(readSessionToken(), "still-active");
   ok(!calls.some((call) => call.path === "/api/lock"));
+  equal(sessionClosedCount, 0);
 
   confirmResult = true;
   await actions.lock();
@@ -241,8 +465,15 @@ test("session actions drive unlock, lock, and browser logout workflow", async ()
   equal(readSessionToken(), null);
   deepEqual(toasts.pop(), { message: "All compartments locked", type: undefined });
   equal(refreshCount, 3);
+  equal(sessionClosedCount, 1);
+  deepEqual(closeOrder, ["closed", "refresh"]);
+  deepEqual(transitions.slice(-2), [
+    "begin-emergency:/api/lock",
+    "end:/api/lock",
+  ]);
 
   writeSessionToken("browser-only");
+  closeOrder.length = 0;
   await actions.logoutSession();
   deepEqual(calls.pop(), {
     method: "POST",
@@ -252,10 +483,17 @@ test("session actions drive unlock, lock, and browser logout workflow", async ()
   equal(readSessionToken(), null);
   deepEqual(toasts.pop(), { message: "Session logged out", type: undefined });
   equal(refreshCount, 4);
+  equal(sessionClosedCount, 2);
+  deepEqual(closeOrder, ["closed", "refresh"]);
+  deepEqual(transitions.slice(-2), [
+    "begin-regular:/api/session/revoke",
+    "end:/api/session/revoke",
+  ]);
 });
 
-test("setup wizard passphrase path validates and initializes a local vault", async () => {
+test("setup wizard follows the visible welcome and passphrase path", async () => {
   const dom = installDom([
+    "wizStepWelcome",
     "wizStep0",
     "wizStepPassphrase",
     "wizStepDone",
@@ -270,6 +508,15 @@ test("setup wizard passphrase path validates and initializes a local vault", asy
     "wizDoneDetail",
     "wizLinkageChoiceStatus",
   ]);
+  const wizardSteps = [
+    dom.el("wizStepWelcome"),
+    dom.el("wizStep0"),
+    dom.el("wizStepPassphrase"),
+    dom.el("wizStepDone"),
+  ];
+  (dom.document as any).querySelectorAll = (selector: string) =>
+    selector === ".wizard-step" ? wizardSteps : [];
+  dom.el("wizStepWelcome").classList.add("active");
   const calls: Array<{ method: string; path: string; body?: any }> = [];
   const toasts: Array<{ message: string; type?: string }> = [];
   let refreshed = false;
@@ -296,6 +543,11 @@ test("setup wizard passphrase path validates and initializes a local vault", asy
       submitNewFido2Pin: async () => undefined,
       friendlyFidoError: (message) => String(message),
     });
+
+    wizard.wizGetStarted();
+    equal(dom.el("wizStepWelcome").classList.contains("active"), false);
+    equal(dom.el("wizStep0").classList.contains("active"), true);
+    equal(dom.el("wizStageTitle").textContent, "Choose a protection model");
 
     wizard.wizPreset("passphrase");
     equal(dom.el("wizStepPassphrase").classList.contains("active"), true);
@@ -335,10 +587,102 @@ test("setup wizard passphrase path validates and initializes a local vault", asy
       'Compartment "browser-smoke" initialized. You are unlocked.',
     );
     equal(dom.el("wizStepDone").classList.contains("active"), true);
+    equal(dom.el("wizPassphrase").value, "");
+    equal(dom.el("wizPassphraseConfirm").value, "");
     equal(refreshed, true);
   } finally {
     globalThis.setTimeout = originalSetTimeout;
   }
+});
+
+test("successful FIDO setup erases primary PIN and fallback credentials", async () => {
+  const dom = installDom([
+    "wizStepCompartments",
+    "wizStepFido2Pin",
+    "wizStepTouch",
+    "wizStepDone",
+    "wizCompList",
+    "wizFido2Pin",
+    "wizFido2Label",
+    "wizFallbackPass",
+    "wizNewFido2Pin",
+    "wizNewFido2PinConfirm",
+    "wizDoneMsg",
+    "wizDoneDetail",
+  ]);
+  const wizardSteps = [
+    dom.el("wizStepCompartments"),
+    dom.el("wizStepFido2Pin"),
+    dom.el("wizStepTouch"),
+    dom.el("wizStepDone"),
+  ];
+  (dom.document as any).querySelectorAll = (selector: string) =>
+    selector === ".wizard-step" ? wizardSteps : [];
+  const calls: Array<{ method: string; path: string; body?: any }> = [];
+  const originalSetTimeout = globalThis.setTimeout;
+  (globalThis as any).setTimeout = () => 0;
+
+  try {
+    const wizard = createSetupWizard({
+      api: async (method, path, body) => {
+        calls.push({ method, path, body });
+        return { status: "initialized", total_keys: 1, session_token: "session-1" };
+      },
+      toast: () => undefined,
+      refresh: () => undefined,
+      submitNewFido2Pin: async () => undefined,
+      friendlyFidoError: (message) => String(message),
+    });
+    wizard.wizPreset("simple");
+    await wizard.wizProceedFido2();
+    dom.el("wizFido2Pin").value = "1234";
+    dom.el("wizFido2Label").value = "primary";
+    dom.el("wizFallbackPass").value = "fallback-passphrase";
+    dom.el("wizNewFido2Pin").value = "5678";
+    dom.el("wizNewFido2PinConfirm").value = "5678";
+
+    await wizard.wizRegisterKey();
+
+    equal(calls.at(-1)?.path, "/api/fido2/setup");
+    equal(dom.el("wizFido2Pin").value, "");
+    equal(dom.el("wizFallbackPass").value, "");
+    equal(dom.el("wizNewFido2Pin").value, "");
+    equal(dom.el("wizNewFido2PinConfirm").value, "");
+    equal(dom.el("wizStepDone").classList.contains("active"), true);
+  } finally {
+    globalThis.setTimeout = originalSetTimeout;
+  }
+});
+
+test("setup advisory reads do not swallow a changed session context", async () => {
+  const dom = installDom(["wizDeviceHint", "wizLinkageChoiceStatus"]);
+  const contextError = new SessionContextChangedError();
+  const wizard = createSetupWizard({
+    api: async () => {
+      throw contextError;
+    },
+    toast: () => undefined,
+    refresh: () => undefined,
+    submitNewFido2Pin: async () => undefined,
+    friendlyFidoError: (message) => String(message),
+  });
+
+  let detectError: unknown;
+  let optInError: unknown;
+  try {
+    await wizard.wizDetectDevice();
+  } catch (error) {
+    detectError = error;
+  }
+  try {
+    await wizard.wizEnableLinkageProtection();
+  } catch (error) {
+    optInError = error;
+  }
+  equal(detectError, contextError);
+  equal(optInError, contextError);
+  equal(dom.el("wizDeviceHint").textContent, "");
+  equal(dom.el("wizLinkageChoiceStatus").textContent, "");
 });
 
 test("setup wizard enables payer-linkage protection from done step", async () => {
@@ -350,7 +694,6 @@ test("setup wizard enables payer-linkage protection from done step", async () =>
   const wizard = createSetupWizard({
     api: async (method, path, body) => {
       calls.push({ method, path, body });
-      if (path === "/api/treasury/policy") return { policy: null };
       return {};
     },
     toast: (message, type) => toasts.push({ message, type }),
@@ -363,14 +706,9 @@ test("setup wizard enables payer-linkage protection from done step", async () =>
 
   deepEqual(calls, [
     {
-      method: "GET",
-      path: "/api/treasury/policy",
-      body: undefined,
-    },
-    {
       method: "POST",
-      path: "/api/treasury/policy/update",
-      body: { enabled: false, block_cross_party_linkage: true },
+      path: "/api/treasury/policy/enable-opt-in",
+      body: { opt_in: "block_cross_party_linkage" },
     },
   ]);
   equal(dom.el("wizLinkageChoiceStatus").classList.contains("hidden"), false);
@@ -381,35 +719,14 @@ test("setup wizard enables payer-linkage protection from done step", async () =>
   });
 });
 
-test("setup wizard preserves merkle claim opt-in when enabling payer-linkage protection", async () => {
+test("setup wizard enables payer-linkage protection without reading or replacing policy", async () => {
   const dom = installDom(["wizLinkageChoiceStatus"]);
   dom.el("wizLinkageChoiceStatus").classList.add("hidden");
-  const existingPolicy: TreasuryPolicy = {
-    enabled: true,
-    allowed_destinations: [
-      { address: "0x2222222222222222222222222222222222222222", label: "cold" },
-    ],
-    max_step_native_wei_hex: "0x1",
-    max_plan_native_wei_hex: null,
-    hot_floor_wei_hex: "0x2",
-    hot_target_wei_hex: "0x3",
-    hot_overflow_wei_hex: "0x5",
-    require_simulation: true,
-    block_cross_party_linkage: false,
-    allow_claim_execution: true,
-    allow_gas_topups: true,
-    allow_treasury_automation: true,
-    max_gas_topup_wei_hex: "0x4",
-    simulation_freshness_secs: 120,
-    created_at_unix: 1,
-    updated_at_unix: 2,
-  };
   const calls: Array<{ method: string; path: string; body?: any }> = [];
 
   const wizard = createSetupWizard({
     api: async (method, path, body) => {
       calls.push({ method, path, body });
-      if (path === "/api/treasury/policy") return { policy: existingPolicy };
       return {};
     },
     toast: () => undefined,
@@ -420,29 +737,13 @@ test("setup wizard preserves merkle claim opt-in when enabling payer-linkage pro
 
   await wizard.wizEnableLinkageProtection();
 
-  const update = calls.find((call) => call.path === "/api/treasury/policy/update");
-  deepEqual(update, {
-    method: "POST",
-    path: "/api/treasury/policy/update",
-    body: {
-      enabled: true,
-      allowed_destinations: [
-        { address: "0x2222222222222222222222222222222222222222", label: "cold" },
-      ],
-      max_step_native_wei_hex: "0x1",
-      max_plan_native_wei_hex: null,
-      require_simulation: true,
-      block_cross_party_linkage: true,
-      allow_claim_execution: true,
-      allow_gas_topups: true,
-      max_gas_topup_wei_hex: "0x4",
-      simulation_freshness_secs: 120,
-      hot_floor_wei_hex: "0x2",
-      hot_target_wei_hex: "0x3",
-      hot_overflow_wei_hex: "0x5",
-      allow_treasury_automation: true,
+  deepEqual(calls, [
+    {
+      method: "POST",
+      path: "/api/treasury/policy/enable-opt-in",
+      body: { opt_in: "block_cross_party_linkage" },
     },
-  });
+  ]);
 });
 
 test("setup wizard can defer payer-linkage protection without policy update", () => {
@@ -464,10 +765,7 @@ test("setup wizard can defer payer-linkage protection without policy update", ()
 
   wizard.wizDeclineLinkageProtection();
 
-  equal(
-    calls.some((call) => call.path === "/api/treasury/policy/update"),
-    false,
-  );
+  deepEqual(calls, []);
   equal(dom.el("wizLinkageChoiceStatus").classList.contains("hidden"), false);
   ok((dom.el("wizLinkageChoiceStatus").textContent || "").length > 0);
   deepEqual(toasts.pop(), {
@@ -485,7 +783,6 @@ test("setup wizard enables merkle claim execution opt-in from done step", async 
   const wizard = createSetupWizard({
     api: async (method, path, body) => {
       calls.push({ method, path, body });
-      if (path === "/api/treasury/policy") return { policy: null };
       return {};
     },
     toast: (message, type) => toasts.push({ message, type }),
@@ -498,14 +795,9 @@ test("setup wizard enables merkle claim execution opt-in from done step", async 
 
   deepEqual(calls, [
     {
-      method: "GET",
-      path: "/api/treasury/policy",
-      body: undefined,
-    },
-    {
       method: "POST",
-      path: "/api/treasury/policy/update",
-      body: { enabled: false, allow_claim_execution: true },
+      path: "/api/treasury/policy/enable-opt-in",
+      body: { opt_in: "allow_claim_execution" },
     },
   ]);
   equal(dom.el("wizClaimExecutionChoiceStatus").classList.contains("hidden"), false);
@@ -538,10 +830,7 @@ test("setup wizard can defer merkle claim execution without policy update", () =
 
   wizard.wizDeclineClaimExecution();
 
-  equal(
-    calls.some((call) => call.path === "/api/treasury/policy/update"),
-    false,
-  );
+  deepEqual(calls, []);
   equal(dom.el("wizClaimExecutionChoiceStatus").classList.contains("hidden"), false);
   equal(
     dom.el("wizClaimExecutionChoiceStatus").textContent,
@@ -562,7 +851,6 @@ test("setup wizard enables sponsor gas top-ups from done step", async () => {
   const wizard = createSetupWizard({
     api: async (method, path, body) => {
       calls.push({ method, path, body });
-      if (path === "/api/treasury/policy") return { policy: null };
       return {};
     },
     toast: (message, type) => toasts.push({ message, type }),
@@ -575,14 +863,9 @@ test("setup wizard enables sponsor gas top-ups from done step", async () => {
 
   deepEqual(calls, [
     {
-      method: "GET",
-      path: "/api/treasury/policy",
-      body: undefined,
-    },
-    {
       method: "POST",
-      path: "/api/treasury/policy/update",
-      body: { enabled: false, allow_gas_topups: true },
+      path: "/api/treasury/policy/enable-opt-in",
+      body: { opt_in: "allow_gas_topups" },
     },
   ]);
   equal(dom.el("wizGasTopupsChoiceStatus").classList.contains("hidden"), false);
@@ -615,10 +898,7 @@ test("setup wizard can defer sponsor gas top-ups without policy update", () => {
 
   wizard.wizDeclineGasTopups();
 
-  equal(
-    calls.some((call) => call.path === "/api/treasury/policy/update"),
-    false,
-  );
+  deepEqual(calls, []);
   equal(dom.el("wizGasTopupsChoiceStatus").classList.contains("hidden"), false);
   equal(
     dom.el("wizGasTopupsChoiceStatus").textContent,
@@ -1781,6 +2061,42 @@ test("data-action dispatcher coerces args and restores button busy state", async
   deepEqual(args, [7]);
   equal(button.disabled, false);
   equal(button.classList.contains("is-busy"), false);
+});
+
+test("data-action dispatcher silences session cancellation but reports real failures", async () => {
+  const dom = installDom();
+  const cancelled = dom.el("cancelledAction", "BUTTON");
+  cancelled.dataset.action = "cancelled";
+  const failed = dom.el("failedAction", "BUTTON");
+  failed.dataset.action = "failed";
+  const toasts: Array<{ message: string; type?: string }> = [];
+  const consoleErrors: unknown[][] = [];
+  const originalConsoleError = console.error;
+  console.error = (...args: unknown[]) => { consoleErrors.push(args); };
+  const options = {
+    actions: {
+      cancelled: async () => { throw new SessionContextChangedError(); },
+      failed: async () => { throw new Error("boom"); },
+    },
+    toast: (message: string, type?: string) => { toasts.push({ message, type }); },
+  };
+
+  try {
+    dispatchDataAction(cancelled as any, options);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    equal(consoleErrors.length, 0);
+    equal(toasts.length, 0);
+    equal(cancelled.disabled, false);
+
+    dispatchDataAction(failed as any, options);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    equal(consoleErrors.length, 1);
+    equal(consoleErrors[0]?.[0], "UI action failed:");
+    deepEqual(toasts, [{ message: "Action failed: failed", type: "error" }]);
+    equal(failed.disabled, false);
+  } finally {
+    console.error = originalConsoleError;
+  }
 });
 
 test("wei-hex formatter converts to ETH units and guards invalid input", () => {
@@ -3764,7 +4080,7 @@ function journeyApiStub(state: JourneyStubState) {
 }
 
 test("journey card renders done/pending steps and collapses when all complete", async () => {
-  const dom = installDom(["journeyList", "journeyProgress", "journeyComplete", "statusStrip"]);
+  const dom = installDom(["journeyList", "journeyProgress", "journeyComplete", "journeyMetrics"]);
   document.body.dataset.mode = "unlocked";
   const state: JourneyStubState = {
     providers: [{ name: "mainnet", chain_id: 1 }],
@@ -3828,8 +4144,8 @@ test("journey card renders done/pending steps and collapses when all complete", 
   equal(dom.el("journeyProgress").textContent, "4 of 4");
 });
 
-test("status strip chips carry values, warn/danger tones, and jump targets", async () => {
-  const dom = installDom(["journeyList", "journeyProgress", "journeyComplete", "statusStrip"]);
+test("overview metrics carry values, warn/danger tones, and jump targets", async () => {
+  const dom = installDom(["journeyList", "journeyProgress", "journeyComplete", "journeyMetrics"]);
   document.body.dataset.mode = "unlocked";
   const state: JourneyStubState = {
     providers: [],
@@ -3849,7 +4165,7 @@ test("status strip chips carry values, warn/danger tones, and jump targets", asy
   });
 
   await journey.loadJourney();
-  const html = dom.el("statusStrip").innerHTML;
+  const html = dom.el("journeyMetrics").innerHTML;
   equal(html.split('<button').length - 1, 4);
   // Providers and Wallets at zero warn; Review needed (1+1+1=3) is danger.
   equal(html.split("status-chip-warn").length - 1, 2);
@@ -3860,7 +4176,7 @@ test("status strip chips carry values, warn/danger tones, and jump targets", asy
   ok(html.includes('<span class="status-chip-label">Review needed</span>'));
   ok(html.includes('data-action="journeyJump" data-arg0="walletManagerCard"'));
   ok(html.includes('data-action="journeyJump" data-arg0="inventoryCard"'));
-  ok(html.includes('data-action="journeyJump" data-arg0="treasuryCard"'));
+  ok(html.includes('data-action="journeyJump" data-arg0="treasuryOverviewCard"'));
 
   // Healthy counts drop the warn/danger tones.
   state.providers = [{ name: "mainnet" }];
@@ -3869,64 +4185,70 @@ test("status strip chips carry values, warn/danger tones, and jump targets", asy
   state.highFindings = 0;
   state.criticalFindings = 0;
   await journey.loadJourney();
-  const healthy = dom.el("statusStrip").innerHTML;
+  const healthy = dom.el("journeyMetrics").innerHTML;
   equal(healthy.split("status-chip-warn").length - 1, 0);
   equal(healthy.split("status-chip-danger").length - 1, 0);
+  ok(healthy.includes('data-action="journeyJump" data-arg0="profilesCard"'));
 
-  // Outside the unlocked workspace the strip must stay empty.
-  document.body.dataset.mode = "locked";
-  await journey.loadJourney();
-  equal(dom.el("statusStrip").innerHTML, "");
 });
 
-test("status strip gains a TTL-cached self-check chip", async () => {
-  const dom = installDom(["journeyList", "journeyProgress", "journeyComplete", "statusStrip"]);
-  document.body.dataset.mode = "unlocked";
-  const state: JourneyStubState = {
-    providers: [{ name: "mainnet" }],
-    seedProfiles: [{ name: "main" }],
-    xpubProfiles: [],
-    trackedAddressCount: 1,
-    reviewRequiredSteps: 0,
-    highFindings: 0,
-    criticalFindings: 0,
-    policy: { enabled: true },
-  };
-  let ensureCalls = 0;
-  let summary: { status: string; failCount: number; warnCount: number } | null = {
-    status: "fail",
-    failCount: 2,
-    warnCount: 1,
-  };
-  const journey = createJourneyActions({
-    api: journeyApiStub(state),
-    toast: () => undefined,
-    jumpToCard: () => undefined,
-    refreshTreasury: () => undefined,
-    ensureSelfCheck: async () => {
-      ensureCalls += 1;
-      return summary;
+test("status strip renders semantic unlocked state and resets private context", () => {
+  const dom = installDom([
+    "statusStrip",
+    "stripLockState",
+    "stripCompartment",
+    "stripSelfCheck",
+  ]);
+  dom.el("statusStrip").classList.add("hidden");
+  const renderer = createStatusStripRenderer();
+
+  renderer.renderUnlocked(
+    {
+      compartment_id: 7,
+      compartment_label: "Treasury cold",
+      api_key_count: 2,
+      secret_count: 3,
     },
-  });
+    { status: "warn", failCount: 0, warnCount: 2, atUnix: 123 },
+  );
+  equal(dom.el("statusStrip").classList.contains("hidden"), false);
+  equal(dom.el("stripLockState").textContent, "Unlocked");
+  equal(dom.el("stripLockState").dataset.state, "unlocked");
+  equal(dom.el("stripCompartment").textContent, "Treasury cold");
+  equal(dom.el("stripSelfCheck").textContent, "Self-check: 2 warning(s)");
+  equal(dom.el("stripSelfCheck").dataset.state, "warn");
 
-  await journey.loadJourney();
-  // The ensure promise resolves on a microtask after render; flush it.
-  await Promise.resolve();
-  let html = dom.el("statusStrip").innerHTML;
-  ok(html.includes('<span class="status-chip-label">Self-check issues</span>'));
-  ok(html.includes('<span class="status-chip-value">3</span>'));
-  ok(html.includes('data-action="journeyJump" data-arg0="diagCard"'));
-  equal(html.split("status-chip-danger").length - 1, 1);
-  equal(ensureCalls, 1);
+  renderer.reset();
+  equal(dom.el("statusStrip").classList.contains("hidden"), true);
+  equal(dom.el("stripLockState").textContent, "Locked");
+  equal(dom.el("stripLockState").dataset.state, "locked");
+  equal(dom.el("stripCompartment").textContent, "No active compartment");
+  equal(dom.el("stripSelfCheck").textContent, "Self-check unavailable");
+  equal(dom.el("stripSelfCheck").dataset.state, "idle");
+});
 
-  // A passing summary drops the tone but keeps the chip visible at zero.
-  summary = { status: "pass", failCount: 0, warnCount: 0 };
-  await journey.loadJourney();
-  await Promise.resolve();
-  html = dom.el("statusStrip").innerHTML;
-  ok(html.includes('<span class="status-chip-label">Self-check issues</span>'));
-  equal(html.split("status-chip-danger").length - 1, 0);
-  equal(ensureCalls, 2);
+test("workspace contract exposes exactly five destinations with safe persistence", () => {
+  const dom = installDom();
+  deepEqual(
+    WORKSPACE_DESTINATIONS.map(({ id, label }) => ({ id, label })),
+    [
+      { id: "overview", label: "Overview" },
+      { id: "receive", label: "Receive" },
+      { id: "portfolio", label: "Portfolio" },
+      { id: "move", label: "Move" },
+      { id: "vault", label: "Vault" },
+    ],
+  );
+  equal(normalizeWorkspaceDestination("move"), "move");
+  equal(normalizeWorkspaceDestination("security"), DEFAULT_WORKSPACE_DESTINATION);
+  equal(normalizeWorkspaceDestination(null), DEFAULT_WORKSPACE_DESTINATION);
+
+  const first = createWorkspaceController();
+  equal(first.activeDestination(), "overview");
+  first.selectWorkspaceSection("vault");
+  equal(first.activeDestination(), "vault");
+  equal(dom.sessionStorage.getItem(WORKSPACE_DESTINATION_KEY), "vault");
+  equal(createWorkspaceController().activeDestination(), "vault");
 });
 
 test("ensureFreshSelfCheck caches within TTL and shares in-flight runs", async () => {
@@ -3967,6 +4289,35 @@ test("ensureFreshSelfCheck caches within TTL and shares in-flight runs", async (
   equal(posts, 1);
   equal(third?.failCount, 0);
   equal(actions.lastSelfCheckSummary()?.status, "warn");
+
+  actions.resetSession();
+  equal(actions.lastSelfCheckSummary(), null);
+  const afterReset = await actions.ensureFreshSelfCheck();
+  equal(posts, 2);
+  equal(afterReset?.status, "warn");
+});
+
+test("self-check discards an old-session in-flight result", async () => {
+  installDom(["selfCheckSummary", "selfCheckList"]);
+  let settle: ((value: unknown) => void) | undefined;
+  const actions = createSelfCheckActions({
+    api: () =>
+      new Promise((resolve) => {
+        settle = resolve;
+      }),
+    toast: () => undefined,
+  });
+
+  const oldSessionRun = actions.ensureFreshSelfCheck();
+  actions.resetSession();
+  settle?.({
+    status: "pass",
+    generated_at_unix: 1781125191,
+    checks: [],
+  });
+
+  equal(await oldSessionRun, null);
+  equal(actions.lastSelfCheckSummary(), null);
 });
 
 test("renderEntityList object empty state renders an actionable button", () => {
@@ -4148,7 +4499,7 @@ test("self-check failures toast an error and surface pill counts in the summary"
 
   await selfCheck.runSelfCheck();
   deepEqual(toasts.pop(), {
-    message: "Self-check: 2 issue(s) found — see System section",
+    message: "Self-check: 2 issue(s) found — see Overview",
     type: "error",
   });
   const summary = dom.el("selfCheckSummary").innerHTML;
@@ -4166,7 +4517,7 @@ test("self-check failures toast an error and surface pill counts in the summary"
   overall = "warn";
   await selfCheck.runSelfCheck();
   deepEqual(toasts.pop(), {
-    message: "Self-check: 2 issue(s) found — see System section",
+    message: "Self-check: 2 issue(s) found — see Overview",
     type: undefined,
   });
 });

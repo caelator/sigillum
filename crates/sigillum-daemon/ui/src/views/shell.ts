@@ -15,18 +15,13 @@ export interface ShellRendererDeps {
   renderCompartmentSwitcher: (unlocked: any[], active: any) => void;
   renderActiveCompartment: (active: any, unlocked: any[]) => void;
   buildPushSelectors: (unlocked: any[]) => void;
+  resetStatusStrip: () => void;
+  resetSelfCheck: () => void;
+  scrubPrivateWorkspace: () => void;
 }
 
 export function createShellRenderer(deps: ShellRendererDeps) {
-  function clearStatusStrip(): void {
-    // The topbar status strip only describes an unlocked workspace; leaving
-    // counts visible on the locked/setup screens would leak state and
-    // mislead. journey.ts also guards on body[data-mode] before rendering.
-    const strip = document.getElementById("statusStrip");
-    if (strip) strip.innerHTML = "";
-  }
-
-  function applySetupUi(): void {
+  function applySetupUi(forcePrivateReset = false): void {
     // The refresh cycle re-applies setup mode every few seconds. Resetting
     // the wizard on every pass silently wipes in-progress choices (preset,
     // compartments) while the rendered step still shows them — so only reset
@@ -34,15 +29,22 @@ export function createShellRenderer(deps: ShellRendererDeps) {
     const alreadyInSetup = document.body.dataset.mode === "setup";
     deps.setUiMode("setup");
     document.body.dataset.mode = "setup";
-    clearStatusStrip();
-    if (!alreadyInSetup) deps.resetSetupWizard();
     clearSessionToken();
+    deps.resetStatusStrip();
+    deps.setCardsHidden(deps.operatorCardIds, true);
+    deps.setSecretsAccess(false);
+    if (!alreadyInSetup || forcePrivateReset) deps.scrubPrivateWorkspace();
+    deps.resetSelfCheck();
+    if (!alreadyInSetup || forcePrivateReset) deps.resetSetupWizard();
     deps.setStatusBadge("status-no-vault", "NO VAULT");
+    setHidden("lockForm", true);
+    setHidden("compSwitcher", true);
+    const switcher = document.getElementById("compSwitcher");
+    if (switcher) switcher.innerHTML = "";
+    setText("compartmentBadge", "");
     setHidden("compartmentBadge", true);
     setHidden("setupCard", false);
     setHidden("authCard", true);
-    deps.setCardsHidden(deps.operatorCardIds, true);
-    deps.setSecretsAccess(false);
     deps.resetVaultCounts();
     deps.setUnlockGuidance("passphrase");
     deps.updateHeroState("setup");
@@ -51,15 +53,22 @@ export function createShellRenderer(deps: ShellRendererDeps) {
     );
   }
 
-  function applyLockedUi(): void {
+  function applyLockedUi(forcePrivateReset = false): void {
+    const alreadyLocked = document.body.dataset.mode === "locked";
     deps.setUiMode("locked");
     document.body.dataset.mode = "locked";
-    clearStatusStrip();
     clearSessionToken();
+    deps.resetStatusStrip();
+    deps.setCardsHidden(deps.operatorCardIds, true);
+    deps.setSecretsAccess(false);
+    if (!alreadyLocked || forcePrivateReset) deps.scrubPrivateWorkspace();
+    deps.resetSelfCheck();
     deps.setStatusBadge("status-locked", "LOCKED");
     setHidden("compartmentBadge", true);
-    deps.setCardsHidden(deps.operatorCardIds, true);
     deps.resetVaultCounts();
+    setHidden("unlockPassphrase", false);
+    setHidden("unlockFido2", true);
+    setHidden("unlockTabs", true);
     setHidden("lockForm", true);
     setHidden("authRecovery", false);
     setHidden("compSwitcher", true);
@@ -68,17 +77,18 @@ export function createShellRenderer(deps: ShellRendererDeps) {
       "authLead",
       "Enter the vault passphrase you chose during setup, or switch to the hardware-key tab. The session token stays only in this browser tab.",
     );
-    deps.setSecretsAccess(false);
     deps.setUnlockGuidance("passphrase");
     deps.updateHeroState("locked");
     // The passphrase field is the only actionable control on this screen;
     // hand it focus once the locked layout has settled.
-    setTimeout(() => {
-      const passphrase = document.getElementById(
-        "passphrase",
-      ) as HTMLInputElement | null;
-      passphrase?.focus?.();
-    }, 0);
+    if (!alreadyLocked) {
+      setTimeout(() => {
+        const passphrase = document.getElementById(
+          "passphrase",
+        ) as HTMLInputElement | null;
+        passphrase?.focus?.();
+      }, 0);
+    }
   }
 
   function applyUnlockedUi(active: any, unlocked: any[]): void {
@@ -101,24 +111,12 @@ export function createShellRenderer(deps: ShellRendererDeps) {
     deps.renderActiveCompartment(active, unlocked);
     deps.setSecretsAccess(true);
 
-    setHidden("compartmentCard", false);
+    // Setup and locked modes hide the complete operator surface. Restore it
+    // from the same authoritative list so newly added destination wrappers
+    // cannot remain silently hidden after unlock.
+    deps.setCardsHidden(deps.operatorCardIds, false);
     setHidden("pushCard", unlocked.length < 2);
     if (unlocked.length >= 2) deps.buildPushSelectors(unlocked);
-
-    setHidden("guideCard", false);
-    setHidden("journeyCard", false);
-    setHidden("walletManagerCard", false);
-    setHidden("profilesCard", false);
-    setHidden("xpubCard", false);
-    setHidden("receivingCard", false);
-    setHidden("treasuryCard", false);
-    setHidden("inventoryCard", false);
-    setHidden("depositsCard", false);
-    setHidden("queueCard", false);
-    setHidden("maintenanceCard", false);
-    setHidden("backupCard", false);
-    setHidden("auditCard", false);
-    setHidden("diagCard", false);
     deps.updateHeroState("unlocked", active, unlocked);
   }
 

@@ -64,6 +64,13 @@ export function createWalletActions(deps: WalletActionsDeps) {
   let lastXpubWalletProfiles: any[] = [];
   let lastSeedWalletProfiles: any[] = [];
 
+  function resetSession(): void {
+    lastProviderProfiles = [];
+    lastWalletProfiles = [];
+    lastXpubWalletProfiles = [];
+    lastSeedWalletProfiles = [];
+  }
+
   function renderProviderProfiles(profiles: any[]): void {
     renderEntityList(
       "providerProfileList",
@@ -640,6 +647,7 @@ export function createWalletActions(deps: WalletActionsDeps) {
   }
 
   return {
+    resetSession,
     getState: (): WalletProfilesState => ({
       providerProfiles: lastProviderProfiles,
       walletProfiles: lastWalletProfiles,

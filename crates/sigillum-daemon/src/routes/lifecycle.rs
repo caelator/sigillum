@@ -72,5 +72,9 @@ pub(crate) async fn post_capability_session(
         Err(resp) => return resp,
     };
     let service = SigillumService::new(state);
-    service_response(service.mint_capability_session(bearer_token(&headers).as_deref(), body))
+    service_response(
+        service
+            .mint_capability_session(bearer_token(&headers).as_deref(), body)
+            .await,
+    )
 }

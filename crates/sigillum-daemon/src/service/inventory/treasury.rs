@@ -10,12 +10,12 @@ use sigillum_api::{
     ReceivingOverviewResponse, ReceivingPartyGroup, ReceivingRefreshResponse, ReceivingTotals,
     TreasuryAllowedDestination, TreasuryAutomationStatus, TreasuryChainSummary,
     TreasuryGroupSummary, TreasuryOverviewResponse, TreasuryPlanSummary, TreasuryPolicy,
-    TreasuryPolicyMutationResponse, TreasuryPolicyResponse, TreasuryPolicyUpdateRequest,
-    TreasuryReceiveAllocateRequest, TreasuryReceiveAllocation,
-    TreasuryReceiveAllocationListResponse, TreasuryReceiveAllocationMutationResponse,
-    TreasuryReceiveRotateRequest, TreasuryReceiveSummary, TreasuryRiskSummary,
-    TreasuryRoutingStatus, WalletAddressClassification, WalletAssetHolding, WalletAssetKind,
-    WalletInventoryAddress,
+    TreasuryPolicyEnableOptInRequest, TreasuryPolicyMutationResponse, TreasuryPolicyOptIn,
+    TreasuryPolicyResponse, TreasuryPolicyUpdateRequest, TreasuryReceiveAllocateRequest,
+    TreasuryReceiveAllocation, TreasuryReceiveAllocationListResponse,
+    TreasuryReceiveAllocationMutationResponse, TreasuryReceiveRotateRequest,
+    TreasuryReceiveSummary, TreasuryRiskSummary, TreasuryRoutingStatus,
+    WalletAddressClassification, WalletAssetHolding, WalletAssetKind, WalletInventoryAddress,
 };
 use sigillum_core::decode_quantity_hex;
 
@@ -53,6 +53,34 @@ const DEFAULT_HOT_TARGET_WEI_HEX: &str = "0xde0b6b3a7640000";
 /// Absurdly large but bounded: receive indices beyond this point indicate a
 /// runaway caller, not a treasury that genuinely needs a million addresses.
 const MAX_RECEIVE_INDEX: u32 = 1_000_000;
+
+fn fail_closed_treasury_policy(now: u64) -> TreasuryPolicy {
+    TreasuryPolicy {
+        enabled: false,
+        allowed_destinations: Vec::new(),
+        max_step_native_wei_hex: None,
+        max_plan_native_wei_hex: None,
+        require_simulation: true,
+        allow_raw_digest_signing: false,
+        block_cross_party_linkage: false,
+        allow_claim_execution: false,
+        allow_gas_topups: false,
+        max_gas_topup_wei_hex: None,
+        allow_plan_execution: false,
+        allow_sweep_execution: false,
+        allow_revoke_execution: false,
+        allow_exit_execution: false,
+        execution_paused: false,
+        max_fee_per_gas_cap_hex: None,
+        simulation_freshness_secs: 900,
+        hot_floor_wei_hex: DEFAULT_HOT_FLOOR_WEI_HEX.into(),
+        hot_target_wei_hex: DEFAULT_HOT_TARGET_WEI_HEX.into(),
+        hot_overflow_wei_hex: None,
+        allow_treasury_automation: false,
+        created_at_unix: now,
+        updated_at_unix: now,
+    }
+}
 
 /// Saturating big-endian addition of two 256-bit quantities.
 pub(super) fn add_u256(left: &[u8; 32], right: &[u8; 32]) -> [u8; 32] {
@@ -641,7 +669,8 @@ impl SigillumService {
     ) -> ServiceResult<ReceivingRefreshResponse> {
         let token =
             self.require_scope(token, crate::service::capability_scopes::DEPOSITS_REFRESH)?;
-        let _guard = self.state.operation_guard().await;
+        let session_context = self.capture_session_operation_context(Some(token))?;
+        let _guard = self.acquire_session_operation(&session_context).await?;
         let registry = crate::profiles::load_profiles(&self.state.base_dir).map_err(|error| {
             ServiceError::internal(format!("Failed to load profile registry: {error}"))
         })?;
@@ -831,12 +860,13 @@ impl SigillumService {
         body: TreasuryPolicyUpdateRequest,
     ) -> ServiceResult<TreasuryPolicyMutationResponse> {
         let token = self.require_session(token)?;
+        let session_context = self.capture_session_operation_context(Some(token))?;
         if body.simulation_freshness_secs == Some(0) {
             return Err(ServiceError::bad_request(
                 "simulation_freshness_secs must be greater than 0",
             ));
         }
-        let _guard = self.state.operation_guard().await;
+        let _guard = self.acquire_session_operation(&session_context).await?;
         let mut state = load_inventory_state(&self.state.base_dir)?;
         let previous_policy = state.treasury_policy.clone();
         let now = now_unix();
@@ -1034,6 +1064,72 @@ impl SigillumService {
         })
     }
 
+    /// Enable one setup-wizard opt-in against the latest durable policy.
+    ///
+    /// The operation guard makes the read-modify-write atomic with every other
+    /// treasury-policy mutation. The typed request cannot disable a gate or
+    /// carry stale values for unrelated policy fields.
+    pub(crate) async fn enable_treasury_policy_opt_in(
+        &self,
+        token: Option<&str>,
+        body: TreasuryPolicyEnableOptInRequest,
+    ) -> ServiceResult<TreasuryPolicyMutationResponse> {
+        let token = self.require_session(token)?;
+        let session_context = self.capture_session_operation_context(Some(token))?;
+        let _guard = self.acquire_session_operation(&session_context).await?;
+        let mut state = load_inventory_state(&self.state.base_dir)?;
+        let now = now_unix();
+        let mut policy = state
+            .treasury_policy
+            .take()
+            .unwrap_or_else(|| fail_closed_treasury_policy(now));
+
+        let (gate, old_value) = match body.opt_in {
+            TreasuryPolicyOptIn::BlockCrossPartyLinkage => {
+                let old_value = policy.block_cross_party_linkage;
+                policy.block_cross_party_linkage = true;
+                ("block_cross_party_linkage", old_value)
+            }
+            TreasuryPolicyOptIn::AllowClaimExecution => {
+                let old_value = policy.allow_claim_execution;
+                policy.allow_claim_execution = true;
+                ("allow_claim_execution", old_value)
+            }
+            TreasuryPolicyOptIn::AllowGasTopups => {
+                let old_value = policy.allow_gas_topups;
+                policy.allow_gas_topups = true;
+                ("allow_gas_topups", old_value)
+            }
+        };
+        policy.updated_at_unix = now;
+        state.treasury_policy = Some(policy.clone());
+        save_inventory_state(&self.state.base_dir, &state)?;
+
+        self.record_audit(
+            self.state.active_compartment_id_for(token),
+            AuditEventSpec::TreasuryPolicyUpdate {
+                enabled: policy.enabled,
+                destinations: policy.allowed_destinations.len(),
+            },
+        )?;
+        if !old_value {
+            self.record_audit(
+                self.state.active_compartment_id_for(token),
+                AuditEventSpec::TreasuryExecutionGateUpdate {
+                    gate: gate.into(),
+                    old_value,
+                    new_value: true,
+                    session_fingerprint_hex: session_fingerprint_hex(token),
+                },
+            )?;
+        }
+
+        Ok(TreasuryPolicyMutationResponse {
+            status: "updated".into(),
+            policy,
+        })
+    }
+
     /// All receive allocations, active and retired, in allocation order.
     pub(crate) fn list_treasury_receive_allocations(
         &self,
@@ -1063,7 +1159,8 @@ impl SigillumService {
         body: CounterpartyCreateRequest,
     ) -> ServiceResult<CounterpartyMutationResponse> {
         let token = self.require_session(token)?;
-        let _guard = self.state.operation_guard().await;
+        let session_context = self.capture_session_operation_context(Some(token))?;
+        let _guard = self.acquire_session_operation(&session_context).await?;
         let name = trimmed_required("name", &body.name)?;
         let note = body.note.and_then(trimmed_optional);
         let sweep_destination_address = body
@@ -1102,7 +1199,8 @@ impl SigillumService {
         body: CounterpartyUpdateRequest,
     ) -> ServiceResult<CounterpartyMutationResponse> {
         let _ = self.require_session(token)?;
-        let _guard = self.state.operation_guard().await;
+        let session_context = self.capture_session_operation_context(token)?;
+        let _guard = self.acquire_session_operation(&session_context).await?;
         let id = body.id.trim().to_string();
         let name = trimmed_required("name", &body.name)?;
         let note = body.note.and_then(trimmed_optional);
@@ -1147,7 +1245,8 @@ impl SigillumService {
         body: CounterpartyDeleteRequest,
     ) -> ServiceResult<CounterpartyMutationResponse> {
         let token = self.require_session(token)?;
-        let _guard = self.state.operation_guard().await;
+        let session_context = self.capture_session_operation_context(Some(token))?;
+        let _guard = self.acquire_session_operation(&session_context).await?;
         let id = body.id.trim().to_string();
 
         let mut state = load_inventory_state(&self.state.base_dir)?;
@@ -1191,7 +1290,8 @@ impl SigillumService {
         body: TreasuryReceiveAllocateRequest,
     ) -> ServiceResult<TreasuryReceiveAllocationMutationResponse> {
         let token = self.require_session(token)?;
-        let _guard = self.state.operation_guard().await;
+        let session_context = self.capture_session_operation_context(Some(token))?;
+        let _guard = self.acquire_session_operation(&session_context).await?;
         let wallet_profile = trimmed_required("wallet_profile", &body.wallet_profile)?;
         let purpose = trimmed_required("purpose", &body.purpose)?;
         let label = body.label.and_then(trimmed_optional);
@@ -1248,7 +1348,8 @@ impl SigillumService {
         body: TreasuryReceiveRotateRequest,
     ) -> ServiceResult<TreasuryReceiveAllocationMutationResponse> {
         let token = self.require_session(token)?;
-        let _guard = self.state.operation_guard().await;
+        let session_context = self.capture_session_operation_context(Some(token))?;
+        let _guard = self.acquire_session_operation(&session_context).await?;
         let allocation_id = body.allocation_id.trim().to_string();
 
         let mut state = load_inventory_state(&self.state.base_dir)?;

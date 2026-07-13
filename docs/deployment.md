@@ -392,8 +392,29 @@ only then publishes.
 
 - The daemon is intended for local use on one host.
 - The daemon authenticates with bearer session tokens over local HTTP.
+- Switching compartments rotates the bearer token. The immediately preceding
+  token remains accepted only by process-global Lock for a bounded grace period
+  so a client with a delayed or lost switch response can still fail closed.
+- Clients must adopt a switch response only when it names the requested
+  compartment and supplies a distinct canonical replacement token. An
+  ambiguous switch must clear local authority and attempt Lock; if Lock cannot
+  be confirmed, stop the daemon before continuing.
+- Browser clients publish a non-secret cross-tab pending boundary before Lock,
+  reset, restore, revoke, or compartment switching. Other tabs immediately
+  abort private reads and scrub their workspace; the initiating tab settles the
+  marker only after a structurally validated success or explicit 4xx rejection.
+  A pending marker or `LOCK NOT CONFIRMED` warning must not be dismissed as a
+  cosmetic error.
+- The Rust client serializes session-changing calls, carries them in owned tasks
+  so caller cancellation cannot abandon token adoption, and lets authenticated
+  emergency Lock bypass a hung ordinary request. `SessionStateUnconfirmed` or
+  `SessionTransitionLockUnconfirmed` means the client is intentionally unusable:
+  stop/restart the daemon and construct a new client rather than injecting a
+  replacement token into the old instance.
 - Unlock state lives in daemon memory.
-- Locking clears the loaded master keys from memory.
+- Locking latches before waiting for active operations, prevents new provider
+  broadcasts and late unlock commits, then clears loaded master keys and all
+  sessions from memory.
 - Snapshot restore replaces on-disk state and clears daemon session/runtime state.
 - Recent state-changing operations are appended to a local audit log and visible through the UI/API.
 - The CLI is useful for setup and launch, but the daemon is the more coherent way to keep compartments unlocked across multiple operations.

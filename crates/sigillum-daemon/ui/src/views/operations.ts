@@ -1,3 +1,4 @@
+import { isSessionContextChangedError } from "../api/session";
 import { setHiddenById } from "../render/dom";
 import {
   clearFields,
@@ -162,6 +163,11 @@ export function createOperationsActions(deps: OperationsDeps) {
   let lastDeposits: any[] = [];
   let lastQueueJobs: any[] = [];
 
+  function resetSession(): void {
+    lastDeposits = [];
+    lastQueueJobs = [];
+  }
+
   function renderDeposits(deposits: any[]): void {
     renderEntityList(
       "depositList",
@@ -255,7 +261,9 @@ export function createOperationsActions(deps: OperationsDeps) {
       if (r.error) return;
       lastDeposits = r.deposits || [];
       renderDeposits(lastDeposits);
-    } catch (_) {}
+    } catch (error) {
+      if (isSessionContextChangedError(error)) throw error;
+    }
   }
 
   async function createNativeDeposit(): Promise<void> {
@@ -487,19 +495,30 @@ export function createOperationsActions(deps: OperationsDeps) {
   }
 
   async function loadQueueJobs(): Promise<void> {
-    try {
-      const r = await deps.api("GET", "/api/queue/jobs");
-      if (r.error) return;
-      lastQueueJobs = r.jobs || [];
-      renderQueueJobs(lastQueueJobs);
-    } catch (_) {}
-    try {
-      const policyResp = await deps.api("GET", "/api/treasury/policy");
-      const paused = Boolean(policyResp?.policy?.execution_paused);
-      setHiddenById("queuePausedBanner", !paused);
-      setHiddenById("queuePauseBtn", paused);
-      setHiddenById("queueResumeBtn", !paused);
-    } catch (_) {}
+    const optionalRead = async (path: string): Promise<any | null> => {
+      try {
+        return await deps.api("GET", path);
+      } catch (error) {
+        if (isSessionContextChangedError(error)) throw error;
+        return null;
+      }
+    };
+    // Queue contents and the execution-pause control are one operator view.
+    // Fetch both in the same turn and commit them together so a compartment
+    // transition cannot combine queue data from one context with policy from
+    // another.
+    const [jobsResp, policyResp] = await Promise.all([
+      optionalRead("/api/queue/jobs"),
+      optionalRead("/api/treasury/policy"),
+    ]);
+    if (!jobsResp || jobsResp.error || !policyResp || policyResp.error) return;
+
+    lastQueueJobs = jobsResp.jobs || [];
+    renderQueueJobs(lastQueueJobs);
+    const paused = Boolean(policyResp.policy?.execution_paused);
+    setHiddenById("queuePausedBanner", !paused);
+    setHiddenById("queuePauseBtn", paused);
+    setHiddenById("queueResumeBtn", !paused);
   }
 
   async function pauseQueueExecution(): Promise<void> {
@@ -634,6 +653,7 @@ export function createOperationsActions(deps: OperationsDeps) {
   }
 
   return {
+    resetSession,
     getState: (): OperationsState => ({
       deposits: lastDeposits,
       queueJobs: lastQueueJobs,

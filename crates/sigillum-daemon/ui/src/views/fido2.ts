@@ -1,4 +1,5 @@
 import { clearFields } from "../render/forms";
+import { isSessionContextChangedError } from "../api/session";
 import { setInlineInfoById, setTextById } from "../render/dom";
 import { esc, escAttr } from "../render/html";
 
@@ -12,6 +13,42 @@ export interface Fido2Deps {
   toast: (message: string, type?: string) => void;
   refresh: () => unknown;
   currentStatus: () => any;
+}
+
+export function applyUnlockTabKeydown(
+  event: Pick<KeyboardEvent, "key" | "target" | "preventDefault">,
+  tabs: HTMLElement[],
+  activate: (tab: string) => void,
+): boolean {
+  const currentIndex = tabs.indexOf(event.target as HTMLElement);
+  if (currentIndex < 0 || tabs.length === 0) return false;
+
+  let nextIndex: number;
+  switch (event.key) {
+    case "ArrowRight":
+      nextIndex = (currentIndex + 1) % tabs.length;
+      break;
+    case "ArrowLeft":
+      nextIndex = (currentIndex - 1 + tabs.length) % tabs.length;
+      break;
+    case "Home":
+      nextIndex = 0;
+      break;
+    case "End":
+      nextIndex = tabs.length - 1;
+      break;
+    default:
+      return false;
+  }
+
+  const target = tabs[nextIndex];
+  const tab = target?.dataset.arg0;
+  if (!target || !tab) return false;
+
+  event.preventDefault();
+  activate(tab);
+  target.focus();
+  return true;
 }
 
 function input(id: string): HTMLInputElement {
@@ -103,36 +140,121 @@ function isAlreadyUnlockedConflict(message: unknown): boolean {
   return String(message || "").toLowerCase().includes("already unlocked");
 }
 
-function promptPin(msg: string): Promise<string | null> {
+interface PinPromptResult {
+  submitted: boolean;
+  pin: string | null;
+}
+
+function promptPin(
+  msg: string,
+  registerCancel?: (cancel: (() => void) | null) => void,
+): Promise<PinPromptResult> {
   return new Promise((resolve) => {
+    const previouslyFocused = document.activeElement as HTMLElement | null;
+    const backgroundState = Array.from(document.body.children).map((element) => ({
+      element,
+      inert: element.getAttribute("inert"),
+      ariaHidden: element.getAttribute("aria-hidden"),
+    }));
+    const previousBodyOverflow = document.body.style.overflow;
     const overlay = document.createElement("div");
     overlay.style.cssText =
       "position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:200;display:flex;align-items:center;justify-content:center;";
     overlay.innerHTML =
-      '<div class="card pin-modal"><h2>' +
+      '<div class="card pin-modal" role="dialog" aria-modal="true" aria-labelledby="pinModalTitle"><h2 id="pinModalTitle">' +
       esc(msg) +
-      '</h2><div class="form-row"><input type="password" id="pinModalInput" placeholder="Current PIN (leave blank if not required)">' +
-      '<button class="btn-primary" id="pinModalOk">OK</button></div></div>';
+      '</h2><div class="form-row"><input type="password" id="pinModalInput" aria-label="Current FIDO2 PIN" autocomplete="off" placeholder="Current PIN (leave blank if not required)">' +
+      '<button type="button" class="btn-primary" id="pinModalOk">OK</button></div></div>';
     document.body.appendChild(overlay);
     const inp = input("pinModalInput");
+    const ok = document.getElementById("pinModalOk") as HTMLButtonElement | null;
+    let settled = false;
+
+    backgroundState.forEach(({ element }) => {
+      element.setAttribute("inert", "");
+      element.setAttribute("aria-hidden", "true");
+    });
+    document.body.style.overflow = "hidden";
     inp.focus();
-    const done = () => {
-      const value = inp.value;
-      overlay.remove();
-      resolve(value || null);
+
+    const restoreBackground = () => {
+      backgroundState.forEach(({ element, inert, ariaHidden }) => {
+        if (inert == null) element.removeAttribute("inert");
+        else element.setAttribute("inert", inert);
+        if (ariaHidden == null) element.removeAttribute("aria-hidden");
+        else element.setAttribute("aria-hidden", ariaHidden);
+      });
+      document.body.style.overflow = previousBodyOverflow;
     };
-    document.getElementById("pinModalOk")?.addEventListener("click", done);
-    inp.addEventListener("keydown", (event) => {
-      if (event.key === "Enter") done();
+
+    const restoreTriggerFocus = () => {
+      if (
+        !previouslyFocused ||
+        previouslyFocused.isConnected === false ||
+        typeof previouslyFocused.focus !== "function"
+      ) {
+        return;
+      }
+      try {
+        previouslyFocused.focus({ preventScroll: true });
+      } catch (_) {
+        previouslyFocused.focus();
+      }
+    };
+
+    const finish = (result: PinPromptResult) => {
+      if (settled) return;
+      settled = true;
+      registerCancel?.(null);
+      document.removeEventListener("keydown", handleDocumentKeydown, true);
+      overlay.remove();
+      restoreBackground();
+      restoreTriggerFocus();
+      resolve(result);
+    };
+
+    registerCancel?.(() => finish({ submitted: false, pin: null }));
+
+    const submit = () => finish({ submitted: true, pin: inp.value || null });
+    const focusable = [inp, ok].filter(
+      (element): element is HTMLInputElement | HTMLButtonElement => Boolean(element),
+    );
+
+    function handleDocumentKeydown(event: KeyboardEvent): void {
       if (event.key === "Escape") {
-        overlay.remove();
-        resolve(null);
+        event.preventDefault();
+        event.stopPropagation();
+        finish({ submitted: false, pin: null });
+        return;
+      }
+      if (event.key !== "Tab" || focusable.length === 0) return;
+
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      const active = document.activeElement;
+      if (!focusable.includes(active as HTMLInputElement | HTMLButtonElement)) {
+        event.preventDefault();
+        first.focus();
+      } else if (event.shiftKey && active === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && active === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    }
+
+    document.addEventListener("keydown", handleDocumentKeydown, true);
+    ok?.addEventListener("click", submit);
+    inp.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") {
+        event.preventDefault();
+        submit();
       }
     });
     overlay.addEventListener("click", (event) => {
       if (event.target === overlay) {
-        overlay.remove();
-        resolve(null);
+        finish({ submitted: false, pin: null });
       }
     });
   });
@@ -141,6 +263,16 @@ function promptPin(msg: string): Promise<string | null> {
 export function createFido2Actions(deps: Fido2Deps) {
   let lastFidoDetect: any | null = null;
   let lastFidoKeys: any[] = [];
+  let cancelPinPrompt: (() => void) | null = null;
+  let sessionGeneration = 0;
+
+  function resetSession(): void {
+    sessionGeneration += 1;
+    cancelPinPrompt?.();
+    cancelPinPrompt = null;
+    lastFidoDetect = null;
+    lastFidoKeys = [];
+  }
 
   function setUnlockGuidance(mode: string): void {
     const el = document.getElementById("authGuidance");
@@ -168,19 +300,37 @@ export function createFido2Actions(deps: Fido2Deps) {
   }
 
   function switchUnlockTab(tab: string): void {
-    document.querySelectorAll(".unlock-tab").forEach((target) => target.classList.remove("active"));
+    const tabs = Array.from(document.querySelectorAll<HTMLElement>(".unlock-tab"));
+    tabs.forEach((target) => {
+      target.classList.remove("active");
+      target.setAttribute("aria-selected", "false");
+      target.setAttribute("tabindex", "-1");
+    });
+    const activate = (target: HTMLElement | undefined) => {
+      target?.classList.add("active");
+      target?.setAttribute("aria-selected", "true");
+      target?.setAttribute("tabindex", "0");
+    };
     if (tab === "fido2") {
       document.getElementById("unlockPassphrase")?.classList.add("hidden");
       document.getElementById("unlockFido2")?.classList.remove("hidden");
-      document.querySelectorAll(".unlock-tab")[1]?.classList.add("active");
+      activate(tabs[1]);
       setUnlockGuidance("fido2");
     } else {
       document.getElementById("unlockPassphrase")?.classList.remove("hidden");
       document.getElementById("unlockFido2")?.classList.add("hidden");
-      document.querySelectorAll(".unlock-tab")[0]?.classList.add("active");
+      activate(tabs[0]);
       setUnlockGuidance("passphrase");
     }
   }
+
+  const unlockTabs = document.getElementById("unlockTabs");
+  unlockTabs?.addEventListener("keydown", (event) => {
+    const tabs = Array.from(
+      unlockTabs.querySelectorAll<HTMLElement>("[role=\"tab\"]"),
+    );
+    applyUnlockTabKeydown(event, tabs, switchUnlockTab);
+  });
 
   async function showUnlockTabs(): Promise<void> {
     try {
@@ -207,7 +357,8 @@ export function createFido2Actions(deps: Fido2Deps) {
         );
         switchUnlockTab("passphrase");
       }
-    } catch (_) {
+    } catch (error) {
+      if (isSessionContextChangedError(error)) throw error;
       setTextById(
         "authLead",
         "Unlock with the passphrase you configured during setup. Hardware-key unlock becomes available when a FIDO2 device is detected.",
@@ -218,55 +369,67 @@ export function createFido2Actions(deps: Fido2Deps) {
 
   async function loadFido2(): Promise<void> {
     const fido2Card = document.getElementById("fido2Card");
-    if (!deps.currentStatus() || deps.currentStatus().locked) {
+    const status = deps.currentStatus();
+    if (!status || status.locked) {
       fido2Card?.classList.add("hidden");
       return;
     }
     fido2Card?.classList.remove("hidden");
 
-    try {
-      const detect = await deps.api("GET", "/api/fido2/detect");
-      lastFidoDetect = detect;
-      const devEl = document.getElementById("fido2DeviceStatus");
-      if (detect.device_present) {
-        if (devEl) {
-          devEl.innerHTML =
-            '<span style="color:var(--success);">' +
-            detect.device_count +
-            " FIDO2 device(s) connected</span>";
-        }
-      } else if (devEl) {
-        devEl.innerHTML =
-          '<span style="color:var(--warning);">No FIDO2 device detected.</span>';
+    const optionalRead = async (path: string): Promise<any | null> => {
+      try {
+        return await deps.api("GET", path);
+      } catch (error) {
+        if (isSessionContextChangedError(error)) throw error;
+        return null;
       }
-    } catch (_) {}
+    };
+    // Detect and list are one panel snapshot. Start both under the same
+    // session context and do not commit either half unless both completed.
+    const [detect, keys] = await Promise.all([
+      optionalRead("/api/fido2/detect"),
+      optionalRead("/api/fido2/list"),
+    ]);
+    if (!detect || detect.error || !keys || keys.error) return;
 
-    try {
-      const keys = await deps.api("GET", "/api/fido2/list");
-      const listEl = document.getElementById("fido2KeyListSection");
-      lastFidoKeys = keys.keys || [];
-      if (keys.keys && keys.keys.length > 0) {
-        let html = '<ul class="key-list">';
-        keys.keys.forEach((key: any) => {
-          html +=
-            "<li><span>" +
-            esc(key.label) +
-            ' <span style="color:var(--text-dim);font-size:11px;">(' +
-            esc(key.credential_id_short) +
-            "...) " +
-            esc(key.registered_at) +
-            "</span></span>" +
-            '<div class="key-actions"><button class="btn-danger" data-action="fido2RemoveKey" data-arg0="' +
-            escAttr(key.label) +
-            '">Remove</button></div></li>';
-        });
-        html += "</ul>";
-        if (listEl) listEl.innerHTML = html;
-      } else if (listEl) {
-        listEl.innerHTML =
-          '<p class="text-meta">No additional hardware keys are registered yet. Add one above to improve recovery and higher-threshold unlock paths.</p>';
+    lastFidoDetect = detect;
+    lastFidoKeys = keys.keys || [];
+
+    const devEl = document.getElementById("fido2DeviceStatus");
+    if (detect.device_present) {
+      if (devEl) {
+        devEl.innerHTML =
+          '<span style="color:var(--success);">' +
+          detect.device_count +
+          " FIDO2 device(s) connected</span>";
       }
-    } catch (_) {}
+    } else if (devEl) {
+      devEl.innerHTML =
+        '<span style="color:var(--warning);">No FIDO2 device detected.</span>';
+    }
+
+    const listEl = document.getElementById("fido2KeyListSection");
+    if (lastFidoKeys.length > 0) {
+      let html = '<ul class="key-list">';
+      lastFidoKeys.forEach((key: any) => {
+        html +=
+          "<li><span>" +
+          esc(key.label) +
+          ' <span style="color:var(--text-dim);font-size:11px;">(' +
+          esc(key.credential_id_short) +
+          "...) " +
+          esc(key.registered_at) +
+          "</span></span>" +
+          '<div class="key-actions"><button class="btn-danger" data-action="fido2RemoveKey" data-arg0="' +
+          escAttr(key.label) +
+          '">Remove</button></div></li>';
+      });
+      html += "</ul>";
+      if (listEl) listEl.innerHTML = html;
+    } else if (listEl) {
+      listEl.innerHTML =
+        '<p class="text-meta">No additional hardware keys are registered yet. Add one above to improve recovery and higher-threshold unlock paths.</p>';
+    }
   }
 
   function togglePoisonWarning(): void {
@@ -371,9 +534,14 @@ export function createFido2Actions(deps: Fido2Deps) {
 
   async function fido2RemoveKey(label: string): Promise<void> {
     if (!confirm('Remove FIDO2 key "' + label + '"?')) return;
-    const pin = await promptPin("Enter the current FIDO2 PIN only if the remaining keys require one:");
+    const generation = sessionGeneration;
+    const pinPrompt = await promptPin(
+      "Enter the current FIDO2 PIN only if the remaining keys require one:",
+      (cancel) => { cancelPinPrompt = cancel; },
+    );
+    if (generation !== sessionGeneration || !pinPrompt.submitted) return;
     const body: any = { label };
-    if (pin) body.pin = pin;
+    if (pinPrompt.pin) body.pin = pinPrompt.pin;
     const r = await deps.api("POST", "/api/fido2/remove", body);
     if (r.error) {
       const message = friendlyFidoError(r.error);
@@ -419,6 +587,7 @@ export function createFido2Actions(deps: Fido2Deps) {
   }
 
   return {
+    resetSession,
     getState: (): Fido2State => ({ detect: lastFidoDetect, keys: lastFidoKeys }),
     friendlyFidoError,
     setUnlockGuidance,

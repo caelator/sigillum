@@ -575,6 +575,10 @@ fn inventory_routes() -> AppRouter {
             post(inventory::update_treasury_policy),
         )
         .route(
+            "/api/treasury/policy/enable-opt-in",
+            post(inventory::enable_treasury_policy_opt_in),
+        )
+        .route(
             "/api/treasury/receive-addresses",
             get(inventory::list_treasury_receive_allocations),
         )

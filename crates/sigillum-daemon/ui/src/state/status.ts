@@ -20,12 +20,22 @@ export function deriveUiMode(status: StatusResponse | null): UiMode {
   return status.locked ? "locked" : "unlocked";
 }
 
+export function clearStaleTokenForLockedMode(
+  mode: UiMode,
+  sessionToken: string | null,
+  clearToken: () => void,
+): boolean {
+  if (mode !== "locked" || !sessionToken) return false;
+  clearToken();
+  return true;
+}
+
 export function snapshotStatus(status: StatusResponse | null): StatusSnapshot {
   return {
     mode: deriveUiMode(status),
     initialized: status?.initialized ?? false,
     locked: status?.locked ?? true,
     unlockedCompartmentCount: status?.unlocked_compartments.length ?? 0,
-    activeCompartmentLabel: status?.active_compartment?.label ?? null,
+    activeCompartmentLabel: status?.active_compartment?.compartment_label ?? null,
   };
 }

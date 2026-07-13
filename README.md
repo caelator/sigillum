@@ -13,7 +13,11 @@
 > `v1.0.0-rc.4` fixed signing but exposed an F6 contract that could accept a
 > mainnet as the L2 testnet, reduce a two-transaction gas-top-up chain to one
 > hash, and let a dependent run before its prerequisite confirmed. All three
-> tags are immutable failure receipts; the next candidate is `v1.0.0-rc.5`.
+> tags are immutable failure receipts. `v1.0.0-rc.5` subsequently proved the
+> corrected runtime and release workflows, but predates the required C7 console
+> and current session-boundary hardening, so it is historical evidence rather
+> than a promotable candidate. RC6 is the next retained candidate; it has not
+> been tagged yet.
 
 Sigillum is a self-hosted, single-operator workstation for finding EVM wallets
 and assets, understanding their provenance and risk, preparing consolidation

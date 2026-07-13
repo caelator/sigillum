@@ -1,9 +1,25 @@
 import { clearSessionToken } from "../api/session";
 
 export interface SessionActionDeps {
-  api: (method: string, path: string, body?: unknown) => Promise<any>;
+  api: (
+    method: string,
+    path: string,
+    body?: unknown,
+    expectedContext?: unknown,
+  ) => Promise<any>;
   toast: (message: string, type?: string) => void;
   refresh: () => unknown | Promise<unknown>;
+  onSessionClosed: () => void;
+  beginSessionTransition: (
+    path: string,
+    label: string,
+    expectedContext?: unknown,
+  ) => Promise<unknown>;
+  beginLockTransition: (
+    path: string,
+    label: string,
+  ) => Promise<unknown>;
+  endSessionTransition: (transitionContext: unknown) => Promise<void>;
   confirm?: (message: string) => boolean;
 }
 
@@ -88,25 +104,44 @@ export function createSessionActions(deps: SessionActionDeps) {
     if (!confirmAction("Lock all compartments? Master keys will be zeroized from memory.")) {
       return;
     }
-    const response = await deps.api("POST", "/api/lock");
-    if (response.error) {
-      deps.toast(response.error, "error");
-      return;
+    const path = "/api/lock";
+    let transitionContext: unknown = null;
+    try {
+      transitionContext = await deps.beginLockTransition(path, "Locking…");
+      const response = await deps.api("POST", path, undefined, transitionContext);
+      if (response.error) {
+        deps.toast(response.error, "error");
+        return;
+      }
+      clearSessionToken();
+      deps.onSessionClosed();
+      deps.toast("All compartments locked");
+    } catch (error) {
+      deps.toast(
+        String((error as { message?: unknown })?.message || "Lock request failed"),
+        "error",
+      );
+    } finally {
+      await deps.endSessionTransition(transitionContext);
     }
-    clearSessionToken();
-    deps.toast("All compartments locked");
-    await deps.refresh();
   }
 
   async function logoutSession(): Promise<void> {
-    const response = await deps.api("POST", "/api/session/revoke");
-    if (response.error) {
-      deps.toast(response.error, "error");
-      return;
+    const path = "/api/session/revoke";
+    let transitionContext: unknown = null;
+    try {
+      transitionContext = await deps.beginSessionTransition(path, "Logging out…");
+      const response = await deps.api("POST", path, undefined, transitionContext);
+      if (response.error) {
+        deps.toast(response.error, "error");
+        return;
+      }
+      clearSessionToken();
+      deps.onSessionClosed();
+      deps.toast("Session logged out");
+    } finally {
+      await deps.endSessionTransition(transitionContext);
     }
-    clearSessionToken();
-    deps.toast("Session logged out");
-    await deps.refresh();
   }
 
   return {

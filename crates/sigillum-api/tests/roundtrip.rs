@@ -8,12 +8,13 @@ use sigillum_api::{
     QueueJobPayload, ReceivingCoverage, ReceivingDepositTagRequest, ReceivingItem,
     ReceivingOverviewResponse, ReceivingPartyGroup, ReceivingTotals, StatusResponse,
     StealthPaymentRef, TreasuryAllowedDestination, TreasuryAllowedDestinationInput, TreasuryPolicy,
-    TreasuryPolicyResponse, TreasuryPolicyUpdateRequest, UnlockedCompartment,
-    WalletAddressActivityState, WalletAddressClassification, WalletAssetHolding, WalletAssetKind,
-    WalletDiscoveryBlockCursor, WalletDiscoveryCheckpoint, WalletDiscoveryJob,
-    WalletInventoryAddress, WalletInventoryListResponse, WalletInventoryScanRequest,
-    WalletPlanStatus, WalletPlanStepAction, WalletPlanStepStatus, WalletSignerStatus,
-    WalletSimulationStatus, WatchAddressProbe,
+    TreasuryPolicyEnableOptInRequest, TreasuryPolicyOptIn, TreasuryPolicyResponse,
+    TreasuryPolicyUpdateRequest, UnlockedCompartment, WalletAddressActivityState,
+    WalletAddressClassification, WalletAssetHolding, WalletAssetKind, WalletDiscoveryBlockCursor,
+    WalletDiscoveryCheckpoint, WalletDiscoveryJob, WalletInventoryAddress,
+    WalletInventoryListResponse, WalletInventoryScanRequest, WalletPlanStatus,
+    WalletPlanStepAction, WalletPlanStepStatus, WalletSignerStatus, WalletSimulationStatus,
+    WatchAddressProbe,
 };
 use std::fmt::Debug;
 
@@ -523,6 +524,10 @@ fn treasury_request_roundtrip() {
         hot_target_wei_hex: Some("0xde0b6b3a7640000".to_string()),
         hot_overflow_wei_hex: None,
         allow_treasury_automation: None,
+    });
+
+    roundtrip(&TreasuryPolicyEnableOptInRequest {
+        opt_in: TreasuryPolicyOptIn::BlockCrossPartyLinkage,
     });
 }
 

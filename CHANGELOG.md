@@ -7,6 +7,43 @@ from 1.0.0 onward, per the stability policy in `docs/stability.md`.
 
 ## [Unreleased]
 
+### Changed
+
+- Reorganized the unlocked operator console into five stable destinations —
+  Overview, Receive, Portfolio, Move, and Vault — with a persistent lock,
+  active-compartment, self-check, and "Lock now" status strip. Setup and locked
+  states keep the strip and operator cards private; transit crypto remains a
+  CLI-only surface.
+
+### Fixed
+
+- Replaced setup-wizard treasury-policy read/modify/write updates with one
+  atomic, server-side opt-in mutation so enabling linkage protection, Merkle
+  claims, or gas top-ups preserves unrelated policy fields and concurrent
+  updates.
+- Hardened browser session transitions and private workspace cleanup so stale
+  requests, cached account data, revealed values, and hidden setup credentials
+  cannot repaint or persist across lock, logout, reset, restore, or compartment
+  changes. Hard transitions now publish pending/settled cross-tab boundaries,
+  reject malformed HTTP success and error bodies, and centralize exact token
+  adoption so capability or unrelated responses cannot replace full authority.
+- Made compartment switches rotate full-session bearer tokens. Only the
+  immediate predecessor remains temporarily usable for process-global Lock,
+  never for reads, mutations, or capability minting, so a delayed switch
+  response can fail closed without preserving general authority.
+- Serialized and revalidated daemon mutations after their wait for the global
+  operation boundary, bound unlock commits to a Lock generation, and
+  linearized provider-broadcast admission with Lock. Queued stale requests and
+  late unlocks now fail before mutation; nothing new broadcasts after Lock
+  latches.
+- Hardened the async Rust client with validated token adoption,
+  compare-and-swap clearing, serialized token transitions, stale-response
+  rejection, owned cancellation-safe establishment workers, and confirmed-Lock
+  fallback when a compartment-switch outcome is ambiguous. Emergency Lock now
+  bypasses hung ordinary requests, invalidates queued pre-Lock work with a
+  shared boundary generation, and permanently latches an unconfirmed client
+  until daemon restart.
+
 ### Documentation
 
 - Reframed the public project landing page around Sigillum's local-first EVM

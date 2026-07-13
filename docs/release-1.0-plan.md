@@ -2,6 +2,9 @@
 
 **Status:** Active plan of record for the 1.0 release (rev 4 — wallet management IN scope; 2026-07-10 stop-ship hardening semantics reconciled)
 **Baseline verified:** 2026-07-01, branch `feat/private-receiving-desktop` (commits `70a087b`, `1cda1f2` ahead of `main`)
+**Current release anchor:** 2026-07-13, protected `main` and historical
+`v1.0.0-rc.5` at `7e04743`; RC6 is the next candidate after C7 and the current
+session-boundary hardening land and pass the release contract
 **Supersedes:** [catchup-plan.md](./catchup-plan.md) Phases 1–3 are absorbed into Phases D–E and W1–W8 below. The
 [wallet-management-roadmap.md](./wallet-management-roadmap.md) product target is **part of 1.0** (EVM scope — see D-9);
 catchup Phase 4 (remote/platform) stays out.
@@ -546,13 +549,16 @@ A → (B ∥ C ∥ D) → E → (W1 ∥ W2) → (W3 ∥ W4 ∥ W5 ∥ W6) → W7
      action, recent audit events.
   2. **Receive** — receiving console: allocations, stealth deposits,
      counterparties, rotation.
-  3. **Portfolio** — inventory, risk findings, discovery jobs, watch book.
+  3. **Portfolio** — wallet and provider management, treasury rollup,
+     inventory, risk findings, discovery jobs, watch book.
   4. **Move** — consolidation plans, queue, maintenance, treasury policy.
-  5. **Vault** — secrets/API keys, transit, snapshots, compartments,
-     FIDO2 keys, diagnostics.
-  A persistent status strip shows lock state, active compartment,
-  self-check pill, and "Lock now". Setup wizard and locked states keep
-  their flows but adopt the same visual system. Danger actions are
+  5. **Vault** — secrets/API keys, secret movement through `secrets/push`,
+     snapshots, compartments, FIDO2 keys, diagnostics. Transit crypto
+     (encrypt/decrypt/HMAC) remains CLI-only and is not a console surface.
+  Across all five unlocked destinations, a persistent status strip shows
+  lock state, active compartment, self-check pill, and "Lock now". Setup
+  wizard and locked states hide and reset that strip while keeping their
+  flows in the same visual system. Danger actions are
   visually distinct and keep typed confirmation.
 - **Hard contracts (break nothing, or update every consumer in the same
   change):** the runtime smoke greps (`Sigillum Vault` title,
@@ -1489,24 +1495,39 @@ below; the remaining items are operator human-gates.
 > as the L2 and represented the two-transaction gas-top-up chain with one hash.
 > Its queue also treated `sent` (broadcast, unconfirmed) as prerequisite
 > success. Preserve RC4 as immutable failed-contract evidence; no RC4 operator
-> receipt can promote a final tag. The next candidate is RC5 after the runtime,
-> L2 allowlist, and F6 schema-v2 fixes pass protected-main gates.
+> receipt can promote a final tag. At that point, RC5 became the next candidate,
+> contingent on the runtime, L2 allowlist, and F6 schema-v2 fixes passing
+> protected-main gates.
 
-- [ ] Fresh clone of `main` at RC5; `./scripts/check-release.sh` passes there.
-      (No RC5 workflow exists yet.)
-- [ ] CI green on the RC5 commit, both legs. (No qualifying RC5 run yet.)
-- [ ] F4 soak receipts (standard + chaos) reference the RC5 SHA. (No
-      qualifying RC5 receipt yet.)
+> **RC5 historical candidate:** `v1.0.0-rc.5` is an annotated immutable tag
+> whose peeled commit is protected-main `7e04743`. Both CI legs passed in run
+> `29246719752`; all six release jobs passed in run `29248938476`; and the
+> checksum, CLI, app, dmg, and notices assets exist in its unpublished draft.
+> RC5 proved the RC4 runtime/evidence fixes, but it predates required C7 and the
+> current session-boundary hardening. It cannot be promoted to final, and its
+> receipts cannot certify the changed RC6 line.
+
+- [ ] Fresh clone of `main` at RC6; `./scripts/check-release.sh` passes there.
+      (The current RC6 change set is not yet on protected `main`.)
+- [ ] CI green on the RC6 commit, both legs. (No qualifying RC6 run yet.)
+- [ ] F4 soak receipts (standard + chaos) reference the RC6 SHA. (No
+      qualifying RC6 receipt yet.)
 - [ ] F6 testnet receipts record five transactions for the four core execution
-      families, including both confirmed gas-chain legs. (No qualifying RC5
+      families, including both confirmed gas-chain legs. (No qualifying RC6
       receipt yet; funded testnet access is required.)
 - [ ] F7 upgrade-path tests green: 0.1-era fixture dir boots and migrates on
-      the RC5 build; 0.1-era snapshot restores. (The tests remain in the source
-      gate but must rerun at the RC5 SHA.)
-- [ ] Desktop `.dmg` from RC5 strictly verifies, installs, and reaches the unlock
-      screen on a machine without a dev toolchain. (No RC5 artifact exists yet.)
-- [ ] `sigillum doctor` passes on each supported host at the RC5 SHA. (No
-      qualifying RC5 receipt yet.)
+      the RC6 build; 0.1-era snapshot restores. (The tests remain in the source
+      gate but must rerun at the RC6 SHA.)
+- [ ] Desktop `.dmg` from RC6 strictly verifies, installs, and reaches the unlock
+      screen on a machine without a dev toolchain. (No RC6 artifact exists yet.)
+- [ ] `sigillum doctor` passes on each supported host at the RC6 SHA. (No
+      qualifying RC6 receipt yet.)
+- [ ] C7 five-destination console walkthrough passes at the RC6 SHA, including
+      status-strip reset/visibility, Portfolio wallet/provider plus treasury
+      coverage, Vault `secrets/push`, and setup/lock/logout/compartment privacy.
+      (Implementation and focused local automation are complete in the RC6
+      change set; exact-SHA full-gate proof and operator sign-off are not
+      recorded.)
 - [~] A full local walkthrough of the completion bar: import a seed →
       multi-chain scan → review inventory/risk → generate plan → approve →
       execute against a local mock provider → audit trail complete. (execute→audit
@@ -1766,15 +1787,15 @@ Phase B — Workspace hygiene
 Phase C — Desktop productization
 - [x] C1 real icon set
 - [x] C2 bundling enabled (.app/.dmg)
-- [~] C3 fail-closed env-gated signing and explicit full-bundle ad-hoc default
-      (landed and source-gate proven on protected `main`; the complete claim
-      needs fresh RC5 release-workflow proof)
-- [~] C4 strict source + mounted-dmg verification and negative regressions in
-      the release gate (landed and source-gate proven on protected `main`; the
-      complete claim needs fresh RC5 release-workflow proof)
+- [x] C3 fail-closed env-gated signing and explicit full-bundle ad-hoc default
+      (landed and source/release-workflow proven by RC5)
+- [x] C4 strict source + mounted-dmg verification and negative regressions in
+      the release gate (landed and source/release-workflow proven by RC5)
 - [x] C5 boot helpers extracted + tested
 - [x] C6 desktop docs
-- [ ] C7 operator console UX redesign (user-directed)
+- [~] C7 operator console UX redesign (implementation and focused local
+      automation complete in the RC6 change set; exact-SHA full release gates
+      and operator walkthrough/sign-off still open)
 
 Phase D — Operator-surface parity
 - [x] D1 CLI: transit, evm read-only, wallets read/derive, compartment list
@@ -1824,16 +1845,14 @@ Phase G — Release engineering
 - [x] G1 CHANGELOG.md
 - [x] G2 docs/stability.md
 - [x] G3 version bump to 1.0.0
-- [~] G4 release workflow (historical dry run validated on a22a98a; RC3 exposed
-      a signature false positive; RC4 exposed an evidence-contract false
-      positive and unconfirmed-dependency execution; RC5 must prove all
-      remediations)
+- [x] G4 release workflow (RC5 run `29248938476` passed all six jobs and created
+      the expected unpublished six-asset draft; any changed RC still reruns it)
 - [x] G5 readiness + product docs final sync
 
 Phase H — Ship
-- [~] H1 RC verification checklist (RC3 void after bundle-signature failure;
-      RC4 void after the F6 schema and dependency-finality failures; all source,
-      release, F4/F6, clean-machine, and doctor evidence must bind RC5)
+- [~] H1 RC verification checklist (RC5 is historical pre-C7 evidence; all
+      source, release, F4/F6, clean-machine, doctor, and UI sign-off evidence
+      must bind the exact RC6 peeled commit)
 - [ ] H2 v1.0.0 tagged, artifacts published (human gate — operator go)
 - [ ] H3 post-release bump + planning issue
 
@@ -1903,8 +1922,9 @@ Phase H — Ship
   maintenance helper test, UI smoke tests, and UI bundle build. Full
   `./scripts/check-release.sh` passed.
 - 2026-07-03 Wave 1 merged: PR #2 → main 6cfcdce (merge commit, per-task
-  history preserved), CI green both legs. C4 remains (Wave 2); C7 complete
-  on its branch pending operator sign-off. Execution runbook created at
+  history preserved), CI green both legs. C4 remains (Wave 2); C7
+  implementation was present on its branch, with acceptance still pending
+  operator sign-off. Execution runbook created at
   docs/execution-runbook-1.0.md (current-state ledger, proven multi-agent
   method, wave sequencing for E/W/F/G/H, triage + recovery procedures);
   E0 added under Phase E from the A2 lesson.
@@ -2196,3 +2216,11 @@ Phase H — Ship
   transactions, and re-run every same-SHA gate. Historical release run
   `29230844456` completed all six jobs and its six-asset unpublished draft,
   proving the signing fix but not curing the assurance/runtime failures.
+- 2026-07-13 RC5 HISTORICAL CANDIDATE (`7e04743`): the annotated immutable tag
+  contains the dependency-finality and F6 schema-v2 remediations. Protected-main
+  CI run `29246719752` passed both legs; release run `29248938476` passed all six
+  jobs and created the expected unpublished checksum, CLI, app, dmg, and notices
+  assets. RC5 predates required C7 and the current session-boundary hardening,
+  so it is retained as positive historical remediation/workflow evidence and is
+  not eligible for final promotion. The next retained candidate is RC6, whose
+  full source, release, operator, and receipt gates must bind its exact SHA.

@@ -67,6 +67,8 @@ pub(super) fn apply(
             job.receipt.prepared_at_unix = Some(now);
             job.receipt.prepared_payload_hash_hex = Some(payload_hash);
             job.receipt.prepared_binding_hash_hex = Some(binding_hash);
+            job.receipt.broadcast_at_unix = None;
+            job.broadcast_transaction_hash_hex = None;
         }
         Ok(QueueExecution::PreparedHeld(reason)) => hold_prepared(job, reason, tally),
         Ok(QueueExecution::Broadcasted {
@@ -77,8 +79,7 @@ pub(super) fn apply(
             job.next_attempt_after_unix = None;
             job.broadcast_transaction_hash_hex = Some(broadcast_transaction_hash_hex);
             clear_replay_bytes(job);
-            // Start confirmation timeout from an affirmative provider
-            // acceptance, not from the earlier pre-I/O crash marker.
+            // Start confirmation timeout only after affirmative provider acceptance.
             job.receipt.broadcast_at_unix = Some(now);
             tally.succeeded += 1;
         }
@@ -109,8 +110,7 @@ pub(super) fn apply(
             block_number,
             gas_used_hex,
         }) => {
-            // W7.4: on-chain revert, discovered via receipt polling — never
-            // auto-retried, gas/block evidence recorded.
+            // Receipt-discovered on-chain reverts are never auto-retried.
             tally.record_cause(QueueFailureCause::OnChainRevert);
             mark_job_operator_action_required(job, reason, now);
             clear_replay_bytes(job);

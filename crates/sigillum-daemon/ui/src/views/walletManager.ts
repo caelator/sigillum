@@ -4,6 +4,7 @@ import type {
   TreasuryGroupSummary,
   TreasuryReceiveAllocation,
 } from "../contracts";
+import { isSessionContextChangedError } from "../api/session";
 import { setHiddenById as setHidden, setTextById as setText } from "../render/dom";
 import {
   clearFields,
@@ -158,6 +159,25 @@ export function createWalletManagerActions(deps: WalletManagerDeps) {
     name: string;
     timer: ReturnType<typeof setTimeout>;
   } | null = null;
+
+  function resetSession(): void {
+    disarmDelete(false);
+    pendingMnemonic = null;
+    receiveTargetProfile = null;
+    lastSeedProfiles = [];
+    lastXpubProfiles = [];
+    lastProviderProfiles = [];
+    lastOverviewGroups = [];
+    lastReceiveAllocations = [];
+
+    // The mnemonic is intentionally held only in this closure and its
+    // one-time reveal. Destroy both copies at every session boundary.
+    const reveal = document.getElementById("walletMnemonicReveal");
+    if (reveal) {
+      reveal.innerHTML = "";
+      reveal.classList.add("hidden");
+    }
+  }
 
   function activeReceiveCountFor(profileName: string): number {
     return lastReceiveAllocations.filter(
@@ -343,16 +363,26 @@ export function createWalletManagerActions(deps: WalletManagerDeps) {
           deps.api("GET", "/api/treasury/overview"),
           deps.api("GET", "/api/treasury/receive-addresses"),
         ]);
-      if (!seedResp.error) lastSeedProfiles = seedResp.profiles || [];
-      if (!xpubResp.error) lastXpubProfiles = xpubResp.profiles || [];
-      if (!providerResp.error) lastProviderProfiles = providerResp.profiles || [];
-      if (!overviewResp.error) lastOverviewGroups = overviewResp.groups || [];
-      if (!receiveResp.error) {
-        lastReceiveAllocations = receiveResp.allocations || [];
+      if (
+        [seedResp, xpubResp, providerResp, overviewResp, receiveResp].some(
+          (response) => response?.error,
+        )
+      ) {
+        return;
       }
+
+      // Commit one complete wallet-manager snapshot. Partial assignment here
+      // would retain old slices beside fresh ones after a failed endpoint.
+      lastSeedProfiles = seedResp.profiles || [];
+      lastXpubProfiles = xpubResp.profiles || [];
+      lastProviderProfiles = providerResp.profiles || [];
+      lastOverviewGroups = overviewResp.groups || [];
+      lastReceiveAllocations = receiveResp.allocations || [];
       renderProviderOptions();
       renderWalletManagerList();
-    } catch (_) {}
+    } catch (error) {
+      if (isSessionContextChangedError(error)) throw error;
+    }
   }
 
   async function refreshWalletManager(): Promise<void> {
@@ -783,6 +813,7 @@ export function createWalletManagerActions(deps: WalletManagerDeps) {
   }
 
   return {
+    resetSession,
     loadWalletManager,
     refreshWalletManager,
     renderWalletManagerList,

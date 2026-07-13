@@ -120,12 +120,15 @@ impl SigillumService {
         body: EvmRpcBroadcastRequest,
     ) -> ServiceResult<EvmRpcBroadcastResponse> {
         let token = self.require_session(token)?;
+        let session_context = self.capture_session_operation_context(Some(token))?;
+        let _guard = self.acquire_session_operation(&session_context).await?;
         let rpc = self.resolve_provider_rpc_client(
             token,
             &body.provider.rpc_url,
             body.provider.compartment_id,
             body.provider.auth_token_key.as_deref(),
         )?;
+        self.admit_broadcast()?;
         let tx_hash = rpc.send_raw_transaction(&body.raw_transaction_hex).await?;
 
         self.record_audit(
@@ -381,9 +384,9 @@ impl SigillumService {
         provider: &sigillum_api::EvmProviderProfile,
         raw_transaction_hex: &str,
     ) -> ServiceResult<String> {
-        self.provider_rpc_for_profile(provider_compartment_id, provider)?
-            .send_raw_transaction(raw_transaction_hex)
-            .await
+        let rpc = self.provider_rpc_for_profile(provider_compartment_id, provider)?;
+        self.admit_broadcast()?;
+        rpc.send_raw_transaction(raw_transaction_hex).await
     }
 
     /// Current chain head (`eth_blockNumber`), used by W7.4 receipt

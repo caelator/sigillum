@@ -76,6 +76,7 @@ impl SigillumService {
         mut body: EthSeedWalletProfileUpsertRequest,
     ) -> ServiceResult<EthSeedWalletProfileMutationResponse> {
         let token = self.require_session(token)?;
+        let session_context = self.capture_session_operation_context(Some(token))?;
         validate_profile_name(&body.name)?;
         let compartment_id = body
             .compartment_id
@@ -87,6 +88,7 @@ impl SigillumService {
 
         let profile = self
             .persist_eth_seed_wallet_profile(
+                &session_context,
                 SeedWalletProfileMaterial {
                     name: body.name,
                     label: body.label,
@@ -123,6 +125,7 @@ impl SigillumService {
         body: EthSeedWalletCreateRequest,
     ) -> ServiceResult<EthSeedWalletCreateResponse> {
         let token = self.require_session(token)?;
+        let session_context = self.capture_session_operation_context(Some(token))?;
         validate_profile_name(&body.name)?;
         let compartment_id = body
             .compartment_id
@@ -134,6 +137,7 @@ impl SigillumService {
 
         let profile = self
             .persist_eth_seed_wallet_profile(
+                &session_context,
                 SeedWalletProfileMaterial {
                     name: body.name,
                     label: body.label,
@@ -166,6 +170,7 @@ impl SigillumService {
     /// any mnemonic material.
     async fn persist_eth_seed_wallet_profile(
         &self,
+        session_context: &crate::service::SessionOperationContext,
         mut material: SeedWalletProfileMaterial,
         mode: SeedWalletWriteMode,
     ) -> ServiceResult<EthSeedWalletProfile> {
@@ -206,7 +211,7 @@ impl SigillumService {
                 .map_err(map_xpub_error)?
                 .address;
 
-        let _guard = self.state.operation_guard().await;
+        let _guard = self.acquire_session_operation(session_context).await?;
         let mut registry =
             crate::profiles::load_profiles(&self.state.base_dir).map_err(|error| {
                 ServiceError::internal(format!("Failed to load profile registry: {error}"))
@@ -300,7 +305,8 @@ impl SigillumService {
         body: EvmProfileDeleteRequest,
     ) -> ServiceResult<EthSeedWalletProfileMutationResponse> {
         let token = self.require_session(token)?;
-        let _guard = self.state.operation_guard().await;
+        let session_context = self.capture_session_operation_context(Some(token))?;
+        let _guard = self.acquire_session_operation(&session_context).await?;
         let mut registry =
             crate::profiles::load_profiles(&self.state.base_dir).map_err(|error| {
                 ServiceError::internal(format!("Failed to load profile registry: {error}"))

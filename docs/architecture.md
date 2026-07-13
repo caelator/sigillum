@@ -126,10 +126,21 @@ Current daemon behavior:
 - runs on `localhost`
 - serves an embedded HTML/JS UI
 - issues bearer session tokens for session-gated access over local HTTP
-- tracks active compartment per session
+- tracks active compartment per session and rotates the full-session bearer
+  token on every compartment switch
+- retains only the immediate rotated predecessor as a bounded, Lock-only
+  capability (at most 180 seconds and never beyond the original TTL or idle
+  deadline); it cannot authorize reads, mutations, or capability minting
 - keeps unlock state process-global inside the local daemon
 - supports per-session logout without forcing a global lock
 - keeps unlocked master keys in daemon memory until locked
+- serializes authenticated mutations and revalidates both token ownership and
+  active compartment after waiting, so a queued request cannot execute in a
+  revoked or switched session context
+- latches process-global Lock before waiting for active work, binds every
+  unlock commit to a lock generation, and linearizes every funds-moving
+  provider submission against the same Lock state. A submission admitted first
+  may finish while Lock drains it; nothing can be admitted after Lock wins
 - can export and restore passphrase-encrypted whole-tree snapshots
 - keeps a local append-only audit log for state-changing operations
 - journals destructive operations so pending work is visible after interruption
@@ -146,10 +157,25 @@ Current daemon behavior:
   Vite writes the checked-in `app.js` runtime and generated `styles.css` that
   the daemon embeds; authored CSS now lives under `ui/src/styles/*` in ordered
   token, layout, form, component, workspace, responsive, and polish modules,
-  while the UI domain modules own setup shell states, FIDO2 controls,
-  wallet/profile operations, inventory/risk/plans, and
+  while the unlocked console presents five stable destinations (Overview,
+  Receive, Portfolio, Move, and Vault) under one persistent status strip. UI
+  domain modules own setup shell states, FIDO2 controls, wallet/profile
+  operations, inventory/risk/plans, and
   deposit/queue/maintenance rendering with lightweight DOM smoke tests covering
   those seams
+- centralizes browser session authority in one coordinator: ordinary responses
+  cannot install bearer tokens, while unlock, initialization, FIDO2 setup, and
+  compartment-switch responses must satisfy exact typed 2xx contracts before a
+  compare-and-swap adoption. Lock, reset, restore, revoke, and switching publish
+  a non-secret cross-tab `pending` boundary before the request and publish
+  `settled` only after a validated success or explicit non-commit; a lost or
+  ambiguous outcome scrubs private state and attempts fail-closed Lock instead
+- gives the async Rust client the same ownership model through a shared token,
+  transition gate, Lock-intent latch, and monotonic boundary generation across
+  clones. Token-establishing and switching work continues in owned tasks after
+  caller cancellation; emergency Lock bypasses hung ordinary requests when it
+  has authority, and an unconfirmed Lock leaves that client fail-closed until
+  the daemon is stopped and a fresh client is constructed
 - exposes transit-style encrypt/decrypt/HMAC operations derived from the active compartment master key
 - centralizes daemon business rules behind an application-service layer instead of spreading them across route handlers
 - keeps wallet inventory discovery, risk derivation, and consolidation planning

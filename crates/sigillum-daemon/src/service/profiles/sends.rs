@@ -15,6 +15,17 @@ impl SigillumService {
         body: EthStealthSendWithProfileRequest,
     ) -> ServiceResult<EthStealthSendResponse> {
         let session_token = self.require_session(token)?;
+        let session_context = self.capture_session_operation_context(Some(session_token))?;
+        let _guard = self.acquire_session_operation(&session_context).await?;
+        self.eth_stealth_send_with_profile_in_operation(session_token, body)
+            .await
+    }
+
+    pub(in crate::service) async fn eth_stealth_send_with_profile_in_operation(
+        &self,
+        session_token: &str,
+        body: EthStealthSendWithProfileRequest,
+    ) -> ServiceResult<EthStealthSendResponse> {
         let (provider, wallet) = self.resolve_wallet_profile(&body.wallet_profile)?;
         let chain_id = wallet.chain_id.unwrap_or(provider.chain_id);
         let gas_limit = body.gas_limit.or(provider.native_gas_limit);
@@ -45,8 +56,8 @@ impl SigillumService {
                 )
             })?;
 
-        self.eth_stealth_send_transfer(
-            token,
+        self.eth_stealth_send_transfer_in_operation(
+            session_token,
             EthStealthSendTransferRequest {
                 rpc_url: provider.rpc_url,
                 wallet: wallet.wallet,
@@ -71,6 +82,17 @@ impl SigillumService {
         body: EthStealthSendErc20WithProfileRequest,
     ) -> ServiceResult<EthStealthSendResponse> {
         let session_token = self.require_session(token)?;
+        let session_context = self.capture_session_operation_context(Some(session_token))?;
+        let _guard = self.acquire_session_operation(&session_context).await?;
+        self.eth_stealth_send_erc20_with_profile_in_operation(session_token, body)
+            .await
+    }
+
+    pub(in crate::service) async fn eth_stealth_send_erc20_with_profile_in_operation(
+        &self,
+        session_token: &str,
+        body: EthStealthSendErc20WithProfileRequest,
+    ) -> ServiceResult<EthStealthSendResponse> {
         let (provider, wallet) = self.resolve_wallet_profile(&body.wallet_profile)?;
         let chain_id = wallet.chain_id.unwrap_or(provider.chain_id);
         let gas_limit = body.gas_limit.or(provider.erc20_gas_limit);
@@ -93,8 +115,8 @@ impl SigillumService {
             static_profile_fees(&provider, chain_id)?
         };
 
-        self.eth_stealth_send_erc20_transfer(
-            token,
+        self.eth_stealth_send_erc20_transfer_in_operation(
+            session_token,
             EthStealthSendErc20TransferRequest {
                 rpc_url: provider.rpc_url,
                 wallet: wallet.wallet,

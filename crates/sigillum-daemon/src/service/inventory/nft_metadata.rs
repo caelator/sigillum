@@ -57,11 +57,12 @@ impl SigillumService {
         body: NftMetadataOptInUpsertRequest,
     ) -> ServiceResult<NftMetadataOptInMutationResponse> {
         let token = self.require_session(token)?;
+        let session_context = self.capture_session_operation_context(Some(token))?;
         if body.chain_id == 0 {
             return Err(ServiceError::bad_request("chain_id must be greater than 0"));
         }
         let contract_address = normalize_address(&body.contract_address)?;
-        let _guard = self.state.operation_guard().await;
+        let _guard = self.acquire_session_operation(&session_context).await?;
         let mut state = load_inventory_state(&self.state.base_dir)?;
         let now = now_unix();
         let mut opt_in = NftMetadataCollectionOptIn {
@@ -105,11 +106,12 @@ impl SigillumService {
         body: NftMetadataOptInDeleteRequest,
     ) -> ServiceResult<NftMetadataOptInMutationResponse> {
         let token = self.require_session(token)?;
+        let session_context = self.capture_session_operation_context(Some(token))?;
         if body.chain_id == 0 {
             return Err(ServiceError::bad_request("chain_id must be greater than 0"));
         }
         let contract_address = normalize_address(&body.contract_address)?;
-        let _guard = self.state.operation_guard().await;
+        let _guard = self.acquire_session_operation(&session_context).await?;
         let mut state = load_inventory_state(&self.state.base_dir)?;
         let position = state
             .nft_metadata_optins
@@ -144,8 +146,9 @@ impl SigillumService {
         body: NftMetadataSettingsUpdateRequest,
     ) -> ServiceResult<NftMetadataSettingsResponse> {
         let token = self.require_session(token)?;
+        let session_context = self.capture_session_operation_context(Some(token))?;
         let ipfs_gateway_url = normalize_ipfs_gateway_setting(body.ipfs_gateway_url)?;
-        let _guard = self.state.operation_guard().await;
+        let _guard = self.acquire_session_operation(&session_context).await?;
         let mut state = load_inventory_state(&self.state.base_dir)?;
         state.nft_metadata_ipfs_gateway = ipfs_gateway_url.clone();
         save_inventory_state(&self.state.base_dir, &state)?;
@@ -169,12 +172,13 @@ impl SigillumService {
         body: NftMetadataFetchRequest,
     ) -> ServiceResult<NftMetadataFetchResponse> {
         let token = self.require_session(token)?;
+        let session_context = self.capture_session_operation_context(Some(token))?;
         let limit = validate_fetch_limit(body.limit)?;
         if body.chain_id == Some(0) {
             return Err(ServiceError::bad_request("chain_id must be greater than 0"));
         }
         let contract_filter = normalize_optional_contract(body.contract_address.as_deref())?;
-        let _guard = self.state.operation_guard().await;
+        let _guard = self.acquire_session_operation(&session_context).await?;
         let mut state = load_inventory_state(&self.state.base_dir)?;
         let registry = crate::profiles::load_profiles(&self.state.base_dir).map_err(|error| {
             ServiceError::internal(format!("Failed to load profile registry: {error}"))

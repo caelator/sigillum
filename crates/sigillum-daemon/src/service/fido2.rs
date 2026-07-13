@@ -171,23 +171,38 @@ impl SigillumService {
         }
     }
 
-    pub(crate) fn fido2_set_pin(
+    pub(crate) async fn fido2_set_pin(
         &self,
         token: Option<&str>,
         body: Fido2SetPinRequest,
     ) -> ServiceResult<Fido2SetPinResponse> {
-        if self.state.is_initialized() {
+        let session_context = if self.state.is_initialized() {
             let _ = self.require_session(token)?;
-        }
+            Some(self.capture_session_operation_context(token)?)
+        } else {
+            None
+        };
         if body.new_pin.len() < 4 {
             return Err(ServiceError::bad_request(
                 "FIDO2 PIN must be at least 4 characters long.",
             ));
         }
+        let new_pin = zeroize::Zeroizing::new(body.new_pin);
+
+        let _guard = if let Some(context) = session_context.as_ref() {
+            self.acquire_session_operation(context).await?
+        } else {
+            self.state.operation_guard().await
+        };
+        if session_context.is_none() && self.state.is_initialized() {
+            return Err(ServiceError::conflict(
+                "Sigillum was initialized while FIDO2 PIN setup was waiting.",
+            ));
+        }
 
         self.state
             .fido2
-            .set_new_pin(&body.new_pin)
+            .set_new_pin(new_pin.as_str())
             .map_err(|error| map_fido2_service_error("FIDO2 PIN setup", error))?;
 
         Ok(Fido2SetPinResponse {
@@ -378,6 +393,7 @@ impl SigillumService {
         body: Fido2RegisterRequest,
     ) -> ServiceResult<Fido2RegisterResponse> {
         let _ = self.require_session(token)?;
+        let session_context = self.capture_session_operation_context(token)?;
         if !self.state.is_initialized() {
             return Err(ServiceError::not_found(
                 "Not initialized. Use /api/fido2/setup first.",
@@ -385,7 +401,7 @@ impl SigillumService {
         }
 
         let skip = body.skip_keys.clone().unwrap_or_default();
-        let _guard = self.state.operation_guard().await;
+        let _guard = self.acquire_session_operation(&session_context).await?;
         let journal = self.begin_operation(
             PendingOperationSpec::fido2_register(body.poison),
             Some(body.label.clone()),
@@ -467,6 +483,7 @@ impl SigillumService {
         token: Option<&str>,
         body: Fido2UnlockRequest,
     ) -> ServiceResult<UnlockResponse> {
+        let unlock_context = self.capture_unlock_operation_context()?;
         if self.state.is_unlocked() && self.optional_session(token).is_some() {
             return Err(ServiceError::conflict("Vault is already unlocked."));
         }
@@ -487,7 +504,7 @@ impl SigillumService {
             .filter(|pin| !pin.is_empty())
             .collect();
 
-        let _guard = self.state.operation_guard().await;
+        let _guard = self.acquire_unlock_operation(&unlock_context).await?;
         let compartment_results = self
             .state
             .fido2
@@ -502,56 +519,58 @@ impl SigillumService {
             return Err(ServiceError::unauthorized("No compartments matched."));
         }
 
-        let mut verified = Vec::new();
-        for (meta, master_key) in &compartment_results {
-            self.state.ensure_vault(meta.id);
-            let matched = self.state.with_vault(meta.id, |vault| {
-                vault.load_master_key(**master_key);
-                let verified = vault.verify_master_key();
-                if !verified {
-                    vault.zeroize_master_key();
+        self.commit_unlock(&unlock_context, || {
+            let mut verified = Vec::new();
+            for (meta, master_key) in &compartment_results {
+                self.state.ensure_vault(meta.id);
+                let matched = self.state.with_vault(meta.id, |vault| {
+                    vault.load_master_key(**master_key);
+                    let verified = vault.verify_master_key();
+                    if !verified {
+                        vault.zeroize_master_key();
+                    }
+                    verified
+                });
+                if matched == Some(true) {
+                    verified.push((meta.clone(), **master_key));
                 }
-                verified
-            });
-            if matched == Some(true) {
-                verified.push((meta.clone(), **master_key));
             }
-        }
 
-        if verified.is_empty() {
-            return Err(ServiceError::unauthorized(
-                "FIDO2 keys do not match any vault.",
-            ));
-        }
+            if verified.is_empty() {
+                return Err(ServiceError::unauthorized(
+                    "FIDO2 keys do not match any vault.",
+                ));
+            }
 
-        self.state.reset_unlock_throttle();
-        self.state.unlock_multiple(&verified);
-        let session_token = self.state.create_session(None);
-        let ids: Vec<usize> = verified.iter().map(|(meta, _)| meta.id).collect();
-        self.record_audit(
-            self.state.default_active_compartment_id(),
-            AuditEventSpec::UnlockFido2 {
-                compartment_ids: ids,
-                count: verified.len(),
-                tap_count: body.tap_count,
-            },
-        )?;
+            self.state.reset_unlock_throttle();
+            self.state.unlock_multiple(&verified);
+            let session_token = self.state.create_session(None);
+            let ids: Vec<usize> = verified.iter().map(|(meta, _)| meta.id).collect();
+            self.record_audit(
+                self.state.default_active_compartment_id(),
+                AuditEventSpec::UnlockFido2 {
+                    compartment_ids: ids,
+                    count: verified.len(),
+                    tap_count: body.tap_count,
+                },
+            )?;
 
-        Ok(UnlockResponse {
-            status: "unlocked".into(),
-            method: "fido2".into(),
-            cascading: Some(true),
-            session_token,
-            unlocked_compartments: verified
-                .into_iter()
-                .map(|(meta, _)| UnlockedCompartment {
-                    id: meta.id,
-                    label: meta.label,
-                    threshold: meta.threshold,
-                    passphrase_mode: meta.passphrase_mode,
-                })
-                .collect(),
-            active_compartment_id: self.state.default_active_compartment_id(),
+            Ok(UnlockResponse {
+                status: "unlocked".into(),
+                method: "fido2".into(),
+                cascading: Some(true),
+                session_token,
+                unlocked_compartments: verified
+                    .into_iter()
+                    .map(|(meta, _)| UnlockedCompartment {
+                        id: meta.id,
+                        label: meta.label,
+                        threshold: meta.threshold,
+                        passphrase_mode: meta.passphrase_mode,
+                    })
+                    .collect(),
+                active_compartment_id: self.state.default_active_compartment_id(),
+            })
         })
     }
 
@@ -561,7 +580,8 @@ impl SigillumService {
         body: Fido2RemoveRequest,
     ) -> ServiceResult<Fido2RemoveResponse> {
         let _ = self.require_session(token)?;
-        let _guard = self.state.operation_guard().await;
+        let session_context = self.capture_session_operation_context(token)?;
+        let _guard = self.acquire_session_operation(&session_context).await?;
         let journal = self.begin_operation(
             PendingOperationSpec::fido2_remove(body.skip_keys.clone().unwrap_or_default()),
             Some(body.label.clone()),

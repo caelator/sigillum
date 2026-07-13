@@ -91,7 +91,8 @@ impl SigillumService {
             // occupancy without resolving a provider or touching the network.
             return Ok(Some(Ok(QueueExecution::PreparedHeld(reason.into()))));
         }
-        let allow_submission = allow_submission && dependency_block_reason.is_none();
+        let allow_submission =
+            allow_submission && dependency_block_reason.is_none() && !self.state.is_locking();
         if allow_submission || resume_existing_submission {
             self.persist_queue_submission_marker(queue, job_index, now)?;
         }

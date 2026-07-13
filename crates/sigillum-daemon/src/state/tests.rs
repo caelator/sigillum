@@ -74,6 +74,181 @@ fn sessions_track_active_compartments_independently() {
 }
 
 #[test]
+fn rotating_session_active_invalidates_old_token_and_preserves_metadata() {
+    let dir = TempDir::new().unwrap();
+    let state = AppState::new(dir.path().to_path_buf()).expect("app state should initialize");
+    state.unlock_compartment(0, [1u8; 32], meta(0, 1, "daily"));
+    state.unlock_compartment(1, [2u8; 32], meta(1, 2, "secure"));
+
+    let (session, _) = state.create_capability_session(
+        Some(0),
+        vec!["deposits:read".into()],
+        Duration::from_secs(90),
+    );
+    let before = state.sessions.lock().active.get(&session).unwrap().clone();
+    let replacement = state.rotate_session_active_for(&session, 1).unwrap();
+    let after = state
+        .sessions
+        .lock()
+        .active
+        .get(&replacement)
+        .unwrap()
+        .clone();
+
+    assert_ne!(replacement, session);
+    assert!(!state.verify_token(&session));
+    assert_eq!(state.active_compartment_id_for(&replacement), Some(1));
+    assert!(state.session_has_scope(&replacement, "deposits:read"));
+    assert!(!state.session_is_full(&replacement));
+    assert!(
+        !state.verify_full_or_retired_lock_token(&replacement),
+        "an active capability session must not authorize process-global Lock"
+    );
+    assert!(
+        !state.verify_full_or_retired_lock_token(&session),
+        "rotating a capability session must not grant its predecessor Lock authority"
+    );
+    assert_eq!(after.created_at, before.created_at);
+    assert_eq!(after.expires_at, before.expires_at);
+    assert_eq!(after.last_activity, before.last_activity);
+    assert_eq!(after.scopes, before.scopes);
+}
+
+#[test]
+fn absent_or_revoked_session_never_falls_back_to_default_compartment() {
+    let dir = TempDir::new().unwrap();
+    let state = AppState::new(dir.path().to_path_buf()).expect("app state should initialize");
+    state.unlock_compartment(0, [1u8; 32], meta(0, 1, "daily"));
+
+    assert_eq!(state.active_compartment_id_for("missing"), None);
+
+    let session = state.create_session(None);
+    assert_eq!(state.active_compartment_id_for(&session), Some(0));
+    state.revoke_session(&session);
+    assert_eq!(state.active_compartment_id_for(&session), None);
+}
+
+#[test]
+fn full_session_rotation_retains_only_immediate_lock_predecessor() {
+    let dir = TempDir::new().unwrap();
+    let state = AppState::new(dir.path().to_path_buf()).expect("app state should initialize");
+    state.unlock_compartment(0, [1u8; 32], meta(0, 1, "daily"));
+    state.unlock_compartment(1, [2u8; 32], meta(1, 2, "secure"));
+
+    let first = state.create_session(Some(0));
+    let second = state.rotate_session_active_for(&first, 1).unwrap();
+
+    assert!(!state.verify_token(&first));
+    assert!(state.verify_full_or_retired_lock_token(&first));
+    assert!(state.verify_token(&second));
+
+    let third = state.rotate_session_active_for(&second, 0).unwrap();
+    assert!(
+        !state.verify_full_or_retired_lock_token(&first),
+        "a second rotation must retire the older predecessor"
+    );
+    assert!(state.verify_full_or_retired_lock_token(&second));
+    assert!(state.verify_token(&third));
+    assert_eq!(state.sessions.lock().retired_len(), 1);
+}
+
+#[test]
+fn revoking_rotated_successor_also_revokes_lock_predecessor() {
+    let dir = TempDir::new().unwrap();
+    let state = AppState::new(dir.path().to_path_buf()).expect("app state should initialize");
+    state.unlock_compartment(0, [1u8; 32], meta(0, 1, "daily"));
+    state.unlock_compartment(1, [2u8; 32], meta(1, 2, "secure"));
+
+    let predecessor = state.create_session(Some(0));
+    let successor = state.rotate_session_active_for(&predecessor, 1).unwrap();
+    assert!(state.verify_full_or_retired_lock_token(&predecessor));
+
+    state.revoke_session(&successor);
+
+    assert!(!state.verify_full_or_retired_lock_token(&predecessor));
+    assert_eq!(state.sessions.lock().retired_len(), 0);
+}
+
+#[test]
+fn idle_rotated_successor_removes_its_lock_predecessor() {
+    let dir = TempDir::new().unwrap();
+    let state = AppState::new(dir.path().to_path_buf()).expect("app state should initialize");
+    state.unlock_compartment(0, [1u8; 32], meta(0, 1, "daily"));
+    state.unlock_compartment(1, [2u8; 32], meta(1, 2, "secure"));
+
+    let predecessor = state.create_session(Some(0));
+    let successor = state.rotate_session_active_for(&predecessor, 1).unwrap();
+    state
+        .sessions
+        .lock()
+        .active
+        .get_mut(&successor)
+        .unwrap()
+        .last_activity =
+        Instant::now() - Duration::from_secs(state.runtime_policy().idle_lock_secs + 1);
+
+    assert!(!state.verify_full_or_retired_lock_token(&predecessor));
+    assert_eq!(state.session_count(), 0);
+    assert_eq!(state.sessions.lock().retired_len(), 0);
+}
+
+#[test]
+fn expired_rotated_successor_removes_its_lock_predecessor() {
+    let dir = TempDir::new().unwrap();
+    let state = AppState::new(dir.path().to_path_buf()).expect("app state should initialize");
+    state.unlock_compartment(0, [1u8; 32], meta(0, 1, "daily"));
+    state.unlock_compartment(1, [2u8; 32], meta(1, 2, "secure"));
+
+    let predecessor = state.create_session(Some(0));
+    let successor = state.rotate_session_active_for(&predecessor, 1).unwrap();
+    state
+        .sessions
+        .lock()
+        .active
+        .get_mut(&successor)
+        .unwrap()
+        .expires_at = Instant::now() - Duration::from_secs(1);
+
+    assert!(!state.verify_full_or_retired_lock_token(&predecessor));
+    assert_eq!(state.session_count(), 0);
+    assert_eq!(state.sessions.lock().retired_len(), 0);
+}
+
+#[test]
+fn capacity_eviction_removes_rotated_successor_lock_predecessor() {
+    let dir = TempDir::new().unwrap();
+    let state = AppState::new(dir.path().to_path_buf()).expect("app state should initialize");
+    state.unlock_compartment(0, [1u8; 32], meta(0, 1, "daily"));
+    state.unlock_compartment(1, [2u8; 32], meta(1, 2, "secure"));
+
+    let predecessor = state.create_session(Some(0));
+    let _successor = state.rotate_session_active_for(&predecessor, 1).unwrap();
+    for _ in 0..session_registry::MAX_SESSIONS {
+        state.create_session(Some(0));
+    }
+
+    assert_eq!(state.session_count(), session_registry::MAX_SESSIONS);
+    assert!(!state.verify_full_or_retired_lock_token(&predecessor));
+    assert_eq!(state.sessions.lock().retired_len(), 0);
+}
+
+#[test]
+fn invalidating_all_sessions_clears_rotated_lock_predecessors() {
+    let dir = TempDir::new().unwrap();
+    let state = AppState::new(dir.path().to_path_buf()).expect("app state should initialize");
+    state.unlock_compartment(0, [1u8; 32], meta(0, 1, "daily"));
+    state.unlock_compartment(1, [2u8; 32], meta(1, 2, "secure"));
+
+    let predecessor = state.create_session(Some(0));
+    let _successor = state.rotate_session_active_for(&predecessor, 1).unwrap();
+    state.invalidate_all_sessions();
+
+    assert!(!state.verify_full_or_retired_lock_token(&predecessor));
+    assert_eq!(state.session_count(), 0);
+    assert_eq!(state.sessions.lock().retired_len(), 0);
+}
+
+#[test]
 fn removing_active_compartment_repoints_sessions() {
     let dir = TempDir::new().unwrap();
     let state = AppState::new(dir.path().to_path_buf()).expect("app state should initialize");
@@ -114,7 +289,7 @@ fn idle_sessions_are_rejected_and_removed() {
     let session = state.create_session(Some(0));
     {
         let mut sessions = state.sessions.lock();
-        let session = sessions.get_mut(&session).unwrap();
+        let session = sessions.active.get_mut(&session).unwrap();
         session.last_activity =
             Instant::now() - Duration::from_secs(state.runtime_policy().idle_lock_secs + 1);
     }
@@ -133,14 +308,18 @@ fn idle_lock_due_requires_all_sessions_to_be_idle() {
     let fresh_session = state.create_session(Some(0));
     {
         let mut sessions = state.sessions.lock();
-        sessions.get_mut(&old_session).unwrap().last_activity =
+        sessions.active.get_mut(&old_session).unwrap().last_activity =
             Instant::now() - Duration::from_secs(state.runtime_policy().idle_lock_secs + 1);
     }
     assert!(!state.idle_lock_due());
 
     {
         let mut sessions = state.sessions.lock();
-        sessions.get_mut(&fresh_session).unwrap().last_activity =
+        sessions
+            .active
+            .get_mut(&fresh_session)
+            .unwrap()
+            .last_activity =
             Instant::now() - Duration::from_secs(state.runtime_policy().idle_lock_secs + 1);
     }
     assert!(state.idle_lock_due());
@@ -175,6 +354,25 @@ fn locking_state_rejects_session_validation_until_lock_finishes() {
 
     assert!(state.begin_locking());
     assert!(!state.verify_token(&session));
+    state.lock_all();
+    assert!(!state.is_locking());
+}
+
+#[test]
+fn broadcast_admission_linearizes_with_lock_latch() {
+    let dir = TempDir::new().unwrap();
+    let state = AppState::new(dir.path().to_path_buf()).expect("app state should initialize");
+
+    state.unlock_compartment(0, [1u8; 32], meta(0, 1, "daily"));
+    assert!(state.admit_broadcast_if_ready());
+
+    assert!(state.begin_locking());
+    assert!(state.is_locking());
+    assert!(
+        !state.admit_broadcast_if_ready(),
+        "an admission ordered after the Lock latch must fail"
+    );
+
     state.lock_all();
     assert!(!state.is_locking());
 }

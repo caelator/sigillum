@@ -83,8 +83,8 @@ impl SigillumService {
             }
         }
         let sent = self
-            .eth_stealth_send_with_profile(
-                Some(token),
+            .eth_stealth_send_with_profile_in_operation(
+                token,
                 EthStealthSendWithProfileRequest {
                     wallet_profile: wallet_profile.into(),
                     stealth: StealthPaymentRef {
@@ -167,8 +167,8 @@ impl SigillumService {
         }
 
         let sent = self
-            .eth_stealth_send_erc20_with_profile(
-                Some(token),
+            .eth_stealth_send_erc20_with_profile_in_operation(
+                token,
                 EthStealthSendErc20WithProfileRequest {
                     wallet_profile: wallet_profile.into(),
                     stealth: StealthPaymentRef {

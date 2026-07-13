@@ -85,8 +85,23 @@ check_max_lines "crates/sigillum-cli/src/daemon_api/queue.rs" 80
 check_max_lines "crates/sigillum-client/src/lib.rs" 1150
 check_max_lines "crates/sigillum-client/src/plans.rs" 160
 check_max_lines "crates/sigillum-client/src/queue.rs" 120
+check_max_lines "crates/sigillum-client/src/session.rs" 500
+check_max_lines "crates/sigillum-client/src/session/establish.rs" 260
+check_max_lines "crates/sigillum-client/src/session/establish/validate.rs" 120
+check_max_lines "crates/sigillum-client/src/session/lock.rs" 180
 check_max_lines "crates/sigillum-daemon/ui/src/app.js" 2500
 check_max_lines "crates/sigillum-daemon/ui/src/app.ts" 1500
+check_max_lines "crates/sigillum-daemon/ui/src/api/sessionCoordinator.ts" 330
+check_max_lines "crates/sigillum-daemon/ui/src/api/sessionRequest.ts" 240
+check_max_lines "crates/sigillum-daemon/ui/src/api/sessionBoundary.ts" 150
+check_max_lines "crates/sigillum-daemon/ui/src/api/sessionEstablishment.ts" 100
+check_max_lines "crates/sigillum-daemon/ui/src/api/sessionFinalizers.ts" 140
+check_max_lines "crates/sigillum-daemon/ui/src/api/lockUnconfirmed.ts" 180
+check_max_lines "crates/sigillum-daemon/ui/src/views/helpTips.ts" 160
+check_max_lines "crates/sigillum-daemon/ui/src/views/lockUnconfirmed.ts" 80
+check_max_lines "crates/sigillum-daemon/ui/src/views/sessionPrivacy.ts" 120
+check_max_lines "crates/sigillum-daemon/ui/src/views/statusStrip.ts" 80
+check_max_lines "crates/sigillum-daemon/ui/src/views/workspace.ts" 240
 check_max_lines "crates/sigillum-daemon/ui/src/styles.css" 80
 check_max_lines "crates/sigillum-daemon/ui/src/styles/00-design-tokens.css" 120
 check_max_lines "crates/sigillum-daemon/ui/src/styles/01-reset-base.css" 90
@@ -101,6 +116,8 @@ check_max_lines "crates/sigillum-daemon/ui/src/styles/09-overview-auth.css" 230
 check_max_lines "crates/sigillum-daemon/ui/src/styles/10-setup-wizard.css" 260
 check_max_lines "crates/sigillum-daemon/ui/src/styles/11-guide-journey.css" 370
 check_max_lines "crates/sigillum-daemon/ui/src/styles/12-modal-utilities-responsive.css" 200
+check_max_lines "crates/sigillum-daemon/ui/src/styles/14-console-c7.css" 250
+check_max_lines "crates/sigillum-daemon/ui/src/styles/15-lock-unconfirmed.css" 80
 check_max_lines "crates/sigillum-daemon/ui/src/styles/app.css" 80
 check_max_lines "docs/refactor-notes.md" 220
 
@@ -111,7 +128,6 @@ fi
 
 check_required_file "crates/sigillum-daemon/ui/src/app.js"
 check_required_file "crates/sigillum-daemon/ui/src/app.ts"
-check_required_file "crates/sigillum-daemon/ui/src/api.ts"
 check_required_file "crates/sigillum-daemon/src/service/evm/rpc.rs"
 check_required_file "crates/sigillum-daemon/src/service/evm/rpc/receipt.rs"
 check_required_file "crates/sigillum-daemon/src/service/profiles/resolution.rs"
@@ -133,6 +149,10 @@ check_required_file "crates/sigillum-api/src/response/queue/plan_step.rs"
 check_required_file "crates/sigillum-api/src/response/queue/receipt.rs"
 check_required_file "crates/sigillum-client/src/queue.rs"
 check_required_file "crates/sigillum-client/src/plans.rs"
+check_required_file "crates/sigillum-client/src/session.rs"
+check_required_file "crates/sigillum-client/src/session/establish.rs"
+check_required_file "crates/sigillum-client/src/session/establish/validate.rs"
+check_required_file "crates/sigillum-client/src/session/lock.rs"
 check_required_file "crates/sigillum-cli/src/daemon_api/queue.rs"
 check_required_file "crates/sigillum-cli/src/daemon_api/plans.rs"
 check_required_file "crates/sigillum-daemon/ui/src/styles.d.ts"
@@ -150,8 +170,15 @@ check_required_file "crates/sigillum-daemon/ui/src/styles/09-overview-auth.css"
 check_required_file "crates/sigillum-daemon/ui/src/styles/10-setup-wizard.css"
 check_required_file "crates/sigillum-daemon/ui/src/styles/11-guide-journey.css"
 check_required_file "crates/sigillum-daemon/ui/src/styles/12-modal-utilities-responsive.css"
+check_required_file "crates/sigillum-daemon/ui/src/styles/14-console-c7.css"
+check_required_file "crates/sigillum-daemon/ui/src/styles/15-lock-unconfirmed.css"
 check_required_file "crates/sigillum-daemon/ui/src/api/session.ts"
-check_required_file "crates/sigillum-daemon/ui/src/actions/session.ts"
+check_required_file "crates/sigillum-daemon/ui/src/api/sessionCoordinator.ts"
+check_required_file "crates/sigillum-daemon/ui/src/api/sessionRequest.ts"
+check_required_file "crates/sigillum-daemon/ui/src/api/sessionBoundary.ts"
+check_required_file "crates/sigillum-daemon/ui/src/api/sessionEstablishment.ts"
+check_required_file "crates/sigillum-daemon/ui/src/api/sessionFinalizers.ts"
+check_required_file "crates/sigillum-daemon/ui/src/api/lockUnconfirmed.ts"
 check_required_file "crates/sigillum-daemon/ui/src/actions/dispatcher.ts"
 check_required_file "crates/sigillum-daemon/ui/src/render/dom.ts"
 check_required_file "crates/sigillum-daemon/ui/src/render/forms.ts"
@@ -162,11 +189,23 @@ check_required_file "crates/sigillum-daemon/ui/src/views/inventory.ts"
 check_required_file "crates/sigillum-daemon/ui/src/views/wallets.ts"
 check_required_file "crates/sigillum-daemon/ui/src/views/queue.ts"
 check_required_file "crates/sigillum-daemon/ui/src/views/fido2.ts"
+check_required_file "crates/sigillum-daemon/ui/src/views/helpTips.ts"
+check_required_file "crates/sigillum-daemon/ui/src/views/lockUnconfirmed.ts"
 check_required_file "crates/sigillum-daemon/ui/src/views/operations.ts"
+check_required_file "crates/sigillum-daemon/ui/src/views/sessionPrivacy.ts"
 check_required_file "crates/sigillum-daemon/ui/src/views/shell.ts"
+check_required_file "crates/sigillum-daemon/ui/src/views/statusStrip.ts"
 check_required_file "crates/sigillum-daemon/ui/src/views/setup.ts"
+check_required_file "crates/sigillum-daemon/ui/src/views/workspace.ts"
 check_required_file "crates/sigillum-daemon/ui/test/ui-smoke.test.ts"
 check_required_file "docs/refactor-notes.md"
+
+if grep -RIn --include='*.ts' 'writeSessionToken' \
+  "${ROOT}/crates/sigillum-daemon/ui/src" | \
+  grep -Ev '/api/session\.ts:|/api/sessionCoordinator\.ts:'; then
+  echo "architecture check failed: session-token writes must flow through the validated session coordinator" >&2
+  exit 1
+fi
 
 check_no_inline_tests "crates/sigillum-api/src/request.rs"
 check_no_inline_tests "crates/sigillum-api/src/request/queue.rs"
@@ -177,6 +216,10 @@ check_no_inline_tests "crates/sigillum-api/src/response/queue/receipt.rs"
 check_no_inline_tests "crates/sigillum-client/src/lib.rs"
 check_no_inline_tests "crates/sigillum-client/src/queue.rs"
 check_no_inline_tests "crates/sigillum-client/src/plans.rs"
+check_no_inline_tests "crates/sigillum-client/src/session.rs"
+check_no_inline_tests "crates/sigillum-client/src/session/establish.rs"
+check_no_inline_tests "crates/sigillum-client/src/session/establish/validate.rs"
+check_no_inline_tests "crates/sigillum-client/src/session/lock.rs"
 
 check_contains "crates/sigillum-api/src/request.rs" '^mod queue;$' "queue request contracts must stay in crates/sigillum-api/src/request/queue.rs"
 check_contains "crates/sigillum-api/src/request.rs" '^pub use queue::\*;$' "queue request contract names must remain re-exported from request.rs"
@@ -186,6 +229,10 @@ check_contains "crates/sigillum-api/src/response.rs" '^pub use queue::\*;$' "que
 check_not_contains "crates/sigillum-api/src/response.rs" '^(pub struct|pub enum) Queue' "queue response DTOs must not move back into response.rs"
 check_contains "crates/sigillum-client/src/lib.rs" '^mod queue;$' "queue client methods must stay in crates/sigillum-client/src/queue.rs"
 check_not_contains "crates/sigillum-client/src/lib.rs" 'pub async fn (list_queue_jobs|enqueue_eth_stealth_transfer|enqueue_eth_stealth_erc20_transfer|enqueue_eth_stealth_native_sweep|enqueue_eth_stealth_erc20_sweep|process_queue)' "queue client methods must not move back into sigillum-client/src/lib.rs"
+check_contains "crates/sigillum-client/src/lib.rs" '^mod session;$' "session client methods must stay in crates/sigillum-client/src/session.rs"
+check_contains "crates/sigillum-client/src/session.rs" '^mod establish;$' "session-establishing client methods must stay in crates/sigillum-client/src/session/establish.rs"
+check_contains "crates/sigillum-client/src/session.rs" '^mod lock;$' "Lock boundary methods must stay in crates/sigillum-client/src/session/lock.rs"
+check_contains "crates/sigillum-client/src/session/establish.rs" '^mod validate;$' "session response validation must stay in crates/sigillum-client/src/session/establish/validate.rs"
 check_contains "crates/sigillum-cli/src/daemon_api.rs" '^mod queue;$' "queue CLI API commands must stay in crates/sigillum-cli/src/daemon_api/queue.rs"
 check_contains "crates/sigillum-cli/src/daemon_api.rs" '"queue"[[:space:]]*=>[[:space:]]*queue::cmd_api_queue\(args\),' "daemon API queue dispatch must route through the queue module"
 check_not_contains "crates/sigillum-cli/src/daemon_api.rs" '^fn cmd_api_queue\(' "queue CLI command handling must not move back into daemon_api.rs"

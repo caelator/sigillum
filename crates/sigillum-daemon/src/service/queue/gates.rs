@@ -6,6 +6,8 @@ use crate::service::{ServiceError, ServiceResult, SigillumService};
 
 pub(crate) const EXECUTION_PAUSED_REASON: &str =
     "execution_paused: queue execution is paused by the operator kill switch";
+pub(crate) const DAEMON_LOCKING_REASON: &str =
+    "daemon_locking: queue drain stopped because daemon Lock is in progress";
 
 #[allow(dead_code)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

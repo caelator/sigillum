@@ -2,6 +2,46 @@ export const REFRESH_INTERVAL_MS = 5000;
 
 export type RefreshMetaState = "busy" | "error" | "live" | "paused";
 
+export interface RefreshRunner {
+  queue: () => void;
+  run: () => Promise<void>;
+}
+
+export function createRefreshRunner(
+  cycle: () => Promise<void>,
+  onIdle: () => void,
+): RefreshRunner {
+  let queued = false;
+  let active: Promise<void> | null = null;
+
+  async function drain(): Promise<void> {
+    try {
+      do {
+        queued = false;
+        await cycle();
+      } while (queued);
+    } finally {
+      // Relinquish ownership before this promise settles. A caller queued in
+      // the promise-resolution microtask must start a new drain instead of
+      // attaching to a completed-but-still-registered single flight.
+      active = null;
+      onIdle();
+    }
+  }
+
+  function queue(): void {
+    queued = true;
+  }
+
+  function run(): Promise<void> {
+    queue();
+    active ??= drain();
+    return active;
+  }
+
+  return { queue, run };
+}
+
 let lastRefreshAt: Date | null = null;
 let refreshTimer: ReturnType<typeof setTimeout> | null = null;
 

@@ -256,12 +256,13 @@ impl SigillumService {
         })
     }
 
-    pub(crate) fn eth_stealth_sign(
+    pub(crate) async fn eth_stealth_sign(
         &self,
         token: Option<&str>,
         body: EthStealthSignRequest,
     ) -> ServiceResult<EthStealthSignResponse> {
         let token = self.require_session(token)?;
+        let session_context = self.capture_session_operation_context(Some(token))?;
         self.authorize_transaction_policy(TransactionPolicyCheck {
             kind: TransactionPolicyKind::RawDigest,
             destination_address: None,
@@ -273,6 +274,7 @@ impl SigillumService {
         let stealth_address = body.stealth.stealth_address;
         let ephemeral_public_key_hex = body.stealth.ephemeral_public_key_hex;
         let digest = Zeroizing::new(decode_fixed_hex::<32>(&body.digest_hex, "digest")?);
+        let _guard = self.acquire_session_operation(&session_context).await?;
 
         let (signature, compartment_id) =
             self.with_active_vault(token, |vault, compartment_id| {
@@ -310,12 +312,13 @@ impl SigillumService {
         })
     }
 
-    pub(crate) fn eth_stealth_sign_transfer(
+    pub(crate) async fn eth_stealth_sign_transfer(
         &self,
         token: Option<&str>,
         body: EthStealthSignTransferRequest,
     ) -> ServiceResult<EthSignedTransactionResponse> {
         let token = self.require_session(token)?;
+        let session_context = self.capture_session_operation_context(Some(token))?;
         self.authorize_transaction_policy(TransactionPolicyCheck {
             kind: TransactionPolicyKind::RoutedTransfer,
             destination_address: Some(&body.destination_address),
@@ -329,6 +332,7 @@ impl SigillumService {
         let max_fee_per_gas =
             decode_quantity_hex(&body.fees.max_fee_per_gas_hex).map_err(map_wallet_error)?;
         let value = decode_quantity_hex(&body.value_wei_hex).map_err(map_wallet_error)?;
+        let _guard = self.acquire_session_operation(&session_context).await?;
 
         let (signed, compartment_id) = self.with_active_vault(token, |vault, compartment_id| {
             let master_key = vault
@@ -380,12 +384,13 @@ impl SigillumService {
         })
     }
 
-    pub(crate) fn eth_stealth_sign_erc20_transfer(
+    pub(crate) async fn eth_stealth_sign_erc20_transfer(
         &self,
         token: Option<&str>,
         body: EthStealthSignErc20TransferRequest,
     ) -> ServiceResult<EthSignedTransactionResponse> {
         let token = self.require_session(token)?;
+        let session_context = self.capture_session_operation_context(Some(token))?;
         self.authorize_transaction_policy(TransactionPolicyCheck {
             kind: TransactionPolicyKind::RoutedTransfer,
             destination_address: Some(&body.recipient_address),
@@ -399,6 +404,7 @@ impl SigillumService {
         let max_fee_per_gas =
             decode_quantity_hex(&body.fees.max_fee_per_gas_hex).map_err(map_wallet_error)?;
         let amount = decode_quantity_hex(&body.amount_hex).map_err(map_wallet_error)?;
+        let _guard = self.acquire_session_operation(&session_context).await?;
 
         let (signed, compartment_id) = self.with_active_vault(token, |vault, compartment_id| {
             let master_key = vault
@@ -508,8 +514,16 @@ mod tests {
         }
     }
 
-    #[test]
-    fn export_generate_check_and_sign_roundtrip() {
+    fn digest_sign_request(payment: &EthStealthGenerateResponse) -> EthStealthSignRequest {
+        EthStealthSignRequest {
+            wallet: "payments".into(),
+            stealth: payment_ref(payment),
+            digest_hex: hex::encode([9u8; 32]),
+        }
+    }
+
+    #[tokio::test]
+    async fn export_generate_check_and_sign_roundtrip() {
         let dir = TempDir::new().unwrap();
         let state =
             Arc::new(AppState::new(dir.path().to_path_buf()).expect("app state should initialize"));
@@ -562,6 +576,7 @@ mod tests {
                     digest_hex: hex::encode([9u8; 32]),
                 },
             )
+            .await
             .unwrap();
         assert_eq!(signature.stealth_address, payment.stealth_address);
         assert_eq!(hex::decode(signature.signature_hex).unwrap().len(), 65);
@@ -587,6 +602,7 @@ mod tests {
                     value_wei_hex: "0xde0b6b3a7640000".into(),
                 },
             )
+            .await
             .unwrap();
         assert_eq!(signed_transfer.kind, "eth-transfer");
         assert!(signed_transfer.raw_transaction_hex.starts_with("02"));
@@ -613,13 +629,121 @@ mod tests {
                     amount_hex: "0x0f4240".into(),
                 },
             )
+            .await
             .unwrap();
         assert_eq!(signed_erc20.kind, "erc20-transfer");
         assert!(signed_erc20.data_hex.starts_with("a9059cbb"));
     }
 
-    #[test]
-    fn enabled_policy_rejects_raw_digest_signing_by_default() {
+    #[tokio::test]
+    async fn queued_signature_rejects_token_rotated_by_compartment_switch() {
+        let dir = TempDir::new().unwrap();
+        let state =
+            Arc::new(AppState::new(dir.path().to_path_buf()).expect("app state should initialize"));
+        state.unlock_compartment(0, [7u8; 32], meta(0, 1, "daily"));
+        state.unlock_compartment(1, [8u8; 32], meta(1, 2, "secure"));
+        let session = state.create_session(Some(0));
+        let service = SigillumService::new(state.clone());
+        let exported = service
+            .eth_stealth_export(
+                Some(&session),
+                EthStealthExportRequest {
+                    wallet: "payments".into(),
+                    short_name: Some("eth".into()),
+                },
+            )
+            .unwrap();
+        let payment = service
+            .eth_stealth_generate(EthStealthGenerateRequest {
+                stealth_meta_address: exported.stealth_meta_address,
+                ephemeral_private_key_hex: Some(hex::encode([3u8; 32])),
+            })
+            .unwrap();
+
+        let held_operation = state.operation_guard().await;
+        let mut switch = Box::pin(service.switch_compartment(
+            Some(&session),
+            sigillum_api::CompartmentSwitchRequest { id: 1 },
+        ));
+        tokio::select! {
+            biased;
+            result = &mut switch => panic!("switch must wait for the operation mutex: {result:?}"),
+            () = tokio::task::yield_now() => {}
+        }
+
+        let mut sign =
+            Box::pin(service.eth_stealth_sign(Some(&session), digest_sign_request(&payment)));
+        tokio::select! {
+            biased;
+            result = &mut sign => panic!("signature must wait for the operation mutex: {result:?}"),
+            () = tokio::task::yield_now() => {}
+        }
+
+        drop(held_operation);
+        let switched = switch.await.unwrap();
+        let sign_error = sign
+            .await
+            .expect_err("old-token signature must fail after token rotation");
+        assert_eq!(sign_error.status(), axum::http::StatusCode::UNAUTHORIZED);
+        assert!(!state.verify_token(&session));
+        assert_eq!(
+            state.active_compartment_id_for(&switched.session_token),
+            Some(1)
+        );
+    }
+
+    #[tokio::test]
+    async fn lock_latch_preempts_signature_waiting_for_operation_mutex() {
+        let dir = TempDir::new().unwrap();
+        let state =
+            Arc::new(AppState::new(dir.path().to_path_buf()).expect("app state should initialize"));
+        state.unlock_compartment(0, [7u8; 32], meta(0, 1, "default"));
+        let session = state.create_session(Some(0));
+        let service = SigillumService::new(state.clone());
+        let exported = service
+            .eth_stealth_export(
+                Some(&session),
+                EthStealthExportRequest {
+                    wallet: "payments".into(),
+                    short_name: Some("eth".into()),
+                },
+            )
+            .unwrap();
+        let payment = service
+            .eth_stealth_generate(EthStealthGenerateRequest {
+                stealth_meta_address: exported.stealth_meta_address,
+                ephemeral_private_key_hex: Some(hex::encode([3u8; 32])),
+            })
+            .unwrap();
+
+        let held_operation = state.operation_guard().await;
+        let mut sign =
+            Box::pin(service.eth_stealth_sign(Some(&session), digest_sign_request(&payment)));
+        tokio::select! {
+            biased;
+            result = &mut sign => panic!("signature must wait for the operation mutex: {result:?}"),
+            () = tokio::task::yield_now() => {}
+        }
+
+        let mut lock = Box::pin(service.lock_all(Some(&session)));
+        tokio::select! {
+            biased;
+            result = &mut lock => panic!("lock must wait for the operation mutex: {result:?}"),
+            () = tokio::task::yield_now() => {}
+        }
+        assert!(state.is_locking());
+
+        drop(held_operation);
+        let sign_error = sign
+            .await
+            .expect_err("latched lock must preempt a queued signature");
+        assert_eq!(sign_error.status(), axum::http::StatusCode::LOCKED);
+        assert_eq!(lock.await.unwrap().status, "locked");
+        assert!(!state.is_unlocked());
+    }
+
+    #[tokio::test]
+    async fn enabled_policy_rejects_raw_digest_signing_by_default() {
         let dir = TempDir::new().unwrap();
         let state =
             Arc::new(AppState::new(dir.path().to_path_buf()).expect("app state should initialize"));
@@ -685,6 +809,7 @@ mod tests {
                     digest_hex: hex::encode([9u8; 32]),
                 },
             )
+            .await
             .unwrap_err();
 
         assert_eq!(error.message(), "policy_violation");

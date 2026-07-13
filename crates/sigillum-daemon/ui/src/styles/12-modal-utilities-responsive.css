@@ -57,6 +57,17 @@ textarea.mono {
   background-color: #4a5670;
 }
 
+/* Keep programmatically focused destination cards below the sticky topbar. */
+.card[data-workspace-section] {
+  scroll-margin-top: 80px;
+}
+
+@media (max-width: 1240px) {
+  .card[data-workspace-section] {
+    scroll-margin-top: 132px;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
@@ -150,6 +161,10 @@ textarea.mono {
 }
 
 @media (max-width: 600px) {
+  .card[data-workspace-section] {
+    scroll-margin-top: 232px;
+  }
+
   main {
     padding: var(--space-4);
   }

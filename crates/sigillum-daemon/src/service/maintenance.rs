@@ -19,8 +19,11 @@ impl SigillumService {
         body: MaintenanceRunRequest,
     ) -> ServiceResult<MaintenanceRunResponse> {
         let token = self.require_session(token)?;
-        let automation = self.run_treasury_automation(token).await?;
-        let _guard = self.state.operation_guard().await;
+        let session_context = self.capture_session_operation_context(Some(token))?;
+        let automation = self
+            .run_treasury_automation(token, &session_context)
+            .await?;
+        let _guard = self.acquire_session_operation(&session_context).await?;
         let mut deposits =
             crate::deposits::load_deposits(&self.state.base_dir).map_err(|error| {
                 super::ServiceError::internal(format!("Failed to load deposits: {error}"))

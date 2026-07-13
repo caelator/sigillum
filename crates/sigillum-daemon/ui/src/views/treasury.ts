@@ -145,6 +145,12 @@ export interface TreasuryActionsDeps {
 
 export function createTreasuryActions(deps: TreasuryActionsDeps) {
   let treasuryParties: Counterparty[] = [];
+  let policyFormFingerprint: string | null = null;
+
+  function resetSession(): void {
+    treasuryParties = [];
+    policyFormFingerprint = null;
+  }
 
   function partyNameById(id: string | null | undefined): string | undefined {
     if (!id) return undefined;
@@ -449,8 +455,6 @@ export function createTreasuryActions(deps: TreasuryActionsDeps) {
   function input(id: string): HTMLInputElement | null {
     return document.getElementById(id) as HTMLInputElement | null;
   }
-
-  let policyFormFingerprint: string | null = null;
 
   function prefillTreasuryPolicyForm(policy: TreasuryPolicy | null): void {
     const fingerprint = JSON.stringify(
@@ -1068,6 +1072,7 @@ export function createTreasuryActions(deps: TreasuryActionsDeps) {
   }
 
   return {
+    resetSession,
     renderTreasuryOverview,
     renderTreasuryPolicy,
     renderTreasuryReceiveAllocations,

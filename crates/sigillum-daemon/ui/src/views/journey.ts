@@ -3,10 +3,10 @@ import { esc, escAttr } from "../render/html";
 
 /**
  * Guided treasury journey: four operator goals, computed from live daemon
- * state on every refresh, plus the always-visible topbar status strip.
+ * state on every refresh, plus compact metrics on the Overview destination.
  *
  * The journey card answers "what do I do next?"; the status strip answers
- * "is anything wrong right now?" — both from the same five GETs.
+ * "what is configured right now?" — both from the same five GETs.
  */
 
 export interface JourneyState {
@@ -70,39 +70,12 @@ interface StatusChipSpec {
   tone: "neutral" | "warn" | "danger";
 }
 
-export interface StripSelfCheckSummary {
-  status: string;
-  failCount: number;
-  warnCount: number;
-}
-
-function statusChips(
-  state: JourneyState,
-  selfCheck?: StripSelfCheckSummary | null,
-): StatusChipSpec[] {
-  const chips = baseStatusChips(state);
-  if (selfCheck) {
-    chips.push({
-      value: selfCheck.failCount + selfCheck.warnCount,
-      label: "Self-check issues",
-      targetCard: "diagCard",
-      tone:
-        selfCheck.status === "fail"
-          ? "danger"
-          : selfCheck.status === "warn"
-            ? "warn"
-            : "neutral",
-    });
-  }
-  return chips;
-}
-
 function baseStatusChips(state: JourneyState): StatusChipSpec[] {
   return [
     {
       value: state.providerCount,
       label: "Providers",
-      targetCard: "walletManagerCard",
+      targetCard: state.providerCount === 0 ? "walletManagerCard" : "profilesCard",
       tone: state.providerCount === 0 ? "warn" : "neutral",
     },
     {
@@ -120,7 +93,7 @@ function baseStatusChips(state: JourneyState): StatusChipSpec[] {
     {
       value: state.reviewNeededCount,
       label: "Review needed",
-      targetCard: "treasuryCard",
+      targetCard: "treasuryOverviewCard",
       tone: state.reviewNeededCount > 0 ? "danger" : "neutral",
     },
   ];
@@ -133,12 +106,6 @@ export interface JourneyDeps {
   jumpToCard: (cardId: string) => void;
   /** Re-render the treasury card after a journey-triggered scan. */
   refreshTreasury: () => Promise<unknown> | unknown;
-  /**
-   * Throttled silent self-check (selfcheck.ts owns the TTL cache). The strip
-   * renders immediately without it, then re-renders when the summary lands —
-   * provider probes must never block the refresh cycle.
-   */
-  ensureSelfCheck?: () => Promise<StripSelfCheckSummary | null>;
 }
 
 export function createJourneyActions(deps: JourneyDeps) {
@@ -201,19 +168,10 @@ export function createJourneyActions(deps: JourneyDeps) {
     list.innerHTML = steps.map(renderJourneyStepRow).join("");
   }
 
-  let lastState: JourneyState | null = null;
-  let lastSelfCheck: StripSelfCheckSummary | null = null;
-
-  function renderStatusStrip(state: JourneyState): void {
-    const strip = document.getElementById("statusStrip");
-    if (!strip) return;
-    // The strip is workspace chrome: never show stale counts on the locked
-    // or setup screens (shell also clears it when leaving unlocked mode).
-    if (document.body.dataset.mode !== "unlocked") {
-      strip.innerHTML = "";
-      return;
-    }
-    strip.innerHTML = statusChips(state, lastSelfCheck)
+  function renderJourneyMetrics(state: JourneyState): void {
+    const metrics = document.getElementById("journeyMetrics");
+    if (!metrics) return;
+    metrics.innerHTML = baseStatusChips(state)
       .map((chip) => {
         const toneClass =
           chip.tone === "warn"
@@ -270,17 +228,8 @@ export function createJourneyActions(deps: JourneyDeps) {
             (overview.risk?.critical_findings || 0)
           : 0,
       };
-      lastState = state;
       renderJourneyCard(state);
-      renderStatusStrip(state);
-      // Ambient self-check: render the strip now, upgrade it when the
-      // (cached or fresh) summary resolves. Never blocks the refresh cycle.
-      if (deps.ensureSelfCheck) {
-        void deps.ensureSelfCheck().then((summary) => {
-          lastSelfCheck = summary;
-          if (lastState) renderStatusStrip(lastState);
-        });
-      }
+      renderJourneyMetrics(state);
     } catch (_) {}
   }
 

@@ -77,13 +77,14 @@ impl SigillumService {
         body: PassphraseRequest,
     ) -> ServiceResult<SnapshotExportResponse> {
         let _ = self.require_session(token)?;
+        let session_context = self.capture_session_operation_context(token)?;
         if !self.state.is_initialized() {
             return Err(ServiceError::not_found("Sigillum is not initialized."));
         }
         let passphrase = Zeroizing::new(body.passphrase);
         super::helpers::require_valid_passphrase(&passphrase)?;
 
-        let _guard = self.state.operation_guard().await;
+        let _guard = self.acquire_session_operation(&session_context).await?;
         let (snapshot, summary) =
             export_encrypted_snapshot(&self.state.base_dir, passphrase.as_str())
                 .map_err(|error| Self::snapshot_error("Snapshot export failed", error))?;
@@ -107,9 +108,12 @@ impl SigillumService {
         token: Option<&str>,
         body: SnapshotRestoreRequest,
     ) -> ServiceResult<SnapshotRestoreResponse> {
-        if self.state.is_initialized() {
+        let session_context = if self.state.is_initialized() {
             let _ = self.require_session(token)?;
-        }
+            Some(self.capture_session_operation_context(token)?)
+        } else {
+            None
+        };
 
         let passphrase = Zeroizing::new(body.passphrase);
         super::helpers::require_valid_passphrase(&passphrase)?;
@@ -118,7 +122,16 @@ impl SigillumService {
             ServiceError::bad_request(format!("Invalid snapshot encoding: {error}"))
         })?;
 
-        let _guard = self.state.operation_guard().await;
+        let _guard = if let Some(context) = session_context.as_ref() {
+            self.acquire_session_operation(context).await?
+        } else {
+            self.state.operation_guard().await
+        };
+        if session_context.is_none() && self.state.is_initialized() {
+            return Err(ServiceError::conflict(
+                "Sigillum was initialized while this restore was waiting.",
+            ));
+        }
         let journal = self.begin_operation(
             PendingOperationSpec::snapshot_restore(snapshot.len()),
             Some("vault".into()),

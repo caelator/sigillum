@@ -76,21 +76,19 @@ impl SigillumService {
             }
         }
 
-        // This is the final instruction before external network I/O. The
-        // latch is lock-free so a concurrent pause request can trip it while
-        // the drain still owns the operation mutex.
-        if !allow_submission || self.state.queue_execution_pause_latched() {
-            return Ok(if resume_existing_submission {
-                QueueExecution::SubmittedUnknown(
-                    "submission_held: preserving submitted_unknown until execution is permitted"
-                        .into(),
-                )
-            } else {
-                QueueExecution::Prepared {
-                    signed_raw_transaction_hex: raw.to_string(),
-                    transaction_hash_hex: transaction_hash_hex.to_string(),
-                }
-            });
+        // This is the final state-preserving check before the authoritative
+        // broadcast admission in `evm_broadcast_raw_transaction_for_provider`.
+        // A Lock that has already latched keeps fresh authority Prepared and
+        // preserves an existing submitted_unknown recovery state.
+        if !allow_submission
+            || self.state.queue_execution_pause_latched()
+            || self.state.is_locking()
+        {
+            return Ok(held_submission_outcome(
+                resume_existing_submission,
+                raw,
+                transaction_hash_hex,
+            ));
         }
 
         match self
@@ -123,6 +121,16 @@ impl SigillumService {
                     broadcast_transaction_hash_hex,
                 })
             }
+            // The preliminary state check above is intentionally not the
+            // authority: Lock may latch between it and the central admission
+            // seam. Admission denial proves the provider call never started,
+            // so retain fresh authority as Prepared instead of misclassifying
+            // it as a transport-unknown submission. A pre-existing unknown
+            // remains unknown because it may have crossed the boundary on an
+            // earlier attempt.
+            Err(error) if error.status() == axum::http::StatusCode::LOCKED => Ok(
+                held_submission_outcome(resume_existing_submission, raw, transaction_hash_hex),
+            ),
             Err(error) => {
                 self.record_queue_broadcast_failure(
                     token,
@@ -300,6 +308,23 @@ impl SigillumService {
                 session_fingerprint_hex: session_fingerprint_hex(token),
             },
         )
+    }
+}
+
+fn held_submission_outcome(
+    resume_existing_submission: bool,
+    raw: &str,
+    transaction_hash_hex: &str,
+) -> QueueExecution {
+    if resume_existing_submission {
+        QueueExecution::SubmittedUnknown(
+            "submission_held: preserving submitted_unknown until execution is permitted".into(),
+        )
+    } else {
+        QueueExecution::Prepared {
+            signed_raw_transaction_hex: raw.to_string(),
+            transaction_hash_hex: transaction_hash_hex.to_string(),
+        }
     }
 }
 
@@ -540,6 +565,36 @@ mod tests {
         let job = plan_job(WalletPlanStepAction::ClaimReward);
         assert!(matches!(
             classify_prepared_broadcast_failure(&job, "connection reset by peer"),
+            QueueExecution::SubmittedUnknown(_)
+        ));
+    }
+
+    #[test]
+    fn lock_admission_denial_preserves_fresh_prepared_but_not_prior_unknown_state() {
+        let mut fresh = plan_job(WalletPlanStepAction::SweepNative);
+        fresh.state = QUEUE_STATE_SUBMITTED_UNKNOWN.into();
+        fresh.receipt.broadcast_at_unix = Some(2);
+        let raw = fresh.receipt.signed_raw_transaction_hex.clone().unwrap();
+        let transaction_hash = fresh.transaction_hash_hex.clone().unwrap();
+        let mut tally = super::super::tally::QueueDrainTally::default();
+
+        super::super::outcomes::apply(
+            &mut fresh,
+            Ok(held_submission_outcome(false, &raw, &transaction_hash)),
+            3,
+            crate::policy::RuntimePolicy::default(),
+            &mut tally,
+        );
+        assert_eq!(fresh.state, super::super::QUEUE_STATE_PREPARED);
+        assert!(fresh.receipt.broadcast_at_unix.is_none());
+        assert!(fresh.broadcast_transaction_hash_hex.is_none());
+        assert_eq!(
+            fresh.receipt.signed_raw_transaction_hex.as_deref(),
+            Some(raw.as_str())
+        );
+
+        assert!(matches!(
+            held_submission_outcome(true, &raw, &transaction_hash),
             QueueExecution::SubmittedUnknown(_)
         ));
     }

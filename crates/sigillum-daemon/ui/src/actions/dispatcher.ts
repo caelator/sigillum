@@ -1,3 +1,5 @@
+import { isSessionContextChangedError } from "../api/session";
+
 export type UiAction = (...args: unknown[]) => unknown | Promise<unknown>;
 export type UiActionMap = Record<string, UiAction>;
 
@@ -50,6 +52,7 @@ export function dispatchDataAction(
 
   Promise.resolve(action(...collectActionArgs(actionEl)))
     .catch((error) => {
+      if (isSessionContextChangedError(error)) return;
       console.error("UI action failed:", actionName, error);
       options.toast("Action failed: " + actionName, "error");
     })

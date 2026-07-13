@@ -11,7 +11,13 @@
         <div class="logo-sub">Treasury console</div>
       </div>
     </div>
-    <nav id="sectionNav" class="section-nav hidden" aria-label="Workspace sections"></nav>
+    <nav id="sectionNav" class="section-nav hidden" aria-label="Workspace destinations">
+      <button type="button" class="nav-item" data-action="selectWorkspaceSection" data-arg0="overview">Overview</button>
+      <button type="button" class="nav-item" data-action="selectWorkspaceSection" data-arg0="receive">Receive</button>
+      <button type="button" class="nav-item" data-action="selectWorkspaceSection" data-arg0="portfolio">Portfolio</button>
+      <button type="button" class="nav-item" data-action="selectWorkspaceSection" data-arg0="move">Move</button>
+      <button type="button" class="nav-item" data-action="selectWorkspaceSection" data-arg0="vault">Vault</button>
+    </nav>
     <div class="sidebar-foot">
       <div id="compartmentBadge" class="compartment-badge hidden"></div>
       <div id="compSwitcher" class="comp-switcher hidden"></div>
@@ -29,7 +35,12 @@
         <h1 id="topbarTitle">Sigillum</h1>
         <p id="topbarSummary" class="topbar-summary">Local treasury daemon</p>
       </div>
-      <div id="statusStrip" class="status-strip" aria-label="Workspace health"></div>
+      <div id="statusStrip" class="status-strip hidden" aria-label="Workspace security status" aria-live="polite">
+        <span id="stripLockState" class="strip-status" data-state="locked">Locked</span>
+        <span id="stripCompartment" class="strip-status strip-compartment">No active compartment</span>
+        <button type="button" id="stripSelfCheck" class="strip-status strip-self-check" data-state="idle" data-action="journeyJump" data-arg0="selfCheckCard">Self-check unavailable</button>
+        <button type="button" id="stripLockNow" class="btn-danger btn-small" data-action="lock">Lock now</button>
+      </div>
       <div class="topbar-meta">
         <div id="refreshMeta" class="refresh-meta" data-state="busy">syncing...</div>
         <button class="btn-ghost btn-small" data-action="refreshWorkspace">Refresh</button>
@@ -39,7 +50,7 @@
     <main>
 
       <!-- Status / overview banner (focus headline in setup+locked, overview strip when unlocked) -->
-      <div class="card overview-card" id="statusCard">
+      <div class="card overview-card" id="statusCard" data-workspace-section="overview">
         <div class="overview-shell">
           <div class="overview-copy">
             <div class="eyebrow" id="statusEyebrow">Local vault daemon</div>
@@ -310,21 +321,21 @@
       <div class="card focus-card" id="authCard">
         <h2 id="authTitle">Unlock this local session</h2>
         <p class="helper-text" id="authLead">Unlock with the passphrase or hardware-key threshold you configured during setup. The session token stays only in this browser tab.</p>
-        <div id="unlockTabs" class="unlock-tabs hidden">
-          <button type="button" class="unlock-tab active" data-action="switchUnlockTab" data-arg0="passphrase">Passphrase</button>
-          <button type="button" class="unlock-tab" data-action="switchUnlockTab" data-arg0="fido2">Hardware Key</button>
+        <div id="unlockTabs" class="unlock-tabs hidden" role="tablist" aria-label="Unlock method">
+          <button type="button" id="unlockPassphraseTab" class="unlock-tab active" role="tab" aria-selected="true" aria-controls="unlockPassphrase" data-action="switchUnlockTab" data-arg0="passphrase">Passphrase</button>
+          <button type="button" id="unlockFido2Tab" class="unlock-tab" role="tab" aria-selected="false" aria-controls="unlockFido2" tabindex="-1" data-action="switchUnlockTab" data-arg0="fido2">Hardware Key</button>
         </div>
         <!-- Deniable passphrase unlock: just a password field, no hints -->
-        <div id="unlockPassphrase">
+        <div id="unlockPassphrase" role="tabpanel" aria-labelledby="unlockPassphraseTab">
           <div class="form-row">
             <input type="password" id="passphrase" placeholder="Enter vault passphrase" autofocus>
             <button class="btn-primary" id="unlockButton" data-action="unlock">Unlock vault</button>
           </div>
           <p class="field-error hidden" id="unlockError" role="alert"></p>
-          <p class="field-hint">This is the vault passphrase you chose during setup &mdash; not a wallet seed phrase. Create or import 12/24-word wallets in the Wallets section after unlocking.</p>
+          <p class="field-hint">This is the vault passphrase you chose during setup &mdash; not a wallet seed phrase. Create or import 12/24-word wallets in Portfolio after unlocking.</p>
         </div>
         <!-- Deniable FIDO2 unlock: optional PIN + number, no compartment hints -->
-        <div id="unlockFido2" class="hidden">
+        <div id="unlockFido2" class="hidden" role="tabpanel" aria-labelledby="unlockFido2Tab">
           <div class="form-row">
             <input type="password" id="fido2Pin" placeholder="Current hardware-key PIN (optional)">
             <input type="number" id="fido2TapCount" min="1" value="1" class="input-narrow" placeholder="Keys">
@@ -345,14 +356,14 @@
             <input type="text" id="authResetConfirm" placeholder="Type RESET LOCAL SIGILLUM DATA to start over">
             <button class="btn-danger" data-action="resetLocalData" data-arg0="authResetConfirm">Archive &amp; start fresh</button>
           </div>
-          <p class="card-note">Starting fresh moves the current data directory to a timestamped archive next to it &mdash; nothing is deleted &mdash; then returns to first-run setup, where you create a new vault and then create or import wallets in the Wallets section.</p>
+          <p class="card-note">Starting fresh moves the current data directory to a timestamped archive next to it &mdash; nothing is deleted &mdash; then returns to first-run setup, where you create a new vault and then create or import wallets in Portfolio.</p>
         </div>
       </div>
 
       <!-- ───────────────────────── Treasury ───────────────────────── -->
 
       <!-- Guided journey: four operator goals from empty vault to working treasury -->
-      <div class="card journey-card hidden" id="journeyCard" data-workspace-section="treasury">
+      <div class="card journey-card hidden" id="journeyCard" data-workspace-section="overview">
         <div class="card-kicker">Getting started</div>
         <div class="card-head">
           <h2>Treasury setup</h2>
@@ -361,11 +372,12 @@
           </div>
         </div>
         <p class="helper-text">Four steps take this machine from an empty vault to a working treasury. Finished steps stay checked.</p>
+        <div id="journeyMetrics" class="journey-metrics" aria-label="Treasury readiness metrics"></div>
         <p id="journeyComplete" class="text-meta hidden"></p>
         <div id="journeyList" class="journey-list" aria-live="polite"></div>
       </div>
 
-      <div class="card hidden" id="receivingCard" data-workspace-section="receiving">
+      <div class="card hidden" id="receivingCard" data-workspace-section="receive">
         <div class="card-kicker">Private receiving</div>
         <div class="card-head">
           <h2>Receiving</h2>
@@ -384,7 +396,7 @@
         <div id="receivingGroupList"></div>
       </div>
 
-      <div class="card hidden" id="treasuryCard" data-workspace-section="treasury">
+      <div class="card hidden" id="treasuryOverviewCard" data-workspace-section="portfolio">
         <div class="card-kicker">Where is the money</div>
         <div class="card-head">
           <h2>Treasury</h2>
@@ -411,11 +423,15 @@
         <div id="treasuryRoutingList"></div>
 
         <div class="section-divider"></div>
-        <div class="section-title">Risk And Plans</div>
+        <div class="section-title">Risk catalog and findings</div>
         <div id="treasuryRiskPlanList"></div>
+      </div>
 
-        <div class="section-divider"></div>
-        <div class="section-title">Treasury Policy</div>
+      <div class="card hidden" id="treasuryCard" data-workspace-section="move">
+        <div class="card-kicker">Guardrails before funds move</div>
+        <div class="card-head">
+          <h2>Movement policy</h2>
+        </div>
         <p class="helper-text">Constrain consolidation plans with an allow-list of destinations, native value caps, and a simulation requirement.</p>
         <div id="treasuryPolicyList"></div>
         <div class="form-row">
@@ -479,9 +495,13 @@
         </div>
         <p class="field-hint">Sweeps route to the hot address while its balance is below the floor; the target is the refill ceiling (floor must be &le; target). Defaults preserve the previous 1 ETH behavior.</p>
         <p class="field-hint">When enabled, consolidation plans may insert fund_gas steps that fund a source address's gas shortfall from the wallet's sponsor address (1.5x the dependent step's estimated gas, capped by the max top-up). Sigillum-generated top-ups run the same payer-linkage analysis as sweeps: funding different payers' addresses from one sponsor always warns and is hard-blocked when cross-party linkage blocking is on. MANUAL gas funding remains operator discipline.</p>
+      </div>
 
-        <div class="section-divider"></div>
-        <div class="section-title">Receive Addresses</div>
+      <div class="card hidden" id="treasuryReceivingCard" data-workspace-section="receive">
+        <div class="card-kicker">Dedicated receiving</div>
+        <div class="card-head">
+          <h2>Addresses and counterparties</h2>
+        </div>
         <p class="helper-text">Allocate a dedicated receive address per wallet profile and purpose; rotated addresses stay tracked as retired.</p>
         <div id="treasuryReceiveList"></div>
         <div class="form-row">
@@ -505,7 +525,7 @@
         </div>
       </div>
 
-      <div class="card hidden" id="nextStepCard" data-workspace-section="treasury">
+      <div class="card hidden" id="nextStepCard" data-workspace-section="overview">
         <div class="card-head">
           <h2 id="nextStepTitle">Finish the essentials before deeper operator work</h2>
         </div>
@@ -520,7 +540,7 @@
 
       <!-- ───────────────────────── Wallets ───────────────────────── -->
 
-      <div class="card hidden" id="walletManagerCard" data-workspace-section="wallets">
+      <div class="card hidden" id="walletManagerCard" data-workspace-section="portfolio">
         <div class="card-kicker">Keys and accounts</div>
         <div class="card-head">
           <h2>Wallets</h2>
@@ -651,7 +671,7 @@
         </div>
       </div>
 
-      <div class="card hidden" id="profilesCard" data-workspace-section="wallets">
+      <div class="card hidden" id="profilesCard" data-workspace-section="portfolio">
         <div class="card-head">
           <h2>Providers and stealth wallets</h2>
         </div>
@@ -703,7 +723,7 @@
         <div id="walletProfileList"></div>
       </div>
 
-      <div class="card hidden" id="xpubCard" data-workspace-section="wallets">
+      <div class="card hidden" id="xpubCard" data-workspace-section="portfolio">
         <div class="card-head">
           <h2>Receive wallets</h2>
         </div>
@@ -785,7 +805,7 @@
 
       <!-- ──────────────────────── Operations ─────────────────────── -->
 
-      <div class="card hidden" id="inventoryCard" data-workspace-section="operations">
+      <div class="card hidden" id="inventoryCard" data-workspace-section="portfolio">
         <div class="card-kicker">What you own, discovered locally</div>
         <div class="card-head">
           <h2>Wallet inventory</h2>
@@ -960,6 +980,18 @@
         </div>
         <div id="riskCatalogList"></div>
         <div class="form-row">
+          <button class="btn-ghost" data-action="loadRiskFindings">Refresh Risks</button>
+        </div>
+        <div id="riskFindingList"></div>
+      </div>
+
+      <div class="card hidden" id="consolidationCard" data-workspace-section="move">
+        <div class="card-kicker">Reviewed movement</div>
+        <div class="card-head">
+          <h2>Consolidation plans</h2>
+        </div>
+        <p class="helper-text">Choose routing, generate a reviewable plan, simulate it, and approve individual steps before anything can enter the queue.</p>
+        <div class="form-row">
           <label class="checkbox-row" for="planRoutingStrategy">Routing</label>
           <select id="planRoutingStrategy" class="input-wide">
             <option value="single">Single destination</option>
@@ -971,14 +1003,12 @@
         <div class="form-row">
           <input type="text" id="planDestinationAddress" placeholder="Consolidation destination address">
           <input type="number" id="planChainId" placeholder="Plan chain ID (optional)" class="input-mid">
-          <button class="btn-ghost" data-action="loadRiskFindings">Refresh Risks</button>
           <button class="btn-primary" data-action="generateConsolidationPlan">Generate Plan</button>
         </div>
-        <div id="riskFindingList"></div>
         <div id="consolidationPlanList"></div>
       </div>
 
-      <div class="card hidden" id="depositsCard" data-workspace-section="operations">
+      <div class="card hidden" id="depositsCard" data-workspace-section="receive">
         <div class="card-kicker">Money coming in</div>
         <div class="card-head">
           <h2>Deposits</h2>
@@ -1060,7 +1090,7 @@
         <div id="depositList"></div>
       </div>
 
-      <div class="card hidden" id="queueCard" data-workspace-section="operations">
+      <div class="card hidden" id="queueCard" data-workspace-section="move">
         <div class="card-kicker">Work waiting to run</div>
         <div class="card-head">
           <h2>Queue</h2>
@@ -1081,7 +1111,7 @@
         <div id="queueList"></div>
       </div>
 
-      <div class="card hidden" id="maintenanceCard" data-workspace-section="operations">
+      <div class="card hidden" id="maintenanceCard" data-workspace-section="move">
         <div class="card-head">
           <h2>Maintenance</h2>
         </div>
@@ -1100,7 +1130,7 @@
 
       <!-- ───────────────────────── Secrets ───────────────────────── -->
 
-      <div class="card" id="secretsCard" data-workspace-section="secrets">
+      <div class="card hidden" id="secretsCard" data-workspace-section="vault">
         <div class="card-head">
           <h2>Encrypted secrets</h2>
         </div>
@@ -1118,7 +1148,7 @@
         </div>
       </div>
 
-      <div class="card" id="apiKeysCard" data-workspace-section="secrets">
+      <div class="card hidden" id="apiKeysCard" data-workspace-section="vault">
         <div class="card-head">
           <h2>Connection keys</h2>
         </div>
@@ -1131,7 +1161,7 @@
         <ul class="key-list" id="apiKeyList"></ul>
       </div>
 
-      <div class="card hidden" id="pushCard" data-workspace-section="secrets">
+      <div class="card hidden" id="pushCard" data-workspace-section="vault">
         <div class="card-head">
           <h2>Move a secret between compartments</h2>
         </div>
@@ -1153,7 +1183,7 @@
         </div>
       </div>
 
-      <div class="card hidden" id="compartmentCard" data-workspace-section="secrets">
+      <div class="card hidden" id="compartmentCard" data-workspace-section="vault">
         <div class="card-head">
           <h2>Unlocked compartments <span class="help-tip" tabindex="0" data-tip="An isolated vault space with its own unlock requirements.">?</span></h2>
         </div>
@@ -1163,7 +1193,7 @@
 
       <!-- ───────────────────────── Security ──────────────────────── -->
 
-      <div class="card hidden" id="fido2Card" data-workspace-section="security">
+      <div class="card hidden" id="fido2Card" data-workspace-section="vault">
         <div class="card-head">
           <h2>Hardware keys</h2>
         </div>
@@ -1197,7 +1227,7 @@
         <div id="fido2KeyListSection" class="mt-14"></div>
       </div>
 
-      <div class="card hidden" id="backupCard" data-workspace-section="security">
+      <div class="card hidden" id="backupCard" data-workspace-section="vault">
         <div class="card-head">
           <h2>Encrypted snapshots</h2>
         </div>
@@ -1221,7 +1251,7 @@
         </div>
       </div>
 
-      <div class="card hidden" id="auditCard" data-workspace-section="security">
+      <div class="card hidden" id="auditCard" data-workspace-section="overview">
         <div class="card-kicker">What happened, and when</div>
         <div class="card-head">
           <h2>Audit trail</h2>
@@ -1232,50 +1262,54 @@
 
       <!-- ────────────────────────── System ───────────────────────── -->
 
-      <div class="card hidden" id="diagCard" data-workspace-section="system">
+      <div class="card hidden" id="diagCard" data-workspace-section="vault">
         <div class="card-head">
           <h2>Diagnostics</h2>
-          <div class="card-head-actions">
-            <button class="btn-ghost btn-small" id="selfCheckRunDiag" data-action="runSelfCheck">Run Self-Check</button>
-          </div>
         </div>
         <p class="helper-text">Low-level daemon health, queue, audit, and runtime policy details.</p>
         <div class="stats stat-tiles" id="diagGrid">
           <div class="stat"><div class="value">-</div><div class="label">Version</div></div>
         </div>
+      </div>
 
-        <div class="section-divider"></div>
-        <div class="section-title">Self-Check</div>
+      <div class="card hidden" id="selfCheckCard" data-workspace-section="overview">
+        <div class="card-kicker">Live configuration proof</div>
+        <div class="card-head">
+          <h2>Self-check</h2>
+          <div class="card-head-actions">
+            <button class="btn-ghost btn-small" id="selfCheckRunDiag" data-action="runSelfCheck">Run Self-Check</button>
+          </div>
+        </div>
         <p class="helper-text">Verifies every configured input live: providers answer RPC on the right chain, wallets re-derive, policy and allocations are internally consistent.</p>
         <p class="text-meta" id="selfCheckSummary" aria-live="polite"></p>
         <div id="selfCheckList"><p class="empty-state">Not run yet in this session. <button type="button" class="btn-ghost empty-state-action" data-action="runSelfCheck">Run Self-Check</button></p></div>
       </div>
 
-      <div class="card hidden" id="guideCard" data-workspace-section="system">
+      <div class="card hidden" id="guideCard" data-workspace-section="overview">
         <div class="card-head">
           <h2>What Sigillum does today</h2>
         </div>
-        <p class="helper-text">A local vault plus an Ethereum operator console. Treat the workspace sections as distinct jobs, not one scrolling checklist.</p>
+        <p class="helper-text">A local vault plus an Ethereum operator console. Each destination answers one operator question instead of exposing implementation buckets.</p>
         <div class="guide-grid">
           <div class="guide-block">
-            <div class="guide-block-title">1. Treasury</div>
-            <p>Watch tracked balances, routing readiness, policy posture, and receive-address allocation in one roll-up.</p>
+            <div class="guide-block-title">1. Overview</div>
+            <p>Confirm lock state, active compartment, self-check results, recommended work, and recent audit activity.</p>
           </div>
           <div class="guide-block">
-            <div class="guide-block-title">2. Wallets</div>
-            <p>Save provider profiles, then choose a wallet family: stealth wallets for tracked deposits and queue work, or seed/xpub receive wallets for address visibility.</p>
+            <div class="guide-block-title">2. Receive</div>
+            <p>Allocate dedicated addresses, keep counterparties separate, rotate old addresses, and monitor private deposits.</p>
           </div>
           <div class="guide-block">
-            <div class="guide-block-title">3. Operations</div>
-            <p>Run inventory discovery, tracked deposits, queue processing, and maintenance cycles. Operator workflows currently run on stealth wallets.</p>
+            <div class="guide-block-title">3. Portfolio</div>
+            <p>Manage wallets and providers, discover holdings, maintain watch lists, and review risk findings.</p>
           </div>
           <div class="guide-block">
-            <div class="guide-block-title">4. Secrets</div>
-            <p>Store connection keys and encrypted secrets, organize compartments, and move values between compartments when needed.</p>
+            <div class="guide-block-title">4. Move</div>
+            <p>Set fail-closed policy, generate and review consolidation plans, then operate the queue and maintenance cycle.</p>
           </div>
           <div class="guide-block">
-            <div class="guide-block-title">5. Security</div>
-            <p>Manage hardware keys, export encrypted snapshots, and inspect the audit trail before anything sensitive.</p>
+            <div class="guide-block-title">5. Vault</div>
+            <p>Protect secrets and connection keys, move values between compartments, manage hardware keys, snapshots, and diagnostics.</p>
           </div>
         </div>
         <div class="section-divider"></div>

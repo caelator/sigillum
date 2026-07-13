@@ -34,12 +34,12 @@ use sigillum_api::AuditEvent;
 use sigillum_core::{FileVault, VaultConfig, VaultLifecycle, recover_snapshot_restore};
 use sigillum_fido2::Fido2Manager;
 use sigillum_fido2::config::CompartmentMeta;
-use subtle::ConstantTimeEq;
 use tokio::sync::Mutex as AsyncMutex;
 use zeroize::Zeroizing;
 
 mod audit_keys;
 mod recovery_files;
+mod session_registry;
 #[cfg(test)]
 mod tests;
 
@@ -51,6 +51,8 @@ use crate::audit_db::AuditQuery;
 use crate::audit_log::{AuditEventSpec, StoredAuditEvent};
 use crate::operations::{OperationGuard, PendingOperationSpec, list_pending_operations};
 use crate::policy::RuntimePolicy;
+pub(crate) use session_registry::LockTokenAuthorization;
+use session_registry::SessionRegistry;
 
 /// A fail-closed wrapper around `std::sync::Mutex<T>`.
 ///
@@ -99,9 +101,6 @@ impl<T: fmt::Debug> fmt::Debug for ResilientMutex<T> {
     }
 }
 
-/// Maximum number of concurrent sessions before the oldest is evicted.
-const MAX_SESSIONS: usize = 64;
-
 /// Session time-to-live. Sessions older than this are considered expired.
 const SESSION_TTL: Duration = Duration::from_secs(24 * 60 * 60);
 
@@ -121,28 +120,6 @@ struct BiometricChallengeState {
     id: [u8; 16],
     nonce: [u8; 32],
     issued_at: Instant,
-}
-
-#[derive(Clone, Debug)]
-struct SessionState {
-    active_compartment_id: Option<usize>,
-    created_at: Instant,
-    expires_at: Instant,
-    last_activity: Instant,
-    scopes: Option<Vec<String>>,
-}
-
-impl Default for SessionState {
-    fn default() -> Self {
-        let now = Instant::now();
-        Self {
-            active_compartment_id: None,
-            created_at: now,
-            expires_at: now + SESSION_TTL,
-            last_activity: now,
-            scopes: None,
-        }
-    }
 }
 
 /// Tracks failed authentication attempts for rate limiting.
@@ -175,7 +152,7 @@ pub struct AppState {
     /// Compartments that have been unlocked and verified — comp_id → meta.
     unlocked: ResilientMutex<HashMap<usize, CompartmentMeta>>,
     /// Per-session state keyed by bearer token.
-    sessions: ResilientMutex<HashMap<String, SessionState>>,
+    sessions: ResilientMutex<SessionRegistry>,
     /// Serializes state-changing operations that touch on-disk data.
     operation_lock: AsyncMutex<()>,
     /// Preemptive queue kill-switch latch. This deliberately lives outside
@@ -194,9 +171,24 @@ pub struct AppState {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum LockState {
+enum LockPhase {
     Ready,
     Locking,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct LockState {
+    phase: LockPhase,
+    generation: u64,
+}
+
+impl Default for LockState {
+    fn default() -> Self {
+        Self {
+            phase: LockPhase::Ready,
+            generation: 0,
+        }
+    }
 }
 
 impl AppState {
@@ -228,22 +220,16 @@ impl AppState {
             runtime_policy: RuntimePolicy::from_env(),
             vaults: ResilientMutex::new(HashMap::new()),
             unlocked: ResilientMutex::new(HashMap::new()),
-            sessions: ResilientMutex::new(HashMap::new()),
+            sessions: ResilientMutex::new(SessionRegistry::default()),
             operation_lock: AsyncMutex::new(()),
             queue_execution_paused: AtomicBool::new(false),
             unlock_throttle: ResilientMutex::new(UnlockThrottle::default()),
             startup_recovery: ResilientMutex::new(StartupRecoverySummary::default()),
             startup_ready: ResilientMutex::new(false),
             startup_error: ResilientMutex::new(None),
-            lock_state: ResilientMutex::new(LockState::Ready),
+            lock_state: ResilientMutex::new(LockState::default()),
             biometric_challenges: ResilientMutex::new(VecDeque::new()),
         })
-    }
-
-    fn token_matches(stored: &str, candidate: &str) -> bool {
-        let a = stored.as_bytes();
-        let b = candidate.as_bytes();
-        a.len() == b.len() && a.ct_eq(b).into()
     }
 
     #[must_use]
@@ -281,16 +267,6 @@ impl AppState {
         *self.startup_error.lock() = Some(error.into());
     }
 
-    fn session_key_for(
-        sessions: &HashMap<String, SessionState>,
-        candidate: &str,
-    ) -> Option<String> {
-        sessions
-            .keys()
-            .find(|stored| Self::token_matches(stored, candidate))
-            .cloned()
-    }
-
     #[must_use]
     pub fn default_active_compartment_id(&self) -> Option<usize> {
         self.unlocked
@@ -303,14 +279,12 @@ impl AppState {
     /// Currently active compartment id for a session.
     #[must_use]
     pub fn active_compartment_id_for(&self, token: &str) -> Option<usize> {
-        let active = {
-            let sessions = self.sessions.lock();
-            sessions
-                .iter()
-                .find(|(stored, _)| Self::token_matches(stored, token))
-                .and_then(|(_, session)| session.active_compartment_id)
-        };
-        active.or_else(|| self.default_active_compartment_id())
+        let session_active = self.sessions.lock().active_compartment_id_for(token);
+        match session_active {
+            Some(Some(active)) => Some(active),
+            Some(None) => self.default_active_compartment_id(),
+            None => None,
+        }
     }
 
     /// Path to a compartment's data directory.
@@ -333,7 +307,47 @@ impl AppState {
 
     #[must_use]
     pub fn is_locking(&self) -> bool {
-        *self.lock_state.lock() == LockState::Locking
+        self.lock_state.lock().phase == LockPhase::Locking
+    }
+
+    /// Linearize a funds-moving provider submission against [`Self::begin_locking`].
+    ///
+    /// Both methods inspect or mutate `LockState::phase` while holding the same
+    /// mutex. A submission admitted here is therefore ordered before a
+    /// concurrent Lock latch and may finish while Lock drains the operation
+    /// mutex. Once `begin_locking` wins, every later admission fails. Callers
+    /// must hold the operation mutex from admission through provider dispatch
+    /// so Lock cannot finish zeroizing underneath an admitted submission.
+    #[must_use]
+    pub(crate) fn admit_broadcast_if_ready(&self) -> bool {
+        self.lock_state.lock().phase == LockPhase::Ready
+    }
+
+    /// Return the current lock generation only while a new unlock may be
+    /// admitted. Every transition into `Locking` advances the generation so
+    /// an unlock that was admitted before a completed lock cannot later wake
+    /// and reopen the daemon after the visible phase returns to `Ready`.
+    #[must_use]
+    pub(crate) fn unlock_generation_if_ready(&self) -> Option<u64> {
+        let state = self.lock_state.lock();
+        (state.phase == LockPhase::Ready).then_some(state.generation)
+    }
+
+    /// Run the key/session installation portion of an unlock only if its
+    /// admission generation is still current. Holding `lock_state` across the
+    /// closure makes the final check atomic with respect to `begin_locking`:
+    /// either the unlock commits first and the subsequent lock drains it, or
+    /// the lock latches first and the unlock commits nothing.
+    pub(crate) fn commit_unlock_if_current<R>(
+        &self,
+        generation: u64,
+        commit: impl FnOnce() -> R,
+    ) -> Option<R> {
+        let state = self.lock_state.lock();
+        if state.phase != LockPhase::Ready || state.generation != generation {
+            return None;
+        }
+        Some(commit())
     }
 
     #[must_use]
@@ -342,15 +356,16 @@ impl AppState {
             return false;
         }
         let mut state = self.lock_state.lock();
-        if *state == LockState::Locking {
+        if state.phase == LockPhase::Locking {
             return false;
         }
-        *state = LockState::Locking;
+        state.phase = LockPhase::Locking;
+        state.generation = state.generation.wrapping_add(1);
         true
     }
 
     pub fn finish_locking(&self) {
-        *self.lock_state.lock() = LockState::Ready;
+        self.lock_state.lock().phase = LockPhase::Ready;
     }
 
     /// Lock and zeroize all unlocked compartments while leaving the daemon running.
@@ -531,8 +546,8 @@ impl AppState {
 
     /// Create a new session token bound to the current unlocked state.
     ///
-    /// Enforces a maximum session count ([`MAX_SESSIONS`]) and evicts
-    /// expired sessions before allocating a new one.
+    /// Enforces the registry's maximum session count and evicts expired
+    /// sessions before allocating a new one.
     pub fn create_session(&self, preferred_active: Option<usize>) -> String {
         self.create_session_inner(preferred_active, None, SESSION_TTL)
             .0
@@ -554,48 +569,12 @@ impl AppState {
         ttl: Duration,
     ) -> (String, u64) {
         let active = preferred_active.or_else(|| self.default_active_compartment_id());
-        let expires_at_unix = SystemTime::now()
-            .checked_add(ttl)
-            .and_then(|time| time.duration_since(UNIX_EPOCH).ok())
-            .unwrap_or_default()
-            .as_secs();
-
-        loop {
-            let mut bytes = [0u8; 32];
-            OsRng.fill_bytes(&mut bytes);
-            let token = hex::encode(bytes);
-
-            let mut sessions = self.sessions.lock();
-
-            // Evict expired sessions.
-            let now = Instant::now();
-            sessions.retain(|_, s| now < s.expires_at);
-
-            // If still at capacity, evict the oldest session.
-            if sessions.len() >= MAX_SESSIONS {
-                if let Some(oldest_key) = sessions
-                    .iter()
-                    .min_by_key(|(_, s)| s.created_at)
-                    .map(|(k, _)| k.clone())
-                {
-                    sessions.remove(&oldest_key);
-                }
-            }
-
-            if !sessions.contains_key(&token) {
-                sessions.insert(
-                    token.clone(),
-                    SessionState {
-                        active_compartment_id: active,
-                        created_at: now,
-                        expires_at: now + ttl,
-                        last_activity: now,
-                        scopes: scopes.clone(),
-                    },
-                );
-                return (token, expires_at_unix);
-            }
-        }
+        self.sessions.lock().create(
+            active,
+            scopes,
+            ttl,
+            Duration::from_secs(self.runtime_policy.idle_lock_secs),
+        )
     }
 
     /// Switch the active compartment for a session. Must be in the unlocked set.
@@ -605,12 +584,27 @@ impl AppState {
             return Err("compartment not unlocked");
         }
 
-        let mut sessions = self.sessions.lock();
-        let session_key = Self::session_key_for(&sessions, token).ok_or("invalid session")?;
-        if let Some(session) = sessions.get_mut(&session_key) {
-            session.active_compartment_id = Some(id);
+        self.sessions.lock().switch_active_for(token, id)
+    }
+
+    /// Atomically move a session to another unlocked compartment and rotate
+    /// its bearer token. The replacement preserves the session's original
+    /// expiry, activity, and capability metadata while making the old token
+    /// invalid as soon as the sessions mutex is released.
+    pub fn rotate_session_active_for(
+        &self,
+        token: &str,
+        id: usize,
+    ) -> Result<String, &'static str> {
+        if !self.unlocked.lock().contains_key(&id) {
+            return Err("compartment not unlocked");
         }
-        Ok(())
+
+        self.sessions.lock().rotate_active_for(
+            token,
+            id,
+            Duration::from_secs(self.runtime_policy.idle_lock_secs),
+        )
     }
 
     /// List all currently unlocked compartments, sorted by threshold.
@@ -647,12 +641,7 @@ impl AppState {
 
         // Repoint any session that had this compartment selected.
         let new_active = self.default_active_compartment_id();
-        let mut sessions = self.sessions.lock();
-        for session in sessions.values_mut() {
-            if session.active_compartment_id == Some(id) {
-                session.active_compartment_id = new_active;
-            }
-        }
+        self.sessions.lock().repoint_compartment(id, new_active);
     }
 
     /// Lock all compartments and clear state.
@@ -673,22 +662,28 @@ impl AppState {
         if self.is_locking() {
             return false;
         }
-        let idle_lock_secs = self.runtime_policy.idle_lock_secs;
-        let mut sessions = self.sessions.lock();
-        let now = Instant::now();
-        sessions.retain(|_, state| now < state.expires_at);
-        let Some(session_key) = Self::session_key_for(&sessions, candidate) else {
-            return false;
-        };
-        let Some(session) = sessions.get_mut(&session_key) else {
-            return false;
-        };
-        if session.last_activity.elapsed() >= Duration::from_secs(idle_lock_secs) {
-            sessions.remove(&session_key);
-            return false;
+        self.sessions.lock().verify(
+            candidate,
+            Duration::from_secs(self.runtime_policy.idle_lock_secs),
+        )
+    }
+
+    /// Verify the narrowly-scoped authentication accepted by process-global
+    /// Lock: either a live full session or its immediate rotated predecessor.
+    /// Retired predecessors are never accepted by [`Self::verify_token`] and
+    /// therefore cannot authorize any other endpoint.
+    pub fn verify_full_or_retired_lock_token(&self, candidate: &str) -> bool {
+        self.authorize_lock_token(candidate) == LockTokenAuthorization::FullOrRetired
+    }
+
+    pub(crate) fn authorize_lock_token(&self, candidate: &str) -> LockTokenAuthorization {
+        if self.is_locking() {
+            return LockTokenAuthorization::Invalid;
         }
-        session.last_activity = Instant::now();
-        true
+        self.sessions.lock().authorize_for_lock(
+            candidate,
+            Duration::from_secs(self.runtime_policy.idle_lock_secs),
+        )
     }
 
     #[must_use]
@@ -704,39 +699,19 @@ impl AppState {
         if !self.is_unlocked() {
             return false;
         }
-        let idle_lock_secs = self.runtime_policy.idle_lock_secs;
-        let mut sessions = self.sessions.lock();
-        let now = Instant::now();
-        sessions.retain(|_, state| now < state.expires_at);
-        if sessions.is_empty() {
-            return true;
-        }
-        sessions
-            .values()
-            .all(|state| state.last_activity.elapsed() >= Duration::from_secs(idle_lock_secs))
+        self.sessions
+            .lock()
+            .idle_lock_due(Duration::from_secs(self.runtime_policy.idle_lock_secs))
     }
 
     #[must_use]
     pub fn session_has_scope(&self, candidate: &str, scope: &str) -> bool {
-        let sessions = self.sessions.lock();
-        sessions
-            .iter()
-            .find(|(stored, _)| Self::token_matches(stored, candidate))
-            .is_some_and(|(_, state)| {
-                state
-                    .scopes
-                    .as_ref()
-                    .is_none_or(|scopes| scopes.iter().any(|candidate| candidate == scope))
-            })
+        self.sessions.lock().has_scope(candidate, scope)
     }
 
     #[must_use]
     pub fn session_is_full(&self, candidate: &str) -> bool {
-        let sessions = self.sessions.lock();
-        sessions
-            .iter()
-            .find(|(stored, _)| Self::token_matches(stored, candidate))
-            .is_some_and(|(_, state)| state.scopes.is_none())
+        self.sessions.lock().is_full(candidate)
     }
 
     /// Invalidate all active sessions (e.g. after credential rotation).
@@ -748,10 +723,7 @@ impl AppState {
 
     /// Revoke a session token.
     pub fn revoke_session(&self, candidate: &str) {
-        let mut sessions = self.sessions.lock();
-        if let Some(session_key) = Self::session_key_for(&sessions, candidate) {
-            sessions.remove(&session_key);
-        }
+        self.sessions.lock().revoke(candidate);
     }
 
     #[must_use]

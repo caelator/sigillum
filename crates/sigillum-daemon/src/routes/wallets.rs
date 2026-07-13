@@ -90,7 +90,11 @@ pub(crate) async fn eth_stealth_sign(
         Err(resp) => return resp,
     };
     let service = SigillumService::new(state);
-    service_response(service.eth_stealth_sign(bearer_token(&headers).as_deref(), body))
+    service_response(
+        service
+            .eth_stealth_sign(bearer_token(&headers).as_deref(), body)
+            .await,
+    )
 }
 
 pub(crate) async fn eth_stealth_sign_transfer(
@@ -103,7 +107,11 @@ pub(crate) async fn eth_stealth_sign_transfer(
         Err(resp) => return resp,
     };
     let service = SigillumService::new(state);
-    service_response(service.eth_stealth_sign_transfer(bearer_token(&headers).as_deref(), body))
+    service_response(
+        service
+            .eth_stealth_sign_transfer(bearer_token(&headers).as_deref(), body)
+            .await,
+    )
 }
 
 pub(crate) async fn eth_stealth_sign_erc20_transfer(
@@ -117,6 +125,8 @@ pub(crate) async fn eth_stealth_sign_erc20_transfer(
     };
     let service = SigillumService::new(state);
     service_response(
-        service.eth_stealth_sign_erc20_transfer(bearer_token(&headers).as_deref(), body),
+        service
+            .eth_stealth_sign_erc20_transfer(bearer_token(&headers).as_deref(), body)
+            .await,
     )
 }

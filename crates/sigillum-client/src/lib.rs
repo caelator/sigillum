@@ -3,9 +3,10 @@
 //! Async HTTP client for the local Sigillum daemon API.
 //!
 //! [`SigillumClient`] wraps a `reqwest::Client` and maintains a session token
-//! that is automatically extracted from daemon responses and injected as a
-//! Bearer token on subsequent requests.  Session tokens are cleared on 401
-//! responses and explicit lock/revoke calls.
+//! that is adopted only by validated unlock/setup/switch responses and
+//! injected as a Bearer token on subsequent requests. Session changes use a
+//! compare-and-swap boundary, so a late response cannot overwrite or clear a
+//! newer concurrent session.
 //!
 //! ## Authentication flow
 //!
@@ -27,19 +28,20 @@
 //!
 //! ## Thread safety
 //!
-//! `SigillumClient` is `Send + Sync`.  The session token is protected by a
-//! `std::sync::Mutex`. If a panic poisons that lock, the client explicitly
-//! clears the cached token and poison flag, restoring the safe logged-out
-//! invariant before any later request can proceed.
+//! `SigillumClient` is `Send + Sync`. An async transition gate serializes
+//! token-changing operations against ordinary requests, while the token itself
+//! is protected by a `std::sync::Mutex`. If a panic poisons that mutex, the
+//! client explicitly clears the cached token and poison flag, restoring the
+//! safe logged-out invariant before any later request can proceed.
 
-use std::sync::{Mutex, MutexGuard};
+use std::sync::atomic::{AtomicU8, AtomicU64};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use reqwest::Method;
 use secrecy::SecretString;
 use serde::de::DeserializeOwned;
 use sigillum_api::request::{
-    BiometricEnrollRequest, BiometricUnlockRequest, CompartmentSwitchRequest,
     DiscoveryJobMutationRequest, EthSeedWalletCreateRequest, EthSeedWalletProfileUpsertRequest,
     EthStealthAnnouncementScanRequest, EthStealthCheckRequest, EthStealthDepositCreateErc20Request,
     EthStealthDepositCreateNativeRequest, EthStealthDepositDeleteRequest,
@@ -50,8 +52,7 @@ use sigillum_api::request::{
     EthStealthSignTransferRequest, EthStealthWalletProfileUpsertRequest, EthXpubDeriveRequest,
     EthXpubExportRequest, EthXpubWalletProfileUpsertRequest, EvmFeeEstimateRequest,
     EvmProfileDeleteRequest, EvmProviderProfileUpsertRequest, EvmRpcBalanceRequest,
-    EvmRpcBroadcastRequest, EvmRpcErc20BalanceRequest, EvmRpcNonceRequest, Fido2RegisterRequest,
-    Fido2RemoveRequest, Fido2SetupRequest, Fido2UnlockRequest, GenerateStoreRequest,
+    EvmRpcBroadcastRequest, EvmRpcErc20BalanceRequest, EvmRpcNonceRequest, GenerateStoreRequest,
     KeyOnlyRequest, KeyValueRequest, MaintenanceRunRequest, PassphraseRequest,
     RiskCatalogDeleteRequest, RiskCatalogUpsertRequest, RunAuditRequest, SecretResolveBatchRequest,
     SnapshotRestoreRequest, StealthPaymentRef, TransitDecryptRequest, TransitEncryptRequest,
@@ -101,6 +102,7 @@ mod plans;
 mod queue;
 mod receiving;
 mod selfcheck;
+mod session;
 mod treasury;
 
 // ── Error types ────────────────────────────────────────────────
@@ -125,17 +127,40 @@ pub enum ClientError {
 
     #[error("invalid response encoding: {0}")]
     Encoding(String),
+
+    #[error("session context changed while the daemon request was in flight")]
+    SessionContextChanged,
+
+    #[error("invalid session transition response: {0}")]
+    InvalidSessionTransition(String),
+
+    #[error("session transition was ambiguous; fallback Lock confirmed: {0}")]
+    SessionTransitionLocked(String),
+
+    #[error(
+        "session transition was ambiguous and Lock could not be confirmed; stop/restart the daemon before continuing: {0}"
+    )]
+    SessionTransitionLockUnconfirmed(String),
+
+    #[error(
+        "session state is fail-closed after an unconfirmed Lock boundary; stop/restart the daemon and construct a new client"
+    )]
+    SessionStateUnconfirmed,
 }
 
 /// Async HTTP client for the Sigillum vault daemon.
 ///
 /// Holds a shared `reqwest::Client`, a normalized base URL, and an
-/// auto-managed session token.  All public methods return
-/// `Result<T, ClientError>`.
+/// auto-managed session token. Clones share the same session token and
+/// transition gate. All public methods return `Result<T, ClientError>`.
+#[derive(Clone)]
 pub struct SigillumClient {
     http: reqwest::Client,
     base_url: String,
-    session_token: Mutex<Option<String>>,
+    session_token: Arc<Mutex<Option<String>>>,
+    session_transition: Arc<tokio::sync::RwLock<()>>,
+    session_lock_state: Arc<AtomicU8>,
+    session_boundary_generation: Arc<AtomicU64>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -162,7 +187,10 @@ impl SigillumClient {
                 .timeout(DEFAULT_REQUEST_TIMEOUT)
                 .build()?,
             base_url: normalize_base_url(base_url.into()),
-            session_token: Mutex::new(None),
+            session_token: Arc::new(Mutex::new(None)),
+            session_transition: Arc::new(tokio::sync::RwLock::new(())),
+            session_lock_state: Arc::new(AtomicU8::new(0)),
+            session_boundary_generation: Arc::new(AtomicU64::new(0)),
         })
     }
 
@@ -171,122 +199,11 @@ impl SigillumClient {
         Self {
             http,
             base_url: normalize_base_url(base_url.into()),
-            session_token: Mutex::new(None),
+            session_token: Arc::new(Mutex::new(None)),
+            session_transition: Arc::new(tokio::sync::RwLock::new(())),
+            session_lock_state: Arc::new(AtomicU8::new(0)),
+            session_boundary_generation: Arc::new(AtomicU64::new(0)),
         }
-    }
-
-    // ── Session management ──────────────────────────────────────
-
-    /// Return a clone of the current session token, if any.
-    pub fn session_token(&self) -> Option<String> {
-        self.session_token_state().clone()
-    }
-
-    pub fn set_session_token(&self, token: impl Into<String>) {
-        *self.session_token_state() = Some(token.into());
-    }
-
-    pub fn clear_session_token(&self) {
-        *self.session_token_state() = None;
-    }
-
-    /// Restore the only safe client-side invariant after a panic: no cached
-    /// authentication. A later explicit unlock or token assignment may then
-    /// establish a fresh session.
-    fn session_token_state(&self) -> MutexGuard<'_, Option<String>> {
-        match self.session_token.lock() {
-            Ok(guard) => guard,
-            Err(poisoned) => {
-                eprintln!(
-                    "client session-token mutex poisoned; clearing cached authentication state"
-                );
-                let mut guard = poisoned.into_inner();
-                *guard = None;
-                self.session_token.clear_poison();
-                guard
-            }
-        }
-    }
-
-    // ── Lifecycle ───────────────────────────────────────────────
-
-    /// Query daemon status (locked / unlocked, active compartment, etc.).
-    pub async fn status(&self) -> Result<StatusResponse, ClientError> {
-        let builder = self.request(Method::GET, "/api/status");
-        self.send(builder).await
-    }
-
-    pub async fn unlock_with_passphrase(
-        &self,
-        passphrase: &str,
-    ) -> Result<UnlockResponse, ClientError> {
-        let builder = self
-            .request(Method::POST, "/api/unlock")
-            .json(&PassphraseRequest {
-                passphrase: passphrase.to_string(),
-            });
-        self.send(builder).await
-    }
-
-    pub async fn biometric_challenge(&self) -> Result<BiometricChallengeResponse, ClientError> {
-        let builder = self.request(Method::POST, "/api/biometric/challenge");
-        self.send(builder).await
-    }
-
-    pub async fn biometric_unlock(
-        &self,
-        payload_hex: String,
-    ) -> Result<UnlockResponse, ClientError> {
-        let builder = self
-            .request(Method::POST, "/api/biometric/unlock")
-            .json(&BiometricUnlockRequest { payload_hex });
-        self.send(builder).await
-    }
-
-    pub async fn biometric_enroll(
-        &self,
-        request: BiometricEnrollRequest,
-    ) -> Result<BiometricEnrollResponse, ClientError> {
-        let builder = self
-            .request(Method::POST, "/api/biometric/enroll")
-            .json(&request);
-        self.send(builder).await
-    }
-
-    pub async fn lock(&self) -> Result<GenericStatusResponse, ClientError> {
-        let builder = self.request(Method::POST, "/api/lock");
-        let response = self.send(builder).await?;
-        self.clear_session_token();
-        Ok(response)
-    }
-
-    pub async fn revoke_session(&self) -> Result<SessionRevokeResponse, ClientError> {
-        let builder = self.request(Method::POST, "/api/session/revoke");
-        let response: SessionRevokeResponse = self.send(builder).await?;
-        if response.requires_reauth {
-            self.clear_session_token();
-        }
-        Ok(response)
-    }
-
-    // ── Compartments ────────────────────────────────────────────
-
-    pub async fn list_compartments(&self) -> Result<Vec<CompartmentInfo>, ClientError> {
-        let builder = self.request(Method::GET, "/api/compartment/list");
-        Ok(self
-            .send::<CompartmentListResponse>(builder)
-            .await?
-            .compartments)
-    }
-
-    pub async fn switch_compartment(
-        &self,
-        id: usize,
-    ) -> Result<SwitchCompartmentResponse, ClientError> {
-        let builder = self
-            .request(Method::POST, "/api/compartment/switch")
-            .json(&CompartmentSwitchRequest { id });
-        self.send(builder).await
     }
 
     // ── Secrets & API keys ──────────────────────────────────────
@@ -417,16 +334,28 @@ impl SigillumClient {
         passphrase: &str,
         snapshot: &[u8],
     ) -> Result<SnapshotRestoreResponse, ClientError> {
+        let boundary_generation = self.session_boundary_generation();
+        self.ensure_session_requests_allowed()?;
+        let _transition = self.acquire_session_transition("snapshot restore").await?;
+        self.ensure_session_requests_allowed()?;
+        self.ensure_session_boundary_generation(boundary_generation)?;
         let builder =
             self.request(Method::POST, "/api/backup/restore")
                 .json(&SnapshotRestoreRequest {
                     passphrase: passphrase.to_string(),
                     snapshot_hex: hex::encode(snapshot),
                 });
-        let response: SnapshotRestoreResponse = self.send(builder).await?;
-        if response.requires_reauth {
-            self.clear_session_token();
+        let (response, expected_token): (SnapshotRestoreResponse, _) =
+            self.send_with_session_context_guarded(builder).await?;
+        self.ensure_session_requests_allowed()?;
+        self.ensure_session_boundary_generation(boundary_generation)?;
+        if response.status != "restored" || !response.requires_reauth {
+            return Err(ClientError::InvalidSessionTransition(format!(
+                "snapshot restore returned status {:?} with requires_reauth={}",
+                response.status, response.requires_reauth
+            )));
         }
+        self.clear_session_token_if_current(expected_token.as_deref())?;
         Ok(response)
     }
 
@@ -1021,63 +950,6 @@ impl SigillumClient {
         self.send(builder).await
     }
 
-    // ── FIDO2 ───────────────────────────────────────────────────────
-
-    pub async fn fido2_status(&self) -> Result<Fido2StatusResponse, ClientError> {
-        let builder = self.request(Method::GET, "/api/fido2/status");
-        self.send(builder).await
-    }
-
-    pub async fn fido2_detect(&self) -> Result<Fido2DetectResponse, ClientError> {
-        let builder = self.request(Method::GET, "/api/fido2/detect");
-        self.send(builder).await
-    }
-
-    pub async fn fido2_list_keys(&self) -> Result<Fido2ListResponse, ClientError> {
-        let builder = self.request(Method::GET, "/api/fido2/list");
-        self.send(builder).await
-    }
-
-    pub async fn fido2_setup(
-        &self,
-        request: Fido2SetupRequest,
-    ) -> Result<Fido2SetupResponse, ClientError> {
-        let builder = self
-            .request(Method::POST, "/api/fido2/setup")
-            .json(&request);
-        self.send(builder).await
-    }
-
-    pub async fn fido2_register(
-        &self,
-        request: Fido2RegisterRequest,
-    ) -> Result<Fido2RegisterResponse, ClientError> {
-        let builder = self
-            .request(Method::POST, "/api/fido2/register")
-            .json(&request);
-        self.send(builder).await
-    }
-
-    pub async fn fido2_unlock(
-        &self,
-        request: Fido2UnlockRequest,
-    ) -> Result<UnlockResponse, ClientError> {
-        let builder = self
-            .request(Method::POST, "/api/fido2/unlock")
-            .json(&request);
-        self.send(builder).await
-    }
-
-    pub async fn fido2_remove(
-        &self,
-        request: Fido2RemoveRequest,
-    ) -> Result<Fido2RemoveResponse, ClientError> {
-        let builder = self
-            .request(Method::POST, "/api/fido2/remove")
-            .json(&request);
-        self.send(builder).await
-    }
-
     // ── Internal helpers ─────────────────────────────────────────
 
     /// Decode a hex-encoded response field into raw bytes.
@@ -1097,14 +969,59 @@ impl SigillumClient {
 
     /// Send a request and deserialize the JSON response.
     ///
-    /// Handles: session-token extraction from responses, 401 token clearing,
-    /// empty-body tolerance, and error-response unwrapping.
+    /// Session-token adoption is deliberately not generic: only the public
+    /// unlock/setup/switch methods validate their typed transition response
+    /// and compare-and-swap its token into the client. A 401 clears only the
+    /// exact token carried by this request, never a newer concurrent session.
     pub(crate) async fn send<T: DeserializeOwned>(
         &self,
         builder: reqwest::RequestBuilder,
     ) -> Result<T, ClientError> {
-        let response = builder.send().await?;
+        let boundary_generation = self.session_boundary_generation();
+        self.ensure_session_requests_allowed()?;
+        let _transition = self.session_transition.read().await;
+        self.ensure_session_requests_allowed()?;
+        self.ensure_session_boundary_generation(boundary_generation)?;
+        let (response, _) = self.send_with_session_context_guarded(builder).await?;
+        self.ensure_session_requests_allowed()?;
+        self.ensure_session_boundary_generation(boundary_generation)?;
+        Ok(response)
+    }
+
+    async fn send_with_session_context_guarded<T: DeserializeOwned>(
+        &self,
+        builder: reqwest::RequestBuilder,
+    ) -> Result<(T, Option<String>), ClientError> {
+        let request = builder.build()?;
+        let expected_token = request_session_token(&request);
+        if expected_token != self.session_token() {
+            return Err(ClientError::SessionContextChanged);
+        }
+        let decoded = self
+            .send_built_with_session_context(request, expected_token.as_deref())
+            .await?;
+        Ok((decoded, expected_token))
+    }
+
+    async fn send_built_with_session_context<T: DeserializeOwned>(
+        &self,
+        request: reqwest::Request,
+        expected_token: Option<&str>,
+    ) -> Result<T, ClientError> {
+        self.ensure_session_requests_allowed()?;
+        let response = self.http.execute(request).await?;
         let status = response.status();
+        if status == reqwest::StatusCode::UNAUTHORIZED || status == reqwest::StatusCode::LOCKED {
+            if !self.replace_session_token_if_current(expected_token, None) {
+                return Err(ClientError::SessionContextChanged);
+            }
+            let text = response.text().await?;
+            return Err(ClientError::Api {
+                status,
+                message: api_error_message(status, &text),
+            });
+        }
+
         let text = response.text().await?;
         let value = if text.trim().is_empty() {
             serde_json::json!({})
@@ -1112,28 +1029,45 @@ impl SigillumClient {
             serde_json::from_str::<serde_json::Value>(&text)?
         };
 
-        if let Some(token) = value.get("session_token").and_then(|v| v.as_str()) {
-            self.set_session_token(token.to_string());
-        }
-        if status == reqwest::StatusCode::UNAUTHORIZED {
-            self.clear_session_token();
-        }
-
         if !status.is_success() {
             let message = serde_json::from_value::<ErrorResponse>(value.clone())
                 .map(|error| error.error)
-                .unwrap_or_else(|_| {
-                    if text.is_empty() {
-                        format!("request failed with status {status}")
-                    } else {
-                        text.clone()
-                    }
-                });
+                .unwrap_or_else(|_| api_error_message(status, &text));
             return Err(ClientError::Api { status, message });
         }
 
-        Ok(serde_json::from_value(value)?)
+        // `set_session_token` remains a synchronous public escape hatch and
+        // therefore cannot participate in the async transition gate. Never
+        // return a successful response if that explicit owner changed while
+        // the request was in flight.
+        if self.session_token().as_deref() != expected_token {
+            return Err(ClientError::SessionContextChanged);
+        }
+
+        let decoded = serde_json::from_value(value)?;
+        Ok(decoded)
     }
+}
+
+fn api_error_message(status: reqwest::StatusCode, text: &str) -> String {
+    serde_json::from_str::<ErrorResponse>(text)
+        .map(|error| error.error)
+        .unwrap_or_else(|_| {
+            if text.is_empty() {
+                format!("request failed with status {status}")
+            } else {
+                text.to_owned()
+            }
+        })
+}
+
+fn request_session_token(request: &reqwest::Request) -> Option<String> {
+    request
+        .headers()
+        .get(reqwest::header::AUTHORIZATION)
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.strip_prefix("Bearer "))
+        .map(str::to_owned)
 }
 
 fn normalize_base_url(mut base_url: String) -> String {

@@ -1,0 +1,250 @@
+/* ── 21. C7 console metrics, persistent status & semantic states ──────────── */
+
+/* Overview readiness metrics are compact, actionable, and safe to shrink. */
+
+.journey-metrics {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  min-width: 0;
+  margin: var(--space-3) 0;
+}
+
+.journey-metrics:empty {
+  display: none;
+}
+
+.journey-metrics .status-chip {
+  flex: 1 1 150px;
+  justify-content: space-between;
+  width: auto;
+  min-width: 0;
+  max-width: 100%;
+  min-height: 36px;
+  height: auto;
+  padding-block: var(--space-2);
+  white-space: normal;
+  text-align: left;
+}
+
+.journey-metrics .status-chip-value {
+  flex: 0 0 auto;
+}
+
+.journey-metrics .status-chip-label {
+  min-width: 0;
+  text-align: right;
+  overflow-wrap: anywhere;
+}
+
+.journey-metrics .status-chip:focus-visible,
+.strip-self-check:focus-visible {
+  outline: 2px solid var(--accent-ring);
+  outline-offset: 2px;
+}
+
+/* Security posture stays visible in the sticky topbar on every destination. */
+
+.topbar-heading {
+  flex: 1 1 180px;
+  min-width: 0;
+}
+
+.topbar-heading h1,
+.topbar-summary {
+  overflow-wrap: anywhere;
+}
+
+.status-strip {
+  display: flex;
+  flex: 0 1 auto;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-2);
+  min-width: 0;
+  max-width: 100%;
+  margin: 0;
+}
+
+.status-strip > * {
+  max-width: 100%;
+}
+
+.strip-status {
+  --strip-border: var(--border);
+  --strip-bg: var(--surface-2);
+  --strip-text: var(--text-secondary);
+  --strip-dot: var(--text-dim);
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
+  min-height: 28px;
+  padding: 4px 10px;
+  border: 1px solid var(--strip-border);
+  border-radius: 999px;
+  background: var(--strip-bg);
+  color: var(--strip-text);
+  font: inherit;
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  line-height: 1.25;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.strip-status::before {
+  content: "";
+  width: 7px;
+  height: 7px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background: var(--strip-dot);
+}
+
+.strip-compartment {
+  --strip-border: rgba(91, 124, 250, 0.35);
+  --strip-bg: var(--accent-tint);
+  --strip-text: var(--accent-text);
+  --strip-dot: var(--accent);
+}
+
+.strip-compartment::before {
+  border-radius: 2px;
+}
+
+.strip-self-check {
+  cursor: pointer;
+  transition: background var(--t-fast), border-color var(--t-fast), color var(--t-fast);
+}
+
+.strip-status[data-state="unlocked"],
+.strip-status[data-state="pass"] {
+  --strip-border: rgba(63, 185, 100, 0.45);
+  --strip-bg: var(--success-tint);
+  --strip-text: var(--success-text);
+  --strip-dot: var(--success);
+}
+
+.strip-status[data-state="locked"],
+.strip-status[data-state="warn"] {
+  --strip-border: rgba(224, 168, 60, 0.48);
+  --strip-bg: var(--warning-tint);
+  --strip-text: var(--warning-text);
+  --strip-dot: var(--warning);
+}
+
+.strip-status[data-state="fail"] {
+  --strip-border: rgba(229, 84, 79, 0.52);
+  --strip-bg: var(--danger-tint);
+  --strip-text: var(--danger-text);
+  --strip-dot: var(--danger);
+}
+
+.strip-status[data-state="idle"],
+.strip-status[data-state="pending"] {
+  --strip-border: rgba(74, 163, 216, 0.4);
+  --strip-bg: var(--info-tint);
+  --strip-text: var(--info-text);
+  --strip-dot: var(--info);
+}
+
+.strip-self-check:hover {
+  filter: brightness(1.1);
+}
+
+#stripLockNow {
+  flex: 0 0 auto;
+}
+
+/* Wrap the center status group before it can crowd either topbar edge. */
+
+@media (max-width: 1240px) {
+  .topbar {
+    flex-wrap: wrap;
+  }
+
+  .status-strip {
+    order: 3;
+    flex: 1 1 100%;
+    justify-content: flex-start;
+    width: 100%;
+  }
+}
+
+@media (max-width: 600px) {
+  .sidebar-foot {
+    width: 100%;
+    margin-left: 0;
+    flex-wrap: wrap;
+    align-items: stretch;
+  }
+
+  .session-controls {
+    flex: 1 1 100%;
+    flex-wrap: wrap;
+    min-width: 0;
+  }
+
+  .card-head,
+  .card-head-actions {
+    flex-wrap: wrap;
+    min-width: 0;
+  }
+
+  .card-head-actions > * {
+    max-width: 100%;
+  }
+
+  .help-tip::after,
+  .help-tip[data-tip-down]::after {
+    position: fixed;
+    inset: auto 16px 16px;
+    width: auto;
+    max-width: none;
+    transform: translateY(4px);
+  }
+
+  .help-tip:hover::after,
+  .help-tip:focus-visible::after,
+  .help-tip[data-tip-down]:hover::after,
+  .help-tip[data-tip-down]:focus-visible::after {
+    transform: none;
+  }
+
+  .checkbox-row,
+  .checkbox-label {
+    max-width: 100%;
+    white-space: normal;
+  }
+
+  .topbar-heading,
+  .topbar-meta {
+    min-width: 0;
+  }
+
+  .topbar-meta {
+    margin-left: auto;
+  }
+
+  .status-strip {
+    align-items: stretch;
+  }
+
+  .strip-status {
+    flex: 1 1 140px;
+    justify-content: center;
+    white-space: normal;
+    text-align: center;
+    overflow-wrap: anywhere;
+  }
+
+  #stripLockNow {
+    flex: 1 1 auto;
+  }
+
+  .journey-metrics .status-chip {
+    flex-basis: 100%;
+  }
+}

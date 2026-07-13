@@ -138,6 +138,16 @@ export function createInventoryActions(deps: InventoryActionsDeps) {
   let latestChainProfiles: ChainProfile[] = [];
   let latestTreasuryPolicy: Record<string, unknown> | null = null;
 
+  function resetSession(): void {
+    // The privacy guard restores the inventory card from static markup, which
+    // replaces the select node that owned this direct listener. Allow the next
+    // current-session render to bind the replacement node exactly once.
+    planRoutingListenerBound = false;
+    planPartyDestinationInputIds = [];
+    latestChainProfiles = [];
+    latestTreasuryPolicy = null;
+  }
+
   function planRoutingStrategy(): "single" | "per_party" {
     const routingEl = document.getElementById(
       "planRoutingStrategy",
@@ -1553,6 +1563,7 @@ export function createInventoryActions(deps: InventoryActionsDeps) {
   }
 
   return {
+    resetSession,
     renderChainProfiles,
     renderInventoryState,
     renderWatchAddressBook,

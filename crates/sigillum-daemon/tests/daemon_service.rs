@@ -2861,6 +2861,11 @@ async fn profile_bound_wallet_and_provider_work_after_session_switches_compartme
     )
     .await;
     assert_eq!(switch.status(), StatusCode::OK);
+    let switch_json: serde_json::Value = switch.json().await.unwrap();
+    let token = switch_json["session_token"]
+        .as_str()
+        .expect("switch response must rotate the session token")
+        .to_owned();
 
     let send = post_json(
         &client,

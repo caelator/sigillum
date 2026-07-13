@@ -163,6 +163,7 @@ impl SigillumService {
         body: WalletInventoryScanRequest,
     ) -> ServiceResult<WalletInventoryScanResponse> {
         let token = self.require_session(token)?;
+        let session_context = self.capture_session_operation_context(Some(token))?;
         let gap_limit = validated_gap_limit(body.gap_limit)?;
         let max_index = validated_max_index(body.max_index)?;
         let block_tag = body
@@ -268,7 +269,7 @@ impl SigillumService {
             seed_derivation_pattern,
             account_limit,
         )?;
-        let _guard = self.state.operation_guard().await;
+        let _guard = self.acquire_session_operation(&session_context).await?;
         let mut inventory = load_inventory_state(&self.state.base_dir)?;
         let chain_profiles = inventory.chain_profiles.clone();
         let deposits = crate::deposits::load_deposits(&self.state.base_dir)

@@ -106,12 +106,13 @@ impl SigillumService {
         body: KeyValueRequest,
     ) -> ServiceResult<KeyMutationResponse> {
         let token = self.require_session(token)?;
+        let session_context = self.capture_session_operation_context(Some(token))?;
         let key = body.key;
         let value = body
             .value
             .filter(|value| !value.is_empty())
             .ok_or_else(|| ServiceError::bad_request("value is required"))?;
-        let _guard = self.state.operation_guard().await;
+        let _guard = self.acquire_session_operation(&session_context).await?;
         let active_compartment_id = self.state.active_compartment_id_for(token);
         self.with_active_vault(token, |vault, _| Ok(vault.set_api_key(&key, &value)?))?;
         self.record_audit(
@@ -131,8 +132,9 @@ impl SigillumService {
         body: KeyOnlyRequest,
     ) -> ServiceResult<KeyMutationResponse> {
         let token = self.require_session(token)?;
+        let session_context = self.capture_session_operation_context(Some(token))?;
         let key = body.key;
-        let _guard = self.state.operation_guard().await;
+        let _guard = self.acquire_session_operation(&session_context).await?;
         let active_compartment_id = self.state.active_compartment_id_for(token);
         self.with_active_vault(token, |vault, _| Ok(vault.delete_api_key(&key)?))?;
         self.record_audit(
@@ -182,12 +184,13 @@ impl SigillumService {
         body: KeyValueRequest,
     ) -> ServiceResult<KeyMutationResponse> {
         let token = self.require_session(token)?;
+        let session_context = self.capture_session_operation_context(Some(token))?;
         let key = body.key;
         let value = body
             .value
             .filter(|value| !value.is_empty())
             .ok_or_else(|| ServiceError::bad_request("value is required"))?;
-        let _guard = self.state.operation_guard().await;
+        let _guard = self.acquire_session_operation(&session_context).await?;
         let active_compartment_id = self.state.active_compartment_id_for(token);
         self.with_active_vault(token, |vault, _| {
             if !vault.is_unlocked() {
@@ -212,8 +215,9 @@ impl SigillumService {
         body: KeyOnlyRequest,
     ) -> ServiceResult<KeyMutationResponse> {
         let token = self.require_session(token)?;
+        let session_context = self.capture_session_operation_context(Some(token))?;
         let key = body.key;
-        let _guard = self.state.operation_guard().await;
+        let _guard = self.acquire_session_operation(&session_context).await?;
         let active_compartment_id = self.state.active_compartment_id_for(token);
         self.with_active_vault(token, |vault, _| {
             if !vault.is_unlocked() {
@@ -238,7 +242,8 @@ impl SigillumService {
         body: SecretsPushRequest,
     ) -> ServiceResult<PushResponse> {
         let _ = self.require_session(token)?;
-        let _guard = self.state.operation_guard().await;
+        let session_context = self.capture_session_operation_context(token)?;
+        let _guard = self.acquire_session_operation(&session_context).await?;
         let unlocked = self.state.unlocked_compartments();
         if unlocked.len() < 2 {
             return Err(ServiceError::forbidden("Access denied."));

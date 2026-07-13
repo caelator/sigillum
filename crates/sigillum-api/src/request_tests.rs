@@ -1344,6 +1344,37 @@ fn test_treasury_policy_update_request_minimal() {
 }
 
 #[test]
+fn test_treasury_policy_enable_opt_in_request_contract() {
+    for (opt_in, wire_value) in [
+        (
+            TreasuryPolicyOptIn::BlockCrossPartyLinkage,
+            "block_cross_party_linkage",
+        ),
+        (
+            TreasuryPolicyOptIn::AllowClaimExecution,
+            "allow_claim_execution",
+        ),
+        (TreasuryPolicyOptIn::AllowGasTopups, "allow_gas_topups"),
+    ] {
+        let request = TreasuryPolicyEnableOptInRequest { opt_in };
+        assert_eq!(
+            serde_json::to_value(&request).unwrap(),
+            serde_json::json!({ "opt_in": wire_value })
+        );
+        request.validate().unwrap();
+        roundtrip_test(request);
+    }
+
+    let unknown = serde_json::from_value::<TreasuryPolicyEnableOptInRequest>(
+        serde_json::json!({ "opt_in": "allow_plan_execution" }),
+    );
+    assert!(
+        unknown.is_err(),
+        "unapproved opt-ins must fail to deserialize"
+    );
+}
+
+#[test]
 fn test_treasury_receive_allocate_request_roundtrip() {
     roundtrip_test(TreasuryReceiveAllocateRequest {
         wallet_profile: "seed-main".to_string(),

@@ -97,6 +97,8 @@ export function createSelfCheckActions(deps: SelfCheckDeps) {
   let lastResponse: SelfCheckRunResponse | null = null;
   let lastRunAtMs = 0;
   let inFlight: Promise<SelfCheckSummary | null> | null = null;
+  let sessionGeneration = 0;
+  let explicitRunId = 0;
 
   function runButtons(): Element[] {
     const buttons: Element[] = [];
@@ -197,11 +199,14 @@ export function createSelfCheckActions(deps: SelfCheckDeps) {
   }
 
   async function runSelfCheck(): Promise<void> {
+    const generation = sessionGeneration;
+    const runId = ++explicitRunId;
     const buttons = runButtons();
     buttons.forEach((button) => button.classList.add("btn-busy"));
     try {
       // Empty body = verify every configured domain.
       const r = await deps.api("POST", "/api/selfcheck/run", {});
+      if (generation !== sessionGeneration || runId !== explicitRunId) return;
       if (r.error) {
         deps.toast(r.error, "error");
         return;
@@ -215,14 +220,18 @@ export function createSelfCheckActions(deps: SelfCheckDeps) {
       } else {
         const issueCount = counts.warn + counts.fail;
         const message =
-          "Self-check: " + issueCount + " issue(s) found — see System section";
+          "Self-check: " + issueCount + " issue(s) found — see Overview";
         if (lastResponse.status === "fail") deps.toast(message, "error");
         else deps.toast(message);
       }
     } catch (e: any) {
-      deps.toast(String(e?.message ?? e), "error");
+      if (generation === sessionGeneration && runId === explicitRunId) {
+        deps.toast(String(e?.message ?? e), "error");
+      }
     } finally {
-      buttons.forEach((button) => button.classList.remove("btn-busy"));
+      if (generation === sessionGeneration && runId === explicitRunId) {
+        buttons.forEach((button) => button.classList.remove("btn-busy"));
+      }
     }
   }
 
@@ -250,21 +259,33 @@ export function createSelfCheckActions(deps: SelfCheckDeps) {
       return lastSelfCheckSummary();
     }
     if (inFlight) return inFlight;
+    const generation = sessionGeneration;
     inFlight = (async () => {
       try {
         const r = await deps.api("POST", "/api/selfcheck/run", {});
+        if (generation !== sessionGeneration) return null;
         if (r.error) return lastSelfCheckSummary();
         lastResponse = r as SelfCheckRunResponse;
         lastRunAtMs = Date.now();
         renderSelfCheckPanel();
         return lastSelfCheckSummary();
       } catch (_) {
-        return lastSelfCheckSummary();
+        return generation === sessionGeneration ? lastSelfCheckSummary() : null;
       } finally {
-        inFlight = null;
+        if (generation === sessionGeneration) inFlight = null;
       }
     })();
     return inFlight;
+  }
+
+  function resetSession(): void {
+    sessionGeneration += 1;
+    explicitRunId += 1;
+    lastResponse = null;
+    lastRunAtMs = 0;
+    inFlight = null;
+    runButtons().forEach((button) => button.classList.remove("btn-busy"));
+    renderSelfCheckPanel();
   }
 
   return {
@@ -272,5 +293,6 @@ export function createSelfCheckActions(deps: SelfCheckDeps) {
     renderSelfCheckPanel,
     ensureFreshSelfCheck,
     lastSelfCheckSummary,
+    resetSession,
   };
 }

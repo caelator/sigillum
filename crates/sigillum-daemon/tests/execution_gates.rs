@@ -58,14 +58,23 @@ struct BroadcastControl {
     broadcast_count: Arc<AtomicUsize>,
 }
 
+#[derive(Clone, Default)]
+struct LockBoundaryControl {
+    preparation_started: Arc<Notify>,
+    release_preparation: Arc<Notify>,
+    broadcast_count: Arc<AtomicUsize>,
+}
+
 #[derive(Clone)]
 struct RpcState {
     broadcast_control: Option<BroadcastControl>,
+    lock_boundary_control: Option<LockBoundaryControl>,
 }
 
 async fn spawn_mock_evm_provider() -> (SocketAddr, tokio::task::JoinHandle<()>) {
     spawn_mock_evm_provider_with_state(RpcState {
         broadcast_control: None,
+        lock_boundary_control: None,
     })
     .await
 }
@@ -75,6 +84,18 @@ async fn spawn_holding_mock_evm_provider()
     let control = BroadcastControl::default();
     let (addr, handle) = spawn_mock_evm_provider_with_state(RpcState {
         broadcast_control: Some(control.clone()),
+        lock_boundary_control: None,
+    })
+    .await;
+    (addr, handle, control)
+}
+
+async fn spawn_lock_boundary_mock_evm_provider()
+-> (SocketAddr, tokio::task::JoinHandle<()>, LockBoundaryControl) {
+    let control = LockBoundaryControl::default();
+    let (addr, handle) = spawn_mock_evm_provider_with_state(RpcState {
+        broadcast_control: None,
+        lock_boundary_control: Some(control.clone()),
     })
     .await;
     (addr, handle, control)
@@ -132,7 +153,13 @@ async fn rpc_response(state: &RpcState, request: &Value) -> Value {
     let result = match method {
         "eth_chainId" => json!("0x1"),
         "eth_blockNumber" => json!("0x20"),
-        "eth_getTransactionCount" => json!("0x7"),
+        "eth_getTransactionCount" => {
+            if let Some(control) = state.lock_boundary_control.as_ref() {
+                control.preparation_started.notify_one();
+                control.release_preparation.notified().await;
+            }
+            json!("0x7")
+        }
         "eth_getBalance" => json!("0xde0b6b3a7640000"),
         "eth_feeHistory" => json!({
             "oldestBlock": "0x1",
@@ -255,6 +282,9 @@ async fn rpc_response(state: &RpcState, request: &Value) -> Value {
             }])
         }
         "eth_sendRawTransaction" => {
+            if let Some(control) = state.lock_boundary_control.as_ref() {
+                control.broadcast_count.fetch_add(1, Ordering::SeqCst);
+            }
             if let Some(control) = state.broadcast_control.as_ref() {
                 let broadcast_index = control.broadcast_count.fetch_add(1, Ordering::SeqCst);
                 if broadcast_index == 0 {
@@ -723,6 +753,98 @@ async fn pause_halts_drain_mid_queue() {
 }
 
 #[tokio::test]
+async fn lock_latch_blocks_in_flight_queue_before_provider_broadcast() {
+    let dir = TempDir::new().unwrap();
+    let base_dir = dir.path().to_path_buf();
+    let (addr, state, handle) = spawn_daemon_with_state(base_dir.clone()).await;
+    let (rpc_addr, rpc_handle, control) = spawn_lock_boundary_mock_evm_provider().await;
+    let client = reqwest::Client::new();
+    let setup = setup_stealth_queue(&client, addr, rpc_addr).await;
+
+    // Two jobs prove both halves of the contract: the already-running job is
+    // retained as Prepared, and the drain never starts the next job.
+    enqueue_stealth_transfer(&client, addr, &setup).await;
+    enqueue_stealth_transfer(&client, addr, &setup).await;
+
+    let process_task = {
+        let client = client.clone();
+        let token = setup.token.clone();
+        tokio::spawn(async move {
+            post_json(&client, addr, "/api/queue/process", json!({}), Some(&token)).await
+        })
+    };
+
+    tokio::time::timeout(
+        Duration::from_secs(5),
+        control.preparation_started.notified(),
+    )
+    .await
+    .expect("the active queue job should reach provider preparation");
+
+    let lock_task = {
+        let client = client.clone();
+        let token = setup.token.clone();
+        tokio::spawn(
+            async move { post_json(&client, addr, "/api/lock", json!({}), Some(&token)).await },
+        )
+    };
+
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while !state.is_locking() {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("Lock must latch before the active operation releases its mutex");
+
+    control.release_preparation.notify_one();
+
+    let process = process_task.await.expect("queue process task should join");
+    assert_eq!(process.status(), StatusCode::OK);
+    let process_json: Value = process.json().await.unwrap();
+    assert_eq!(process_json["processed"], json!(1));
+    assert_eq!(process_json["succeeded"], json!(0));
+    assert_eq!(process_json["jobs"][0]["state"], json!("prepared"));
+    assert_eq!(
+        process_json["paused_reason"],
+        json!("daemon_locking: queue drain stopped because daemon Lock is in progress")
+    );
+    assert_eq!(
+        control.broadcast_count.load(Ordering::SeqCst),
+        0,
+        "no provider submission may be admitted after the Lock latch"
+    );
+
+    let lock = lock_task.await.expect("lock task should join");
+    assert_eq!(lock.status(), StatusCode::OK);
+    let lock_json: Value = lock.json().await.unwrap();
+    assert_eq!(lock_json["status"], json!("locked"));
+    assert!(!state.is_locking());
+    assert!(
+        !state.is_unlocked(),
+        "Lock must drain and zeroize the vault"
+    );
+    assert_eq!(state.session_count(), 0);
+
+    let persisted: Value = serde_json::from_slice(
+        &std::fs::read(base_dir.join("queue.json")).expect("queue state should be durable"),
+    )
+    .unwrap();
+    let jobs = persisted["data"]["jobs"].as_array().unwrap();
+    assert_eq!(jobs.len(), 2);
+    assert_eq!(jobs[0]["state"], json!("prepared"));
+    assert_eq!(jobs[0]["attempts"], json!(1));
+    assert!(jobs[0]["signed_raw_transaction_hex"].is_string());
+    assert!(jobs[0]["broadcast_at_unix"].is_null());
+    assert!(jobs[0]["broadcast_transaction_hash_hex"].is_null());
+    assert_eq!(jobs[1]["state"], json!("queued"));
+    assert_eq!(jobs[1]["attempts"], json!(0));
+
+    handle.abort();
+    rpc_handle.abort();
+}
+
+#[tokio::test]
 async fn pause_and_resume_routes_flip_policy_with_audit() {
     let dir = TempDir::new().unwrap();
     let (addr, handle) = spawn_daemon(dir.path().to_path_buf()).await;
@@ -775,6 +897,212 @@ async fn pause_and_resume_routes_flip_policy_with_audit() {
     assert_eq!(events[1]["details"]["new_value"], json!(false));
     assert_session_fingerprint(&events[0]["details"]["session_fingerprint_hex"], &token);
     assert_session_fingerprint(&events[1]["details"]["session_fingerprint_hex"], &token);
+
+    handle.abort();
+}
+
+#[tokio::test]
+async fn policy_enable_opt_in_creates_fail_closed_policy_and_requires_session() {
+    let dir = TempDir::new().unwrap();
+    let (addr, handle) = spawn_daemon(dir.path().to_path_buf()).await;
+    let client = reqwest::Client::new();
+    let init = post_json(
+        &client,
+        addr,
+        "/api/compartment/init",
+        json!({
+            "id": 0,
+            "label": "default",
+            "threshold": 1,
+            "passphrase": "correct horse battery staple",
+        }),
+        None,
+    )
+    .await;
+    assert_eq!(init.status(), StatusCode::OK);
+    let init_json: Value = init.json().await.unwrap();
+    let token = init_json["session_token"].as_str().unwrap().to_string();
+
+    let unauthorized = post_json(
+        &client,
+        addr,
+        "/api/treasury/policy/enable-opt-in",
+        json!({ "opt_in": "allow_claim_execution" }),
+        None,
+    )
+    .await;
+    assert_eq!(unauthorized.status(), StatusCode::UNAUTHORIZED);
+
+    let before = get(&client, addr, "/api/treasury/policy", Some(&token)).await;
+    assert_eq!(before.status(), StatusCode::OK);
+    assert_eq!(before.json::<Value>().await.unwrap()["policy"], Value::Null);
+
+    let enable = post_json(
+        &client,
+        addr,
+        "/api/treasury/policy/enable-opt-in",
+        json!({ "opt_in": "allow_claim_execution" }),
+        Some(&token),
+    )
+    .await;
+    assert_eq!(enable.status(), StatusCode::OK);
+    let response: Value = enable.json().await.unwrap();
+    assert_eq!(response["status"], json!("updated"));
+    let policy = &response["policy"];
+    assert_eq!(policy["enabled"], json!(false));
+    assert_eq!(policy["allowed_destinations"], Value::Null);
+    assert_eq!(policy["max_step_native_wei_hex"], Value::Null);
+    assert_eq!(policy["max_plan_native_wei_hex"], Value::Null);
+    assert_eq!(policy["require_simulation"], json!(true));
+    assert_eq!(policy["allow_raw_digest_signing"], json!(false));
+    assert_eq!(policy["block_cross_party_linkage"], json!(false));
+    assert_eq!(policy["allow_claim_execution"], json!(true));
+    assert_eq!(policy["allow_gas_topups"], json!(false));
+    assert_eq!(policy["max_gas_topup_wei_hex"], Value::Null);
+    assert_eq!(policy["allow_plan_execution"], json!(false));
+    assert_eq!(policy["allow_sweep_execution"], json!(false));
+    assert_eq!(policy["allow_revoke_execution"], json!(false));
+    assert_eq!(policy["allow_exit_execution"], json!(false));
+    assert_eq!(policy["execution_paused"], json!(false));
+    assert_eq!(policy["max_fee_per_gas_cap_hex"], Value::Null);
+    assert_eq!(policy["simulation_freshness_secs"], json!(900));
+    assert_eq!(policy["hot_floor_wei_hex"], json!("0xde0b6b3a7640000"));
+    assert_eq!(policy["hot_target_wei_hex"], json!("0xde0b6b3a7640000"));
+    assert_eq!(policy["hot_overflow_wei_hex"], Value::Null);
+    assert_eq!(policy["allow_treasury_automation"], json!(false));
+    assert_eq!(policy["created_at_unix"], policy["updated_at_unix"]);
+
+    let events = execution_gate_events(&client, addr, &token).await;
+    assert_eq!(events.len(), 1);
+    assert_eq!(events[0]["details"]["gate"], json!("allow_claim_execution"));
+    assert_eq!(events[0]["details"]["old_value"], json!(false));
+    assert_eq!(events[0]["details"]["new_value"], json!(true));
+    assert_session_fingerprint(&events[0]["details"]["session_fingerprint_hex"], &token);
+
+    handle.abort();
+}
+
+#[tokio::test]
+async fn concurrent_policy_opt_ins_preserve_latest_policy_without_lost_updates() {
+    let dir = TempDir::new().unwrap();
+    let (addr, handle) = spawn_daemon(dir.path().to_path_buf()).await;
+    let client = reqwest::Client::new();
+    let init = post_json(
+        &client,
+        addr,
+        "/api/compartment/init",
+        json!({
+            "id": 0,
+            "label": "default",
+            "threshold": 1,
+            "passphrase": "correct horse battery staple",
+        }),
+        None,
+    )
+    .await;
+    assert_eq!(init.status(), StatusCode::OK);
+    let init_json: Value = init.json().await.unwrap();
+    let token = init_json["session_token"].as_str().unwrap().to_string();
+
+    let initial = post_json(
+        &client,
+        addr,
+        "/api/treasury/policy/update",
+        json!({
+            "enabled": true,
+            "allowed_destinations": [{
+                "address": "0x9999999999999999999999999999999999999999",
+                "label": "cold treasury",
+            }],
+            "max_step_native_wei_hex": "0x10",
+            "max_plan_native_wei_hex": "0x20",
+            "require_simulation": false,
+            "allow_raw_digest_signing": true,
+            "block_cross_party_linkage": false,
+            "allow_claim_execution": false,
+            "allow_gas_topups": false,
+            "max_gas_topup_wei_hex": "0x30",
+            "allow_plan_execution": true,
+            "allow_sweep_execution": true,
+            "allow_revoke_execution": true,
+            "allow_exit_execution": true,
+            "execution_paused": true,
+            "max_fee_per_gas_cap_hex": "0x40",
+            "simulation_freshness_secs": 321,
+            "hot_floor_wei_hex": "0x1",
+            "hot_target_wei_hex": "0x2",
+            "hot_overflow_wei_hex": "0x3",
+            "allow_treasury_automation": true,
+        }),
+        Some(&token),
+    )
+    .await;
+    assert_eq!(initial.status(), StatusCode::OK);
+    let before = initial.json::<Value>().await.unwrap()["policy"].clone();
+
+    let (linkage, claims, topups) = tokio::join!(
+        post_json(
+            &client,
+            addr,
+            "/api/treasury/policy/enable-opt-in",
+            json!({ "opt_in": "block_cross_party_linkage" }),
+            Some(&token),
+        ),
+        post_json(
+            &client,
+            addr,
+            "/api/treasury/policy/enable-opt-in",
+            json!({ "opt_in": "allow_claim_execution" }),
+            Some(&token),
+        ),
+        post_json(
+            &client,
+            addr,
+            "/api/treasury/policy/enable-opt-in",
+            json!({ "opt_in": "allow_gas_topups" }),
+            Some(&token),
+        ),
+    );
+    assert_eq!(linkage.status(), StatusCode::OK);
+    assert_eq!(claims.status(), StatusCode::OK);
+    assert_eq!(topups.status(), StatusCode::OK);
+
+    let current = get(&client, addr, "/api/treasury/policy", Some(&token)).await;
+    assert_eq!(current.status(), StatusCode::OK);
+    let after = current.json::<Value>().await.unwrap()["policy"].clone();
+    let mut expected = before;
+    expected["block_cross_party_linkage"] = json!(true);
+    expected["allow_claim_execution"] = json!(true);
+    expected["allow_gas_topups"] = json!(true);
+    expected["updated_at_unix"] = after["updated_at_unix"].clone();
+    assert_eq!(
+        after, expected,
+        "atomic opt-ins must preserve every other field"
+    );
+
+    let target_events = execution_gate_events(&client, addr, &token)
+        .await
+        .into_iter()
+        .filter(|event| {
+            matches!(
+                event["details"]["gate"].as_str(),
+                Some("block_cross_party_linkage" | "allow_claim_execution" | "allow_gas_topups")
+            )
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(target_events.len(), 3);
+    for gate in [
+        "block_cross_party_linkage",
+        "allow_claim_execution",
+        "allow_gas_topups",
+    ] {
+        let event = target_events
+            .iter()
+            .find(|event| event["details"]["gate"] == gate)
+            .unwrap_or_else(|| panic!("missing audit event for {gate}"));
+        assert_eq!(event["details"]["old_value"], json!(false));
+        assert_eq!(event["details"]["new_value"], json!(true));
+    }
 
     handle.abort();
 }

@@ -2,9 +2,10 @@
 
 **Status:** Active hardening and release handbook
 
-**State recorded:** 2026-07-12, protected `main` at `f73b861`; failed RCs
+**State recorded:** 2026-07-13, protected `main` at `7e04743`; failed RCs
 `v1.0.0-rc.2` at `815d262`, `v1.0.0-rc.3` at `0a97c18`, and
-`v1.0.0-rc.4` at `f73b861`
+`v1.0.0-rc.4` at `f73b861`; historical pre-C7 candidate
+`v1.0.0-rc.5` at `7e04743`
 
 **Plan authority:** [release-1.0-plan.md](./release-1.0-plan.md)
 
@@ -43,35 +44,53 @@ a commit that contains later hardening changes.
   represented the two-transaction `fund_gas` → sweep chain with one hash. Its
   queue treated `sent` (broadcast, unconfirmed) as prerequisite success instead
   of requiring `confirmed`. No RC4 operator receipt can certify a final
-  release. The next retained candidate is `v1.0.0-rc.5` after the runtime and
-  F6 schema-v2 fixes pass protected-main gates.
+  release.
   Historical release run `29230844456` completed all six jobs and uploaded the
   checksum, CLI, app, dmg, and notices assets to an unpublished draft; that
   proves the signing remediation, not the invalidated F6/runtime contract.
+- `v1.0.0-rc.5` is an immutable historical pre-C7 candidate. Its annotated tag
+  peels to protected-main commit `7e047438f6305ef1cedecdf4790e1b0e1d7e1e6e`;
+  CI run `29246719752` and all six jobs in release run `29248938476` passed,
+  and its draft contains the expected checksum, CLI, app, dmg, and notices
+  assets. RC5 proved the runtime, F6 schema-v2, signing, and release-workflow
+  remediations at that SHA. It does not include the required C7 console or the
+  subsequent session-boundary hardening, so it cannot be promoted to final.
+  Any receipt gathered for RC5 remains bound to RC5 and cannot certify the
+  changed RC6 line.
+- RC6 is the next retained candidate. Its current change set implements the C7
+  five-destination console and related session/privacy hardening. The
+  implementation is code-complete in the RC6 checkout: focused UI and Rust
+  suites, architecture checks, and the live browser smoke pass. C7 release
+  acceptance remains incomplete until the change set lands, the exact RC6
+  source and release gates pass, and the operator walkthrough is signed off.
+  No RC6 tag or draft exists yet.
+- Live GitHub governance was rechecked on 2026-07-13: `main` requires the
+  Ubuntu and macOS CI contexts from an up-to-date branch, enforces protection
+  for admins, requires conversation resolution, and forbids force-pushes and
+  deletion. Active no-bypass tag rulesets `18789975` and `18843710` forbid
+  update, deletion, and non-fast-forward changes for `v1.0.0` and
+  `v1.0.0-rc.*`, respectively. Recheck these settings immediately before the
+  RC6 merge/tag rather than treating this dated observation as permanent.
 - Gateway payments are preview-only and disabled by default. Opt-in balance
   observations are not finality proof and must not be represented as supported
   1.0 payment confirmations.
 
 ## 2. Execution order
 
-1. Re-anchor on a clean, current `main`; confirm the GitNexus index matches the
-   checked-out commit.
-2. Treat the authorization, payment-truth, queue, tag, and signing remediations
-   through `f73b861` as a landed baseline. Complete the RC5 stop-ship
-   remediation in this order:
-   - require the exact `sepolia` and `l2` role set;
-   - accept only integer chain IDs for Sepolia (`11155111`) and Base Sepolia
-     (`84532`), Arbitrum Sepolia (`421614`), or OP Sepolia (`11155420`);
-   - require each plan-step prerequisite to reach `confirmed`, never merely
-     `sent`, before a dependent can sign or broadcast;
-   - use F6 schema v2 to prove four families with five transactions, including
-     two ordered, receipt-confirmed `fund_gas` and dependent-sweep legs bound by
-     plan, job, step, chain, address, and prerequisite identities;
-   - prove all supported IDs pass and mainnet, arbitrary, and non-integer IDs
-     fail, and prove malformed or single-hash gas chains fail, with internally
-     consistent receipt and audit fixtures;
-   - synchronize the runbook, readiness audit, changelog, and plan so RC4 is
-     failed evidence and RC5 is the next candidate.
+1. Re-anchor on protected `main` at the RC5 peeled commit, then create an
+   isolated RC6 worktree and confirm the GitNexus index matches that checkout.
+2. Treat the authorization, payment-truth, queue, tag, signing, dependency-
+   finality, and F6 schema-v2 remediations through `7e04743` as the landed RC5
+   baseline. Complete the RC6 stop-ship change set without widening the 1.0
+   product scope:
+   - implement the exact five C7 destinations and persistent unlocked status
+     strip while keeping setup and locked states private;
+   - make lock, logout, reset, restore, and compartment switching hard session
+     boundaries that cannot repaint or reuse data from a prior context;
+   - keep onboarding policy opt-ins atomic so enabling one gate cannot overwrite
+     unrelated policy fields or a concurrent update;
+   - preserve all existing fail-closed execution, confirmation, and receipt
+     contracts from RC5.
 3. Run focused tests for every changed boundary, then run
    `./scripts/check-release.sh` alone. Never run a full gate while another agent
    or build is modifying the same checkout.
@@ -81,8 +100,8 @@ a commit that contains later hardening changes.
    legs, blocks force-pushes, and that release-tag governance prevents updates
    and deletion. Remediate missing settings before landing through a pull
    request, then require both CI legs to pass.
-6. Only then create a new annotated RC tag and complete the operator gates in
-   section 5.
+6. Only then create annotated tag `v1.0.0-rc.6` and complete the operator gates
+   in section 5 against its exact peeled commit.
 
 ## 3. Executable release contract
 
@@ -166,7 +185,7 @@ and the operator decision are required before publication.
 | F6 | Five funded testnet transactions for four families, including both confirmed legs of `fund_gas` → dependent sweep, with any mock-only family labeled honestly |
 | Desktop | Checksum-verified RC `.dmg` installs and reaches unlock on a clean machine without a dev toolchain |
 | Doctor | `sigillum doctor` passes on every supported host at the new RC |
-| UI | Operator walkthrough/sign-off for the remaining C7 console acceptance surface |
+| UI | Operator walkthrough/sign-off for the remaining five-destination C7 console surface, including the persistent unlocked status strip on every destination, its hidden/reset setup and locked states, Portfolio wallet/provider and treasury-rollup coverage, and Vault `secrets/push` coverage; transit crypto remains CLI-only |
 | H2 | Explicit operator decision to tag and publish `v1.0.0` |
 
 Work may continue on any independent item while one of these gates is waiting.

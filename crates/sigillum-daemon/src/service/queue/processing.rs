@@ -17,7 +17,7 @@ use crate::service::helpers::now_unix;
 use crate::service::{ServiceError, ServiceResult, SigillumService};
 
 use super::QueueExecution;
-use super::gates::EXECUTION_PAUSED_REASON;
+use super::gates::{DAEMON_LOCKING_REASON, EXECUTION_PAUSED_REASON};
 use super::serialization;
 use super::state::queue_job_is_runnable;
 use super::tally::QueueDrainTally;
@@ -29,7 +29,8 @@ impl SigillumService {
         body: QueueProcessRequest,
     ) -> ServiceResult<QueueProcessResponse> {
         let token = self.require_session(token)?;
-        let _guard = self.state.operation_guard().await;
+        let session_context = self.capture_session_operation_context(Some(token))?;
+        let _guard = self.acquire_session_operation(&session_context).await?;
         let mut queue = crate::queue_store::load_queue(&self.state.base_dir)
             .map_err(|error| ServiceError::internal(format!("Failed to load queue: {error}")))?;
         let processed = self.process_queue_state(token, &mut queue, body).await?;
@@ -85,8 +86,11 @@ impl SigillumService {
             if processed.len() >= limit {
                 break;
             }
-            // Pause is immediate: no new job starts. Any in-flight job finishes
-            // its current attempt; remaining jobs keep state and attempts intact.
+            if self.state.is_locking() {
+                paused_reason = Some(DAEMON_LOCKING_REASON.to_string());
+                break;
+            }
+            // Pause prevents another job from starting without disturbing its state.
             if self.queue_execution_paused()? {
                 paused_reason = Some(EXECUTION_PAUSED_REASON.to_string());
                 break;
@@ -155,8 +159,8 @@ impl SigillumService {
                     gas_limit,
                     view_tag_hex,
                 } => self
-                    .eth_stealth_send_with_profile(
-                        Some(token),
+                    .eth_stealth_send_with_profile_in_operation(
+                        token,
                         EthStealthSendWithProfileRequest {
                             wallet_profile: wallet_profile.clone(),
                             stealth: StealthPaymentRef {
@@ -185,8 +189,8 @@ impl SigillumService {
                     gas_limit,
                     view_tag_hex,
                 } => self
-                    .eth_stealth_send_erc20_with_profile(
-                        Some(token),
+                    .eth_stealth_send_erc20_with_profile_in_operation(
+                        token,
                         EthStealthSendErc20WithProfileRequest {
                             wallet_profile: wallet_profile.clone(),
                             stealth: StealthPaymentRef {
@@ -346,7 +350,9 @@ impl SigillumService {
             {
                 super::broadcast::persist_queue(&self.state.base_dir, queue)?;
                 super::failpoints::hit(super::failpoints::AFTER_PREPARED_PERSIST);
-                if self.state.queue_execution_pause_latched() {
+                if self.state.is_locking() {
+                    paused_reason = Some(DAEMON_LOCKING_REASON.to_string());
+                } else if self.state.queue_execution_pause_latched() {
                     paused_reason = Some(EXECUTION_PAUSED_REASON.to_string());
                 } else {
                     self.persist_queue_submission_marker(queue, job_index, now)?;
