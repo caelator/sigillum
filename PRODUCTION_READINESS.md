@@ -1,14 +1,15 @@
 # Sigillum — Production Readiness
 
-**Date:** June 4, 2026 (updated July 11, 2026)
-**Current Verdict:** the code-level hardening and updated source gates pass on
-the current line, but `v1.0.0-rc.2` is not a valid release candidate. Its remote
-tag is annotated; the tag-time workflow produced a false negative after
-checkout rewrote the runner-local tag ref to the peeled commit, so no draft or
-assets were created. The contract fix must land, its protected-main SHA must be
-re-gated, and a fresh monotonically numbered `v1.0.0-rc.3` must pass the
-workflow and same-SHA operator gates. Every pushed RC tag remains an immutable
-receipt anchor.
+**Date:** June 4, 2026 (updated July 12, 2026)
+**Current Verdict:** there is no valid release candidate. `v1.0.0-rc.2` is an
+immutable annotated-tag-contract failure. `v1.0.0-rc.3` passed the legacy
+source and release workflows and produced checksum-valid assets, but its
+macOS app had only a linker signature: strict bundle verification failed,
+`Info.plist` was unbound, resources were unsealed, and `CodeResources` was
+absent. RC3 and every same-SHA operator receipt are historical failure evidence
+only. The bundle-signing fix must pass the strengthened gate on protected
+`main`; the next candidate is the monotonically required `v1.0.0-rc.4`.
+Every pushed RC tag remains an immutable receipt anchor.
 The supported boundary remains local-first, single-host, and not
 internet-facing; remote-platform scope is explicitly unsupported.
 
@@ -104,7 +105,9 @@ not the shipped local-first wallet-management baseline:
   `scripts/check-adversarial.sh` is not an independent security audit.
 - The remaining RC-time evidence is:
   - a successful draft release workflow and checksum-verified asset set at the
-    fresh `v1.0.0-rc.3` SHA; `v1.0.0-rc.2` is historical failure evidence only
+    fresh `v1.0.0-rc.4` SHA, including strict verification of the source app
+    and the app mounted from its dmg; `v1.0.0-rc.2` and `v1.0.0-rc.3` are
+    historical failure evidence only
   - standard and chaos doctor/soak receipts on every supported host at the new
     RC SHA; the earlier `mac-server` receipt is historical baseline evidence,
     not evidence for the current hardening candidate (F4)

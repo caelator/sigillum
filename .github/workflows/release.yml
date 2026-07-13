@@ -126,8 +126,41 @@ jobs:
         run: cargo about generate --locked --output-file crates/sigillum-desktop/THIRD-PARTY-NOTICES.txt about.hbs
 
       - name: Build desktop bundle
-        working-directory: crates/sigillum-desktop
-        run: cargo tauri build --config '{"bundle":{"resources":["THIRD-PARTY-NOTICES.txt"]}}' -- --locked
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: ./scripts/build-macos-bundle.sh --config '{"bundle":{"resources":{"THIRD-PARTY-NOTICES.txt":"THIRD-PARTY-NOTICES.txt"}}}' -- --locked
+
+      - name: Verify macOS release bundle
+        shell: bash
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          dmg_files=(target/release/bundle/dmg/Sigillum_*.dmg)
+          if [[ "${#dmg_files[@]}" -ne 1 ]]; then
+            printf 'Expected exactly one Sigillum dmg, found %s\n' "${#dmg_files[@]}" >&2
+            exit 1
+          fi
+          if [[ ! -s target/release/bundle/macos/Sigillum.app/Contents/Resources/THIRD-PARTY-NOTICES.txt ]]; then
+            printf 'Release app is missing bundled THIRD-PARTY-NOTICES.txt\n' >&2
+            exit 1
+          fi
+          signing_mode="$(./scripts/check-macos-signing-env.sh)"
+          ./scripts/check-macos-bundle-signature.sh \
+            --mode "${signing_mode}" \
+            target/release/bundle/macos/Sigillum.app \
+            "${dmg_files[0]}"
 
       - name: Build CLI
         run: cargo build --release -p sigillum-cli --locked
