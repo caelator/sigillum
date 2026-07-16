@@ -3770,7 +3770,13 @@ function journeyApiStub(state: JourneyStubState) {
 }
 
 test("journey card renders done/pending steps and collapses when all complete", async () => {
-  const dom = installDom(["journeyList", "journeyProgress", "journeyComplete", "statusStrip"]);
+  const dom = installDom([
+    "journeyCard",
+    "journeyList",
+    "journeyProgress",
+    "journeyComplete",
+    "statusStrip",
+  ]);
   document.body.dataset.mode = "unlocked";
   const state: JourneyStubState = {
     providers: [{ name: "mainnet", chain_id: 1 }],
@@ -3808,6 +3814,9 @@ test("journey card renders done/pending steps and collapses when all complete", 
   ok(html.includes("The endpoint Sigillum uses to read balances"));
   equal(dom.el("journeyProgress").textContent, "1 of 4");
   equal(dom.el("journeyComplete").classList.contains("hidden"), true);
+  // Incomplete: the card stays expanded, no collapsed-state classes.
+  equal(dom.el("journeyCard").classList.contains("journey-card-complete"), false);
+  equal(dom.el("journeyComplete").classList.contains("journey-complete"), false);
 
   // Pure step computation mirrors the rendered done flags.
   const steps = computeJourneySteps({
@@ -3819,7 +3828,7 @@ test("journey card renders done/pending steps and collapses when all complete", 
   });
   deepEqual(steps.map((step) => step.done), [true, false, false, false]);
 
-  // Everything finished: checklist collapses into one quiet ready line.
+  // Everything finished: the card collapses into one compact ready line.
   state.seedProfiles = [{ name: "main" }];
   state.trackedAddressCount = 4;
   state.policy = { enabled: true, require_simulation: true };
@@ -3831,7 +3840,19 @@ test("journey card renders done/pending steps and collapses when all complete", 
     "Treasury ready — all setup steps complete",
   );
   equal(dom.el("journeyComplete").classList.contains("hidden"), false);
+  equal(dom.el("journeyComplete").classList.contains("journey-complete"), true);
+  equal(dom.el("journeyCard").classList.contains("journey-card-complete"), true);
   equal(dom.el("journeyProgress").textContent, "4 of 4");
+
+  // A step slipping back to pending restores the full checklist card.
+  state.policy = null;
+  await journey.loadJourney();
+  equal(dom.el("journeyCard").classList.contains("journey-card-complete"), false);
+  equal(dom.el("journeyComplete").classList.contains("journey-complete"), false);
+  equal(dom.el("journeyComplete").classList.contains("hidden"), true);
+  equal(dom.el("journeyList").classList.contains("hidden"), false);
+  equal(dom.el("journeyProgress").textContent, "3 of 4");
+  ok(dom.el("journeyList").innerHTML.includes("Set treasury guardrails"));
 });
 
 test("status strip chips carry values, warn/danger tones, and jump targets", async () => {

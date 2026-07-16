@@ -70,6 +70,42 @@
     var(--surface);
 }
 
+/* All four setup steps done: the card collapses to a single compact line. */
+.journey-card-complete {
+  padding-top: var(--space-2);
+  padding-bottom: var(--space-2);
+  border-left-color: var(--success);
+  background: var(--surface);
+}
+
+.journey-card-complete .card-head,
+.journey-card-complete .helper-text {
+  display: none;
+}
+
+.journey-complete {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin: 0;
+  color: var(--success-text);
+  font-weight: 600;
+}
+
+.journey-complete::before {
+  content: "✓";
+  flex-shrink: 0;
+  width: 18px;
+  height: 18px;
+  display: inline-grid;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--success-tint);
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1;
+}
+
 .journey-list {
   display: flex;
   flex-direction: column;

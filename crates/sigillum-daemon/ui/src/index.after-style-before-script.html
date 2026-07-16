@@ -23,6 +23,10 @@
         <h1 id="topbarTitle">Sigillum</h1>
         <p id="topbarSummary" class="topbar-summary">Local treasury daemon</p>
       </div>
+      <div class="topbar-meta">
+        <div id="refreshMeta" class="refresh-meta" data-state="busy">syncing...</div>
+        <button class="btn-ghost btn-small" data-action="refreshWorkspace">Refresh</button>
+      </div>
       <div class="topbar-status" role="group" aria-label="Vault status">
         <div id="statusBadge" class="status-badge status-locked">checking...</div>
         <div id="compartmentBadge" class="compartment-badge hidden"></div>
@@ -31,10 +35,6 @@
           <button class="btn-ghost btn-small" data-action="logoutSession">Log out</button>
           <button class="btn-danger btn-small" data-action="lock">Lock now</button>
         </div>
-      </div>
-      <div class="topbar-meta">
-        <div id="refreshMeta" class="refresh-meta" data-state="busy">syncing...</div>
-        <button class="btn-ghost btn-small" data-action="refreshWorkspace">Refresh</button>
       </div>
     </div>
 

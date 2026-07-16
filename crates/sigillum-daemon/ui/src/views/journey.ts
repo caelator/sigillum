@@ -174,6 +174,7 @@ export function createJourneyActions(deps: JourneyDeps) {
   function renderJourneyCard(state: JourneyState): void {
     const list = document.getElementById("journeyList");
     if (!list) return;
+    const card = document.getElementById("journeyCard");
     const steps = computeJourneySteps(state);
     const doneCount = steps.filter((step) => step.done).length;
     const progress = document.getElementById("journeyProgress");
@@ -181,20 +182,25 @@ export function createJourneyActions(deps: JourneyDeps) {
     const completeLine = document.getElementById("journeyComplete");
 
     if (doneCount === steps.length) {
-      // Every goal met: collapse to one quiet line instead of a checklist
-      // the operator no longer needs. The card stays so the strip and the
-      // progress count keep a stable home.
+      // Every goal met: the whole card collapses into one compact ready line
+      // (check icon + text) — header, blurb, and checklist are hidden by the
+      // journey-card-complete styles. The card itself stays so the overview
+      // keeps a stable anchor.
       list.innerHTML = "";
       list.classList.add("hidden");
+      if (card) card.classList.add("journey-card-complete");
       if (completeLine) {
         completeLine.textContent = "Treasury ready — all setup steps complete";
+        completeLine.classList.add("journey-complete");
         completeLine.classList.remove("hidden");
       }
       return;
     }
 
+    if (card) card.classList.remove("journey-card-complete");
     if (completeLine) {
       completeLine.textContent = "";
+      completeLine.classList.remove("journey-complete");
       completeLine.classList.add("hidden");
     }
     list.classList.remove("hidden");
