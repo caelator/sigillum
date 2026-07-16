@@ -193,3 +193,28 @@ input[type="radio"] {
 .input-mid     { flex: 0 1 150px !important; }
 .input-wide    { flex: 1 1 200px !important; }
 .input-wider   { flex: 0 1 220px !important; }
+
+/* Visible field labels for dense operator forms (policy caps, refills). */
+.field-label {
+  font-size: var(--fs-sm);
+  color: var(--text-secondary);
+  white-space: nowrap;
+  align-self: center;
+}
+
+/* Treasury policy: plain-English summary + collapsible detail blocks. */
+.policy-summary {
+  margin: var(--space-2) 0;
+  font-size: var(--fs-sm);
+  color: var(--text);
+}
+
+.policy-details {
+  margin: var(--space-2) 0;
+}
+
+.policy-details summary {
+  cursor: pointer;
+  font-size: var(--fs-sm);
+  color: var(--text-secondary);
+}

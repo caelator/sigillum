@@ -1,4 +1,5 @@
 import { deepEqual, equal, ok } from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { test } from "node:test";
 
 import {
@@ -42,6 +43,7 @@ import {
   formatWeiHexAsEth,
   parseEthToWeiHex,
   parseTreasuryDestinationLines,
+  treasuryPolicySummary,
 } from "../src/views/treasury";
 import {
   createWalletManagerActions,
@@ -2982,6 +2984,15 @@ test("treasury policy renderer shows configured policy and empty state", () => {
   ok(html.includes(">enabled<"));
   ok(html.includes("0x2222222222222222222222222222222222222222 (cold-vault)"));
   ok(html.includes("0x3333333333333333333333333333333333333333"));
+  // The camelCase state line is now a plain-English summary…
+  ok(html.includes('class="policy-summary"'));
+  ok(html.includes("Plans may execute sweeps and claims."));
+  ok(html.includes("DeFi exits and Revokes are blocked."));
+  ok(html.includes("Cross-party linkage blocking is off"));
+  ok(html.includes("Sponsor gas top-ups are allowed"));
+  ok(html.includes("queue execution is currently paused"));
+  // …and the raw state stays one click away behind "Technical state".
+  ok(html.includes("<summary>Technical state</summary>"));
   ok(html.includes("maxStep=1.5 ETH"));
   ok(html.includes("maxPlan=-"));
   ok(html.includes("requireSimulation=true"));
@@ -2999,6 +3010,87 @@ test("treasury policy renderer shows configured policy and empty state", () => {
   ok(
     dom.el("treasuryPolicyList").innerHTML.includes("No treasury policy configured yet."),
   );
+});
+
+test("treasury policy summary describes the gates in plain English", () => {
+  const base: TreasuryPolicy = {
+    enabled: true,
+    allowed_destinations: [],
+    max_step_native_wei_hex: null,
+    max_plan_native_wei_hex: null,
+    require_simulation: true,
+    allow_claim_execution: false,
+    allow_gas_topups: false,
+    max_gas_topup_wei_hex: null,
+    allow_plan_execution: true,
+    allow_sweep_execution: true,
+    allow_revoke_execution: true,
+    allow_exit_execution: false,
+    max_fee_per_gas_cap_hex: null,
+    execution_paused: false,
+    created_at_unix: 1,
+    updated_at_unix: 2,
+  };
+
+  deepEqual(treasuryPolicySummary({ ...base, enabled: false }), [
+    "The policy is disabled, so nothing may execute from a plan.",
+    "Cross-party linkage blocking is off — plans may route different payers to a shared destination.",
+    "Sponsor gas top-ups are off.",
+  ]);
+
+  deepEqual(treasuryPolicySummary({ ...base, allow_plan_execution: false }), [
+    "Plan execution is switched off, so no step may execute yet.",
+    "Cross-party linkage blocking is off — plans may route different payers to a shared destination.",
+    "Sponsor gas top-ups are off.",
+  ]);
+
+  deepEqual(
+    treasuryPolicySummary({
+      ...base,
+      allow_exit_execution: true,
+      allow_claim_execution: true,
+      allow_gas_topups: true,
+      block_cross_party_linkage: true,
+    }),
+    [
+      "Plans may execute sweeps, revokes, DeFi exits, and claims.",
+      "Cross-party linkage blocking is on; destinations are limited to the allow-list below.",
+      "Sponsor gas top-ups are allowed.",
+    ],
+  );
+
+  deepEqual(treasuryPolicySummary(base), [
+    "Plans may execute sweeps and revokes.",
+    "Claims and DeFi exits are blocked.",
+    "Cross-party linkage blocking is off — plans may route different payers to a shared destination.",
+    "Sponsor gas top-ups are off.",
+  ]);
+});
+
+test("treasury policy form labels every numeric input and folds the legal hints", () => {
+  const html = readFileSync("src/index.after-style-before-script.html", "utf8");
+  const expectedLabels: Array<[string, string]> = [
+    ["treasuryPolicyDestinations", "Allowed destinations"],
+    ["treasuryPolicyMaxStepEth", "Per-step cap (ETH)"],
+    ["treasuryPolicyMaxPlanEth", "Per-plan cap (ETH)"],
+    ["treasuryPolicyFreshnessSecs", "Simulation freshness (seconds)"],
+    ["treasuryPolicyHotFloorEth", "Hot floor (ETH)"],
+    ["treasuryPolicyHotTargetEth", "Hot target (ETH)"],
+    ["treasuryPolicyHotOverflowEth", "Hot overflow threshold (ETH)"],
+    ["treasuryPolicyMaxGasTopupEth", "Max gas top-up (ETH)"],
+    ["treasuryPolicyMaxFeePerGasGwei", "Max fee per gas (gwei)"],
+  ];
+  for (const [id, label] of expectedLabels) {
+    ok(
+      html.includes('for="' + id + '"'),
+      "expected a visible label for #" + id,
+    );
+    ok(html.includes(label), "expected label text " + label);
+  }
+  ok(html.includes("<summary>How this policy protects you</summary>"));
+  // The dense legal copy is preserved, just behind the details fold.
+  ok(html.includes("Claim execution stays blocked unless ALL of these hold"));
+  ok(html.includes("Nothing executes from a consolidation plan step unless"));
 });
 
 test("treasury receive list renders rotate buttons only for active allocations", () => {

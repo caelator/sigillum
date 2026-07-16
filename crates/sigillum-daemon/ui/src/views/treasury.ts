@@ -117,6 +117,57 @@ function shortAddress(value: string): string {
   return trimmed.length > 24 ? trimmed.slice(0, 12) + "..." + trimmed.slice(-6) : trimmed;
 }
 
+function joinEnglishList(items: string[]): string {
+  if (items.length <= 1) return items.join("");
+  if (items.length === 2) return items[0] + " and " + items[1];
+  return items.slice(0, -1).join(", ") + ", and " + items[items.length - 1];
+}
+
+/// Plain-English description of what the current policy permits, in 2-4
+/// short sentences. The raw key=value state stays available behind the
+/// "Technical state" details in renderTreasuryPolicy.
+export function treasuryPolicySummary(policy: TreasuryPolicy): string[] {
+  const sentences: string[] = [];
+  if (!policy.enabled) {
+    sentences.push("The policy is disabled, so nothing may execute from a plan.");
+  } else if (!policy.allow_plan_execution) {
+    sentences.push("Plan execution is switched off, so no step may execute yet.");
+  } else {
+    const allowed: string[] = [];
+    if (policy.allow_sweep_execution) allowed.push("sweeps");
+    if (policy.allow_revoke_execution) allowed.push("revokes");
+    if (policy.allow_exit_execution) allowed.push("DeFi exits");
+    if (policy.allow_claim_execution) allowed.push("claims");
+    if (allowed.length) {
+      sentences.push("Plans may execute " + joinEnglishList(allowed) + ".");
+    }
+    const blocked: string[] = [];
+    if (!policy.allow_claim_execution) blocked.push("Claims");
+    if (!policy.allow_exit_execution) blocked.push("DeFi exits");
+    if (!policy.allow_sweep_execution) blocked.push("Sweeps");
+    if (!policy.allow_revoke_execution) blocked.push("Revokes");
+    if (blocked.length) {
+      sentences.push(joinEnglishList(blocked) + " are blocked.");
+    }
+  }
+  sentences.push(
+    policy.block_cross_party_linkage
+      ? "Cross-party linkage blocking is on; destinations are limited to the allow-list below."
+      : "Cross-party linkage blocking is off — plans may route different payers to a shared destination.",
+  );
+  const operational: string[] = [];
+  operational.push(
+    policy.allow_gas_topups
+      ? "Sponsor gas top-ups are allowed"
+      : "Sponsor gas top-ups are off",
+  );
+  if (policy.execution_paused) {
+    operational.push("queue execution is currently paused");
+  }
+  sentences.push(operational.join("; ") + ".");
+  return sentences;
+}
+
 export interface TreasuryActionsDeps {
   api: (method: string, path: string, body?: unknown) => Promise<any>;
   toast: (message: string, type?: string) => void;
@@ -377,10 +428,16 @@ export function createTreasuryActions(deps: TreasuryActionsDeps) {
           '<div class="entity-title">Treasury policy ' +
           statusPill(current.enabled ? "enabled" : "disabled") +
           "</div>" +
+          '<p class="policy-summary">' +
+          esc(treasuryPolicySummary(current).join(" ")) +
+          "</p>" +
           '<div class="entity-meta">' +
           "destinations=" +
           esc(destinations || "-") +
-          "<br>" +
+          "</div>" +
+          '<details class="policy-details">' +
+          "<summary>Technical state</summary>" +
+          '<div class="entity-meta">' +
           "maxStep=" +
           esc(capAsEth(current.max_step_native_wei_hex)) +
           " · maxPlan=" +
@@ -419,7 +476,7 @@ export function createTreasuryActions(deps: TreasuryActionsDeps) {
           esc(String(current.simulation_freshness_secs ?? 900)) +
           " · updated=" +
           esc(formatTs(current.updated_at_unix)) +
-          "</div></div></li>"
+          "</div></details></li>"
         );
       },
     );
