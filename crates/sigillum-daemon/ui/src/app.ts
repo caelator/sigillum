@@ -290,31 +290,10 @@ function focusWatchBook() {
 }
 
 function heroPrimaryAction() {
-  if (currentUiMode === 'setup') {
-    jumpToCard('setupCard');
-    return;
-  }
-  if (currentUiMode === 'locked') {
-    jumpToCard('authCard');
-    const input = document.getElementById('passphrase');
-    if (input) input.focus();
-    return;
-  }
   jumpToCard('secretsCard');
 }
 
 function heroSecondaryAction() {
-  if (currentUiMode === 'setup') {
-    jumpToCard('setupCard');
-    return;
-  }
-  if (currentUiMode === 'locked') {
-    jumpToCard('authCard');
-    fido2Actions.switchUnlockTab('fido2');
-    const input = document.getElementById('fido2Pin');
-    if (input) input.focus();
-    return;
-  }
   jumpToCard('profilesCard');
 }
 
@@ -478,41 +457,11 @@ function updateNextStepCard() {
   setHidden('nextStepCard', false);
 }
 
-function updateHeroState(mode, active, unlocked) {
+// The hero (#statusCard) is hidden outside unlocked mode, so this only ever
+// renders the unlocked overview banner.
+function updateHeroState(active, unlocked) {
   const primary = document.getElementById('heroPrimaryBtn');
   const secondary = document.getElementById('heroSecondaryBtn');
-
-  if (mode === 'setup') {
-    setText('statusEyebrow', 'First run');
-    setText('statusTitle', 'Set up the vault');
-    setText('statusSummary', 'This daemon is ready, but the machine does not have a vault yet. Finish setup first, then Sigillum will reveal the working operator surface below.');
-    setText('heroModeValue', 'Setup required');
-    setText('heroModeDetail', 'You only do this once per local data directory. Everything else stays quiet until setup is complete.');
-    primary.textContent = 'Start setup';
-    secondary.textContent = 'View options';
-    setTrustedHtml('statusContext', renderHeroContext([
-      { title: 'Pick a model', body: 'Start with Daily + Secure if you want the best default for one person managing everyday and higher-trust work.' },
-      { title: 'Register access', body: 'Use a hardware key for stronger local protection, or choose passphrase-only if this machine will not use hardware keys.' },
-      { title: 'Verify the path', body: 'When setup finishes, unlock once and store a first real value so the workflow is proven end to end.' },
-    ]));
-    return;
-  }
-
-  if (mode === 'locked') {
-    setText('statusEyebrow', 'Locked state');
-    setText('statusTitle', 'Unlock to continue');
-    setText('statusSummary', 'Your local data is still on disk, but this browser session is not authenticated. Unlock to reach secrets, profiles, deposits, queue actions, backups, and diagnostics.');
-    setText('heroModeValue', 'Locked');
-    setText('heroModeDetail', 'Use the same passphrase or hardware-key threshold you configured during setup. The session token stays only in this tab.');
-    primary.textContent = 'Unlock now';
-    secondary.textContent = 'Use hardware key';
-    setTrustedHtml('statusContext', renderHeroContext([
-      { title: 'Passphrase path', body: 'Use this if you configured passphrase fallback or built a passphrase-only vault.' },
-      { title: 'Hardware-key path', body: 'Use the hardware-key tab when a FIDO2 device is attached and you want threshold-based unlock.' },
-      { title: 'Session scope', body: 'Unlock state lives in the daemon process and the session token lives only in this browser tab.' },
-    ]));
-    return;
-  }
 
   const activeLabel = active ? (active.compartment_label || ('Compartment ' + active.compartment_id)) : 'No active compartment';
   setText('statusEyebrow', 'Vault unlocked');

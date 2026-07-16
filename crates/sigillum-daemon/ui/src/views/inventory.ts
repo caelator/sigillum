@@ -23,33 +23,6 @@ import {
 } from "../render/forms";
 import { esc, escAttr, statusPill } from "../render/html";
 
-export interface InventoryViewModel {
-  enabledChains: ChainProfile[];
-  watchAddressBook: WatchAddressBookEntry[];
-  discoveryJobs: WalletDiscoveryJob[];
-  riskCatalog: RiskCatalogEntry[];
-  riskFindings: RiskFinding[];
-  consolidationPlans: ConsolidationPlan[];
-}
-
-export function summarizeInventory(view: InventoryViewModel): string {
-  return [
-    `${view.enabledChains.length} enabled chains`,
-    `${view.watchAddressBook.length} saved watch addresses`,
-    `${view.discoveryJobs.length} discovery jobs`,
-    `${view.riskCatalog.length} risk catalog entries`,
-    `${view.riskFindings.length} risk findings`,
-    `${view.consolidationPlans.length} plans`,
-  ].join(" | ");
-}
-
-export function inventoryNeedsOperatorReview(view: InventoryViewModel): boolean {
-  return (
-    view.riskFindings.length > 0 ||
-    view.consolidationPlans.some((plan) => plan.summary?.review_required_steps > 0)
-  );
-}
-
 /// Per-family W7.1 execution gate field for each plan-step action.
 /// review_asset is deliberately absent: it is never executable.
 const EXECUTION_FAMILY_GATE: Record<string, string> = {

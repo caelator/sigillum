@@ -9,7 +9,7 @@ export interface ShellRendererDeps {
   setSecretsAccess: (unlocked: boolean) => void;
   resetVaultCounts: () => void;
   setUnlockGuidance: (mode: string) => void;
-  updateHeroState: (mode: string, active?: any, unlocked?: any[]) => void;
+  updateHeroState: (active?: any, unlocked?: any[]) => void;
   updateWizardChrome: (id: string) => void;
   resetSetupWizard: () => void;
   renderCompartmentSwitcher: (unlocked: any[], active: any) => void;
@@ -45,7 +45,6 @@ export function createShellRenderer(deps: ShellRendererDeps) {
     deps.setSecretsAccess(false);
     deps.resetVaultCounts();
     deps.setUnlockGuidance("passphrase");
-    deps.updateHeroState("setup");
     deps.updateWizardChrome(
       document.querySelector(".wizard-step.active")?.id || "wizStep0",
     );
@@ -70,7 +69,6 @@ export function createShellRenderer(deps: ShellRendererDeps) {
     );
     deps.setSecretsAccess(false);
     deps.setUnlockGuidance("passphrase");
-    deps.updateHeroState("locked");
     // The passphrase field is the only actionable control on this screen;
     // hand it focus once the locked layout has settled.
     setTimeout(() => {
@@ -122,7 +120,7 @@ export function createShellRenderer(deps: ShellRendererDeps) {
     setHidden("backupCard", false);
     setHidden("auditCard", false);
     setHidden("diagCard", false);
-    deps.updateHeroState("unlocked", active, unlocked);
+    deps.updateHeroState(active, unlocked);
   }
 
   return {

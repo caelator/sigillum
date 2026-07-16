@@ -98,48 +98,10 @@ body[data-mode="unlocked"] .overview-card .hero-context {
   display: none;
 }
 
-/* Focus modes: statusCard renders as a centered headline, not a card */
-
-body:not([data-mode="unlocked"]) .overview-card {
-  background: transparent;
-  border: 0;
-  box-shadow: none;
-  padding: 0 var(--space-2);
-  text-align: center;
-}
-
-body:not([data-mode="unlocked"]) .overview-card h2 {
-  font-size: var(--fs-xl);
-  letter-spacing: 0;
-  line-height: 1.2;
-}
-
-body:not([data-mode="unlocked"]) .overview-card .overview-summary {
-  margin-left: auto;
-  margin-right: auto;
-}
-
-body:not([data-mode="unlocked"]) .overview-shell {
-  display: block;
-}
-
-body:not([data-mode="unlocked"]) .overview-side,
-body:not([data-mode="unlocked"]) .overview-actions {
-  display: none;
-}
-
 /* Locked and setup are focused flows. The overview hero only pushes the one
    actionable panel below the fold, so it is removed outright and the unlock
    or setup card becomes the first thing on screen. */
 body:not([data-mode="unlocked"]) #statusCard {
-  display: none;
-}
-
-body:not([data-mode="unlocked"]) .hero-context {
-  text-align: left;
-}
-
-body[data-mode="setup"] .hero-context {
   display: none;
 }
 
