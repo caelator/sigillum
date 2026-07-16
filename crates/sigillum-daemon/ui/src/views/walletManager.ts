@@ -4,6 +4,7 @@ import type {
   TreasuryGroupSummary,
   TreasuryReceiveAllocation,
 } from "../contracts";
+import { confirmDangerDialog } from "../render/confirm";
 import { setHiddenById as setHidden, setTextById as setText } from "../render/dom";
 import {
   clearFields,
@@ -18,7 +19,6 @@ import { formatWeiHexAsEth } from "./treasury";
 
 export type ManagedWalletKind = "seed" | "xpub";
 
-const DELETE_CONFIRM_TIMEOUT_MS = 5000;
 const WALLET_NAME_PATTERN = /^[A-Za-z0-9_-]+$/;
 const IMPORT_TABS = ["seed", "xpub", "watch"] as const;
 const CREATE_FORM_CONTROL_IDS = [
@@ -153,11 +153,6 @@ export function createWalletManagerActions(deps: WalletManagerDeps) {
   // storage, never in a toast, never logged. confirmMnemonicSaved() nulls it.
   let pendingMnemonic: string | null = null;
   let receiveTargetProfile: string | null = null;
-  let armedDelete: {
-    kind: ManagedWalletKind;
-    name: string;
-    timer: ReturnType<typeof setTimeout>;
-  } | null = null;
 
   function activeReceiveCountFor(profileName: string): number {
     return lastReceiveAllocations.filter(
@@ -170,13 +165,6 @@ export function createWalletManagerActions(deps: WalletManagerDeps) {
     return kind === "seed"
       ? '<span class="pill pill-good">signer</span>'
       : '<span class="pill pill-info">watch-only</span>';
-  }
-
-  function disarmDelete(rerender = true): void {
-    if (!armedDelete) return;
-    clearTimeout(armedDelete.timer);
-    armedDelete = null;
-    if (rerender) renderWalletManagerList();
   }
 
   function renderWalletManagerList(): void {
@@ -208,10 +196,6 @@ export function createWalletManagerActions(deps: WalletManagerDeps) {
           .split("\n")
           .map((line) => esc(line))
           .join("<br>");
-        const armed =
-          armedDelete &&
-          armedDelete.kind === row.kind &&
-          armedDelete.name === profile.name;
         let actions =
           '<button class="btn-ghost" data-action="promptWalletReceiveAddress" data-arg0="' +
           escAttr(profile.name) +
@@ -222,17 +206,12 @@ export function createWalletManagerActions(deps: WalletManagerDeps) {
             escAttr(seed.first_receive_address) +
             '" data-arg1="First receive address">Copy address</button>';
         }
-        actions += armed
-          ? '<button class="btn-danger" data-action="deleteManagedWallet" data-arg0="' +
-            escAttr(row.kind) +
-            '" data-arg1="' +
-            escAttr(profile.name) +
-            '">Confirm delete</button>'
-          : '<button class="btn-ghost" data-action="deleteManagedWallet" data-arg0="' +
-            escAttr(row.kind) +
-            '" data-arg1="' +
-            escAttr(profile.name) +
-            '">Delete</button>';
+        actions +=
+          '<button class="btn-danger" data-action="deleteManagedWallet" data-arg0="' +
+          escAttr(row.kind) +
+          '" data-arg1="' +
+          escAttr(profile.name) +
+          '">Delete</button>';
         return (
           '<li><div class="entity-main">' +
           '<div class="entity-title">' +
@@ -405,7 +384,6 @@ export function createWalletManagerActions(deps: WalletManagerDeps) {
   }
 
   async function createWalletRequest(): Promise<void> {
-    disarmDelete();
     if (pendingMnemonic != null) {
       deps.toast("Confirm the current seed phrase backup first", "error");
       return;
@@ -536,26 +514,20 @@ export function createWalletManagerActions(deps: WalletManagerDeps) {
   }
 
   async function copyWalletAddress(value: string, labelText?: string): Promise<void> {
-    disarmDelete();
     await copyValue(value, labelText || "Address");
   }
 
   async function deleteManagedWallet(kind: string, name: string): Promise<void> {
     const targetKind: ManagedWalletKind = kind === "xpub" ? "xpub" : "seed";
-    const armedForTarget =
-      armedDelete && armedDelete.kind === targetKind && armedDelete.name === name;
-    if (!armedForTarget) {
-      // First click only arms; a second click within the timeout executes.
-      disarmDelete(false);
-      armedDelete = {
-        kind: targetKind,
-        name,
-        timer: setTimeout(() => disarmDelete(), DELETE_CONFIRM_TIMEOUT_MS),
-      };
-      renderWalletManagerList();
-      return;
-    }
-    disarmDelete(false);
+    const confirmed = await confirmDangerDialog({
+      title: targetKind === "seed" ? "Delete wallet" : "Delete xpub profile",
+      body:
+        (targetKind === "seed"
+          ? 'Delete seed wallet "' + name + '"? The mnemonic is removed from this daemon\'s vault; on-chain funds are not moved, but this daemon can no longer sign with it.'
+          : 'Delete xpub profile "' + name + '"? The watch-only profile is removed from this daemon.'),
+      actionLabel: "Delete",
+    });
+    if (!confirmed) return;
     const path =
       targetKind === "seed"
         ? "/api/profiles/eth-seed/delete"
@@ -575,7 +547,6 @@ export function createWalletManagerActions(deps: WalletManagerDeps) {
   // ── Receive-address allocation (inline panel under the list) ──────────
 
   function promptWalletReceiveAddress(profileName: string): void {
-    disarmDelete();
     receiveTargetProfile = profileName;
     setText("walletReceiveTarget", profileName);
     setHidden("walletReceivePanel", false);
@@ -623,7 +594,6 @@ export function createWalletManagerActions(deps: WalletManagerDeps) {
   // ── Import tabs ───────────────────────────────────────────────────────
 
   function setWalletImportTab(tab: string): void {
-    disarmDelete();
     const target = (IMPORT_TABS as readonly string[]).includes(tab) ? tab : "seed";
     IMPORT_TABS.forEach((name) => {
       const suffix = name.charAt(0).toUpperCase() + name.slice(1);
@@ -636,7 +606,6 @@ export function createWalletManagerActions(deps: WalletManagerDeps) {
   }
 
   async function importSeedWallet(): Promise<void> {
-    disarmDelete();
     const name = textValue("walletImportSeedName");
     if (!name) {
       deps.toast("Wallet name is required", "error");
@@ -701,7 +670,6 @@ export function createWalletManagerActions(deps: WalletManagerDeps) {
   }
 
   async function importXpubWallet(): Promise<void> {
-    disarmDelete();
     const name = textValue("walletImportXpubName");
     if (!name) {
       deps.toast("Profile name is required", "error");
@@ -761,7 +729,6 @@ export function createWalletManagerActions(deps: WalletManagerDeps) {
   }
 
   async function importWatchAddress(): Promise<void> {
-    disarmDelete();
     const address = textValue("walletImportWatchAddress");
     if (!address) {
       deps.toast("Watch address is required", "error");

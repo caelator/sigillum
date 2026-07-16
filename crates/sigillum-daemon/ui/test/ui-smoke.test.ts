@@ -8,6 +8,11 @@ import {
   writeSessionToken,
 } from "../src/api/session";
 import { dispatchDataAction } from "../src/actions/dispatcher";
+import {
+  confirmDangerDialog,
+  confirmTypedDialog,
+  informDialog,
+} from "../src/render/confirm";
 import { renderEntityList } from "../src/render/forms";
 import {
   buildInventoryReport,
@@ -47,6 +52,137 @@ import type {
   TreasuryReceiveAllocation,
 } from "../src/contracts";
 import { installDom } from "./dom-fixture";
+
+// ── Shared confirm-dialog drivers ───────────────────────────────────────────
+// Dangerous actions are gated by the modal in src/render/confirm.ts. The
+// dialog renders into document.body via createElement/appendChild, so the
+// fake DOM keeps real element references these helpers can drive.
+
+async function tick(): Promise<void> {
+  await new Promise((resolve) => setTimeout(resolve, 0));
+}
+
+function confirmOverlay(): any {
+  return (
+    ((document.body.children as unknown as any[]) || []).find(
+      (child) => child.isConnected && child.getAttribute?.("data-confirm-overlay") != null,
+    ) || null
+  );
+}
+
+function confirmPart(selector: string): any {
+  const overlay = confirmOverlay();
+  return overlay ? overlay.querySelector(selector) : null;
+}
+
+function typeConfirmPhrase(phrase: string): void {
+  const input = confirmPart("[data-confirm-input]");
+  ok(input, "expected a typed-phrase input in the confirmation dialog");
+  input.value = phrase;
+  input.dispatchEvent({ type: "input", target: input });
+}
+
+async function answerConfirm(action: "action" | "cancel", phrase?: string): Promise<void> {
+  await tick();
+  const overlay = confirmOverlay();
+  ok(overlay, "expected a confirmation dialog to be open");
+  if (phrase !== undefined) typeConfirmPhrase(phrase);
+  const button = overlay.querySelector(
+    action === "action" ? "[data-confirm-action]" : "[data-confirm-cancel]",
+  );
+  ok(button, "expected the dialog " + action + " button");
+  button.click();
+  await tick();
+}
+
+test("confirmation dialog tiers resolve decisions and gate typed phrases", async () => {
+  installDom();
+
+  // inform: one acknowledgement button, no cancel, resolves true.
+  let pending: Promise<boolean> = informDialog({
+    title: "Clipboard unavailable",
+    body: "Copy the value manually.",
+    valueDisplay: "0xvalue",
+  });
+  let overlay = confirmOverlay();
+  ok(overlay, "inform dialog opens");
+  equal(overlay.getAttribute("data-confirm-overlay"), "inform");
+  const dialog = overlay.children[0];
+  equal(dialog.getAttribute("role"), "dialog");
+  equal(dialog.getAttribute("aria-modal"), "true");
+  ok(dialog.getAttribute("aria-labelledby"), "dialog is labelled by its title");
+  equal(confirmPart("[data-confirm-cancel]"), null);
+  equal(confirmPart("[data-confirm-value]").value, "0xvalue");
+  confirmPart("[data-confirm-action]").click();
+  equal(await pending, true);
+  ok(!overlay.isConnected, "dialog closes after the decision");
+
+  // confirm: Cancel and danger action, initial focus on the safe button.
+  pending = confirmDangerDialog({ title: "Delete thing", body: "It is gone for good." });
+  overlay = confirmOverlay();
+  equal(overlay.getAttribute("data-confirm-overlay"), "confirm");
+  const cancelButton = confirmPart("[data-confirm-cancel]");
+  const actionButton = confirmPart("[data-confirm-action]");
+  equal(cancelButton.textContent, "Cancel");
+  equal(actionButton.textContent, "Confirm");
+  equal(actionButton.className, "btn-danger");
+  equal(document.activeElement, cancelButton, "focus starts on the safe button");
+  actionButton.click();
+  equal(await pending, true);
+
+  // Cancel resolves false.
+  pending = confirmDangerDialog({ title: "Delete thing", body: "Gone." });
+  confirmPart("[data-confirm-cancel]").click();
+  equal(await pending, false);
+
+  // Escape resolves false.
+  pending = confirmDangerDialog({ title: "Delete thing", body: "Gone." });
+  (document as any).dispatchEvent({ type: "keydown", key: "Escape" });
+  equal(await pending, false);
+
+  // Backdrop click resolves false.
+  pending = confirmDangerDialog({ title: "Delete thing", body: "Gone." });
+  confirmOverlay().click();
+  equal(await pending, false);
+
+  // typed: the action stays disabled until the exact phrase is entered.
+  const phrase = "EXECUTE 2 PLAN STEPS TOTAL 7 WEI";
+  pending = confirmTypedDialog({ title: "Bulk enqueue", body: "Everything goes.", phrase });
+  overlay = confirmOverlay();
+  equal(overlay.getAttribute("data-confirm-overlay"), "typed");
+  equal(confirmPart("[data-confirm-phrase]").textContent, phrase);
+  const typedAction = confirmPart("[data-confirm-action]");
+  equal(typedAction.disabled, true, "action disabled before the phrase matches");
+  const phraseInput = confirmPart("[data-confirm-input]");
+  equal(document.activeElement, phraseInput, "focus starts in the phrase input");
+
+  // Wrong phrase: still disabled, clicking does nothing, Enter does nothing.
+  typeConfirmPhrase("EXECUTE 9 PLAN STEPS TOTAL 1 WEI");
+  equal(typedAction.disabled, true);
+  typedAction.click();
+  (document as any).dispatchEvent({
+    type: "keydown",
+    key: "Enter",
+    target: phraseInput,
+  });
+  await tick();
+  ok(confirmOverlay(), "dialog stays open while the phrase mismatches");
+
+  // Exact phrase enables the action; Enter in the input submits.
+  typeConfirmPhrase(phrase);
+  equal(typedAction.disabled, false);
+  (document as any).dispatchEvent({
+    type: "keydown",
+    key: "Enter",
+    target: phraseInput,
+  });
+  equal(await pending, true);
+
+  // Typed tier also cancels cleanly via Escape.
+  pending = confirmTypedDialog({ title: "Bulk enqueue", body: "Everything goes.", phrase });
+  (document as any).dispatchEvent({ type: "keydown", key: "Escape" });
+  equal(await pending, false);
+});
 
 test("shell renderer applies setup, locked, and unlocked DOM state", () => {
   const dom = installDom([
@@ -170,7 +306,6 @@ test("session actions drive unlock, lock, and browser logout workflow", async ()
   const calls: Array<{ method: string; path: string; body?: any }> = [];
   const toasts: Array<{ message: string; type?: string }> = [];
   let refreshCount = 0;
-  let confirmResult = false;
   const actions = createSessionActions({
     api: async (method, path, body) => {
       calls.push({ method, path, body });
@@ -194,7 +329,6 @@ test("session actions drive unlock, lock, and browser logout workflow", async ()
     refresh: () => {
       refreshCount += 1;
     },
-    confirm: () => confirmResult,
   });
 
   // Empty passphrase: inline error, no network call, nothing silent.
@@ -237,12 +371,15 @@ test("session actions drive unlock, lock, and browser logout workflow", async ()
   deepEqual(toasts.pop(), { message: "Unlock failed: bad passphrase.", type: "error" });
 
   writeSessionToken("still-active");
-  await actions.lock();
+  let lockPending = actions.lock();
+  await answerConfirm("cancel");
+  await lockPending;
   equal(readSessionToken(), "still-active");
   ok(!calls.some((call) => call.path === "/api/lock"));
 
-  confirmResult = true;
-  await actions.lock();
+  lockPending = actions.lock();
+  await answerConfirm("action");
+  await lockPending;
   deepEqual(calls.pop(), { method: "POST", path: "/api/lock", body: undefined });
   equal(readSessionToken(), null);
   deepEqual(toasts.pop(), { message: "All compartments locked", type: undefined });
@@ -921,9 +1058,10 @@ test("plan execute affordances render only when gates pass and drive enqueue rou
   ok(html.includes("Execute All Eligible"));
   ok(html.includes("queuedJob=job-1"));
 
-  // Single-step enqueue posts the explicit confirm flag.
-  (globalThis as any).confirm = () => true;
-  await inventory.enqueuePlanStep("plan-exec", "step-exec");
+  // Single-step enqueue asks once, then posts the explicit confirm flag.
+  const stepPending = inventory.enqueuePlanStep("plan-exec", "step-exec");
+  await answerConfirm("action");
+  await stepPending;
   deepEqual(
     calls.find((call) => call.path === "/api/plans/enqueue-step"),
     {
@@ -934,25 +1072,29 @@ test("plan execute affordances render only when gates pass and drive enqueue rou
   );
 
   // Bulk enqueue probes for the exact daemon-computed phrase, renders it in
-  // the typed-confirmation dialog, and submits what the operator typed.
-  const promptMessages: string[] = [];
-  (globalThis as any).prompt = (message: string) => {
-    promptMessages.push(message);
-    return expectedPhrase;
-  };
-  await inventory.enqueuePlanBulk("plan-exec");
-  ok(promptMessages.some((message) => message.includes(expectedPhrase)));
+  // the typed-confirmation dialog, and submits only after the operator types
+  // it. A mistyped phrase keeps the danger button disabled and never reaches
+  // the daemon.
+  const bulkPending = inventory.enqueuePlanBulk("plan-exec");
+  await tick();
+  equal(confirmPart("[data-confirm-phrase]")?.textContent, expectedPhrase);
+  typeConfirmPhrase("EXECUTE 9 PLAN STEPS TOTAL 1 WEI");
+  equal(confirmPart("[data-confirm-action]").disabled, true);
+  typeConfirmPhrase(expectedPhrase);
+  equal(confirmPart("[data-confirm-action]").disabled, false);
+  confirmPart("[data-confirm-action]").click();
+  await bulkPending;
   const bulkCalls = calls.filter((call) => call.path === "/api/plans/enqueue-plan");
   equal(bulkCalls.length, 2);
   equal((bulkCalls[0].body as any).confirmation, "");
   equal((bulkCalls[1].body as any).confirmation, expectedPhrase);
   ok(toasts.some((message) => message.includes("Enqueued 1 step(s)")));
 
-  // A mistyped phrase never reaches the daemon.
-  (globalThis as any).prompt = () => "EXECUTE 9 PLAN STEPS TOTAL 1 WEI";
-  await inventory.enqueuePlanBulk("plan-exec");
+  // Cancelling the typed dialog stops after the probe: nothing is enqueued.
+  const cancelledBulk = inventory.enqueuePlanBulk("plan-exec");
+  await answerConfirm("cancel");
+  await cancelledBulk;
   equal(calls.filter((call) => call.path === "/api/plans/enqueue-plan").length, 3);
-  ok(toasts.some((message) => message.includes("Confirmation phrase does not match")));
 });
 
 test("chain profile UI renders registry fields and uses chain routes", async () => {
@@ -1087,8 +1229,9 @@ test("chain profile UI renders registry fields and uses chain routes", async () 
     },
   );
 
-  (globalThis as any).confirm = () => true;
-  await inventory.deleteChainProfile("test-rollup");
+  const deleteChainPending = inventory.deleteChainProfile("test-rollup");
+  await answerConfirm("action");
+  await deleteChainPending;
   deepEqual(
     calls.find((call) => call.path === "/api/chains/delete"),
     {
@@ -1172,7 +1315,9 @@ test("operation results include failure cause breakdowns", async () => {
     updateNextStepCard: () => undefined,
   });
 
-  await operations.processQueueBatch();
+  const batchPending = operations.processQueueBatch();
+  await answerConfirm("action");
+  await batchPending;
   ok(resultBoxes.queueProcessResult.includes("failures_by_cause"));
   ok(resultBoxes.queueProcessResult.includes("provider_error=1"));
   ok(resultBoxes.queueProcessResult.includes("policy_block=1"));
@@ -1225,11 +1370,185 @@ test("processQueueBatch surfaces a mid-drain pause reason in the result line", a
     updateNextStepCard: () => undefined,
   });
 
-  await operations.processQueueBatch();
+  const pauseBatchPending = operations.processQueueBatch();
+  await answerConfirm("action");
+  await pauseBatchPending;
   ok(
     resultBoxes.queueProcessResult.includes(
       "paused: execution_paused: queue execution is paused by the operator kill switch",
     ),
+  );
+});
+
+test("queue process batch and single job require confirmation before broadcast", async () => {
+  const dom = installDom(["queueProcessLimit", "queueList", "depositList"]);
+  dom.el("queueProcessLimit").value = "20";
+  const calls: Array<{ method: string; path: string; body?: any }> = [];
+  const operations = createOperationsActions({
+    api: async (method, path, body) => {
+      calls.push({ method, path, body });
+      if (path === "/api/queue/process") {
+        return { processed: 1, succeeded: 1, jobs: [] };
+      }
+      if (path === "/api/deposits/eth-stealth") return { deposits: [] };
+      return {};
+    },
+    toast: () => undefined,
+    refresh: () => undefined,
+    showResultBox: () => undefined,
+    updateNextStepCard: () => undefined,
+  });
+
+  // Cancelling the batch dialog never touches the process route.
+  let pending: Promise<void> = operations.processQueueBatch();
+  await tick();
+  ok(
+    confirmPart("[data-confirm-body]")?.textContent.includes(
+      "Process up to 20 queued jobs now?",
+    ),
+    "batch dialog states the job count and consequence",
+  );
+  ok(
+    confirmPart("[data-confirm-body]")?.textContent.includes("signed and broadcast"),
+    "batch dialog states the broadcast consequence",
+  );
+  await answerConfirm("cancel");
+  await pending;
+  equal(calls.filter((call) => call.path === "/api/queue/process").length, 0);
+
+  // Confirming posts the batch drain with the operator's limit.
+  pending = operations.processQueueBatch();
+  await answerConfirm("action");
+  await pending;
+  deepEqual(calls.find((call) => call.path === "/api/queue/process"), {
+    method: "POST",
+    path: "/api/queue/process",
+    body: { id: null, limit: 20 },
+  });
+
+  // Single-job processing is guarded the same way.
+  pending = operations.processQueueJob("job-7");
+  await answerConfirm("cancel");
+  await pending;
+  equal(calls.filter((call) => call.path === "/api/queue/process").length, 1);
+
+  pending = operations.processQueueJob("job-7");
+  await tick();
+  ok(confirmPart("[data-confirm-body]")?.textContent.includes('"job-7"'));
+  await answerConfirm("action");
+  await pending;
+  deepEqual(calls.filter((call) => call.path === "/api/queue/process")[1], {
+    method: "POST",
+    path: "/api/queue/process",
+    body: { id: "job-7", limit: 1 },
+  });
+});
+
+test("deposit sweep enqueue and deposit delete require confirmation", async () => {
+  installDom(["depositList", "queueList", "depositRefreshResult"]);
+  const calls: Array<{ method: string; path: string; body?: any }> = [];
+  const operations = createOperationsActions({
+    api: async (method, path, body) => {
+      calls.push({ method, path, body });
+      if (path === "/api/deposits/eth-stealth/enqueue-sweep") {
+        return { status: "queued", job: { id: "job-sweep-1" } };
+      }
+      return { status: "ok", deposits: [], jobs: [] };
+    },
+    toast: () => undefined,
+    refresh: () => undefined,
+    showResultBox: () => undefined,
+    updateNextStepCard: () => undefined,
+  });
+
+  let pending: Promise<void> = operations.enqueueDepositSweep("dep-1");
+  await answerConfirm("cancel");
+  await pending;
+  equal(
+    calls.filter((call) => call.path === "/api/deposits/eth-stealth/enqueue-sweep").length,
+    0,
+  );
+
+  pending = operations.enqueueDepositSweep("dep-1");
+  await tick();
+  ok(
+    confirmPart("[data-confirm-body]")?.textContent.includes("signed and broadcast"),
+    "sweep dialog states the on-chain consequence",
+  );
+  await answerConfirm("action");
+  await pending;
+  deepEqual(
+    calls.find((call) => call.path === "/api/deposits/eth-stealth/enqueue-sweep"),
+    {
+      method: "POST",
+      path: "/api/deposits/eth-stealth/enqueue-sweep",
+      body: { id: "dep-1" },
+    },
+  );
+
+  pending = operations.deleteDeposit("dep-1");
+  await answerConfirm("cancel");
+  await pending;
+  equal(
+    calls.filter((call) => call.path === "/api/deposits/eth-stealth/delete").length,
+    0,
+  );
+
+  pending = operations.deleteDeposit("dep-1");
+  await answerConfirm("action");
+  await pending;
+  deepEqual(
+    calls.find((call) => call.path === "/api/deposits/eth-stealth/delete"),
+    {
+      method: "POST",
+      path: "/api/deposits/eth-stealth/delete",
+      body: { id: "dep-1" },
+    },
+  );
+});
+
+test("treasury party delete requires confirmation", async () => {
+  installDom(["treasuryPartyList", "treasuryReceiveParty"]);
+  const calls: Array<{ method: string; path: string; body?: any }> = [];
+  const treasury = createTreasuryActions({
+    api: async (method, path, body) => {
+      calls.push({ method, path, body });
+      if (path === "/api/treasury/parties" && method === "GET") {
+        return {
+          parties: [{ id: "party-1", name: "Client One", created_at_unix: 1717900000 }],
+        };
+      }
+      return { status: "ok", allocations: [] };
+    },
+    toast: () => undefined,
+  });
+
+  await treasury.loadTreasuryParties();
+  calls.length = 0;
+
+  let pending: Promise<void> = treasury.deleteTreasuryParty("party-1");
+  await tick();
+  ok(
+    confirmPart("[data-confirm-body]")?.textContent.includes('"Client One"'),
+    "party dialog names the counterparty being deleted",
+  );
+  await answerConfirm("cancel");
+  await pending;
+  equal(
+    calls.filter((call) => call.path === "/api/treasury/parties/delete").length,
+    0,
+  );
+
+  pending = treasury.deleteTreasuryParty("party-1");
+  await answerConfirm("action");
+  await pending;
+  deepEqual(
+    calls.find((call) => call.path === "/api/treasury/parties/delete"),
+    {
+      method: "POST",
+      path: "/api/treasury/parties/delete",
+      body: { id: "party-1" },
+    },
   );
 });
 
@@ -1599,7 +1918,6 @@ test("saved watch-address UI renders, saves, toggles, and deletes entries", asyn
     "inventoryWatchLabel",
     "inventoryWatchAddresses",
   ]);
-  (globalThis as any).confirm = () => true;
   const calls: Array<{ method: string; path: string; body?: any }> = [];
   const toasts: string[] = [];
   const inventory = createInventoryActions({
@@ -1681,7 +1999,11 @@ test("saved watch-address UI renders, saves, toggles, and deletes entries", asyn
   equal(toggleUpsert?.body.enabled, false);
 
   calls.length = 0;
-  await inventory.deleteWatchAddressBookEntry("0x7777777777777777777777777777777777777777");
+  const deleteWatchPending = inventory.deleteWatchAddressBookEntry(
+    "0x7777777777777777777777777777777777777777",
+  );
+  await answerConfirm("action");
+  await deleteWatchPending;
   const deleteCall = calls.find(
     (call) => call.path === "/api/inventory/watch-addresses/delete",
   );
@@ -2891,13 +3213,23 @@ test("treasury receive allocate and rotate dispatch api calls with toasts", asyn
   const rotateButton = dom.el("rotateBtn", "BUTTON");
   rotateButton.dataset.action = "rotateTreasuryReceiveAddress";
   rotateButton.dataset.arg0 = "alloc-7";
-  dispatchDataAction(rotateButton as any, {
-    actions: {
-      rotateTreasuryReceiveAddress: (...args: unknown[]) =>
-        (pending = treasury.rotateTreasuryReceiveAddress(args[0] as string)),
-    },
-    toast: () => undefined,
-  });
+  const rotateDispatch = () =>
+    dispatchDataAction(rotateButton as any, {
+      actions: {
+        rotateTreasuryReceiveAddress: (...args: unknown[]) =>
+          (pending = treasury.rotateTreasuryReceiveAddress(args[0] as string)),
+      },
+      toast: () => undefined,
+    });
+
+  // Cancelling the rotation dialog never reaches the daemon.
+  rotateDispatch();
+  await answerConfirm("cancel");
+  await pending;
+  equal(calls.length, 0);
+
+  rotateDispatch();
+  await answerConfirm("action");
   await pending;
 
   deepEqual(calls[0], {
@@ -3549,100 +3881,79 @@ test("wallet manager import tabs switch forms, scrub seed input, and post contra
   equal(dom.el("walletImportWatchAddress").value, "");
 });
 
-test("wallet manager delete requires a two-step confirm and disarms on timeout", async () => {
+test("wallet manager delete is gated by the shared confirmation dialog", async () => {
   const dom = installWalletManagerDom();
-  const timers: Array<() => void> = [];
-  const originalSetTimeout = globalThis.setTimeout;
-  const originalClearTimeout = globalThis.clearTimeout;
-  (globalThis as any).setTimeout = (handler: () => void) => {
-    timers.push(handler);
-    return timers.length;
-  };
-  (globalThis as any).clearTimeout = () => undefined;
+  const calls: Array<{ method: string; path: string; body?: any }> = [];
+  const manager = createWalletManagerActions({
+    api: async (method, path, body) => {
+      calls.push({ method, path, body });
+      if (path === "/api/profiles/eth-seed") {
+        return { profiles: [walletManagerSeedProfile()] };
+      }
+      if (path === "/api/profiles/eth-xpub") {
+        return {
+          profiles: [
+            {
+              name: "watcher",
+              project_account: 0,
+              provider_profile: "mainnet",
+              compartment_id: 0,
+            },
+          ],
+        };
+      }
+      if (path === "/api/profiles/evm") {
+        return { profiles: [{ name: "mainnet", chain_id: 1 }] };
+      }
+      return { status: "ok" };
+    },
+    toast: () => undefined,
+  });
 
-  try {
-    const calls: Array<{ method: string; path: string; body?: any }> = [];
-    const manager = createWalletManagerActions({
-      api: async (method, path, body) => {
-        calls.push({ method, path, body });
-        if (path === "/api/profiles/eth-seed") {
-          return { profiles: [walletManagerSeedProfile()] };
-        }
-        if (path === "/api/profiles/eth-xpub") {
-          return {
-            profiles: [
-              {
-                name: "watcher",
-                project_account: 0,
-                provider_profile: "mainnet",
-                compartment_id: 0,
-              },
-            ],
-          };
-        }
-        if (path === "/api/profiles/evm") {
-          return { profiles: [{ name: "mainnet", chain_id: 1 }] };
-        }
-        return { status: "ok" };
-      },
-      toast: () => undefined,
-    });
+  await manager.loadWalletManager();
+  const list = dom.el("walletManagerList");
+  equal(list.innerHTML.split('data-action="deleteManagedWallet"').length - 1, 2);
 
-    await manager.loadWalletManager();
-    const list = dom.el("walletManagerList");
-    ok(list.innerHTML.includes('data-action="deleteManagedWallet"'));
-    ok(!list.innerHTML.includes("Confirm delete"));
+  // Cancelling the dialog deletes nothing.
+  let pendingDelete = manager.deleteManagedWallet("seed", "main");
+  await answerConfirm("cancel");
+  await pendingDelete;
+  equal(calls.filter((call) => call.path.endsWith("/delete")).length, 0);
 
-    // First click arms only — nothing is deleted.
-    await manager.deleteManagedWallet("seed", "main");
-    equal(
-      calls.filter((call) => call.path.endsWith("/delete")).length,
-      0,
-    );
-    equal(list.innerHTML.split("Confirm delete").length - 1, 1);
+  // Confirming the danger action posts the delete for that exact profile.
+  pendingDelete = manager.deleteManagedWallet("xpub", "watcher");
+  await tick();
+  ok(
+    confirmPart("[data-confirm-body]")?.textContent.includes('"watcher"'),
+    "dialog names the xpub profile being deleted",
+  );
+  await answerConfirm("action");
+  await pendingDelete;
+  deepEqual(
+    calls.find((call) => call.path === "/api/profiles/eth-xpub/delete"),
+    {
+      method: "POST",
+      path: "/api/profiles/eth-xpub/delete",
+      body: { name: "watcher" },
+    },
+  );
 
-    // Clicking a different row re-arms for that row instead of deleting.
-    await manager.deleteManagedWallet("xpub", "watcher");
-    equal(
-      calls.filter((call) => call.path.endsWith("/delete")).length,
-      0,
-    );
-    equal(list.innerHTML.split("Confirm delete").length - 1, 1);
-
-    // Second click on the armed row executes the delete.
-    await manager.deleteManagedWallet("xpub", "watcher");
-    deepEqual(
-      calls.find((call) => call.path === "/api/profiles/eth-xpub/delete"),
-      {
-        method: "POST",
-        path: "/api/profiles/eth-xpub/delete",
-        body: { name: "watcher" },
-      },
-    );
-
-    // Timeout disarms a pending confirmation.
-    await manager.deleteManagedWallet("seed", "main");
-    equal(list.innerHTML.split("Confirm delete").length - 1, 1);
-    timers[timers.length - 1]();
-    equal(list.innerHTML.includes("Confirm delete"), false);
-    await manager.deleteManagedWallet("seed", "main");
-    equal(
-      calls.filter((call) => call.path === "/api/profiles/eth-seed/delete").length,
-      0,
-    );
-    await manager.deleteManagedWallet("seed", "main");
-    deepEqual(
-      calls.find((call) => call.path === "/api/profiles/eth-seed/delete"),
-      {
-        method: "POST",
-        path: "/api/profiles/eth-seed/delete",
-        body: { name: "main" },
-      },
-    );
-  } finally {
-    globalThis.setTimeout = originalSetTimeout;
-    globalThis.clearTimeout = originalClearTimeout;
-  }
+  pendingDelete = manager.deleteManagedWallet("seed", "main");
+  await tick();
+  ok(
+    confirmPart("[data-confirm-body]")?.textContent.includes("no longer sign"),
+    "seed delete copy keeps the signing consequence",
+  );
+  await answerConfirm("action");
+  await pendingDelete;
+  deepEqual(
+    calls.find((call) => call.path === "/api/profiles/eth-seed/delete"),
+    {
+      method: "POST",
+      path: "/api/profiles/eth-seed/delete",
+      body: { name: "main" },
+    },
+  );
 });
 
 test("wallet manager copy and receive-allocation flows hit clipboard and treasury", async () => {

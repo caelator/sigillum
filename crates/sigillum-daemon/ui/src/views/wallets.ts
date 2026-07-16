@@ -7,6 +7,7 @@ import {
   showResultBox,
   textValue,
 } from "../render/forms";
+import { confirmDangerDialog } from "../render/confirm";
 import { esc, escAttr } from "../render/html";
 
 export type WalletProfileKind = "stealth" | "xpub" | "seed";
@@ -358,7 +359,15 @@ export function createWalletActions(deps: WalletActionsDeps) {
   }
 
   async function deleteProviderProfile(name: string): Promise<void> {
-    if (!confirm('Delete provider profile "' + name + '"?')) return;
+    const confirmed = await confirmDangerDialog({
+      title: "Delete provider profile",
+      body:
+        'Delete provider profile "' +
+        name +
+        '"? Wallets and deposits that reference it lose their chain connection.',
+      actionLabel: "Delete",
+    });
+    if (!confirmed) return;
     const r = await deps.api("POST", "/api/profiles/evm/delete", { name });
     if (r.error) {
       deps.toast(r.error, "error");
@@ -404,7 +413,15 @@ export function createWalletActions(deps: WalletActionsDeps) {
   }
 
   async function deleteWalletProfile(name: string): Promise<void> {
-    if (!confirm('Delete wallet profile "' + name + '"?')) return;
+    const confirmed = await confirmDangerDialog({
+      title: "Delete wallet profile",
+      body:
+        'Delete wallet profile "' +
+        name +
+        '"? Its deposit and receive configuration is removed from this daemon.',
+      actionLabel: "Delete",
+    });
+    if (!confirmed) return;
     const r = await deps.api("POST", "/api/profiles/eth-stealth/delete", { name });
     if (r.error) {
       deps.toast(r.error, "error");
@@ -456,7 +473,15 @@ export function createWalletActions(deps: WalletActionsDeps) {
   }
 
   async function deleteXpubWalletProfile(name: string): Promise<void> {
-    if (!confirm('Delete xpub wallet profile "' + name + '"?')) return;
+    const confirmed = await confirmDangerDialog({
+      title: "Delete xpub wallet profile",
+      body:
+        'Delete xpub wallet profile "' +
+        name +
+        '"? The watch-only profile is removed from this daemon.',
+      actionLabel: "Delete",
+    });
+    if (!confirmed) return;
     const r = await deps.api("POST", "/api/profiles/eth-xpub/delete", { name });
     if (r.error) {
       deps.toast(r.error, "error");
@@ -512,7 +537,15 @@ export function createWalletActions(deps: WalletActionsDeps) {
   }
 
   async function deleteSeedWalletProfile(name: string): Promise<void> {
-    if (!confirm('Delete seed wallet profile "' + name + '"?')) return;
+    const confirmed = await confirmDangerDialog({
+      title: "Delete seed wallet profile",
+      body:
+        'Delete seed wallet profile "' +
+        name +
+        '"? The stored mnemonic is removed from this daemon\'s vault; on-chain funds are not moved, but this daemon can no longer sign with it.',
+      actionLabel: "Delete",
+    });
+    if (!confirmed) return;
     const r = await deps.api("POST", "/api/profiles/eth-seed/delete", { name });
     if (r.error) {
       deps.toast(r.error, "error");

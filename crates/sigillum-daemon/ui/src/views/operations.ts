@@ -1,3 +1,4 @@
+import { confirmDangerDialog } from "../render/confirm";
 import { setHiddenById } from "../render/dom";
 import {
   clearFields,
@@ -416,6 +417,15 @@ export function createOperationsActions(deps: OperationsDeps) {
   }
 
   async function enqueueDepositSweep(id: string): Promise<void> {
+    const confirmed = await confirmDangerDialog({
+      title: "Queue deposit sweep",
+      body:
+        'Enqueue a sweep job for deposit "' +
+        id +
+        '"? When the queue processes it and the job passes its checks, the sweep is signed and broadcast on-chain.',
+      actionLabel: "Queue sweep",
+    });
+    if (!confirmed) return;
     const r = await deps.api("POST", "/api/deposits/eth-stealth/enqueue-sweep", { id });
     if (r.error) {
       deps.toast(r.error, "error");
@@ -430,7 +440,15 @@ export function createOperationsActions(deps: OperationsDeps) {
   }
 
   async function deleteDeposit(id: string): Promise<void> {
-    if (!confirm('Delete deposit "' + id + '"?')) return;
+    const confirmed = await confirmDangerDialog({
+      title: "Delete deposit",
+      body:
+        'Delete deposit "' +
+        id +
+        '"? The deposit record is removed from this daemon; funds already on-chain are not moved.',
+      actionLabel: "Delete",
+    });
+    if (!confirmed) return;
     const r = await deps.api("POST", "/api/deposits/eth-stealth/delete", { id });
     if (r.error) {
       deps.toast(r.error, "error");
@@ -523,9 +541,20 @@ export function createOperationsActions(deps: OperationsDeps) {
   }
 
   async function processQueueBatch(): Promise<void> {
+    const limit = optionalNumberValue("queueProcessLimit");
+    const confirmed = await confirmDangerDialog({
+      title: "Process queue",
+      body:
+        (limit
+          ? "Process up to " + String(limit) + " queued jobs now?"
+          : "Process queued jobs now?") +
+        " Jobs that pass their checks will be signed and broadcast on-chain.",
+      actionLabel: "Process now",
+    });
+    if (!confirmed) return;
     const r = await deps.api("POST", "/api/queue/process", {
       id: null,
-      limit: optionalNumberValue("queueProcessLimit"),
+      limit,
     });
     if (r.error) {
       deps.toast(r.error, "error");
@@ -556,6 +585,15 @@ export function createOperationsActions(deps: OperationsDeps) {
   }
 
   async function processQueueJob(id: string): Promise<void> {
+    const confirmed = await confirmDangerDialog({
+      title: "Process queued job",
+      body:
+        'Process queued job "' +
+        id +
+        '" now? If it passes its checks it will be signed and broadcast on-chain.',
+      actionLabel: "Process now",
+    });
+    if (!confirmed) return;
     const r = await deps.api("POST", "/api/queue/process", { id, limit: 1 });
     if (r.error) {
       deps.toast(r.error, "error");

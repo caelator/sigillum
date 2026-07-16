@@ -10,6 +10,7 @@ import {
   setTrustedHtmlById as setTrustedHtml,
 } from "./render/dom";
 import { clearFields, showResultBox } from "./render/forms";
+import { confirmDangerDialog, confirmTypedDialog, informDialog } from "./render/confirm";
 import { esc, escAttr, formatTs, statBox } from "./render/html";
 import {
   clearRefreshTimer,
@@ -786,7 +787,11 @@ async function copyText(value, label) {
       return;
     }
   } catch (_) {}
-  window.prompt('Copy ' + label + ':', value);
+  await informDialog({
+    title: 'Copy ' + label,
+    body: 'Clipboard access is unavailable in this browser context. Select the value below and copy it manually.',
+    valueDisplay: value,
+  });
 }
 
 // ── API Keys & Secrets ────────────────────────────────────────
@@ -892,7 +897,12 @@ function revealSecretButton(key, btn) {
 }
 
 async function deleteApiKey(key) {
-  if (!confirm('Delete API key "' + key + '"?')) return;
+  const confirmed = await confirmDangerDialog({
+    title: 'Delete API key',
+    body: 'Delete API key "' + key + '"? Providers using this stored credential lose their authenticated access.',
+    actionLabel: 'Delete',
+  });
+  if (!confirmed) return;
   const r = await api('POST', '/api/api-keys/delete', { key });
   if (r.error) { toast(r.error, 'error'); return; }
   toast('Deleted');
@@ -900,7 +910,12 @@ async function deleteApiKey(key) {
 }
 
 async function deleteSecret(key) {
-  if (!confirm('Delete secret "' + key + '"?')) return;
+  const confirmed = await confirmDangerDialog({
+    title: 'Delete secret',
+    body: 'Delete secret "' + key + '"? The encrypted value is removed from this compartment and cannot be recovered from the vault.',
+    actionLabel: 'Delete',
+  });
+  if (!confirmed) return;
   const r = await api('POST', '/api/secrets/delete', { key });
   if (r.error) { toast(r.error, 'error'); return; }
   toast('Deleted');
@@ -966,7 +981,12 @@ async function restoreSnapshot(
     toast('Restore passphrase must be at least 8 characters', 'error');
     return;
   }
-  if (!confirm('Restore this snapshot? Current on-disk Sigillum data will be replaced and you will need to unlock again.')) return;
+  const confirmed = await confirmDangerDialog({
+    title: 'Restore snapshot',
+    body: 'Restore this snapshot? Current on-disk Sigillum data will be replaced and you will need to unlock again.',
+    actionLabel: 'Restore',
+  });
+  if (!confirmed) return;
 
   let snapshotHex;
   try {
@@ -1006,29 +1026,20 @@ function restoreAuthSnapshot() {
   );
 }
 
-async function resetLocalData(confirmId = 'setupResetConfirm') {
-  const confirmInput = document.getElementById(confirmId);
-  if (!confirmInput) {
-    toast('Reset controls are unavailable.', 'error');
-    return;
-  }
-  const confirmation = confirmInput.value.trim();
-  if (confirmation !== SETUP_RESET_CONFIRMATION) {
-    toast("Type '" + SETUP_RESET_CONFIRMATION + "' exactly to continue.", 'error');
-    return;
-  }
-  if (!confirm('Archive this machine\'s Sigillum data and return to first-run setup? The current data directory is moved aside (not deleted), but you will need a new vault to continue.')) {
-    return;
-  }
+async function resetLocalData() {
+  const confirmed = await confirmTypedDialog({
+    title: 'Reset local Sigillum data',
+    body: 'Archive this machine\'s Sigillum data and return to first-run setup? The current data directory is moved aside (not deleted), but you will need a new vault to continue.',
+    phrase: SETUP_RESET_CONFIRMATION,
+    actionLabel: 'Archive & reset',
+  });
+  if (!confirmed) return;
 
-  const r = await api('POST', '/api/setup/reset', { confirmation });
+  const r = await api('POST', '/api/setup/reset', { confirmation: SETUP_RESET_CONFIRMATION });
   if (r.error) { toast(r.error, 'error'); return; }
 
   clearSessionToken();
   clearFields([
-    'setupResetConfirm',
-    'authResetConfirm',
-    'backupResetConfirm',
     'setupRestorePass',
     'authRestorePass',
     'backupRestorePass',

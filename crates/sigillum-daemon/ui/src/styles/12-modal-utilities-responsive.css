@@ -12,6 +12,72 @@
   margin-bottom: var(--space-3);
 }
 
+/* ── 18b. Confirmation dialog (created at runtime by render/confirm.ts) ───── */
+
+.confirm-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.7);
+  z-index: 200;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.confirm-dialog {
+  width: min(460px, calc(100vw - 48px));
+  box-shadow: var(--shadow-3);
+}
+
+.confirm-dialog h2 {
+  font-size: var(--fs-base);
+  font-weight: 600;
+  line-height: 1.5;
+  margin-bottom: var(--space-3);
+}
+
+.confirm-body {
+  color: var(--text-secondary);
+  font-size: var(--fs-sm);
+  line-height: 1.5;
+  margin-bottom: var(--space-4);
+  overflow-wrap: anywhere;
+}
+
+.confirm-value {
+  width: 100%;
+  margin-bottom: var(--space-4);
+}
+
+.confirm-phrase-label {
+  color: var(--text-muted);
+  font-size: var(--fs-xs);
+  margin-bottom: var(--space-2);
+}
+
+.confirm-phrase {
+  background: var(--danger-tint);
+  border: 1px solid rgba(229, 84, 79, 0.4);
+  border-radius: var(--radius-sm);
+  color: var(--danger-text);
+  font-size: var(--fs-xs);
+  padding: var(--space-2) var(--space-3);
+  margin-bottom: var(--space-3);
+  user-select: none;
+  overflow-wrap: anywhere;
+}
+
+.confirm-input {
+  width: 100%;
+}
+
+.confirm-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-2);
+  margin-top: var(--space-4);
+}
+
 /* ── 19. Utilities ────────────────────────────────────────────────────────── */
 
 .flex-1 { flex: 1 1 160px; min-width: 0; }

@@ -12,6 +12,7 @@ import type {
   TreasuryRiskSummary,
   TreasuryRoutingStatus,
 } from "../contracts";
+import { confirmDangerDialog } from "../render/confirm";
 import { setTextById as setText } from "../render/dom";
 import {
   clearFields,
@@ -941,6 +942,13 @@ export function createTreasuryActions(deps: TreasuryActionsDeps) {
   }
 
   async function rotateTreasuryReceiveAddress(allocationId: string): Promise<void> {
+    const confirmed = await confirmDangerDialog({
+      title: "Rotate receive address",
+      body:
+        "Rotate this receive address? The current address is retired and a fresh address is derived for future payments. The old address stays valid on-chain, but it no longer shows as the active receive address here.",
+      actionLabel: "Rotate address",
+    });
+    if (!confirmed) return;
     const r = await deps.api("POST", "/api/treasury/receive-addresses/rotate", {
       allocation_id: allocationId,
     });
@@ -1056,6 +1064,16 @@ export function createTreasuryActions(deps: TreasuryActionsDeps) {
   }
 
   async function deleteTreasuryParty(partyId: string): Promise<void> {
+    const party = treasuryParties.find((candidate) => candidate.id === partyId);
+    const confirmed = await confirmDangerDialog({
+      title: "Delete counterparty",
+      body:
+        'Delete counterparty "' +
+        (party?.name || partyId) +
+        '"? Existing receive allocations are kept, but their link to this party is removed.',
+      actionLabel: "Delete",
+    });
+    if (!confirmed) return;
     const r = await deps.api("POST", "/api/treasury/parties/delete", {
       id: partyId,
     });

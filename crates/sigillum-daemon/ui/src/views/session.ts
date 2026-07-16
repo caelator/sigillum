@@ -1,10 +1,10 @@
 import { clearSessionToken } from "../api/session";
+import { confirmDangerDialog } from "../render/confirm";
 
 export interface SessionActionDeps {
   api: (method: string, path: string, body?: unknown) => Promise<any>;
   toast: (message: string, type?: string) => void;
   refresh: () => unknown | Promise<unknown>;
-  confirm?: (message: string) => boolean;
 }
 
 export function isAlreadyUnlockedConflict(message: unknown): boolean {
@@ -30,9 +30,6 @@ function setUnlockError(message: string | null): void {
 }
 
 export function createSessionActions(deps: SessionActionDeps) {
-  const confirmAction =
-    deps.confirm || ((message: string) => globalThis.confirm(message));
-
   async function unlock(): Promise<void> {
     const input = passphraseInput();
     const passphrase = input?.value || "";
@@ -85,7 +82,12 @@ export function createSessionActions(deps: SessionActionDeps) {
   }
 
   async function lock(): Promise<void> {
-    if (!confirmAction("Lock all compartments? Master keys will be zeroized from memory.")) {
+    const confirmed = await confirmDangerDialog({
+      title: "Lock all compartments",
+      body: "Master keys will be zeroized from daemon memory. You will need to unlock the vault again to continue working.",
+      actionLabel: "Lock all",
+    });
+    if (!confirmed) {
       return;
     }
     const response = await deps.api("POST", "/api/lock");

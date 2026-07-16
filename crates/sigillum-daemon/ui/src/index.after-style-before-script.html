@@ -302,8 +302,7 @@
           <button class="btn-danger" data-action="restoreSetupSnapshot">Restore Snapshot</button>
         </div>
         <div class="form-row">
-          <input type="text" id="setupResetConfirm" placeholder="Type RESET LOCAL SIGILLUM DATA to start over">
-          <button class="btn-danger" data-action="resetLocalData" data-arg0="setupResetConfirm">Reset local setup</button>
+          <button class="btn-danger" data-action="resetLocalData">Reset local setup</button>
         </div>
         <p class="card-note">Resetting archives the local Sigillum data directory to a timestamped sibling (nothing is deleted). Restoring replaces local state with the selected encrypted snapshot.</p>
       </div>
@@ -344,8 +343,7 @@
             <button class="btn-danger" data-action="restoreAuthSnapshot">Restore Snapshot</button>
           </div>
           <div class="form-row">
-            <input type="text" id="authResetConfirm" placeholder="Type RESET LOCAL SIGILLUM DATA to start over">
-            <button class="btn-danger" data-action="resetLocalData" data-arg0="authResetConfirm">Archive &amp; start fresh</button>
+            <button class="btn-danger" data-action="resetLocalData">Archive &amp; start fresh</button>
           </div>
           <p class="card-note">Starting fresh moves the current data directory to a timestamped archive next to it &mdash; nothing is deleted &mdash; then returns to first-run setup, where you create a new vault and then create or import wallets in the Wallets section.</p>
         </div>
@@ -1233,8 +1231,7 @@
         <div class="section-title">Start over on this machine</div>
         <p class="helper-text">Wipe the local Sigillum data directory and return this daemon to first-run setup.</p>
         <div class="form-row">
-          <input type="text" id="backupResetConfirm" placeholder="Type RESET LOCAL SIGILLUM DATA to reset">
-          <button class="btn-danger" data-action="resetLocalData" data-arg0="backupResetConfirm">Reset local data</button>
+          <button class="btn-danger" data-action="resetLocalData">Reset local data</button>
         </div>
       </div>
 

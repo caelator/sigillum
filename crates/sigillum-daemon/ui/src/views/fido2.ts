@@ -1,3 +1,4 @@
+import { confirmDangerDialog } from "../render/confirm";
 import { clearFields } from "../render/forms";
 import { setInlineInfoById, setTextById } from "../render/dom";
 import { esc, escAttr } from "../render/html";
@@ -340,15 +341,16 @@ export function createFido2Actions(deps: Fido2Deps) {
       deps.toast("Label required", "error");
       return;
     }
-    if (
-      poison &&
-      !confirm(
-        'Register "' +
+    if (poison) {
+      const confirmed = await confirmDangerDialog({
+        title: "Register poison key",
+        body:
+          'Register "' +
           label +
           '" as a POISON key? Including it during unlock will cause silent failure.',
-      )
-    ) {
-      return;
+        actionLabel: "Register poison key",
+      });
+      if (!confirmed) return;
     }
     deps.toast("Touch your FIDO2 key now...");
     const body: any = { label };
@@ -370,7 +372,15 @@ export function createFido2Actions(deps: Fido2Deps) {
   }
 
   async function fido2RemoveKey(label: string): Promise<void> {
-    if (!confirm('Remove FIDO2 key "' + label + '"?')) return;
+    const confirmed = await confirmDangerDialog({
+      title: "Remove FIDO2 key",
+      body:
+        'Remove FIDO2 key "' +
+        label +
+        '"? Unlock thresholds that count on this key will no longer be able to use it.',
+      actionLabel: "Remove key",
+    });
+    if (!confirmed) return;
     const pin = await promptPin("Enter the current FIDO2 PIN only if the remaining keys require one:");
     const body: any = { label };
     if (pin) body.pin = pin;

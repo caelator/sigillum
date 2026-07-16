@@ -21,6 +21,7 @@ import {
   renderEntityList,
   textValue,
 } from "../render/forms";
+import { confirmDangerDialog, confirmTypedDialog } from "../render/confirm";
 import { esc, escAttr, statusPill } from "../render/html";
 
 /// Per-family W7.1 execution gate field for each plan-step action.
@@ -957,7 +958,15 @@ export function createInventoryActions(deps: InventoryActionsDeps) {
   }
 
   async function deleteChainProfile(name: string): Promise<void> {
-    if (!confirm('Delete chain profile "' + name + '"?')) return;
+    const confirmed = await confirmDangerDialog({
+      title: "Delete chain profile",
+      body:
+        'Delete chain profile "' +
+        name +
+        '"? Inventory scans and plans that reference this chain will no longer resolve it.',
+      actionLabel: "Delete",
+    });
+    if (!confirmed) return;
     const r = await deps.api("POST", "/api/chains/delete", { name });
     if (r.error) {
       deps.toast(r.error, "error");
@@ -1125,7 +1134,15 @@ export function createInventoryActions(deps: InventoryActionsDeps) {
   }
 
   async function deleteWatchAddressBookEntry(address: string): Promise<void> {
-    if (!confirm('Delete saved watch address "' + address + '"?')) return;
+    const confirmed = await confirmDangerDialog({
+      title: "Delete watch address",
+      body:
+        'Delete saved watch address "' +
+        address +
+        '"? The daemon stops tracking its balances and approvals.',
+      actionLabel: "Delete",
+    });
+    if (!confirmed) return;
     const r = await deps.api("POST", "/api/inventory/watch-addresses/delete", { address });
     if (r.error) {
       deps.toast(r.error, "error");
@@ -1189,7 +1206,15 @@ export function createInventoryActions(deps: InventoryActionsDeps) {
       deps.toast("NFT metadata opt-in target is invalid", "error");
       return;
     }
-    if (!confirm('Delete NFT metadata opt-in "' + contractAddress + '"?')) return;
+    const confirmed = await confirmDangerDialog({
+      title: "Delete NFT metadata opt-in",
+      body:
+        'Delete NFT metadata opt-in "' +
+        contractAddress +
+        '"? Cached metadata for this collection is dropped and no longer fetched.',
+      actionLabel: "Delete",
+    });
+    if (!confirmed) return;
     const r = await deps.api("POST", "/api/inventory/nft-metadata/opt-ins/delete", {
       chain_id: numericChainId,
       contract_address: contractAddress,
@@ -1298,7 +1323,15 @@ export function createInventoryActions(deps: InventoryActionsDeps) {
   }
 
   async function deleteTokenRegistryList(name: string): Promise<void> {
-    if (!confirm('Delete token registry list "' + name + '"?')) return;
+    const confirmed = await confirmDangerDialog({
+      title: "Delete token registry list",
+      body:
+        'Delete token registry list "' +
+        name +
+        '"? Its token metadata is removed from local inventory views.',
+      actionLabel: "Delete",
+    });
+    if (!confirmed) return;
     const r = await deps.api("POST", "/api/inventory/token-registry/delete", { name });
     if (r.error) {
       deps.toast(r.error, "error");
@@ -1346,7 +1379,15 @@ export function createInventoryActions(deps: InventoryActionsDeps) {
   }
 
   async function deleteRiskCatalogEntry(address: string): Promise<void> {
-    if (!confirm('Delete risk catalog entry "' + address + '"?')) return;
+    const confirmed = await confirmDangerDialog({
+      title: "Delete risk catalog entry",
+      body:
+        'Delete risk catalog entry "' +
+        address +
+        '"? Findings derived from it disappear from the risk view.',
+      actionLabel: "Delete",
+    });
+    if (!confirmed) return;
     const r = await deps.api("POST", "/api/risk/catalog/delete", { address });
     if (r.error) {
       deps.toast(r.error, "error");
@@ -1441,14 +1482,16 @@ export function createInventoryActions(deps: InventoryActionsDeps) {
   }
 
   async function enqueuePlanStep(planId: string, stepId: string): Promise<void> {
-    if (
-      !confirm(
+    const confirmed = await confirmDangerDialog({
+      title: "Enqueue plan step",
+      body:
         "Enqueue plan step " +
-          stepId +
-          " as an execution queue job? The daemon re-validates every gate; " +
-          "queued plan-step jobs stay blocked until execution is enabled (W7.3).",
-      )
-    ) {
+        stepId +
+        " as an execution queue job? The daemon re-validates every gate; " +
+        "queued plan-step jobs stay blocked until execution is enabled (W7.3).",
+      actionLabel: "Enqueue step",
+    });
+    if (!confirmed) {
       return;
     }
     const r = await deps.api("POST", "/api/plans/enqueue-step", {
@@ -1477,19 +1520,19 @@ export function createInventoryActions(deps: InventoryActionsDeps) {
       deps.toast(probe.error || "No plan steps are eligible for enqueue", "error");
       return;
     }
-    const typed = prompt(
-      "Typed confirmation required (house pattern).\n\n" +
-        "Type this phrase exactly to enqueue every eligible step:\n\n" +
-        expected,
-    );
-    if (typed === null) return;
-    if (typed.trim() !== expected) {
-      deps.toast("Confirmation phrase does not match. Expected: " + expected, "error");
-      return;
-    }
+    const confirmed = await confirmTypedDialog({
+      title: "Enqueue all eligible plan steps",
+      body:
+        "This enqueues every eligible step of the plan as execution queue jobs. " +
+        "The daemon re-validates every gate before executing; steps that pass " +
+        "their checks are signed and broadcast on-chain.",
+      phrase: expected,
+      actionLabel: "Enqueue all",
+    });
+    if (!confirmed) return;
     const r = await deps.api("POST", "/api/plans/enqueue-plan", {
       plan_id: planId,
-      confirmation: typed.trim(),
+      confirmation: expected,
     });
     if (r.error) {
       deps.toast(r.error, "error");
@@ -1677,7 +1720,9 @@ function safeAddressForExportAction(actionEl: unknown): string | null {
     | undefined;
   const fromInput = input?.value?.trim();
   if (fromInput) return fromInput;
-  return window.prompt("Safe address")?.trim() || null;
+  // No modal prompt here: the row input is the only source, so the export
+  // flow stays inside the styled UI and the fake-DOM test harness.
+  return null;
 }
 
 function exportFilename(response: ConsolidationPlanExportResponse): string {

@@ -29,7 +29,50 @@ class FakeClassList {
   }
 }
 
-export class FakeElement {
+export interface FakeEvent {
+  type: string;
+  target?: FakeElement | FakeDocument | null;
+  key?: string;
+  shiftKey?: boolean;
+  preventDefault?: () => void;
+  [key: string]: unknown;
+}
+
+type FakeListener = (event: FakeEvent) => void;
+
+class FakeEventTarget {
+  private readonly listeners = new Map<string, FakeListener[]>();
+
+  addEventListener(type: string, listener: FakeListener): void {
+    const registered = this.listeners.get(type) || [];
+    registered.push(listener);
+    this.listeners.set(type, registered);
+  }
+
+  removeEventListener(type: string, listener: FakeListener): void {
+    const registered = this.listeners.get(type) || [];
+    this.listeners.set(
+      type,
+      registered.filter((candidate) => candidate !== listener),
+    );
+  }
+
+  dispatchEvent(event: FakeEvent): boolean {
+    if (!event.target) event.target = this as unknown as FakeElement;
+    (this.listeners.get(event.type) || []).slice().forEach((listener) => listener(event));
+    return true;
+  }
+}
+
+function matchesSelector(element: FakeElement, selector: string): boolean {
+  const attribute = selector.match(/^\[([a-zA-Z0-9-]+)(?:="([^"]*)")?\]$/);
+  if (!attribute) return false;
+  const [, name, value] = attribute;
+  if (!(name in element.attributes)) return false;
+  return value === undefined || element.attributes[name] === value;
+}
+
+export class FakeElement extends FakeEventTarget {
   readonly dataset: Record<string, string> = {};
   readonly classList = new FakeClassList();
   readonly style: Record<string, string> = {};
@@ -43,8 +86,11 @@ export class FakeElement {
   className = "";
   innerHTML = "";
   id = "";
+  ownerDocument: FakeDocumentLike | null = null;
 
-  constructor(readonly tagName = "DIV") {}
+  constructor(readonly tagName = "DIV") {
+    super();
+  }
 
   private text = "";
 
@@ -66,7 +112,13 @@ export class FakeElement {
     this.isConnected = false;
   }
 
-  focus(): void {}
+  focus(): void {
+    if (this.ownerDocument) this.ownerDocument.activeElement = this;
+  }
+
+  click(): void {
+    this.dispatchEvent({ type: "click", target: this });
+  }
 
   scrollIntoView(): void {}
 
@@ -86,15 +138,22 @@ export class FakeElement {
     return name in this.attributes;
   }
 
-  addEventListener(): void {}
-
   closest(): FakeElement | null {
     return this;
   }
 
-  querySelector(): FakeElement | null {
+  querySelector(selector: string): FakeElement | null {
+    for (const child of this.children) {
+      if (matchesSelector(child, selector)) return child;
+      const nested = child.querySelector(selector);
+      if (nested) return nested;
+    }
     return null;
   }
+}
+
+export interface FakeDocumentLike {
+  activeElement: FakeElement | null;
 }
 
 class FakeStorage {
@@ -113,14 +172,22 @@ class FakeStorage {
   }
 }
 
-class FakeDocument {
+class FakeDocument extends FakeEventTarget implements FakeDocumentLike {
   readonly body = new FakeElement("BODY") as FakeElement & {
     dataset: Record<string, string>;
   };
+  activeElement: FakeElement | null = null;
   private readonly elements = new Map<string, FakeElement>();
 
+  constructor() {
+    super();
+    this.body.ownerDocument = this;
+  }
+
   createElement(tagName: string): FakeElement {
-    return new FakeElement(tagName.toUpperCase());
+    const element = new FakeElement(tagName.toUpperCase());
+    element.ownerDocument = this;
+    return element;
   }
 
   getElementById(id: string): FakeElement | null {
@@ -136,7 +203,7 @@ class FakeDocument {
   }
 
   register(id: string, tagName = "DIV"): FakeElement {
-    const element = new FakeElement(tagName.toUpperCase());
+    const element = this.createElement(tagName);
     element.id = id;
     this.elements.set(id, element);
     return element;
