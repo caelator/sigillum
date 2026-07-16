@@ -284,3 +284,28 @@
   color: var(--warning-text);
   overflow-wrap: anywhere;
 }
+
+/* Raw-value affordance: humanized amounts keep the machine value one
+   click away behind an inline disclosure. */
+.raw-details {
+  display: inline;
+  font-size: var(--fs-xs);
+}
+
+.raw-details summary {
+  display: inline;
+  cursor: pointer;
+  color: var(--text-dim);
+  text-decoration: underline dotted;
+}
+
+.raw-details[open] summary {
+  display: block;
+}
+
+.raw-details code {
+  font-family: var(--mono);
+  font-size: var(--fs-xs);
+  color: var(--text-muted);
+  overflow-wrap: anywhere;
+}

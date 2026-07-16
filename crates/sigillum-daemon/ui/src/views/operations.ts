@@ -1,5 +1,6 @@
 import { confirmDangerDialog } from "../render/confirm";
 import { setHiddenById } from "../render/dom";
+import { amountWithRawHtml, quantityWithRawHtml } from "../render/format";
 import {
   clearFields,
   optionalNumberValue,
@@ -95,7 +96,7 @@ function queueReceiptLine(job: any): string {
     " · block=" +
     esc(String(job.receipt_block_number ?? "-")) +
     " · gasUsed=" +
-    esc(job.receipt_gas_used_hex || "-")
+    quantityWithRawHtml(job.receipt_gas_used_hex)
   );
 }
 
@@ -147,15 +148,20 @@ function failureBreakdownLine(summary: any): string {
 }
 
 function depositObservedLine(deposit: any): string {
-  const observedAmount = deposit.observed_amount_hex || "-";
-  const nativeBalance = deposit.observed_native_balance_wei_hex || "-";
+  // Native deposits humanize to ETH. ERC-20 amounts stay raw: this view has
+  // no token-registry decimals loaded, and guessing token units would lie.
+  const isNative = deposit.asset_kind === "native";
+  const expected = isNative
+    ? amountWithRawHtml(deposit.expected_amount_hex, { symbol: "ETH" })
+    : esc(deposit.expected_amount_hex || "-");
+  const observed = isNative
+    ? amountWithRawHtml(deposit.observed_amount_hex, { symbol: "ETH" })
+    : esc(deposit.observed_amount_hex || "-");
+  const nativeBalance = amountWithRawHtml(deposit.observed_native_balance_wei_hex, {
+    symbol: "ETH",
+  });
   return (
-    "expected=" +
-    esc(deposit.expected_amount_hex || "-") +
-    " · observed=" +
-    esc(observedAmount) +
-    " · native=" +
-    esc(nativeBalance)
+    "expected=" + expected + " · observed=" + observed + " · native=" + nativeBalance
   );
 }
 

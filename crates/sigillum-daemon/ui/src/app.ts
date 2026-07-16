@@ -1108,7 +1108,7 @@ async function loadAudit() {
     }
     let html = '<ul class="key-list">';
     events.forEach(event => {
-      const when = new Date((event.created_at_unix || 0) * 1000).toLocaleString();
+      const when = formatTs(event.created_at_unix);
       const comp = event.compartment_id != null
         ? '<span style="color:var(--text-dim);font-size:11px;">compartment #' + event.compartment_id + '</span>'
         : '<span style="color:var(--text-dim);font-size:11px;">global</span>';
@@ -1129,7 +1129,7 @@ async function loadDiagnostics() {
       el.innerHTML = '<div style="color:var(--danger);font-size:13px;">' + esc(r.error) + '</div>';
       return;
     }
-    const started = r.started_at_unix ? new Date(r.started_at_unix * 1000).toLocaleString() : '-';
+    const started = formatTs(r.started_at_unix);
     el.innerHTML = [
       statBox(r.version || '-', 'Version'),
       statBox(r.unlock_scope || '-', 'Unlock Scope'),

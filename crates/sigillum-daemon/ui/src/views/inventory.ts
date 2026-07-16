@@ -22,6 +22,11 @@ import {
   textValue,
 } from "../render/forms";
 import { confirmDangerDialog, confirmTypedDialog } from "../render/confirm";
+import {
+  amountWithRawHtml,
+  chainLabel as resolveChainLabel,
+  formatTimestamp,
+} from "../render/format";
 import { esc, escAttr, statusPill } from "../render/html";
 
 /// Per-family W7.1 execution gate field for each plan-step action.
@@ -110,6 +115,7 @@ export function createInventoryActions(deps: InventoryActionsDeps) {
   let planRoutingListenerBound = false;
   let planPartyDestinationInputIds: string[] = [];
   let latestChainProfiles: ChainProfile[] = [];
+  let latestTokenLists: TokenRegistryList[] = [];
   let latestTreasuryPolicy: Record<string, unknown> | null = null;
 
   function planRoutingStrategy(): "single" | "per_party" {
@@ -280,12 +286,63 @@ export function createInventoryActions(deps: InventoryActionsDeps) {
   }
 
   function chainLabel(chainId: number | string | null | undefined): string {
-    if (chainId === null || chainId === undefined) return "-";
+    return resolveChainLabel(chainId, latestChainProfiles);
+  }
+
+  interface AmountUnits {
+    decimals: number;
+    symbol: string | null;
+  }
+
+  /// Native amounts use the chain profile's decimals/symbol when the chain
+  /// is configured, else the EVM-native 18-decimal ETH convention.
+  function nativeUnits(chainId: unknown): AmountUnits {
     const numericChainId = Number(chainId);
     const profile = latestChainProfiles.find(
-      (chain) => chain.enabled && chain.chain_id === numericChainId,
+      (chain) => chain.chain_id === numericChainId,
     );
-    return profile ? `${numericChainId} (${profile.name})` : String(chainId);
+    return {
+      decimals: profile?.native_decimals ?? 18,
+      symbol: profile?.native_symbol || "ETH",
+    };
+  }
+
+  /// Token amounts only humanize when an imported token registry list knows
+  /// the contract's decimals; otherwise the raw hex stays (never guess units).
+  function tokenUnits(chainId: unknown, assetAddress: unknown): AmountUnits | null {
+    const numericChainId = Number(chainId);
+    const address = String(assetAddress || "").toLowerCase();
+    if (!address) return null;
+    for (const list of latestTokenLists) {
+      const entry = (list.entries || []).find(
+        (candidate) =>
+          candidate.chain_id === numericChainId &&
+          candidate.address.toLowerCase() === address,
+      );
+      if (entry) return { decimals: entry.decimals, symbol: entry.symbol };
+    }
+    return null;
+  }
+
+  function assetUnits(
+    assetKind: unknown,
+    chainId: unknown,
+    assetAddress: unknown,
+  ): AmountUnits | null {
+    if (assetKind === "native" || !assetAddress) return nativeUnits(chainId);
+    return tokenUnits(chainId, assetAddress);
+  }
+
+  function assetAmountHtml(
+    amountHex: string | null | undefined,
+    assetKind: unknown,
+    chainId: unknown,
+    assetAddress: unknown,
+  ): string {
+    const units = assetUnits(assetKind, chainId, assetAddress);
+    return units
+      ? amountWithRawHtml(amountHex, units)
+      : esc(amountHex || "-");
   }
 
   function blockCursorSummary(job: WalletDiscoveryJob): string {
@@ -328,7 +385,7 @@ export function createInventoryActions(deps: InventoryActionsDeps) {
           "chain=" +
           esc(chainLabel(optIn.chain_id)) +
           " · updated=" +
-          esc(String(optIn.updated_at_unix || "-")) +
+          esc(formatTimestamp(optIn.updated_at_unix)) +
           "</div></div>" +
           '<div class="entity-actions">' +
           '<button class="btn-ghost" data-action="toggleNftMetadataOptIn" data-arg0="' +
@@ -381,7 +438,7 @@ export function createInventoryActions(deps: InventoryActionsDeps) {
   function nftMetadataProvenanceLine(entry: NftMetadataCacheEntry): string {
     const fetchedParts: string[] = [];
     if (entry.fetched_at_unix !== undefined && entry.fetched_at_unix !== null) {
-      fetchedParts.push("fetched=" + String(entry.fetched_at_unix));
+      fetchedParts.push("fetched=" + formatTimestamp(entry.fetched_at_unix));
     }
     if (entry.fetched_uri) fetchedParts.push("uri=" + entry.fetched_uri);
     if (entry.content_sha256) {
@@ -515,7 +572,10 @@ export function createInventoryActions(deps: InventoryActionsDeps) {
         esc(address.derivation_path) +
         "<br>" +
         "native=" +
-        esc(address.native_balance_wei_hex || "0x0") +
+        amountWithRawHtml(
+          address.native_balance_wei_hex || "0x0",
+          nativeUnits(address.chain_id),
+        ) +
         " · txCount=" +
         esc(String(address.transaction_count || 0)) +
         (address.last_activity_block !== undefined && address.last_activity_block !== null
@@ -560,7 +620,12 @@ export function createInventoryActions(deps: InventoryActionsDeps) {
           ? " · proofWords=" + esc(String((holding.claim_proof || []).length))
           : "") +
         " · amount=" +
-        esc(holding.amount_hex) +
+        assetAmountHtml(
+          holding.amount_hex,
+          holding.asset_kind,
+          holding.chain_id,
+          holding.asset_address,
+        ) +
         "<br>" +
         esc(holding.wallet_family) +
         "/" +
@@ -603,7 +668,7 @@ export function createInventoryActions(deps: InventoryActionsDeps) {
           " · source=" +
           esc(entry.source || "-") +
           " · updated=" +
-          esc(String(entry.updated_at_unix || "-")) +
+          esc(formatTimestamp(entry.updated_at_unix)) +
           "</div></div>" +
           '<div class="entity-actions">' +
           '<button class="btn-ghost" data-action="loadWatchAddressBookEntry" data-arg0="' +
@@ -659,7 +724,7 @@ export function createInventoryActions(deps: InventoryActionsDeps) {
           " entries · chains=" +
           esc(chainIds) +
           " · updated=" +
-          esc(String(list.updated_at_unix)) +
+          esc(formatTimestamp(list.updated_at_unix)) +
           "</div></div>" +
           '<div class="entity-actions">' +
           '<button class="btn-danger" data-action="deleteTokenRegistryList" data-arg0="' +
@@ -750,6 +815,12 @@ export function createInventoryActions(deps: InventoryActionsDeps) {
             const evidence = (step.simulation_evidence || []).join(" | ");
             const linkageWarnings = step.linkage_warnings || [];
             const blockers = (step.blockers || []).map(blockerLabel).join(", ");
+            const stepAmountHtml = assetAmountHtml(
+              step.amount_hex,
+              step.asset_kind,
+              step.chain_id,
+              step.asset_address,
+            );
             // Execute appears ONLY when every gate passes; the daemon
             // re-validates everything at enqueue time regardless.
             const executeButton = stepExecutionEligible(
@@ -781,7 +852,7 @@ export function createInventoryActions(deps: InventoryActionsDeps) {
                   " · funds=" +
                   esc(step.destination_address || "-") +
                   " · topup=" +
-                  esc(step.amount_hex)
+                  amountWithRawHtml(step.amount_hex, nativeUnits(step.chain_id))
                 : "") +
               (step.token_id_hex ? " #" + esc(step.token_id_hex) : "") +
               (step.counterparty_address
@@ -805,7 +876,7 @@ export function createInventoryActions(deps: InventoryActionsDeps) {
                 ? " · proofWords=" + esc(String((step.claim_proof || []).length))
                 : "") +
               " · amount=" +
-              esc(step.amount_hex) +
+              stepAmountHtml +
               " · simulation=" +
               esc(step.simulation_status || "not_run") +
               " · blockers=" +
@@ -903,9 +974,12 @@ export function createInventoryActions(deps: InventoryActionsDeps) {
         latestChainProfiles = chains.profiles || [];
         renderChainProfiles(latestChainProfiles);
       }
+      // Token units must be captured before the inventory render so holding
+      // amounts humanize with registry decimals.
+      if (!tokenRegistry.error) latestTokenLists = tokenRegistry.lists || [];
       if (!watchBook.error) renderWatchAddressBook(watchBook.entries || []);
       if (!inventory.error) renderInventoryState(inventory);
-      if (!tokenRegistry.error) renderTokenRegistry(tokenRegistry.lists || []);
+      if (!tokenRegistry.error) renderTokenRegistry(latestTokenLists);
       if (!catalog.error) renderRiskCatalog(catalog.entries || []);
       if (!risks.error) renderRiskFindings(risks.findings || []);
       // The policy gates decide whether Execute affordances render, so it

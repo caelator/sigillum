@@ -13,6 +13,15 @@ import {
   confirmTypedDialog,
   informDialog,
 } from "../src/render/confirm";
+import {
+  amountWithRawHtml,
+  chainLabel,
+  formatEthAmount,
+  formatHexQuantity,
+  formatTimestamp,
+  formatTokenAmount,
+  quantityWithRawHtml,
+} from "../src/render/format";
 import { renderEntityList } from "../src/render/forms";
 import {
   buildInventoryReport,
@@ -924,7 +933,13 @@ test("queue and inventory renderers produce reviewable DOM summaries", () => {
   ok(dom.el("consolidationPlanList").innerHTML.includes("fund_gas"));
   ok(dom.el("consolidationPlanList").innerHTML.includes("sponsor=0xsponsor"));
   ok(dom.el("consolidationPlanList").innerHTML.includes("funds=0xfunded"));
-  ok(dom.el("consolidationPlanList").innerHTML.includes("topup=0x123"));
+  // Native top-up humanizes to ETH; the raw hex stays behind the "raw" details.
+  ok(
+    dom
+      .el("consolidationPlanList")
+      .innerHTML.includes("topup=0.000000000000000291 ETH"),
+  );
+  ok(dom.el("consolidationPlanList").innerHTML.includes(">0x123</code>"));
   ok(dom.el("consolidationPlanList").innerHTML.includes("simulateConsolidationPlan"));
   ok(dom.el("consolidationPlanList").innerHTML.includes("exportConsolidationPlan"));
   ok(dom.el("consolidationPlanList").innerHTML.includes("Safe JSON"));
@@ -939,6 +954,296 @@ test("queue and inventory renderers produce reviewable DOM summaries", () => {
   // No treasury policy loaded: no Execute affordance may render.
   ok(!dom.el("consolidationPlanList").innerHTML.includes("enqueuePlanStep"));
   ok(!dom.el("consolidationPlanList").innerHTML.includes("Execute All Eligible"));
+});
+
+test("format helpers humanize amounts, quantities, timestamps, and chains", () => {
+  installDom();
+
+  // BigInt-safe token amounts at various decimals.
+  equal(formatTokenAmount("0xde0b6b3a7640000", 18), "1");
+  equal(formatTokenAmount("0x" + (1500000000000000000n).toString(16), 18), "1.5");
+  equal(formatTokenAmount("0x123", 18), "0.000000000000000291");
+  equal(formatTokenAmount("0xf4240", 6), "1");
+  equal(formatTokenAmount("0x" + (25000000n).toString(16), 6), "25");
+  equal(formatTokenAmount("0x0", 18), "0");
+  equal(formatTokenAmount("nonsense"), null);
+  equal(formatTokenAmount(""), null);
+  equal(formatTokenAmount("0x"), null);
+  equal(formatTokenAmount(null), null);
+  equal(formatTokenAmount(undefined), null);
+
+  equal(formatEthAmount("0xde0b6b3a7640000"), "1");
+  equal(formatEthAmount("0xde0b6b3a7640000", "ETH"), "1 ETH");
+  equal(formatEthAmount("not-hex", "ETH"), null);
+
+  equal(formatHexQuantity("0x5208"), "21000");
+  equal(formatHexQuantity("0x0"), "0");
+  equal(formatHexQuantity("nope"), null);
+  equal(formatHexQuantity(null), null);
+
+  // Timestamps share the single locale formatter; falsy stays a placeholder.
+  equal(formatTimestamp(0), "-");
+  equal(formatTimestamp(null), "-");
+  equal(formatTimestamp(undefined), "-");
+  equal(formatTimestamp(1717900000), new Date(1717900000 * 1000).toLocaleString());
+
+  // Chain ids resolve via the registry, else fall back to "Chain N".
+  const chains = [
+    { name: "ethereum", chain_id: 1, enabled: true },
+    { name: "retired", chain_id: 2, enabled: false },
+  ] as any;
+  equal(chainLabel(1, chains), "1 (ethereum)");
+  equal(chainLabel("1", chains), "1 (ethereum)");
+  equal(chainLabel(2, chains), "Chain 2", "disabled profiles do not resolve");
+  equal(chainLabel(56, chains), "Chain 56");
+  equal(chainLabel(1, []), "Chain 1");
+  equal(chainLabel(null, chains), "-");
+  equal(chainLabel(undefined, chains), "-");
+
+  // Raw values stay one click away behind the "raw" details affordance.
+  const amountHtml = amountWithRawHtml("0xde0b6b3a7640000", { symbol: "ETH" });
+  ok(amountHtml.includes("1 ETH"));
+  ok(amountHtml.includes('<details class="raw-details">'));
+  ok(amountHtml.includes(">0xde0b6b3a7640000</code>"));
+  equal(amountWithRawHtml(undefined, { symbol: "ETH" }), "-");
+  const quantityHtml = quantityWithRawHtml("0x5208");
+  ok(quantityHtml.includes("21000"));
+  ok(quantityHtml.includes(">0x5208</code>"));
+  equal(quantityWithRawHtml(undefined), "-");
+});
+
+test("inventory views humanize balances, amounts, and timestamps", async () => {
+  const dom = installDom([
+    "chainProfileList",
+    "inventoryJobList",
+    "inventoryAddressList",
+    "inventoryHoldingList",
+    "watchAddressBookList",
+    "tokenRegistryList",
+    "riskCatalogList",
+    "riskFindingList",
+    "consolidationPlanList",
+    "nftMetaOptInList",
+    "nftMetadataList",
+    "nftSuspiciousList",
+  ]);
+  const onePointFiveEthHex = "0x" + (1500000000000000000n).toString(16);
+  const quarterEthHex = "0x" + (250000000000000000n).toString(16);
+  const twentyFiveUsdcHex = "0x" + (25000000n).toString(16);
+  const inventory = createInventoryActions({
+    api: async (_method, path) => {
+      if (path === "/api/chains") {
+        return {
+          profiles: [
+            {
+              name: "ethereum",
+              chain_family: "evm",
+              chain_id: 1,
+              provider_profile: null,
+              native_symbol: "ETH",
+              native_decimals: 18,
+              finality_blocks: 0,
+              permit2_address: null,
+              uniswap_v2_router_address: null,
+              capabilities: [],
+              enabled: true,
+              source: "builtin",
+              builtin: true,
+            },
+          ],
+        };
+      }
+      if (path === "/api/inventory/wallets") {
+        return {
+          jobs: [],
+          addresses: [
+            {
+              address: "0xabc",
+              activity_state: "funded",
+              wallet_family: "eth-seed",
+              wallet_profile: "archive",
+              chain_id: 1,
+              derivation_path: "m/44'/60'/0'/0/0",
+              native_balance_wei_hex: onePointFiveEthHex,
+              transaction_count: 3,
+            },
+          ],
+          holdings: [
+            {
+              asset_kind: "native",
+              status: "active",
+              address: "0xabc",
+              amount_hex: quarterEthHex,
+              wallet_family: "eth-seed",
+              wallet_profile: "archive",
+              provider_profile: "mainnet",
+              chain_id: 1,
+            },
+            {
+              asset_kind: "erc20",
+              status: "active",
+              address: "0xabc",
+              asset_address: "0xToken",
+              amount_hex: twentyFiveUsdcHex,
+              wallet_family: "eth-seed",
+              wallet_profile: "archive",
+              provider_profile: "mainnet",
+              chain_id: 1,
+            },
+            {
+              asset_kind: "erc20",
+              status: "active",
+              address: "0xabc",
+              asset_address: "0xUnknownToken",
+              amount_hex: "0xff",
+              wallet_family: "eth-seed",
+              wallet_profile: "archive",
+              provider_profile: "mainnet",
+              chain_id: 1,
+            },
+          ],
+        };
+      }
+      if (path === "/api/inventory/token-registry") {
+        return {
+          lists: [
+            {
+              id: "list-1",
+              name: "default",
+              compartment_id: 1,
+              source: "operator",
+              entries: [{ chain_id: 1, address: "0xtoken", symbol: "USDC", decimals: 6 }],
+              created_at_unix: 1,
+              updated_at_unix: 1717900000,
+            },
+          ],
+        };
+      }
+      if (path === "/api/inventory/watch-addresses") {
+        return {
+          entries: [
+            {
+              id: "watch-1",
+              address: "0xwatch",
+              label: "vault",
+              tags: [],
+              source: "operator",
+              enabled: true,
+              created_at_unix: 1,
+              updated_at_unix: 1717900000,
+            },
+          ],
+        };
+      }
+      if (path === "/api/inventory/nft-metadata/opt-ins") {
+        return {
+          opt_ins: [
+            { chain_id: 1, contract_address: "0xnft", enabled: true, updated_at_unix: 1717900000 },
+          ],
+        };
+      }
+      return { entries: [], findings: [], plans: [] };
+    },
+    toast: () => undefined,
+    downloadJson: () => undefined,
+  });
+
+  await inventory.loadInventoryOperations();
+
+  // Native balances render as ETH with the raw wei behind "raw" details.
+  const addressHtml = dom.el("inventoryAddressList").innerHTML;
+  ok(addressHtml.includes("native=1.5 ETH"));
+  ok(addressHtml.includes(">" + onePointFiveEthHex + "</code>"));
+  ok(!addressHtml.includes("native=" + onePointFiveEthHex + " ·"));
+
+  // Holdings: native → ETH, registry-known token → token units, unknown
+  // token keeps the raw hex (decimals are never guessed).
+  const holdingHtml = dom.el("inventoryHoldingList").innerHTML;
+  ok(holdingHtml.includes("amount=0.25 ETH"));
+  ok(holdingHtml.includes(">" + quarterEthHex + "</code>"));
+  ok(holdingHtml.includes("amount=25 USDC"));
+  ok(holdingHtml.includes(">" + twentyFiveUsdcHex + "</code>"));
+  ok(holdingHtml.includes("amount=0xff"));
+
+  // Raw unix seconds become locale timestamps everywhere they were shown.
+  const humanTs = formatTimestamp(1717900000);
+  ok(dom.el("tokenRegistryList").innerHTML.includes("updated=" + humanTs));
+  ok(!dom.el("tokenRegistryList").innerHTML.includes("updated=1717900000"));
+  ok(dom.el("watchAddressBookList").innerHTML.includes("updated=" + humanTs));
+  ok(!dom.el("watchAddressBookList").innerHTML.includes("updated=1717900000"));
+  const optInHtml = dom.el("nftMetaOptInList").innerHTML;
+  ok(optInHtml.includes("updated=" + humanTs));
+  ok(!optInHtml.includes("updated=1717900000"));
+  ok(optInHtml.includes("chain=1 (ethereum)"));
+});
+
+test("operations views humanize deposit amounts and queue gas used", () => {
+  const dom = installDom(["depositList", "queueList"]);
+  const operations = createOperationsActions({
+    api: async () => ({}),
+    toast: () => undefined,
+    refresh: () => undefined,
+    showResultBox: () => undefined,
+    updateNextStepCard: () => undefined,
+  });
+  const oneEthHex = "0x" + (1000000000000000000n).toString(16);
+  operations.renderDeposits([
+    {
+      id: "dep-native",
+      status: "observed",
+      asset_kind: "native",
+      wallet_profile: "daily",
+      short_name: "dep-1",
+      stealth_address: "0xstealth",
+      ephemeral_public_key_hex: "0xephem",
+      view_tag_hex: "0x01",
+      expected_amount_hex: oneEthHex,
+      observed_amount_hex: "0x" + (500000000000000000n).toString(16),
+      observed_native_balance_wei_hex: oneEthHex,
+      auto_queue_sweep: true,
+      created_at_unix: 1,
+      updated_at_unix: 2,
+    },
+    {
+      id: "dep-token",
+      status: "observed",
+      asset_kind: "erc20",
+      wallet_profile: "daily",
+      short_name: "dep-2",
+      stealth_address: "0xstealth2",
+      ephemeral_public_key_hex: "0xephem2",
+      view_tag_hex: "0x02",
+      token_address: "0xtoken",
+      expected_amount_hex: "0xff",
+      auto_queue_sweep: false,
+      created_at_unix: 1,
+      updated_at_unix: 2,
+    },
+  ]);
+  const depositsHtml = dom.el("depositList").innerHTML;
+  ok(depositsHtml.includes("expected=1 ETH"));
+  ok(depositsHtml.includes("observed=0.5 ETH"));
+  ok(depositsHtml.includes("native=1 ETH"));
+  ok(depositsHtml.includes(">" + oneEthHex + "</code>"));
+  // ERC-20 amounts stay raw: this view has no registry decimals loaded.
+  ok(depositsHtml.includes("expected=0xff"));
+
+  operations.renderQueueJobs([
+    {
+      id: "job-1",
+      state: "confirmed",
+      kind: "eth_stealth_native_sweep",
+      wallet_profile: "daily",
+      transaction_hash_hex: "0xtx",
+      receipt_status: "success",
+      receipt_gas_used_hex: "0x5208",
+      created_at_unix: 1,
+      updated_at_unix: 2,
+    },
+  ]);
+  const queueHtml = dom.el("queueList").innerHTML;
+  ok(queueHtml.includes("gasUsed=21000"));
+  ok(queueHtml.includes(">0x5208</code>"));
 });
 
 test("plan execute affordances render only when gates pass and drive enqueue routes", async () => {

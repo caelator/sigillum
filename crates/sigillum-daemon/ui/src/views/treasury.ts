@@ -20,26 +20,17 @@ import {
   renderEntityList,
   textValue,
 } from "../render/forms";
+import { formatTokenAmount } from "../render/format";
 import { esc, escAttr, formatTs, statBox, statusPill } from "../render/html";
 
 const WEI_PER_ETH = 10n ** 18n;
 const DEFAULT_HOT_REFILL_WEI_HEX = "0xde0b6b3a7640000";
 
+// The BigInt formatting core lives in render/format.ts (shared with the
+// inventory/operations views); these keep the historical "0" fallback
+// treasury callers rely on.
 export function formatWeiHexAsEth(weiHex: string): string {
-  if (typeof weiHex !== "string") return "0";
-  const trimmed = weiHex.trim();
-  if (!/^0x[0-9a-fA-F]+$/.test(trimmed)) return "0";
-  let wei: bigint;
-  try {
-    wei = BigInt(trimmed);
-  } catch (_) {
-    return "0";
-  }
-  const whole = wei / WEI_PER_ETH;
-  const fraction = wei % WEI_PER_ETH;
-  if (fraction === 0n) return whole.toString();
-  const fractionText = fraction.toString().padStart(18, "0").replace(/0+$/, "");
-  return whole.toString() + "." + fractionText;
+  return formatTokenAmount(weiHex, 18) ?? "0";
 }
 
 export function parseEthToWeiHex(value: string): string | null {
@@ -56,20 +47,7 @@ export function parseEthToWeiHex(value: string): string | null {
 const WEI_PER_GWEI = 10n ** 9n;
 
 export function formatWeiHexAsGwei(weiHex: string): string {
-  if (typeof weiHex !== "string") return "0";
-  const trimmed = weiHex.trim();
-  if (!/^0x[0-9a-fA-F]+$/.test(trimmed)) return "0";
-  let wei: bigint;
-  try {
-    wei = BigInt(trimmed);
-  } catch (_) {
-    return "0";
-  }
-  const whole = wei / WEI_PER_GWEI;
-  const fraction = wei % WEI_PER_GWEI;
-  if (fraction === 0n) return whole.toString();
-  const fractionText = fraction.toString().padStart(9, "0").replace(/0+$/, "");
-  return whole.toString() + "." + fractionText;
+  return formatTokenAmount(weiHex, 9) ?? "0";
 }
 
 export function parseGweiToWeiHex(value: string): string | null {
