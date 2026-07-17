@@ -544,7 +544,8 @@ impl SigillumService {
         };
         inventory.jobs.push(job.clone());
         save_inventory_state(&self.state.base_dir, &inventory)?;
-        self.state.operation_add_related(operation.id(), job.id.clone());
+        self.state
+            .operation_add_related(operation.id(), job.id.clone());
         self.state
             .operation_set_progress(operation.id(), job.addresses_scanned as u64);
 
@@ -839,10 +840,8 @@ impl SigillumService {
 
         if let Err(error) = loop_result {
             self.finalize_scan_job(&mut inventory, &mut job, "failed", Some(&error))?;
-            self.state.operation_set_progress(
-                operation.id(),
-                job.addresses_scanned as u64,
-            );
+            self.state
+                .operation_set_progress(operation.id(), job.addresses_scanned as u64);
             self.state.finish_operation(
                 operation.id(),
                 OPERATION_STATE_FAILED,

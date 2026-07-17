@@ -111,8 +111,7 @@ async fn spawn_gated_evm_provider() -> (SocketAddr, tokio::task::JoinHandle<()>,
                         notified.as_mut().enable();
                         state.gate_waiting.store(true, Ordering::SeqCst);
                         // A broken test must fail, not hang forever.
-                        let _ =
-                            tokio::time::timeout(Duration::from_secs(30), notified).await;
+                        let _ = tokio::time::timeout(Duration::from_secs(30), notified).await;
                         state.gate_waiting.store(false, Ordering::SeqCst);
                         state.gate_at_balance_call.store(0, Ordering::SeqCst);
                     }
@@ -220,10 +219,7 @@ impl Rig {
     async fn wait_for_gate(&self) {
         let deadline = Instant::now() + Duration::from_secs(15);
         while !self.rpc.gate_waiting.load(Ordering::SeqCst) {
-            assert!(
-                Instant::now() < deadline,
-                "provider gate was never reached"
-            );
+            assert!(Instant::now() < deadline, "provider gate was never reached");
             tokio::time::sleep(Duration::from_millis(10)).await;
         }
     }
@@ -460,7 +456,8 @@ async fn async_scan_cancel_mid_run_and_resume_completes_without_duplicates() {
     let resume_operation_id = resume["operation"]["id"].as_str().unwrap().to_string();
     assert_eq!(resume["operation"]["related_ids"], json!([resume_job_id]));
 
-    rig.wait_for_operation(&resume_operation_id, "completed").await;
+    rig.wait_for_operation(&resume_operation_id, "completed")
+        .await;
 
     // (c) The remainder completed with ZERO re-observation: the resumed
     // job observed exactly the two missing indices, and the provider saw
@@ -506,7 +503,11 @@ async fn async_scan_cancel_mid_run_and_resume_completes_without_duplicates() {
     let (status, conflict) = rig
         .post("/api/discovery/jobs/resume", json!({ "id": resume_job_id }))
         .await;
-    assert_eq!(status, StatusCode::CONFLICT, "resume of completed: {conflict}");
+    assert_eq!(
+        status,
+        StatusCode::CONFLICT,
+        "resume of completed: {conflict}"
+    );
     assert_eq!(conflict["code"], "conflict");
 
     rig.handle.abort();
@@ -663,10 +664,7 @@ async fn failed_scan_persists_failed_job_and_resume_completes() {
     let job_id = job["id"].as_str().unwrap().to_string();
     assert_eq!(job["status"], "failed");
     assert!(
-        job["last_error"]
-            .as_str()
-            .unwrap()
-            .contains("stub boom"),
+        job["last_error"].as_str().unwrap().contains("stub boom"),
         "job last_error: {job}"
     );
     let checkpoint = job["checkpoints"]
@@ -682,10 +680,7 @@ async fn failed_scan_persists_failed_job_and_resume_completes() {
     let operation = &list["operations"][0];
     assert_eq!(operation["state"], "failed");
     assert!(
-        operation["error"]
-            .as_str()
-            .unwrap()
-            .contains("stub boom"),
+        operation["error"].as_str().unwrap().contains("stub boom"),
         "operation error: {operation}"
     );
     assert_eq!(operation["related_ids"], json!([job_id]));
@@ -700,7 +695,8 @@ async fn failed_scan_persists_failed_job_and_resume_completes() {
         .await;
     assert_eq!(status, StatusCode::OK, "resume response: {resume}");
     let resume_operation_id = resume["operation"]["id"].as_str().unwrap().to_string();
-    rig.wait_for_operation(&resume_operation_id, "completed").await;
+    rig.wait_for_operation(&resume_operation_id, "completed")
+        .await;
 
     let resume_job_id = resume["job"]["id"].as_str().unwrap().to_string();
     let resumed = rig.discovery_job(&resume_job_id).await;

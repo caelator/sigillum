@@ -49,9 +49,7 @@ use recovery_files::{restore_stashed_ops_dir, stash_snapshot_placeholder_ops};
 use crate::DaemonInitError;
 use crate::audit_db::AuditQuery;
 use crate::audit_log::{AuditEventSpec, StoredAuditEvent};
-use crate::operation_registry::{
-    OperationCancelRequest, OperationHandle, OperationRegistry,
-};
+use crate::operation_registry::{OperationCancelRequest, OperationHandle, OperationRegistry};
 use crate::operations::{OperationGuard, PendingOperationSpec, list_pending_operations};
 use crate::policy::RuntimePolicy;
 

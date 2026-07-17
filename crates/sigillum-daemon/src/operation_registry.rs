@@ -196,7 +196,11 @@ impl OperationRegistry {
     /// operations are ignored so callers can fall back to durable state.
     pub(crate) fn request_cancel_for_related(&mut self, related_id: &str) -> Option<Operation> {
         let record = self.records.iter_mut().rev().find(|record| {
-            record.operation.related_ids.iter().any(|id| id == related_id)
+            record
+                .operation
+                .related_ids
+                .iter()
+                .any(|id| id == related_id)
                 && !is_terminal_state(&record.operation.state)
         })?;
         if record.operation.state == OPERATION_STATE_RUNNING {
@@ -213,7 +217,11 @@ impl OperationRegistry {
             .iter()
             .rev()
             .find(|record| {
-                record.operation.related_ids.iter().any(|id| id == related_id)
+                record
+                    .operation
+                    .related_ids
+                    .iter()
+                    .any(|id| id == related_id)
                     && !is_terminal_state(&record.operation.state)
             })
             .map(|record| record.operation.clone())

@@ -82,16 +82,15 @@ pub use sigillum_api::response::{
     Fido2StatusResponse, FieldError, GenerateStoreResponse, GenericStatusResponse, KeyListResponse,
     KeyValueResponse, MaintenanceRunResponse, Operation, OperationListResponse,
     OperationMutationResponse, OperationProgress, OperationResponse, QueueEnqueueResponse,
-    QueueExecutionPauseResponse,
-    QueueJob, QueueJobListResponse, QueueProcessResponse, RiskCatalogEntry,
-    RiskCatalogListResponse, RiskCatalogMutationResponse, RiskFinding, RiskFindingListResponse,
-    SafeTransactionBuilderBatch, SafeTransactionBuilderMeta, SafeTransactionBuilderTransaction,
-    SecretResolveBatchResponse, SecretResolveValue, SelfCheckResult, SelfCheckRunResponse,
-    SessionRevokeResponse, SnapshotExportResponse, SnapshotRestoreResponse, StatusResponse,
-    SwitchCompartmentResponse, TransitDecryptResponse, TransitEncryptResponse, TransitHmacResponse,
-    UnlockResponse, UnlockedCompartment, WalletAssetHolding, WalletDiscoveryJob,
-    WalletInventoryAddress, WalletInventoryListResponse, WalletInventoryScanResponse,
-    WatchAddressBookListResponse, WatchAddressBookMutationResponse,
+    QueueExecutionPauseResponse, QueueJob, QueueJobListResponse, QueueProcessResponse,
+    RiskCatalogEntry, RiskCatalogListResponse, RiskCatalogMutationResponse, RiskFinding,
+    RiskFindingListResponse, SafeTransactionBuilderBatch, SafeTransactionBuilderMeta,
+    SafeTransactionBuilderTransaction, SecretResolveBatchResponse, SecretResolveValue,
+    SelfCheckResult, SelfCheckRunResponse, SessionRevokeResponse, SnapshotExportResponse,
+    SnapshotRestoreResponse, StatusResponse, SwitchCompartmentResponse, TransitDecryptResponse,
+    TransitEncryptResponse, TransitHmacResponse, UnlockResponse, UnlockedCompartment,
+    WalletAssetHolding, WalletDiscoveryJob, WalletInventoryAddress, WalletInventoryListResponse,
+    WalletInventoryScanResponse, WatchAddressBookListResponse, WatchAddressBookMutationResponse,
 };
 use sigillum_core::SnapshotSummary;
 use thiserror::Error;
@@ -956,7 +955,10 @@ impl SigillumClient {
     /// Returns the operation in `cancel_requested` state; the worker
     /// transitions it to `canceled` at its next checkpoint. Canceling a
     /// terminal operation fails with a 409 `conflict` API error.
-    pub async fn cancel_operation(&self, id: &str) -> Result<OperationMutationResponse, ClientError> {
+    pub async fn cancel_operation(
+        &self,
+        id: &str,
+    ) -> Result<OperationMutationResponse, ClientError> {
         let builder = self.request(Method::POST, &format!("/api/operations/{id}/cancel"));
         self.send(builder).await
     }

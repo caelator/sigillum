@@ -27,8 +27,8 @@ use crate::audit_log::AuditEventSpec;
 use crate::service::helpers::now_unix;
 use crate::service::{ServiceError, ServiceResult, SigillumService};
 
-use super::support::{load_inventory_state, save_inventory_state};
 use super::DISCOVERY_SOURCE_LOCAL_RPC;
+use super::support::{load_inventory_state, save_inventory_state};
 
 const STATUS_CANCEL_REQUESTED: &str = "cancel_requested";
 const STATUS_CANCELED: &str = "canceled";
@@ -54,11 +54,7 @@ impl SigillumService {
         // operation mutex while a scan holds it.
         let signaled = self.state.request_operation_cancel_for_related(&body.id);
         let inventory = load_inventory_state(&self.state.base_dir)?;
-        let job = inventory
-            .jobs
-            .iter()
-            .find(|job| job.id == body.id)
-            .cloned();
+        let job = inventory.jobs.iter().find(|job| job.id == body.id).cloned();
 
         let Some(job) = job else {
             // The job may not be persisted yet: an accepted async scan only
