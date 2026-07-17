@@ -1107,6 +1107,10 @@
         <div class="form-row">
           <input type="number" id="queueProcessLimit" placeholder="Process limit" value="20" class="input-mid">
           <button class="btn-primary" data-action="processQueueBatch">Process Queue</button>
+          <label class="checkbox-row" title="Start the drain as a background operation you can cancel; progress shows in the queue list">
+            <input type="checkbox" id="queueProcessRunAsync">
+            Run in background
+          </label>
         </div>
         <p class="card-note">Processing executes pending local jobs immediately with the current daemon state.</p>
         <div id="queueProcessResult" class="result-box hidden"></div>
@@ -1126,6 +1130,10 @@
             Auto enqueue sweeps
           </label>
           <button class="btn-primary" data-action="runMaintenanceCycle">Run Maintenance</button>
+          <label class="checkbox-row" title="Start the cycle as a background operation you can cancel; progress shows in the queue and deposit lists">
+            <input type="checkbox" id="maintenanceRunAsync">
+            Run in background
+          </label>
         </div>
         <div id="maintenanceResult" class="result-box hidden"></div>
       </div>

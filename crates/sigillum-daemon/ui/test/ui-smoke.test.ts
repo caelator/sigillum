@@ -1866,6 +1866,123 @@ test("processQueueBatch surfaces a mid-drain pause reason in the result line", a
   );
 });
 
+test("processQueueBatch can run in background and surfaces the operation id", async () => {
+  const dom = installDom(["queueProcessLimit", "queueProcessRunAsync", "queueList"]);
+  dom.el("queueProcessRunAsync").checked = true;
+  const resultBoxes: Record<string, string> = {};
+  const toasts: string[] = [];
+  let requestBody: any = null;
+  const operations = createOperationsActions({
+    api: async (_method, path, body) => {
+      if (path === "/api/queue/process") {
+        requestBody = body;
+        return {
+          processed: 0,
+          succeeded: 0,
+          jobs: [],
+          operation: { id: "op-q1", kind: "queue_process", state: "running" },
+        };
+      }
+      if (path === "/api/queue/jobs") return { jobs: [] };
+      if (path === "/api/treasury/policy") return {};
+      return {};
+    },
+    toast: (message: string) => {
+      toasts.push(message);
+    },
+    refresh: () => undefined,
+    showResultBox: (id, html) => {
+      resultBoxes[id] = html;
+    },
+    updateNextStepCard: () => undefined,
+  });
+
+  // The Phase 0 confirm dialog still gates the background submission.
+  const pending = operations.processQueueBatch();
+  await answerConfirm("action");
+  await pending;
+
+  equal(requestBody.run_async, true);
+  equal(requestBody.id, null);
+  ok(
+    toasts.some((message) => message.includes("operation op-q1")),
+    "toast surfaces the operation id: " + toasts.join(" | "),
+  );
+  equal(
+    resultBoxes.queueProcessResult,
+    undefined,
+    "background mode does not render a synchronous tally box",
+  );
+});
+
+test("runMaintenanceCycle sends run_async only in background mode and surfaces the operation id", async () => {
+  const dom = installDom([
+    "maintenanceDepositLimit",
+    "maintenanceQueueLimit",
+    "maintenanceAutoEnqueue",
+    "maintenanceRunAsync",
+    "depositList",
+    "queueList",
+  ]);
+  const resultBoxes: Record<string, string> = {};
+  const toasts: string[] = [];
+  const requestBodies: any[] = [];
+  const operations = createOperationsActions({
+    api: async (_method, path, body) => {
+      if (path === "/api/maintenance/run") {
+        requestBodies.push(body);
+        if ((body as any)?.run_async === true) {
+          return {
+            status: "accepted",
+            operation: { id: "op-m1", kind: "maintenance_run", state: "running" },
+          };
+        }
+        return {
+          status: "ok",
+          refreshed: 0,
+          detected: 0,
+          queued: 0,
+          processed: 0,
+          succeeded: 0,
+          failed: 0,
+          failures_by_cause: {},
+          deposits: [],
+          jobs: [],
+        };
+      }
+      if (path === "/api/queue/jobs") return { jobs: [] };
+      if (path === "/api/deposits/eth-stealth") return { deposits: [] };
+      if (path === "/api/treasury/policy") return {};
+      return {};
+    },
+    toast: (message: string) => {
+      toasts.push(message);
+    },
+    refresh: () => undefined,
+    showResultBox: (id, html) => {
+      resultBoxes[id] = html;
+    },
+    updateNextStepCard: () => undefined,
+  });
+
+  // Default: synchronous run, run_async stays absent from the request.
+  await operations.runMaintenanceCycle();
+  equal(
+    requestBodies[0]?.run_async,
+    undefined,
+    "run_async stays absent unless the background checkbox is checked",
+  );
+  ok(resultBoxes.maintenanceResult !== undefined, "sync run renders the tally box");
+
+  dom.el("maintenanceRunAsync").checked = true;
+  await operations.runMaintenanceCycle();
+  equal(requestBodies[1]?.run_async, true);
+  ok(
+    toasts.some((message) => message.includes("operation op-m1")),
+    "toast surfaces the operation id: " + toasts.join(" | "),
+  );
+});
+
 test("queue process batch and single job require confirmation before broadcast", async () => {
   const dom = installDom(["queueProcessLimit", "queueList", "depositList"]);
   dom.el("queueProcessLimit").value = "20";

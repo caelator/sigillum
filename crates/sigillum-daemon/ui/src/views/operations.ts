@@ -593,12 +593,27 @@ export function createOperationsActions(deps: OperationsDeps) {
       actionLabel: "Process now",
     });
     if (!confirmed) return;
-    const r = await deps.api("POST", "/api/queue/process", {
-      id: null,
-      limit,
-    });
+    const runAsync =
+      (document.getElementById("queueProcessRunAsync") as HTMLInputElement | null)?.checked ??
+      false;
+    const body: Record<string, unknown> = { id: null, limit };
+    if (runAsync) body.run_async = true;
+    const r = await deps.api("POST", "/api/queue/process", body);
     if (r.error) {
       deps.toast(r.error, "error");
+      return;
+    }
+    if (runAsync && r.operation && r.operation.id) {
+      // Background drain accepted: progress renders in the queue list on
+      // the next refresh; the operation id lets the operator cross-check
+      // (and cancel) via GET/POST /api/operations/{id}[/cancel].
+      deps.toast(
+        "Queue drain started in background — operation " +
+          String(r.operation.id) +
+          "; progress shows in the queue list below",
+      );
+      void loadQueueJobs();
+      deps.updateNextStepCard();
       return;
     }
     deps.showResultBox(
@@ -665,13 +680,32 @@ export function createOperationsActions(deps: OperationsDeps) {
   }
 
   async function runMaintenanceCycle(): Promise<void> {
-    const r = await deps.api("POST", "/api/maintenance/run", {
+    const runAsync =
+      (document.getElementById("maintenanceRunAsync") as HTMLInputElement | null)?.checked ??
+      false;
+    const body: Record<string, unknown> = {
       deposit_refresh_limit: optionalNumberValue("maintenanceDepositLimit"),
       queue_process_limit: optionalNumberValue("maintenanceQueueLimit"),
       auto_enqueue: input("maintenanceAutoEnqueue").checked,
-    });
+    };
+    if (runAsync) body.run_async = true;
+    const r = await deps.api("POST", "/api/maintenance/run", body);
     if (r.error) {
       deps.toast(r.error, "error");
+      return;
+    }
+    if (runAsync && r.operation && r.operation.id) {
+      // Background cycle accepted: progress renders in the queue and
+      // deposit lists on the next refresh; the operation id lets the
+      // operator cross-check (and cancel) via /api/operations/{id}.
+      deps.toast(
+        "Maintenance cycle started in background — operation " +
+          String(r.operation.id) +
+          "; progress shows in the queue and deposit lists",
+      );
+      void loadQueueJobs();
+      void loadDepositRegistry();
+      deps.updateNextStepCard();
       return;
     }
     deps.showResultBox(
