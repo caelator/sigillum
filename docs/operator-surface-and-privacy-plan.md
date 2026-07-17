@@ -51,6 +51,19 @@ ratified), D-E (ERC-6538 deferred).
     then legacy and re-stamps on match; sweeps use the record's stamp with
     address-verified probe fallback; fixed external vectors (SDK-published
     keypair, independent @noble reference) pin both conventions.
+  - 2.3 watch-only detection (`19a7ef1`, daemon `cf0c6d8`, docs `3b0ef2f`):
+    `EthereumStealthWatchView` (viewing key + spending pubkey; no field can
+    hold the spending secret) backs scanning, check, export, guardrails, and
+    deposit creation; signing paths unchanged; fixed vectors pin the
+    watch-only entry points byte-identical on both conventions.
+  - 2.4 stealth gas story (`5721db3`..`1719d02`, 8 commits): EIP-5564
+    metadata SHOULD layouts (native `0xeeeeeeee` + sentinel + amount; token
+    selector + address + amount) produced on `request_gas` and consumed on
+    scan (auto-populating asset/amount); per-wallet gas sponsor derived from
+    the compartment master key; `EthStealthGasTopup` queue payload with sweep
+    prerequisites, 1.5× cap, sponsor solvency re-checks, and cross-party
+    linkage warn/hard-block; console deposit forms surface payer-gas requests
+    and gas state.
   - 2.5 stealth execution-gate carve-out closed (`9c3bb24`): stealth
     transfers/sweeps gate under the Sweep family (`allow_plan_execution` +
     `allow_sweep_execution`) at enqueue and drain, mirroring EthSeed*; the
