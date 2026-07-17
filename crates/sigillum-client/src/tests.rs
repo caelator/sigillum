@@ -2778,3 +2778,117 @@ async fn tag_stealth_deposit_posts_deposit_id_and_parses_status() {
     assert_eq!(response.deposit.id, "dep-1");
     assert_eq!(response.deposit.counterparty_id.as_deref(), Some("party-1"));
 }
+
+// ── Structured error codes (1.4) ─────────────────────────────────
+
+async fn spawn_error_server() -> Option<SocketAddr> {
+    async fn gated() -> (StatusCode, Json<serde_json::Value>) {
+        (
+            StatusCode::FORBIDDEN,
+            Json(json!({
+                "code": "execution_gate_denied",
+                "error": "treasury execution gates deny this operation",
+            })),
+        )
+    }
+    async fn invalid() -> (StatusCode, Json<serde_json::Value>) {
+        (
+            StatusCode::BAD_REQUEST,
+            Json(json!({
+                "code": "validation_failed",
+                "error": "name exceeds maximum length of 256 bytes (got 300 bytes)",
+                "fields": [
+                    {
+                        "field": "name",
+                        "message": "name exceeds maximum length of 256 bytes (got 300 bytes)"
+                    },
+                    {
+                        "field": "rpc_url",
+                        "message": "rpc_url exceeds maximum length of 2048 bytes (got 2100 bytes)"
+                    }
+                ]
+            })),
+        )
+    }
+    async fn legacy() -> (StatusCode, Json<serde_json::Value>) {
+        (
+            StatusCode::UNAUTHORIZED,
+            Json(json!({ "error": "Invalid or missing session token." })),
+        )
+    }
+    let app = Router::new()
+        .route("/gated", post(gated))
+        .route("/invalid", post(invalid))
+        .route("/legacy", post(legacy));
+    let listener = match tokio::net::TcpListener::bind("127.0.0.1:0").await {
+        Ok(listener) => listener,
+        Err(error) => {
+            eprintln!("skipping loopback test: sandbox blocks loopback bind: {error}");
+            return None;
+        }
+    };
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        axum::serve(listener, app).await.unwrap();
+    });
+    Some(addr)
+}
+
+#[tokio::test]
+async fn api_error_exposes_code_and_field_errors() {
+    let Some(addr) = spawn_error_server().await else {
+        return;
+    };
+    let client = SigillumClient::new(format!("http://{addr}")).expect("client should build");
+
+    let error = client
+        .send::<serde_json::Value>(client.request(reqwest::Method::POST, "/invalid").json(&json!({})))
+        .await
+        .unwrap_err();
+    assert_eq!(error.code(), Some("validation_failed"));
+    assert_eq!(
+        error.to_string(),
+        "api error (400 Bad Request): name exceeds maximum length of 256 bytes (got 300 bytes)"
+    );
+    let fields = error.fields();
+    assert_eq!(fields.len(), 2);
+    assert_eq!(fields[0].field, "name");
+    assert_eq!(
+        fields[0].message,
+        "name exceeds maximum length of 256 bytes (got 300 bytes)"
+    );
+    assert_eq!(fields[1].field, "rpc_url");
+
+    let error = client
+        .send::<serde_json::Value>(client.request(reqwest::Method::POST, "/gated").json(&json!({})))
+        .await
+        .unwrap_err();
+    assert_eq!(error.code(), Some("execution_gate_denied"));
+    assert!(error.fields().is_empty());
+}
+
+#[tokio::test]
+async fn legacy_envelope_without_code_maps_to_none() {
+    let Some(addr) = spawn_error_server().await else {
+        return;
+    };
+    let client = SigillumClient::new(format!("http://{addr}")).expect("client should build");
+
+    let error = client
+        .send::<serde_json::Value>(client.request(reqwest::Method::POST, "/legacy").json(&json!({})))
+        .await
+        .unwrap_err();
+    assert_eq!(error.code(), None);
+    assert!(error.fields().is_empty());
+    assert_eq!(
+        error.to_string(),
+        "api error (401 Unauthorized): Invalid or missing session token."
+    );
+}
+
+#[test]
+fn non_api_errors_have_no_code_or_fields() {
+    let error = ClientError::Encoding("bad hex".to_string());
+    assert_eq!(error.code(), None);
+    assert!(error.fields().is_empty());
+}

@@ -725,8 +725,31 @@ fn run_eth_seed_create(args: &[String], request: EthSeedWalletCreateRequest) {
     print_json(&response);
 }
 
+/// Render a daemon client error for stderr.
+///
+/// When the daemon sent a structured error code the line becomes
+/// `error[<code>]: <message>` with one indented line per field-level
+/// validation error; anything else keeps the legacy `Display` rendering.
+fn format_client_error(error: &ClientError) -> String {
+    match error {
+        ClientError::Api {
+            code: Some(code),
+            message,
+            fields,
+            ..
+        } => {
+            let mut rendered = format!("error[{code}]: {message}");
+            for field in fields {
+                rendered.push_str(&format!("\n  {}: {}", field.field, field.message));
+            }
+            rendered
+        }
+        _ => error.to_string(),
+    }
+}
+
 pub(super) fn report_client_error(error: ClientError) -> ! {
-    eprintln!("{error}");
+    eprintln!("{}", format_client_error(&error));
     process::exit(1);
 }
 
@@ -931,5 +954,63 @@ mod tests {
         let error = write_mnemonic_file(&path, TEST_MNEMONIC).unwrap_err();
         assert_eq!(error.kind(), io::ErrorKind::AlreadyExists);
         assert_eq!(std::fs::read_to_string(&path).unwrap(), "existing");
+    }
+
+    // ── Client error rendering ───────────────────────────────────
+
+    #[test]
+    fn format_client_error_includes_code_and_field_errors() {
+        let error = ClientError::Api {
+            status: reqwest::StatusCode::FORBIDDEN,
+            message: "execution gates deny this operation".into(),
+            code: Some("execution_gate_denied".into()),
+            fields: Vec::new(),
+        };
+        assert_eq!(
+            format_client_error(&error),
+            "error[execution_gate_denied]: execution gates deny this operation"
+        );
+
+        let error = ClientError::Api {
+            status: reqwest::StatusCode::BAD_REQUEST,
+            message: "name exceeds maximum length of 256 bytes".into(),
+            code: Some("validation_failed".into()),
+            fields: vec![
+                sigillum_client::FieldError {
+                    field: "name".into(),
+                    message: "name exceeds maximum length of 256 bytes".into(),
+                },
+                sigillum_client::FieldError {
+                    field: "rpc_url".into(),
+                    message: "rpc_url exceeds maximum length of 2048 bytes".into(),
+                },
+            ],
+        };
+        assert_eq!(
+            format_client_error(&error),
+            "error[validation_failed]: name exceeds maximum length of 256 bytes\n  \
+             name: name exceeds maximum length of 256 bytes\n  \
+             rpc_url: rpc_url exceeds maximum length of 2048 bytes"
+        );
+    }
+
+    #[test]
+    fn format_client_error_without_code_keeps_legacy_rendering() {
+        let error = ClientError::Api {
+            status: reqwest::StatusCode::UNAUTHORIZED,
+            message: "Invalid or missing session token.".into(),
+            code: None,
+            fields: Vec::new(),
+        };
+        assert_eq!(
+            format_client_error(&error),
+            "api error (401 Unauthorized): Invalid or missing session token."
+        );
+
+        let encoding = ClientError::Encoding("bad hex".into());
+        assert_eq!(
+            format_client_error(&encoding),
+            "invalid response encoding: bad hex"
+        );
     }
 }

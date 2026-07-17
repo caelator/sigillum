@@ -78,6 +78,7 @@ pub use sigillum_api::response::{
     EvmFeeEstimateResponse, EvmProviderProfile, EvmProviderProfileListResponse,
     EvmProviderProfileMutationResponse, EvmRpcBalanceResponse, EvmRpcBroadcastResponse,
     EvmRpcErc20BalanceResponse, EvmRpcNonceResponse, Fido2DetectResponse, Fido2KeyInfo,
+    FieldError,
     Fido2ListResponse, Fido2RegisterResponse, Fido2RemoveResponse, Fido2SetupResponse,
     Fido2StatusResponse, GenerateStoreResponse, GenericStatusResponse, KeyListResponse,
     KeyValueResponse, MaintenanceRunResponse, QueueEnqueueResponse, QueueExecutionPauseResponse,
@@ -118,6 +119,14 @@ pub enum ClientError {
     Api {
         status: reqwest::StatusCode,
         message: String,
+        /// Stable machine-readable error code from the daemon's error
+        /// envelope (`sigillum_api::error_codes`); `None` when the daemon
+        /// did not send one (legacy envelope) or the body was not an
+        /// envelope at all.
+        code: Option<String>,
+        /// Per-field validation breakdown for `validation_failed` errors;
+        /// empty otherwise.
+        fields: Vec<FieldError>,
     },
 
     #[error("invalid snapshot encoding: {0}")]
@@ -125,6 +134,24 @@ pub enum ClientError {
 
     #[error("invalid response encoding: {0}")]
     Encoding(String),
+}
+
+impl ClientError {
+    /// The daemon's stable machine-readable error code, when one was sent.
+    pub fn code(&self) -> Option<&str> {
+        match self {
+            ClientError::Api { code, .. } => code.as_deref(),
+            _ => None,
+        }
+    }
+
+    /// Per-field validation breakdown (`validation_failed` errors only).
+    pub fn fields(&self) -> &[FieldError] {
+        match self {
+            ClientError::Api { fields, .. } => fields,
+            _ => &[],
+        }
+    }
 }
 
 /// Async HTTP client for the Sigillum vault daemon.
@@ -1120,16 +1147,31 @@ impl SigillumClient {
         }
 
         if !status.is_success() {
-            let message = serde_json::from_value::<ErrorResponse>(value.clone())
-                .map(|error| error.error)
-                .unwrap_or_else(|_| {
-                    if text.is_empty() {
+            let (message, code, fields) = match serde_json::from_value::<ErrorResponse>(value.clone())
+            {
+                Ok(error) => {
+                    // The daemon never emits the `unknown` deserialization
+                    // fallback; map it back to "no code" so legacy envelopes
+                    // keep their old rendering downstream.
+                    let code = (error.code != sigillum_api::error_codes::UNKNOWN)
+                        .then_some(error.code);
+                    (error.error, code, error.fields.unwrap_or_default())
+                }
+                Err(_) => {
+                    let message = if text.is_empty() {
                         format!("request failed with status {status}")
                     } else {
                         text.clone()
-                    }
-                });
-            return Err(ClientError::Api { status, message });
+                    };
+                    (message, None, Vec::new())
+                }
+            };
+            return Err(ClientError::Api {
+                status,
+                message,
+                code,
+                fields,
+            });
         }
 
         Ok(serde_json::from_value(value)?)
