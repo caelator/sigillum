@@ -713,7 +713,7 @@ mod tests {
         let queue = queue_with_gas_topup("topup_1", sponsor, &other.stealth_address);
 
         let linkage =
-            detect_stealth_gas_sponsor_linkage(&target, sponsor, &[other.clone()], &queue).unwrap();
+            detect_stealth_gas_sponsor_linkage(&target, sponsor, "mainnet", &[other.clone()], &queue).unwrap();
         assert!(
             linkage.warning.starts_with("shared gas sponsor links this party"),
             "{}",
@@ -727,6 +727,7 @@ mod tests {
         assert_eq!(finding.subject_type, "gas_funder");
         assert_eq!(finding.subject, sponsor);
         assert_eq!(finding.wallet_family, "eth-stealth");
+        assert_eq!(finding.provider_profile, "mainnet");
         assert_eq!(finding.chain_id, target.chain_id);
         assert!(
             finding
@@ -741,7 +742,8 @@ mod tests {
         let mut same_party = other.clone();
         same_party.counterparty_id = Some("party_a".into());
         assert!(
-            detect_stealth_gas_sponsor_linkage(&target, sponsor, &[same_party], &queue).is_none()
+            detect_stealth_gas_sponsor_linkage(&target, sponsor, "mainnet", &[same_party], &queue)
+                .is_none()
         );
 
         // A different sponsor funds the other deposit: no shared funder.
@@ -749,6 +751,7 @@ mod tests {
             detect_stealth_gas_sponsor_linkage(
                 &target,
                 "0x5555555555555555555555555555555555555555",
+                "mainnet",
                 &[other],
                 &queue
             )
@@ -764,7 +767,10 @@ mod tests {
         let queue = queue_with_gas_topup("topup_1", sponsor, &other.stealth_address);
 
         // The other deposit never recorded a top-up job: nothing to link.
-        assert!(detect_stealth_gas_sponsor_linkage(&target, sponsor, &[other], &queue).is_none());
+        assert!(
+            detect_stealth_gas_sponsor_linkage(&target, sponsor, "mainnet", &[other], &queue)
+                .is_none()
+        );
     }
 }
 
@@ -1871,8 +1877,13 @@ impl SigillumService {
             return Ok((None, None));
         }
 
-        let linkage =
-            detect_stealth_gas_sponsor_linkage(deposit, &sponsor_address, other_deposits, queue);
+        let linkage = detect_stealth_gas_sponsor_linkage(
+            deposit,
+            &sponsor_address,
+            &provider.name,
+            other_deposits,
+            queue,
+        );
         let job = QueueJob {
             id: random_id(),
             state: "queued".into(),
@@ -2334,6 +2345,7 @@ struct StealthSponsorLinkage {
 fn detect_stealth_gas_sponsor_linkage(
     target: &EthStealthDeposit,
     sponsor_address: &str,
+    provider_profile: &str,
     other_deposits: &[EthStealthDeposit],
     queue: &crate::queue_store::QueueState,
 ) -> Option<StealthSponsorLinkage> {
@@ -2377,7 +2389,7 @@ fn detect_stealth_gas_sponsor_linkage(
         let risk_finding = super::inventory::planner::common_gas_funder_finding(
             "eth-stealth",
             &target.wallet_profile,
-            &target.wallet_profile,
+            provider_profile,
             target.chain_id,
             sponsor_address,
             &linked_labels,
