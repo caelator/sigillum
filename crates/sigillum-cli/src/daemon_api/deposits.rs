@@ -51,6 +51,8 @@ fn create_native(args: &[String]) {
         min_sweep_value_wei_hex: parse_flag(args, "--min-sweep-value-wei-hex"),
         note: parse_flag(args, "--note"),
         ephemeral_private_key_hex: parse_flag(args, "--ephemeral-private-key-hex"),
+        request_gas: flag_option(args, "--request-gas"),
+        gas_amount_wei_hex: parse_flag(args, "--gas-amount-wei-hex"),
     };
     run_api_command(args, true, move |client| async move {
         client.create_eth_stealth_native_deposit(request).await
@@ -68,6 +70,8 @@ fn create_erc20(args: &[String]) {
         min_sweep_amount_hex: parse_flag(args, "--min-sweep-amount-hex"),
         note: parse_flag(args, "--note"),
         ephemeral_private_key_hex: parse_flag(args, "--ephemeral-private-key-hex"),
+        request_gas: flag_option(args, "--request-gas"),
+        gas_amount_wei_hex: parse_flag(args, "--gas-amount-wei-hex"),
     };
     run_api_command(args, true, move |client| async move {
         client.create_eth_stealth_erc20_deposit(request).await

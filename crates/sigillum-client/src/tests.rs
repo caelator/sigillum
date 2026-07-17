@@ -2593,6 +2593,8 @@ async fn profile_and_queue_helpers_roundtrip_response_shapes() {
             min_sweep_value_wei_hex: Some("0x1".into()),
             note: Some("invoice-42".into()),
             ephemeral_private_key_hex: None,
+            request_gas: None,
+            gas_amount_wei_hex: None,
         })
         .await
         .unwrap();
@@ -2608,6 +2610,8 @@ async fn profile_and_queue_helpers_roundtrip_response_shapes() {
             min_sweep_amount_hex: Some("0xf4240".into()),
             note: None,
             ephemeral_private_key_hex: None,
+            request_gas: None,
+            gas_amount_wei_hex: None,
         })
         .await
         .unwrap();

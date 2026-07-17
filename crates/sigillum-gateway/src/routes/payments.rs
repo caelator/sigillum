@@ -240,6 +240,8 @@ pub async fn create_payment(
                 min_sweep_amount_hex: None,
                 note: Some("gateway-payment".to_string()),
                 ephemeral_private_key_hex: None,
+                request_gas: None,
+                gas_amount_wei_hex: None,
             })
             .await?
             .deposit
@@ -254,6 +256,8 @@ pub async fn create_payment(
                 min_sweep_value_wei_hex: None,
                 note: Some("gateway-payment".to_string()),
                 ephemeral_private_key_hex: None,
+                request_gas: None,
+                gas_amount_wei_hex: None,
             })
             .await?
             .deposit
