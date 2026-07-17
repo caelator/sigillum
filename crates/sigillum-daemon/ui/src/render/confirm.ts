@@ -37,6 +37,18 @@ export interface ConfirmDialogOptions {
   phrase?: string;
   /** Optional value rendered in a read-only field (e.g. copy fallback). */
   valueDisplay?: string;
+  /**
+   * Optional single checkbox rendered between the body and the actions
+   * (e.g. opting a profile delete into the forget-history cascade). The
+   * decision carries its state; see confirmDangerDialogWithCheckbox.
+   */
+  checkbox?: { label: string; checked?: boolean };
+}
+
+/** A dialog decision: whether the operator confirmed, and the checkbox state. */
+export interface ConfirmDecision {
+  confirmed: boolean;
+  checked: boolean;
 }
 
 // Only one dialog may be open at a time; a new dialog cancels the previous
@@ -59,6 +71,18 @@ export function confirmDialog(
   tier: ConfirmTier,
   options: ConfirmDialogOptions,
 ): Promise<boolean> {
+  return confirmDialogDecision(tier, options).then((decision) => decision.confirmed);
+}
+
+/**
+ * Full-decision variant: resolves the confirmation AND the optional
+ * checkbox state (false when no checkbox was rendered or the dialog was
+ * cancelled).
+ */
+export function confirmDialogDecision(
+  tier: ConfirmTier,
+  options: ConfirmDialogOptions,
+): Promise<ConfirmDecision> {
   return new Promise((resolve) => {
     if (activeCancel) activeCancel();
 
@@ -88,6 +112,21 @@ export function confirmDialog(
 
     dialog.appendChild(title);
     dialog.appendChild(body);
+
+    let checkboxInput: HTMLInputElement | null = null;
+    if (options.checkbox != null) {
+      const checkboxLabel = document.createElement("label");
+      checkboxLabel.className = "confirm-checkbox";
+      checkboxInput = document.createElement("input") as HTMLInputElement;
+      checkboxInput.type = "checkbox";
+      checkboxInput.checked = options.checkbox.checked === true;
+      checkboxInput.setAttribute("data-confirm-checkbox", "");
+      const checkboxText = document.createElement("span");
+      checkboxText.textContent = options.checkbox.label;
+      checkboxLabel.appendChild(checkboxInput);
+      checkboxLabel.appendChild(checkboxText);
+      dialog.appendChild(checkboxLabel);
+    }
 
     let valueInput: HTMLInputElement | null = null;
     if (options.valueDisplay != null) {
@@ -150,11 +189,12 @@ export function confirmDialog(
     const focusables: HTMLElement[] = [];
     if (valueInput) focusables.push(valueInput);
     if (phraseInput) focusables.push(phraseInput);
+    if (checkboxInput) focusables.push(checkboxInput);
     if (cancelButton) focusables.push(cancelButton);
     focusables.push(actionButton);
 
     let settled = false;
-    const settle = (result: boolean): void => {
+    const settle = (confirmed: boolean): void => {
       if (settled) return;
       settled = true;
       activeCancel = null;
@@ -163,7 +203,10 @@ export function confirmDialog(
       if (previousFocus && typeof previousFocus.focus === "function") {
         previousFocus.focus();
       }
-      resolve(result);
+      resolve({
+        confirmed,
+        checked: confirmed && checkboxInput != null && checkboxInput.checked,
+      });
     };
 
     const phraseMatches = (): boolean =>
@@ -234,6 +277,13 @@ export function informDialog(options: ConfirmDialogOptions): Promise<boolean> {
 /** Descriptive copy + Cancel / danger action. The default guard tier. */
 export function confirmDangerDialog(options: ConfirmDialogOptions): Promise<boolean> {
   return confirmDialog("confirm", options);
+}
+
+/** Danger tier with the decision exposed (for the optional checkbox). */
+export function confirmDangerDialogDecision(
+  options: ConfirmDialogOptions,
+): Promise<ConfirmDecision> {
+  return confirmDialogDecision("confirm", options);
 }
 
 /** Like confirm, but the action stays disabled until the phrase is typed. */

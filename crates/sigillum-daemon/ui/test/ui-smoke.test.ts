@@ -11,6 +11,7 @@ import {
 import { dispatchDataAction } from "../src/actions/dispatcher";
 import {
   confirmDangerDialog,
+  confirmDangerDialogDecision,
   confirmTypedDialog,
   informDialog,
 } from "../src/render/confirm";
@@ -197,6 +198,47 @@ test("confirmation dialog tiers resolve decisions and gate typed phrases", async
   pending = confirmTypedDialog({ title: "Bulk enqueue", body: "Everything goes.", phrase });
   (document as any).dispatchEvent({ type: "keydown", key: "Escape" });
   equal(await pending, false);
+});
+
+test("confirm dialog checkbox rides along with the decision", async () => {
+  installDom();
+
+  // Checkbox renders between the body and the actions; confirm carries its state.
+  let decision = confirmDangerDialogDecision({
+    title: "Delete wallet",
+    body: "Gone.",
+    checkbox: { label: "Also forget scanned history", checked: false },
+  });
+  let checkbox = confirmPart("[data-confirm-checkbox]");
+  ok(checkbox, "expected the cascade checkbox in the dialog");
+  equal(checkbox.checked, false);
+  checkbox.checked = true;
+  confirmPart("[data-confirm-action]").click();
+  deepEqual(await decision, { confirmed: true, checked: true });
+
+  // Untouched checkbox resolves checked: false on confirm.
+  decision = confirmDangerDialogDecision({
+    title: "Delete wallet",
+    body: "Gone.",
+    checkbox: { label: "Also forget scanned history" },
+  });
+  confirmPart("[data-confirm-action]").click();
+  deepEqual(await decision, { confirmed: true, checked: false });
+
+  // Cancel never reports an opt-in, even if the box was ticked first.
+  decision = confirmDangerDialogDecision({
+    title: "Delete wallet",
+    body: "Gone.",
+    checkbox: { label: "Also forget scanned history", checked: true },
+  });
+  confirmPart("[data-confirm-cancel]").click();
+  deepEqual(await decision, { confirmed: false, checked: false });
+
+  // No checkbox configured: the decision still reports checked: false.
+  decision = confirmDangerDialogDecision({ title: "Delete thing", body: "Gone." });
+  equal(confirmPart("[data-confirm-checkbox]"), null);
+  confirmPart("[data-confirm-action]").click();
+  deepEqual(await decision, { confirmed: true, checked: false });
 });
 
 test("shell renderer applies setup, locked, and unlocked DOM state", () => {
@@ -4521,6 +4563,101 @@ test("wallet manager list renders unified wallets with balances and fallbacks", 
   equal(dom.el("walletCreateProviderHint").classList.contains("hidden"), false);
   // With no providers, the inline quick-add is the visible path forward.
   equal(dom.el("walletQuickProvider").classList.contains("hidden"), false);
+});
+
+test("wallet manager delete offers the forget-history cascade", async () => {
+  const dom = installWalletManagerDom();
+  const calls: Array<{ method: string; path: string; body?: any }> = [];
+  const toasts: string[] = [];
+  const manager = createWalletManagerActions({
+    api: async (method, path, body) => {
+      calls.push({ method, path, body });
+      if (path === "/api/profiles/eth-seed") {
+        return { profiles: [walletManagerSeedProfile()] };
+      }
+      if (path === "/api/profiles/eth-xpub") {
+        return { profiles: [] };
+      }
+      if (path === "/api/profiles/evm") {
+        return { profiles: [{ name: "mainnet", chain_id: 1 }] };
+      }
+      if (path === "/api/treasury/overview") {
+        return { groups: [] };
+      }
+      if (path === "/api/treasury/receive-addresses") {
+        return { allocations: [] };
+      }
+      if (path === "/api/profiles/eth-seed/delete") {
+        return {
+          status: "deleted",
+          pruned_inventory: (body as any)?.prune_inventory
+            ? {
+                addresses: 7,
+                holdings: 2,
+                jobs: 1,
+                checkpoints: 2,
+                block_cursors: 0,
+                allocations_active: 1,
+                allocations_retired: 1,
+                counterparty_bindings: 2,
+              }
+            : undefined,
+        };
+      }
+      return {};
+    },
+    toast: (message) => toasts.push(message),
+  });
+  await manager.loadWalletManager();
+  calls.length = 0;
+
+  // Legacy path: confirm without ticking the box — the body carries no flag.
+  let pending = manager.deleteManagedWallet("seed", "main");
+  await tick();
+  let overlay = confirmOverlay();
+  ok(overlay, "delete opens the shared confirm dialog");
+  ok(
+    confirmPart("[data-confirm-body]").textContent.includes(
+      "re-import and re-scan re-derives fresh addresses",
+    ),
+    "the dialog states what forgetting means",
+  );
+  ok(confirmPart("[data-confirm-checkbox]"), "the cascade checkbox renders");
+  confirmPart("[data-confirm-action]").click();
+  await pending;
+  let deleteCall = calls.find((call) => call.path === "/api/profiles/eth-seed/delete");
+  deepEqual(deleteCall?.body, { name: "main" });
+
+  // Cascade path: ticking the box sends prune_inventory: true, and the toast
+  // summarizes what was forgotten.
+  pending = manager.deleteManagedWallet("seed", "main");
+  await tick();
+  overlay = confirmOverlay();
+  ok(overlay, "second delete opens the dialog again");
+  const checkbox = confirmPart("[data-confirm-checkbox]");
+  checkbox.checked = true;
+  confirmPart("[data-confirm-action]").click();
+  await pending;
+  deleteCall = calls
+    .filter((call) => call.path === "/api/profiles/eth-seed/delete")
+    .at(-1);
+  deepEqual(deleteCall?.body, { name: "main", prune_inventory: true });
+  ok(
+    toasts.some((message) => message.includes("forgot 7 addresses")),
+    "toast summarizes the forgotten counts: " + toasts.join(" | "),
+  );
+
+  // Cancel posts nothing.
+  calls.length = 0;
+  pending = manager.deleteManagedWallet("seed", "main");
+  await tick();
+  confirmPart("[data-confirm-cancel]").click();
+  await pending;
+  equal(
+    calls.filter((call) => call.path === "/api/profiles/eth-seed/delete").length,
+    0,
+    "cancel never posts the delete",
+  );
 });
 
 test("provider profile editor posts fee estimation opt-in", async () => {

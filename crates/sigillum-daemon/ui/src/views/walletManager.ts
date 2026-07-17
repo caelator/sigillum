@@ -4,7 +4,7 @@ import type {
   TreasuryGroupSummary,
   TreasuryReceiveAllocation,
 } from "../contracts";
-import { confirmDangerDialog } from "../render/confirm";
+import { confirmDangerDialogDecision } from "../render/confirm";
 import { setHiddenById as setHidden, setTextById as setText } from "../render/dom";
 import {
   clearFields,
@@ -519,27 +519,46 @@ export function createWalletManagerActions(deps: WalletManagerDeps) {
 
   async function deleteManagedWallet(kind: string, name: string): Promise<void> {
     const targetKind: ManagedWalletKind = kind === "xpub" ? "xpub" : "seed";
-    const confirmed = await confirmDangerDialog({
+    const decision = await confirmDangerDialogDecision({
       title: targetKind === "seed" ? "Delete wallet" : "Delete xpub profile",
       body:
         (targetKind === "seed"
           ? 'Delete seed wallet "' + name + '"? The mnemonic is removed from this daemon\'s vault; on-chain funds are not moved, but this daemon can no longer sign with it.'
-          : 'Delete xpub profile "' + name + '"? The watch-only profile is removed from this daemon.'),
+          : 'Delete xpub profile "' + name + '"? The watch-only profile is removed from this daemon.') +
+        " Tick the box below to also forget what this daemon learned about the wallet — a later re-import and re-scan re-derives fresh addresses, but today's history is gone for good.",
       actionLabel: "Delete",
+      checkbox: {
+        label:
+          "Also forget scanned history: observed addresses, balances, scan state, and receive allocations with their counterparty bindings (counterparties themselves are kept).",
+        checked: false,
+      },
     });
-    if (!confirmed) return;
+    if (!decision.confirmed) return;
     const path =
       targetKind === "seed"
         ? "/api/profiles/eth-seed/delete"
         : "/api/profiles/eth-xpub/delete";
-    const r = await deps.api("POST", path, { name });
+    const body: { name: string; prune_inventory?: boolean } = { name };
+    if (decision.checked) body.prune_inventory = true;
+    const r = await deps.api("POST", path, body);
     if (r.error) {
       deps.toast(r.error, "error");
       renderWalletManagerList();
       return;
     }
+    const pruned = r.pruned_inventory;
+    const forgotten =
+      decision.checked && pruned
+        ? " — forgot " +
+          String(pruned.addresses || 0) +
+          " addresses, " +
+          String((pruned.allocations_active || 0) + (pruned.allocations_retired || 0)) +
+          " receive allocations, " +
+          String(pruned.counterparty_bindings || 0) +
+          " bindings"
+        : "";
     deps.toast(
-      (targetKind === "seed" ? "Wallet" : "Xpub profile") + ' "' + name + '" deleted',
+      (targetKind === "seed" ? "Wallet" : "Xpub profile") + ' "' + name + '" deleted' + forgotten,
     );
     await loadWalletManager();
   }

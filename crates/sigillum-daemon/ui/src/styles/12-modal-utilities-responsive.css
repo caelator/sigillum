@@ -49,6 +49,22 @@
   margin-bottom: var(--space-4);
 }
 
+.confirm-checkbox {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  color: var(--text-secondary);
+  font-size: var(--fs-sm);
+  line-height: 1.45;
+  margin-bottom: var(--space-2);
+  cursor: pointer;
+}
+
+.confirm-checkbox input {
+  margin-top: 3px;
+  accent-color: var(--danger);
+}
+
 .confirm-phrase-label {
   color: var(--text-muted);
   font-size: var(--fs-xs);
