@@ -54,6 +54,16 @@ candidates may adjust stable-candidate surfaces with the change recorded in
 - A discovery scan that fails mid-run now persists the job as `failed` with
   `last_error` (previously the record stayed `running` forever), which also
   makes it resumable.
+- `WalletInventoryScanRequest` gained an optional `partition_providers` flag
+  (absent/false — and any scan with a single selected provider per chain —
+  preserves the previous behavior exactly): when engaged, same-chain address
+  probes are distributed across that chain's provider profiles by a stable
+  per-address hash so each endpoint observes a disjoint subset.
+  `WalletDiscoveryJob` gained additive optional `partition_providers` and
+  `provider_partition_observations` fields (both absent for non-partitioned
+  jobs), and discovery-job resume replays the flag.
+  `sigillum api inventory scan-evm` gained a matching
+  `--partition-providers` flag.
 - New route `GET /api/events` exposes the daemon's SSE event channel (plan
   task 1.3 / decision D-D): `snapshot` (on connect and on lag resync),
   `operation`, `queue`, and `status` events with `v: 1` versioned payloads

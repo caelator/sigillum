@@ -634,6 +634,35 @@ full threat model and operator-discipline requirements are documented in the
 README's "Privacy Model — Scope and Limitations" section; the claim is
 intentionally not an unconditional unlinkability guarantee.
 
+**Provider partitioning (plan task 3.1)** narrows that RPC boundary on an
+opt-in basis. When an inventory scan sets `partition_providers: true` and more
+than one selected provider profile serves the same chain, each probed address
+is assigned to exactly one of that chain's providers by a stable hash —
+`SHA-256(domain ‖ chain_id ‖ address) mod N` over the chain's name-sorted
+provider set — so every endpoint observes only a disjoint subset of the
+address set instead of the full ordered tree. The union of observations,
+per-chain coverage (an address is still probed once per chain), gap-limit
+accounting, and cancel/resume semantics are unchanged. Assignment is stable
+across scans for a fixed provider set, which keeps resume and result caching
+exact; per-provider request batches are paced with a 25–150 ms CSPRNG-seeded
+jitter (`SIGILLUM_SCAN_PARTITION_JITTER_MAX_MS=0` disables it, used by tests).
+Discovery jobs record `partition_providers` plus per-provider observed counts
+(`provider_partition_observations`) so an operator can verify disjoint
+coverage, and discovery-job resume replays the flag so an interrupted
+partitioned scan keeps its assignment. When the flag is absent/false — or
+every chain has a single selected provider — scan behavior is byte-identical
+to the pre-flag pipeline.
+
+The residual is stated plainly: partitioning reduces but does not eliminate
+provider-side linkage. Each provider still sees its assigned subset — a
+coherent, stable subset it can track across scans, observed in derivation
+order within the subset — together with the operator's IP address, and there
+is no Tor or proxy layer: all endpoints are contacted from one origin, so
+colluding providers or a network-level observer can still cluster the subsets
+by source IP and timing (the jitter only blurs intra-scan timing). Operators
+who need network-layer unlinkability still need their own node or distinct
+network paths per provider.
+
 ### xpub exposure and the derivation oracle
 
 An xpub is watch-only material — it cannot sign — but it is **not**

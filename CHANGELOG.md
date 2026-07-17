@@ -9,6 +9,27 @@ from 1.0.0 onward, per the stability policy in `docs/stability.md`.
 
 ### Added
 
+- **Provider partitioning for inventory scans (plan task 3.1)** —
+  `WalletInventoryScanRequest` gains an additive optional
+  `partition_providers` flag; absent/false — and any scan where each chain
+  has a single selected provider — keeps the previous behavior
+  byte-identical. When engaged, every probed address is assigned to exactly
+  one provider per multi-provider chain by a stable
+  `SHA-256(domain ‖ chain_id ‖ address) mod N` hash over the chain's
+  name-sorted provider set, so each endpoint observes only a disjoint
+  subset of the address set instead of the full ordered tree; the union of
+  observations, per-chain coverage (an address is still probed once per
+  chain), gap-limit accounting, and cancel/resume semantics are unchanged.
+  Per-provider request batches are paced with a 25–150 ms `OsRng`-seeded
+  jitter (`SIGILLUM_SCAN_PARTITION_JITTER_MAX_MS=0` disables it for tests).
+  `WalletDiscoveryJob` additively records `partition_providers` and
+  per-provider observed counts (`provider_partition_observations`) so
+  operators can verify disjoint coverage; discovery-job resume replays the
+  flag so an interrupted partitioned scan keeps its assignment. The CLI's
+  `inventory scan-evm` gains `--partition-providers`. This reduces but does
+  not eliminate provider-side linkage — each provider still sees its subset
+  plus the operator IP, with no Tor/proxy layer. See
+  `docs/architecture.md#privacy--linkage-model`.
 - **Single-key (66-hex-char) stealth meta-addresses (plan task 2.6)** —
   meta-address parsing now accepts the EIP-5564 single-key form
   (`st:<chain>:0x<key>`, one 33-byte compressed SEC1 key serving as both
