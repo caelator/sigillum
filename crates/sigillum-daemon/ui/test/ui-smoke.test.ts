@@ -802,9 +802,10 @@ test("setup wizard can defer payer-linkage protection without policy update", ()
     false,
   );
   equal(dom.el("wizLinkageChoiceStatus").classList.contains("hidden"), false);
-  ok((dom.el("wizLinkageChoiceStatus").textContent || "").length > 0);
+  // Declining records nothing: the API default keeps protection ON.
+  ok(dom.el("wizLinkageChoiceStatus").textContent?.includes("defaults to ON"));
   deepEqual(toasts.pop(), {
-    message: "You can enable payer-linkage protection later in Treasury policy.",
+    message: "Payer-linkage protection defaults to on; adjust anytime in Treasury policy.",
     type: undefined,
   });
 });
@@ -3822,6 +3823,20 @@ test("treasury policy loader prefills the form without clobbering operator edits
   dom.el("treasuryPolicyDestinations").value = "0xdraft";
   await treasury.loadTreasuryOverview();
   equal(dom.el("treasuryPolicyDestinations").value, "0xdraft");
+});
+
+test("treasury policy prefill defaults cross-party linkage ON when no policy exists", async () => {
+  const dom = installDom(["treasuryPolicyList", "treasuryPolicyBlockLinkage"]);
+  const treasury = createTreasuryActions({
+    // No saved policy: the form must show the daemon's default posture
+    // (linkage blocking ON since plan task 3.5), not an unchecked box that
+    // would silently turn protection off on first save.
+    api: async (_method, path) => (path === "/api/treasury/policy" ? { policy: null } : {}),
+    toast: () => undefined,
+  });
+
+  await treasury.loadTreasuryOverview();
+  equal(dom.el("treasuryPolicyBlockLinkage").checked, true);
 });
 
 test("treasury policy save validates caps and submits the parsed update request", async () => {

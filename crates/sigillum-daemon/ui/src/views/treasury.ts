@@ -534,7 +534,10 @@ export function createTreasuryActions(deps: TreasuryActionsDeps) {
     if (requireSimEl) requireSimEl.checked = policy ? policy.require_simulation : true;
     const blockLinkageEl = input("treasuryPolicyBlockLinkage");
     if (blockLinkageEl) {
-      blockLinkageEl.checked = policy ? Boolean(policy.block_cross_party_linkage) : false;
+      // Default-on (plan task 3.5): with no saved policy the checkbox shows
+      // the daemon's default posture — protection ON unless explicitly
+      // turned off.
+      blockLinkageEl.checked = policy ? Boolean(policy.block_cross_party_linkage) : true;
     }
     const allowClaimExecEl = input("treasuryPolicyAllowClaimExec");
     if (allowClaimExecEl) {

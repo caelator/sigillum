@@ -612,7 +612,7 @@ export function createSetupWizard(deps: SetupWizardDeps) {
         return;
       }
       showLinkageChoiceStatus(
-        "Payer-linkage protection is on. Sweeps that would link different payers to the same destination are now blocked. Adjust anytime in Treasury policy.",
+        "Payer-linkage protection is on (the default for new policies). Sweeps that would link different payers to the same destination are blocked. Adjust anytime in Treasury policy.",
       );
       deps.toast("Payer-linkage protection enabled");
     } catch (e: any) {
@@ -622,9 +622,9 @@ export function createSetupWizard(deps: SetupWizardDeps) {
 
   function wizDeclineLinkageProtection(): void {
     showLinkageChoiceStatus(
-      "Left off for now. You can enable payer-linkage protection later in Treasury policy.",
+      "No change recorded — payer-linkage protection defaults to ON for any policy you save later. Turn it off anytime in Treasury policy.",
     );
-    deps.toast("You can enable payer-linkage protection later in Treasury policy.");
+    deps.toast("Payer-linkage protection defaults to on; adjust anytime in Treasury policy.");
   }
 
   async function wizEnableClaimExecution(): Promise<void> {
