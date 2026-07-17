@@ -126,6 +126,44 @@ pub(super) fn queue_job_is_runnable(job: &QueueJob, force_target: bool, now: u64
     }
 }
 
+/// Due-work statistics for the background scheduler's pre-check and for
+/// diagnostics: `due_now` counts the jobs a drain would attempt immediately
+/// (runnable states whose backoff, if any, has elapsed), and
+/// `next_retry_at_unix` is the earliest backoff deadline among the jobs
+/// still waiting. Computed without the operation guard — a cheap read-only
+/// estimate; the drain re-decides authoritatively under the guard.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(in crate::service) struct QueueDueStats {
+    pub due_now: usize,
+    pub next_retry_at_unix: Option<u64>,
+}
+
+pub(in crate::service) fn queue_due_stats(
+    queue: &crate::queue_store::QueueState,
+    now: u64,
+) -> QueueDueStats {
+    let mut stats = QueueDueStats::default();
+    for job in &queue.jobs {
+        if queue_job_is_runnable(job, false, now) {
+            stats.due_now += 1;
+            continue;
+        }
+        if matches!(
+            normalize_queue_state(&job.state),
+            QUEUE_STATE_RETRYING | QUEUE_STATE_SUBMITTED_UNKNOWN
+        ) {
+            if let Some(next_attempt) = job.next_attempt_after_unix {
+                stats.next_retry_at_unix = Some(
+                    stats
+                        .next_retry_at_unix
+                        .map_or(next_attempt, |earliest| earliest.min(next_attempt)),
+                );
+            }
+        }
+    }
+    stats
+}
+
 #[cfg(test)]
 mod tests {
     use sigillum_api::{QueueJob, QueueJobPayload};

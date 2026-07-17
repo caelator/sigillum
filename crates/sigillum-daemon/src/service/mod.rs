@@ -20,6 +20,9 @@
 //! - **profiles** — EVM provider and wallet profile CRUD, profile-backed send
 //!   resolution, and provider/wallet lookup helpers
 //! - **maintenance** — compound refresh + queue-drain cycles
+//! - **scheduler** — background loop advancing queue retries, receipt
+//!   confirmations, and deposit refreshes through the same paths without a
+//!   client present (plan task 1.6)
 //! - **backup / recovery** — encrypted snapshot export/restore
 //! - **transit** — inter-compartment secret push
 //! - **observability** — status and diagnostics endpoints
@@ -46,6 +49,7 @@ mod operations;
 mod profiles;
 mod queue;
 mod recovery;
+pub(crate) mod scheduler;
 mod secrets;
 mod selfcheck;
 pub(crate) mod transaction_policy;
@@ -406,5 +410,13 @@ mod tests {
         );
         assert_eq!(diagnostics.eth_stealth_deposit_count, 0);
         assert_eq!(diagnostics.funded_eth_stealth_deposit_count, 0);
+        assert!(diagnostics.scheduler.enabled);
+        assert_eq!(diagnostics.scheduler.queue_tick_secs, 60);
+        assert_eq!(diagnostics.scheduler.refresh_secs, 300);
+        assert_eq!(diagnostics.scheduler.last_tick_at_unix, None);
+        assert_eq!(diagnostics.scheduler.last_cycle_outcome, None);
+        assert_eq!(diagnostics.scheduler.consecutive_failures, 0);
+        assert_eq!(diagnostics.scheduler.due_queue_job_count, 0);
+        assert_eq!(diagnostics.scheduler.next_retry_at_unix, None);
     }
 }

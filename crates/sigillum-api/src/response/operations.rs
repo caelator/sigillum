@@ -63,6 +63,17 @@ pub const OPERATION_KIND_QUEUE_PROCESS: &str = "queue_process";
 /// persisted.
 pub const OPERATION_KIND_MAINTENANCE_RUN: &str = "maintenance_run";
 
+/// [`Operation::kind`] — a background-scheduler cycle that advanced work
+/// (plan task 1.6). Scheduler ticks are deliberately NOT registered one by
+/// one (the registry retains 50 records); a record appears only for a cycle
+/// that actually advanced work (processed > 0 queue jobs or refreshed > 0
+/// deposits), registered already-`completed` as a summary of what ran.
+/// `related_ids` carries the `stage:<name>` markers for the stages that ran
+/// (`treasury_automation`, `deposit_refresh`, `queue_drain`), and
+/// `progress.processed`/`progress.total` count the advanced units (jobs
+/// attempted plus deposits refreshed).
+pub const OPERATION_KIND_SCHEDULER_CYCLE: &str = "scheduler_cycle";
+
 /// Progress counters for a running or finished [`Operation`].
 ///
 /// `total` is `None` when the work cannot know its extent up front (for

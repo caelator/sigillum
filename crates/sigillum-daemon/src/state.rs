@@ -197,6 +197,10 @@ pub struct AppState {
     /// scans). Process-lifetime by design: durable scan progress lives in
     /// the persisted inventory checkpoints and discovery job records.
     operations: ResilientMutex<OperationRegistry>,
+    /// Background-scheduler status snapshot (plan task 1.6): the effective
+    /// configuration plus the most recent cycle's outcome, surfaced in
+    /// `GET /api/diagnostics`. Process-lifetime like the operation registry.
+    scheduler_status: ResilientMutex<sigillum_api::SchedulerStatusResponse>,
     /// Fan-out hub for the `GET /api/events` SSE stream. Publishers are the
     /// operation registry (via a sender clone), the queue state writers, and
     /// the lock/compartment transitions below; see `events.rs` for the
@@ -253,6 +257,9 @@ impl AppState {
             lock_state: ResilientMutex::new(LockState::Ready),
             biometric_challenges: ResilientMutex::new(VecDeque::new()),
             operations: ResilientMutex::new(operation_registry),
+            scheduler_status: ResilientMutex::new(
+                crate::service::scheduler::SchedulerConfig::from_env().status_baseline(),
+            ),
             events,
         })
     }
@@ -401,6 +408,33 @@ impl AppState {
         related_id: &str,
     ) -> Option<sigillum_api::Operation> {
         self.operations.lock().running_for_related(related_id)
+    }
+
+    // ── Background scheduler status ───────────────────────────────
+
+    /// Snapshot of the background scheduler's status for diagnostics.
+    #[must_use]
+    pub fn scheduler_status(&self) -> sigillum_api::SchedulerStatusResponse {
+        self.scheduler_status.lock().clone()
+    }
+
+    /// Record a scheduler cycle's outcome (`advanced`, `idle`,
+    /// `skipped_locked`, `skipped_guard_busy`, or `failed`). A failed cycle
+    /// increments the consecutive-failure counter the scheduler loop uses
+    /// for exponential backoff; any other outcome resets it.
+    pub(crate) fn scheduler_note_cycle(&self, outcome: &'static str, failed: bool) {
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+        let mut status = self.scheduler_status.lock();
+        status.last_tick_at_unix = Some(now);
+        status.last_cycle_outcome = Some(outcome.into());
+        if failed {
+            status.consecutive_failures += 1;
+        } else {
+            status.consecutive_failures = 0;
+        }
     }
 
     // ── Event bus (SSE fan-out) ───────────────────────────────────

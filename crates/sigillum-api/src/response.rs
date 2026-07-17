@@ -306,6 +306,42 @@ pub struct RuntimePolicyResponse {
     pub idle_lock_force_after_secs: u64,
 }
 
+/// Background-scheduler status, embedded in [`DiagnosticsResponse`].
+///
+/// The scheduler (plan task 1.6) advances queue retries, receipt
+/// confirmations, and stealth-deposit refreshes without a client driving the
+/// request surface. `enabled`, `queue_tick_secs`, and `refresh_secs` echo the
+/// effective configuration (env-overridable); `last_tick_at_unix` /
+/// `last_cycle_outcome` / `consecutive_failures` describe the most recent
+/// cycle (`last_cycle_outcome` is one of `advanced`, `idle`,
+/// `skipped_locked`, `skipped_guard_busy`, or `failed`); the due-work fields
+/// are computed from the persisted queue at request time.
+///
+/// Every field deserializes from an absent payload (whole-struct
+/// `Default`), so older daemons without this block read cleanly.
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SchedulerStatusResponse {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default)]
+    pub queue_tick_secs: u64,
+    #[serde(default)]
+    pub refresh_secs: u64,
+    #[serde(default)]
+    pub last_tick_at_unix: Option<u64>,
+    #[serde(default)]
+    pub last_cycle_outcome: Option<String>,
+    #[serde(default)]
+    pub consecutive_failures: u32,
+    /// Jobs a drain would attempt right now (runnable states whose backoff,
+    /// if any, has elapsed).
+    #[serde(default)]
+    pub due_queue_job_count: usize,
+    /// Earliest `next_attempt_after_unix` among backoff-waiting jobs.
+    #[serde(default)]
+    pub next_retry_at_unix: Option<u64>,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct DiagnosticsResponse {
     pub status: String,
@@ -344,6 +380,8 @@ pub struct DiagnosticsResponse {
     pub runtime_policy: RuntimePolicyResponse,
     pub eth_stealth_deposit_count: usize,
     pub funded_eth_stealth_deposit_count: usize,
+    #[serde(default)]
+    pub scheduler: SchedulerStatusResponse,
 }
 
 // ── Self-check ──────────────────────────────────

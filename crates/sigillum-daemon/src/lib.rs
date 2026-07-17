@@ -39,6 +39,7 @@ mod state;
 mod token_registry;
 mod ui;
 
+pub use service::scheduler::spawn_scheduler;
 pub use state::AppState;
 
 #[derive(Debug, thiserror::Error)]
@@ -156,6 +157,14 @@ where
     let _daemon_lock = DaemonLock::acquire(&base_dir, options.force_daemon_lock)?;
     let (app, state) = build_router(base_dir, addr.port())?;
     spawn_idle_lock_task(state.clone());
+    // Background scheduler (plan task 1.6): advances queue retries, receipt
+    // confirmations, and deposit refreshes without a client. Spawned here —
+    // with the daemon's other background task — rather than in build_router,
+    // so it never outlives the server entry point (tests that restart
+    // daemons on a shared base dir abort only the serve task). Integration
+    // tests opt in via `spawn_scheduler` directly. No-ops when
+    // SIGILLUM_SCHEDULER_DISABLE is set.
+    spawn_scheduler(state.clone());
 
     #[cfg(unix)]
     let mut sigterm = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())?;

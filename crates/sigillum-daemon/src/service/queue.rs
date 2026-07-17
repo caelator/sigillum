@@ -46,6 +46,7 @@ pub(in crate::service) use gates::{
     ExecutionFamily, execution_gate_denial, plan_action_execution_family,
 };
 pub(in crate::service) use payloads::queued_job;
+pub(in crate::service) use state::queue_due_stats;
 
 use super::helpers::{now_unix, random_id};
 use super::list_query;
