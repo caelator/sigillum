@@ -592,9 +592,13 @@ heuristic on Ethereum's account model. The identity model is conservative: a
 tagged party is one identity and each unattributed address is its own distinct
 identity, so within any one plan two tagged payers routed to one destination are
 always caught, at the cost of possible false positives. When the
-`block_cross_party_linkage` treasury policy is enabled (an explicit
-fail-closed opt-in surfaced in onboarding, default off), warnings become hard
-blockers at plan generation, approval, and stealth-sweep enqueue. Plan-step
+`block_cross_party_linkage` treasury policy is enabled, warnings become hard
+blockers at plan generation, approval, and stealth-sweep enqueue. Since plan
+task 3.5 this policy **defaults to ON**: a policy update that omits the field
+keeps linkage blocking engaged (an explicit `false` is now required to turn
+it off), and the policy response deserializes an absent field as `true`;
+policies persisted by older daemons carry their explicit value and are
+unaffected. Plan-step
 execution enqueue (W7.2) enforces this at parity (W7.5): linkage is
 re-evaluated fresh against current state at enqueue time exactly as at
 generation and approval — warnings are always recomputed and surfaced
@@ -627,9 +631,22 @@ hard-blocks (`policy_violation: cross_party_linkage`) when
 wallet, any two differently-tagged gas-sponsored deposits on the same stealth
 wallet trip this analysis — the mitigations are payer-attached gas
 (`request_gas`), distinct stealth wallets per party, or manual funding.
-Manual gas funding, amount/timing correlation, downstream
-re-merging of per-party destinations, and multi-hop flows remain out of scope,
-and RPC provider calls expose queried addresses to the configured endpoint. The
+Since plan task 3.5 both passes also surface the detection as a structured,
+advisory `common_gas_funder` **risk finding** built by the local risk
+machinery (`service/inventory/risk.rs`, the same finding shapes used for
+risky approvals, watch-only value, stranded, and dormant addresses):
+`ConsolidationPlan.risk_findings` carries it on generated plans (one finding
+per chain + funder, stable id, `medium` level, evidence listing the linked
+payer identities) and `EthStealthDepositEnqueueSweepResponse.risk_findings`
+carries it on stealth sweep enqueues. The finding is a surfacing, never a
+block — execution blocking stays governed exactly as above by
+`block_cross_party_linkage`. What it covers: gas funding this daemon planned
+(`fund_gas` steps) or recorded (stealth sponsor top-up jobs), per plan or per
+enqueue. What it does NOT cover: manual gas funding done outside the daemon,
+funding shared across DIFFERENT plans (the F5 N1 per-plan caveat above),
+amount/timing correlation, downstream re-merging of per-party destinations,
+and multi-hop flows — those remain operator discipline. RPC provider calls
+also expose queried addresses to the configured endpoint. The
 full threat model and operator-discipline requirements are documented in the
 README's "Privacy Model — Scope and Limitations" section; the claim is
 intentionally not an unconditional unlinkability guarantee.

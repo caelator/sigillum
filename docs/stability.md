@@ -61,7 +61,8 @@ candidates may adjust stable-candidate surfaces with the change recorded in
   per-address hash so each endpoint observes a disjoint subset.
   `WalletDiscoveryJob` gained additive optional `partition_providers` and
   `provider_partition_observations` fields (both absent for non-partitioned
-  jobs), and discovery-job resume replays the flag.
+  jobs; wallet-inventory store schema v21), and discovery-job resume
+  replays the flag.
   `sigillum api inventory scan-evm` gained a matching
   `--partition-providers` flag.
 - New route `GET /api/events` exposes the daemon's SSE event channel (plan
@@ -172,6 +173,29 @@ candidates may adjust stable-candidate surfaces with the change recorded in
   for existing installs until the operator opens the sweep gate; jobs already
   `sent` (broadcast, pre-terminal) are unaffected. The `EthStealthGasTopup`
   job keeps its `allow_gas_topups` enqueue-time gate unchanged.
+- `EthXpubExportResponse` gained a backward-compatible `warning` string
+  (additive, serde default — empty from older daemons) restating that an xpub
+  exposes the wallet's entire past and future receive-address tree (plan task
+  3.4).
+- **`block_cross_party_linkage` defaults to ON (plan task 3.5)**: a
+  `TreasuryPolicyUpdateRequest` that omits the field now resolves to `true`
+  (previously `false`), and the `TreasuryPolicy` wire type deserializes an
+  absent field as `true` — cross-party linkage blocking is the default
+  posture and turning it off requires an explicit `false`. Policies persisted
+  by older daemons always carry the field explicitly, so their chosen value
+  is unaffected; the flip strengthens (never weakens) the fail-closed
+  direction. Behavior change for hand-written or older clients that relied
+  on the implicit off default: plans routing distinct payers to a shared
+  destination (or sharing a gas sponsor across parties) are now hard-blocked
+  unless the operator opts out.
+- `ConsolidationPlan` and `EthStealthDepositEnqueueSweepResponse` gained a
+  backward-compatible `risk_findings` array (additive, serde default, omitted
+  when empty) carrying structured `common_gas_funder` findings from the
+  linkage analysis (plan task 3.5): one advisory `RiskFinding` (category
+  `common_gas_funder`, `medium`, stable per-(chain, funder) id) when one gas
+  sponsor funds receive addresses attributed to different payer identities.
+  Advisory only — execution blocking is unchanged and stays governed by
+  `block_cross_party_linkage`.
 
 ## Stable at 1.0
 
@@ -200,11 +224,14 @@ Breaking any of these is a major-version event:
    trait contracts.
 6. **`TreasuryPolicy` fail-closed defaults** - every execution and automation
    capability (`allow_plan_execution` and its per-family gates,
-   `allow_claim_execution`, `allow_gas_topups`, `allow_treasury_automation`, and
-   the `block_cross_party_linkage` opt-in) defaults to OFF and requires an
-   explicit operator opt-in. New capabilities ship default-off behind their own
-   opt-ins. Weakening a fail-closed default is treated as a breaking change and
-   will not happen within 1.x.
+   `allow_claim_execution`, `allow_gas_topups`, `allow_treasury_automation`)
+   defaults to OFF and requires an explicit operator opt-in. New capabilities
+   ship default-off behind their own opt-ins. The `block_cross_party_linkage`
+   privacy protection takes the opposite posture: it defaults to ON (since
+   plan task 3.5) and turning it off requires an explicit `false`. Weakening
+   a fail-closed default is treated as a breaking change and will not happen
+   within 1.x; strengthening one (as the linkage flip did) is a pre-tag
+   adjustment recorded above.
 
 ### Error code catalog
 

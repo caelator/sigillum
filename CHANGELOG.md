@@ -26,10 +26,11 @@ from 1.0.0 onward, per the stability policy in `docs/stability.md`.
   per-provider observed counts (`provider_partition_observations`) so
   operators can verify disjoint coverage; discovery-job resume replays the
   flag so an interrupted partitioned scan keeps its assignment. The CLI's
-  `inventory scan-evm` gains `--partition-providers`. This reduces but does
-  not eliminate provider-side linkage — each provider still sees its subset
-  plus the operator IP, with no Tor/proxy layer. See
-  `docs/architecture.md#privacy--linkage-model`.
+  `inventory scan-evm` gains `--partition-providers`. The wallet-inventory
+  store bumps to schema v21 (older payloads load with both job fields
+  absent). This reduces but does not eliminate provider-side linkage —
+  each provider still sees its subset plus the operator IP, with no
+  Tor/proxy layer. See `docs/architecture.md#privacy--linkage-model`.
 - **Single-key (66-hex-char) stealth meta-addresses (plan task 2.6)** —
   meta-address parsing now accepts the EIP-5564 single-key form
   (`st:<chain>:0x<key>`, one 33-byte compressed SEC1 key serving as both
@@ -87,6 +88,22 @@ from 1.0.0 onward, per the stability policy in `docs/stability.md`.
   derivation oracle is now documented as such (rustdoc +
   `docs/architecture.md#xpub-exposure-and-the-derivation-oracle`) and traces
   each use at debug level; it is otherwise unchanged.
+- **Common-gas-funder risk findings (plan task 3.5)** — the linkage analysis
+  now surfaces one gas funder paying for receive addresses attributed to
+  different payer identities as a structured, advisory `common_gas_funder`
+  risk finding built by the local risk machinery (the same finding shapes as
+  risky approvals / watch-only / stranded / dormant): one finding per chain +
+  funder with a stable id, `medium` level, and evidence listing the linked
+  payer identities. `ConsolidationPlan.risk_findings` carries it from the
+  plan-generation common-funder pass, and
+  `EthStealthDepositEnqueueSweepResponse.risk_findings` carries it from the
+  stealth sponsor linkage detection (both additive, serde default, omitted
+  when empty). The finding is a surfacing, never a block — execution blocking
+  is unchanged and stays governed by `block_cross_party_linkage`. Coverage is
+  honest: daemon-planned `fund_gas` steps and recorded stealth sponsor
+  top-ups, per plan or per enqueue; manual gas funding, cross-plan sharing,
+  amount/timing correlation, and multi-hop flows remain operator discipline
+  (see `docs/architecture.md#privacy--linkage-model`).
 - **CLI seed-wallet import and mnemonic hygiene** — New
   `profiles eth-seed upsert` arm imports an existing mnemonic via
   `--mnemonic-env`/`--mnemonic-stdin` or a hidden prompt (never argv).
@@ -215,6 +232,22 @@ from 1.0.0 onward, per the stability policy in `docs/stability.md`.
   consecutive-failure count, due-work counters).
 
 ### Changed
+
+- **`block_cross_party_linkage` now defaults to ON (plan task 3.5)** —
+  BEHAVIOR CHANGE: a treasury policy update that omits
+  `block_cross_party_linkage` previously resolved it to `false`; it now
+  resolves to `true`, and the `TreasuryPolicy` wire type deserializes an
+  absent field as `true` (mirroring `require_simulation`). Cross-party
+  linkage blocking is the default posture — plans routing distinct payers to
+  a shared destination, or funding different parties' gas from one sponsor,
+  hard-block at generation, approval, and stealth-sweep enqueue unless the
+  operator explicitly sets the flag to `false`. Policies persisted by older
+  daemons always carry the field, so existing configurations are unaffected;
+  the flip strengthens (never weakens) the fail-closed direction. The console
+  policy form shows the checkbox on for a not-yet-saved policy, the policy
+  hints and setup wizard copy state the default plainly, and the change is
+  recorded as a pre-tag adjustment in `docs/stability.md`. See
+  `docs/architecture.md#privacy--linkage-model`.
 
 - **Stealth sweeps and transfers now sit under the treasury execution gates
   — the stealth carve-out is closed (plan task 2.5)** — BEHAVIOR CHANGE:
