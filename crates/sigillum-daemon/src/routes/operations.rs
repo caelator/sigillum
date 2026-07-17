@@ -15,6 +15,7 @@ use super::{bearer_token, service_response};
 /// enforced for body-carried ids.
 const MAX_OPERATION_ID_LEN: usize = 256;
 
+#[allow(clippy::result_large_err)]
 fn validated_operation_id(id: String) -> Result<String, Response> {
     let id = id.trim().to_string();
     if id.is_empty() || id.len() > MAX_OPERATION_ID_LEN {
