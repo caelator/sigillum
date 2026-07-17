@@ -61,6 +61,26 @@
 //! vault. Watch views are re-derived per operation and never cached, so the
 //! zeroize-on-lock invariant is preserved.
 //!
+//! ## Announcement metadata SHOULD layouts
+//!
+//! Beyond the mandatory view-tag first byte, EIP-5564 recommends two 57-byte
+//! metadata layouts so recipients learn the asset and amount from the
+//! announcement itself: the native-token layout (`0xeeeeeeee` marker +
+//! sentinel address + amount) and the token layout (function identifier +
+//! token contract + amount). [`encode_erc5564_metadata_native`] and
+//! [`encode_erc5564_metadata_erc20_transfer`] produce them (used when a
+//! deposit requests payer-attached gas/asset info), and
+//! [`decode_erc5564_metadata_hints`] parses them defensively — unknown or
+//! malformed trailing bytes always decode to "no hints", never to an error.
+//!
+//! ## Gas sponsor
+//!
+//! [`EthereumStealthGasSponsor`] (derived by
+//! [`derive_sigillum_ethereum_stealth_gas_sponsor`]) is the canonical gas
+//! sponsor source for stealth deposits: a deterministic key on its own HMAC
+//! chain from the compartment master key, funded out-of-band by the operator,
+//! paying sponsor top-ups to gas-starved stealth deposit addresses.
+//!
 //! ## Security Properties
 //!
 //! - Every signing operation derives and verifies the stealth private key against the expected
@@ -438,6 +458,71 @@ pub fn derive_watch_only_sigillum_ethereum_stealth_wallet(
     })
 }
 
+// ── Gas sponsor derivation ──
+
+/// Gas-sponsor key of a Sigillum Ethereum stealth wallet: a deterministic
+/// secp256k1 key on its own HMAC chain
+/// (`sigillum/eth-stealth/v1/{wallet}/sponsor`), independent of the `spend`
+/// and `view` chains, whose address serves as the operator-funded gas sponsor
+/// for that wallet's stealth deposits.
+///
+/// This is the canonical sponsor source for stealth-deposit gas top-ups:
+/// stealth wallets have no seed phrase and no control branch, so the sponsor
+/// key derives from the compartment master key exactly like the spend/view
+/// keys — recoverable from the vault alone, with no extra persisted secret.
+/// The operator funds `sponsor_address` out-of-band; the daemon then pays
+/// 1.5x-estimated-gas top-ups from it to gas-starved stealth deposit
+/// addresses. Because one sponsor funds many deposits, every top-up flows
+/// through cross-party linkage accounting (a shared sponsor funding deposits
+/// of DIFFERENT counterparties links them on-chain).
+///
+/// # Security
+///
+/// The sponsor key can move every wei held by the sponsor address, so it is
+/// secret material like the spending key: derive it only inside an unlocked
+/// compartment scope and let it zeroize on drop (k256 `SecretKey:
+/// ZeroizeOnDrop`). It never enters scan/detection paths.
+#[derive(Clone, Debug)]
+pub struct EthereumStealthGasSponsor {
+    wallet: String,
+    sponsor_address: String,
+    secret_key: SecretKey,
+}
+
+impl EthereumStealthGasSponsor {
+    pub fn wallet(&self) -> &str {
+        &self.wallet
+    }
+
+    /// Checksummed-lowercase hex address the operator funds out-of-band.
+    pub fn sponsor_address(&self) -> &str {
+        &self.sponsor_address
+    }
+
+    /// ECDSA signing key for broadcasting sponsor top-up transfers.
+    pub fn signing_key(&self) -> SigningKey {
+        SigningKey::from(&self.secret_key)
+    }
+}
+
+/// Derive the gas sponsor of a Sigillum Ethereum stealth wallet from a master
+/// key. See [`EthereumStealthGasSponsor`] for the sponsorship model.
+pub fn derive_sigillum_ethereum_stealth_gas_sponsor(
+    master_key: &[u8],
+    wallet: &str,
+) -> Result<EthereumStealthGasSponsor, EthereumStealthError> {
+    if wallet.trim().is_empty() {
+        return Err(EthereumStealthError::EmptyWalletLabel);
+    }
+    let secret_key = derive_wallet_secret_key(master_key, wallet, "sponsor")?;
+    let sponsor_address = ethereum_address_from_public_key(&secret_key.public_key());
+    Ok(EthereumStealthGasSponsor {
+        wallet: wallet.to_string(),
+        sponsor_address,
+        secret_key,
+    })
+}
+
 // ── Stealth address generation ──
 
 /// Generate a unique stealth address for a given meta-address.
@@ -496,6 +581,27 @@ pub fn build_erc5564_announcement(
     payment: &EthereumStealthPayment,
 ) -> Result<EthereumStealthAnnouncement, EthereumStealthError> {
     let metadata_hex = erc5564_metadata_from_view_tag(&payment.view_tag_hex)?;
+    build_erc5564_announcement_with_metadata(payment, &metadata_hex)
+}
+
+/// Build the announcer contract call with caller-supplied metadata bytes.
+///
+/// The metadata MUST carry the payment's view tag in its first byte (checked
+/// against `payment.view_tag_hex`); use [`encode_erc5564_metadata_native`] or
+/// [`encode_erc5564_metadata_erc20_transfer`] to construct metadata following
+/// the EIP-5564 SHOULD layouts.
+pub fn build_erc5564_announcement_with_metadata(
+    payment: &EthereumStealthPayment,
+    metadata_hex: &str,
+) -> Result<EthereumStealthAnnouncement, EthereumStealthError> {
+    let metadata = decode_hex_bytes(metadata_hex, "metadata")?;
+    let view_tag = decode_hex_bytes(&payment.view_tag_hex, "view_tag")?;
+    if metadata.first() != view_tag.first() {
+        return Err(EthereumStealthError::InvalidAnnouncementField(
+            "metadata must include the payment's view tag as its first byte".into(),
+        ));
+    }
+    let metadata_hex = hex::encode(metadata.as_slice());
     let calldata_hex = encode_erc5564_announce_calldata(
         payment.scheme_id,
         &payment.stealth_address,
@@ -512,6 +618,121 @@ pub fn build_erc5564_announcement(
         metadata_hex,
         calldata_hex,
         value_wei_hex: "0x0".to_string(),
+    })
+}
+
+// ── Announcement metadata SHOULD layouts ──
+
+/// Byte length of the EIP-5564 SHOULD metadata layouts: 1 (view tag) + 4
+/// (native marker / function identifier) + 20 (address) + 32 (uint256 amount).
+pub const ERC5564_METADATA_LAYOUT_LEN: usize = 57;
+
+/// Native-asset marker in metadata bytes 2-5 (`0xeeeeeeee`), per the EIP-5564
+/// native-token metadata SHOULD layout.
+pub const ERC5564_METADATA_NATIVE_MARKER: [u8; 4] = [0xee, 0xee, 0xee, 0xee];
+
+/// Native-asset sentinel address in metadata bytes 6-25 of the EIP-5564
+/// native-token metadata SHOULD layout.
+pub const ERC5564_METADATA_NATIVE_SENTINEL_ADDRESS: &str =
+    "0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE";
+
+/// Canonical ERC-20 `transfer(address,uint256)` function selector, used as the
+/// function identifier (metadata bytes 2-5) when Sigillum announces an ERC-20
+/// deposit. The EIP-5564 token metadata SHOULD layout requires the function
+/// selector whenever one is available.
+pub const ERC5564_METADATA_ERC20_TRANSFER_SELECTOR: [u8; 4] = [0xa9, 0x05, 0x9c, 0xbb];
+
+/// Asset/amount hints decoded from an EIP-5564 announcement's metadata SHOULD
+/// layout.
+///
+/// The layouts are defined in the EIP-5564 `announce` specification
+/// (<https://eips.ethereum.org/EIPS/eip-5564>, byte offsets here are 0-indexed;
+/// the EIP text numbers bytes from 1):
+///
+/// - Byte 0 MUST be the view tag.
+/// - Native token (cf. ETH): bytes 1-5 are `0xeeeeeeee`, bytes 5-25 are the
+///   address `0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE`, bytes 25-57 are the
+///   amount of ETH being sent.
+/// - ERC-20/ERC-721/etc. tokens: bytes 1-5 are a function identifier (the
+///   function selector when one is available), bytes 5-25 are the token
+///   contract address, bytes 25-57 are the token amount (fungible) or token
+///   id (non-fungible).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Erc5564MetadataHints {
+    /// Native-token layout: the amount of native token (wei) being sent.
+    Native {
+        amount_wei: [u8; 32],
+    },
+    /// Token layout: the function identifier, token contract address, and
+    /// amount (fungible) or token id (non-fungible) being sent.
+    Token {
+        function_selector: [u8; 4],
+        token_address: String,
+        amount: [u8; 32],
+    },
+}
+
+/// Encode the EIP-5564 native-token metadata SHOULD layout:
+/// `view_tag ‖ 0xeeeeeeee ‖ 0xEeeeeE…EEeE ‖ amount_wei` (57 bytes).
+pub fn encode_erc5564_metadata_native(view_tag: u8, amount_wei: &[u8; 32]) -> String {
+    let mut metadata = Vec::with_capacity(ERC5564_METADATA_LAYOUT_LEN);
+    metadata.push(view_tag);
+    metadata.extend_from_slice(&ERC5564_METADATA_NATIVE_MARKER);
+    metadata.extend_from_slice(
+        &decode_ethereum_address(ERC5564_METADATA_NATIVE_SENTINEL_ADDRESS)
+            .expect("sentinel address literal is valid"),
+    );
+    metadata.extend_from_slice(amount_wei);
+    hex::encode(metadata)
+}
+
+/// Encode the EIP-5564 token metadata SHOULD layout for an ERC-20 transfer:
+/// `view_tag ‖ transfer(address,uint256) selector ‖ token_address ‖ amount`
+/// (57 bytes). Per the EIP, the function identifier MUST be the function
+/// selector when one is available.
+pub fn encode_erc5564_metadata_erc20_transfer(
+    view_tag: u8,
+    token_address: &str,
+    amount: &[u8; 32],
+) -> Result<String, EthereumStealthError> {
+    let token_address = decode_ethereum_address(token_address)?;
+    let mut metadata = Vec::with_capacity(ERC5564_METADATA_LAYOUT_LEN);
+    metadata.push(view_tag);
+    metadata.extend_from_slice(&ERC5564_METADATA_ERC20_TRANSFER_SELECTOR);
+    metadata.extend_from_slice(&token_address);
+    metadata.extend_from_slice(amount);
+    Ok(hex::encode(metadata))
+}
+
+/// Decode asset/amount hints from announcement metadata, defensively.
+///
+/// Returns `None` — never an error — for anything that is not exactly one of
+/// the two 57-byte EIP-5564 SHOULD layouts: view-tag-only metadata, unknown
+/// trailing layouts, truncated layouts, and native markers carrying a
+/// non-sentinel address all parse as "no hints". Byte 0 (the view tag) is not
+/// interpreted; callers match it against the announcement's view tag.
+pub fn decode_erc5564_metadata_hints(metadata: &[u8]) -> Option<Erc5564MetadataHints> {
+    if metadata.len() != ERC5564_METADATA_LAYOUT_LEN {
+        return None;
+    }
+    let mut amount = [0u8; 32];
+    amount.copy_from_slice(&metadata[25..57]);
+    if metadata[1..5] == ERC5564_METADATA_NATIVE_MARKER {
+        let sentinel = decode_ethereum_address(ERC5564_METADATA_NATIVE_SENTINEL_ADDRESS)
+            .expect("sentinel address literal is valid");
+        if metadata[5..25] != sentinel {
+            // Native marker with an unrecognized address: an unknown layout,
+            // not asset information Sigillum can act on.
+            return None;
+        }
+        return Some(Erc5564MetadataHints::Native { amount_wei: amount });
+    }
+    let mut function_selector = [0u8; 4];
+    function_selector.copy_from_slice(&metadata[1..5]);
+    Some(Erc5564MetadataHints::Token {
+        function_selector,
+        token_address: format!("0x{}", hex::encode(&metadata[5..25])),
+        amount,
     })
 }
 
@@ -2217,5 +2438,195 @@ mod tests {
         assert_eq!(StealthHashConvention::STANDARD.as_str(), "compressed33");
         assert_eq!(StealthHashConvention::LEGACY.as_str(), "x32");
         assert!("uncompressed64".parse::<StealthHashConvention>().is_err());
+    }
+
+    // ── Metadata SHOULD layouts ──
+
+    /// Byte-format assertion for the EIP-5564 native-token metadata SHOULD
+    /// layout (`announce` spec: byte 1 view tag; bytes 2-5 `0xeeeeeeee`;
+    /// bytes 6-25 `0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE`; bytes 26-57
+    /// the amount of ETH being sent — EIP bytes are 1-indexed).
+    #[test]
+    fn native_metadata_layout_matches_eip5564_byte_format() {
+        let mut amount = [0u8; 32];
+        amount[31] = 0x2a;
+        let metadata = hex::decode(encode_erc5564_metadata_native(0xab, &amount)).unwrap();
+
+        assert_eq!(metadata.len(), ERC5564_METADATA_LAYOUT_LEN);
+        assert_eq!(metadata[0], 0xab);
+        assert_eq!(&metadata[1..5], &ERC5564_METADATA_NATIVE_MARKER);
+        assert_eq!(
+            format!("0x{}", hex::encode(&metadata[5..25])),
+            ERC5564_METADATA_NATIVE_SENTINEL_ADDRESS.to_ascii_lowercase()
+        );
+        assert_eq!(&metadata[25..57], &amount);
+    }
+
+    /// Byte-format assertion for the EIP-5564 token metadata SHOULD layout
+    /// (byte 1 view tag; bytes 2-5 function identifier — the selector when
+    /// available; bytes 6-25 token contract; bytes 26-57 amount/token id).
+    #[test]
+    fn erc20_metadata_layout_matches_eip5564_byte_format() {
+        let token_address = "0x2222222222222222222222222222222222222222";
+        let mut amount = [0u8; 32];
+        amount[30] = 0x0f;
+        amount[31] = 0x42;
+        let metadata =
+            hex::decode(encode_erc5564_metadata_erc20_transfer(0xcd, token_address, &amount).unwrap())
+                .unwrap();
+
+        assert_eq!(metadata.len(), ERC5564_METADATA_LAYOUT_LEN);
+        assert_eq!(metadata[0], 0xcd);
+        // keccak256("transfer(address,uint256)")[..4] == 0xa9059cbb.
+        assert_eq!(&metadata[1..5], &ERC5564_METADATA_ERC20_TRANSFER_SELECTOR);
+        assert_eq!(
+            ERC5564_METADATA_ERC20_TRANSFER_SELECTOR,
+            Keccak256::digest(b"transfer(address,uint256)")[..4]
+        );
+        assert_eq!(
+            &metadata[5..25],
+            &decode_ethereum_address(token_address).unwrap()
+        );
+        assert_eq!(&metadata[25..57], &amount);
+    }
+
+    #[test]
+    fn metadata_hints_roundtrip_both_layouts() {
+        let mut amount = [7u8; 32];
+        amount[0] = 0;
+        let native = encode_erc5564_metadata_native(0x11, &amount);
+        assert_eq!(
+            decode_erc5564_metadata_hints(&hex::decode(native).unwrap()),
+            Some(Erc5564MetadataHints::Native { amount_wei: amount })
+        );
+
+        let token_address = "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+        let token =
+            encode_erc5564_metadata_erc20_transfer(0x22, token_address, &amount).unwrap();
+        assert_eq!(
+            decode_erc5564_metadata_hints(&hex::decode(token).unwrap()),
+            Some(Erc5564MetadataHints::Token {
+                function_selector: ERC5564_METADATA_ERC20_TRANSFER_SELECTOR,
+                token_address: token_address.to_string(),
+                amount,
+            })
+        );
+    }
+
+    #[test]
+    fn metadata_hints_decode_is_defensive_never_errors() {
+        // View-tag-only metadata (the minimal form Sigillum emits by default).
+        assert_eq!(decode_erc5564_metadata_hints(&[0xab]), None);
+        // Empty and truncated layouts.
+        assert_eq!(decode_erc5564_metadata_hints(&[]), None);
+        assert_eq!(decode_erc5564_metadata_hints(&[0xab; 56]), None);
+        // Oversized / unknown trailing layouts.
+        assert_eq!(decode_erc5564_metadata_hints(&[0xab; 58]), None);
+        assert_eq!(decode_erc5564_metadata_hints(&[0xab; 89]), None);
+        // Native marker with a non-sentinel address is an unknown layout, not
+        // a native hint.
+        let mut bogus_native = [0u8; 57];
+        bogus_native[1..5].copy_from_slice(&ERC5564_METADATA_NATIVE_MARKER);
+        bogus_native[5] = 0x11;
+        assert_eq!(decode_erc5564_metadata_hints(&bogus_native), None);
+        // A 57-byte payload with an unrecognized function identifier still
+        // parses as a token hint; consumers decide which selectors they act
+        // on. The view-tag byte (0xee here) is never interpreted.
+        let mut unknown_selector = [0u8; 57];
+        unknown_selector[0] = 0xee;
+        unknown_selector[1..5].copy_from_slice(&[0xde, 0xad, 0xbe, 0xef]);
+        unknown_selector[5..25].copy_from_slice(&[0x33; 20]);
+        assert_eq!(
+            decode_erc5564_metadata_hints(&unknown_selector),
+            Some(Erc5564MetadataHints::Token {
+                function_selector: [0xde, 0xad, 0xbe, 0xef],
+                token_address: format!("0x{}", hex::encode([0x33; 20])),
+                amount: [0u8; 32],
+            })
+        );
+    }
+
+    #[test]
+    fn announcement_with_layout_metadata_carries_it_into_calldata() {
+        let wallet =
+            derive_sigillum_ethereum_stealth_wallet(&[9u8; 32], "exchange", "eth").unwrap();
+        let payment = generate_ethereum_stealth_address(
+            &wallet.meta_address.stealth_meta_address,
+            Some([3u8; 32]),
+            StealthHashConvention::STANDARD,
+        )
+        .unwrap();
+        let view_tag = hex::decode(&payment.view_tag_hex).unwrap()[0];
+        let metadata_hex = encode_erc5564_metadata_erc20_transfer(
+            view_tag,
+            "0x2222222222222222222222222222222222222222",
+            &[0u8; 32],
+        )
+        .unwrap();
+
+        let announcement =
+            build_erc5564_announcement_with_metadata(&payment, &metadata_hex).unwrap();
+        assert_eq!(announcement.metadata_hex, metadata_hex);
+        let calldata = hex::decode(&announcement.calldata_hex).unwrap();
+        // The ABI-encoded metadata tail embeds the 57 hinted bytes verbatim.
+        assert!(calldata.len() > 4 + 32 * 4 + 32 + 57);
+
+        // A metadata blob whose first byte is not the payment's view tag is
+        // rejected (the EIP mandates the view tag as the first metadata byte).
+        let mut wrong_tag = hex::decode(&metadata_hex).unwrap();
+        wrong_tag[0] ^= 0xff;
+        let error =
+            build_erc5564_announcement_with_metadata(&payment, &hex::encode(wrong_tag)).unwrap_err();
+        assert_eq!(
+            error,
+            EthereumStealthError::InvalidAnnouncementField(
+                "metadata must include the payment's view tag as its first byte".into()
+            )
+        );
+    }
+
+    // ── Gas sponsor derivation ──
+
+    #[test]
+    fn gas_sponsor_derivation_is_deterministic_and_wallet_scoped() {
+        let first = derive_sigillum_ethereum_stealth_gas_sponsor(&[31u8; 32], "payments").unwrap();
+        let second = derive_sigillum_ethereum_stealth_gas_sponsor(&[31u8; 32], "payments").unwrap();
+        assert_eq!(first.sponsor_address(), second.sponsor_address());
+        assert_eq!(first.wallet(), "payments");
+        assert!(first.sponsor_address().starts_with("0x"));
+        assert_eq!(first.sponsor_address().len(), 42);
+
+        let other_wallet =
+            derive_sigillum_ethereum_stealth_gas_sponsor(&[31u8; 32], "treasury").unwrap();
+        assert_ne!(first.sponsor_address(), other_wallet.sponsor_address());
+        let other_master = derive_sigillum_ethereum_stealth_gas_sponsor(&[37u8; 32], "payments").unwrap();
+        assert_ne!(first.sponsor_address(), other_master.sponsor_address());
+
+        // The sponsor chain is independent of the spend/view chains: the
+        // sponsor address must not collide with the stealth wallet's own
+        // meta-address-derived keys' addresses.
+        let wallet = derive_sigillum_ethereum_stealth_wallet(&[31u8; 32], "payments", "eth").unwrap();
+        let payment = generate_ethereum_stealth_address(
+            &wallet.meta_address.stealth_meta_address,
+            Some([41u8; 32]),
+            StealthHashConvention::STANDARD,
+        )
+        .unwrap();
+        assert_ne!(first.sponsor_address(), &payment.stealth_address);
+    }
+
+    #[test]
+    fn gas_sponsor_signing_key_matches_sponsor_address() {
+        let sponsor = derive_sigillum_ethereum_stealth_gas_sponsor(&[43u8; 32], "payments").unwrap();
+        let signing_key = sponsor.signing_key();
+        // The signing key's address must be the advertised sponsor address —
+        // same defense-in-depth invariant the seed signer enforces.
+        let address = crate::ethereum_address_from_signing_key(&signing_key);
+        assert_eq!(&address, sponsor.sponsor_address());
+
+        assert_eq!(
+            derive_sigillum_ethereum_stealth_gas_sponsor(&[43u8; 32], "  ").unwrap_err(),
+            EthereumStealthError::EmptyWalletLabel
+        );
     }
 }
