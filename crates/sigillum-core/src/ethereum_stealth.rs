@@ -40,6 +40,27 @@
 //! A third, incompatible variant exists in the wild (Fluidkey hashes the
 //! 64-byte uncompressed X‖Y encoding); it is intentionally NOT supported.
 //!
+//! ## Watch-only detection
+//!
+//! Recipient-side detection follows the EIP-5564 `checkStealthAddress` key
+//! signature: it needs only the stealth address, the ephemeral public key, the
+//! viewing private key, and the spending PUBLIC key — never the spending
+//! private key. [`EthereumStealthWatchView`] (derived by
+//! [`derive_watch_only_sigillum_ethereum_stealth_wallet`]) carries exactly
+//! that reduced material, and [`check_ethereum_stealth_address_watch_only`] /
+//! [`check_ethereum_stealth_address_any_watch_only`] are the detection core;
+//! the full-wallet [`check_ethereum_stealth_address`] /
+//! [`check_ethereum_stealth_address_any`] entry points reduce the wallet to
+//! its watch view and delegate, so both paths share one implementation and
+//! produce byte-identical results. Only sweep signing
+//! ([`derive_verified_stealth_key`]) uses the spending private key.
+//!
+//! Detection still requires the compartment unlocked (the viewing key derives
+//! from the master key); the watch-only boundary means spending secret
+//! material never enters the scan path, not that scanning works on a locked
+//! vault. Watch views are re-derived per operation and never cached, so the
+//! zeroize-on-lock invariant is preserved.
+//!
 //! ## Security Properties
 //!
 //! - Every signing operation derives and verifies the stealth private key against the expected
@@ -274,6 +295,51 @@ impl EthereumStealthWallet {
     pub fn meta_address(&self) -> &EthereumStealthMetaAddress {
         &self.meta_address
     }
+
+    /// Reduced-privilege view of this wallet for watch-only detection.
+    ///
+    /// Carries everything EIP-5564 `checkStealthAddress` needs — the viewing
+    /// private key and the spending PUBLIC key — and drops the spending
+    /// private key from the detection path entirely.
+    pub fn watch_view(&self) -> EthereumStealthWatchView {
+        EthereumStealthWatchView {
+            meta_address: self.meta_address.clone(),
+            viewing_private_key: self.viewing_private_key.clone(),
+            spending_public_key: self.spending_private_key.public_key(),
+        }
+    }
+}
+
+/// Watch-only view of a Sigillum Ethereum stealth wallet: the viewing private
+/// key plus the spending PUBLIC key.
+///
+/// This is exactly the recipient-side key material of EIP-5564
+/// `checkStealthAddress(stealthAddress, ephemeralPubkey, viewingKey,
+/// spendingPubkey)`: sufficient to detect payments (view tag → shared-secret
+/// hash → stealth address recompute + compare) but NOT to spend them, because
+/// the spending private key is absent by construction — the type has no field
+/// that could hold it. Detection paths (announcement scans, deposit checks)
+/// should operate on this view so spending secret material never enters the
+/// scan path; only sweep signing needs the full [`EthereumStealthWallet`].
+///
+/// # Security
+///
+/// The viewing private key is still secret (it lets observers recognize your
+/// payments), so this view must live in memory only while the compartment is
+/// unlocked, exactly like the master key it derives from. It is deliberately
+/// re-derived per operation rather than cached: caching it across a lock
+/// would weaken the zeroize-on-lock invariant.
+#[derive(Clone, Debug)]
+pub struct EthereumStealthWatchView {
+    meta_address: EthereumStealthMetaAddress,
+    viewing_private_key: SecretKey,
+    spending_public_key: PublicKey,
+}
+
+impl EthereumStealthWatchView {
+    pub fn meta_address(&self) -> &EthereumStealthMetaAddress {
+        &self.meta_address
+    }
 }
 
 // ── Wallet derivation ──
@@ -316,6 +382,59 @@ pub fn derive_sigillum_ethereum_stealth_wallet(
         },
         spending_private_key,
         viewing_private_key,
+    })
+}
+
+/// Derive the watch-only view of a Sigillum Ethereum stealth wallet from a
+/// master key.
+///
+/// Produces the recipient-side detection material of EIP-5564 — the viewing
+/// private key and the spending PUBLIC key (plus the meta-address) — WITHOUT
+/// retaining the spending private key. The derivation is two independent
+/// HMAC chains (`…/view/…` and `…/spend/…`); the spend chain is touched only
+/// to compute the public half, and the resulting secret is dropped (and thus
+/// zeroized, k256 `SecretKey: ZeroizeOnDrop`) inside a dedicated scope before
+/// this function returns. Callers in the detection path therefore never hold
+/// spending secret material at all.
+///
+/// Detection still requires the compartment unlocked: the viewing key derives
+/// from the master key just like the spending key does. The win over
+/// [`derive_sigillum_ethereum_stealth_wallet`] is that the spending secret
+/// never enters the scan path — not that scanning works on a locked vault.
+/// The view is deliberately re-derived per operation and never cached, so
+/// locking the compartment keeps zeroizing every path to key material.
+pub fn derive_watch_only_sigillum_ethereum_stealth_wallet(
+    master_key: &[u8],
+    wallet: &str,
+    short_name: &str,
+) -> Result<EthereumStealthWatchView, EthereumStealthError> {
+    if wallet.trim().is_empty() {
+        return Err(EthereumStealthError::EmptyWalletLabel);
+    }
+    let short_name = normalize_short_name(short_name)?;
+    let viewing_private_key = derive_wallet_secret_key(master_key, wallet, "view")?;
+    let spending_public_key = {
+        let spending_private_key = derive_wallet_secret_key(master_key, wallet, "spend")?;
+        spending_private_key.public_key()
+        // `spending_private_key` is dropped — and zeroized on drop — here,
+        // before the watch view is constructed.
+    };
+    let spending_public_key_hex = encode_public_key(&spending_public_key);
+    let viewing_public_key_hex = encode_public_key(&viewing_private_key.public_key());
+    let stealth_meta_address =
+        format!("st:{short_name}:0x{spending_public_key_hex}{viewing_public_key_hex}");
+
+    Ok(EthereumStealthWatchView {
+        meta_address: EthereumStealthMetaAddress {
+            wallet: wallet.to_string(),
+            short_name,
+            scheme_id: ETHEREUM_STEALTH_SCHEME_ID,
+            stealth_meta_address,
+            spending_public_key_hex,
+            viewing_public_key_hex,
+        },
+        viewing_private_key,
+        spending_public_key,
     })
 }
 
@@ -398,24 +517,30 @@ pub fn build_erc5564_announcement(
 
 // ── Stealth address verification ──
 
-/// Verify that a stealth address matches a given ephemeral public key under one
-/// explicit shared-secret hash convention.
+/// Watch-only recipient check, per the EIP-5564 `checkStealthAddress` key
+/// signature: stealth address + ephemeral public key + viewing private key +
+/// spending PUBLIC key, under one explicit shared-secret hash convention.
 ///
-/// Recipients call this function during block scanning to determine whether an on-chain
-/// payment was intended for them. The function computes the stealth address that would
-/// have been generated with the given ephemeral public key and compares it to the
-/// provided stealth address. Callers that do not know the payment's convention should
-/// use [`check_ethereum_stealth_address_any`] to probe.
+/// This is the detection core: view-tag pre-filter → shared-secret hash per
+/// `convention` → stealth address recompute (spending public key + hash
+/// offset point) → constant-shape compare. It never touches — and cannot
+/// touch, see [`EthereumStealthWatchView`] — the spending private key, so
+/// announcement scanning and deposit checking run without spending secret
+/// material in memory. The full-wallet entry points
+/// ([`check_ethereum_stealth_address`], [`check_ethereum_stealth_address_any`])
+/// delegate here, so both paths execute one identical implementation and
+/// produce byte-identical results.
 ///
-/// The view tag provides a fast pre-filter: if it doesn't match, the computation short-circuits
-/// immediately without performing full ECDH and point arithmetic.
+/// The view tag provides a fast pre-filter: if it doesn't match, the
+/// computation short-circuits immediately without performing full point
+/// arithmetic.
 ///
 /// # Security
 ///
-/// The view tag is only 1 byte, so false positives are expected (~1 in 256). Always verify
-/// the full stealth address derivation before processing.
-pub fn check_ethereum_stealth_address(
-    wallet: &EthereumStealthWallet,
+/// The view tag is only 1 byte, so false positives are expected (~1 in 256).
+/// Always verify the full stealth address derivation before processing.
+pub fn check_ethereum_stealth_address_watch_only(
+    view: &EthereumStealthWatchView,
     stealth_address: &str,
     ephemeral_public_key_hex: &str,
     view_tag: Option<u8>,
@@ -423,7 +548,7 @@ pub fn check_ethereum_stealth_address(
 ) -> Result<EthereumStealthCheck, EthereumStealthError> {
     let ephemeral_public_key = parse_public_key_hex(ephemeral_public_key_hex)?;
     let hashed_shared_secret = hashed_shared_secret_for_recipient(
-        &wallet.viewing_private_key,
+        &view.viewing_private_key,
         &ephemeral_public_key,
         convention,
     )?;
@@ -435,10 +560,8 @@ pub fn check_ethereum_stealth_address(
         }
     }
 
-    let stealth_public_key = derive_stealth_public_key(
-        &wallet.spending_private_key.public_key(),
-        &hashed_shared_secret,
-    )?;
+    let stealth_public_key =
+        derive_stealth_public_key(&view.spending_public_key, &hashed_shared_secret)?;
     let derived_stealth_address = ethereum_address_from_public_key(&stealth_public_key);
     let expected_stealth_address = normalize_ethereum_address(stealth_address)?;
 
@@ -450,8 +573,9 @@ pub fn check_ethereum_stealth_address(
     })
 }
 
-/// Dual-decode variant of [`check_ethereum_stealth_address`]: probes the given
-/// conventions in order and returns the first full stealth-address match.
+/// Dual-decode variant of [`check_ethereum_stealth_address_watch_only`]:
+/// probes the given conventions in order and returns the first full
+/// stealth-address match.
 ///
 /// Detection paths use this with [`StealthHashConvention::PROBE_ORDER`]
 /// (standard first, legacy second) so payments created with either convention
@@ -466,8 +590,8 @@ pub fn check_ethereum_stealth_address(
 /// view tag was supplied) when no convention matches, and
 /// [`EthereumStealthError::ViewTagMismatch`] when every convention is excluded
 /// by the view-tag pre-filter.
-pub fn check_ethereum_stealth_address_any(
-    wallet: &EthereumStealthWallet,
+pub fn check_ethereum_stealth_address_any_watch_only(
+    view: &EthereumStealthWatchView,
     stealth_address: &str,
     ephemeral_public_key_hex: &str,
     view_tag: Option<u8>,
@@ -476,8 +600,8 @@ pub fn check_ethereum_stealth_address_any(
     let mut tag_filtered = false;
     let mut first_candidate: Option<EthereumStealthCheck> = None;
     for &convention in conventions {
-        match check_ethereum_stealth_address(
-            wallet,
+        match check_ethereum_stealth_address_watch_only(
+            view,
             stealth_address,
             ephemeral_public_key_hex,
             view_tag,
@@ -505,6 +629,81 @@ pub fn check_ethereum_stealth_address_any(
     Err(EthereumStealthError::InvalidStealthHashConvention(
         "no conventions to probe".to_string(),
     ))
+}
+
+/// Verify that a stealth address matches a given ephemeral public key under one
+/// explicit shared-secret hash convention.
+///
+/// Recipients call this function during block scanning to determine whether an on-chain
+/// payment was intended for them. The function computes the stealth address that would
+/// have been generated with the given ephemeral public key and compares it to the
+/// provided stealth address. Callers that do not know the payment's convention should
+/// use [`check_ethereum_stealth_address_any`] to probe.
+///
+/// The view tag provides a fast pre-filter: if it doesn't match, the computation short-circuits
+/// immediately without performing full ECDH and point arithmetic.
+///
+/// This is the full-wallet entry point: it reduces the wallet to its
+/// [`EthereumStealthWatchView`] and delegates to
+/// [`check_ethereum_stealth_address_watch_only`], so detection never depends
+/// on the spending private key even when the caller holds it. Detection-only
+/// callers should prefer deriving the watch view directly
+/// ([`derive_watch_only_sigillum_ethereum_stealth_wallet`]) so the spending
+/// secret never enters the scan path at all.
+///
+/// # Security
+///
+/// The view tag is only 1 byte, so false positives are expected (~1 in 256). Always verify
+/// the full stealth address derivation before processing.
+pub fn check_ethereum_stealth_address(
+    wallet: &EthereumStealthWallet,
+    stealth_address: &str,
+    ephemeral_public_key_hex: &str,
+    view_tag: Option<u8>,
+    convention: StealthHashConvention,
+) -> Result<EthereumStealthCheck, EthereumStealthError> {
+    check_ethereum_stealth_address_watch_only(
+        &wallet.watch_view(),
+        stealth_address,
+        ephemeral_public_key_hex,
+        view_tag,
+        convention,
+    )
+}
+
+/// Dual-decode variant of [`check_ethereum_stealth_address`]: probes the given
+/// conventions in order and returns the first full stealth-address match.
+///
+/// Detection paths use this with [`StealthHashConvention::PROBE_ORDER`]
+/// (standard first, legacy second) so payments created with either convention
+/// are found in one pass, including legacy payments whose on-chain view tag
+/// only matches under the legacy convention. The returned
+/// [`EthereumStealthCheck::stealth_hash_convention`] is the convention the
+/// payment was actually made with; callers persist it so sweeping derives the
+/// stealth key with the right convention.
+///
+/// Like the single-convention entry point, this delegates to the watch-only
+/// core ([`check_ethereum_stealth_address_any_watch_only`]).
+///
+/// Returns `Ok` with `matches: false` (derived values from the first probed
+/// convention that passed the view-tag filter, or the first convention when no
+/// view tag was supplied) when no convention matches, and
+/// [`EthereumStealthError::ViewTagMismatch`] when every convention is excluded
+/// by the view-tag pre-filter.
+pub fn check_ethereum_stealth_address_any(
+    wallet: &EthereumStealthWallet,
+    stealth_address: &str,
+    ephemeral_public_key_hex: &str,
+    view_tag: Option<u8>,
+    conventions: &[StealthHashConvention],
+) -> Result<EthereumStealthCheck, EthereumStealthError> {
+    check_ethereum_stealth_address_any_watch_only(
+        &wallet.watch_view(),
+        stealth_address,
+        ephemeral_public_key_hex,
+        view_tag,
+        conventions,
+    )
 }
 
 // ── Stealth signing ──
@@ -1763,6 +1962,32 @@ mod tests {
         assert!(probed.matches);
         assert_eq!(probed.stealth_hash_convention, convention);
 
+        // Watch-only recipient side: the same checks from the viewing
+        // private key + spending PUBLIC key alone are byte-identical to the
+        // full-wallet results, for this exact fixed vector. (The full-wallet
+        // entry points delegate to the watch-only core, so equality holds by
+        // construction — pinned here so the two can never silently diverge.)
+        let watch_view = vector_wallet().watch_view();
+        let watch_check = check_ethereum_stealth_address_watch_only(
+            &watch_view,
+            vector.stealth_address,
+            vector.ephemeral_public_key,
+            Some(vector.view_tag),
+            convention,
+        )
+        .unwrap();
+        assert_eq!(watch_check, check);
+
+        let watch_probed = check_ethereum_stealth_address_any_watch_only(
+            &watch_view,
+            vector.stealth_address,
+            vector.ephemeral_public_key,
+            Some(vector.view_tag),
+            &StealthHashConvention::PROBE_ORDER,
+        )
+        .unwrap();
+        assert_eq!(watch_probed, probed);
+
         let (stealth_key, _) = derive_verified_stealth_key(
             &wallet,
             vector.stealth_address,
@@ -1789,6 +2014,150 @@ mod tests {
         for vector in &LEGACY_VECTORS {
             assert_fixed_vector(StealthHashConvention::XOnly32, vector);
         }
+    }
+
+    /// Watch view built from bare parts — the spending private key never
+    /// exists in this test process beyond computing the public half here, so
+    /// detection through this view provably needs only the viewing private
+    /// key and the spending public key.
+    fn vector_watch_view_from_parts() -> EthereumStealthWatchView {
+        let viewing_private_key = fixed_secret_key(VECTOR_VIEWING_PRIVATE_KEY);
+        let spending_public_key = fixed_secret_key(VECTOR_SPENDING_PRIVATE_KEY).public_key();
+        EthereumStealthWatchView {
+            meta_address: EthereumStealthMetaAddress {
+                wallet: "vectors".into(),
+                short_name: "eth".into(),
+                scheme_id: ETHEREUM_STEALTH_SCHEME_ID,
+                stealth_meta_address: VECTOR_META_ADDRESS.into(),
+                spending_public_key_hex: encode_public_key(&spending_public_key),
+                viewing_public_key_hex: encode_public_key(&viewing_private_key.public_key()),
+            },
+            viewing_private_key,
+            spending_public_key,
+        }
+    }
+
+    #[test]
+    fn watch_only_check_detects_fixed_vectors_without_spending_private_key() {
+        // Detection from the EIP-5564 `checkStealthAddress` key material
+        // (viewing private key + spending PUBLIC key) alone: matches every
+        // fixed vector on both conventions, with byte-exact derived values.
+        let view = vector_watch_view_from_parts();
+        for (convention, vectors) in [
+            (StealthHashConvention::Compressed33, &STANDARD_VECTORS),
+            (StealthHashConvention::XOnly32, &LEGACY_VECTORS),
+        ] {
+            for vector in vectors {
+                let check = check_ethereum_stealth_address_watch_only(
+                    &view,
+                    vector.stealth_address,
+                    vector.ephemeral_public_key,
+                    Some(vector.view_tag),
+                    convention,
+                )
+                .unwrap();
+                assert!(check.matches);
+                assert_eq!(check.derived_stealth_address, vector.stealth_address);
+                assert_eq!(check.view_tag_hex, hex::encode([vector.view_tag]));
+                assert_eq!(check.stealth_hash_convention, convention);
+
+                // Dual-decode probing finds the payment's actual convention.
+                let probed = check_ethereum_stealth_address_any_watch_only(
+                    &view,
+                    vector.stealth_address,
+                    vector.ephemeral_public_key,
+                    Some(vector.view_tag),
+                    &StealthHashConvention::PROBE_ORDER,
+                )
+                .unwrap();
+                assert!(probed.matches);
+                assert_eq!(probed, check);
+
+                // The view-tag prefilter still fails fast on a foreign tag
+                // (one that matches neither convention's derived tag).
+                let other_tag = hex::decode(
+                    check_ethereum_stealth_address_watch_only(
+                        &view,
+                        vector.stealth_address,
+                        vector.ephemeral_public_key,
+                        None,
+                        convention.other(),
+                    )
+                    .unwrap()
+                    .view_tag_hex,
+                )
+                .unwrap()[0];
+                let foreign_tag = (0u8..=255)
+                    .find(|tag| *tag != vector.view_tag && *tag != other_tag)
+                    .unwrap();
+                let error = check_ethereum_stealth_address_any_watch_only(
+                    &view,
+                    vector.stealth_address,
+                    vector.ephemeral_public_key,
+                    Some(foreign_tag),
+                    &StealthHashConvention::PROBE_ORDER,
+                )
+                .unwrap_err();
+                assert_eq!(error, EthereumStealthError::ViewTagMismatch);
+            }
+        }
+    }
+
+    #[test]
+    fn watch_view_matches_full_wallet_detection_for_derived_wallets() {
+        // Same master key + labels: the watch-only derivation yields the same
+        // meta-address as the full wallet, and detection results are
+        // byte-identical on both conventions.
+        let master_key = [19u8; 32];
+        let full =
+            derive_sigillum_ethereum_stealth_wallet(&master_key, "treasury", "eth").unwrap();
+        let watch =
+            derive_watch_only_sigillum_ethereum_stealth_wallet(&master_key, "treasury", "eth")
+                .unwrap();
+        assert_eq!(watch.meta_address(), full.meta_address());
+        assert_eq!(watch.meta_address(), full.watch_view().meta_address());
+
+        for convention in [StealthHashConvention::Compressed33, StealthHashConvention::XOnly32] {
+            let payment = generate_ethereum_stealth_address(
+                &full.meta_address().stealth_meta_address,
+                Some([23u8; 32]),
+                convention,
+            )
+            .unwrap();
+            let view_tag = hex::decode(&payment.view_tag_hex).unwrap()[0];
+
+            let full_check = check_ethereum_stealth_address_any(
+                &full,
+                &payment.stealth_address,
+                &payment.ephemeral_public_key_hex,
+                Some(view_tag),
+                &StealthHashConvention::PROBE_ORDER,
+            )
+            .unwrap();
+            let watch_check = check_ethereum_stealth_address_any_watch_only(
+                &watch,
+                &payment.stealth_address,
+                &payment.ephemeral_public_key_hex,
+                Some(view_tag),
+                &StealthHashConvention::PROBE_ORDER,
+            )
+            .unwrap();
+            assert!(watch_check.matches);
+            assert_eq!(watch_check, full_check);
+        }
+    }
+
+    #[test]
+    fn watch_only_derivation_validates_labels_like_full_derivation() {
+        assert_eq!(
+            derive_watch_only_sigillum_ethereum_stealth_wallet(&[7u8; 32], "  ", "eth")
+                .unwrap_err(),
+            EthereumStealthError::EmptyWalletLabel
+        );
+        assert!(
+            derive_watch_only_sigillum_ethereum_stealth_wallet(&[7u8; 32], "ops", "bad name")
+                .is_err()
+        );
     }
 
     #[test]
