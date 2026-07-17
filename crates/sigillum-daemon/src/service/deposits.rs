@@ -41,10 +41,12 @@ use sigillum_api::{
     ReceivingDepositTagRequest,
 };
 use sigillum_core::{
-    ERC5564_ANNOUNCE_FUNCTION, ERC5564_ANNOUNCER_ADDRESS, ETHEREUM_STEALTH_SCHEME_ID,
-    EthereumStealthError, StealthHashConvention, VaultLifecycle,
-    check_ethereum_stealth_address_any_watch_only, decode_quantity_hex,
-    derive_watch_only_sigillum_ethereum_stealth_wallet, encode_erc5564_announce_calldata,
+    ERC5564_ANNOUNCE_FUNCTION, ERC5564_ANNOUNCER_ADDRESS, ERC5564_METADATA_ERC20_TRANSFER_SELECTOR,
+    ETHEREUM_STEALTH_SCHEME_ID, Erc5564MetadataHints, EthereumStealthError, StealthHashConvention,
+    VaultLifecycle, check_ethereum_stealth_address_any_watch_only, decode_erc5564_metadata_hints,
+    decode_quantity_hex, derive_watch_only_sigillum_ethereum_stealth_wallet,
+    encode_erc5564_announce_calldata, encode_erc5564_metadata_erc20_transfer,
+    encode_erc5564_metadata_native,
 };
 
 use crate::audit_log::{AuditEventSpec, AuditQueueJobKind};
@@ -77,6 +79,12 @@ struct DepositBlueprint {
     sweep_destination_address: Option<String>,
     min_sweep_amount_hex: Option<String>,
     note: Option<String>,
+    /// Native gas the payer is asked to attach for this deposit's sweep
+    /// (`request_gas` at creation; already resolved to a concrete amount —
+    /// explicit `gas_amount_wei_hex` or the provider's static sweep gas
+    /// estimate). When set, the announcement metadata follows the EIP-5564
+    /// SHOULD layouts so standards-aware payer wallets learn the asset info.
+    requested_gas_wei_hex: Option<String>,
 }
 
 #[cfg(test)]
@@ -206,6 +214,9 @@ mod tests {
             last_checked_at_unix: None,
             broadcast_transaction_hash_hex: None,
             counterparty_id: counterparty_id.map(str::to_string),
+            requested_gas_wei_hex: None,
+            gas_topup_job_id: None,
+            gas_topup_job_state: None,
         }
     }
 
@@ -502,6 +513,182 @@ mod tests {
         assert!(validate_optional_positive_quantity(Some("0x"), "expected_amount").is_err());
         assert!(validate_optional_positive_quantity(Some("0x1"), "expected_amount").is_ok());
     }
+
+    fn announcement_event_with_metadata(metadata: Vec<u8>) -> Erc5564AnnouncementEvent {
+        Erc5564AnnouncementEvent {
+            stealth_address: "0x1111111111111111111111111111111111111111".into(),
+            caller_address: None,
+            ephemeral_public_key_hex: hex::encode([0x03; 33]),
+            metadata_hex: hex::encode(&metadata),
+            view_tag_hex: hex::encode([metadata[0]]),
+            block_number: None,
+            transaction_hash: None,
+            log_index: None,
+        }
+    }
+
+    #[test]
+    fn token_layout_hint_autopopulates_asset_and_expected_amount() {
+        let token_address = "0x2222222222222222222222222222222222222222";
+        let mut amount = [0u8; 32];
+        amount[31] = 0x2a;
+        let metadata = hex::decode(
+            sigillum_core::encode_erc5564_metadata_erc20_transfer(0x7f, token_address, &amount)
+                .unwrap(),
+        )
+        .unwrap();
+        let event = announcement_event_with_metadata(metadata);
+
+        let (asset_kind, hinted_token, expected) =
+            resolve_announcement_asset_hints(&event, None).unwrap();
+
+        assert_eq!(asset_kind, "erc20");
+        assert_eq!(hinted_token.as_deref(), Some(token_address));
+        assert_eq!(expected.as_deref(), Some("0x2a"));
+    }
+
+    #[test]
+    fn native_layout_hint_sets_expected_amount_only() {
+        let mut amount = [0u8; 32];
+        amount[30] = 0x01;
+        let metadata =
+            hex::decode(sigillum_core::encode_erc5564_metadata_native(0x7f, &amount)).unwrap();
+        let event = announcement_event_with_metadata(metadata);
+
+        let (asset_kind, hinted_token, expected) =
+            resolve_announcement_asset_hints(&event, None).unwrap();
+
+        assert_eq!(asset_kind, "native");
+        assert_eq!(hinted_token, None);
+        assert_eq!(expected.as_deref(), Some("0x100"));
+    }
+
+    #[test]
+    fn explicit_token_address_wins_over_metadata_hints() {
+        let hinted_token = "0x2222222222222222222222222222222222222222";
+        let metadata = hex::decode(
+            sigillum_core::encode_erc5564_metadata_erc20_transfer(0x7f, hinted_token, &[1u8; 32])
+                .unwrap(),
+        )
+        .unwrap();
+        let event = announcement_event_with_metadata(metadata);
+        let explicit = "0x3333333333333333333333333333333333333333";
+
+        let (asset_kind, token, expected) =
+            resolve_announcement_asset_hints(&event, Some(explicit)).unwrap();
+
+        assert_eq!(asset_kind, "erc20");
+        assert_eq!(token.as_deref(), Some(explicit));
+        assert_eq!(expected, None);
+    }
+
+    #[test]
+    fn unknown_layouts_and_zero_amounts_yield_no_hints() {
+        // View-tag-only metadata (historical default).
+        let event = announcement_event_with_metadata(vec![0x7f]);
+        assert_eq!(
+            resolve_announcement_asset_hints(&event, None).unwrap(),
+            ("native", None, None)
+        );
+
+        // 57-byte token layout with an unrecognized selector: not acted on.
+        let mut unknown = vec![0x7f];
+        unknown.extend_from_slice(&[0xde, 0xad, 0xbe, 0xef]);
+        unknown.extend_from_slice(&[0x22; 20]);
+        unknown.extend_from_slice(&[0u8; 32]);
+        let event = announcement_event_with_metadata(unknown);
+        assert_eq!(
+            resolve_announcement_asset_hints(&event, None).unwrap(),
+            ("native", None, None)
+        );
+
+        // Zero-amount hints carry no expected amount.
+        let metadata = hex::decode(
+            sigillum_core::encode_erc5564_metadata_erc20_transfer(
+                0x7f,
+                "0x2222222222222222222222222222222222222222",
+                &[0u8; 32],
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        let event = announcement_event_with_metadata(metadata);
+        let (asset_kind, token, expected) =
+            resolve_announcement_asset_hints(&event, None).unwrap();
+        assert_eq!(asset_kind, "erc20");
+        assert!(token.is_some());
+        assert_eq!(expected, None);
+    }
+
+    fn queue_with_gas_topup(id: &str, sponsor: &str, destination: &str) -> crate::queue_store::QueueState {
+        crate::queue_store::QueueState {
+            jobs: vec![sigillum_api::QueueJob {
+                id: id.into(),
+                state: "queued".into(),
+                attempts: 0,
+                created_at_unix: 1,
+                updated_at_unix: 1,
+                next_attempt_after_unix: None,
+                payload: QueueJobPayload::EthStealthGasTopup {
+                    wallet_profile: "stealth".into(),
+                    sponsor_address: sponsor.into(),
+                    destination_address: destination.into(),
+                    value_wei_hex: "0x1".into(),
+                    gas_limit: None,
+                },
+                last_error: None,
+                transaction_hash_hex: None,
+                broadcast_transaction_hash_hex: None,
+                receipt: Default::default(),
+            }],
+        }
+    }
+
+    #[test]
+    fn sponsor_funding_two_parties_warns_with_mirrored_identity_axis() {
+        let sponsor = "0x4444444444444444444444444444444444444444";
+        let target = test_deposit("dep_1", "w", "0xaaaa00000000000000000000000000000000aaaa", Some("party_a"), None);
+        let mut other = test_deposit("dep_2", "w", "0xbbbb00000000000000000000000000000000bbbb", Some("party_b"), None);
+        other.gas_topup_job_id = Some("topup_1".into());
+        let queue = queue_with_gas_topup("topup_1", sponsor, &other.stealth_address);
+
+        let warning =
+            detect_stealth_gas_sponsor_linkage(&target, sponsor, &[other.clone()], &queue).unwrap();
+        assert!(warning.starts_with("shared gas sponsor links this party"), "{warning}");
+
+        // Same counterparty on both deposits: one identity, no linkage.
+        let mut same_party = other.clone();
+        same_party.counterparty_id = Some("party_a".into());
+        assert_eq!(
+            detect_stealth_gas_sponsor_linkage(&target, sponsor, &[same_party], &queue),
+            None
+        );
+
+        // A different sponsor funds the other deposit: no shared funder.
+        assert_eq!(
+            detect_stealth_gas_sponsor_linkage(
+                &target,
+                "0x5555555555555555555555555555555555555555",
+                &[other],
+                &queue
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn sponsor_linkage_ignores_deposits_without_tracked_topups() {
+        let sponsor = "0x4444444444444444444444444444444444444444";
+        let target = test_deposit("dep_1", "w", "0xaaaa00000000000000000000000000000000aaaa", Some("party_a"), None);
+        let other = test_deposit("dep_2", "w", "0xbbbb00000000000000000000000000000000bbbb", Some("party_b"), None);
+        let queue = queue_with_gas_topup("topup_1", sponsor, &other.stealth_address);
+
+        // The other deposit never recorded a top-up job: nothing to link.
+        assert_eq!(
+            detect_stealth_gas_sponsor_linkage(&target, sponsor, &[other], &queue),
+            None
+        );
+    }
 }
 
 #[derive(Clone)]
@@ -594,11 +781,6 @@ impl SigillumService {
             .transpose()?;
         validate_optional_quantity(body.min_sweep_amount_hex.as_deref(), "min_sweep_amount")?;
         let (provider, wallet) = self.resolve_wallet_profile(&body.wallet_profile)?;
-        let asset_kind = if token_address.is_some() {
-            "erc20"
-        } else {
-            "native"
-        };
 
         // Watch-only detection: the scan derives the viewing private key +
         // spending PUBLIC key only; the spending private key never
@@ -670,8 +852,24 @@ impl SigillumService {
             }
             matched += 1;
 
+            // EIP-5564 metadata SHOULD-layout hints: when the operator did not
+            // pin an explicit `token_address`, a standards-following
+            // announcement tells us the asset itself — the token layout
+            // (transfer selector + token contract + amount) makes the match an
+            // ERC-20 deposit candidate, the native layout a native one with an
+            // expected amount. Unknown layouts yield no hints (never an
+            // error) and the historical operator-driven defaults apply.
+            let (event_asset_kind, event_token_address, hint_expected_amount_hex) =
+                resolve_announcement_asset_hints(&event, token_address.as_deref())?;
+
             if let Some(existing_index) = deposits.eth_stealth.iter().position(|deposit| {
-                discovered_deposit_matches(deposit, &wallet, &event, asset_kind, &token_address)
+                discovered_deposit_matches(
+                    deposit,
+                    &wallet,
+                    &event,
+                    event_asset_kind,
+                    &event_token_address,
+                )
             }) {
                 existing += 1;
                 let existing_deposit = &mut deposits.eth_stealth[existing_index];
@@ -686,7 +884,7 @@ impl SigillumService {
             let deposit = EthStealthDeposit {
                 id: random_id(),
                 status: "pending".into(),
-                asset_kind: asset_kind.into(),
+                asset_kind: event_asset_kind.into(),
                 wallet_profile: wallet.name.clone(),
                 chain_id: provider.chain_id,
                 chain_id_assumed: false,
@@ -700,8 +898,8 @@ impl SigillumService {
                 view_tag_hex: check.view_tag_hex.clone(),
                 stealth_hash_convention: check.stealth_hash_convention,
                 announcement: Some(discovered_announcement_payload(&event)?),
-                token_address: token_address.clone(),
-                expected_amount_hex: None,
+                token_address: event_token_address.clone(),
+                expected_amount_hex: hint_expected_amount_hex,
                 observed_amount_hex: None,
                 observed_native_balance_wei_hex: None,
                 auto_queue_sweep: body.auto_queue_sweep.unwrap_or(false),
@@ -718,6 +916,9 @@ impl SigillumService {
                 last_checked_at_unix: None,
                 broadcast_transaction_hash_hex: None,
                 counterparty_id: None,
+                requested_gas_wei_hex: None,
+                gas_topup_job_id: None,
+                gas_topup_job_state: None,
             };
             created += 1;
             response_deposits.push(deposit.clone());
@@ -773,6 +974,18 @@ impl SigillumService {
             body.min_sweep_value_wei_hex.as_deref(),
             "min_sweep_value_wei",
         )?;
+        validate_optional_positive_quantity(body.gas_amount_wei_hex.as_deref(), "gas_amount_wei")?;
+        if body.gas_amount_wei_hex.is_some() && body.request_gas != Some(true) {
+            return Err(ServiceError::bad_request(
+                "gas_amount_wei_hex requires request_gas",
+            ));
+        }
+        let requested_gas_wei_hex = resolve_requested_gas_wei_hex(
+            body.request_gas.unwrap_or(false),
+            body.gas_amount_wei_hex.as_deref(),
+            &provider,
+            provider.native_gas_limit.unwrap_or(21_000),
+        )?;
 
         self.persist_new_deposit(
             token,
@@ -794,6 +1007,7 @@ impl SigillumService {
                     .or(wallet.default_destination_address.clone()),
                 min_sweep_amount_hex: body.min_sweep_value_wei_hex,
                 note: body.note,
+                requested_gas_wei_hex,
             },
         )
         .await
@@ -814,7 +1028,19 @@ impl SigillumService {
             "expected_amount",
         )?;
         validate_optional_quantity(body.min_sweep_amount_hex.as_deref(), "min_sweep_amount")?;
+        validate_optional_positive_quantity(body.gas_amount_wei_hex.as_deref(), "gas_amount_wei")?;
+        if body.gas_amount_wei_hex.is_some() && body.request_gas != Some(true) {
+            return Err(ServiceError::bad_request(
+                "gas_amount_wei_hex requires request_gas",
+            ));
+        }
         let normalized_token = super::evm::normalize_address(&body.token_address)?;
+        let requested_gas_wei_hex = resolve_requested_gas_wei_hex(
+            body.request_gas.unwrap_or(false),
+            body.gas_amount_wei_hex.as_deref(),
+            &provider,
+            provider.erc20_gas_limit.unwrap_or(65_000),
+        )?;
 
         self.persist_new_deposit(
             token,
@@ -836,6 +1062,7 @@ impl SigillumService {
                     .or(wallet.default_destination_address.clone()),
                 min_sweep_amount_hex: body.min_sweep_amount_hex,
                 note: body.note,
+                requested_gas_wei_hex,
             },
         )
         .await
@@ -875,6 +1102,20 @@ impl SigillumService {
         })?;
         let warnings = payment.warnings.clone();
 
+        // Payer-attached gas (`request_gas`): rebuild the announcement with
+        // EIP-5564 SHOULD-layout metadata so a standards-aware payer wallet
+        // learns the asset/amount (and, for native, the payment+gas total) to
+        // attach. Without it the announcement keeps the minimal view-tag-only
+        // metadata from generation.
+        let announcement = match blueprint.requested_gas_wei_hex.as_deref() {
+            Some(requested_gas) => Some(build_gas_requesting_announcement(
+                &payment,
+                &blueprint,
+                requested_gas,
+            )?),
+            None => payment.announcement,
+        };
+
         let now = now_unix();
         let deposit = EthStealthDeposit {
             id: random_id(),
@@ -893,7 +1134,7 @@ impl SigillumService {
             view_tag_hex: payment.view_tag_hex,
             // New deposits are always generated with the standard convention.
             stealth_hash_convention: payment.stealth_hash_convention,
-            announcement: payment.announcement,
+            announcement,
             token_address: blueprint.token_address,
             expected_amount_hex: blueprint.expected_amount_hex,
             observed_amount_hex: None,
@@ -909,6 +1150,9 @@ impl SigillumService {
             last_checked_at_unix: None,
             broadcast_transaction_hash_hex: None,
             counterparty_id: None,
+            requested_gas_wei_hex: blueprint.requested_gas_wei_hex,
+            gas_topup_job_id: None,
+            gas_topup_job_state: None,
         };
 
         let _guard = self.state.operation_guard().await;
@@ -1109,22 +1353,28 @@ impl SigillumService {
             }
 
             let (provider, wallet) = self.resolve_wallet_profile(&deposit.wallet_profile)?;
-            let (enqueue, linkage_warning) = self.enqueue_deposit_sweep_job(
-                DepositSweepJobParams {
-                    token,
-                    deposit: &*deposit,
-                    other_deposits: &all_deposits,
-                    wallet: &wallet,
-                    provider: &provider,
-                    strict_destination: true,
-                },
-                &mut queue,
-            )?;
-            deposit.queue_job_id = Some(enqueue.job.id.clone());
-            deposit.queue_job_state = Some(enqueue.job.state.clone());
-            deposit.status = super::queue::queue_status(&enqueue.job.state);
+            let outcome = self
+                .enqueue_deposit_sweep_job(
+                    DepositSweepJobParams {
+                        token,
+                        deposit: &*deposit,
+                        other_deposits: &all_deposits,
+                        wallet: &wallet,
+                        provider: &provider,
+                        strict_destination: true,
+                    },
+                    &mut queue,
+                )
+                .await?;
+            deposit.queue_job_id = Some(outcome.enqueue.job.id.clone());
+            deposit.queue_job_state = Some(outcome.enqueue.job.state.clone());
+            deposit.status = super::queue::queue_status(&outcome.enqueue.job.state);
+            if let Some(topup_job) = outcome.gas_topup_job.as_ref() {
+                deposit.gas_topup_job_id = Some(topup_job.id.clone());
+                deposit.gas_topup_job_state = Some(topup_job.state.clone());
+            }
             deposit.updated_at_unix = now_unix();
-            (deposit.clone(), enqueue, linkage_warning)
+            (deposit.clone(), outcome)
         };
 
         crate::queue_store::save_queue(&self.state.base_dir, &queue)
@@ -1136,15 +1386,15 @@ impl SigillumService {
             self.state.active_compartment_id_for(token),
             AuditEventSpec::DepositsEthStealthEnqueueSweep {
                 id: deposit_snapshot.0.id.clone(),
-                job_id: deposit_snapshot.1.job.id.clone(),
+                job_id: deposit_snapshot.1.enqueue.job.id.clone(),
             },
         )?;
 
         Ok(EthStealthDepositEnqueueSweepResponse {
-            status: deposit_snapshot.1.status,
+            status: deposit_snapshot.1.enqueue.status,
             deposit: deposit_snapshot.0,
-            job: deposit_snapshot.1.job,
-            linkage_warning: deposit_snapshot.2,
+            job: deposit_snapshot.1.enqueue.job,
+            linkage_warning: deposit_snapshot.1.linkage_warning,
         })
     }
 }
@@ -1160,12 +1410,21 @@ struct DepositSweepJobParams<'a> {
     strict_destination: bool,
 }
 
+/// Outcome of enqueueing a deposit sweep: the sweep job itself, an optional
+/// non-blocking linkage warning (destination- and/or sponsor-axis), and the
+/// sponsor gas top-up job when one was planned ahead of the sweep.
+struct DepositSweepEnqueueOutcome {
+    enqueue: QueueEnqueueResponse,
+    linkage_warning: Option<String>,
+    gas_topup_job: Option<QueueJob>,
+}
+
 impl SigillumService {
-    fn enqueue_deposit_sweep_job(
+    async fn enqueue_deposit_sweep_job(
         &self,
         params: DepositSweepJobParams<'_>,
         queue: &mut crate::queue_store::QueueState,
-    ) -> ServiceResult<(QueueEnqueueResponse, Option<String>)> {
+    ) -> ServiceResult<DepositSweepEnqueueOutcome> {
         let DepositSweepJobParams {
             token,
             deposit,
@@ -1179,19 +1438,20 @@ impl SigillumService {
                 ServiceError::internal(format!("Failed to load wallet inventory: {error}"))
             })?;
         let destination = resolve_stealth_sweep_destination(deposit, wallet, &inventory)?;
-        let linkage_warning = destination.as_deref().and_then(|destination| {
+        let destination_linkage_warning = destination.as_deref().and_then(|destination| {
             detect_stealth_sweep_linkage(deposit, destination, other_deposits, &inventory)
         });
-        if linkage_warning.is_some()
-            && inventory
-                .treasury_policy
-                .as_ref()
-                .map(|policy| policy.block_cross_party_linkage)
-                .unwrap_or(false)
-        {
+        let block_cross_party_linkage = inventory
+            .treasury_policy
+            .as_ref()
+            .map(|policy| policy.block_cross_party_linkage)
+            .unwrap_or(false);
+        if destination_linkage_warning.is_some() && block_cross_party_linkage {
             return Err(ServiceError::policy_violation("cross_party_linkage"));
         }
 
+        let mut gas_topup_job = None;
+        let mut sponsor_linkage_warning = None;
         let job = if deposit.asset_kind == "erc20" {
             let recipient_address = destination.ok_or_else(|| {
                 ServiceError::bad_request(
@@ -1204,6 +1464,29 @@ impl SigillumService {
                 asset_kind: "erc20",
                 amount_hex: deposit.min_sweep_amount_hex.as_deref().unwrap_or("0x0"),
             })?;
+
+            // Sponsor gas top-up: an ERC-20 deposit whose stealth address
+            // lacks native gas gets a sponsor-funded top-up as a queue job
+            // PRECEDING the sweep (the sweep depends on it and stays blocked
+            // until gas is confirmed on-chain). Sponsor linkage flows through
+            // the same cross-party accounting as seed-plan sponsor funding:
+            // warn by default, hard-block when `block_cross_party_linkage`.
+            let (planned_topup, planned_sponsor_warning) = self
+                .plan_stealth_gas_topup_job(
+                    deposit,
+                    wallet,
+                    provider,
+                    other_deposits,
+                    &inventory,
+                    queue,
+                )
+                .await?;
+            if planned_sponsor_warning.is_some() && block_cross_party_linkage {
+                return Err(ServiceError::policy_violation("cross_party_linkage"));
+            }
+            gas_topup_job = planned_topup;
+            sponsor_linkage_warning = planned_sponsor_warning;
+
             QueueJob {
                 id: random_id(),
                 state: "queued".into(),
@@ -1225,6 +1508,10 @@ impl SigillumService {
                     // The sweep derives the stealth key with the record's
                     // stored convention (dual-decoded at detection time).
                     stealth_hash_convention: Some(deposit.stealth_hash_convention),
+                    prerequisite_job_ids: gas_topup_job
+                        .as_ref()
+                        .map(|job| vec![job.id.clone()])
+                        .unwrap_or_default(),
                 },
                 last_error: None,
                 transaction_hash_hex: None,
@@ -1283,6 +1570,25 @@ impl SigillumService {
             }
         };
 
+        let linkage_warning = [destination_linkage_warning, sponsor_linkage_warning]
+            .into_iter()
+            .flatten()
+            .reduce(|left, right| format!("{left}; {right}"));
+
+        // The top-up lands in the queue BEFORE its dependent sweep so a
+        // single drain broadcasts it first (dependency ordering is by job id
+        // state, but queue order keeps one drain sufficient in the common
+        // case).
+        if let Some(topup_job) = gas_topup_job.as_ref() {
+            queue.jobs.push(topup_job.clone());
+            self.record_audit(
+                self.state.active_compartment_id_for(token),
+                AuditEventSpec::QueueEnqueue {
+                    id: topup_job.id.clone(),
+                    job_kind: AuditQueueJobKind::from_payload(&topup_job.payload),
+                },
+            )?;
+        }
         queue.jobs.push(job.clone());
         self.record_audit(
             self.state.active_compartment_id_for(token),
@@ -1292,13 +1598,138 @@ impl SigillumService {
             },
         )?;
 
-        Ok((
-            QueueEnqueueResponse {
+        Ok(DepositSweepEnqueueOutcome {
+            enqueue: QueueEnqueueResponse {
                 status: "queued".into(),
                 job,
             },
             linkage_warning,
-        ))
+            gas_topup_job,
+        })
+    }
+
+    /// Plan a sponsor gas top-up for an ERC-20 deposit that lacks native gas.
+    ///
+    /// Returns the top-up job to enqueue ahead of the sweep plus an optional
+    /// sponsor-linkage warning. `(None, _)` means "no top-up": policy off,
+    /// gas already sufficient, fee basis missing, cap exceeded, sponsor
+    /// unavailable (locked compartment) or insolvent, or a live top-up
+    /// already tracked — in every case the deposit keeps its historical
+    /// behavior (the sweep job blocks on gas until the operator funds the
+    /// address manually, e.g. via payer-attached gas).
+    ///
+    /// Mirrors the seed-plan rules (`service/inventory/gas_topup.rs`):
+    /// amount = 1.5x the sweep's estimated gas, capped by
+    /// `max_gas_topup_wei_hex`; the sponsor must cover the top-up plus its
+    /// own transfer gas. The sponsor is the stealth wallet's derived gas
+    /// sponsor (`stealth_gas_sponsor_address`), funded by the operator
+    /// out-of-band — see `docs/architecture.md`.
+    async fn plan_stealth_gas_topup_job(
+        &self,
+        deposit: &EthStealthDeposit,
+        wallet: &sigillum_api::EthStealthWalletProfile,
+        provider: &sigillum_api::EvmProviderProfile,
+        other_deposits: &[EthStealthDeposit],
+        inventory: &WalletInventoryState,
+        queue: &crate::queue_store::QueueState,
+    ) -> ServiceResult<(Option<QueueJob>, Option<String>)> {
+        if !super::inventory::gas_topup::gas_topup_policy_enabled(
+            inventory.treasury_policy.as_ref(),
+        ) {
+            return Ok((None, None));
+        }
+        // One live top-up per deposit: an active or already-broadcast job is
+        // reused, never duplicated.
+        if let Some(existing) = deposit
+            .gas_topup_job_id
+            .as_deref()
+            .and_then(|id| queue.jobs.iter().find(|job| job.id == id))
+        {
+            if super::queue::is_active_or_completed_queue_state(&existing.state) {
+                return Ok((None, None));
+            }
+        }
+        let Some(max_fee_hex) = provider.max_fee_per_gas_hex.as_deref() else {
+            return Ok((None, None));
+        };
+        let max_fee = decode_quantity_hex(max_fee_hex).map_err(map_wallet_error)?;
+        let gas_limit = provider.erc20_gas_limit.unwrap_or(65_000);
+        let gas_cost = multiply_u256_u64(&max_fee, gas_limit);
+        // Gas shortfall judged from the last observed native balance on the
+        // record (refresh keeps it current); unknown balance means "assume
+        // short". The sweep's own on-chain check stays authoritative.
+        let observed_native = deposit
+            .observed_native_balance_wei_hex
+            .as_deref()
+            .map(decode_quantity_hex)
+            .transpose()
+            .map_err(map_wallet_error)?
+            .unwrap_or([0u8; 32]);
+        if compare_u256(&observed_native, &gas_cost).is_ge() {
+            return Ok((None, None));
+        }
+        // Seed-path formula: 1.5x the sweep's estimated gas, policy-capped.
+        let topup = super::inventory::treasury::add_u256(
+            &gas_cost,
+            &super::inventory::gas_topup::shr1_u256(&gas_cost),
+        );
+        if super::inventory::gas_topup::topup_exceeds_cap(
+            &topup,
+            inventory
+                .treasury_policy
+                .as_ref()
+                .and_then(|policy| policy.max_gas_topup_wei_hex.as_deref()),
+        ) {
+            return Ok((None, None));
+        }
+        let Some(sponsor_address) =
+            self.stealth_gas_sponsor_address(wallet.compartment_id, &wallet.wallet)?
+        else {
+            return Ok((None, None));
+        };
+        if sponsor_address.eq_ignore_ascii_case(&deposit.stealth_address) {
+            return Ok((None, None));
+        }
+        // The sponsor must cover the top-up plus its own transfer gas,
+        // verified against a fresh balance read.
+        let sponsor_balance_hex = self
+            .evm_native_balance_for_provider(
+                provider.compartment_id,
+                provider,
+                &sponsor_address,
+                "latest",
+            )
+            .await?;
+        let sponsor_balance = decode_quantity_hex(&sponsor_balance_hex).map_err(map_wallet_error)?;
+        let sponsor_gas_cost =
+            multiply_u256_u64(&max_fee, provider.native_gas_limit.unwrap_or(21_000));
+        let required = super::inventory::treasury::add_u256(&topup, &sponsor_gas_cost);
+        if compare_u256(&sponsor_balance, &required).is_lt() {
+            return Ok((None, None));
+        }
+
+        let linkage_warning =
+            detect_stealth_gas_sponsor_linkage(deposit, &sponsor_address, other_deposits, queue);
+        let job = QueueJob {
+            id: random_id(),
+            state: "queued".into(),
+            attempts: 0,
+            created_at_unix: now_unix(),
+            updated_at_unix: now_unix(),
+            next_attempt_after_unix: None,
+            payload: QueueJobPayload::EthStealthGasTopup {
+                wallet_profile: deposit.wallet_profile.clone(),
+                sponsor_address,
+                destination_address: deposit.stealth_address.clone(),
+                value_wei_hex: super::evm::encode_quantity_u256(&topup),
+                gas_limit: provider.native_gas_limit,
+            },
+            last_error: None,
+            transaction_hash_hex: None,
+            broadcast_transaction_hash_hex: None,
+            receipt: Default::default(),
+        };
+        Ok((Some(job), linkage_warning))
     }
 
     // ── Deposit State Refresh & Sync ───────────────────────────────────────
@@ -1428,22 +1859,28 @@ impl SigillumService {
                 && expected_ready
                 && min_ready
             {
-                let enqueue_result = self.enqueue_deposit_sweep_job(
-                    DepositSweepJobParams {
-                        token,
-                        deposit: &*deposit,
-                        other_deposits: &all_deposits,
-                        wallet: &plan.wallet,
-                        provider: &plan.provider,
-                        strict_destination: false,
-                    },
-                    queue,
-                );
-                if let Ok((enqueue_result, _linkage_warning)) = enqueue_result {
+                let enqueue_result = self
+                    .enqueue_deposit_sweep_job(
+                        DepositSweepJobParams {
+                            token,
+                            deposit: &*deposit,
+                            other_deposits: &all_deposits,
+                            wallet: &plan.wallet,
+                            provider: &plan.provider,
+                            strict_destination: false,
+                        },
+                        queue,
+                    )
+                    .await;
+                if let Ok(outcome) = enqueue_result {
                     queued += 1;
-                    deposit.queue_job_id = Some(enqueue_result.job.id.clone());
-                    deposit.queue_job_state = Some(enqueue_result.job.state.clone());
-                    deposit.status = super::queue::queue_status(&enqueue_result.job.state);
+                    deposit.queue_job_id = Some(outcome.enqueue.job.id.clone());
+                    deposit.queue_job_state = Some(outcome.enqueue.job.state.clone());
+                    deposit.status = super::queue::queue_status(&outcome.enqueue.job.state);
+                    if let Some(topup_job) = outcome.gas_topup_job.as_ref() {
+                        deposit.gas_topup_job_id = Some(topup_job.id.clone());
+                        deposit.gas_topup_job_state = Some(topup_job.state.clone());
+                    }
                 }
             }
 
@@ -1482,6 +1919,95 @@ fn validate_optional_positive_quantity(value: Option<&str>, label: &str) -> Serv
         )));
     }
     Ok(())
+}
+
+/// Resolve the payer-attached gas request to a concrete wei amount.
+///
+/// `None` (no `request_gas`) keeps the announcement metadata minimal
+/// (view-tag-only). Without an explicit `gas_amount_wei_hex`, the provider
+/// profile's static sweep gas estimate (`max_fee_per_gas × gas_limit`, the
+/// asset's sweep gas limit resolved by the caller) is used — the same fee
+/// basis the sweep itself checks against.
+fn resolve_requested_gas_wei_hex(
+    request_gas: bool,
+    gas_amount_wei_hex: Option<&str>,
+    provider: &EvmProviderProfile,
+    gas_limit: u64,
+) -> ServiceResult<Option<String>> {
+    if !request_gas {
+        return Ok(None);
+    }
+    if let Some(explicit) = gas_amount_wei_hex {
+        let amount = decode_quantity_hex(explicit).map_err(map_wallet_error)?;
+        return Ok(Some(super::evm::encode_quantity_u256(&amount)));
+    }
+    let max_fee_hex = provider.max_fee_per_gas_hex.as_deref().ok_or_else(|| {
+        ServiceError::bad_request(
+            "gas_amount_wei_hex is required when the provider profile has no static max fee",
+        )
+    })?;
+    let max_fee = decode_quantity_hex(max_fee_hex).map_err(map_wallet_error)?;
+    let gas_cost = multiply_u256_u64(&max_fee, gas_limit);
+    Ok(Some(super::evm::encode_quantity_u256(&gas_cost)))
+}
+
+/// Build the announcement payload for a gas-requesting deposit, with metadata
+/// following the EIP-5564 SHOULD layouts:
+///
+/// - native deposits: the native layout (`view tag ‖ 0xeeeeeeee ‖ sentinel ‖
+///   amount`), amount = expected value + requested gas — the TOTAL native
+///   value the payer should attach (the EIP-5564 "Recipients' transaction
+///   costs" sponsorship pattern, where the sender attaches ETH sponsoring
+///   the recipient's subsequent transactions);
+/// - ERC-20 deposits: the token layout (`view tag ‖ transfer(address,
+///   uint256) selector ‖ token contract ‖ amount`), amount = expected token
+///   amount (zero when unspecified); the requested native gas rides on the
+///   deposit record (`requested_gas_wei_hex`) as payment instructions, since
+///   the token layout carries asset info only.
+fn build_gas_requesting_announcement(
+    payment: &sigillum_api::EthStealthGenerateResponse,
+    blueprint: &DepositBlueprint,
+    requested_gas_wei_hex: &str,
+) -> ServiceResult<EthStealthAnnouncementPayload> {
+    let view_tag = hex::decode(&payment.view_tag_hex)
+        .ok()
+        .and_then(|bytes| bytes.first().copied())
+        .ok_or_else(|| ServiceError::internal("generated payment is missing a view tag"))?;
+    let expected_amount = blueprint
+        .expected_amount_hex
+        .as_deref()
+        .map(decode_quantity_hex)
+        .transpose()
+        .map_err(map_wallet_error)?
+        .unwrap_or([0u8; 32]);
+    let metadata_hex = if blueprint.asset_kind == "erc20" {
+        let token_address = blueprint.token_address.as_deref().ok_or_else(|| {
+            ServiceError::internal("ERC-20 deposit blueprint is missing token_address")
+        })?;
+        encode_erc5564_metadata_erc20_transfer(view_tag, token_address, &expected_amount)
+            .map_err(map_wallet_error)?
+    } else {
+        let requested_gas = decode_quantity_hex(requested_gas_wei_hex).map_err(map_wallet_error)?;
+        let total = super::inventory::treasury::add_u256(&expected_amount, &requested_gas);
+        encode_erc5564_metadata_native(view_tag, &total)
+    };
+    let calldata_hex = encode_erc5564_announce_calldata(
+        payment.scheme_id,
+        &payment.stealth_address,
+        &payment.ephemeral_public_key_hex,
+        &metadata_hex,
+    )
+    .map_err(map_wallet_error)?;
+    Ok(EthStealthAnnouncementPayload {
+        announcer_address: ERC5564_ANNOUNCER_ADDRESS.into(),
+        announce_function: ERC5564_ANNOUNCE_FUNCTION.into(),
+        scheme_id: payment.scheme_id,
+        stealth_address: payment.stealth_address.clone(),
+        ephemeral_public_key_hex: payment.ephemeral_public_key_hex.clone(),
+        metadata_hex,
+        calldata_hex,
+        value_wei_hex: "0x0".into(),
+    })
 }
 
 /// A deposit is economically ready only after the observed balance reaches the
@@ -1621,6 +2147,63 @@ fn stealth_sweep_identity_key(deposit: &EthStealthDeposit) -> String {
                 normalize_stealth_linkage_address(&deposit.stealth_address)
             )
         })
+}
+
+/// Cross-party sponsor linkage for stealth gas top-ups (single hop,
+/// destination axis): one sponsor funding stealth deposits attributed to
+/// DIFFERENT identities links those parties on-chain — an observer sees a
+/// common gas funder paying into both parties' deposit addresses. Mirrors
+/// the seed-plan FundGas funder analysis
+/// (`service/inventory/planner.rs::analyze_plan_linkage`), with the funded
+/// destination's identity resolved from the deposit record's counterparty
+/// tag (`stealth_sweep_identity_key`).
+fn detect_stealth_gas_sponsor_linkage(
+    target: &EthStealthDeposit,
+    sponsor_address: &str,
+    other_deposits: &[EthStealthDeposit],
+    queue: &crate::queue_store::QueueState,
+) -> Option<String> {
+    let sponsor_key = normalize_stealth_linkage_address(sponsor_address);
+    if sponsor_key.is_empty() {
+        return None;
+    }
+    let target_identity = stealth_sweep_identity_key(target);
+    let mut linked_identities = BTreeSet::new();
+    for other in other_deposits {
+        if other.id == target.id {
+            continue;
+        }
+        let Some(topup_job_id) = other.gas_topup_job_id.as_deref() else {
+            continue;
+        };
+        let Some(job) = queue.jobs.iter().find(|job| job.id == topup_job_id) else {
+            continue;
+        };
+        let QueueJobPayload::EthStealthGasTopup {
+            sponsor_address: other_sponsor,
+            ..
+        } = &job.payload
+        else {
+            continue;
+        };
+        if normalize_stealth_linkage_address(other_sponsor) != sponsor_key {
+            continue;
+        }
+        let other_identity = stealth_sweep_identity_key(other);
+        if other_identity != target_identity {
+            linked_identities.insert(other_identity);
+        }
+    }
+
+    if linked_identities.is_empty() {
+        None
+    } else {
+        Some(
+            "shared gas sponsor links this party with another payer; fund gas from a distinct \
+             sponsor or request payer-attached gas"
+                .into(),
+        )
+    }
 }
 
 fn normalize_stealth_linkage_address(address: &str) -> String {
@@ -1786,14 +2369,51 @@ fn decode_abi_dynamic_bytes(data: &[u8], offset: usize) -> ServiceResult<Vec<u8>
     Ok(bytes.to_vec())
 }
 
+/// Resolve the effective asset hints for a matched announcement.
+///
+/// Explicit operator input (`token_address` on the scan request) always wins.
+/// Otherwise the EIP-5564 metadata SHOULD layouts provide the asset info: a
+/// token layout using the ERC-20 `transfer(address,uint256)` selector makes
+/// the match an ERC-20 candidate with the hinted contract and (when non-zero)
+/// expected amount; a native layout keeps it native with the hinted expected
+/// amount. Unknown layouts and unrecognized selectors yield the historical
+/// native default with no expected amount — hints are advisory and never fail
+/// the scan.
+fn resolve_announcement_asset_hints(
+    event: &Erc5564AnnouncementEvent,
+    explicit_token_address: Option<&str>,
+) -> ServiceResult<(&'static str, Option<String>, Option<String>)> {
+    if let Some(explicit) = explicit_token_address {
+        return Ok(("erc20", Some(explicit.to_string()), None));
+    }
+    let metadata = hex::decode(&event.metadata_hex).unwrap_or_default();
+    match decode_erc5564_metadata_hints(&metadata) {
+        Some(Erc5564MetadataHints::Token {
+            function_selector,
+            token_address,
+            amount,
+        }) if function_selector == ERC5564_METADATA_ERC20_TRANSFER_SELECTOR => {
+            let token_address = super::evm::normalize_address(&token_address)?;
+            let expected =
+                (!is_zero_u256(&amount)).then(|| super::evm::encode_quantity_u256(&amount));
+            Ok(("erc20", Some(token_address), expected))
+        }
+        Some(Erc5564MetadataHints::Native { amount_wei }) => {
+            let expected =
+                (!is_zero_u256(&amount_wei)).then(|| super::evm::encode_quantity_u256(&amount_wei));
+            Ok(("native", None, expected))
+        }
+        _ => Ok(("native", None, None)),
+    }
+}
+
 fn discovered_deposit_matches(
     deposit: &EthStealthDeposit,
     wallet: &EthStealthWalletProfile,
     event: &Erc5564AnnouncementEvent,
     asset_kind: &str,
     token_address: &Option<String>,
-) -> bool {
-    deposit.wallet_profile == wallet.name
+) -> bool {    deposit.wallet_profile == wallet.name
         && deposit.asset_kind == asset_kind
         && deposit
             .stealth_address
@@ -1868,6 +2488,7 @@ fn sync_eth_stealth_deposit_with_queue(
     let previous_queue_job_state = deposit.queue_job_state.clone();
     let previous_status = deposit.status.clone();
     let previous_broadcast = deposit.broadcast_transaction_hash_hex.clone();
+    let previous_gas_topup_job_state = deposit.gas_topup_job_state.clone();
     let job = deposit
         .queue_job_id
         .as_deref()
@@ -1880,10 +2501,18 @@ fn sync_eth_stealth_deposit_with_queue(
     if let Some(state) = queue_state.as_deref() {
         deposit.status = super::queue::queue_status(state);
     }
+    // Mirror the sponsor gas top-up's queue state so operators see what a
+    // gas-starved deposit is waiting for.
+    deposit.gas_topup_job_state = deposit
+        .gas_topup_job_id
+        .as_deref()
+        .and_then(|id| queue.jobs.iter().find(|candidate| candidate.id == id))
+        .map(|job| job.state.clone());
     (
         queue_state,
         previous_queue_job_state != deposit.queue_job_state
             || previous_status != deposit.status
-            || previous_broadcast != deposit.broadcast_transaction_hash_hex,
+            || previous_broadcast != deposit.broadcast_transaction_hash_hex
+            || previous_gas_topup_job_state != deposit.gas_topup_job_state,
     )
 }

@@ -182,7 +182,7 @@ impl SigillumService {
     }
 }
 
-pub(super) fn gas_topup_policy_enabled(policy: Option<&TreasuryPolicy>) -> bool {
+pub(in crate::service) fn gas_topup_policy_enabled(policy: Option<&TreasuryPolicy>) -> bool {
     policy
         .map(|policy| policy.enabled && policy.allow_gas_topups)
         .unwrap_or(false)
@@ -218,7 +218,7 @@ fn step_has_gas_shortfall(
     Some(compare_u256(&balance, gas_cost).is_lt())
 }
 
-fn topup_exceeds_cap(topup: &[u8; 32], cap_hex: Option<&str>) -> bool {
+pub(in crate::service) fn topup_exceeds_cap(topup: &[u8; 32], cap_hex: Option<&str>) -> bool {
     let Some(cap_hex) = cap_hex else {
         return false;
     };
@@ -290,7 +290,7 @@ fn fund_gas_step(
     }
 }
 
-fn shr1_u256(value: &[u8; 32]) -> [u8; 32] {
+pub(in crate::service) fn shr1_u256(value: &[u8; 32]) -> [u8; 32] {
     let mut out = [0u8; 32];
     let mut carry = 0u8;
     for (index, byte) in value.iter().enumerate() {

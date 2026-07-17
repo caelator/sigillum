@@ -21,6 +21,7 @@ mod selection;
 mod serialization;
 mod state;
 mod status;
+mod stealth_gas_topup;
 mod sweeps;
 mod tally;
 
@@ -231,6 +232,7 @@ fn queue_job_kind(job: &sigillum_api::QueueJob) -> &'static str {
         QueueJobPayload::EthStealthErc20Transfer { .. } => "eth_stealth_erc20_transfer",
         QueueJobPayload::EthStealthNativeSweep { .. } => "eth_stealth_native_sweep",
         QueueJobPayload::EthStealthErc20Sweep { .. } => "eth_stealth_erc20_sweep",
+        QueueJobPayload::EthStealthGasTopup { .. } => "eth_stealth_gas_topup",
         QueueJobPayload::EthSeedTransfer { .. } => "eth_seed_transfer",
         QueueJobPayload::EthSeedNativeSweep { .. } => "eth_seed_native_sweep",
         QueueJobPayload::EthSeedErc20Sweep { .. } => "eth_seed_erc20_sweep",

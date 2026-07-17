@@ -107,6 +107,7 @@ pub(crate) enum AuditQueueJobKind {
     EthStealthErc20Transfer,
     EthStealthNativeSweep,
     EthStealthErc20Sweep,
+    EthStealthGasTopup,
     EthSeedTransfer,
     EthSeedNativeSweep,
     EthSeedErc20Sweep,
@@ -120,6 +121,7 @@ impl AuditQueueJobKind {
             Self::EthStealthErc20Transfer => "eth_stealth_erc20_transfer",
             Self::EthStealthNativeSweep => "eth_stealth_native_sweep",
             Self::EthStealthErc20Sweep => "eth_stealth_erc20_sweep",
+            Self::EthStealthGasTopup => "eth_stealth_gas_topup",
             Self::EthSeedTransfer => "eth_seed_transfer",
             Self::EthSeedNativeSweep => "eth_seed_native_sweep",
             Self::EthSeedErc20Sweep => "eth_seed_erc20_sweep",
@@ -139,6 +141,7 @@ impl AuditQueueJobKind {
             sigillum_api::QueueJobPayload::EthStealthErc20Sweep { .. } => {
                 Self::EthStealthErc20Sweep
             }
+            sigillum_api::QueueJobPayload::EthStealthGasTopup { .. } => Self::EthStealthGasTopup,
             sigillum_api::QueueJobPayload::EthSeedTransfer { .. } => Self::EthSeedTransfer,
             sigillum_api::QueueJobPayload::EthSeedNativeSweep { .. } => Self::EthSeedNativeSweep,
             sigillum_api::QueueJobPayload::EthSeedErc20Sweep { .. } => Self::EthSeedErc20Sweep,

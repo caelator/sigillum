@@ -54,7 +54,8 @@ fn queue_payload_wallet_profile(payload: &QueueJobPayload) -> (&str, &str) {
         QueueJobPayload::EthStealthTransfer { wallet_profile, .. }
         | QueueJobPayload::EthStealthErc20Transfer { wallet_profile, .. }
         | QueueJobPayload::EthStealthNativeSweep { wallet_profile, .. }
-        | QueueJobPayload::EthStealthErc20Sweep { wallet_profile, .. } => {
+        | QueueJobPayload::EthStealthErc20Sweep { wallet_profile, .. }
+        | QueueJobPayload::EthStealthGasTopup { wallet_profile, .. } => {
             (wallet_profile.as_str(), "eth-stealth")
         }
         QueueJobPayload::EthSeedTransfer { wallet_profile, .. }
@@ -105,6 +106,18 @@ fn queue_payload_policy_check(payload: &QueueJobPayload) -> Option<(&str, &str, 
                 min_amount_hex.as_deref().unwrap_or("0x0"),
             )
         }),
+        // Sponsor top-ups fund an OWN stealth deposit address with native
+        // gas, mirroring how a seed-plan `FundGas` step's destination (the
+        // funded address) is checked as a native routed transfer.
+        QueueJobPayload::EthStealthGasTopup {
+            destination_address,
+            value_wei_hex,
+            ..
+        } => Some((
+            destination_address.as_str(),
+            "native",
+            value_wei_hex.as_str(),
+        )),
         QueueJobPayload::EthSeedTransfer {
             destination_address,
             value_wei_hex,

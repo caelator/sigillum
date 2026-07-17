@@ -197,11 +197,12 @@ pub(crate) const QUEUE_JOB_STATES: [&str; 11] = [
 ];
 
 /// Queue job payload kinds accepted by the `kind` filter.
-pub(crate) const QUEUE_JOB_KINDS: [&str; 8] = [
+pub(crate) const QUEUE_JOB_KINDS: [&str; 9] = [
     "eth_stealth_transfer",
     "eth_stealth_erc20_transfer",
     "eth_stealth_native_sweep",
     "eth_stealth_erc20_sweep",
+    "eth_stealth_gas_topup",
     "eth_seed_transfer",
     "eth_seed_native_sweep",
     "eth_seed_erc20_sweep",

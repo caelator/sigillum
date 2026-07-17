@@ -397,18 +397,52 @@ impl SigillumService {
                     gas_limit,
                     view_tag_hex,
                     stealth_hash_convention,
+                    prerequisite_job_ids,
                 } => {
-                    self.process_eth_stealth_erc20_sweep(
-                        token,
+                    // W6.4-style dependency ordering (mirrors the
+                    // `PlanStepExecution` prerequisite semantics): a sponsor
+                    // gas top-up must have broadcast before this sweep
+                    // executes. The sweep's own on-chain gas balance check
+                    // remains the authoritative gate until the top-up
+                    // confirms, so the sweep stays `blocked` until gas is
+                    // actually there.
+                    if let Some(reason) = super::stealth_gas_topup::sweep_dependency_block_reason(
+                        prerequisite_job_ids,
+                        &job_states,
+                    ) {
+                        Ok(QueueExecution::Blocked(reason))
+                    } else {
+                        self.process_eth_stealth_erc20_sweep(
+                            token,
+                            wallet_profile,
+                            stealth_address,
+                            ephemeral_public_key_hex,
+                            token_address,
+                            recipient_address.clone(),
+                            min_amount_hex.as_deref(),
+                            *gas_limit,
+                            view_tag_hex.clone(),
+                            *stealth_hash_convention,
+                        )
+                        .await
+                    }
+                }
+                // Sponsor gas top-up for a gas-starved stealth deposit: a
+                // native transfer from the wallet's derived gas sponsor to
+                // the stealth address (see `stealth_gas_topup.rs`).
+                QueueJobPayload::EthStealthGasTopup {
+                    wallet_profile,
+                    sponsor_address,
+                    destination_address,
+                    value_wei_hex,
+                    gas_limit,
+                } => {
+                    self.process_eth_stealth_gas_topup(
                         wallet_profile,
-                        stealth_address,
-                        ephemeral_public_key_hex,
-                        token_address,
-                        recipient_address.clone(),
-                        min_amount_hex.as_deref(),
+                        sponsor_address,
+                        destination_address,
+                        value_wei_hex,
                         *gas_limit,
-                        view_tag_hex.clone(),
-                        *stealth_hash_convention,
                     )
                     .await
                 }

@@ -229,7 +229,8 @@ impl SigillumService {
             QueueJobPayload::EthStealthTransfer { .. }
             | QueueJobPayload::EthStealthErc20Transfer { .. }
             | QueueJobPayload::EthStealthNativeSweep { .. }
-            | QueueJobPayload::EthStealthErc20Sweep { .. } => {
+            | QueueJobPayload::EthStealthErc20Sweep { .. }
+            | QueueJobPayload::EthStealthGasTopup { .. } => {
                 let (provider, wallet) = self.resolve_wallet_profile(wallet_profile)?;
                 Ok((provider, wallet.compartment_id))
             }
@@ -427,6 +428,7 @@ fn queue_wallet_profile(payload: &QueueJobPayload) -> &str {
         | QueueJobPayload::EthStealthErc20Transfer { wallet_profile, .. }
         | QueueJobPayload::EthStealthNativeSweep { wallet_profile, .. }
         | QueueJobPayload::EthStealthErc20Sweep { wallet_profile, .. }
+        | QueueJobPayload::EthStealthGasTopup { wallet_profile, .. }
         | QueueJobPayload::EthSeedTransfer { wallet_profile, .. }
         | QueueJobPayload::EthSeedNativeSweep { wallet_profile, .. }
         | QueueJobPayload::EthSeedErc20Sweep { wallet_profile, .. } => wallet_profile,

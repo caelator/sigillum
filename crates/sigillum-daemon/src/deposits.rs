@@ -147,6 +147,9 @@ mod tests {
             last_checked_at_unix: None,
             broadcast_transaction_hash_hex: None,
             counterparty_id: None,
+            requested_gas_wei_hex: None,
+            gas_topup_job_id: None,
+            gas_topup_job_state: None,
         }
     }
 

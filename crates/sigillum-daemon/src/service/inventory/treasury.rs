@@ -55,7 +55,7 @@ const DEFAULT_HOT_TARGET_WEI_HEX: &str = "0xde0b6b3a7640000";
 const MAX_RECEIVE_INDEX: u32 = 1_000_000;
 
 /// Saturating big-endian addition of two 256-bit quantities.
-pub(super) fn add_u256(left: &[u8; 32], right: &[u8; 32]) -> [u8; 32] {
+pub(in crate::service) fn add_u256(left: &[u8; 32], right: &[u8; 32]) -> [u8; 32] {
     let mut out = [0u8; 32];
     let mut carry = 0u16;
     for index in (0..32).rev() {
@@ -2085,6 +2085,9 @@ mod tests {
             last_checked_at_unix: None,
             broadcast_transaction_hash_hex: None,
             counterparty_id: counterparty_id.map(str::to_string),
+            requested_gas_wei_hex: None,
+            gas_topup_job_id: None,
+            gas_topup_job_state: None,
         }
     }
 

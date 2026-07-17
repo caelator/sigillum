@@ -101,10 +101,15 @@ pub(crate) fn queue_payload_execution_family(payload: &QueueJobPayload) -> Optio
     match payload {
         // EthStealth* variants are the pre-W7 stealth families: deliberately
         // NOT plan execution, so treasury execution gates must not affect them.
+        // The sponsor gas top-up joins the same carve-out for now (enqueued
+        // only by the deposit flow, already policy-gated on `allow_gas_topups`
+        // at enqueue time); task 2.5 of the operator-surface plan reconciles
+        // the stealth carve-out with the gate model explicitly.
         QueueJobPayload::EthStealthTransfer { .. }
         | QueueJobPayload::EthStealthErc20Transfer { .. }
         | QueueJobPayload::EthStealthNativeSweep { .. }
-        | QueueJobPayload::EthStealthErc20Sweep { .. } => None,
+        | QueueJobPayload::EthStealthErc20Sweep { .. }
+        | QueueJobPayload::EthStealthGasTopup { .. } => None,
         // EthSeed* variants (W7.3): fund movement out of a seed-derived
         // wallet is a Sweep-family execution regardless of shape (plain
         // transfer or threshold sweep) — there is no separate "transfer"
@@ -345,6 +350,7 @@ mod tests {
                 gas_limit: None,
                 view_tag_hex: None,
                 stealth_hash_convention: None,
+                prerequisite_job_ids: Vec::new(),
             },
         ];
 
