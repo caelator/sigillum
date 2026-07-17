@@ -33,8 +33,16 @@ ratified), D-E (ERC-6538 deferred).
     (`ee1540d`..`32ccd22`, 8 commits; adversarial suite
     `tests/discovery_operations.rs`); 1.1b async drain/maintenance
     (`12b5ccc`..`8dfbbb8`, 5 commits; `tests/queue_operations.rs`).
-  - 1.3 SSE channel + passive-read idle fix; 1.5 pagination/filter/sort —
-    implementation complete, committing next.
+  - 1.3 SSE channel + passive-read idle fix (`8635c7f`, wiring `68fde62`);
+    1.5 pagination/filter/sort on six list endpoints (`a1187c4`, wiring
+    `68fde62`); 19 pagination integration tests, SSE idle-eviction proof.
+  - 1.6 background scheduler (`e6a7134`, `b258acc`, `4e569a2`): queue
+    retries/receipts/deposit refresh advance with no client; guard with
+    skip-on-contention; honors lock/gates/kill switch; env config; diagnostics
+    block.
+  - 1.7+1.8 (`0d509dc`): status/operations polling joins events as passive
+    reads (idle-lock can no longer be defeated by an open console);
+    `/api/chains*` canonical, `/api/inventory/chains*` deprecated alias.
 
 ## Original plan
 
