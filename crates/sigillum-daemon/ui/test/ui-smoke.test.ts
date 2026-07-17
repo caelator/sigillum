@@ -2215,6 +2215,116 @@ test("deposit create without stealth generation warnings shows no warning UI", a
   equal(box.innerHTML, "");
 });
 
+test("deposit create sends request-gas fields when the payer-gas option is checked", async () => {
+  const dom = installDom([
+    "depositNativeWalletProfile",
+    "depositNativeExpected",
+    "depositNativeMinSweep",
+    "depositNativeDestination",
+    "depositNativeNote",
+    "depositNativeAutoQueue",
+    "depositNativeRequestGas",
+    "depositNativeGasAmount",
+    "depositErc20WalletProfile",
+    "depositErc20TokenAddress",
+    "depositErc20Expected",
+    "depositErc20MinSweep",
+    "depositErc20Destination",
+    "depositErc20Note",
+    "depositErc20AutoQueue",
+    "depositErc20RequestGas",
+    "depositErc20GasAmount",
+    "depositCreateWarnings",
+  ]);
+  dom.el("depositNativeWalletProfile").value = "stealth-main";
+  dom.el("depositNativeRequestGas").checked = true;
+  dom.el("depositNativeGasAmount").value = "0x5208";
+  dom.el("depositErc20WalletProfile").value = "stealth-main";
+  dom.el("depositErc20TokenAddress").value = "0xtoken";
+  const calls: Array<{ method: string; path: string; body?: any }> = [];
+  const operations = createOperationsActions({
+    api: async (method, path, body) => {
+      calls.push({ method, path, body });
+      return { status: "created", deposit: { id: "dep-gas" }, warnings: [] };
+    },
+    toast: () => undefined,
+    refresh: () => undefined,
+    showResultBox,
+    updateNextStepCard: () => undefined,
+  });
+
+  await operations.createNativeDeposit();
+  await operations.createErc20Deposit();
+
+  const nativeBody = calls.find(
+    (call) => call.path === "/api/deposits/eth-stealth/create-native",
+  )?.body;
+  equal(nativeBody.request_gas, true);
+  equal(nativeBody.gas_amount_wei_hex, "0x5208");
+  const erc20Body = calls.find(
+    (call) => call.path === "/api/deposits/eth-stealth/create-erc20",
+  )?.body;
+  // Unchecked: the request goes out with request_gas off and no gas amount.
+  equal(erc20Body.request_gas, false);
+  equal(erc20Body.gas_amount_wei_hex, null);
+  // The gas amount field clears after a successful create.
+  equal(dom.el("depositNativeGasAmount").value, "");
+});
+
+test("deposit rows surface requested gas, sponsor top-up state, and the needs-gas explainer", () => {
+  const dom = installDom(["depositList", "queueList"]);
+  const operations = createOperationsActions({
+    api: async () => ({}),
+    toast: () => undefined,
+    refresh: () => undefined,
+    showResultBox: () => undefined,
+    updateNextStepCard: () => undefined,
+  });
+  operations.renderDeposits([
+    {
+      id: "dep-needs-gas-manual",
+      status: "funded_needs_gas",
+      asset_kind: "erc20",
+      wallet_profile: "daily",
+      short_name: "dep-1",
+      stealth_address: "0xstealth1",
+      ephemeral_public_key_hex: "0xephem1",
+      view_tag_hex: "0x01",
+      token_address: "0xtoken",
+      requested_gas_wei_hex: "0x" + (42000000000000n).toString(16),
+      observed_native_balance_wei_hex: "0x0",
+      auto_queue_sweep: true,
+      created_at_unix: 1,
+      updated_at_unix: 2,
+    },
+    {
+      id: "dep-needs-gas-sponsored",
+      status: "funded_needs_gas",
+      asset_kind: "erc20",
+      wallet_profile: "daily",
+      short_name: "dep-2",
+      stealth_address: "0xstealth2",
+      ephemeral_public_key_hex: "0xephem2",
+      view_tag_hex: "0x02",
+      token_address: "0xtoken",
+      gas_topup_job_id: "job-topup-1",
+      gas_topup_job_state: "sent",
+      auto_queue_sweep: true,
+      created_at_unix: 1,
+      updated_at_unix: 2,
+    },
+  ]);
+  const html = dom.el("depositList").innerHTML;
+  // Requested payer gas humanizes to ETH.
+  ok(html.includes("requested payer gas=0.000042 ETH"), html);
+  // A gas-starved deposit without a sponsor explains the manual path.
+  ok(html.includes("no native gas for the sweep"), html);
+  ok(html.includes("fund the address manually"), html);
+  // A sponsored deposit shows the top-up job state and what it waits for.
+  ok(html.includes("sponsor top-up state=sent"), html);
+  ok(html.includes("waiting for the sponsor gas top-up to confirm"), html);
+});
+
 test("treasury party delete requires confirmation", async () => {
   installDom(["treasuryPartyList", "treasuryReceiveParty"]);
   const calls: Array<{ method: string; path: string; body?: any }> = [];

@@ -27,6 +27,13 @@ function input(id: string): HTMLInputElement {
   return document.getElementById(id) as HTMLInputElement;
 }
 
+// Checkbox reads that tolerate a missing element (older/smoke DOMs): absent
+// means unchecked, never a throw.
+function checkboxChecked(id: string): boolean {
+  const el = document.getElementById(id) as HTMLInputElement | null;
+  return el ? el.checked : false;
+}
+
 function describeQueueJob(job: any): string {
   const kind = job.kind || "unknown";
   switch (kind) {
@@ -165,6 +172,29 @@ function depositObservedLine(deposit: any): string {
   );
 }
 
+function depositGasLine(deposit: any): string {
+  // The gas story in human terms: what the payer was asked to attach, what a
+  // sponsor top-up is doing, and what a `funded_needs_gas` deposit waits for.
+  const parts: string[] = [];
+  if (deposit.requested_gas_wei_hex) {
+    parts.push(
+      "requested payer gas=" +
+        amountWithRawHtml(deposit.requested_gas_wei_hex, { symbol: "ETH" }),
+    );
+  }
+  if (deposit.gas_topup_job_id) {
+    parts.push("sponsor top-up state=" + esc(deposit.gas_topup_job_state || "queued"));
+  }
+  if (deposit.status === "funded_needs_gas") {
+    parts.push(
+      deposit.gas_topup_job_id
+        ? "needs gas: waiting for the sponsor gas top-up to confirm before the sweep can run"
+        : "needs gas: the deposit address holds tokens but no native gas for the sweep — attach gas as the payer or fund the address manually",
+    );
+  }
+  return parts.join(" · ");
+}
+
 // Stealth address generation returns non-blocking cautionary warnings
 // (foreign meta-address, ephemeral key reuse). They are always serialized
 // but may be absent on older daemons, so read them defensively.
@@ -188,6 +218,7 @@ export function createOperationsActions(deps: OperationsDeps) {
         const queueInfo = deposit.queue_job_id
           ? "job=" + deposit.queue_job_id + " · state=" + (deposit.queue_job_state || "-")
           : "job=-";
+        const gasLine = depositGasLine(deposit);
         const announcement = deposit.announcement;
         const announcementMeta = announcement
           ? "<br>announcer=" +
@@ -230,6 +261,7 @@ export function createOperationsActions(deps: OperationsDeps) {
           announcementMeta +
           "<br>" +
           depositObservedLine(deposit) +
+          (gasLine ? "<br>" + gasLine : "") +
           "<br>" +
           "token=" +
           esc(deposit.token_address || "-") +
@@ -311,6 +343,8 @@ export function createOperationsActions(deps: OperationsDeps) {
       sweep_destination_address: optionalTextValue("depositNativeDestination"),
       min_sweep_value_wei_hex: optionalTextValue("depositNativeMinSweep"),
       note: optionalTextValue("depositNativeNote"),
+      request_gas: checkboxChecked("depositNativeRequestGas"),
+      gas_amount_wei_hex: optionalTextValue("depositNativeGasAmount"),
     });
     if (r.error) {
       deps.toast(r.error, "error");
@@ -321,6 +355,7 @@ export function createOperationsActions(deps: OperationsDeps) {
       "depositNativeMinSweep",
       "depositNativeDestination",
       "depositNativeNote",
+      "depositNativeGasAmount",
     ]);
     deps.toast("Native deposit created");
     surfaceStealthGenerationWarnings(r);
@@ -342,6 +377,8 @@ export function createOperationsActions(deps: OperationsDeps) {
       sweep_destination_address: optionalTextValue("depositErc20Destination"),
       min_sweep_amount_hex: optionalTextValue("depositErc20MinSweep"),
       note: optionalTextValue("depositErc20Note"),
+      request_gas: checkboxChecked("depositErc20RequestGas"),
+      gas_amount_wei_hex: optionalTextValue("depositErc20GasAmount"),
     });
     if (r.error) {
       deps.toast(r.error, "error");
@@ -353,6 +390,7 @@ export function createOperationsActions(deps: OperationsDeps) {
       "depositErc20MinSweep",
       "depositErc20Destination",
       "depositErc20Note",
+      "depositErc20GasAmount",
     ]);
     deps.toast("ERC-20 deposit created");
     surfaceStealthGenerationWarnings(r);

@@ -927,6 +927,14 @@
           </label>
           <button class="btn-primary" data-action="createNativeDeposit">Create Native</button>
         </div>
+        <div class="form-row">
+          <label class="checkbox-row">
+            <input type="checkbox" id="depositNativeRequestGas">
+            Request gas from payer
+          </label>
+          <input type="text" id="depositNativeGasAmount" placeholder="Gas amount wei hex (optional)">
+        </div>
+        <p class="field-hint">Request gas from payer: the announcement metadata follows the EIP-5564 native layout, so a payer wallet that implements ERC-5564 metadata learns the total ETH to attach — payment plus the gas your sweep will spend. Without it the payer must be told out-of-band and the sweep spends from the payment itself.</p>
 
         <div class="section-divider"></div>
 
@@ -948,6 +956,14 @@
           </label>
           <button class="btn-primary" data-action="createErc20Deposit">Create ERC-20</button>
         </div>
+        <div class="form-row">
+          <label class="checkbox-row">
+            <input type="checkbox" id="depositErc20RequestGas">
+            Request gas from payer
+          </label>
+          <input type="text" id="depositErc20GasAmount" placeholder="Gas amount wei hex (optional)">
+        </div>
+        <p class="field-hint">Request gas from payer: the announcement metadata follows the EIP-5564 token layout, so a payer wallet that implements ERC-5564 metadata learns the token and amount to send; the requested gas is the native amount the payer should attach to the deposit address alongside the transfer (token transfers cannot pay their own sweep gas).</p>
         <div id="depositCreateWarnings" class="warning-box hidden"></div>
 
         <div class="section-divider"></div>
