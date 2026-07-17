@@ -87,6 +87,43 @@ ratified), D-E (ERC-6538 deferred).
     e2e covers fund→observe→sweep→retire→purge plus below-threshold,
     gates-off, dedupe, and linkage companions. (3.1/3.2/3.4/3.5 landed
     earlier on this branch; their ledger entries were not backfilled.)
+  - 3.1 provider partitioning (`adab7a0`..`0341159`): same-chain scan probes
+    distribute across providers by consistent per-address assignment with
+    jitter (`partition_providers` scan flag); store schema v21; honest
+    residual documentation (subset + operator IP still visible; no Tor).
+  - 3.2 forget/prune (`7a20da8`..`b113299`): `/api/inventory/addresses/delete`
+    (selector-scoped), `/api/treasury/receive-addresses/purge`
+    (retired-only), profile-delete `prune_inventory` cascade (atomic,
+    audit-counted); bindings never resurrect; backup docs updated.
+  - 3.4 xpub hygiene (`1ae8a75`, `06dd23f`): export responses carry an
+    exposure warning (CLI prints to stderr), console warns + gates first copy
+    per session (inform tier); the unauthenticated xpub-derive oracle is
+    documented and debug-traced.
+  - 3.5 linkage defaults + common-funder (`5d1ff1c`, `c9960c4`, `776c870`,
+    `af450c3`): `block_cross_party_linkage` defaults ON at the API/default
+    policy layer (pre-tag adjustment); advisory `common_gas_funder` risk
+    findings from plan generation and stealth sponsor detection.
+  - Maintenance contract fix (`550b69f`): `one_time_receive` summary is only
+    emitted when one-time allocations exist (byte-identity restored).
+- **Phase 4**:
+  - 4.1 frontend core (`2bfa7f3`..`8da10e8`): strict-typed `ui/src/core/` —
+    observable store, keyed `renderList`, hash router with the
+    legacy-section adapter contract, SSE client with poll fallback, typed API
+    client with a discriminated error union; refresh-meta proof-of-life
+    migration.
+  - 4.2 design system v2 (`ea7869e`): consequence-tier tokens, `[data-tier]`,
+    `.table`, `.skeleton`, `.page-header`, `.section-empty`, `.nums`;
+    `ui/DESIGN.md` rules.
+  - 4.3 all five destinations rebuilt (`a866c78`; controllers in
+    `ui/src/destinations/`, tests 87 → 183): Overview attention queue,
+    Move plan-review/queue/policy, Receiving lifecycle + payer instructions,
+    Portfolio tables + scan stepper, Vault security story. `renderList`
+    kept-key zombie fix with regression test; legacy hero null-safety
+    (`e545627`).
+  - **Checkpoint:** harness verification in progress — see
+    `docs/execution-handoff.md` §3 for the exact resume point (mock-data
+    `/api/operations` gap diagnosed) and §4 for remaining work (4.4, 4.5,
+    Phase 5).
 
 ## Original plan
 
