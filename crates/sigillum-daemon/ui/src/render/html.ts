@@ -27,6 +27,10 @@ export function pillClass(status: unknown): string {
   if (value.includes("underfunded")) {
     return "pill-warn";
   }
+  // `funded_needs_gas` contains "funded" but is a wait state, not a good one.
+  if (value.includes("needs_gas")) {
+    return "pill-warn";
+  }
   if (
     value.includes("ok") ||
     value.includes("pass") ||

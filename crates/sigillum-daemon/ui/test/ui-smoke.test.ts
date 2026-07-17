@@ -2323,6 +2323,8 @@ test("deposit rows surface requested gas, sponsor top-up state, and the needs-ga
   // A sponsored deposit shows the top-up job state and what it waits for.
   ok(html.includes("sponsor top-up state=sent"), html);
   ok(html.includes("waiting for the sponsor gas top-up to confirm"), html);
+  // A needs-gas status warns rather than reading as a healthy "funded" green.
+  ok(html.includes('pill pill-warn">funded needs gas<'), html);
 });
 
 test("treasury party delete requires confirmation", async () => {
