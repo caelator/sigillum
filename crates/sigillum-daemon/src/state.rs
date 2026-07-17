@@ -49,6 +49,7 @@ use recovery_files::{restore_stashed_ops_dir, stash_snapshot_placeholder_ops};
 use crate::DaemonInitError;
 use crate::audit_db::AuditQuery;
 use crate::audit_log::{AuditEventSpec, StoredAuditEvent};
+use crate::events::EventBus;
 use crate::operation_registry::{OperationCancelRequest, OperationHandle, OperationRegistry};
 use crate::operations::{OperationGuard, PendingOperationSpec, list_pending_operations};
 use crate::policy::RuntimePolicy;
@@ -196,6 +197,11 @@ pub struct AppState {
     /// scans). Process-lifetime by design: durable scan progress lives in
     /// the persisted inventory checkpoints and discovery job records.
     operations: ResilientMutex<OperationRegistry>,
+    /// Fan-out hub for the `GET /api/events` SSE stream. Publishers are the
+    /// operation registry (via a sender clone), the queue state writers, and
+    /// the lock/compartment transitions below; see `events.rs` for the
+    /// bounded-channel backpressure contract.
+    events: EventBus,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -222,6 +228,10 @@ impl AppState {
             tracing::warn!(error = %error, "failed to initialize audit database");
         }
 
+        let events = EventBus::new();
+        let mut operation_registry = OperationRegistry::new();
+        operation_registry.set_event_sender(events.sender());
+
         Ok(Self {
             fido2,
             base_dir,
@@ -242,7 +252,8 @@ impl AppState {
             startup_error: ResilientMutex::new(None),
             lock_state: ResilientMutex::new(LockState::Ready),
             biometric_challenges: ResilientMutex::new(VecDeque::new()),
-            operations: ResilientMutex::new(OperationRegistry::new()),
+            operations: ResilientMutex::new(operation_registry),
+            events,
         })
     }
 
@@ -392,6 +403,71 @@ impl AppState {
         self.operations.lock().running_for_related(related_id)
     }
 
+    // ── Event bus (SSE fan-out) ───────────────────────────────────
+    //
+    // `operation` events are emitted inside the operation registry itself
+    // (it holds a sender clone), which keeps emission exactly at the
+    // mutation points. Queue and status transitions publish through the
+    // helpers below.
+
+    /// Register a new subscriber on the daemon event bus.
+    pub fn subscribe_events(&self) -> tokio::sync::broadcast::Receiver<sigillum_api::DaemonEvent> {
+        self.events.subscribe()
+    }
+
+    /// Publish a queue-job state transition. `previous_state` is the job's
+    /// state before the mutation (`None` for a newly created job); no event
+    /// is emitted when the state did not actually change.
+    pub(crate) fn publish_queue_job_transition(
+        &self,
+        job: &sigillum_api::QueueJob,
+        previous_state: Option<&str>,
+    ) {
+        if previous_state == Some(job.state.as_str()) {
+            return;
+        }
+        self.events.publish(sigillum_api::DaemonEvent::Queue(
+            sigillum_api::QueueJobEvent {
+                v: sigillum_api::EVENTS_PROTOCOL_VERSION,
+                job_id: job.id.clone(),
+                state: job.state.clone(),
+                last_error: job.last_error.clone(),
+            },
+        ));
+    }
+
+    /// Publish a `status` event (`locked`, `unlocked`,
+    /// `compartment_switched`), stamped with the current default active
+    /// compartment.
+    fn publish_status_event(&self, kind: &'static str) {
+        self.events.publish(sigillum_api::DaemonEvent::Status(
+            sigillum_api::StatusEvent {
+                v: sigillum_api::EVENTS_PROTOCOL_VERSION,
+                kind: kind.into(),
+                active_compartment_id: self.default_active_compartment_id(),
+            },
+        ));
+    }
+
+    /// Build the `snapshot` event payload for a new SSE subscriber: the
+    /// current lock status plus the live (non-terminal) operations, so the
+    /// client can sync without a second request.
+    pub fn events_snapshot(&self) -> sigillum_api::EventsSnapshot {
+        let operations = self
+            .operations
+            .lock()
+            .list(crate::operation_registry::MAX_TRACKED_OPERATIONS)
+            .into_iter()
+            .filter(|operation| !crate::operation_registry::is_terminal_state(&operation.state))
+            .collect();
+        sigillum_api::EventsSnapshot {
+            v: sigillum_api::EVENTS_PROTOCOL_VERSION,
+            locked: !self.is_unlocked(),
+            active_compartment_id: self.default_active_compartment_id(),
+            operations,
+        }
+    }
+
     #[must_use]
     pub fn queue_execution_pause_latched(&self) -> bool {
         self.queue_execution_paused.load(Ordering::Acquire)
@@ -511,6 +587,7 @@ impl AppState {
         }
         drop(vaults);
         self.unlocked.lock().insert(id, meta);
+        self.publish_status_event(sigillum_api::STATUS_EVENT_UNLOCKED);
     }
 
     /// Unlock multiple compartments at once (cascading FIDO2).
@@ -523,6 +600,9 @@ impl AppState {
             }
             drop(vaults);
             self.unlocked.lock().insert(meta.id, meta.clone());
+        }
+        if !compartments.is_empty() {
+            self.publish_status_event(sigillum_api::STATUS_EVENT_UNLOCKED);
         }
     }
 
@@ -680,6 +760,8 @@ impl AppState {
         if let Some(session) = sessions.get_mut(&session_key) {
             session.active_compartment_id = Some(id);
         }
+        drop(sessions);
+        self.publish_status_event(sigillum_api::STATUS_EVENT_COMPARTMENT_SWITCHED);
         Ok(())
     }
 
@@ -736,10 +818,31 @@ impl AppState {
         self.unlocked.lock().clear();
         self.sessions.lock().clear();
         self.finish_locking();
+        self.publish_status_event(sigillum_api::STATUS_EVENT_LOCKED);
     }
 
     /// Verify a candidate token against the stored session token.
+    ///
+    /// This is the ACTIVE verify: a successful call refreshes the session's
+    /// `last_activity`, deferring the idle auto-lock. Reads that must not
+    /// extend session life (today: `GET /api/events`; later the console's
+    /// status polling) use [`Self::verify_token_passive`] instead — mark a
+    /// route passive at its verify call site.
     pub fn verify_token(&self, candidate: &str) -> bool {
+        self.verify_token_inner(candidate, true)
+    }
+
+    /// Verify a candidate token WITHOUT counting the request as activity.
+    ///
+    /// PASSIVE verify: expiry and idle eviction apply exactly as in
+    /// [`Self::verify_token`], but a successful call leaves `last_activity`
+    /// untouched, so a permanently connected or polling observer cannot
+    /// defeat the vault idle auto-lock.
+    pub fn verify_token_passive(&self, candidate: &str) -> bool {
+        self.verify_token_inner(candidate, false)
+    }
+
+    fn verify_token_inner(&self, candidate: &str, touch_activity: bool) -> bool {
         if self.is_locking() {
             return false;
         }
@@ -757,7 +860,9 @@ impl AppState {
             sessions.remove(&session_key);
             return false;
         }
-        session.last_activity = Instant::now();
+        if touch_activity {
+            session.last_activity = Instant::now();
+        }
         true
     }
 

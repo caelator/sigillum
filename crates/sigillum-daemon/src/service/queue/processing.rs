@@ -486,7 +486,10 @@ impl SigillumService {
             }
             };
 
+            let queue_state_before = queue.jobs[job_index].state.clone();
             super::outcomes::apply(&mut queue.jobs[job_index], result, now, policy, &mut tally);
+            self.state
+                .publish_queue_job_transition(&queue.jobs[job_index], Some(&queue_state_before));
 
             // A newly signed job crosses a durable prepare barrier before
             // any external network call. Then persist `submitted_unknown`
@@ -509,12 +512,17 @@ impl SigillumService {
                     let broadcast_result = self
                         .broadcast_prepared_queue_job(token, &submitted_job, false, true)
                         .await;
+                    let queue_state_before = queue.jobs[job_index].state.clone();
                     super::outcomes::apply(
                         &mut queue.jobs[job_index],
                         broadcast_result,
                         now,
                         policy,
                         &mut tally,
+                    );
+                    self.state.publish_queue_job_transition(
+                        &queue.jobs[job_index],
+                        Some(&queue_state_before),
                     );
                 }
             }

@@ -24,9 +24,11 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use sigillum_api::{
-    OPERATION_STATE_CANCEL_REQUESTED, OPERATION_STATE_CANCELED, OPERATION_STATE_COMPLETED,
-    OPERATION_STATE_FAILED, OPERATION_STATE_RUNNING, Operation, OperationProgress,
+    DaemonEvent, EVENTS_PROTOCOL_VERSION, OPERATION_STATE_CANCEL_REQUESTED,
+    OPERATION_STATE_CANCELED, OPERATION_STATE_COMPLETED, OPERATION_STATE_FAILED,
+    OPERATION_STATE_RUNNING, Operation, OperationEvent, OperationProgress,
 };
+use tokio::sync::broadcast;
 
 /// Maximum retained operations. Terminal records beyond this bound are
 /// evicted oldest-first; running records are never evicted.
@@ -72,12 +74,32 @@ struct OperationRecord {
 pub struct OperationRegistry {
     /// Records in insertion order (oldest front, newest back).
     records: VecDeque<OperationRecord>,
+    /// Optional fan-out for `operation` events (the daemon's SSE bus).
+    /// Emitted inside each mutation, so subscribers observe create/state/
+    /// progress transitions in registry-mutation order.
+    events: Option<broadcast::Sender<DaemonEvent>>,
 }
 
 impl OperationRegistry {
     pub(crate) fn new() -> Self {
         Self {
             records: VecDeque::new(),
+            events: None,
+        }
+    }
+
+    /// Attach the daemon event bus; every subsequent mutation emits an
+    /// `operation` event carrying the post-mutation record.
+    pub(crate) fn set_event_sender(&mut self, sender: broadcast::Sender<DaemonEvent>) {
+        self.events = Some(sender);
+    }
+
+    fn emit(events: &Option<broadcast::Sender<DaemonEvent>>, operation: &Operation) {
+        if let Some(events) = events {
+            let _ = events.send(DaemonEvent::Operation(OperationEvent {
+                v: EVENTS_PROTOCOL_VERSION,
+                operation: operation.clone(),
+            }));
         }
     }
 
@@ -103,6 +125,9 @@ impl OperationRegistry {
             },
             cancel_requested: cancel_requested.clone(),
         });
+        if let Some(record) = self.records.back() {
+            Self::emit(&self.events, &record.operation);
+        }
         self.prune();
         OperationHandle {
             id,
@@ -139,6 +164,7 @@ impl OperationRegistry {
                 record.operation.related_ids.push(related_id);
             }
             record.operation.updated_at_unix = now_unix();
+            Self::emit(&self.events, &record.operation);
         }
     }
 
@@ -150,6 +176,7 @@ impl OperationRegistry {
         {
             record.operation.progress.processed = processed;
             record.operation.updated_at_unix = now_unix();
+            Self::emit(&self.events, &record.operation);
         }
     }
 
@@ -164,6 +191,7 @@ impl OperationRegistry {
         {
             record.operation.progress.total = Some(total);
             record.operation.updated_at_unix = now_unix();
+            Self::emit(&self.events, &record.operation);
         }
     }
 
@@ -180,6 +208,7 @@ impl OperationRegistry {
             record.operation.error = error;
             record.operation.updated_at_unix = now;
             record.operation.completed_at_unix = Some(now);
+            Self::emit(&self.events, &record.operation);
         }
         self.prune();
     }
@@ -202,6 +231,7 @@ impl OperationRegistry {
         record.cancel_requested.store(true, Ordering::Release);
         record.operation.state = OPERATION_STATE_CANCEL_REQUESTED.to_string();
         record.operation.updated_at_unix = now_unix();
+        Self::emit(&self.events, &record.operation);
         OperationCancelRequest::Signaled(record.operation.clone())
     }
 
@@ -221,6 +251,7 @@ impl OperationRegistry {
             record.cancel_requested.store(true, Ordering::Release);
             record.operation.state = OPERATION_STATE_CANCEL_REQUESTED.to_string();
             record.operation.updated_at_unix = now_unix();
+            Self::emit(&self.events, &record.operation);
         }
         Some(record.operation.clone())
     }

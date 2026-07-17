@@ -286,6 +286,39 @@ Current daemon behavior:
   and block cursors for scans; the queue and deposit stores for drains and
   maintenance cycles), so a restart loses only the live view, never the
   ability to resume or re-drive
+- streams daemon state to subscribed clients over `GET /api/events`
+  (Server-Sent Events; plan task 1.3 / decision D-D, ratified 2026-07-17 —
+  see the amended non-goal below). The vocabulary is deliberately minimal and
+  versioned (`v: 1` in every payload; `sigillum_api::response::events`):
+  - `snapshot` — first frame on every connection, carrying the lock status
+    and the live (non-terminal) operations so a client syncs without a
+    second request; also re-sent as a resync frame when a subscriber falls
+    behind (bounded per-subscriber channel, 256 events — on lag the oldest
+    events are dropped and the subscriber is resynced rather than stalled;
+    emitters never block)
+  - `operation` — create/state/progress transitions from the operation
+    registry; payload is the full post-transition `Operation`
+  - `queue` — queue-job state transitions (`{job_id, state, last_error?}`)
+    emitted at the drain/broadcast writes (`service/queue/`) and on enqueue;
+    deliberately not the full job record (no payload or receipt material)
+  - `status` — `locked`, `unlocked`, `compartment_switched`
+  Heartbeat comments (`:hb`) are emitted every 25 s so intermediaries do not
+  kill the stream. Auth is the same bearer session model; because browser
+  `EventSource` cannot set headers, the token is also accepted as `?session=`
+  — loopback-only by design (CORS stays pinned to the loopback origin), and
+  non-browser clients should prefer the `Authorization` header since URLs
+  are leak-prone (logs, history, proxies). The connect verify is a PASSIVE
+  read (`AppState::verify_token_passive` via
+  `service::require_passive_full_session_token`): the stream neither bumps
+  the session's idle clock at connect nor over its lifetime, so an
+  always-open events tab cannot defeat the vault auto-lock — the session is
+  evicted on the idle timeout exactly as if the stream were not there
+  (proven by `crates/sigillum-daemon/tests/events_idle.rs`). The stream
+  performs no re-verifies after connect, so a subscriber whose session was
+  evicted keeps receiving events until it disconnects (loopback-local, and
+  it learns of the lock via the `locked` status event). More read-only
+  routes can be marked passive later at their verify call site; routes that
+  perform work must stay on the active verify
 - runs EVM discovery scans either synchronously inside the request (default,
   unchanged for existing clients) or as a background operation
   (`inventory/scan/evm` with `run_async: true`, or a discovery-job resume).
@@ -332,7 +365,14 @@ What it intentionally does not do today:
 - remote or hosted operating modes, including a polished multi-host
   client/server story
 - multi-host coordination
-- SSE streams
+- ~~SSE streams~~ — amended 2026-07-17 per decision D-D
+  (`docs/operator-surface-and-privacy-plan.md`): a minimal, loopback-only SSE
+  channel (`GET /api/events`; status/queue/operation/snapshot, `v: 1`
+  payloads) is ratified as a 1.x addition so clients stop polling — polling
+  with the session token reset idle activity and silently defeated the
+  15-minute vault auto-lock, which the channel's passive-read auth fixes.
+  Anything beyond that minimal vocabulary (general pub/sub, remote
+  subscribers) remains a non-goal
 - remote audit aggregation pipeline
 - deep on-chain indexing beyond the implemented provider-RPC balance checks,
   bounded EVM transfer-log discovery, and operator-bounded or

@@ -123,6 +123,62 @@ fn idle_sessions_are_rejected_and_removed() {
     assert_eq!(state.session_count(), 0);
 }
 
+/// A passive verify (the `GET /api/events` path) authenticates but must not
+/// refresh `last_activity`; an active verify must.
+#[test]
+fn passive_verify_does_not_refresh_activity_but_active_verify_does() {
+    let dir = TempDir::new().unwrap();
+    let state = AppState::new(dir.path().to_path_buf()).expect("app state should initialize");
+
+    state.unlock_compartment(0, [1u8; 32], meta(0, 1, "daily"));
+    let session = state.create_session(Some(0));
+
+    let before = state.sessions.lock().get(&session).unwrap().last_activity;
+    assert!(state.verify_token_passive(&session));
+    let after_passive = state.sessions.lock().get(&session).unwrap().last_activity;
+    assert_eq!(
+        before, after_passive,
+        "passive verify must not touch last_activity"
+    );
+
+    std::thread::sleep(Duration::from_millis(10));
+    assert!(state.verify_token(&session));
+    let after_active = state.sessions.lock().get(&session).unwrap().last_activity;
+    assert!(
+        after_active > after_passive,
+        "active verify must refresh last_activity"
+    );
+}
+
+/// The contract that keeps an always-open SSE stream from defeating the
+/// vault auto-lock: a session that only ever had passive reads is still
+/// evicted once it goes idle past `idle_lock_secs`.
+#[test]
+fn passive_only_session_is_still_evicted_on_idle_timeout() {
+    let dir = TempDir::new().unwrap();
+    let state = AppState::new(dir.path().to_path_buf()).expect("app state should initialize");
+
+    state.unlock_compartment(0, [1u8; 32], meta(0, 1, "daily"));
+    let session = state.create_session(Some(0));
+
+    // Repeated passive verifies (an SSE connect plus reconnects) succeed...
+    assert!(state.verify_token_passive(&session));
+    assert!(state.verify_token_passive(&session));
+
+    // ...but the idle clock keeps running from the last ACTIVE request.
+    {
+        let mut sessions = state.sessions.lock();
+        sessions.get_mut(&session).unwrap().last_activity =
+            Instant::now() - Duration::from_secs(state.runtime_policy().idle_lock_secs + 1);
+    }
+
+    // The next verify — passive or active — evicts it.
+    assert!(!state.verify_token_passive(&session));
+    assert!(!state.verify_token(&session));
+    assert_eq!(state.session_count(), 0);
+    assert!(state.idle_lock_due());
+}
+
 #[test]
 fn idle_lock_due_requires_all_sessions_to_be_idle() {
     let dir = TempDir::new().unwrap();

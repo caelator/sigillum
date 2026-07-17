@@ -14,8 +14,10 @@ categories = ["cryptography", "api-bindings"]
 [dependencies]
 sigillum-api = { workspace = true }
 sigillum-core = { workspace = true }
-reqwest = { workspace = true }
+reqwest = { workspace = true, features = ["stream"] }
 tokio = { workspace = true }
+futures-core = { workspace = true }
+bytes = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 secrecy = { workspace = true }

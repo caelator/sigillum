@@ -26,6 +26,7 @@ impl SigillumService {
         now: u64,
     ) -> ServiceResult<()> {
         if queue.jobs[job_index].state != super::QUEUE_STATE_SUBMITTED_UNKNOWN {
+            let previous_state = queue.jobs[job_index].state.clone();
             queue.jobs[job_index].state = super::QUEUE_STATE_SUBMITTED_UNKNOWN.into();
             queue.jobs[job_index].updated_at_unix = now;
             queue.jobs[job_index]
@@ -34,6 +35,8 @@ impl SigillumService {
                 .get_or_insert(now);
             persist_queue(&self.state.base_dir, queue)?;
             super::failpoints::hit(super::failpoints::AFTER_SUBMITTED_UNKNOWN_PERSIST);
+            self.state
+                .publish_queue_job_transition(&queue.jobs[job_index], Some(&previous_state));
         }
         Ok(())
     }
