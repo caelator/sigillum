@@ -17,6 +17,7 @@ mod plan_steps;
 mod processing;
 mod replay;
 mod seed_sends;
+mod selection;
 mod serialization;
 mod state;
 mod status;

@@ -153,6 +153,20 @@ impl OperationRegistry {
         }
     }
 
+    /// Set the total work extent for an operation that only learns it after
+    /// registration (for example a queue drain's selected job count, known
+    /// once the queue is loaded under the guard).
+    pub(crate) fn set_total(&mut self, id: &str, total: u64) {
+        if let Some(record) = self
+            .records
+            .iter_mut()
+            .find(|record| record.operation.id == id)
+        {
+            record.operation.progress.total = Some(total);
+            record.operation.updated_at_unix = now_unix();
+        }
+    }
+
     /// Mark an operation terminal (`canceled`, `completed`, or `failed`).
     pub(crate) fn finish(&mut self, id: &str, state: &str, error: Option<String>) {
         debug_assert!(is_terminal_state(state));

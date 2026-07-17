@@ -357,6 +357,12 @@ impl AppState {
         self.operations.lock().set_progress(id, processed);
     }
 
+    /// Set the total work extent for an operation (learned after
+    /// registration, e.g. a drain's selected job count).
+    pub fn operation_set_progress_total(&self, id: &str, total: u64) {
+        self.operations.lock().set_total(id, total);
+    }
+
     /// Mark an operation terminal (`canceled`, `completed`, or `failed`).
     pub fn finish_operation(&self, id: &str, state: &str, error: Option<String>) {
         self.operations.lock().finish(id, state, error);
