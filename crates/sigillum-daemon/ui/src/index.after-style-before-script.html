@@ -771,6 +771,10 @@
           <input type="number" id="inventoryAccountLimit" placeholder="Account limit" value="3" class="input-mid">
           <input type="text" id="inventoryTokenAddress" placeholder="ERC-20 token address (optional)">
           <button class="btn-primary" data-action="scanInventoryEvm">Scan EVM</button>
+          <label class="checkbox-row" title="Start the scan as a background operation you can cancel; progress shows in the job list">
+            <input type="checkbox" id="inventoryRunAsync">
+            Run in background
+          </label>
         </div>
         <div class="form-row">
           <input type="text" id="inventoryWatchAddress" placeholder="Watch address (optional)">

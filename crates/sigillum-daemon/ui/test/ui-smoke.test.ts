@@ -359,7 +359,7 @@ test("shell renders the active compartment from the canonical status shape", () 
   equal(dom.el("secretCount").textContent, "(locked)");
 });
 
-test("discovery job cancel and resume controls stay gated until the daemon honors them", () => {
+test("discovery job cancel and resume controls drive the real endpoints", async () => {
   const dom = installDom([
     "inventoryJobList",
     "inventoryAddressList",
@@ -367,9 +367,30 @@ test("discovery job cancel and resume controls stay gated until the daemon honor
     "nftMetadataList",
     "nftSuspiciousList",
   ]);
+  const calls: Array<{ method: string; path: string; body: unknown }> = [];
+  const toasts: string[] = [];
   const inventory = createInventoryActions({
-    api: async () => ({}),
-    toast: () => undefined,
+    api: async (method: string, path: string, body?: unknown) => {
+      calls.push({ method, path, body });
+      if (path === "/api/discovery/jobs/cancel") {
+        return {
+          status: "cancel_requested",
+          job: { id: "scan-1", status: "running" },
+          operation: { id: "op-1", state: "cancel_requested" },
+        };
+      }
+      if (path === "/api/discovery/jobs/resume") {
+        return {
+          status: "running",
+          job: { id: "scan-2", status: "running" },
+          operation: { id: "op-2", state: "running" },
+        };
+      }
+      return {};
+    },
+    toast: (message: string) => {
+      toasts.push(message);
+    },
     downloadJson: () => undefined,
   });
   inventory.renderInventoryState({
@@ -378,19 +399,42 @@ test("discovery job cancel and resume controls stay gated until the daemon honor
     holdings: [],
   });
   const html = dom.el("inventoryJobList").innerHTML;
-  // The job list itself still renders…
+  // The job list renders with both verbs enabled — the daemon honors them
+  // for real since plan task 1.2 landed.
   ok(html.includes("scan-1"));
   ok(html.includes(">running</span>"));
-  // …but cancel/resume are visibly disabled with an explanation, because
-  // the daemon verbs do not actually stop a running scan (plan task 1.2).
   equal(html.split('data-action="cancelDiscoveryJob"').length - 1, 1);
   equal(html.split('data-action="resumeDiscoveryJob"').length - 1, 1);
-  equal(
-    html.split(
-      '<button class="btn-ghost" disabled title="Cancel/resume arrives in a future update"',
-    ).length - 1,
-    2,
-  );
+  ok(!html.includes("Cancel/resume arrives in a future update"));
+  ok(!html.includes("disabled title="));
+
+  // Cancel gates on the shared confirm dialog before posting.
+  const posts = () => calls.filter((call) => call.method === "POST");
+  let pending = inventory.cancelDiscoveryJob("scan-1");
+  equal(posts().length, 0, "no request before the dialog is answered");
+  await answerConfirm("action");
+  await pending;
+  deepEqual(posts()[0], {
+    method: "POST",
+    path: "/api/discovery/jobs/cancel",
+    body: { id: "scan-1" },
+  });
+  ok(toasts.some((message) => message.includes("Cancel requested")));
+
+  // Dismissing the dialog skips the request entirely.
+  pending = inventory.cancelDiscoveryJob("scan-1");
+  await answerConfirm("cancel");
+  await pending;
+  equal(posts().length, 1, "dismissed confirm must not post");
+
+  // Resume posts to the real verb and reports the background restart.
+  await inventory.resumeDiscoveryJob("scan-1");
+  deepEqual(posts()[posts().length - 1], {
+    method: "POST",
+    path: "/api/discovery/jobs/resume",
+    body: { id: "scan-1" },
+  });
+  ok(toasts.some((message) => message.includes("resumed in the background")));
 });
 
 test("session requests persist fresh tokens and clear stale tokens on 401", async () => {
@@ -2354,6 +2398,77 @@ test("inventory scan sends optional EVM watch-address probes", async () => {
   equal(requestBody.include_watch_book, true);
   equal(requestBody.provider_profile, "mainnet");
   equal(requestBody.block_tag, "latest");
+  equal(
+    requestBody.run_async,
+    undefined,
+    "run_async stays absent unless the background checkbox is checked",
+  );
+});
+
+test("inventory scan can run in background and surfaces the operation id", async () => {
+  const dom = installDom([
+    "inventoryWatchAddress",
+    "inventoryWatchLabel",
+    "inventoryWatchAddresses",
+    "inventoryIncludeWatchBook",
+    "inventoryTokenAddress",
+    "inventoryAllowanceSpender",
+    "inventoryPermit2Contract",
+    "inventoryPermit2Spender",
+    "inventoryNftOperator",
+    "inventoryWalletFamily",
+    "inventoryWalletProfile",
+    "inventoryProviderProfile",
+    "inventoryGapLimit",
+    "inventoryMaxIndex",
+    "inventoryDiscoverErc20Transfers",
+    "inventoryTokenDiscoveryFromBlock",
+    "inventoryTokenDiscoveryToBlock",
+    "inventoryTokenDiscoveryLimit",
+    "inventoryDiscoverErc20Allowances",
+    "inventoryProbeTokenRegistry",
+    "inventoryAllowanceLimit",
+    "inventoryDiscoverPermit2Allowances",
+    "inventoryPermit2AllowanceLimit",
+    "inventoryDiscoverErc721Transfers",
+    "inventoryDiscoverErc1155Transfers",
+    "inventoryDiscoverNftOperatorApprovals",
+    "inventoryNftOperatorApprovalLimit",
+    "inventoryNftDiscoveryFromBlock",
+    "inventoryNftDiscoveryToBlock",
+    "inventoryNftDiscoveryLimit",
+    "inventoryRunAsync",
+  ]);
+  dom.el("inventoryRunAsync").checked = true;
+  dom.el("inventoryProviderProfile").value = "mainnet";
+  let requestBody: any = null;
+  const toasts: string[] = [];
+  const inventory = createInventoryActions({
+    api: async (method: string, path: string, body?: unknown) => {
+      if (path === "/api/inventory/scan/evm") {
+        requestBody = body;
+        return {
+          job: { id: "job-1", status: "running" },
+          addresses: [],
+          holdings: [],
+          operation: { id: "op-1", kind: "inventory_scan_evm", state: "running" },
+        };
+      }
+      return {};
+    },
+    toast: (message: string) => {
+      toasts.push(message);
+    },
+    downloadJson: () => undefined,
+  });
+
+  await inventory.scanInventoryEvm();
+
+  equal(requestBody.run_async, true);
+  ok(
+    toasts.some((message) => message.includes("operation op-1")),
+    "toast surfaces the operation id: " + toasts.join(" | "),
+  );
 });
 
 test("watch-address parser accepts bulk line formats and dedupes", () => {

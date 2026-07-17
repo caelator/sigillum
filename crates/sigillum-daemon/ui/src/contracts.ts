@@ -143,6 +143,26 @@ export interface WalletDiscoveryBlockCursor {
   updated_at_unix: number;
 }
 
+// Background daemon operations (GET /api/operations, scan run_async).
+// Mirrors sigillum-api response/operations.rs; states/kinds are free-form
+// strings — treat unrecognized values as opaque.
+export interface OperationProgress {
+  processed: number;
+  total?: number;
+}
+
+export interface Operation {
+  id: string;
+  kind: string;
+  state: string;
+  progress: OperationProgress;
+  related_ids?: string[];
+  created_at_unix: number;
+  updated_at_unix: number;
+  completed_at_unix?: number | null;
+  error?: string | null;
+}
+
 export interface NftMetadataCacheEntry {
   chain_id: number;
   contract_address: string;

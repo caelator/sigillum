@@ -531,15 +531,13 @@ export function createInventoryActions(deps: InventoryActionsDeps) {
         esc(cursorSummary) +
         "</div></div>" +
         '<div class="entity-actions">' +
-        // Plan task 1.2: discovery-job cancel/resume is not yet honored by
-        // the running scan — the verbs only rewrite the stored job status,
-        // so enabling these controls would lie to the operator. They stay
-        // visible but disabled until the daemon implements real
-        // cancellation; the job list itself is unaffected.
-        '<button class="btn-ghost" disabled title="Cancel/resume arrives in a future update" data-action="cancelDiscoveryJob" data-arg0="' +
+        // Plan task 1.2: cancel/resume are real — cancel cooperatively
+        // stops the running scan (progress so far is kept), resume starts a
+        // new background operation continuing from the job's checkpoints.
+        '<button class="btn-ghost" title="Stop this scan after the current address; progress so far is kept" data-action="cancelDiscoveryJob" data-arg0="' +
         escAttr(job.id) +
         '">Cancel</button>' +
-        '<button class="btn-ghost" disabled title="Cancel/resume arrives in a future update" data-action="resumeDiscoveryJob" data-arg0="' +
+        '<button class="btn-ghost" title="Continue from this job&#39;s checkpoints in a new background scan" data-action="resumeDiscoveryJob" data-arg0="' +
         escAttr(job.id) +
         '">Resume</button>' +
         "</div></li>"
@@ -1122,12 +1120,27 @@ export function createInventoryActions(deps: InventoryActionsDeps) {
       nft_discovery_limit: optionalNumberValue("inventoryNftDiscoveryLimit"),
     };
     if (allConfiguredChains) body.all_configured_chains = true;
+    const runAsync =
+      (document.getElementById("inventoryRunAsync") as HTMLInputElement | null)?.checked ??
+      false;
+    if (runAsync) body.run_async = true;
     const r = await deps.api("POST", "/api/inventory/scan/evm", body);
     if (r.error) {
       deps.toast(r.error, "error");
       return;
     }
-    deps.toast("Inventory scan completed");
+    if (runAsync && r.operation && r.operation.id) {
+      // Background scan accepted: progress renders in the job list on the
+      // next refresh; the operation id lets the operator cross-check via
+      // GET /api/operations/{id} (and cancel from the job row).
+      deps.toast(
+        "Scan started in background — operation " +
+          String(r.operation.id) +
+          "; progress shows in the job list below",
+      );
+    } else {
+      deps.toast("Inventory scan completed");
+    }
     void loadInventoryOperations();
   }
 
@@ -1356,12 +1369,25 @@ export function createInventoryActions(deps: InventoryActionsDeps) {
   }
 
   async function cancelDiscoveryJob(id: string): Promise<void> {
+    const confirmed = await confirmDangerDialog({
+      title: "Cancel discovery scan",
+      body:
+        'Stop discovery job "' +
+        id +
+        '"? The scan stops after the address it is currently checking. Progress so far is kept and you can resume from it later.',
+      actionLabel: "Cancel scan",
+    });
+    if (!confirmed) return;
     const r = await deps.api("POST", "/api/discovery/jobs/cancel", { id });
     if (r.error) {
       deps.toast(r.error, "error");
       return;
     }
-    deps.toast("Discovery job marked canceled");
+    if (r.status === "cancel_requested") {
+      deps.toast("Cancel requested — the scan stops after the current address");
+    } else {
+      deps.toast("Discovery job canceled");
+    }
     void loadInventoryOperations();
   }
 
@@ -1371,7 +1397,7 @@ export function createInventoryActions(deps: InventoryActionsDeps) {
       deps.toast(r.error, "error");
       return;
     }
-    deps.toast("Discovery job marked for resume");
+    deps.toast("Discovery scan resumed in the background");
     void loadInventoryOperations();
   }
 
