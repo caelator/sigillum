@@ -7,6 +7,63 @@ from 1.0.0 onward, per the stability policy in `docs/stability.md`.
 
 ## [Unreleased]
 
+### Added
+
+- **Five-destination operator console (C7)** — The console is restructured
+  around operator goals: Overview, Receive, Portfolio, Move, and Vault, with a
+  compact single-row topbar status strip, the unlocked hero shown once on
+  Overview, and a treasury-setup journey card that collapses when complete.
+- **Shared confirmation dialog** — One modal component with inform / confirm /
+  typed-phrase tiers replaces native `confirm()`/`prompt()` and bespoke
+  two-click arms. Queue processing, deposit sweep enqueue, receive-address
+  rotation, and party deletion — previously unguarded — now require
+  confirmation; bulk plan enqueue and local data reset keep their typed
+  phrases; all destructive deletes share the same confirm tier.
+- **Stealth-generation guardrail warnings** — `wallets/eth-stealth/generate`
+  returns cautionary `warnings` when a meta-address cannot be matched to the
+  vault's known stealth wallets, and when a supplied ephemeral key was already
+  used for a recorded deposit (reuse derives the identical stealth address).
+  Warnings propagate through deposit creation
+  (`EthStealthDepositMutationResponse.warnings`), print to stderr in the CLI,
+  and surface in the console as toasts plus a pinned warning box.
+- **CLI seed-wallet import and mnemonic hygiene** — New
+  `profiles eth-seed upsert` arm imports an existing mnemonic via
+  `--mnemonic-env`/`--mnemonic-stdin` or a hidden prompt (never argv).
+  `profiles eth-seed create` now redacts the mnemonic from stdout by default;
+  reveal interactively with `--reveal-mnemonic` (TTY only) or file it with
+  `--mnemonic-out PATH` (owner-only 0600, never overwrites).
+- **UI screenshot harness** — `scripts/ui-screenshots/` captures a
+  deterministic, mock-driven shot set of the console (setup, unlock, all five
+  destinations) via headless Chromium for release-evidence walkthroughs.
+
+### Changed
+
+- **Console data displays are human-readable** — Shared formatting helpers
+  render wei hex as ETH/token units, unix seconds as locale timestamps, and
+  chain ids as registry names, with raw values behind a details disclosure.
+- **Treasury policy form** — Every input has a visible label with units, the
+  camelCase state line moves behind a "Technical state" disclosure beneath a
+  plain-English summary of what the policy does, and the dense legal hints sit
+  behind a "How this policy protects you" fold.
+- **Console dead code removed** — The unused typed API client and session
+  actions, unreachable hero setup/locked copy, stale "increment B2" roadmap
+  text, and unused view helpers are gone; discovery-job cancel/resume controls
+  are disabled with a tooltip until the server-side verbs become real.
+
+### Fixed
+
+- **Treasury planner panics** — Malformed hot/treasury address pairs and
+  undecodable policy floor values now fail closed to the default destination
+  with a warning instead of unwrapping.
+- **Status response contract drift** — Console contract types now match the
+  daemon's `active_compartment` (`compartment_id`/`compartment_label`) and
+  `unlocked_compartments` shapes exactly.
+- **Stealth interoperability caveat documented** — `docs/architecture.md` now
+  states the shared-secret hash convention deviation (keccak256 over the
+  32-byte x-only encoding vs the 33-byte compressed-point scheme-1 SDK
+  convention) and warns against pointing third-party ERC-5564 senders at
+  Sigillum meta-addresses until the conformance switch lands.
+
 ## [1.0.0] - 2026-07-10
 
 ### Added
