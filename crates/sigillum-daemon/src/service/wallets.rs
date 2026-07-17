@@ -2,6 +2,12 @@
 //!
 //! Provides wallet export, address generation, checking, and transaction signing
 //! for Ethereum stealth addresses using master key derivation.
+//!
+//! Detection (`eth_stealth_check`) and public-info paths (`eth_stealth_export`,
+//! the known-meta-address guardrail) are watch-only: they derive the viewing
+//! private key + spending PUBLIC key and never retain the spending private
+//! key. Signing paths (`eth_stealth_sign*`) derive the full wallet — the
+//! spending key's only job.
 
 use sigillum_api::{
     EthSignedTransactionResponse, EthStealthAnnouncementPayload, EthStealthCheckRequest,
@@ -12,12 +18,14 @@ use sigillum_api::{
 };
 use sigillum_core::{
     EthereumEip1559Erc20Transfer, EthereumEip1559Transfer, StealthHashConvention, VaultLifecycle,
-    build_erc5564_announcement, check_ethereum_stealth_address_any, decode_quantity_hex,
-    derive_ethereum_address_from_xpub, derive_ethereum_receive_branch_from_account_xpub,
+    build_erc5564_announcement, check_ethereum_stealth_address_any_watch_only,
+    decode_quantity_hex, derive_ethereum_address_from_xpub,
+    derive_ethereum_receive_branch_from_account_xpub,
     derive_ethereum_receive_branch_from_account_xpub_with_path,
     derive_sigillum_ethereum_stealth_wallet, derive_sigillum_ethereum_xpub_receive_branch,
-    generate_ethereum_stealth_address, sign_ethereum_stealth_digest,
-    sign_ethereum_stealth_erc20_transfer, sign_ethereum_stealth_native_transfer,
+    derive_watch_only_sigillum_ethereum_stealth_wallet, generate_ethereum_stealth_address,
+    sign_ethereum_stealth_digest, sign_ethereum_stealth_erc20_transfer,
+    sign_ethereum_stealth_native_transfer,
 };
 use zeroize::Zeroizing;
 
@@ -146,6 +154,12 @@ impl SigillumService {
         })
     }
 
+    /// Export the stealth meta-address for a wallet label.
+    ///
+    /// The response is entirely public payer-facing information (spending and
+    /// viewing PUBLIC keys), so this derives the watch-only view: the
+    /// spending private key is never retained outside the core derivation
+    /// helper's zeroize-on-drop scope.
     pub(crate) fn eth_stealth_export(
         &self,
         token: Option<&str>,
@@ -160,7 +174,7 @@ impl SigillumService {
                 let master_key = vault
                     .extract_master_key()
                     .ok_or_else(|| ServiceError::vault_locked("Vault is locked."))?;
-                let derived = derive_sigillum_ethereum_stealth_wallet(
+                let derived = derive_watch_only_sigillum_ethereum_stealth_wallet(
                     master_key.as_ref(),
                     &wallet,
                     &short_name,
@@ -270,7 +284,9 @@ impl SigillumService {
             self.state
                 .with_vault(profile.compartment_id, |vault| {
                     let master_key = vault.extract_master_key()?;
-                    derive_sigillum_ethereum_stealth_wallet(
+                    // Comparing meta-addresses needs only the watch-only view
+                    // (public keys); no spending secret is retained.
+                    derive_watch_only_sigillum_ethereum_stealth_wallet(
                         master_key.as_ref(),
                         &profile.wallet,
                         &profile.short_name,
@@ -284,6 +300,14 @@ impl SigillumService {
         })
     }
 
+    /// Check whether a stealth payment (stealth address + ephemeral public
+    /// key) belongs to a wallet — the recipient-side `checkStealthAddress`.
+    ///
+    /// Runs watch-only per EIP-5564: detection derives the viewing private
+    /// key + spending PUBLIC key from the compartment master key and never
+    /// materializes the spending private key in the check path. The vault
+    /// must still be unlocked (the viewing key derives from the master key);
+    /// the spending key is only needed later, when sweeping/signing.
     pub(crate) fn eth_stealth_check(
         &self,
         token: Option<&str>,
@@ -297,15 +321,18 @@ impl SigillumService {
 
         // Dual-decode: probe the standard convention first, then the legacy
         // one, so payments created before the hash-convention switch are still
-        // detected.
+        // detected. Watch-only: no spending secret enters the check.
         let (check, compartment_id) = self.with_active_vault(token, |vault, compartment_id| {
             let master_key = vault
                 .extract_master_key()
                 .ok_or_else(|| ServiceError::vault_locked("Vault is locked."))?;
-            let derived =
-                derive_sigillum_ethereum_stealth_wallet(master_key.as_ref(), &wallet, "eth")
-                    .map_err(map_wallet_error)?;
-            let check = check_ethereum_stealth_address_any(
+            let derived = derive_watch_only_sigillum_ethereum_stealth_wallet(
+                master_key.as_ref(),
+                &wallet,
+                "eth",
+            )
+            .map_err(map_wallet_error)?;
+            let check = check_ethereum_stealth_address_any_watch_only(
                 &derived,
                 &stealth_address,
                 &ephemeral_public_key_hex,
@@ -776,6 +803,114 @@ mod tests {
             .unwrap();
         assert_eq!(signed_erc20.kind, "erc20-transfer");
         assert!(signed_erc20.data_hex.starts_with("a9059cbb"));
+    }
+
+    /// Detection (`eth_stealth_check`) is watch-only: the service derives the
+    /// viewing private key + spending PUBLIC key via
+    /// `derive_watch_only_sigillum_ethereum_stealth_wallet` and never touches
+    /// the spending-key derivation. This test proves the daemon's check
+    /// result equals what the viewing key + spending public key ALONE produce
+    /// for the same compartment master key ([7u8; 32], known to the test) —
+    /// `EthereumStealthWatchView` has no field that could hold the spending
+    /// private key, so equality is achievable only if detection ran without
+    /// it.
+    #[test]
+    fn check_runs_watch_only_from_viewing_key_and_spending_pubkey() {
+        let dir = TempDir::new().unwrap();
+        let state =
+            Arc::new(AppState::new(dir.path().to_path_buf()).expect("app state should initialize"));
+        state.unlock_compartment(0, [7u8; 32], meta(0, 1, "default"));
+        let session = state.create_session(Some(0));
+        let service = SigillumService::new(state.clone());
+
+        let meta = service
+            .eth_stealth_export(
+                Some(&session),
+                EthStealthExportRequest {
+                    wallet: "payments".into(),
+                    short_name: Some("eth".into()),
+                },
+            )
+            .unwrap();
+
+        // The watch-only view for the exact inputs the service uses. The
+        // export (public info) must match it — and the full wallet's
+        // meta-address — while the view itself carries no spending secret.
+        let watch_view = sigillum_core::derive_watch_only_sigillum_ethereum_stealth_wallet(
+            &[7u8; 32],
+            "payments",
+            "eth",
+        )
+        .unwrap();
+        assert_eq!(watch_view.meta_address().stealth_meta_address, meta.stealth_meta_address);
+
+        for convention in [
+            StealthHashConvention::Compressed33,
+            StealthHashConvention::XOnly32,
+        ] {
+            let payment = sigillum_core::generate_ethereum_stealth_address(
+                &meta.stealth_meta_address,
+                Some([3u8; 32]),
+                convention,
+            )
+            .unwrap();
+            let view_tag = hex::decode(&payment.view_tag_hex).unwrap()[0];
+
+            // Daemon detection.
+            let check = service
+                .eth_stealth_check(
+                    Some(&session),
+                    EthStealthCheckRequest {
+                        wallet: "payments".into(),
+                        stealth: sigillum_api::StealthPaymentRef {
+                            stealth_address: payment.stealth_address.clone(),
+                            ephemeral_public_key_hex: payment.ephemeral_public_key_hex.clone(),
+                            view_tag_hex: Some(payment.view_tag_hex.clone()),
+                            stealth_hash_convention: None,
+                        },
+                    },
+                )
+                .unwrap();
+            assert!(check.matches, "daemon check must detect a {convention} payment");
+            assert_eq!(check.stealth_hash_convention, convention);
+
+            // Detection from the viewing key + spending public key alone
+            // (same core the scan delegates to) is byte-identical.
+            let watch_only = sigillum_core::check_ethereum_stealth_address_any_watch_only(
+                &watch_view,
+                &payment.stealth_address,
+                &payment.ephemeral_public_key_hex,
+                Some(view_tag),
+                &StealthHashConvention::PROBE_ORDER,
+            )
+            .unwrap();
+            assert!(watch_only.matches);
+            assert_eq!(watch_only.derived_stealth_address, check.derived_stealth_address);
+            assert_eq!(watch_only.view_tag_hex, check.view_tag_hex);
+            assert_eq!(watch_only.stealth_hash_convention, check.stealth_hash_convention);
+        }
+
+        // Watch-only ≠ lock-tolerant: the viewing key derives from the
+        // compartment master key, so after lock (master keys zeroized, no
+        // viewing-key cache by design) detection fails `vault_locked` even
+        // with a valid session.
+        state.lock_all();
+        let locked_session = state.create_session(Some(0));
+        let error = service
+            .eth_stealth_check(
+                Some(&locked_session),
+                EthStealthCheckRequest {
+                    wallet: "payments".into(),
+                    stealth: sigillum_api::StealthPaymentRef {
+                        stealth_address: "0x0000000000000000000000000000000000000001".into(),
+                        ephemeral_public_key_hex: meta.viewing_public_key_hex.clone(),
+                        view_tag_hex: None,
+                        stealth_hash_convention: None,
+                    },
+                },
+            )
+            .unwrap_err();
+        assert_eq!(error.code(), "vault_locked");
     }
 
     #[test]

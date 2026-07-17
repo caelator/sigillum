@@ -15,6 +15,17 @@
 //! Both native and ERC-20 deposit creation share core logic extracted into
 //! [`DepositBlueprint`] and [`SigillumService::persist_new_deposit`] to
 //! avoid structural duplication while keeping the public API surface clean.
+//!
+//! ## Watch-only detection
+//!
+//! Announcement scanning ([`SigillumService::scan_eth_stealth_announcements`])
+//! detects deposits from the viewing private key + spending PUBLIC key alone
+//! (the EIP-5564 `checkStealthAddress` key material), via
+//! `derive_watch_only_sigillum_ethereum_stealth_wallet`: the spending private
+//! key never enters the scan path. Detection still requires the wallet
+//! compartment unlocked — the viewing key derives from its master key — but
+//! no spending secret materializes while scanning. The spending private key
+//! is only derived later, at sweep-signing time.
 
 use std::collections::{BTreeSet, HashMap};
 
@@ -31,8 +42,9 @@ use sigillum_api::{
 };
 use sigillum_core::{
     ERC5564_ANNOUNCE_FUNCTION, ERC5564_ANNOUNCER_ADDRESS, ETHEREUM_STEALTH_SCHEME_ID,
-    EthereumStealthError, StealthHashConvention, VaultLifecycle, check_ethereum_stealth_address_any,
-    decode_quantity_hex, derive_sigillum_ethereum_stealth_wallet, encode_erc5564_announce_calldata,
+    EthereumStealthError, StealthHashConvention, VaultLifecycle,
+    check_ethereum_stealth_address_any_watch_only, decode_quantity_hex,
+    derive_watch_only_sigillum_ethereum_stealth_wallet, encode_erc5564_announce_calldata,
 };
 
 use crate::audit_log::{AuditEventSpec, AuditQueueJobKind};
@@ -588,11 +600,17 @@ impl SigillumService {
             "native"
         };
 
-        let derived_wallet = self.with_vault(wallet.compartment_id, |vault| {
+        // Watch-only detection: the scan derives the viewing private key +
+        // spending PUBLIC key only; the spending private key never
+        // materializes outside a short zeroize-on-drop scope inside the core
+        // derivation helper, so no spending secret enters the scan path. The
+        // compartment must still be unlocked (the viewing key derives from
+        // the master key). Sweep signing re-derives the full wallet later.
+        let watch_view = self.with_vault(wallet.compartment_id, |vault| {
             let master_key = vault
                 .extract_master_key()
                 .ok_or_else(|| ServiceError::vault_locked("Wallet compartment is locked."))?;
-            derive_sigillum_ethereum_stealth_wallet(
+            derive_watch_only_sigillum_ethereum_stealth_wallet(
                 master_key.as_ref(),
                 &wallet.wallet,
                 &wallet.short_name,
@@ -634,9 +652,10 @@ impl SigillumService {
             // before the hash-convention switch (whose on-chain view tag only
             // matches under the legacy convention) are still found in the
             // same pass. The matched convention is persisted on the record so
-            // sweeping derives the stealth key the same way.
-            let check = match check_ethereum_stealth_address_any(
-                &derived_wallet,
+            // sweeping derives the stealth key the same way. Runs watch-only:
+            // viewing key + spending public key, no spending secret.
+            let check = match check_ethereum_stealth_address_any_watch_only(
+                &watch_view,
                 &event.stealth_address,
                 &event.ephemeral_public_key_hex,
                 view_tag,
@@ -675,7 +694,7 @@ impl SigillumService {
                 provider_compartment_id: provider.compartment_id,
                 wallet: wallet.wallet.clone(),
                 short_name: wallet.short_name.clone(),
-                stealth_meta_address: derived_wallet.meta_address().stealth_meta_address.clone(),
+                stealth_meta_address: watch_view.meta_address().stealth_meta_address.clone(),
                 stealth_address: event.stealth_address.clone(),
                 ephemeral_public_key_hex: event.ephemeral_public_key_hex.clone(),
                 view_tag_hex: check.view_tag_hex.clone(),
@@ -838,7 +857,11 @@ impl SigillumService {
             let master_key = vault
                 .extract_master_key()
                 .ok_or_else(|| ServiceError::vault_locked("Wallet compartment is locked."))?;
-            let derived = derive_sigillum_ethereum_stealth_wallet(
+            // Only the meta-address (spending/viewing public keys) is needed
+            // to mint a deposit address, so derive the watch-only view: the
+            // spending secret never persists outside the core helper's
+            // zeroize-on-drop scope.
+            let derived = derive_watch_only_sigillum_ethereum_stealth_wallet(
                 master_key.as_ref(),
                 &wallet.wallet,
                 &wallet.short_name,

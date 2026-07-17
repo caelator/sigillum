@@ -276,6 +276,10 @@ pub struct TransitHmacRequest {
 // ── Ethereum stealth wallet operations ──────────────────────────
 
 /// Export a wallet's stealth meta-address for sharing with senders.
+///
+/// The response is public payer-facing information only (spending + viewing
+/// public keys); the daemon derives it via the watch-only path, without
+/// retaining the spending private key.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct EthStealthExportRequest {
     pub wallet: String,
@@ -295,6 +299,11 @@ pub struct EthStealthGenerateRequest {
 }
 
 /// Check whether a stealth address belongs to a wallet.
+///
+/// Watch-only per EIP-5564 `checkStealthAddress`: the daemon runs this from
+/// the viewing private key + spending PUBLIC key; the spending private key
+/// never enters the check path (the vault must still be unlocked, since the
+/// viewing key derives from the compartment master key).
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct EthStealthCheckRequest {
     pub wallet: String,
@@ -705,6 +714,11 @@ pub struct EthStealthDepositRefreshRequest {
 /// Scan bounded ERC-5564 announcement logs for a stealth wallet profile.
 /// `from_block` is required; `token_address` turns matches into ERC-20 deposit
 /// candidates instead of native deposit candidates.
+///
+/// Detection is watch-only: matching uses the viewing private key + spending
+/// PUBLIC key only; the spending private key is never loaded for scanning
+/// (the wallet compartment must still be unlocked — the viewing key derives
+/// from its master key).
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct EthStealthAnnouncementScanRequest {
     pub wallet_profile: String,
