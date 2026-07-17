@@ -169,34 +169,36 @@ mod tests {
 
     #[test]
     fn assignment_is_deterministic_disjoint_and_covering() {
-        let providers = vec![provider("alpha", 1), provider("beta", 1), provider("base", 8453)];
+        let providers = vec![
+            provider("alpha", 1),
+            provider("beta", 1),
+            provider("base", 8453),
+        ];
         let plan = ProviderPartitions::build(&providers, true).expect("plan");
 
         let mut seen_per_provider: BTreeMap<&str, Vec<String>> = BTreeMap::new();
         for index in 0..200 {
             let address = address(index);
-            let first: Vec<&str> = ProviderPartitions::select_for_address(
-                Some(&plan),
-                &providers,
-                &address,
-            )
-            .iter()
-            .map(|provider| provider.name.as_str())
-            .collect();
+            let first: Vec<&str> =
+                ProviderPartitions::select_for_address(Some(&plan), &providers, &address)
+                    .iter()
+                    .map(|provider| provider.name.as_str())
+                    .collect();
             // Re-selection is stable: same address, same providers.
-            let second: Vec<&str> = ProviderPartitions::select_for_address(
-                Some(&plan),
-                &providers,
-                &address,
-            )
-            .iter()
-            .map(|provider| provider.name.as_str())
-            .collect();
+            let second: Vec<&str> =
+                ProviderPartitions::select_for_address(Some(&plan), &providers, &address)
+                    .iter()
+                    .map(|provider| provider.name.as_str())
+                    .collect();
             assert_eq!(first, second);
             // Exactly one mainnet provider plus the single Base provider.
             assert_eq!(first.len(), 2);
             assert!(first.contains(&"base"));
-            let mainnet = if first.contains(&"alpha") { "alpha" } else { "beta" };
+            let mainnet = if first.contains(&"alpha") {
+                "alpha"
+            } else {
+                "beta"
+            };
             assert!(!(first.contains(&"alpha") && first.contains(&"beta")));
             assert!(
                 !seen_per_provider
@@ -222,22 +224,16 @@ mod tests {
         let reversed_plan = ProviderPartitions::build(&reversed, true).expect("plan");
         for index in 0..50 {
             let address = address(index);
-            let a: Vec<&str> = ProviderPartitions::select_for_address(
-                Some(&forward_plan),
-                &forward,
-                &address,
-            )
-            .iter()
-            .map(|provider| provider.name.as_str())
-            .collect();
-            let b: Vec<&str> = ProviderPartitions::select_for_address(
-                Some(&reversed_plan),
-                &reversed,
-                &address,
-            )
-            .iter()
-            .map(|provider| provider.name.as_str())
-            .collect();
+            let a: Vec<&str> =
+                ProviderPartitions::select_for_address(Some(&forward_plan), &forward, &address)
+                    .iter()
+                    .map(|provider| provider.name.as_str())
+                    .collect();
+            let b: Vec<&str> =
+                ProviderPartitions::select_for_address(Some(&reversed_plan), &reversed, &address)
+                    .iter()
+                    .map(|provider| provider.name.as_str())
+                    .collect();
             assert_eq!(a, b, "assignment must be registry-order independent");
         }
     }

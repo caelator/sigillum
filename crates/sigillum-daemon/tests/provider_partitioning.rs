@@ -85,7 +85,10 @@ impl PartitionRpcState {
             .unwrap()
             .iter()
             .map(|(name, addresses)| {
-                (name.clone(), addresses.iter().cloned().collect::<BTreeSet<_>>())
+                (
+                    name.clone(),
+                    addresses.iter().cloned().collect::<BTreeSet<_>>(),
+                )
             })
             .collect()
     }
@@ -507,18 +510,22 @@ async fn partitioned_results_match_nonpartitioned_scan_per_chain() {
     let funded: BTreeSet<String> = [expected[1].clone(), expected[4].clone()]
         .into_iter()
         .collect();
-    let scan_args = json!({ "max_index": 20, "gap_limit": 4 });
 
     let reference = spawn_rig(&["mainnet"], funded.clone()).await;
-    let (status, reference_scan) = reference.scan(scan_args.clone()).await;
+    let (status, reference_scan) = reference
+        .scan(json!({ "max_index": 20, "gap_limit": 4 }))
+        .await;
     assert_eq!(status, StatusCode::OK, "reference scan: {reference_scan}");
 
     let partitioned = spawn_rig(&["mainnet-a", "mainnet-b"], funded).await;
     let (status, partitioned_scan) = partitioned
         .scan(json!({ "max_index": 20, "gap_limit": 4, "partition_providers": true }))
         .await;
-    assert_eq!(status, StatusCode::OK, "partitioned scan: {partitioned_scan}");
-    let _ = scan_args;
+    assert_eq!(
+        status,
+        StatusCode::OK,
+        "partitioned scan: {partitioned_scan}"
+    );
 
     // Identical per-chain results once provider identity is collapsed.
     assert_eq!(
@@ -594,13 +601,7 @@ async fn partition_assignment_is_stable_across_scans() {
     );
     // Sanity: the second scan re-observed the full set (this is a fresh
     // walk, not a resume), split the same way.
-    assert_eq!(
-        second
-            .values()
-            .map(BTreeSet::len)
-            .sum::<usize>(),
-        10
-    );
+    assert_eq!(second.values().map(BTreeSet::len).sum::<usize>(), 10);
 
     rig.handle.abort();
     for handle in &rig.rpc_handles {
@@ -643,7 +644,9 @@ async fn single_provider_per_chain_matches_flag_off_behavior() {
     );
 
     let flag_off = spawn_rig(&["mainnet"], funded).await;
-    let (status, off) = flag_off.scan(json!({ "max_index": 9, "gap_limit": 10 })).await;
+    let (status, off) = flag_off
+        .scan(json!({ "max_index": 9, "gap_limit": 10 }))
+        .await;
     assert_eq!(status, StatusCode::OK, "flag-off scan: {off}");
     assert!(off["job"].get("partition_providers").is_none());
     assert!(off["job"].get("provider_partition_observations").is_none());
@@ -727,7 +730,8 @@ async fn partitioned_async_scan_cancel_and_resume_preserves_disjoint_coverage() 
     assert_eq!(status, StatusCode::OK, "resume response: {resume}");
     let resume_job_id = resume["job"]["id"].as_str().unwrap().to_string();
     let resume_operation_id = resume["operation"]["id"].as_str().unwrap().to_string();
-    rig.wait_for_operation(&resume_operation_id, "completed").await;
+    rig.wait_for_operation(&resume_operation_id, "completed")
+        .await;
 
     let resumed = rig.discovery_job(&resume_job_id).await;
     assert_eq!(resumed["status"], "completed");
