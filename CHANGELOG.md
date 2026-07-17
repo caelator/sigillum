@@ -165,6 +165,14 @@ from 1.0.0 onward, per the stability policy in `docs/stability.md`.
 - **Console dead code removed** — The unused typed API client and session
   actions, unreachable hero setup/locked copy, stale "increment B2" roadmap
   text, and unused view helpers are gone.
+- **Passive reads for console polling** — `GET /api/status`,
+  `GET /api/operations`, and `GET /api/operations/{id}` join `GET /api/events`
+  as passive reads: they authenticate without refreshing the session's
+  idle-activity clock, so an always-open console can no longer defeat the
+  15-minute vault idle auto-lock.
+- **Chain-registry route canonicalization** — `/api/chains*` is the canonical
+  chain-registry route set; the `/api/inventory/chains*` trio remains working
+  as a deprecated legacy alias slated for removal at the next major version.
 
 ### Fixed
 

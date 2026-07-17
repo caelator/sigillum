@@ -348,9 +348,11 @@ Current daemon behavior:
   (proven by `crates/sigillum-daemon/tests/events_idle.rs`). The stream
   performs no re-verifies after connect, so a subscriber whose session was
   evicted keeps receiving events until it disconnects (loopback-local, and
-  it learns of the lock via the `locked` status event). More read-only
-  routes can be marked passive later at their verify call site; routes that
-  perform work must stay on the active verify
+  it learns of the lock via the `locked` status event). Passive reads (plan
+  task 1.7) now also cover the console's polling trio — `GET /api/status`,
+  `GET /api/operations`, and `GET /api/operations/{id}` — so an always-open
+  console cannot defeat the vault auto-lock either; routes that perform work
+  must stay on the active verify
 - runs EVM discovery scans either synchronously inside the request (default,
   unchanged for existing clients) or as a background operation
   (`inventory/scan/evm` with `run_async: true`, or a discovery-job resume).

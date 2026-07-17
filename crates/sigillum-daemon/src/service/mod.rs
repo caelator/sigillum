@@ -118,15 +118,15 @@ pub(crate) fn require_full_session_token<'a>(
     }
 }
 
-/// Require a valid full daemon session for a PASSIVE read (today:
-/// `GET /api/events`).
+/// Require a valid full daemon session for a PASSIVE read (`GET /api/events`,
+/// `GET /api/status`, `GET /api/operations`, `GET /api/operations/{id}`).
 ///
 /// Identical to [`require_full_session_token`] except the verify does not
 /// refresh the session's idle-activity clock: a permanently connected
-/// observer must not defeat the vault auto-lock (plan task 1.3 / D-D). Mark
-/// additional read-only routes passive by calling this at their verify call
-/// site — do NOT widen it to any route that performs work on behalf of the
-/// operator.
+/// observer must not defeat the vault auto-lock (plan tasks 1.3/1.7 / D-D).
+/// Mark additional read-only routes passive by calling this at their verify
+/// call site — do NOT widen it to any route that performs work on behalf of
+/// the operator.
 pub(crate) fn require_passive_full_session_token<'a>(
     state: &AppState,
     token: Option<&'a str>,
@@ -228,6 +228,24 @@ impl SigillumService {
         })
     }
 
+    /// Require a valid full session for a PASSIVE read; see
+    /// [`require_passive_full_session_token`]. Used by the console's
+    /// live-update polling reads so they cannot defeat the vault auto-lock.
+    fn require_passive_session<'a>(&self, token: Option<&'a str>) -> ServiceResult<&'a str> {
+        require_passive_full_session_token(&self.state, token)
+    }
+
+    /// Passive variant of [`Self::optional_session`]: authenticates without
+    /// refreshing the session's idle-activity clock.
+    fn optional_session_passive<'a>(&self, token: Option<&'a str>) -> Option<&'a str> {
+        if self.state.is_locking() {
+            return None;
+        }
+        token.filter(|candidate| {
+            self.state.verify_token_passive(candidate) && self.state.session_is_full(candidate)
+        })
+    }
+
     /// Append a typed audit event, mapping I/O failures to `ServiceError`.
     fn record_audit(
         &self,
@@ -319,6 +337,42 @@ mod tests {
         assert!(status.locked);
         assert!(status.active_compartment.is_none());
         assert!(status.unlocked_compartments.is_empty());
+    }
+
+    /// Plan task 1.7: the console's live-update reads (`status`,
+    /// `list_operations`) authenticate passively so a permanently open
+    /// console cannot defeat the vault idle auto-lock.
+    #[test]
+    fn status_and_operations_reads_do_not_refresh_idle_activity() {
+        use sigillum_core::{SecretStore, VaultLifecycle};
+
+        let dir = TempDir::new().unwrap();
+        let state =
+            Arc::new(AppState::new(dir.path().to_path_buf()).expect("app state should initialize"));
+        state.unlock_compartment(0, [11u8; 32], meta(0, 1, "default"));
+        // Initialize the vault stores on disk so the status read path has a
+        // real vault to inspect (production compartments are initialized at
+        // setup).
+        let init = state.with_vault(0, |vault| {
+            vault
+                .initialize(&[11u8; 32])
+                .and_then(|()| vault.set_api_key("init", "x"))
+                .and_then(|()| vault.set_secret("init", "y"))
+        });
+        assert!(matches!(init, Some(Ok(()))));
+        let session = state.create_session(Some(0));
+        let service = SigillumService::new(state.clone());
+
+        let before = state.last_activity_for(&session).unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(10));
+        let status = service.status(Some(&session)).unwrap();
+        assert!(!status.locked);
+        let _ = service.list_operations(Some(&session)).unwrap();
+        let after = state.last_activity_for(&session).unwrap();
+        assert_eq!(
+            before, after,
+            "passive console reads must not refresh last_activity"
+        );
     }
 
     #[tokio::test]

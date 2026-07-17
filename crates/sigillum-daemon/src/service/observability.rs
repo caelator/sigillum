@@ -25,7 +25,7 @@ impl SigillumService {
             });
         }
 
-        let Some(token) = self.optional_session(token) else {
+        let Some(token) = self.optional_session_passive(token) else {
             return Ok(StatusResponse {
                 locked: true,
                 initialized,

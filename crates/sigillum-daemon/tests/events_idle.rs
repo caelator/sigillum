@@ -1,6 +1,9 @@
 //! The important half of plan task 1.3: an SSE-connected session must NOT
 //! have its idle clock refreshed — otherwise an always-open events tab
-//! defeats the vault auto-lock (decision D-D).
+//! defeats the vault auto-lock (decision D-D). Plan task 1.7 extends the same
+//! passive semantics to the console's polling trio (`/api/status`,
+//! `/api/operations`, `/api/operations/{id}`), so the ACTIVE control session
+//! below keeps itself alive with `/api/diagnostics`, an active read.
 //!
 //! This lives in its own test binary because it overrides
 //! `SIGILLUM_IDLE_LOCK_SECS` process-wide before the daemon's
@@ -74,11 +77,12 @@ async fn sse_connection_does_not_extend_session_idle_life() {
         .unwrap();
     assert_eq!(stream.status(), StatusCode::OK);
 
-    // ~1s in: the active session makes one ACTIVE request (idle clock
-    // refreshed for it alone). The stream keeps flowing in the background.
+    // ~1s in: the active session makes one ACTIVE request (`/api/diagnostics`
+    // — `/api/operations` is itself passive since plan task 1.7, so it would
+    // not refresh the clock). The stream keeps flowing in the background.
     tokio::time::sleep(Duration::from_millis(1000)).await;
     let active_probe = client
-        .get(format!("http://{addr}/api/operations"))
+        .get(format!("http://{addr}/api/diagnostics"))
         .bearer_auth(&active_token)
         .send()
         .await
@@ -103,7 +107,7 @@ async fn sse_connection_does_not_extend_session_idle_life() {
     // ...while the active session (~2.5s since its last ACTIVE request) is
     // still valid.
     let active_probe = client
-        .get(format!("http://{addr}/api/operations"))
+        .get(format!("http://{addr}/api/diagnostics"))
         .bearer_auth(&active_token)
         .send()
         .await

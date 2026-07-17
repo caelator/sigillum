@@ -968,6 +968,14 @@ impl AppState {
         self.sessions.lock().len()
     }
 
+    #[cfg(test)]
+    pub(crate) fn last_activity_for(&self, candidate: &str) -> Option<std::time::Instant> {
+        self.sessions
+            .lock()
+            .get(candidate)
+            .map(|session| session.last_activity)
+    }
+
     #[must_use]
     pub fn pending_operation_count(&self) -> usize {
         list_pending_operations(&self.base_dir)

@@ -108,6 +108,19 @@ candidates may adjust stable-candidate surfaces with the change recorded in
   (`SchedulerStatusResponse`: effective config, last tick time, last cycle
   outcome, consecutive-failure count, due-queue-job count, next retry
   timestamp) that deserializes with defaults from older payloads.
+- The passive-read set (plan task 1.7) extends beyond `GET /api/events` to
+  the console's polling trio: `GET /api/status`, `GET /api/operations`, and
+  `GET /api/operations/{id}` now authenticate without refreshing the
+  session's idle-activity clock, so an always-open console cannot defeat the
+  idle auto-lock. Mutations and all other reads are unchanged.
+- Route duplication cleanup (plan task 1.8): `/api/chains`,
+  `/api/chains/upsert`, and `/api/chains/delete` are designated the CANONICAL
+  chain-registry routes (they are what `sigillum-client`, the CLI, and the
+  console call); the `/api/inventory/chains*` trio is a legacy alias kept
+  working and deprecated — new integrations must use `/api/chains*`, and the
+  alias is scheduled for removal at the next major version. Collection-route
+  convention going forward: `GET` reads plus `POST` mutations
+  (`…/upsert`, `…/delete` verb forms), matching the rest of the daemon API.
 
 ## Stable at 1.0
 

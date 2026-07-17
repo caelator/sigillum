@@ -494,6 +494,10 @@ fn inventory_routes() -> AppRouter {
             "/api/inventory/wallets",
             get(inventory::list_wallet_inventory),
         )
+        // Chain registry. CANONICAL: `/api/chains*` (used by the client crate,
+        // CLI, and console). The `/api/inventory/chains*` trio below is a
+        // legacy alias kept for compatibility — deprecated, scheduled for
+        // removal at the next major version (docs/stability.md).
         .route("/api/chains", get(inventory::list_chain_profiles))
         .route("/api/chains/upsert", post(inventory::upsert_chain_profile))
         .route("/api/chains/delete", post(inventory::delete_chain_profile))

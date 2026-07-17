@@ -17,7 +17,7 @@ impl SigillumService {
         &self,
         token: Option<&str>,
     ) -> ServiceResult<OperationListResponse> {
-        let _ = self.require_session(token)?;
+        let _ = self.require_passive_session(token)?;
         Ok(OperationListResponse {
             operations: self.state.list_operations(MAX_TRACKED_OPERATIONS),
         })
@@ -28,7 +28,7 @@ impl SigillumService {
         token: Option<&str>,
         id: &str,
     ) -> ServiceResult<OperationResponse> {
-        let _ = self.require_session(token)?;
+        let _ = self.require_passive_session(token)?;
         let operation = self
             .state
             .get_operation(id)
