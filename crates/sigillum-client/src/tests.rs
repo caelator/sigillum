@@ -501,6 +501,78 @@ async fn maintenance_run_route(
     )
 }
 
+fn operation_fixture() -> serde_json::Value {
+    json!({
+        "id": "op-1",
+        "kind": "inventory_scan_evm",
+        "state": "running",
+        "progress": { "processed": 3 },
+        "related_ids": ["job-1"],
+        "created_at_unix": 10,
+        "updated_at_unix": 12
+    })
+}
+
+fn authorized(headers: &HeaderMap) -> bool {
+    headers
+        .get(header::AUTHORIZATION)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("")
+        == "Bearer test-token"
+}
+
+async fn operations_list_route(headers: HeaderMap) -> (StatusCode, Json<serde_json::Value>) {
+    if !authorized(&headers) {
+        return (
+            StatusCode::UNAUTHORIZED,
+            Json(json!({ "error": "missing auth" })),
+        );
+    }
+    (
+        StatusCode::OK,
+        Json(json!({ "operations": [operation_fixture()] })),
+    )
+}
+
+async fn operation_get_route(
+    headers: HeaderMap,
+    axum::extract::Path(id): axum::extract::Path<String>,
+) -> (StatusCode, Json<serde_json::Value>) {
+    if !authorized(&headers) {
+        return (
+            StatusCode::UNAUTHORIZED,
+            Json(json!({ "error": "missing auth" })),
+        );
+    }
+    assert_eq!(id, "op-1");
+    (
+        StatusCode::OK,
+        Json(json!({ "operation": operation_fixture() })),
+    )
+}
+
+async fn operation_cancel_route(
+    headers: HeaderMap,
+    axum::extract::Path(id): axum::extract::Path<String>,
+) -> (StatusCode, Json<serde_json::Value>) {
+    if !authorized(&headers) {
+        return (
+            StatusCode::UNAUTHORIZED,
+            Json(json!({ "error": "missing auth" })),
+        );
+    }
+    assert_eq!(id, "op-1");
+    let mut operation = operation_fixture();
+    operation["state"] = json!("cancel_requested");
+    (
+        StatusCode::OK,
+        Json(json!({
+            "status": "cancel_requested",
+            "operation": operation
+        })),
+    )
+}
+
 async fn transit_encrypt_route(
     headers: HeaderMap,
     Json(body): Json<serde_json::Value>,
@@ -1763,6 +1835,9 @@ async fn spawn_test_server() -> Option<SocketAddr> {
         .route("/api/audit/run", post(audit_run_route))
         .route("/api/diagnostics", get(diagnostics_route))
         .route("/api/maintenance/run", post(maintenance_run_route))
+        .route("/api/operations", get(operations_list_route))
+        .route("/api/operations/{id}", get(operation_get_route))
+        .route("/api/operations/{id}/cancel", post(operation_cancel_route))
         .route("/api/session/revoke", post(revoke_session_route))
         .route("/api/backup/export", post(export_snapshot_route))
         .route("/api/backup/restore", post(restore_snapshot_route))
@@ -1911,6 +1986,30 @@ async fn unlock_stores_session_for_follow_up_requests() {
 
     let keys = client.list_api_keys().await.unwrap();
     assert_eq!(keys, vec!["alpha".to_string(), "beta".to_string()]);
+}
+
+#[tokio::test]
+async fn operation_routes_roundtrip() {
+    let Some(addr) = spawn_test_server().await else {
+        return;
+    };
+    let client = SigillumClient::new(format!("http://{addr}")).expect("client should build");
+    client.set_session_token("test-token");
+
+    let list = client.list_operations().await.unwrap();
+    assert_eq!(list.operations.len(), 1);
+    assert_eq!(list.operations[0].id, "op-1");
+    assert_eq!(list.operations[0].kind, "inventory_scan_evm");
+    assert_eq!(list.operations[0].state, "running");
+    assert_eq!(list.operations[0].progress.processed, 3);
+    assert_eq!(list.operations[0].related_ids, vec!["job-1".to_string()]);
+
+    let fetched = client.get_operation("op-1").await.unwrap();
+    assert_eq!(fetched.operation.id, "op-1");
+
+    let canceled = client.cancel_operation("op-1").await.unwrap();
+    assert_eq!(canceled.status, "cancel_requested");
+    assert_eq!(canceled.operation.state, "cancel_requested");
 }
 
 #[tokio::test]

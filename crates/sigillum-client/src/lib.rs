@@ -80,7 +80,9 @@ pub use sigillum_api::response::{
     EvmRpcErc20BalanceResponse, EvmRpcNonceResponse, Fido2DetectResponse, Fido2KeyInfo,
     Fido2ListResponse, Fido2RegisterResponse, Fido2RemoveResponse, Fido2SetupResponse,
     Fido2StatusResponse, FieldError, GenerateStoreResponse, GenericStatusResponse, KeyListResponse,
-    KeyValueResponse, MaintenanceRunResponse, QueueEnqueueResponse, QueueExecutionPauseResponse,
+    KeyValueResponse, MaintenanceRunResponse, Operation, OperationListResponse,
+    OperationMutationResponse, OperationProgress, OperationResponse, QueueEnqueueResponse,
+    QueueExecutionPauseResponse,
     QueueJob, QueueJobListResponse, QueueProcessResponse, RiskCatalogEntry,
     RiskCatalogListResponse, RiskCatalogMutationResponse, RiskFinding, RiskFindingListResponse,
     SafeTransactionBuilderBatch, SafeTransactionBuilderMeta, SafeTransactionBuilderTransaction,
@@ -932,6 +934,30 @@ impl SigillumClient {
         let builder = self
             .request(Method::POST, "/api/discovery/jobs/resume")
             .json(&DiscoveryJobMutationRequest { id: id.into() });
+        self.send(builder).await
+    }
+
+    // ── Background operations ─────────────────────────────────────
+
+    /// List the daemon's tracked background operations (most recent first).
+    pub async fn list_operations(&self) -> Result<OperationListResponse, ClientError> {
+        let builder = self.request(Method::GET, "/api/operations");
+        self.send(builder).await
+    }
+
+    /// Fetch a single background operation by id.
+    pub async fn get_operation(&self, id: &str) -> Result<OperationResponse, ClientError> {
+        let builder = self.request(Method::GET, &format!("/api/operations/{id}"));
+        self.send(builder).await
+    }
+
+    /// Request cooperative cancellation of a background operation.
+    ///
+    /// Returns the operation in `cancel_requested` state; the worker
+    /// transitions it to `canceled` at its next checkpoint. Canceling a
+    /// terminal operation fails with a 409 `conflict` API error.
+    pub async fn cancel_operation(&self, id: &str) -> Result<OperationMutationResponse, ClientError> {
+        let builder = self.request(Method::POST, &format!("/api/operations/{id}/cancel"));
         self.send(builder).await
     }
 
