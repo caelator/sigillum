@@ -91,10 +91,7 @@ impl SigillumService {
         let service = self.clone();
         let token = token.to_string();
         tokio::spawn(async move {
-            if let Err(error) = service
-                .execute_queue_process(&token, body, operation)
-                .await
-            {
+            if let Err(error) = service.execute_queue_process(&token, body, operation).await {
                 tracing::warn!(error = %error, "async queue drain failed");
             }
         });

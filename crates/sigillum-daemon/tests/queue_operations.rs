@@ -116,9 +116,7 @@ async fn spawn_gated_evm_provider() -> (SocketAddr, tokio::task::JoinHandle<()>,
                 "eth_getTransactionCount" => json!("0x7"),
                 "eth_getBalance" => {
                     let call = state.balance_calls.fetch_add(1, Ordering::SeqCst) + 1;
-                    state
-                        .maybe_gate(call, &state.gate_at_balance_call)
-                        .await;
+                    state.maybe_gate(call, &state.gate_at_balance_call).await;
                     json!(ONE_ETH_HEX)
                 }
                 "eth_feeHistory" => json!({
@@ -131,9 +129,7 @@ async fn spawn_gated_evm_provider() -> (SocketAddr, tokio::task::JoinHandle<()>,
                 "eth_getLogs" => json!([]),
                 "eth_sendRawTransaction" => {
                     let call = state.send_raw_calls.fetch_add(1, Ordering::SeqCst) + 1;
-                    state
-                        .maybe_gate(call, &state.gate_at_send_raw_call)
-                        .await;
+                    state.maybe_gate(call, &state.gate_at_send_raw_call).await;
                     submitted_raw_transaction_hash(request)
                 }
                 _ => json!("0x0"),

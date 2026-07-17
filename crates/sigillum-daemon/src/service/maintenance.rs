@@ -157,11 +157,8 @@ impl SigillumService {
         // the historical synchronous path). Cancel checkpoint: the stage
         // boundary BEFORE any stage work.
         if operation.cancellation_requested() {
-            self.state.finish_operation(
-                operation.id(),
-                OPERATION_STATE_CANCELED,
-                None,
-            );
+            self.state
+                .finish_operation(operation.id(), OPERATION_STATE_CANCELED, None);
             return Ok(self.canceled_maintenance_response(None, None, None, Vec::new()));
         }
         let automation = self.run_treasury_automation(token).await?;
@@ -171,11 +168,8 @@ impl SigillumService {
         // checkpoint: automation's effects are already durable; nothing of
         // this cycle's refresh/drain has started.
         if operation.cancellation_requested() {
-            self.state.finish_operation(
-                operation.id(),
-                OPERATION_STATE_CANCELED,
-                None,
-            );
+            self.state
+                .finish_operation(operation.id(), OPERATION_STATE_CANCELED, None);
             return Ok(self.canceled_maintenance_response(automation, None, None, Vec::new()));
         }
 
@@ -229,11 +223,8 @@ impl SigillumService {
                     failed: 0,
                 },
             )?;
-            self.state.finish_operation(
-                operation.id(),
-                OPERATION_STATE_CANCELED,
-                None,
-            );
+            self.state
+                .finish_operation(operation.id(), OPERATION_STATE_CANCELED, None);
             return Ok(self.canceled_maintenance_response(
                 automation,
                 Some((refresh.processed, refresh.detected, refresh.queued)),
