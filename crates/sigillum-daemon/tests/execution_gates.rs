@@ -482,24 +482,58 @@ fn assert_session_fingerprint(value: &Value, token: &str) {
     assert!(!token.contains(fingerprint));
 }
 
+/// Plan task 2.5: with no treasury policy at all (the default), stealth
+/// transfer/sweep enqueue is refused with 403 `execution_gate_denied` —
+/// the stealth families no longer bypass the treasury execution gates.
 #[tokio::test]
-async fn gates_off_no_policy_keeps_stealth_queue_behavior() {
+async fn gates_off_no_policy_blocks_stealth_enqueue() {
     let dir = TempDir::new().unwrap();
     let (addr, handle) = spawn_daemon(dir.path().to_path_buf()).await;
     let (rpc_addr, rpc_handle) = spawn_mock_evm_provider().await;
     let client = reqwest::Client::new();
     let setup = setup_stealth_queue(&client, addr, rpc_addr).await;
 
-    enqueue_stealth_transfer(&client, addr, &setup).await;
-    let process_json = process_queue(&client, addr, &setup.token).await;
-    assert_sent_process_response(&process_json);
+    let transfer_body = json!({
+        "wallet_profile": "payments-mainnet",
+        "stealth_address": setup.stealth_address,
+        "ephemeral_public_key_hex": setup.ephemeral_public_key_hex,
+        "view_tag_hex": setup.view_tag_hex,
+        "value_wei_hex": "0xde0b6b3a7640000",
+    });
+    let sweep_body = json!({
+        "wallet_profile": "payments-mainnet",
+        "stealth_address": setup.stealth_address,
+        "ephemeral_public_key_hex": setup.ephemeral_public_key_hex,
+        "view_tag_hex": setup.view_tag_hex,
+        "destination_address": DEFAULT_DESTINATION,
+        "min_value_wei_hex": "0x1",
+    });
+    for (path, body) in [
+        ("/api/queue/enqueue/eth-stealth-transfer", transfer_body),
+        ("/api/queue/enqueue/eth-stealth-native-sweep", sweep_body),
+    ] {
+        let enqueue = post_json(&client, addr, path, body, Some(&setup.token)).await;
+        assert_eq!(enqueue.status(), StatusCode::FORBIDDEN, "{path}");
+        let body: Value = enqueue.json().await.unwrap();
+        assert_eq!(body["code"], json!("execution_gate_denied"), "{path}");
+        assert!(
+            body["error"]
+                .as_str()
+                .unwrap()
+                .contains("enabled treasury policy"),
+            "{path}: {body}"
+        );
+    }
 
     handle.abort();
     rpc_handle.abort();
 }
 
+/// Plan task 2.5: an enabled policy with the gates off still blocks stealth
+/// enqueue — the master gate denial surfaces first, then the sweep-family
+/// gate denial once the master is on.
 #[tokio::test]
-async fn gates_off_with_policy_keeps_stealth_queue_behavior() {
+async fn gates_off_with_policy_blocks_stealth_enqueue() {
     let dir = TempDir::new().unwrap();
     let (addr, handle) = spawn_daemon(dir.path().to_path_buf()).await;
     let (rpc_addr, rpc_handle) = spawn_mock_evm_provider().await;
@@ -519,7 +553,243 @@ async fn gates_off_with_policy_keeps_stealth_queue_behavior() {
     .await;
     assert_eq!(update.status(), StatusCode::OK);
 
+    let enqueue = post_json(
+        &client,
+        addr,
+        "/api/queue/enqueue/eth-stealth-transfer",
+        json!({
+            "wallet_profile": "payments-mainnet",
+            "stealth_address": setup.stealth_address,
+            "ephemeral_public_key_hex": setup.ephemeral_public_key_hex,
+            "view_tag_hex": setup.view_tag_hex,
+            "value_wei_hex": "0xde0b6b3a7640000"
+        }),
+        Some(&setup.token),
+    )
+    .await;
+    assert_eq!(enqueue.status(), StatusCode::FORBIDDEN);
+    let body: Value = enqueue.json().await.unwrap();
+    assert_eq!(body["code"], json!("execution_gate_denied"));
+    assert!(
+        body["error"]
+            .as_str()
+            .unwrap()
+            .contains("allow_plan_execution"),
+        "{body}"
+    );
+
+    let update = post_json(
+        &client,
+        addr,
+        "/api/treasury/policy/update",
+        json!({
+            "enabled": true,
+            "allow_plan_execution": true,
+            "allowed_destinations": [{ "address": DEFAULT_DESTINATION }],
+        }),
+        Some(&setup.token),
+    )
+    .await;
+    assert_eq!(update.status(), StatusCode::OK);
+
+    let enqueue = post_json(
+        &client,
+        addr,
+        "/api/queue/enqueue/eth-stealth-native-sweep",
+        json!({
+            "wallet_profile": "payments-mainnet",
+            "stealth_address": setup.stealth_address,
+            "ephemeral_public_key_hex": setup.ephemeral_public_key_hex,
+            "view_tag_hex": setup.view_tag_hex,
+            "destination_address": DEFAULT_DESTINATION
+        }),
+        Some(&setup.token),
+    )
+    .await;
+    assert_eq!(enqueue.status(), StatusCode::FORBIDDEN);
+    let body: Value = enqueue.json().await.unwrap();
+    assert_eq!(body["code"], json!("execution_gate_denied"));
+    assert!(
+        body["error"]
+            .as_str()
+            .unwrap()
+            .contains("allow_sweep_execution"),
+        "{body}"
+    );
+
+    handle.abort();
+    rpc_handle.abort();
+}
+
+/// Plan task 2.5: with the master + sweep gates on, stealth transfers and
+/// sweeps enqueue and drain exactly as before the carve-out was closed.
+#[tokio::test]
+async fn gates_on_allows_stealth_enqueue_and_drain() {
+    let dir = TempDir::new().unwrap();
+    let (addr, handle) = spawn_daemon(dir.path().to_path_buf()).await;
+    let (rpc_addr, rpc_handle) = spawn_mock_evm_provider().await;
+    let client = reqwest::Client::new();
+    let setup = setup_stealth_queue(&client, addr, rpc_addr).await;
+
+    let update = post_json(
+        &client,
+        addr,
+        "/api/treasury/policy/update",
+        json!({
+            "enabled": true,
+            "allow_plan_execution": true,
+            "allow_sweep_execution": true,
+            "allowed_destinations": [{ "address": DEFAULT_DESTINATION }],
+        }),
+        Some(&setup.token),
+    )
+    .await;
+    assert_eq!(update.status(), StatusCode::OK);
+
     enqueue_stealth_transfer(&client, addr, &setup).await;
+    let process_json = process_queue(&client, addr, &setup.token).await;
+    assert_sent_process_response(&process_json);
+
+    handle.abort();
+    rpc_handle.abort();
+}
+
+/// Plan task 2.5: the drain re-checks the gate per job — a job enqueued
+/// while the gate was open is blocked (never signed or broadcast) once the
+/// gate closes, and resumes when it reopens.
+#[tokio::test]
+async fn gate_flip_between_enqueue_and_drain_blocks_then_allows() {
+    let dir = TempDir::new().unwrap();
+    let (addr, handle) = spawn_daemon(dir.path().to_path_buf()).await;
+    let (rpc_addr, rpc_handle) = spawn_mock_evm_provider().await;
+    let client = reqwest::Client::new();
+    let setup = setup_stealth_queue(&client, addr, rpc_addr).await;
+
+    let gates = |allow_sweep: bool| {
+        json!({
+            "enabled": true,
+            "allow_plan_execution": true,
+            "allow_sweep_execution": allow_sweep,
+            "allowed_destinations": [{ "address": DEFAULT_DESTINATION }],
+        })
+    };
+    let update = post_json(
+        &client,
+        addr,
+        "/api/treasury/policy/update",
+        gates(true),
+        Some(&setup.token),
+    )
+    .await;
+    assert_eq!(update.status(), StatusCode::OK);
+    enqueue_stealth_transfer(&client, addr, &setup).await;
+
+    let update = post_json(
+        &client,
+        addr,
+        "/api/treasury/policy/update",
+        gates(false),
+        Some(&setup.token),
+    )
+    .await;
+    assert_eq!(update.status(), StatusCode::OK);
+
+    let process_json = process_queue(&client, addr, &setup.token).await;
+    assert_eq!(process_json["processed"], json!(1));
+    assert_eq!(process_json["succeeded"], json!(0));
+    assert_eq!(process_json["blocked"], json!(1));
+    assert_eq!(process_json["jobs"][0]["state"], json!("blocked"));
+    assert!(
+        process_json["jobs"][0]["last_error"]
+            .as_str()
+            .unwrap()
+            .contains("allow_sweep_execution"),
+        "{process_json}"
+    );
+    assert_eq!(
+        process_json["jobs"][0]["transaction_hash_hex"],
+        Value::Null
+    );
+
+    let update = post_json(
+        &client,
+        addr,
+        "/api/treasury/policy/update",
+        gates(true),
+        Some(&setup.token),
+    )
+    .await;
+    assert_eq!(update.status(), StatusCode::OK);
+    let process_json = process_queue(&client, addr, &setup.token).await;
+    assert_sent_process_response(&process_json);
+
+    handle.abort();
+    rpc_handle.abort();
+}
+
+/// Plan task 2.5: the deposit sweep enqueue surface
+/// (`/api/deposits/eth-stealth/enqueue-sweep`) re-validates the sweep gate
+/// at enqueue time exactly like the queue enqueue endpoints.
+#[tokio::test]
+async fn deposit_sweep_enqueue_respects_the_sweep_gate() {
+    let dir = TempDir::new().unwrap();
+    let (addr, handle) = spawn_daemon(dir.path().to_path_buf()).await;
+    let (rpc_addr, rpc_handle) = spawn_mock_evm_provider().await;
+    let client = reqwest::Client::new();
+    let setup = setup_stealth_queue(&client, addr, rpc_addr).await;
+
+    let create = post_json(
+        &client,
+        addr,
+        "/api/deposits/eth-stealth/create-native",
+        json!({
+            "wallet_profile": "payments-mainnet",
+            "expected_value_wei_hex": "0xde0b6b3a7640000",
+        }),
+        Some(&setup.token),
+    )
+    .await;
+    assert_eq!(create.status(), StatusCode::OK);
+    let create_json: Value = create.json().await.unwrap();
+    let deposit_id = create_json["deposit"]["id"].as_str().unwrap();
+
+    // Gates off (no policy): the deposit sweep enqueue is refused.
+    let enqueue = post_json(
+        &client,
+        addr,
+        "/api/deposits/eth-stealth/enqueue-sweep",
+        json!({ "id": deposit_id }),
+        Some(&setup.token),
+    )
+    .await;
+    assert_eq!(enqueue.status(), StatusCode::FORBIDDEN);
+    let body: Value = enqueue.json().await.unwrap();
+    assert_eq!(body["code"], json!("execution_gate_denied"));
+
+    // Gates on: enqueue and drain succeed.
+    let update = post_json(
+        &client,
+        addr,
+        "/api/treasury/policy/update",
+        json!({
+            "enabled": true,
+            "allow_plan_execution": true,
+            "allow_sweep_execution": true,
+            "allowed_destinations": [{ "address": DEFAULT_DESTINATION }],
+        }),
+        Some(&setup.token),
+    )
+    .await;
+    assert_eq!(update.status(), StatusCode::OK);
+    let enqueue = post_json(
+        &client,
+        addr,
+        "/api/deposits/eth-stealth/enqueue-sweep",
+        json!({ "id": deposit_id }),
+        Some(&setup.token),
+    )
+    .await;
+    assert_eq!(enqueue.status(), StatusCode::OK);
     let process_json = process_queue(&client, addr, &setup.token).await;
     assert_sent_process_response(&process_json);
 
@@ -535,11 +805,19 @@ async fn pause_halts_drain_mid_queue() {
     let (rpc_addr, rpc_handle, broadcast_control) = spawn_holding_mock_evm_provider().await;
     let client = reqwest::Client::new();
     let setup = setup_stealth_queue(&client, addr, rpc_addr).await;
+    // Plan task 2.5: stealth jobs enqueue and drain only with the sweep gate
+    // open — this test exercises the PAUSE switch, so the gates stay on
+    // throughout (pause/resume flips only `execution_paused`).
     let policy = post_json(
         &client,
         addr,
         "/api/treasury/policy/update",
-        json!({ "enabled": false }),
+        json!({
+            "enabled": true,
+            "allow_plan_execution": true,
+            "allow_sweep_execution": true,
+            "allowed_destinations": [{ "address": DEFAULT_DESTINATION }],
+        }),
         Some(&setup.token),
     )
     .await;

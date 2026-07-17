@@ -385,6 +385,12 @@ impl Rig {
                 "enabled": true,
                 "allow_gas_topups": allow_gas_topups,
                 "block_cross_party_linkage": block_cross_party_linkage,
+                // Plan task 2.5: stealth sweeps gate under the same Sweep
+                // family as seed sweeps — the master + sweep gates must be
+                // on for any sweep in this suite to enqueue/drain. The 2.4
+                // gas-topup behavior stays keyed to `allow_gas_topups` only.
+                "allow_plan_execution": true,
+                "allow_sweep_execution": true,
                 // An enabled policy fail-closes destinations not on the
                 // allowlist; both test sweep destinations are allowed.
                 "allowed_destinations": [

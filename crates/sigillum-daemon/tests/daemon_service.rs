@@ -2559,6 +2559,24 @@ async fn profile_backed_send_and_queue_flow_persist_internal_configuration() {
     let init_json: serde_json::Value = init.json().await.unwrap();
     let token = init_json["session_token"].as_str().unwrap().to_string();
 
+    // Plan task 2.5: stealth transfers gate under the Sweep execution family —
+    // the enqueue + drain below need the master + sweep gates open and the
+    // profile's default destination allow-listed.
+    let policy = post_json(
+        &client,
+        addr,
+        "/api/treasury/policy/update",
+        json!({
+            "enabled": true,
+            "allow_plan_execution": true,
+            "allow_sweep_execution": true,
+            "allowed_destinations": [{ "address": "0x1111111111111111111111111111111111111111" }],
+        }),
+        Some(&token),
+    )
+    .await;
+    assert_eq!(policy.status(), StatusCode::OK);
+
     post_json(
         &client,
         addr,
@@ -4769,6 +4787,24 @@ async fn deposit_registry_refresh_and_sweep_flow_roundtrip() {
     .await;
     let init_json: serde_json::Value = init.json().await.unwrap();
     let token = init_json["session_token"].as_str().unwrap().to_string();
+
+    // Plan task 2.5: stealth deposit sweeps gate under the Sweep execution
+    // family — the auto-enqueue, manual enqueue, and drains below need the
+    // master + sweep gates open and the sweep destination allow-listed.
+    let policy = post_json(
+        &client,
+        addr,
+        "/api/treasury/policy/update",
+        json!({
+            "enabled": true,
+            "allow_plan_execution": true,
+            "allow_sweep_execution": true,
+            "allowed_destinations": [{ "address": "0x1111111111111111111111111111111111111111" }],
+        }),
+        Some(&token),
+    )
+    .await;
+    assert_eq!(policy.status(), StatusCode::OK);
 
     post_json(
         &client,

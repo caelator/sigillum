@@ -1433,6 +1433,13 @@ impl SigillumService {
             provider,
             strict_destination,
         } = params;
+        // Plan task 2.5: stealth deposit sweeps re-validate the Sweep-family
+        // execution gate at enqueue time, at parity with the seed-family
+        // `/api/queue/enqueue/*` endpoints (`enqueue_job`) — the sweep jobs
+        // built below map to `ExecutionFamily::Sweep`. The drain re-checks
+        // the same gate per job. A denial fails the whole enqueue (including
+        // any sponsor gas top-up planning) before a job is persisted.
+        self.require_execution_family_allowed(super::queue::ExecutionFamily::Sweep)?;
         let inventory =
             crate::inventory::load_wallet_inventory(&self.state.base_dir).map_err(|error| {
                 ServiceError::internal(format!("Failed to load wallet inventory: {error}"))

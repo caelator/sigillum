@@ -3572,8 +3572,9 @@ test("treasury policy renderer shows configured policy and empty state", () => {
   ok(html.includes('class="policy-summary"'));
   ok(html.includes("Plans may execute sweeps and claims."));
   ok(html.includes("DeFi exits and Revokes are blocked."));
+  ok(html.includes("The sweep gate also covers stealth deposit sweeps and transfers."));
   ok(html.includes("Cross-party linkage blocking is off"));
-  ok(html.includes("Sponsor gas top-ups are allowed"));
+  ok(html.includes("Sponsor gas top-ups (plan and stealth) are allowed"));
   ok(html.includes("queue execution is currently paused"));
   // …and the raw state stays one click away behind "Technical state".
   ok(html.includes("<summary>Technical state</summary>"));
@@ -3617,15 +3618,15 @@ test("treasury policy summary describes the gates in plain English", () => {
   };
 
   deepEqual(treasuryPolicySummary({ ...base, enabled: false }), [
-    "The policy is disabled, so nothing may execute from a plan.",
+    "The policy is disabled, so nothing may execute — no plan steps and no stealth deposit sweeps.",
     "Cross-party linkage blocking is off — plans may route different payers to a shared destination.",
-    "Sponsor gas top-ups are off.",
+    "Sponsor gas top-ups (plan and stealth) are off.",
   ]);
 
   deepEqual(treasuryPolicySummary({ ...base, allow_plan_execution: false }), [
-    "Plan execution is switched off, so no step may execute yet.",
+    "Plan execution is switched off, so no plan step or stealth deposit sweep may execute yet.",
     "Cross-party linkage blocking is off — plans may route different payers to a shared destination.",
-    "Sponsor gas top-ups are off.",
+    "Sponsor gas top-ups (plan and stealth) are off.",
   ]);
 
   deepEqual(
@@ -3638,16 +3639,26 @@ test("treasury policy summary describes the gates in plain English", () => {
     }),
     [
       "Plans may execute sweeps, revokes, DeFi exits, and claims.",
+      "The sweep gate also covers stealth deposit sweeps and transfers.",
       "Cross-party linkage blocking is on; destinations are limited to the allow-list below.",
-      "Sponsor gas top-ups are allowed.",
+      "Sponsor gas top-ups (plan and stealth) are allowed.",
     ],
   );
 
   deepEqual(treasuryPolicySummary(base), [
     "Plans may execute sweeps and revokes.",
     "Claims and DeFi exits are blocked.",
+    "The sweep gate also covers stealth deposit sweeps and transfers.",
     "Cross-party linkage blocking is off — plans may route different payers to a shared destination.",
-    "Sponsor gas top-ups are off.",
+    "Sponsor gas top-ups (plan and stealth) are off.",
+  ]);
+
+  deepEqual(treasuryPolicySummary({ ...base, allow_sweep_execution: false }), [
+    "Plans may execute revokes.",
+    "Claims, DeFi exits, and Sweeps are blocked.",
+    "Stealth deposit sweeps and transfers stay blocked until the sweep gate is on.",
+    "Cross-party linkage blocking is off — plans may route different payers to a shared destination.",
+    "Sponsor gas top-ups (plan and stealth) are off.",
   ]);
 });
 

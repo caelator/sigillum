@@ -155,6 +155,25 @@ from 1.0.0 onward, per the stability policy in `docs/stability.md`.
 
 ### Changed
 
+- **Stealth sweeps and transfers now sit under the treasury execution gates
+  — the stealth carve-out is closed (plan task 2.5)** — BEHAVIOR CHANGE:
+  `EthStealthTransfer`, `EthStealthErc20Transfer`, `EthStealthNativeSweep`,
+  and `EthStealthErc20Sweep` queue jobs previously executed regardless of the
+  treasury policy gates, a fail-open asymmetry against the seed family. They
+  now map to the same Sweep execution family as the `EthSeed*` equivalents:
+  enqueue (`/api/queue/enqueue/eth-stealth-*` and the deposit sweep paths,
+  including refresh auto-enqueue) is refused with 403
+  `execution_gate_denied` unless the treasury policy is enabled with
+  `allow_plan_execution` AND `allow_sweep_execution` on, and the drain
+  re-checks the gate per job — a job enqueued while the gate was open blocks
+  (never signs or broadcasts) once the gate closes, and resumes when it
+  reopens. **With every gate off (the default), stealth sweeps no longer
+  execute; operators must open the sweep gate to keep stealth sweeps
+  running.** The sponsor gas top-up keeps its 2.4 carve-out (policy-gated on
+  `allow_gas_topups` at enqueue time; the drain-level pause checks still halt
+  it), and the console policy screen now states that the sweep gate covers
+  stealth deposit sweeps and transfers. Recorded as a pre-tag adjustment in
+  `docs/stability.md`.
 - **ERC-5564 stealth shared-secret hash switched to the compressed-point
   scheme-1 standard** — New stealth payments and deposit records now derive
   the shared-secret hash as keccak256 over the 33-byte compressed SEC1 point,

@@ -308,6 +308,22 @@ async fn spawn_rig(dir: &TempDir) -> Rig {
         Some(&token),
     )
     .await;
+    // Plan task 2.5: stealth sweeps gate under the Sweep execution family —
+    // every sweep in this suite needs the master + sweep gates open and the
+    // default destination allow-listed.
+    post_ok(
+        &client,
+        addr,
+        "/api/treasury/policy/update",
+        json!({
+            "enabled": true,
+            "allow_plan_execution": true,
+            "allow_sweep_execution": true,
+            "allowed_destinations": [{ "address": DESTINATION }],
+        }),
+        Some(&token),
+    )
+    .await;
 
     Rig {
         addr,

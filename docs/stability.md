@@ -139,6 +139,18 @@ candidates may adjust stable-candidate surfaces with the change recorded in
   standard-convention serde default; the four stealth `QueueJobPayload`
   variants gain it optionally (absent = probe). Fluidkey's 64-byte X‖Y
   encoding remains unsupported.
+- **Stealth execution-gate carve-out closed (plan task 2.5)**: the stealth
+  transfer/sweep queue jobs (`EthStealthTransfer`, `EthStealthErc20Transfer`,
+  `EthStealthNativeSweep`, `EthStealthErc20Sweep`) no longer bypass the
+  treasury execution gates — a pre-switch behavior change. They gate under
+  the Sweep execution family exactly like the `EthSeed*` equivalents:
+  enqueue (`/api/queue/enqueue/eth-stealth-*` and the deposit sweep paths)
+  returns 403 `execution_gate_denied` unless the treasury policy is enabled
+  with `allow_plan_execution` and `allow_sweep_execution` on, and the drain
+  re-checks the gate per job. Stealth sweeps are therefore BLOCKED BY DEFAULT
+  for existing installs until the operator opens the sweep gate; jobs already
+  `sent` (broadcast, pre-terminal) are unaffected. The `EthStealthGasTopup`
+  job keeps its `allow_gas_topups` enqueue-time gate unchanged.
 
 ## Stable at 1.0
 

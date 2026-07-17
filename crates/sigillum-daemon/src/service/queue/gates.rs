@@ -99,22 +99,27 @@ fn family_gate_enabled(policy: &TreasuryPolicy, family: ExecutionFamily) -> bool
 
 pub(crate) fn queue_payload_execution_family(payload: &QueueJobPayload) -> Option<ExecutionFamily> {
     match payload {
-        // EthStealth* variants are the pre-W7 stealth families: deliberately
-        // NOT plan execution, so treasury execution gates must not affect them.
-        // The sponsor gas top-up joins the same carve-out for now (enqueued
-        // only by the deposit flow, already policy-gated on `allow_gas_topups`
-        // at enqueue time); task 2.5 of the operator-surface plan reconciles
-        // the stealth carve-out with the gate model explicitly.
+        // Plan task 2.5 (the stealth carve-out is reconciled): a stealth
+        // transfer or sweep moves funds out of a stealth address exactly
+        // like its EthSeed* equivalent, so it gates under the same Sweep
+        // family — the `allow_plan_execution` master gate plus
+        // `allow_sweep_execution`, with enqueue-time re-validation
+        // (`enqueue_job`, `enqueue_deposit_sweep_job`) and the drain-time
+        // re-check (`process_queue_state`) both keying off this mapping.
+        // There is no separate "transfer" execution family.
         QueueJobPayload::EthStealthTransfer { .. }
         | QueueJobPayload::EthStealthErc20Transfer { .. }
         | QueueJobPayload::EthStealthNativeSweep { .. }
-        | QueueJobPayload::EthStealthErc20Sweep { .. }
-        | QueueJobPayload::EthStealthGasTopup { .. } => None,
+        | QueueJobPayload::EthStealthErc20Sweep { .. } => Some(ExecutionFamily::Sweep),
+        // The sponsor gas top-up keeps its 2.4 carve-out: enqueued only by
+        // the deposit flow, already policy-gated on `allow_gas_topups` at
+        // enqueue (plan) time. It is not plan execution, so the plan gates
+        // do not apply — but the drain-level pause checks (policy
+        // `execution_paused` and the latched kill switch) still halt it.
+        QueueJobPayload::EthStealthGasTopup { .. } => None,
         // EthSeed* variants (W7.3): fund movement out of a seed-derived
         // wallet is a Sweep-family execution regardless of shape (plain
-        // transfer or threshold sweep) — there is no separate "transfer"
-        // execution family, and none of these three should ever bypass the
-        // gates the way the pre-W7 stealth families do.
+        // transfer or threshold sweep).
         QueueJobPayload::EthSeedTransfer { .. }
         | QueueJobPayload::EthSeedNativeSweep { .. }
         | QueueJobPayload::EthSeedErc20Sweep { .. } => Some(ExecutionFamily::Sweep),
@@ -304,8 +309,11 @@ mod tests {
         }
     }
 
+    /// Plan task 2.5: stealth transfer/sweep payloads gate exactly like
+    /// their EthSeed* equivalents (`ExecutionFamily::Sweep`); only the
+    /// sponsor gas top-up keeps the 2.4 `allow_gas_topups` carve-out.
     #[test]
-    fn current_stealth_queue_payloads_are_not_plan_execution_families() {
+    fn stealth_sweep_payloads_are_gated_as_sweep_family() {
         let payloads = [
             QueueJobPayload::EthStealthTransfer {
                 wallet_profile: "stealth".into(),
@@ -355,8 +363,26 @@ mod tests {
         ];
 
         for payload in payloads {
-            assert_eq!(queue_payload_execution_family(&payload), None);
+            assert_eq!(
+                queue_payload_execution_family(&payload),
+                Some(ExecutionFamily::Sweep)
+            );
         }
+    }
+
+    /// The 2.4 sponsor gas top-up stays in its carve-out: policy-gated on
+    /// `allow_gas_topups` at enqueue (plan) time, exempt from the plan gates
+    /// at drain time (the drain-level pause checks still halt it).
+    #[test]
+    fn stealth_gas_topup_payload_is_not_a_plan_execution_family() {
+        let payload = QueueJobPayload::EthStealthGasTopup {
+            wallet_profile: "stealth".into(),
+            sponsor_address: "0x4444444444444444444444444444444444444444".into(),
+            destination_address: "0x1111111111111111111111111111111111111111".into(),
+            value_wei_hex: "0x1".into(),
+            gas_limit: None,
+        };
+        assert_eq!(queue_payload_execution_family(&payload), None);
     }
 
     /// W7.3: EthSeed* queue payloads now gate the same way `PlanStepExecution`
@@ -488,15 +514,8 @@ mod tests {
         }
     }
 
-    #[test]
-    fn stealth_payloads_bypass_gate_block_reason_even_under_hostile_policy() {
-        let (dir, service) = test_service();
-        let mut policy = sample_policy();
-        policy.allow_plan_execution = false;
-        policy.execution_paused = true;
-        persist_policy(&dir, Some(policy));
-
-        let payload = QueueJobPayload::EthStealthNativeSweep {
+    fn stealth_native_sweep_payload() -> QueueJobPayload {
+        QueueJobPayload::EthStealthNativeSweep {
             wallet_profile: "stealth".into(),
             stealth_address: "0x1111111111111111111111111111111111111111".into(),
             ephemeral_public_key_hex: "02aa".into(),
@@ -505,6 +524,81 @@ mod tests {
             gas_limit: None,
             view_tag_hex: None,
             stealth_hash_convention: None,
+        }
+    }
+
+    #[test]
+    fn stealth_sweep_payload_blocked_by_gates_under_hostile_policy() {
+        let (dir, service) = test_service();
+        let payload = stealth_native_sweep_payload();
+
+        persist_policy(&dir, None);
+        assert_eq!(
+            service
+                .execution_gate_block_reason(&payload)
+                .unwrap()
+                .as_deref(),
+            Some("execution_gate: plan execution requires an enabled treasury policy")
+        );
+
+        let mut policy = sample_policy();
+        policy.allow_plan_execution = false;
+        policy.allow_sweep_execution = true;
+        persist_policy(&dir, Some(policy));
+        assert_eq!(
+            service
+                .execution_gate_block_reason(&payload)
+                .unwrap()
+                .as_deref(),
+            Some("execution_gate: allow_plan_execution is disabled")
+        );
+
+        let policy = sample_policy();
+        persist_policy(&dir, Some(policy));
+        assert_eq!(
+            service
+                .execution_gate_block_reason(&payload)
+                .unwrap()
+                .as_deref(),
+            Some("execution_gate: allow_sweep_execution is disabled")
+        );
+
+        let mut policy = sample_policy();
+        policy.allow_sweep_execution = true;
+        policy.execution_paused = true;
+        persist_policy(&dir, Some(policy));
+        assert_eq!(
+            service
+                .execution_gate_block_reason(&payload)
+                .unwrap()
+                .as_deref(),
+            Some(EXECUTION_PAUSED_REASON)
+        );
+
+        let mut policy = sample_policy();
+        policy.allow_sweep_execution = true;
+        persist_policy(&dir, Some(policy));
+        assert_eq!(service.execution_gate_block_reason(&payload).unwrap(), None);
+    }
+
+    /// The 2.4 gas-topup carve-out is unchanged: even under a hostile policy
+    /// the top-up job reports no plan-gate block reason (its enqueue-time
+    /// `allow_gas_topups` check is the gate; the latched kill switch still
+    /// halts the whole drain before any job runs).
+    #[test]
+    fn stealth_gas_topup_bypasses_plan_gate_block_reason_under_hostile_policy() {
+        let (dir, service) = test_service();
+        let mut policy = sample_policy();
+        policy.allow_plan_execution = false;
+        policy.execution_paused = true;
+        persist_policy(&dir, Some(policy));
+
+        let payload = QueueJobPayload::EthStealthGasTopup {
+            wallet_profile: "stealth".into(),
+            sponsor_address: "0x4444444444444444444444444444444444444444".into(),
+            destination_address: "0x1111111111111111111111111111111111111111".into(),
+            value_wei_hex: "0x1".into(),
+            gas_limit: None,
         };
 
         assert_eq!(service.execution_gate_block_reason(&payload).unwrap(), None);

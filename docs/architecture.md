@@ -279,7 +279,13 @@ Current daemon behavior:
 - keeps consolidation-plan execution fail closed under the
   default-off `allow_plan_execution` master gate and the default-off per-family
   `allow_sweep_execution`, `allow_revoke_execution`, `allow_exit_execution`,
-  `allow_claim_execution`, and `allow_gas_topups` gates. The
+  `allow_claim_execution`, and `allow_gas_topups` gates. The stealth
+  transfer/sweep queue families (`EthStealthTransfer`,
+  `EthStealthErc20Transfer`, `EthStealthNativeSweep`, `EthStealthErc20Sweep`)
+  gate under the same Sweep family as their `EthSeed*` equivalents (plan task
+  2.5): enqueue is refused with `execution_gate_denied` and the drain
+  re-checks the gate per job, so with the gates off (the default) no stealth
+  funds move either. The
   `execution_paused` kill switch is controlled through
   `POST /api/queue/pause|resume`, and every gate or pause flip emits a typed
   audit event. Pause sets an in-memory `AtomicBool` latch before waiting for the
@@ -538,10 +544,13 @@ retryable `blocked`, never a signature. If any planning precondition fails
 (policy off, cap exceeded, sponsor unavailable or insolvent, gas already
 sufficient, or a live top-up already tracked) no top-up is emitted and the
 deposit keeps its historical behavior: the sweep blocks on gas until the
-operator funds the address manually. Like the other `EthStealth*` families,
-the top-up job is not treasury-plan execution and bypasses the plan gates
-(enqueue is already policy-gated on `allow_gas_topups`); reconciling that
-carve-out with the gate model is plan task 2.5.
+operator funds the address manually. The top-up job keeps a deliberate
+carve-out from the plan gates: it is not treasury-plan execution, its enqueue
+is already policy-gated on `allow_gas_topups`, and the drain-level pause
+checks still halt it. The other `EthStealth*` families no longer share that
+carve-out — since plan task 2.5, stealth transfers and sweeps gate under the
+`allow_sweep_execution` family (with the `allow_plan_execution` master gate)
+at enqueue and drain, exactly like the `EthSeed*` equivalents.
 
 ## Privacy & Linkage Model
 

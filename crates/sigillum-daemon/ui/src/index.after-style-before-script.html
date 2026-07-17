@@ -288,7 +288,7 @@
             </div>
             <div class="trust-point">
               <div class="tp-head">Plan execution stays off by default</div>
-              <div class="tp-body">Consolidation plans are review-and-export only until you explicitly enable execution per family (sweeps, revokes, DeFi exits &mdash; plus the claim and gas top-up opt-ins above) behind a master gate in Treasury policy. A global pause switch in the Operations queue view halts all queue execution immediately. Every gate change is recorded in the audit log.</div>
+              <div class="tp-body">Consolidation plans are review-and-export only until you explicitly enable execution per family (sweeps, revokes, DeFi exits &mdash; plus the claim and gas top-up opt-ins above) behind a master gate in Treasury policy. The sweep gate covers stealth deposit sweeps and transfers too &mdash; nothing stealth executes while it is off. A global pause switch in the Operations queue view halts all queue execution immediately. Every gate change is recorded in the audit log.</div>
             </div>
           </div>
         </div>
@@ -1043,7 +1043,7 @@
           </label>
           <label class="checkbox-row">
             <input type="checkbox" id="treasuryPolicyAllowSweepExec">
-            Allow sweep execution (default off)
+            Allow sweep execution &mdash; covers plan-step sweeps and stealth deposit sweeps/transfers (default off)
           </label>
           <label class="checkbox-row">
             <input type="checkbox" id="treasuryPolicyAllowRevokeExec">
@@ -1058,7 +1058,7 @@
           <summary>How this policy protects you</summary>
           <p class="field-hint">Scope: blocks when different payers would sweep to the SAME destination. Sigillum-generated gas top-ups (fund_gas steps) are covered by the same payer-linkage analysis: one sponsor funding different payers warns and is blocked when linkage protection is on. MANUAL gas funding, amount/timing correlation, downstream re-merging of per-party destinations, and multi-hop flows remain operator discipline &mdash; keep per-party destinations separate.</p>
           <p class="field-hint">Claim execution stays blocked unless ALL of these hold: this policy is enabled, the claim uses the merkle-distributor-v1 adapter, its simulation passed, the claim contract is marked trusted in the risk catalog (or carries a claim_execution_reviewed note), and you explicitly approve the step. Other claim types stay review/export-only. A claim that reverts at execution will require operator action and is never auto-retried, because a reverted claim may have consumed its proof.</p>
-          <p class="field-hint">Nothing executes from a consolidation plan step unless this policy is enabled AND the master gate (allow plan execution) AND that step's per-family gate (sweep, revoke, or DeFi exit) are all on. Claim execution and gas top-ups keep their existing separate opt-ins above. Every gate change is written to the audit log. The queue view has a global pause switch that halts ALL queue execution immediately &mdash; including today's stealth sweep jobs &mdash; and it is honored even while this policy is disabled.</p>
+          <p class="field-hint">Nothing executes from a consolidation plan step unless this policy is enabled AND the master gate (allow plan execution) AND that step's per-family gate (sweep, revoke, or DeFi exit) are all on. The same sweep gate also covers stealth deposit sweeps and transfers &mdash; with the gate off they are refused at enqueue and blocked at drain, exactly like seed-wallet sweeps; there is no stealth carve-out. Claim execution and sponsor gas top-ups (including stealth deposit top-ups) keep their existing separate opt-ins above. Every gate change is written to the audit log. The queue view has a global pause switch that halts ALL queue execution immediately, and it is honored even while this policy is disabled.</p>
         </details>
         <label class="field-label" for="treasuryPolicyDestinations">Allowed destinations</label>
         <textarea id="treasuryPolicyDestinations" placeholder="One per line: 0xADDRESS or 0xADDRESS:label"></textarea>

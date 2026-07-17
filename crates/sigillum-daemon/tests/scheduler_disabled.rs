@@ -180,6 +180,24 @@ async fn disabled_scheduler_produces_no_background_activity() {
     .await;
     assert_eq!(key.status(), StatusCode::OK);
 
+    // Plan task 2.5: stealth transfers/sweeps gate under the Sweep execution
+    // family — the enqueue below needs an enabled policy with the master +
+    // sweep gates open and the default destination allow-listed.
+    let policy = post_json(
+        &client,
+        addr,
+        "/api/treasury/policy/update",
+        json!({
+            "enabled": true,
+            "allow_plan_execution": true,
+            "allow_sweep_execution": true,
+            "allowed_destinations": [{ "address": DEFAULT_DESTINATION }],
+        }),
+        Some(&token),
+    )
+    .await;
+    assert_eq!(policy.status(), StatusCode::OK);
+
     for (path, body) in [
         (
             "/api/profiles/evm/upsert",

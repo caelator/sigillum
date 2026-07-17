@@ -129,9 +129,13 @@ function joinEnglishList(items: string[]): string {
 export function treasuryPolicySummary(policy: TreasuryPolicy): string[] {
   const sentences: string[] = [];
   if (!policy.enabled) {
-    sentences.push("The policy is disabled, so nothing may execute from a plan.");
+    sentences.push(
+      "The policy is disabled, so nothing may execute — no plan steps and no stealth deposit sweeps.",
+    );
   } else if (!policy.allow_plan_execution) {
-    sentences.push("Plan execution is switched off, so no step may execute yet.");
+    sentences.push(
+      "Plan execution is switched off, so no plan step or stealth deposit sweep may execute yet.",
+    );
   } else {
     const allowed: string[] = [];
     if (policy.allow_sweep_execution) allowed.push("sweeps");
@@ -149,6 +153,13 @@ export function treasuryPolicySummary(policy: TreasuryPolicy): string[] {
     if (blocked.length) {
       sentences.push(joinEnglishList(blocked) + " are blocked.");
     }
+    // Plan task 2.5: the sweep gate covers the stealth families too — no
+    // "stealth bypasses the gates" carve-out may be implied here.
+    sentences.push(
+      policy.allow_sweep_execution
+        ? "The sweep gate also covers stealth deposit sweeps and transfers."
+        : "Stealth deposit sweeps and transfers stay blocked until the sweep gate is on.",
+    );
   }
   sentences.push(
     policy.block_cross_party_linkage
@@ -158,8 +169,8 @@ export function treasuryPolicySummary(policy: TreasuryPolicy): string[] {
   const operational: string[] = [];
   operational.push(
     policy.allow_gas_topups
-      ? "Sponsor gas top-ups are allowed"
-      : "Sponsor gas top-ups are off",
+      ? "Sponsor gas top-ups (plan and stealth) are allowed"
+      : "Sponsor gas top-ups (plan and stealth) are off",
   );
   if (policy.execution_paused) {
     operational.push("queue execution is currently paused");

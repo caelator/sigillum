@@ -21,6 +21,7 @@ use sha3::{Digest, Keccak256};
 use tempfile::TempDir;
 
 const ONE_ETH_HEX: &str = "0xde0b6b3a7640000";
+const DESTINATION: &str = "0x1111111111111111111111111111111111111111";
 
 // ── Daemon + gated provider fixtures ─────────────────────────────
 
@@ -320,12 +321,28 @@ async fn spawn_rig() -> Rig {
                 "wallet": "payments",
                 "short_name": "eth",
                 "provider_profile": "mainnet",
-                "default_destination_address": "0x1111111111111111111111111111111111111111",
+                "default_destination_address": DESTINATION,
                 "execution_enabled": true,
             }),
         )
         .await;
     assert_eq!(status, StatusCode::OK, "wallet upsert: {body}");
+
+    // Plan task 2.5: stealth transfers/sweeps gate under the Sweep execution
+    // family — every job in this suite needs the master + sweep gates open
+    // and the transfer destination allow-listed.
+    let (status, body) = rig
+        .post(
+            "/api/treasury/policy/update",
+            json!({
+                "enabled": true,
+                "allow_plan_execution": true,
+                "allow_sweep_execution": true,
+                "allowed_destinations": [{ "address": DESTINATION }],
+            }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "policy update: {body}");
 
     let (status, export) = rig
         .post(

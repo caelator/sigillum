@@ -309,6 +309,23 @@ async fn spawn_rig() -> Rig {
         view_tag_hex: String::new(),
     };
 
+    // Plan task 2.5: stealth transfers/sweeps no longer bypass the treasury
+    // execution gates — open the master + sweep gates and allowlist the
+    // transfer destination (the `payments-mainnet` default below) so queue
+    // enqueue/drain succeeds.
+    let (status, body) = rig
+        .post(
+            "/api/treasury/policy/update",
+            json!({
+                "enabled": true,
+                "allow_plan_execution": true,
+                "allow_sweep_execution": true,
+                "allowed_destinations": [{ "address": "0x1111111111111111111111111111111111111111" }],
+            }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "policy update: {body}");
+
     let (status, body) = rig
         .post(
             "/api/api-keys/set",
