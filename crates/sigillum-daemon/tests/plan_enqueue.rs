@@ -266,6 +266,10 @@ fn gates_on_policy_body() -> Value {
         "allow_exit_execution": true,
         "allow_claim_execution": true,
         "allow_gas_topups": true,
+        // Explicit off: the API default flipped to ON in plan task 3.5, so a
+        // body that means "linkage blocking off" must say so. Tests exercising
+        // the on path override this key with `true` below.
+        "block_cross_party_linkage": false,
     })
 }
 

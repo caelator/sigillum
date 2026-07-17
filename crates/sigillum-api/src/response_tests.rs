@@ -1184,6 +1184,7 @@ fn test_wallet_operations_response_roundtrips() {
         },
         policy_violations: Vec::new(),
         linkage_findings: Vec::new(),
+        risk_findings: Vec::new(),
         steps: vec![step],
     };
     roundtrip_test(ConsolidationPlanListResponse {
@@ -2196,13 +2197,16 @@ fn test_treasury_policy_responses_roundtrip() {
 }
 
 #[test]
-fn test_treasury_policy_require_simulation_defaults_true() {
-    // Older or hand-written payloads without the field must stay strict.
+fn test_treasury_policy_protective_defaults_stay_strict() {
+    // Older or hand-written payloads without the fields must stay strict:
+    // simulation and cross-party linkage blocking default ON (the latter
+    // flipped default-on in plan task 3.5); every execution capability
+    // defaults OFF.
     let policy: TreasuryPolicy =
         serde_json::from_str(r#"{"enabled":true,"created_at_unix":1,"updated_at_unix":2}"#)
             .unwrap();
     assert!(policy.require_simulation);
-    assert!(!policy.block_cross_party_linkage);
+    assert!(policy.block_cross_party_linkage);
     assert!(!policy.allow_claim_execution);
     assert!(!policy.allow_gas_topups);
     assert!(policy.max_gas_topup_wei_hex.is_none());
@@ -2254,6 +2258,7 @@ fn test_consolidation_plan_policy_violations_roundtrip() {
         },
         policy_violations: vec!["exceeds_policy_plan_cap".to_string()],
         linkage_findings: Vec::new(),
+        risk_findings: Vec::new(),
         steps: Vec::new(),
     };
     roundtrip_test(base.clone());

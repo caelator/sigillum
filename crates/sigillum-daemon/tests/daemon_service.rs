@@ -4791,6 +4791,10 @@ async fn deposit_registry_refresh_and_sweep_flow_roundtrip() {
     // Plan task 2.5: stealth deposit sweeps gate under the Sweep execution
     // family — the auto-enqueue, manual enqueue, and drains below need the
     // master + sweep gates open and the sweep destination allow-listed.
+    // Linkage blocking is explicitly OFF: untagged stealth deposits are each a
+    // distinct identity, and since plan task 3.5 made block_cross_party_linkage
+    // default-on, a body that means "off" must say so — otherwise the shared
+    // default destination would policy-block the auto-enqueued sweeps.
     let policy = post_json(
         &client,
         addr,
@@ -4799,6 +4803,7 @@ async fn deposit_registry_refresh_and_sweep_flow_roundtrip() {
             "enabled": true,
             "allow_plan_execution": true,
             "allow_sweep_execution": true,
+            "block_cross_party_linkage": false,
             "allowed_destinations": [{ "address": "0x1111111111111111111111111111111111111111" }],
         }),
         Some(&token),

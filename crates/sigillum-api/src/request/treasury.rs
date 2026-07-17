@@ -19,7 +19,10 @@ pub struct TreasuryAllowedDestinationInput {
 /// Updates are whole-document: the daemon normalizes and dedupes the
 /// destination allowlist, validates the caps, and preserves the original
 /// `created_at_unix`. `require_simulation` defaults to true when omitted so
-/// loosening that gate is always an explicit choice.
+/// loosening that gate is always an explicit choice. Since plan task 3.5,
+/// `block_cross_party_linkage` likewise defaults to TRUE when omitted:
+/// cross-party linkage blocking is the default posture and turning it off
+/// requires passing an explicit `false`.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct TreasuryPolicyUpdateRequest {
     pub enabled: bool,

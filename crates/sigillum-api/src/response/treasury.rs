@@ -180,7 +180,11 @@ pub struct TreasuryPolicy {
     #[serde(default)]
     pub allow_raw_digest_signing: bool,
     /// Fail-closed: when true, any step the linkage analyzer flags is hard-blocked.
-    #[serde(default)]
+    /// Defaults to TRUE (absent field ⇒ on) since plan task 3.5: cross-party
+    /// linkage blocking is the default posture and disabling it is an
+    /// explicit operator opt-out. Policies persisted by older daemons carry
+    /// the field explicitly, so their chosen value is unaffected.
+    #[serde(default = "default_block_cross_party_linkage")]
     pub block_cross_party_linkage: bool,
     /// Fail-closed opt-in: allows merkle-distributor-v1 claim steps to clear the
     /// claim_execution_disabled blocker only once every execution gate holds
@@ -251,6 +255,10 @@ pub struct TreasuryPolicy {
 }
 
 fn default_require_simulation() -> bool {
+    true
+}
+
+fn default_block_cross_party_linkage() -> bool {
     true
 }
 

@@ -911,7 +911,10 @@ impl SigillumService {
             )?,
             require_simulation: body.require_simulation.unwrap_or(true),
             allow_raw_digest_signing: body.allow_raw_digest_signing.unwrap_or(false),
-            block_cross_party_linkage: body.block_cross_party_linkage.unwrap_or(false),
+            // Default-on since plan task 3.5 (pre-tag adjustment): omitting
+            // the field keeps cross-party linkage blocking engaged; turning
+            // it off is an explicit operator choice.
+            block_cross_party_linkage: body.block_cross_party_linkage.unwrap_or(true),
             allow_claim_execution: body.allow_claim_execution.unwrap_or(false),
             allow_gas_topups: body.allow_gas_topups.unwrap_or(false),
             max_gas_topup_wei_hex: validated_cap_hex(
