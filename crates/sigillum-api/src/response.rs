@@ -448,6 +448,10 @@ pub struct EthStealthGenerateResponse {
     pub view_tag_hex: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub announcement: Option<EthStealthAnnouncementPayload>,
+    /// Non-blocking cautionary warnings (e.g. foreign meta-address, ephemeral
+    /// key reuse). Empty when nothing suspicious was detected.
+    #[serde(default)]
+    pub warnings: Vec<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]

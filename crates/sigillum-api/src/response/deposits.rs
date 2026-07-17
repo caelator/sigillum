@@ -62,6 +62,11 @@ pub struct EthStealthDepositListResponse {
 pub struct EthStealthDepositMutationResponse {
     pub status: String,
     pub deposit: EthStealthDeposit,
+    /// Non-blocking cautionary warnings propagated from stealth generation
+    /// (e.g. ephemeral key reuse). Empty for non-create mutations and when
+    /// nothing suspicious was detected.
+    #[serde(default)]
+    pub warnings: Vec<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]

@@ -268,8 +268,29 @@ fn test_eth_stealth_generate_response_roundtrip() {
             calldata_hex: "0xcalldata".to_string(),
             value_wei_hex: "0x0".to_string(),
         }),
+        warnings: vec![
+            "This meta-address does not match any of this vault's known stealth wallets."
+                .to_string(),
+        ],
     };
     roundtrip_test(resp);
+}
+
+#[test]
+fn test_eth_stealth_generate_response_warnings_default_empty() {
+    // Responses serialized before the `warnings` field existed must still
+    // deserialize, defaulting to no warnings.
+    let json = r#"{
+        "short_name": "wallet1",
+        "scheme_id": 1,
+        "stealth_meta_address": "st:0x...",
+        "stealth_address": "0xstealth",
+        "ephemeral_public_key_hex": "0xeph",
+        "view_tag_hex": "0xaa"
+    }"#;
+    let resp: EthStealthGenerateResponse = serde_json::from_str(json).unwrap();
+    assert!(resp.warnings.is_empty());
+    assert!(resp.announcement.is_none());
 }
 
 #[test]

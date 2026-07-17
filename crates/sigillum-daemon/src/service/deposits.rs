@@ -804,6 +804,7 @@ impl SigillumService {
             stealth_meta_address: meta.stealth_meta_address.clone(),
             ephemeral_private_key_hex,
         })?;
+        let warnings = payment.warnings.clone();
 
         let now = now_unix();
         let deposit = EthStealthDeposit {
@@ -862,6 +863,7 @@ impl SigillumService {
         Ok(EthStealthDepositMutationResponse {
             status: "created".into(),
             deposit,
+            warnings,
         })
     }
 
@@ -895,6 +897,7 @@ impl SigillumService {
         Ok(EthStealthDepositMutationResponse {
             status: "deleted".into(),
             deposit,
+            warnings: Vec::new(),
         })
     }
 
@@ -957,6 +960,7 @@ impl SigillumService {
                 "untagged".into()
             },
             deposit,
+            warnings: Vec::new(),
         })
     }
 

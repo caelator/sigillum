@@ -29,6 +29,14 @@ use super::helpers::{
 use super::transaction_policy::{TransactionPolicyCheck, TransactionPolicyKind};
 use super::{ServiceError, ServiceResult, SigillumService};
 
+/// Cautionary warning returned by stealth address generation when the target
+/// meta-address cannot be confirmed as one of this vault's own.
+const FOREIGN_STEALTH_META_ADDRESS_WARNING: &str = "This meta-address does not match any of this vault's known stealth wallets. Sigillum's current stealth derivation is not yet interoperable with standard ERC-5564 tooling — addresses generated here may be undetectable and unspendable by the recipient's wallet. See docs/architecture.md#stealth-addresses-erc-5564.";
+
+/// Cautionary warning returned by stealth address generation when a supplied
+/// ephemeral key was already used for a recorded deposit.
+const EPHEMERAL_KEY_REUSE_WARNING: &str = "This ephemeral key was already used for an existing deposit; reusing it with the same meta-address produces the identical stealth address (linkable, address reuse).";
+
 impl SigillumService {
     pub(crate) fn eth_xpub_export(
         &self,
@@ -192,6 +200,21 @@ impl SigillumService {
                 .map_err(map_wallet_error)?;
         let announcement = build_erc5564_announcement(&payment).map_err(map_wallet_error)?;
 
+        // Best-effort guardrails: load the deposit records once and reuse them
+        // for both the foreign meta-address and the ephemeral-key reuse check.
+        let deposits = crate::deposits::load_deposits(&self.state.base_dir)
+            .map(|state| state.eth_stealth)
+            .unwrap_or_default();
+        let mut warnings = Vec::new();
+        if !self.is_known_own_stealth_meta_address(&body.stealth_meta_address, &deposits) {
+            warnings.push(FOREIGN_STEALTH_META_ADDRESS_WARNING.to_string());
+        }
+        if body.ephemeral_private_key_hex.is_some()
+            && ephemeral_public_key_already_used(&payment.ephemeral_public_key_hex, &deposits)
+        {
+            warnings.push(EPHEMERAL_KEY_REUSE_WARNING.to_string());
+        }
+
         Ok(EthStealthGenerateResponse {
             short_name: payment.short_name,
             scheme_id: payment.scheme_id,
@@ -209,6 +232,48 @@ impl SigillumService {
                 calldata_hex: announcement.calldata_hex,
                 value_wei_hex: announcement.value_wei_hex,
             }),
+            warnings,
+        })
+    }
+
+    /// Best-effort check whether `stealth_meta_address` belongs to this vault:
+    /// either recorded on an existing stealth deposit, or derivable from a
+    /// registered stealth wallet profile in an unlocked compartment.
+    ///
+    /// This endpoint is session-less, so only already-unlocked compartment
+    /// vaults can be consulted; meta-addresses exported ad-hoc (no profile and
+    /// no deposit) or whose compartment is locked cannot be confirmed and are
+    /// treated as foreign, which fails safe for a cautionary warning.
+    fn is_known_own_stealth_meta_address(
+        &self,
+        stealth_meta_address: &str,
+        deposits: &[sigillum_api::EthStealthDeposit],
+    ) -> bool {
+        if deposits
+            .iter()
+            .any(|deposit| deposit.stealth_meta_address == stealth_meta_address)
+        {
+            return true;
+        }
+
+        let profiles = crate::profiles::load_profiles(&self.state.base_dir)
+            .map(|registry| registry.eth_stealth_wallets)
+            .unwrap_or_default();
+        profiles.iter().any(|profile| {
+            self.state
+                .with_vault(profile.compartment_id, |vault| {
+                    let master_key = vault.extract_master_key()?;
+                    derive_sigillum_ethereum_stealth_wallet(
+                        master_key.as_ref(),
+                        &profile.wallet,
+                        &profile.short_name,
+                    )
+                    .ok()
+                    .map(|derived| derived.meta_address().stealth_meta_address.clone())
+                })
+                .flatten()
+                .as_deref()
+                == Some(stealth_meta_address)
         })
     }
 
@@ -466,15 +531,38 @@ fn parent_derivation_path(path: &str) -> String {
         .unwrap_or_else(|| path.to_string())
 }
 
+/// Check whether `ephemeral_public_key_hex` already appears on a recorded
+/// stealth deposit. Bare generate calls are not journaled anywhere, so only
+/// deposit records can be consulted.
+fn ephemeral_public_key_already_used(
+    ephemeral_public_key_hex: &str,
+    deposits: &[sigillum_api::EthStealthDeposit],
+) -> bool {
+    let wanted = normalize_hex_key(ephemeral_public_key_hex);
+    deposits
+        .iter()
+        .any(|deposit| normalize_hex_key(&deposit.ephemeral_public_key_hex) == wanted)
+}
+
+fn normalize_hex_key(value: &str) -> String {
+    let trimmed = value.trim();
+    let trimmed = trimmed
+        .strip_prefix("0x")
+        .or_else(|| trimmed.strip_prefix("0X"))
+        .unwrap_or(trimmed);
+    trimmed.to_lowercase()
+}
+
 #[cfg(test)]
 mod tests {
     use std::sync::Arc;
 
     use sigillum_api::{
-        EthStealthCheckRequest, EthStealthExportRequest, EthStealthGenerateRequest,
-        EthStealthSignErc20TransferRequest, EthStealthSignRequest, EthStealthSignTransferRequest,
-        EthXpubExportRequest, EthXpubWalletProfile, EvmProviderProfile, StealthPaymentRef,
-        TreasuryAllowedDestination, TreasuryPolicy,
+        EthStealthCheckRequest, EthStealthDeposit, EthStealthExportRequest,
+        EthStealthGenerateRequest, EthStealthSignErc20TransferRequest, EthStealthSignRequest,
+        EthStealthSignTransferRequest, EthStealthWalletProfile, EthXpubExportRequest,
+        EthXpubWalletProfile, EvmProviderProfile, StealthPaymentRef, TreasuryAllowedDestination,
+        TreasuryPolicy,
     };
     use sigillum_core::{
         derive_ethereum_account_xpub_from_mnemonic,
@@ -486,6 +574,7 @@ mod tests {
 
     use super::*;
     use crate::AppState;
+    use crate::deposits::{DepositState, save_deposits};
     use crate::inventory::{WalletInventoryState, save_wallet_inventory};
     use crate::profiles::{ProfileRegistry, save_profiles};
 
@@ -689,6 +778,198 @@ mod tests {
 
         assert_eq!(error.message(), "policy_violation");
         assert_eq!(error.action(), Some("block_raw_digest"));
+    }
+
+    fn register_payments_stealth_profile(dir: &TempDir) {
+        save_profiles(
+            dir.path(),
+            &ProfileRegistry {
+                eth_stealth_wallets: vec![EthStealthWalletProfile {
+                    name: "payments".into(),
+                    wallet: "payments".into(),
+                    short_name: "eth".into(),
+                    provider_profile: "mainnet".into(),
+                    compartment_id: 0,
+                    chain_id: Some(1),
+                    default_destination_address: None,
+                    execution_enabled: false,
+                }],
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    }
+
+    fn deposit_record(
+        meta_address: &str,
+        stealth_address: &str,
+        ephemeral_public_key_hex: &str,
+    ) -> EthStealthDeposit {
+        EthStealthDeposit {
+            id: "dep_1".into(),
+            status: "pending".into(),
+            asset_kind: "native".into(),
+            wallet_profile: "payments".into(),
+            chain_id: 1,
+            chain_id_assumed: false,
+            wallet_compartment_id: 0,
+            provider_compartment_id: 0,
+            wallet: "payments".into(),
+            short_name: "eth".into(),
+            stealth_meta_address: meta_address.into(),
+            stealth_address: stealth_address.into(),
+            ephemeral_public_key_hex: ephemeral_public_key_hex.into(),
+            view_tag_hex: "0xaa".into(),
+            announcement: None,
+            token_address: None,
+            expected_amount_hex: None,
+            observed_amount_hex: None,
+            observed_native_balance_wei_hex: None,
+            auto_queue_sweep: false,
+            sweep_destination_address: None,
+            min_sweep_amount_hex: None,
+            queue_job_id: None,
+            queue_job_state: None,
+            note: None,
+            created_at_unix: 1,
+            updated_at_unix: 1,
+            last_checked_at_unix: None,
+            broadcast_transaction_hash_hex: None,
+            counterparty_id: None,
+        }
+    }
+
+    #[test]
+    fn generate_warns_for_foreign_meta_address() {
+        let dir = TempDir::new().unwrap();
+        let state =
+            Arc::new(AppState::new(dir.path().to_path_buf()).expect("app state should initialize"));
+        let service = SigillumService::new(state);
+
+        // Derived from a master key this vault does not hold.
+        let foreign =
+            derive_sigillum_ethereum_stealth_wallet(&[9u8; 32], "foreign", "eth").unwrap();
+        let payment = service
+            .eth_stealth_generate(EthStealthGenerateRequest {
+                stealth_meta_address: foreign.meta_address().stealth_meta_address.clone(),
+                ephemeral_private_key_hex: None,
+            })
+            .unwrap();
+
+        assert_eq!(payment.warnings.len(), 1);
+        assert!(
+            payment.warnings[0].contains("does not match any of this vault's known stealth wallets")
+        );
+    }
+
+    #[test]
+    fn generate_omits_warnings_for_own_profile_meta_address() {
+        let dir = TempDir::new().unwrap();
+        let state =
+            Arc::new(AppState::new(dir.path().to_path_buf()).expect("app state should initialize"));
+        state.unlock_compartment(0, [7u8; 32], meta(0, 1, "default"));
+        let session = state.create_session(Some(0));
+        let service = SigillumService::new(state);
+        register_payments_stealth_profile(&dir);
+
+        let meta = service
+            .eth_stealth_export(
+                Some(&session),
+                EthStealthExportRequest {
+                    wallet: "payments".into(),
+                    short_name: Some("eth".into()),
+                },
+            )
+            .unwrap();
+        let payment = service
+            .eth_stealth_generate(EthStealthGenerateRequest {
+                stealth_meta_address: meta.stealth_meta_address,
+                ephemeral_private_key_hex: None,
+            })
+            .unwrap();
+
+        assert!(payment.warnings.is_empty());
+    }
+
+    #[test]
+    fn generate_omits_reuse_warning_on_first_ephemeral_key_use() {
+        let dir = TempDir::new().unwrap();
+        let state =
+            Arc::new(AppState::new(dir.path().to_path_buf()).expect("app state should initialize"));
+        state.unlock_compartment(0, [7u8; 32], meta(0, 1, "default"));
+        let session = state.create_session(Some(0));
+        let service = SigillumService::new(state);
+        register_payments_stealth_profile(&dir);
+
+        let meta = service
+            .eth_stealth_export(
+                Some(&session),
+                EthStealthExportRequest {
+                    wallet: "payments".into(),
+                    short_name: Some("eth".into()),
+                },
+            )
+            .unwrap();
+        let payment = service
+            .eth_stealth_generate(EthStealthGenerateRequest {
+                stealth_meta_address: meta.stealth_meta_address,
+                ephemeral_private_key_hex: Some(hex::encode([3u8; 32])),
+            })
+            .unwrap();
+
+        assert!(payment.warnings.is_empty());
+    }
+
+    #[test]
+    fn generate_warns_on_ephemeral_key_reuse() {
+        let dir = TempDir::new().unwrap();
+        let state =
+            Arc::new(AppState::new(dir.path().to_path_buf()).expect("app state should initialize"));
+        state.unlock_compartment(0, [7u8; 32], meta(0, 1, "default"));
+        let session = state.create_session(Some(0));
+        let service = SigillumService::new(state);
+        register_payments_stealth_profile(&dir);
+
+        let meta = service
+            .eth_stealth_export(
+                Some(&session),
+                EthStealthExportRequest {
+                    wallet: "payments".into(),
+                    short_name: Some("eth".into()),
+                },
+            )
+            .unwrap();
+        let first = service
+            .eth_stealth_generate(EthStealthGenerateRequest {
+                stealth_meta_address: meta.stealth_meta_address.clone(),
+                ephemeral_private_key_hex: Some(hex::encode([3u8; 32])),
+            })
+            .unwrap();
+        assert!(first.warnings.is_empty());
+
+        save_deposits(
+            dir.path(),
+            &DepositState {
+                eth_stealth: vec![deposit_record(
+                    &meta.stealth_meta_address,
+                    &first.stealth_address,
+                    &first.ephemeral_public_key_hex,
+                )],
+            },
+        )
+        .unwrap();
+
+        let second = service
+            .eth_stealth_generate(EthStealthGenerateRequest {
+                stealth_meta_address: meta.stealth_meta_address,
+                ephemeral_private_key_hex: Some(hex::encode([3u8; 32])),
+            })
+            .unwrap();
+
+        // Same ephemeral key + same meta-address derives the identical address.
+        assert_eq!(second.stealth_address, first.stealth_address);
+        assert_eq!(second.warnings.len(), 1);
+        assert!(second.warnings[0].contains("ephemeral key was already used"));
     }
 
     #[test]

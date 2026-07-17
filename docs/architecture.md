@@ -303,6 +303,30 @@ What it intentionally does not do today:
 - non-EVM chains (roadmap phase 10)
 - fiat or NFT valuation (D-16)
 
+## Stealth Addresses (ERC-5564)
+
+Sigillum implements ERC-5564-style stealth addresses: senders derive one-time
+addresses from a recipient's stealth meta-address, and recipients detect
+payments by scanning announcements with their viewing key. Meta-addresses are
+derived from the compartment master key plus a wallet label and short name,
+so each compartment/wallet pair yields a distinct meta-address.
+
+**Interoperability caveat.** The current release derives the shared-secret
+hash as keccak256 over the 32-byte x-only ECDH encoding. The dominant
+scheme-1 SDK convention (the ScopeLift tooling and compatible wallets)
+hashes the 33-byte compressed point instead. Until the conformance switch
+lands, third-party ERC-5564 senders MUST NOT be pointed at a Sigillum
+meta-address — they would derive addresses Sigillum cannot detect or spend
+from — and addresses Sigillum generates for foreign meta-addresses may
+likewise be undetectable and unspendable by the recipient's wallet.
+Self-deposit flows (generating for the operator's own meta-address, then
+checking and sweeping with the same vault) round-trip correctly. To keep the
+boundary visible, the generate endpoint returns cautionary `warnings` when a
+meta-address cannot be matched to any of the vault's known stealth wallets,
+and when a supplied ephemeral key was already used for a recorded deposit —
+reusing an ephemeral key with the same meta-address derives the identical
+stealth address, which is linkable and constitutes address reuse.
+
 ## Privacy & Linkage Model
 
 The receiving/treasury model centers on keeping payers unlinkable. Receive
