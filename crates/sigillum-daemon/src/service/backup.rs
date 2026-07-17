@@ -78,7 +78,7 @@ impl SigillumService {
     ) -> ServiceResult<SnapshotExportResponse> {
         let _ = self.require_session(token)?;
         if !self.state.is_initialized() {
-            return Err(ServiceError::not_found("Sigillum is not initialized."));
+            return Err(ServiceError::not_initialized("Sigillum is not initialized."));
         }
         let passphrase = Zeroizing::new(body.passphrase);
         super::helpers::require_valid_passphrase(&passphrase)?;

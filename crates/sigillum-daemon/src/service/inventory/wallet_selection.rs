@@ -193,7 +193,7 @@ pub(super) fn select_discovery_wallets(
                 let export = service.with_vault(profile.compartment_id, |vault| {
                     let master_key = vault
                         .extract_master_key()
-                        .ok_or_else(|| ServiceError::forbidden("Wallet compartment is locked."))?;
+                        .ok_or_else(|| ServiceError::vault_locked("Wallet compartment is locked."))?;
                     derive_sigillum_ethereum_xpub_receive_branch(
                         master_key.as_ref(),
                         profile.project_account,
@@ -232,7 +232,7 @@ fn seed_account_discovery_wallets(
 ) -> ServiceResult<Vec<DiscoveryWallet>> {
     service.with_vault(profile.compartment_id, |vault| {
         if !vault.is_unlocked() {
-            return Err(ServiceError::forbidden("Wallet compartment is locked."));
+            return Err(ServiceError::vault_locked("Wallet compartment is locked."));
         }
         let secret = vault
             .read_secret(&profile.mnemonic_secret_key)?

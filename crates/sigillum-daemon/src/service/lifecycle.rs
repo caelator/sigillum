@@ -35,7 +35,7 @@ impl SigillumService {
 
         // Rate-limit: reject early if the caller is in a cooldown window.
         if let Err(retry_after) = self.state.check_unlock_throttle() {
-            return Err(ServiceError::too_many_requests(format!(
+            return Err(ServiceError::unlock_throttled(format!(
                 "Too many failed unlock attempts. Retry in {retry_after}s."
             )));
         }

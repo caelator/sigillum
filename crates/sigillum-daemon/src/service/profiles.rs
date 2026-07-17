@@ -59,7 +59,7 @@ impl SigillumService {
             .provider
             .compartment_id
             .or_else(|| self.state.active_compartment_id_for(token))
-            .ok_or_else(|| ServiceError::forbidden("No active compartment."))?;
+            .ok_or_else(|| ServiceError::vault_locked("No active compartment."))?;
 
         let profile = EvmProviderProfile {
             name: body.name,
@@ -173,7 +173,7 @@ impl SigillumService {
         let compartment_id = body
             .compartment_id
             .or_else(|| self.state.active_compartment_id_for(token))
-            .ok_or_else(|| ServiceError::forbidden("No active compartment."))?;
+            .ok_or_else(|| ServiceError::vault_locked("No active compartment."))?;
 
         let _guard = self.state.operation_guard().await;
         let mut registry =
@@ -275,7 +275,7 @@ impl SigillumService {
         let compartment_id = body
             .compartment_id
             .or_else(|| self.state.active_compartment_id_for(token))
-            .ok_or_else(|| ServiceError::forbidden("No active compartment."))?;
+            .ok_or_else(|| ServiceError::vault_locked("No active compartment."))?;
 
         let _guard = self.state.operation_guard().await;
         let mut registry =

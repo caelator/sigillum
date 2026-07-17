@@ -67,7 +67,7 @@ impl SigillumService {
         let _guard = self.state.operation_guard().await;
         let unlocked = self.state.unlocked_compartments();
         if unlocked.is_empty() {
-            return Err(ServiceError::forbidden("Access denied."));
+            return Err(ServiceError::vault_locked("Access denied."));
         }
         if unlocked.iter().any(|meta| meta.threshold == body.threshold) {
             return Err(ServiceError::bad_request("Duplicate threshold."));
@@ -128,7 +128,7 @@ impl SigillumService {
         let _ = self.require_session(token)?;
         let _guard = self.state.operation_guard().await;
         if !self.state.is_unlocked() {
-            return Err(ServiceError::forbidden("Access denied."));
+            return Err(ServiceError::vault_locked("Access denied."));
         }
 
         let id = body.id;
@@ -242,7 +242,7 @@ impl SigillumService {
             Some(token) => {
                 self.state
                     .switch_active_for(&token, body.id)
-                    .map_err(ServiceError::forbidden)?;
+                    .map_err(ServiceError::vault_locked)?;
                 token
             }
             None => self.state.create_session(Some(body.id)),
@@ -276,7 +276,7 @@ impl SigillumService {
         let _guard = self.state.operation_guard().await;
         self.state
             .switch_active_for(token, body.id)
-            .map_err(ServiceError::forbidden)?;
+            .map_err(ServiceError::vault_locked)?;
 
         let label = self
             .state

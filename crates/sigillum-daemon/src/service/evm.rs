@@ -166,7 +166,7 @@ impl SigillumService {
     ) -> ServiceResult<ProviderRpcClient> {
         let compartment_id = compartment_id
             .or_else(|| self.state.active_compartment_id_for(token))
-            .ok_or_else(|| ServiceError::forbidden("No active compartment."))?;
+            .ok_or_else(|| ServiceError::vault_locked("No active compartment."))?;
         self.resolve_provider_rpc_client_for_compartment(compartment_id, rpc_url, auth_token_key)
     }
 

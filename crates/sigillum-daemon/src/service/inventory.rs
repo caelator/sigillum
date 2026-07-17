@@ -219,7 +219,7 @@ impl SigillumService {
             let compartment_id = self
                 .state
                 .active_compartment_id_for(token)
-                .ok_or_else(|| ServiceError::forbidden("No active compartment."))?;
+                .ok_or_else(|| ServiceError::vault_locked("No active compartment."))?;
             let state = crate::token_registry::load_token_registry(&self.state.base_dir).map_err(
                 |error| ServiceError::internal(format!("Failed to load token registry: {error}")),
             )?;

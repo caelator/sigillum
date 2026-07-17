@@ -328,7 +328,7 @@ fn step_enqueue_verdict(
     if let Some(denial) = execution_gate_denial(ctx.policy, family) {
         return Err(Box::new(StepRefusal::plain(
             denial.clone(),
-            ServiceError::forbidden(denial),
+            ServiceError::execution_gate_denied(denial),
         )));
     }
 
@@ -365,7 +365,7 @@ fn step_enqueue_verdict(
     {
         return Err(Box::new(StepRefusal::plain(
             REASON_CLAIM_EXECUTION_DISABLED,
-            ServiceError::forbidden(format!(
+            ServiceError::execution_gate_denied(format!(
                 "{REASON_CLAIM_EXECUTION_DISABLED}: the claim execution gate is not satisfied \
                  for step {}",
                 step.id
@@ -377,7 +377,7 @@ fn step_enqueue_verdict(
     if step.action == WalletPlanStepAction::FundGas && !gas_topup_policy_enabled(ctx.policy) {
         return Err(Box::new(StepRefusal::plain(
             REASON_GAS_TOPUP_DISABLED,
-            ServiceError::forbidden(format!(
+            ServiceError::execution_gate_denied(format!(
                 "{REASON_GAS_TOPUP_DISABLED}: allow_gas_topups is disabled (step {})",
                 step.id
             )),

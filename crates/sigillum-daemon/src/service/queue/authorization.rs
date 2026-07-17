@@ -26,7 +26,7 @@ pub(super) fn require_queue_execution_enabled(
     }
     .ok_or_else(|| ServiceError::not_found("Wallet profile not found."))?;
     if !enabled {
-        return Err(ServiceError::forbidden(
+        return Err(ServiceError::execution_gate_denied(
             "Wallet profile execution is disabled.",
         ));
     }

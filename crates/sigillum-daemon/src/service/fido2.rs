@@ -379,7 +379,7 @@ impl SigillumService {
     ) -> ServiceResult<Fido2RegisterResponse> {
         let _ = self.require_session(token)?;
         if !self.state.is_initialized() {
-            return Err(ServiceError::not_found(
+            return Err(ServiceError::not_initialized(
                 "Not initialized. Use /api/fido2/setup first.",
             ));
         }
@@ -394,7 +394,7 @@ impl SigillumService {
         if body.poison == Some(true) {
             let unlocked = self.state.unlocked_compartments();
             if unlocked.is_empty() {
-                return Err(ServiceError::forbidden(
+                return Err(ServiceError::vault_locked(
                     "Compartments must be unlocked to read metadata.",
                 ));
             }
@@ -425,7 +425,7 @@ impl SigillumService {
 
         let master_keys_with_meta = self.state.extract_all_master_keys_with_meta();
         if master_keys_with_meta.is_empty() {
-            return Err(ServiceError::forbidden("Compartments must be unlocked."));
+            return Err(ServiceError::vault_locked("Compartments must be unlocked."));
         }
 
         let master_key_refs: Vec<(CompartmentMeta, &[u8; 32])> = master_keys_with_meta
@@ -473,7 +473,7 @@ impl SigillumService {
 
         // Rate-limit: reject early if the caller is in a cooldown window.
         if let Err(retry_after) = self.state.check_unlock_throttle() {
-            return Err(ServiceError::too_many_requests(format!(
+            return Err(ServiceError::unlock_throttled(format!(
                 "Too many failed unlock attempts. Retry in {retry_after}s."
             )));
         }
@@ -568,7 +568,7 @@ impl SigillumService {
         )?;
         let master_keys_with_meta = self.state.extract_all_master_keys_with_meta();
         if master_keys_with_meta.is_empty() {
-            return Err(ServiceError::forbidden("Compartments must be unlocked."));
+            return Err(ServiceError::vault_locked("Compartments must be unlocked."));
         }
 
         let master_key_refs: Vec<(CompartmentMeta, &[u8; 32])> = master_keys_with_meta

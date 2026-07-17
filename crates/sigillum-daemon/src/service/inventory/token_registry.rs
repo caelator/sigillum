@@ -229,7 +229,7 @@ fn active_compartment_id(service: &SigillumService, token: &str) -> ServiceResul
     service
         .state
         .active_compartment_id_for(token)
-        .ok_or_else(|| ServiceError::forbidden("No active compartment."))
+        .ok_or_else(|| ServiceError::vault_locked("No active compartment."))
 }
 
 fn load_token_registry_state(

@@ -139,7 +139,7 @@ impl SigillumService {
     ) -> ServiceResult<()> {
         let policy = self.current_treasury_policy()?;
         if let Some(reason) = execution_gate_denial(policy.as_ref(), family) {
-            return Err(ServiceError::forbidden(reason));
+            return Err(ServiceError::execution_gate_denied(reason));
         }
         Ok(())
     }

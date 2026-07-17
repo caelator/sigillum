@@ -38,7 +38,7 @@ impl SigillumService {
 
         self.with_active_vault(token, |vault, _| {
             if !vault.is_unlocked() {
-                return Err(ServiceError::forbidden("Vault is locked."));
+                return Err(ServiceError::vault_locked("Vault is locked."));
             }
             Ok(vault.set_secret(&key, &value)?)
         })?;

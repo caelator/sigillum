@@ -84,13 +84,15 @@ pub(crate) fn sec_headers(mut resp: Response) -> Response {
     resp
 }
 
-pub(crate) fn err(status: StatusCode, msg: &str) -> Response {
+pub(crate) fn err(status: StatusCode, code: &'static str, msg: &str) -> Response {
     sec_headers(
         (
             status,
             Json(ErrorResponse {
+                code: code.to_string(),
                 error: msg.to_string(),
                 action: None,
+                fields: None,
             }),
         )
             .into_response(),
@@ -111,8 +113,10 @@ where
             (
                 error.status(),
                 Json(ErrorResponse {
+                    code: error.code().to_string(),
                     error: error.message().to_string(),
                     action: error.action().map(str::to_owned),
+                    fields: None,
                 }),
             )
                 .into_response(),
@@ -166,9 +170,13 @@ pub(crate) fn bearer_token(headers: &HeaderMap) -> Option<String> {
 /// Validate a request body and extract it, or return a 400 error Response.
 #[allow(clippy::result_large_err)]
 pub(crate) fn validated<T: Validate>(body: Json<T>) -> Result<T, Response> {
-    body.0
-        .validate()
-        .map_err(|e| err(StatusCode::BAD_REQUEST, &e))?;
+    body.0.validate().map_err(|e| {
+        err(
+            StatusCode::BAD_REQUEST,
+            sigillum_api::error_codes::VALIDATION_FAILED,
+            &e,
+        )
+    })?;
     Ok(body.0)
 }
 
@@ -226,6 +234,7 @@ pub(crate) async fn startup_gate(
     }
     err(
         StatusCode::SERVICE_UNAVAILABLE,
+        sigillum_api::error_codes::UNAVAILABLE,
         "Startup recovery is not ready.",
     )
 }
@@ -702,5 +711,66 @@ mod tests {
         assert!(html.contains("data-action=\"togglePoisonWarning\""));
         assert!(csp.contains("script-src 'nonce-"));
         assert!(!csp.contains("script-src-attr 'unsafe-inline'"));
+    }
+
+    async fn error_body(resp: axum::response::Response) -> serde_json::Value {
+        let bytes = to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .expect("error body should be readable");
+        serde_json::from_slice(&bytes).expect("error body should be json")
+    }
+
+    #[tokio::test]
+    async fn service_response_envelope_carries_code() {
+        use crate::service::ServiceError;
+
+        let resp = super::service_response::<serde_json::Value>(Err(ServiceError::vault_locked(
+            "Vault is locked.",
+        )));
+        assert_eq!(resp.status(), axum::http::StatusCode::FORBIDDEN);
+        let body = error_body(resp).await;
+        assert_eq!(body["code"], "vault_locked");
+        assert_eq!(body["error"], "Vault is locked.");
+        assert!(body.get("action").is_none());
+        assert!(body.get("fields").is_none());
+    }
+
+    #[tokio::test]
+    async fn service_response_envelope_carries_action_for_policy_violation() {
+        use crate::service::ServiceError;
+
+        let resp = super::service_response::<serde_json::Value>(Err(
+            ServiceError::policy_violation("cross_party_linkage"),
+        ));
+        assert_eq!(resp.status(), axum::http::StatusCode::FORBIDDEN);
+        let body = error_body(resp).await;
+        assert_eq!(body["code"], "policy_violation");
+        assert_eq!(body["error"], "policy_violation");
+        assert_eq!(body["action"], "cross_party_linkage");
+    }
+
+    #[tokio::test]
+    async fn service_response_envelope_disambiguates_overloaded_statuses() {
+        use crate::service::ServiceError;
+
+        let cases: [(ServiceError, u16, &str); 7] = [
+            (ServiceError::execution_gate_denied("x"), 403, "execution_gate_denied"),
+            (
+                ServiceError::capability_scope_denied("x"),
+                403,
+                "capability_scope_denied",
+            ),
+            (ServiceError::not_found("x"), 404, "not_found"),
+            (ServiceError::not_initialized("x"), 404, "not_initialized"),
+            (ServiceError::unlock_throttled("x"), 429, "unlock_throttled"),
+            (ServiceError::too_many_requests("x"), 429, "rate_limited"),
+            (ServiceError::conflict("x"), 409, "conflict"),
+        ];
+        for (error, status, code) in cases {
+            let resp = super::service_response::<serde_json::Value>(Err(error));
+            assert_eq!(resp.status().as_u16(), status, "status for {code}");
+            let body = error_body(resp).await;
+            assert_eq!(body["code"], code);
+        }
     }
 }

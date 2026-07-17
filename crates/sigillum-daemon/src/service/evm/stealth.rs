@@ -30,7 +30,7 @@ impl SigillumService {
         let active_compartment_id = self
             .state
             .active_compartment_id_for(token)
-            .ok_or_else(|| ServiceError::forbidden("No active compartment."))?;
+            .ok_or_else(|| ServiceError::vault_locked("No active compartment."))?;
         let provider_compartment_id = body
             .provider_compartment_id
             .unwrap_or(active_compartment_id);
@@ -59,7 +59,7 @@ impl SigillumService {
         let signed = self.with_vault(wallet_compartment_id, |vault| {
             let master_key = vault
                 .extract_master_key()
-                .ok_or_else(|| ServiceError::forbidden("Vault is locked."))?;
+                .ok_or_else(|| ServiceError::vault_locked("Vault is locked."))?;
             let derived =
                 derive_sigillum_ethereum_stealth_wallet(master_key.as_ref(), &body.wallet, "eth")
                     .map_err(map_wallet_error)?;
@@ -133,7 +133,7 @@ impl SigillumService {
         let active_compartment_id = self
             .state
             .active_compartment_id_for(token)
-            .ok_or_else(|| ServiceError::forbidden("No active compartment."))?;
+            .ok_or_else(|| ServiceError::vault_locked("No active compartment."))?;
         let provider_compartment_id = body
             .provider_compartment_id
             .unwrap_or(active_compartment_id);
@@ -162,7 +162,7 @@ impl SigillumService {
         let signed = self.with_vault(wallet_compartment_id, |vault| {
             let master_key = vault
                 .extract_master_key()
-                .ok_or_else(|| ServiceError::forbidden("Vault is locked."))?;
+                .ok_or_else(|| ServiceError::vault_locked("Vault is locked."))?;
             let derived =
                 derive_sigillum_ethereum_stealth_wallet(master_key.as_ref(), &body.wallet, "eth")
                     .map_err(map_wallet_error)?;

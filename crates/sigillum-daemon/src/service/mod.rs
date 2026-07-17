@@ -106,7 +106,7 @@ pub(crate) fn require_full_session_token<'a>(
     if state.session_is_full(token) {
         Ok(token)
     } else {
-        Err(ServiceError::forbidden(
+        Err(ServiceError::capability_scope_denied(
             "A full daemon session is required for this operation.",
         ))
     }
@@ -165,7 +165,7 @@ impl SigillumService {
         if self.state.session_has_scope(token, scope) {
             Ok(token)
         } else {
-            Err(ServiceError::forbidden(format!(
+            Err(ServiceError::capability_scope_denied(format!(
                 "Missing daemon capability scope: {scope}"
             )))
         }
@@ -215,10 +215,10 @@ impl SigillumService {
         let id = self
             .state
             .active_compartment_id_for(token)
-            .ok_or_else(|| ServiceError::forbidden("No active compartment."))?;
+            .ok_or_else(|| ServiceError::vault_locked("No active compartment."))?;
         self.state
             .with_active_vault_for(token, |vault| f(vault, id))
-            .unwrap_or_else(|| Err(ServiceError::forbidden("No active compartment.")))
+            .unwrap_or_else(|| Err(ServiceError::vault_locked("No active compartment.")))
     }
 
     /// Run a closure against a specific compartment's vault by ID.
@@ -234,7 +234,7 @@ impl SigillumService {
     /// Map a [`VaultError`] to the appropriate HTTP-level [`ServiceError`] for snapshot ops.
     fn snapshot_error(context: &str, error: VaultError) -> ServiceError {
         match error {
-            VaultError::NotInitialized => ServiceError::not_found("Sigillum is not initialized."),
+            VaultError::NotInitialized => ServiceError::not_initialized("Sigillum is not initialized."),
             VaultError::Decryption(_) => ServiceError::unauthorized(format!(
                 "{context}: wrong passphrase or corrupted snapshot."
             )),

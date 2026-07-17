@@ -558,7 +558,7 @@ impl SigillumService {
         let derived_wallet = self.with_vault(wallet.compartment_id, |vault| {
             let master_key = vault
                 .extract_master_key()
-                .ok_or_else(|| ServiceError::forbidden("Wallet compartment is locked."))?;
+                .ok_or_else(|| ServiceError::vault_locked("Wallet compartment is locked."))?;
             derive_sigillum_ethereum_stealth_wallet(
                 master_key.as_ref(),
                 &wallet.wallet,
@@ -791,7 +791,7 @@ impl SigillumService {
         let meta = self.with_vault(wallet.compartment_id, |vault| {
             let master_key = vault
                 .extract_master_key()
-                .ok_or_else(|| ServiceError::forbidden("Wallet compartment is locked."))?;
+                .ok_or_else(|| ServiceError::vault_locked("Wallet compartment is locked."))?;
             let derived = derive_sigillum_ethereum_stealth_wallet(
                 master_key.as_ref(),
                 &wallet.wallet,

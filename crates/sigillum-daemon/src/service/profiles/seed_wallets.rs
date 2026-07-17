@@ -80,7 +80,7 @@ impl SigillumService {
         let compartment_id = body
             .compartment_id
             .or_else(|| self.state.active_compartment_id_for(token))
-            .ok_or_else(|| ServiceError::forbidden("No active compartment."))?;
+            .ok_or_else(|| ServiceError::vault_locked("No active compartment."))?;
 
         let mnemonic = Zeroizing::new(normalize_mnemonic_phrase(&body.mnemonic));
         body.mnemonic.zeroize();
@@ -127,7 +127,7 @@ impl SigillumService {
         let compartment_id = body
             .compartment_id
             .or_else(|| self.state.active_compartment_id_for(token))
-            .ok_or_else(|| ServiceError::forbidden("No active compartment."))?;
+            .ok_or_else(|| ServiceError::vault_locked("No active compartment."))?;
 
         let word_count = body.word_count.unwrap_or(DEFAULT_SEED_WALLET_WORD_COUNT);
         let mut mnemonic = generate_ethereum_mnemonic(word_count).map_err(map_xpub_error)?;
@@ -244,7 +244,7 @@ impl SigillumService {
         }
         self.with_vault(material.compartment_id, |vault| {
             if !vault.is_unlocked() {
-                return Err(ServiceError::forbidden("Wallet compartment is locked."));
+                return Err(ServiceError::vault_locked("Wallet compartment is locked."));
             }
             Ok(vault.set_secret(&mnemonic_secret_key, secret_payload.as_str())?)
         })?;
@@ -314,7 +314,7 @@ impl SigillumService {
 
         self.with_vault(profile.compartment_id, |vault| {
             if !vault.is_unlocked() {
-                return Err(ServiceError::forbidden("Wallet compartment is locked."));
+                return Err(ServiceError::vault_locked("Wallet compartment is locked."));
             }
             Ok(vault.delete_secret(&profile.mnemonic_secret_key)?)
         })?;
@@ -356,7 +356,7 @@ impl SigillumService {
     ) -> ServiceResult<k256::ecdsa::SigningKey> {
         self.with_vault(profile.compartment_id, |vault| {
             if !vault.is_unlocked() {
-                return Err(ServiceError::forbidden("Wallet compartment is locked."));
+                return Err(ServiceError::vault_locked("Wallet compartment is locked."));
             }
             let secret = vault
                 .read_secret(&profile.mnemonic_secret_key)
