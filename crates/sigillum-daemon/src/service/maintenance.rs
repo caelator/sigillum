@@ -283,7 +283,7 @@ impl SigillumService {
             return Ok(self.canceled_maintenance_response(
                 automation,
                 Some((refresh.processed, refresh.detected, refresh.queued)),
-                Some(one_time.summary()),
+                one_time.tracked.then(|| one_time.summary()),
                 None,
                 deposits.eth_stealth,
             ));
@@ -347,7 +347,7 @@ impl SigillumService {
             confirmed: processed.confirmed,
             failures_by_cause,
             treasury_automation: automation.as_ref().map(|outcome| outcome.summary.clone()),
-            one_time_receive: Some(one_time.summary()),
+            one_time_receive: one_time.tracked.then(|| one_time.summary()),
             deposits: deposits.eth_stealth,
             jobs: processed.jobs,
             operation: None,
