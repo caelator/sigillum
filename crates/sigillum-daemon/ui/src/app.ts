@@ -481,6 +481,9 @@ function updateNextStepCard() {
 function updateHeroState(active, unlocked) {
   const primary = document.getElementById('heroPrimaryBtn');
   const secondary = document.getElementById('heroSecondaryBtn');
+  // When a migrated destination owns the hero card its legacy markup is
+  // detached; hero updates must no-op instead of crashing the refresh loop.
+  if (!primary || !secondary) return;
 
   const activeLabel = active ? (active.compartment_label || ('Compartment ' + active.compartment_id)) : 'No active compartment';
   setText('statusEyebrow', 'Vault unlocked');
