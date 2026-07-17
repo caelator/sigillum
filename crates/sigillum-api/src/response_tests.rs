@@ -676,6 +676,78 @@ fn test_eth_xpub_export_response_roundtrip() {
 }
 
 #[test]
+fn test_profile_mutation_response_pruned_inventory_is_additive() {
+    let profile = EthSeedWalletProfile {
+        name: "seed-main".to_string(),
+        label: None,
+        project_account: 0,
+        provider_profile: "mainnet".to_string(),
+        compartment_id: 1,
+        chain_id: Some(1),
+        word_count: 12,
+        mnemonic_secret_key: "wallet.seed.seed-main.mnemonic".to_string(),
+        account_path: "m/44'/60'/0'".to_string(),
+        receive_path: "m/44'/60'/0'/0".to_string(),
+        receive_xpub: "xpub661MyMwAqRbcFexample".to_string(),
+        first_receive_address: "0x1111111111111111111111111111111111111111".to_string(),
+        default_destination_address: None,
+        control_xpub: None,
+        sponsor_address: None,
+        hot_address: None,
+        treasury_address: None,
+        execution_enabled: false,
+    };
+
+    // Without the cascade the response is byte-identical to the legacy shape
+    // (no `pruned_inventory` key), and legacy payloads still deserialize.
+    let legacy = EthSeedWalletProfileMutationResponse {
+        status: "deleted".to_string(),
+        profile: profile.clone(),
+        pruned_inventory: None,
+    };
+    let json = serde_json::to_value(&legacy).unwrap();
+    assert!(json.get("pruned_inventory").is_none());
+    let decoded: EthSeedWalletProfileMutationResponse = serde_json::from_value(json).unwrap();
+    assert_eq!(decoded, legacy);
+
+    roundtrip_test(EthSeedWalletProfileMutationResponse {
+        status: "deleted".to_string(),
+        profile,
+        pruned_inventory: Some(InventoryPruneSummary {
+            addresses: 6,
+            holdings: 1,
+            jobs: 1,
+            checkpoints: 2,
+            block_cursors: 0,
+            allocations_active: 1,
+            allocations_retired: 1,
+            counterparty_bindings: 2,
+        }),
+    });
+}
+
+#[test]
+fn test_wallet_inventory_address_prune_response_roundtrip() {
+    roundtrip_test(WalletInventoryAddressPruneResponse {
+        status: "pruned".to_string(),
+        pruned: InventoryPruneSummary {
+            addresses: 3,
+            holdings: 2,
+            jobs: 0,
+            checkpoints: 0,
+            block_cursors: 1,
+            allocations_active: 0,
+            allocations_retired: 0,
+            counterparty_bindings: 0,
+        },
+    });
+    roundtrip_test(WalletInventoryAddressPruneResponse {
+        status: "pruned".to_string(),
+        pruned: InventoryPruneSummary::default(),
+    });
+}
+
+#[test]
 fn test_eth_xpub_address_response_roundtrip() {
     let resp = EthXpubAddressResponse {
         index: 4,
@@ -2059,6 +2131,11 @@ fn test_treasury_receive_allocation_responses_roundtrip() {
     roundtrip_test(TreasuryReceiveAllocationMutationResponse {
         status: "allocated".to_string(),
         allocation: sample_receive_allocation(),
+    });
+    roundtrip_test(TreasuryReceivePurgeResponse {
+        status: "purged".to_string(),
+        allocation_id: "alloc_123".to_string(),
+        counterparty_binding_removed: true,
     });
     let mut json = serde_json::to_value(sample_receive_allocation()).unwrap();
     let object = json.as_object_mut().unwrap();

@@ -657,6 +657,28 @@ fn test_evm_provider_profile_upsert_request_minimal() {
 }
 
 #[test]
+fn test_evm_profile_delete_request_prune_inventory_is_additive() {
+    // Legacy payloads (no flag) deserialize with the cascade off...
+    let legacy: EvmProfileDeleteRequest = serde_json::from_str(r#"{"name":"seed-main"}"#).unwrap();
+    assert_eq!(legacy.prune_inventory, None);
+
+    // ...and serializing without the flag stays byte-identical to legacy.
+    let req = EvmProfileDeleteRequest {
+        name: "seed-main".to_string(),
+        prune_inventory: None,
+    };
+    assert_eq!(
+        serde_json::to_string(&req).unwrap(),
+        r#"{"name":"seed-main"}"#
+    );
+
+    roundtrip_test(EvmProfileDeleteRequest {
+        name: "seed-main".to_string(),
+        prune_inventory: Some(true),
+    });
+}
+
+#[test]
 fn test_eth_xpub_wallet_profile_upsert_request_roundtrip() {
     let req = EthXpubWalletProfileUpsertRequest {
         name: "treasury_receive".to_string(),
@@ -1452,6 +1474,53 @@ fn test_treasury_receive_rotate_request_roundtrip() {
     roundtrip_test(TreasuryReceiveRotateRequest {
         allocation_id: "alloc_123".to_string(),
     });
+}
+
+#[test]
+fn test_treasury_receive_purge_request_roundtrip() {
+    roundtrip_test(TreasuryReceivePurgeRequest {
+        allocation_id: "alloc_123".to_string(),
+    });
+}
+
+#[test]
+fn test_wallet_inventory_address_prune_request_roundtrip_and_validation() {
+    roundtrip_test(WalletInventoryAddressPruneRequest {
+        address: Some("0x1111111111111111111111111111111111111111".to_string()),
+        wallet_family: Some("eth-seed".to_string()),
+        wallet_profile: Some("seed-main".to_string()),
+        provider_profile: Some("mainnet".to_string()),
+        chain_id: Some(1),
+        account_index: Some(0),
+    });
+
+    let by_profile = WalletInventoryAddressPruneRequest {
+        wallet_profile: Some("seed-main".to_string()),
+        ..WalletInventoryAddressPruneRequest::default()
+    };
+    assert!(by_profile.validate().is_ok());
+    let by_account = WalletInventoryAddressPruneRequest {
+        account_index: Some(3),
+        ..WalletInventoryAddressPruneRequest::default()
+    };
+    assert!(by_account.validate().is_ok());
+
+    // Fail closed: no selector, a malformed address, or an unknown family.
+    assert!(
+        WalletInventoryAddressPruneRequest::default()
+            .validate()
+            .is_err()
+    );
+    let bad_address = WalletInventoryAddressPruneRequest {
+        address: Some("not-an-address".to_string()),
+        ..WalletInventoryAddressPruneRequest::default()
+    };
+    assert!(bad_address.validate().is_err());
+    let bad_family = WalletInventoryAddressPruneRequest {
+        wallet_family: Some("btc".to_string()),
+        ..WalletInventoryAddressPruneRequest::default()
+    };
+    assert!(bad_family.validate().is_err());
 }
 
 #[test]
