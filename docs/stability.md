@@ -18,6 +18,19 @@ surfaces are explicitly unstable, and how versions evolve. It applies from the
   supported on macOS and Linux; the Linux desktop build is compile-only; Windows
   is unsupported.
 
+### Pre-tag adjustments
+
+No valid `v1.0.0` tag or GitHub Release has published yet, so the stability
+promises above are not yet in force. Until the first valid tag, release
+candidates may adjust stable-candidate surfaces with the change recorded in
+`CHANGELOG.md`. Current adjustments since `1.0.0-rc.5`:
+
+- `sigillum api profiles eth-seed create` redacts the mnemonic from stdout by
+  default (new `--reveal-mnemonic` and `--mnemonic-out PATH` flags control
+  delivery), and `profiles eth-seed upsert` imports an existing mnemonic.
+- `EthStealthGenerateResponse` and `EthStealthDepositMutationResponse` gained
+  a backward-compatible `warnings` array (additive, defaults to empty).
+
 ## Stable at 1.0
 
 Breaking any of these is a major-version event:
