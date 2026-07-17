@@ -49,6 +49,30 @@ from 1.0.0 onward, per the stability policy in `docs/stability.md`.
   profile upserts. The client exposes `code()`/`fields()` on API errors, the
   CLI prints `error[<code>]: <message>` with one line per field error, and
   the console contracts carry both through for the upcoming UX handling.
+- **Background operations API** — Long-running daemon work is tracked as an
+  `Operation` resource with progress counters and cooperative cancellation:
+  `GET /api/operations`, `GET /api/operations/{id}`, and
+  `POST /api/operations/{id}/cancel` (404 `not_found` for unknown ids, 409
+  `conflict` once the operation is terminal). Operations are in-memory,
+  process-lifetime records; durable progress stays in the existing persisted
+  stores. The client crate grows matching
+  `list_operations`/`get_operation`/`cancel_operation` methods.
+- **Async EVM discovery scans with real cancel/resume** —
+  `inventory/scan/evm` accepts `run_async: true` to validate synchronously,
+  spawn the scan as a background operation, and return immediately with the
+  accepted discovery job and its operation (an absent flag keeps the
+  synchronous contract unchanged). The scan loop checks the operation's
+  cancel flag at every address index: a canceled scan keeps all persisted
+  progress and the job is marked `canceled`; a mid-run failure persists the
+  job as `failed` with `last_error` instead of leaking a permanently
+  `running` record. `discovery/jobs/cancel` now really stops the running
+  scan (409 `conflict` on terminal jobs), and `discovery/jobs/resume` starts
+  a new background operation continuing from the interrupted job's persisted
+  checkpoints — per-index persistence and observation upserts make resume
+  free of duplicate observations. The console re-enables its discovery
+  Cancel/Resume controls (cancel behind the shared confirm dialog) and the
+  scan form gains a "Run in background" option that surfaces the operation
+  id; the CLI gains `sigillum api inventory scan-evm --run-async`.
 
 ### Changed
 
@@ -61,8 +85,7 @@ from 1.0.0 onward, per the stability policy in `docs/stability.md`.
   behind a "How this policy protects you" fold.
 - **Console dead code removed** — The unused typed API client and session
   actions, unreachable hero setup/locked copy, stale "increment B2" roadmap
-  text, and unused view helpers are gone; discovery-job cancel/resume controls
-  are disabled with a tooltip until the server-side verbs become real.
+  text, and unused view helpers are gone.
 
 ### Fixed
 

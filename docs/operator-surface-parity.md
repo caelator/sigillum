@@ -5,10 +5,10 @@ assembled in `api_router()` and the API surface in `api_routes()`. All route
 registrations live in that one file (submodules under `src/routes/` contain
 handlers only, no registrations).
 
-**Counts (cross-checked against the router):** 134 route registrations
-(`grep -c '\.route(' crates/sigillum-daemon/src/routes/mod.rs` -> 134), which
-is 135 method endpoints because `/api/treasury/parties` registers both GET
-and POST. The 33 family rows below cover 134/134 registrations; each route
+**Counts (cross-checked against the router):** 139 route registrations
+(`grep -c '\.route(' crates/sigillum-daemon/src/routes/mod.rs` -> 139), which
+is 140 method endpoints because `/api/treasury/parties` registers both GET
+and POST. The 34 family rows below cover 139/139 registrations; each route
 appears in exactly one row.
 
 **Maintenance rule (release-1.0 plan §0.1.5 / D2):** every W-task that adds
@@ -56,8 +56,8 @@ commands.
 | 20 | Wallet profiles | `profiles/evm` (+`/upsert`,`/delete`), `profiles/eth-stealth` (+`/upsert`,`/delete`), `profiles/eth-xpub` (+`/upsert`,`/delete`), `profiles/eth-seed` (+`/upsert`,`/create`,`/delete`) — 13 routes | `wallets.ts`, `walletManager.ts`, `journey.ts` | `sigillum api profiles <evm\|stealth\|eth-xpub\|eth-seed> <list\|upsert\|create\|delete>` | Fully covered. |
 | 21 | Wallet key ops (read/derive, no spend) | `wallets/eth-xpub/export`, `wallets/eth-xpub/derive`, `wallets/eth-stealth/export`, `wallets/eth-stealth/generate`, `wallets/eth-stealth/check` | `wallets.ts` (both exports + derive); generate/check not in UI yet | `sigillum api wallets xpub-export\|xpub-derive\|stealth-export\|stealth-generate\|stealth-check` | No sign/send in this family, so it is safe to script; D1 adds the CLI. |
 | 22 | Wallet sign/send | `wallets/eth-stealth/sign`, `.../sign-transfer`, `.../sign-erc20-transfer`, `.../send-transfer`, `.../send-erc20-transfer`, `.../send-with-profile`, `.../send-erc20-with-profile` | no | no — permanent | Decision (D2): same hazard as `evm/broadcast` — shell history plus no plan review. Interactive spending goes through consolidation plans + queue (review/approve); programmatic callers use the API/SDK. |
-| 23 | Inventory registry | `inventory/wallets`, `chains` (+`/upsert`,`/delete`), `inventory/chains` (+`/upsert`,`/delete` legacy alias), `inventory/scan/evm`, `inventory/watch-addresses` (+`/upsert`,`/delete`), `inventory/token-registry` (+`/import`,`/delete`) | `inventory.ts` (+ `journey.ts`, `walletManager.ts`) | `sigillum api chains <list\|upsert\|delete>`; `sigillum api inventory <list\|chains\|watch\|token-registry\|scan-evm>` (`scan-evm --all-configured-chains --probe-token-registry`) | Fully covered. |
-| 24 | Discovery jobs | `discovery/jobs`, `discovery/jobs/cancel`, `discovery/jobs/resume` | `inventory.ts` (cancel/resume; the job list itself is surfaced via the scan flow, not fetched directly) | `sigillum api discovery jobs <list\|cancel\|resume>` | Covered; the UI job-list gap is cosmetic and the CLI lists jobs. |
+| 23 | Inventory registry | `inventory/wallets`, `chains` (+`/upsert`,`/delete`), `inventory/chains` (+`/upsert`,`/delete` legacy alias), `inventory/scan/evm`, `inventory/watch-addresses` (+`/upsert`,`/delete`), `inventory/token-registry` (+`/import`,`/delete`) | `inventory.ts` (+ `journey.ts`, `walletManager.ts`); the scan form offers Run in background (`run_async`) and surfaces the returned operation id | `sigillum api chains <list\|upsert\|delete>`; `sigillum api inventory <list\|chains\|watch\|token-registry\|scan-evm>` (`scan-evm --all-configured-chains --probe-token-registry --run-async`) | Fully covered. |
+| 24 | Discovery jobs | `discovery/jobs`, `discovery/jobs/cancel`, `discovery/jobs/resume` | `inventory.ts` (cancel gates on the shared confirm dialog; resume restarts in the background; the job list itself is surfaced via the scan flow, not fetched directly) | `sigillum api discovery jobs <list\|cancel\|resume>` | Covered; the UI job-list gap is cosmetic and the CLI lists jobs. Cancel/resume are real since plan task 1.2: cancel cooperatively stops the live scan (409 on terminal jobs), resume starts a new background operation from the job's checkpoints. |
 | 25 | Risk | `risk/findings`, `risk/catalog` (+`/upsert`,`/delete`) | `inventory.ts` | `sigillum api risk <list\|catalog\|catalog-upsert\|catalog-delete>` | Fully covered. |
 | 26 | Consolidation plans | `plans/consolidation` (+`/generate`,`/approve`,`/simulate`,`/export`) | `inventory.ts` | `sigillum api plans <list\|generate\|approve\|simulate\|export>` (`generate --chain-id` optional) | Fully covered — this is the reviewed path for spending. |
 | 26a | Plan-step enqueue (W7.2) | `plans/enqueue-step`, `plans/enqueue-plan` | `inventory.ts` (per-step Execute appears only when every gate passes; Execute All Eligible opens the typed-confirmation dialog rendering the exact daemon-computed phrase) | `sigillum api plans enqueue-step --plan-id --step-id --confirm`, `sigillum api plans enqueue-plan --plan-id --confirmation "<PHRASE>"` (run without `--confirmation` to have the daemon print the exact phrase) | Fully covered. Every check is re-validated server-side at enqueue time (W7.1 gates, treasury allowlist/caps, linkage, simulation pass + freshness, W5 claim gate, W6.1 gas-topup opt-in, idempotency, W6.4 dependency order). Enqueued `plan_step_execution` jobs stay hard-blocked at drain time until W7.3 enables execution. |
@@ -68,14 +68,16 @@ commands.
 | 31 | Manual queue enqueue | `queue/enqueue/eth-stealth-transfer`, `.../eth-stealth-erc20-transfer`, `.../eth-stealth-native-sweep`, `.../eth-stealth-erc20-sweep` | no (direct) | no | Decision (D2): maintenance auto-enqueues, and the UI covers the manual path via the deposit sweep action (`deposits/eth-stealth/enqueue-sweep`). Direct enqueue endpoints remain programmatic/API-only. |
 | 32 | FIDO2 admin | `fido2/status`, `fido2/detect`, `fido2/pin/set`, `fido2/list`, `fido2/setup`, `fido2/register`, `fido2/unlock`, `fido2/remove` | `fido2.ts` + `setup.ts` (all except `status`) | `sigillum api unlock-fido2` (unlock only); local `sigillum fido2 <register\|list\|remove\|status\|unlock>` manages the same store offline | Decision (D2): admin requires a physical touch ceremony on the security key at the machine — the interactive UI flow is the operator surface; `status` is a programmatic probe. |
 | 33 | NFT metadata (opt-in fetch) | `inventory/nft-metadata/opt-ins` (+`/upsert`,`/delete`), `inventory/nft-metadata/settings`, `inventory/nft-metadata/fetch` — 5 routes | `inventory.ts` (opt-in controls, gateway setting, fetch, suspicious-NFT bucket) | no | Deliberate UI+API surface at 1.0: metadata fetching is an interactive, privacy-sensitive review action (per-collection opt-in, results need visual review), so no CLI is provided; scripting goes through the API/SDK. |
+| 34 | Background operations | `operations`, `operations/{id}`, `operations/{id}/cancel` | `inventory.ts` (Run-in-background scan surfaces the operation id and progress renders via the linked discovery job; cancel is driven through the discovery-job row) | partial: `sigillum api inventory scan-evm --run-async` starts an operation; no list/get/cancel CLI | The discovery-scan workflow is UI-covered end to end (start in background, progress in the job list, cancel/resume). Direct list/get/cancel stay programmatic/API-only for now — the console's refresh loop already renders operation progress via the linked discovery job; a CLI surface can land with a future operations consumer. |
 
 ## Verification
 
-- Route registrations in `crates/sigillum-daemon/src/routes/mod.rs`: **134**
-  (`grep -c '\.route('`). Method endpoints: **135** (`/api/treasury/parties`
+- Route registrations in `crates/sigillum-daemon/src/routes/mod.rs`: **139**
+  (`grep -c '\.route('`). Method endpoints: **140** (`/api/treasury/parties`
   is GET+POST on one registration).
-- Sum of routes across the 33 rows above: **134** — every registration
+- Sum of routes across the 34 rows above: **139** — every registration
   appears in exactly one row.
 - No row is UI=no and CLI=no without an explicit decision (rows 4, 12, 19,
   22, 31 carry D2 decisions; rows 2, 15 are machine-plumbing decisions; row
-  33 records the deliberate UI+API-only NFT metadata decision).
+  33 records the deliberate UI+API-only NFT metadata decision; row 34 records
+  the partial-CLI operations decision).

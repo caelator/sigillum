@@ -278,6 +278,30 @@ Current daemon behavior:
   stranded-value, watch-only, and dormant-candidate labels so risk and
   consolidation views can distinguish recoverable value from merely visible
   value
+- tracks long-running work as in-memory `Operation` records
+  (`GET /api/operations`, `GET /api/operations/{id}`,
+  `POST /api/operations/{id}/cancel`) with progress counters and cooperative
+  cancellation. Operations are a process-lifetime observability/control view;
+  durable progress for scans lives in the persisted discovery-job checkpoints
+  and block cursors, so a restart loses only the live view, never the ability
+  to resume
+- runs EVM discovery scans either synchronously inside the request (default,
+  unchanged for existing clients) or as a background operation
+  (`inventory/scan/evm` with `run_async: true`, or a discovery-job resume).
+  Both paths share one pipeline: validation and wallet/provider/watch
+  resolution happen synchronously up front, then the scan loop runs under the
+  operation mutex (mutation serialization is identical to the historical
+  synchronous path) and persists inventory state after every address index.
+  The loop checks the operation's cancel flag at every index; on cancel it
+  stops before the next index, keeps all persisted progress, and marks the
+  job and operation `canceled`. Mid-run errors persist the job as `failed`
+  with `last_error` instead of leaking a permanently `running` record
+- resumes canceled/failed/interrupted discovery jobs as NEW background
+  operations that continue from the interrupted job's persisted
+  per-wallet/provider checkpoints (`discovery/jobs/resume`). Because every
+  index is persisted before the next starts and observation records upsert on
+  wallet/provider/chain/address keys, resume never produces duplicate
+  observations
 - keeps the gateway surface local-sidecar-only rather than treating it as an internet-facing service boundary
 
 What it intentionally does not do today:

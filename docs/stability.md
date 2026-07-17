@@ -37,6 +37,23 @@ candidates may adjust stable-candidate surfaces with the change recorded in
   disambiguate the overloaded 403/404/429 statuses through the catalog, and
   CLI daemon errors print as `error[<code>]: <message>` (with one indented
   line per field error) when the daemon supplied a code.
+- New routes `GET /api/operations`, `GET /api/operations/{id}`, and
+  `POST /api/operations/{id}/cancel` expose the daemon's background-operation
+  registry (in-memory, process-lifetime). `WalletInventoryScanRequest` gained
+  an optional `run_async` flag (absent/false preserves the synchronous
+  behavior exactly); `WalletInventoryScanResponse` and
+  `DiscoveryJobMutationResponse` gained an additive optional `operation`
+  field. `sigillum api inventory scan-evm` gained a matching `--run-async`
+  flag.
+- Discovery-job cancel/resume semantics are now real and tightened: cancel
+  cooperatively stops the running scan (or marks an orphaned `running` job
+  canceled) and conflicts (409 `conflict`) on terminal jobs; resume starts a
+  NEW background operation and discovery job continuing from the interrupted
+  job's persisted checkpoints and conflicts on completed or still-running
+  jobs. Previously both verbs merely rewrote the stored status string.
+- A discovery scan that fails mid-run now persists the job as `failed` with
+  `last_error` (previously the record stayed `running` forever), which also
+  makes it resumable.
 
 ## Stable at 1.0
 
