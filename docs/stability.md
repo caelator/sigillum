@@ -54,6 +54,37 @@ candidates may adjust stable-candidate surfaces with the change recorded in
 - A discovery scan that fails mid-run now persists the job as `failed` with
   `last_error` (previously the record stayed `running` forever), which also
   makes it resumable.
+- New route `GET /api/events` exposes the daemon's SSE event channel (plan
+  task 1.3 / decision D-D): `snapshot` (on connect and on lag resync),
+  `operation`, `queue`, and `status` events with `v: 1` versioned payloads
+  from `sigillum-api` (`DaemonEvent` and friends). Auth is the standard
+  bearer session (plus a `?session=` query-token alternative for
+  `EventSource`, loopback-only), but the route is the first PASSIVE read:
+  it authenticates without refreshing the session's idle-activity clock, so
+  an always-open stream cannot defeat the idle auto-lock. Session semantics
+  for every other route are unchanged.
+- The six previously unbounded list endpoints gained additive optional query
+  parameters for filtering, sorting, and offset pagination (plan task 1.5).
+  A parameterless request is byte-identical to before: full list in store
+  order, no `pagination` key. When `limit` and/or `offset` is supplied, the
+  response gains an additive `pagination` envelope
+  (`{total, limit, offset, has_more}`). Parameters: `GET /api/queue/jobs`
+  accepts `state`, `kind`, `chain_id`, `sort=created|updated`;
+  `GET /api/inventory/wallets` accepts `chain_id`, `funded`,
+  `sort=address|last_scanned` (applies to the `addresses` list only);
+  `GET /api/deposits/eth-stealth` accepts `status`, `chain_id`,
+  `counterparty_id`, `sort=created|updated`; `GET /api/plans/consolidation`
+  accepts `status`, `sort=created|updated`; `GET /api/risk/findings` accepts
+  `severity` (matches `risk_level`), `kind` (matches `category`, free-form),
+  `chain_id`, `sort=severity|found_at`; `GET /api/discovery/jobs` accepts
+  `state`, `sort=created|updated` (`updated` = `completed_at_unix`, falling
+  back to `started_at_unix`). All six also accept `order=asc|desc`
+  (requires `sort`; default `desc` for time/severity fields, `asc` for
+  `address`) and `limit`/`offset` (non-negative integers). Unknown or
+  malformed values fail with 400 `validation_failed` naming the parameter.
+  `sigillum-client` grows matching `list_*_with_options` methods taking
+  typed `sigillum_api::request::*ListOptions` structs; the legacy no-arg
+  methods are unchanged.
 
 ## Stable at 1.0
 
@@ -66,7 +97,12 @@ Breaking any of these is a major-version event:
    break older clients on values alone.
 2. **Daemon route paths and semantics** - the HTTP route paths, methods, auth
    expectations (bearer session tokens over loopback), and fail-closed validation
-   semantics of the local daemon API.
+   semantics of the local daemon API. This includes the `GET /api/events` SSE
+   channel: its event names (`snapshot`, `operation`, `queue`, `status`), the
+   `v: 1` versioned payload shapes, and its passive-read idle semantics
+   (connecting does not defer the idle auto-lock) are part of the stable
+   surface; new event names or optional payload fields may be added within 1.x,
+   and clients must ignore ones they do not recognize.
 3. **CLI syntax** - command names, arguments, environment variables, and JSON
    output shapes of `sigillum` and the `sigillum api` operator commands.
 4. **On-disk formats** - every persisted daemon store is schema-versioned and

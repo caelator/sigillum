@@ -5,16 +5,25 @@ assembled in `api_router()` and the API surface in `api_routes()`. All route
 registrations live in that one file (submodules under `src/routes/` contain
 handlers only, no registrations).
 
-**Counts (cross-checked against the router):** 139 route registrations
-(`grep -c '\.route(' crates/sigillum-daemon/src/routes/mod.rs` -> 139), which
-is 140 method endpoints because `/api/treasury/parties` registers both GET
-and POST. The 34 family rows below cover 139/139 registrations; each route
+**Counts (cross-checked against the router):** 140 route registrations
+(`grep -c '\.route(' crates/sigillum-daemon/src/routes/mod.rs` -> 140), which
+is 141 method endpoints because `/api/treasury/parties` registers both GET
+and POST. The 35 family rows below cover 140/140 registrations; each route
 appears in exactly one row.
 
 **Maintenance rule (release-1.0 plan §0.1.5 / D2):** every W-task that adds
 or changes routes MUST update this file in the same PR chain. A route family
 may only be UI-less and CLI-less when the Decision column records an explicit
 rationale.
+
+**Query parameters (plan task 1.5):** the list routes in rows 23
+(`inventory/wallets`), 24 (`discovery/jobs`), 25 (`risk/findings`), 26
+(`plans/consolidation`), 29 (`deposits/eth-stealth`), and 30 (`queue/jobs`)
+accept additive optional filter/sort/`limit`/`offset` query parameters
+(enumerated in `docs/stability.md`). A parameterless request keeps the
+legacy response exactly, so no UI/CLI surface above changes: the client
+gains `list_*_with_options` variants, and CLI flags for these parameters
+are deliberately deferred until a CLI consumer needs them.
 
 Column legend:
 
@@ -69,15 +78,17 @@ commands.
 | 32 | FIDO2 admin | `fido2/status`, `fido2/detect`, `fido2/pin/set`, `fido2/list`, `fido2/setup`, `fido2/register`, `fido2/unlock`, `fido2/remove` | `fido2.ts` + `setup.ts` (all except `status`) | `sigillum api unlock-fido2` (unlock only); local `sigillum fido2 <register\|list\|remove\|status\|unlock>` manages the same store offline | Decision (D2): admin requires a physical touch ceremony on the security key at the machine — the interactive UI flow is the operator surface; `status` is a programmatic probe. |
 | 33 | NFT metadata (opt-in fetch) | `inventory/nft-metadata/opt-ins` (+`/upsert`,`/delete`), `inventory/nft-metadata/settings`, `inventory/nft-metadata/fetch` — 5 routes | `inventory.ts` (opt-in controls, gateway setting, fetch, suspicious-NFT bucket) | no | Deliberate UI+API surface at 1.0: metadata fetching is an interactive, privacy-sensitive review action (per-collection opt-in, results need visual review), so no CLI is provided; scripting goes through the API/SDK. |
 | 34 | Background operations | `operations`, `operations/{id}`, `operations/{id}/cancel` | `inventory.ts` (Run-in-background scan surfaces the operation id and progress renders via the linked discovery job; cancel is driven through the discovery-job row); `operations.ts` (Run-in-background queue drain and maintenance cycle surface the operation id; progress renders via the queue/deposit lists) | partial: `sigillum api inventory scan-evm --run-async`, `sigillum api queue process --run-async`, and `sigillum api maintenance run --run-async` start operations; no list/get/cancel CLI | The discovery-scan workflow is UI-covered end to end (start in background, progress in the job list, cancel/resume). Direct list/get/cancel stay programmatic/API-only for now — the console's refresh loop already renders operation progress via the linked discovery job and the queue/deposit lists; a CLI surface can land with a future operations consumer. |
+| 35 | Events (SSE) | `events` | no (later phase) | no — but the `sigillum-client` SDK exposes `subscribe_events` | Decision (plan task 1.3 / D-D): server-sent events channel (`snapshot`/`operation`/`queue`/`status`, `v: 1` payloads) so clients subscribe instead of polling. Console adoption (EventSource against `?session=`, replacing the status-polling refresh loop) is a LATER phase; the route is a passive read, so connecting never defers the idle auto-lock. |
 
 ## Verification
 
-- Route registrations in `crates/sigillum-daemon/src/routes/mod.rs`: **139**
-  (`grep -c '\.route('`). Method endpoints: **140** (`/api/treasury/parties`
+- Route registrations in `crates/sigillum-daemon/src/routes/mod.rs`: **140**
+  (`grep -c '\.route('`). Method endpoints: **141** (`/api/treasury/parties`
   is GET+POST on one registration).
-- Sum of routes across the 34 rows above: **139** — every registration
+- Sum of routes across the 35 rows above: **140** — every registration
   appears in exactly one row.
 - No row is UI=no and CLI=no without an explicit decision (rows 4, 12, 19,
   22, 31 carry D2 decisions; rows 2, 15 are machine-plumbing decisions; row
   33 records the deliberate UI+API-only NFT metadata decision; row 34 records
-  the partial-CLI operations decision).
+  the partial-CLI operations decision; row 35 records the later-phase console
+  adoption for the SSE channel).

@@ -90,6 +90,46 @@ from 1.0.0 onward, per the stability policy in `docs/stability.md`.
   Maintenance actions gain a "Run in background" option that surfaces the
   operation id, and the CLI gains `sigillum api queue process --run-async`
   and `sigillum api maintenance run --run-async`.
+- **SSE daemon events channel** — New `GET /api/events` route streams
+  daemon state over Server-Sent Events so clients subscribe instead of
+  polling (plan task 1.3 / decision D-D). The versioned vocabulary (`v: 1`
+  payloads, `sigillum_api::response::events`) is deliberately minimal:
+  `snapshot` (lock status + live operations, sent on connect and again as a
+  resync when a subscriber falls behind the bounded per-subscriber
+  channel), `operation` (registry create/state/progress transitions with
+  the full post-transition record), `queue` (job state transitions at
+  enqueue and at the drain/broadcast writes), and `status` (`locked`,
+  `unlocked`, `compartment_switched`); heartbeat comments keep the stream
+  alive through intermediaries. Auth is the standard bearer session, plus a
+  `?session=` query-token alternative for browser `EventSource`
+  (loopback-only; CORS unchanged). The route is the first PASSIVE read:
+  connecting and staying connected does not refresh the session's
+  idle-activity clock, so an always-open events tab can no longer defeat
+  the vault idle auto-lock — semantics for all other routes are unchanged,
+  and more read-only routes can opt into the passive verify later.
+  `sigillum-client` gains `subscribe_events()` returning an
+  `EventSubscription` stream of typed `DaemonEvent`s (unknown event names
+  are skipped for forward compatibility); console adoption of the channel
+  is a later phase.
+- **Pagination, filtering, and sorting on list endpoints** — The six
+  previously unbounded list endpoints accept additive optional query
+  parameters: `GET /api/queue/jobs` (`state`, `kind`, `chain_id`,
+  `sort=created|updated`), `GET /api/inventory/wallets` (`chain_id`,
+  `funded`, `sort=address|last_scanned`, applied to the `addresses` list
+  only), `GET /api/deposits/eth-stealth` (`status`, `chain_id`,
+  `counterparty_id`, `sort=created|updated`), `GET /api/plans/consolidation`
+  (`status`, `sort=created|updated`), `GET /api/risk/findings` (`severity`,
+  `kind`, `chain_id`, `sort=severity|found_at`), and
+  `GET /api/discovery/jobs` (`state`, `sort=created|updated`). All six also
+  accept `order=asc|desc` (default `desc` for time/severity fields, `asc`
+  for `address`) and `limit`/`offset`; a paginated response gains an
+  additive `pagination` envelope (`{total, limit, offset, has_more}`).
+  Parameterless requests stay byte-identical to before. Unknown or malformed
+  values fail with 400 `validation_failed` naming the parameter. The client
+  crate grows `list_*_with_options` methods taking typed
+  `sigillum_api::request::*ListOptions` structs (legacy no-arg methods
+  unchanged), and the console contracts carry the additive query/response
+  types.
 
 ### Changed
 

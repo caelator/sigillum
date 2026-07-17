@@ -39,6 +39,7 @@ mod generate;
 pub(crate) mod helpers;
 mod inventory;
 mod lifecycle;
+pub(crate) mod list_query;
 mod maintenance;
 mod observability;
 mod operations;
@@ -98,6 +99,39 @@ pub(crate) fn require_full_session_token<'a>(
     }
     let token = match token {
         Some(token) if state.verify_token(token) => token,
+        _ => {
+            return Err(ServiceError::unauthorized(
+                "Invalid or missing session token.",
+            ));
+        }
+    };
+    if state.session_is_full(token) {
+        Ok(token)
+    } else {
+        Err(ServiceError::capability_scope_denied(
+            "A full daemon session is required for this operation.",
+        ))
+    }
+}
+
+/// Require a valid full daemon session for a PASSIVE read (today:
+/// `GET /api/events`).
+///
+/// Identical to [`require_full_session_token`] except the verify does not
+/// refresh the session's idle-activity clock: a permanently connected
+/// observer must not defeat the vault auto-lock (plan task 1.3 / D-D). Mark
+/// additional read-only routes passive by calling this at their verify call
+/// site — do NOT widen it to any route that performs work on behalf of the
+/// operator.
+pub(crate) fn require_passive_full_session_token<'a>(
+    state: &AppState,
+    token: Option<&'a str>,
+) -> ServiceResult<&'a str> {
+    if state.is_locking() {
+        return Err(ServiceError::locked("Daemon is locking."));
+    }
+    let token = match token {
+        Some(token) if state.verify_token_passive(token) => token,
         _ => {
             return Err(ServiceError::unauthorized(
                 "Invalid or missing session token.",

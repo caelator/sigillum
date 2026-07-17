@@ -595,11 +595,17 @@ pub use inventory::*;
 mod operations;
 pub use operations::*;
 
+mod events;
+pub use events::*;
+
 mod consolidation_export;
 pub use consolidation_export::*;
 
 mod watch_book;
 pub use watch_book::*;
+
+mod pagination;
+pub use pagination::*;
 
 mod treasury;
 pub use treasury::*;

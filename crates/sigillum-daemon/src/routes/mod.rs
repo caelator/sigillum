@@ -26,11 +26,13 @@ mod biometric;
 mod compartments;
 mod deposits;
 mod diagnostics;
+mod events;
 mod evm;
 mod fido2;
 mod generate;
 mod inventory;
 mod lifecycle;
+mod list_query;
 mod maintenance;
 mod operations;
 mod profiles;
@@ -283,6 +285,7 @@ fn api_routes() -> AppRouter {
 fn lifecycle_routes() -> AppRouter {
     Router::new()
         .route("/api/status", get(lifecycle::get_status))
+        .route("/api/events", get(events::get_events))
         .route("/api/unlock", post(lifecycle::post_unlock))
         .route("/api/lock", post(lifecycle::post_lock))
         .route("/api/session/revoke", post(lifecycle::post_revoke_session))

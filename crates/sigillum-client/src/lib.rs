@@ -65,32 +65,33 @@ pub use sigillum_api::response::{
     ConsolidationPlanExportBundle, ConsolidationPlanExportCall, ConsolidationPlanExportResponse,
     ConsolidationPlanExportSkippedStep, ConsolidationPlanListResponse,
     ConsolidationPlanMutationResponse, ConsolidationPlanStep, ConsolidationPlanSummary,
-    DiagnosticsResponse, DiscoveryJobListResponse, DiscoveryJobMutationResponse, ErrorResponse,
-    EthSeedWalletCreateResponse, EthSeedWalletProfile, EthSeedWalletProfileListResponse,
-    EthSeedWalletProfileMutationResponse, EthSignedTransactionResponse,
-    EthStealthAnnouncementScanResponse, EthStealthCheckResponse, EthStealthDeposit,
-    EthStealthDepositEnqueueSweepResponse, EthStealthDepositListResponse,
+    DaemonEvent, DiagnosticsResponse, DiscoveryJobListResponse, DiscoveryJobMutationResponse,
+    ErrorResponse, EthSeedWalletCreateResponse, EthSeedWalletProfile,
+    EthSeedWalletProfileListResponse, EthSeedWalletProfileMutationResponse,
+    EthSignedTransactionResponse, EthStealthAnnouncementScanResponse, EthStealthCheckResponse,
+    EthStealthDeposit, EthStealthDepositEnqueueSweepResponse, EthStealthDepositListResponse,
     EthStealthDepositMutationResponse, EthStealthDepositRefreshResponse,
     EthStealthGenerateResponse, EthStealthMetaAddressResponse, EthStealthSendResponse,
     EthStealthSignResponse, EthStealthWalletProfile, EthStealthWalletProfileListResponse,
     EthStealthWalletProfileMutationResponse, EthXpubAddressResponse, EthXpubExportResponse,
     EthXpubWalletProfile, EthXpubWalletProfileListResponse, EthXpubWalletProfileMutationResponse,
-    EvmFeeEstimateResponse, EvmProviderProfile, EvmProviderProfileListResponse,
+    EventsSnapshot, EvmFeeEstimateResponse, EvmProviderProfile, EvmProviderProfileListResponse,
     EvmProviderProfileMutationResponse, EvmRpcBalanceResponse, EvmRpcBroadcastResponse,
     EvmRpcErc20BalanceResponse, EvmRpcNonceResponse, Fido2DetectResponse, Fido2KeyInfo,
     Fido2ListResponse, Fido2RegisterResponse, Fido2RemoveResponse, Fido2SetupResponse,
     Fido2StatusResponse, FieldError, GenerateStoreResponse, GenericStatusResponse, KeyListResponse,
-    KeyValueResponse, MaintenanceRunResponse, Operation, OperationListResponse,
-    OperationMutationResponse, OperationProgress, OperationResponse, QueueEnqueueResponse,
-    QueueExecutionPauseResponse, QueueJob, QueueJobListResponse, QueueProcessResponse,
-    RiskCatalogEntry, RiskCatalogListResponse, RiskCatalogMutationResponse, RiskFinding,
-    RiskFindingListResponse, SafeTransactionBuilderBatch, SafeTransactionBuilderMeta,
-    SafeTransactionBuilderTransaction, SecretResolveBatchResponse, SecretResolveValue,
-    SelfCheckResult, SelfCheckRunResponse, SessionRevokeResponse, SnapshotExportResponse,
-    SnapshotRestoreResponse, StatusResponse, SwitchCompartmentResponse, TransitDecryptResponse,
-    TransitEncryptResponse, TransitHmacResponse, UnlockResponse, UnlockedCompartment,
-    WalletAssetHolding, WalletDiscoveryJob, WalletInventoryAddress, WalletInventoryListResponse,
-    WalletInventoryScanResponse, WatchAddressBookListResponse, WatchAddressBookMutationResponse,
+    KeyValueResponse, MaintenanceRunResponse, Operation, OperationEvent, OperationListResponse,
+    OperationMutationResponse, OperationProgress, OperationResponse, PaginationInfo,
+    QueueEnqueueResponse, QueueExecutionPauseResponse, QueueJob, QueueJobEvent,
+    QueueJobListResponse, QueueProcessResponse, RiskCatalogEntry, RiskCatalogListResponse,
+    RiskCatalogMutationResponse, RiskFinding, RiskFindingListResponse, SafeTransactionBuilderBatch,
+    SafeTransactionBuilderMeta, SafeTransactionBuilderTransaction, SecretResolveBatchResponse,
+    SecretResolveValue, SelfCheckResult, SelfCheckRunResponse, SessionRevokeResponse,
+    SnapshotExportResponse, SnapshotRestoreResponse, StatusEvent, StatusResponse,
+    SwitchCompartmentResponse, TransitDecryptResponse, TransitEncryptResponse, TransitHmacResponse,
+    UnlockResponse, UnlockedCompartment, WalletAssetHolding, WalletDiscoveryJob,
+    WalletInventoryAddress, WalletInventoryListResponse, WalletInventoryScanResponse,
+    WatchAddressBookListResponse, WatchAddressBookMutationResponse,
 };
 use sigillum_core::SnapshotSummary;
 use thiserror::Error;
@@ -98,11 +99,15 @@ use thiserror::Error;
 pub use sigillum_core::{SecretStore, VaultError};
 
 mod inventory;
+mod list_queries;
 mod plans;
 mod queue;
 mod receiving;
 mod selfcheck;
 mod treasury;
+
+mod events;
+pub use events::EventSubscription;
 
 // ── Error types ────────────────────────────────────────────────
 
@@ -161,6 +166,10 @@ impl ClientError {
 /// `Result<T, ClientError>`.
 pub struct SigillumClient {
     http: reqwest::Client,
+    /// Client for long-lived streaming requests (the SSE events channel):
+    /// `http`'s total request timeout would kill an open stream, so the
+    /// streaming client carries only a connect timeout.
+    stream_http: reqwest::Client,
     base_url: String,
     session_token: Mutex<Option<String>>,
 }
@@ -188,15 +197,25 @@ impl SigillumClient {
                 .connect_timeout(DEFAULT_CONNECT_TIMEOUT)
                 .timeout(DEFAULT_REQUEST_TIMEOUT)
                 .build()?,
+            stream_http: reqwest::Client::builder()
+                .connect_timeout(DEFAULT_CONNECT_TIMEOUT)
+                .build()?,
             base_url: normalize_base_url(base_url.into()),
             session_token: Mutex::new(None),
         })
     }
 
     /// Create a client with a pre-configured `reqwest::Client` (custom timeouts, TLS, etc.).
+    ///
+    /// Streaming requests (event subscriptions) still use a separate
+    /// timeout-free client; configure them through [`Self::new`]'s defaults.
     pub fn with_http_client(base_url: impl Into<String>, http: reqwest::Client) -> Self {
         Self {
             http,
+            stream_http: reqwest::Client::builder()
+                .connect_timeout(DEFAULT_CONNECT_TIMEOUT)
+                .build()
+                .unwrap_or_else(|_| reqwest::Client::new()),
             base_url: normalize_base_url(base_url.into()),
             session_token: Mutex::new(None),
         }
@@ -1142,6 +1161,17 @@ impl SigillumClient {
     pub(crate) fn request(&self, method: Method, path: &str) -> reqwest::RequestBuilder {
         let mut builder = self
             .http
+            .request(method, format!("{}{}", self.base_url, path));
+        if let Some(token) = self.session_token() {
+            builder = builder.bearer_auth(token);
+        }
+        builder
+    }
+
+    /// Like [`Self::request`] but on the timeout-free streaming client (SSE).
+    pub(crate) fn stream_request(&self, method: Method, path: &str) -> reqwest::RequestBuilder {
+        let mut builder = self
+            .stream_http
             .request(method, format!("{}{}", self.base_url, path));
         if let Some(token) = self.session_token() {
             builder = builder.bearer_auth(token);

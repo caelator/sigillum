@@ -858,7 +858,8 @@ mod tests {
 
         assert_eq!(payment.warnings.len(), 1);
         assert!(
-            payment.warnings[0].contains("does not match any of this vault's known stealth wallets")
+            payment.warnings[0]
+                .contains("does not match any of this vault's known stealth wallets")
         );
     }
 

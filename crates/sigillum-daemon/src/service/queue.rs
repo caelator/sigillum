@@ -48,6 +48,7 @@ pub(in crate::service) use gates::{
 pub(in crate::service) use payloads::queued_job;
 
 use super::helpers::{now_unix, random_id};
+use super::list_query;
 use super::{ServiceError, ServiceResult, SigillumService};
 
 // ── Queue State Constants ──────────────────────────────────────────────────
@@ -79,12 +80,44 @@ impl SigillumService {
     pub(crate) fn list_queue_jobs(
         &self,
         token: Option<&str>,
+        query: list_query::QueueJobListQuery,
     ) -> ServiceResult<QueueJobListResponse> {
         let _ = self.require_session(token)?;
+        let state = query
+            .state
+            .map(|value| list_query::validated_value("state", value, &list_query::QUEUE_JOB_STATES))
+            .transpose()?;
+        let kind = query
+            .kind
+            .map(|value| list_query::validated_value("kind", value, &list_query::QUEUE_JOB_KINDS))
+            .transpose()?;
         let queue = crate::queue_store::load_queue(&self.state.base_dir)
             .map_err(|error| ServiceError::internal(format!("Failed to load queue: {error}")))?;
+        let mut jobs = queue.jobs;
+        if let Some(state) = state.as_deref() {
+            jobs.retain(|job| job.state == state);
+        }
+        if let Some(kind) = kind.as_deref() {
+            jobs.retain(|job| queue_job_kind(job) == kind);
+        }
+        if let Some(chain_id) = query.chain_id {
+            jobs.retain(|job| queue_job_chain_id(job) == Some(chain_id));
+        }
+        if let Some(sort) = query.sort {
+            let order = list_query::effective_order(query.sort.as_ref(), query.order);
+            let key = |job: &sigillum_api::QueueJob| match sort {
+                list_query::CreatedUpdatedSort::Created => job.created_at_unix,
+                list_query::CreatedUpdatedSort::Updated => job.updated_at_unix,
+            };
+            match order {
+                list_query::SortOrder::Asc => jobs.sort_by_key(|job| key(job)),
+                list_query::SortOrder::Desc => jobs.sort_by(|a, b| key(b).cmp(&key(a))),
+            }
+        }
+        let (jobs, pagination) = list_query::paginate(jobs, query.page);
         Ok(QueueJobListResponse {
-            jobs: queue.jobs.into_iter().map(queue_job_for_response).collect(),
+            jobs: jobs.into_iter().map(queue_job_for_response).collect(),
+            pagination,
         })
     }
 
@@ -165,6 +198,7 @@ impl SigillumService {
         queue.jobs.push(job.clone());
         crate::queue_store::save_queue(&self.state.base_dir, &queue)
             .map_err(|error| ServiceError::internal(format!("Failed to save queue: {error}")))?;
+        self.state.publish_queue_job_transition(&job, None);
 
         self.record_audit(
             self.state.active_compartment_id_for(token),
@@ -187,4 +221,28 @@ fn queue_job_for_response(mut job: sigillum_api::QueueJob) -> sigillum_api::Queu
     // consumer an unnecessary transaction-submission capability.
     job.receipt.signed_raw_transaction_hex = None;
     job
+}
+
+/// Wire `kind` tag of a job payload, for the `kind` list filter.
+fn queue_job_kind(job: &sigillum_api::QueueJob) -> &'static str {
+    match &job.payload {
+        QueueJobPayload::EthStealthTransfer { .. } => "eth_stealth_transfer",
+        QueueJobPayload::EthStealthErc20Transfer { .. } => "eth_stealth_erc20_transfer",
+        QueueJobPayload::EthStealthNativeSweep { .. } => "eth_stealth_native_sweep",
+        QueueJobPayload::EthStealthErc20Sweep { .. } => "eth_stealth_erc20_sweep",
+        QueueJobPayload::EthSeedTransfer { .. } => "eth_seed_transfer",
+        QueueJobPayload::EthSeedNativeSweep { .. } => "eth_seed_native_sweep",
+        QueueJobPayload::EthSeedErc20Sweep { .. } => "eth_seed_erc20_sweep",
+        QueueJobPayload::PlanStepExecution(_) => "plan_step_execution",
+    }
+}
+
+/// Chain id carried by the job payload, when it carries one: only
+/// `plan_step_execution` jobs record a chain today, so a `chain_id` filter
+/// matches those jobs exclusively.
+fn queue_job_chain_id(job: &sigillum_api::QueueJob) -> Option<u64> {
+    match &job.payload {
+        QueueJobPayload::PlanStepExecution(payload) => Some(payload.chain_id),
+        _ => None,
+    }
 }
