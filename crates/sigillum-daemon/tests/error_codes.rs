@@ -110,3 +110,53 @@ async fn startup_gate_maps_to_unavailable_code() {
     assert_eq!(body["code"], json!("unavailable"));
     assert_eq!(body["error"], json!("Startup recovery is not ready."));
 }
+
+#[tokio::test]
+async fn upgraded_dto_reports_field_level_validation_errors() {
+    let (app, _state, _dir) = test_app_with_state();
+
+    let (init_status, init_body) = post_request(
+        &app,
+        "/api/compartment/init",
+        json!({
+            "id": 0,
+            "label": "default",
+            "threshold": 1,
+            "passphrase": "test-passphrase-123"
+        }),
+        None,
+    )
+    .await;
+    assert_eq!(init_status, StatusCode::OK, "init: {init_body:?}");
+    let token = init_body["session_token"].as_str().unwrap();
+
+    let (status, body) = post_request(
+        &app,
+        "/api/profiles/evm/upsert",
+        json!({
+            "name": "n".repeat(300),
+            "rpc_url": "u".repeat(2100),
+            "chain_id": 1,
+            "max_fee_per_gas_hex": "f".repeat(4100)
+        }),
+        Some(token),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(body["code"], json!("validation_failed"));
+    // Top-level message stays the first field failure (legacy contract).
+    assert!(body["error"].as_str().unwrap().contains("name"));
+    let fields = body["fields"].as_array().expect("fields array present");
+    let paths: Vec<&str> = fields
+        .iter()
+        .map(|field| field["field"].as_str().unwrap())
+        .collect();
+    assert_eq!(paths, vec!["name", "rpc_url", "max_fee_per_gas_hex"]);
+    assert!(
+        fields[0]["message"]
+            .as_str()
+            .unwrap()
+            .contains("exceeds maximum length")
+    );
+}

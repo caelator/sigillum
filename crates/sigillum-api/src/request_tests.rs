@@ -1442,3 +1442,274 @@ fn test_self_check_run_request_validation() {
     };
     assert!(oversize.validate().is_err());
 }
+
+// ── Field-level validation (validate_fields) ─────────────────────
+
+#[test]
+fn test_validate_fields_default_wraps_single_string_without_fields() {
+    // DTOs that only implement `validate()` report one failure with no
+    // per-field breakdown.
+    let req = PassphraseRequest {
+        passphrase: "x".repeat(2048),
+    };
+    let failure = req.validate_fields().unwrap_err();
+    assert!(failure.message().contains("passphrase"));
+    assert!(failure.fields().is_empty());
+}
+
+#[test]
+fn test_evm_provider_profile_upsert_fields_accumulate_with_flattened_paths() {
+    let req = EvmProviderProfileUpsertRequest {
+        name: "n".repeat(300),
+        provider: EvmProviderRef {
+            rpc_url: "u".repeat(2100),
+            auth_token_key: Some("k".repeat(600)),
+            compartment_id: None,
+        },
+        chain_id: 1,
+        max_priority_fee_per_gas_hex: None,
+        max_fee_per_gas_hex: Some("f".repeat(4100)),
+        native_gas_limit: None,
+        erc20_gas_limit: None,
+        fee_estimation_enabled: None,
+    };
+    let failure = req.validate_fields().unwrap_err();
+    let paths: Vec<&str> = failure.fields().iter().map(|f| f.field.as_str()).collect();
+    // `provider` is #[serde(flatten)] on the wire, so rpc_url/auth_token_key
+    // stay top-level field paths.
+    assert_eq!(
+        paths,
+        vec![
+            "name",
+            "rpc_url",
+            "auth_token_key",
+            "max_fee_per_gas_hex"
+        ]
+    );
+    // Legacy single-string contract: first field message, byte-identical.
+    assert_eq!(req.validate().unwrap_err(), failure.message());
+    assert!(failure.fields()[0].message.contains("name"));
+}
+
+#[test]
+fn test_eth_xpub_wallet_profile_upsert_fields_cover_cross_field_rules() {
+    let req = EthXpubWalletProfileUpsertRequest {
+        name: "treasury_receive".to_string(),
+        project_account: 7,
+        provider_profile: "mainnet".to_string(),
+        compartment_id: None,
+        chain_id: None,
+        external_receive_xpub: None,
+        external_receive_path: Some("m/44'/60'/7'/1".to_string()),
+        external_account_xpub: None,
+        external_account_path: Some("m/44'/60'/7'".to_string()),
+        default_destination_address: Some("not-an-address".to_string()),
+        execution_enabled: None,
+    };
+    let failure = req.validate_fields().unwrap_err();
+    let paths: Vec<&str> = failure.fields().iter().map(|f| f.field.as_str()).collect();
+    assert_eq!(
+        paths,
+        vec![
+            "external_receive_path",
+            "external_account_path",
+            "external_receive_path",
+            "default_destination_address"
+        ]
+    );
+    assert_eq!(
+        failure.fields()[0].message,
+        "external_receive_path requires external_receive_xpub"
+    );
+    assert_eq!(
+        failure.fields()[2].message,
+        "external_receive_path and external_account_path are mutually exclusive"
+    );
+    // Single-error case keeps the historical message exactly.
+    assert_eq!(
+        req.validate().unwrap_err(),
+        "external_receive_path requires external_receive_xpub"
+    );
+}
+
+#[test]
+fn test_eth_seed_wallet_profile_upsert_fields_accumulate() {
+    let req = EthSeedWalletProfileUpsertRequest {
+        name: "n".repeat(300),
+        label: None,
+        mnemonic: "abandon abandon abandon".to_string(),
+        mnemonic_passphrase: None,
+        project_account: 0,
+        provider_profile: "mainnet".to_string(),
+        compartment_id: None,
+        chain_id: None,
+        default_destination_address: Some("0xnothex".to_string()),
+        execution_enabled: None,
+    };
+    let failure = req.validate_fields().unwrap_err();
+    let paths: Vec<&str> = failure.fields().iter().map(|f| f.field.as_str()).collect();
+    assert_eq!(paths, vec!["name", "default_destination_address"]);
+    assert!(failure.fields()[1]
+        .message
+        .contains("must be a valid ethereum address"));
+}
+
+#[test]
+fn test_wallet_inventory_scan_fields_use_indexed_paths() {
+    let req = WalletInventoryScanRequest {
+        wallet_family: None,
+        wallet_profile: None,
+        provider_profile: Some("mainnet".to_string()),
+        all_configured_chains: Some(true),
+        derivation_pattern: None,
+        account_limit: None,
+        watch_addresses: vec![WatchAddressProbe {
+            address: "0xnothex".to_string(),
+            label: None,
+        }],
+        include_watch_book: None,
+        gap_limit: None,
+        max_index: None,
+        resume_from_latest_checkpoint: None,
+        token_addresses: vec![
+            "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48".to_string(),
+            "0xtooshort".to_string(),
+        ],
+        block_tag: None,
+        probe_token_registry: None,
+        discover_erc20_transfers: None,
+        token_discovery_from_block: None,
+        token_discovery_to_block: None,
+        token_discovery_limit: None,
+        discover_erc20_allowances: None,
+        allowance_spender_addresses: Vec::new(),
+        allowance_discovery_limit: None,
+        discover_permit2_allowances: None,
+        permit2_contract_addresses: Vec::new(),
+        permit2_spender_addresses: Vec::new(),
+        permit2_allowance_limit: None,
+        discover_erc721_transfers: None,
+        discover_erc1155_transfers: None,
+        discover_nft_operator_approvals: None,
+        nft_operator_addresses: Vec::new(),
+        nft_operator_approval_limit: None,
+        discover_defi_token_positions: None,
+        defi_token_probes: Vec::new(),
+        defi_position_limit: None,
+        discover_claim_candidates: None,
+        claim_candidate_probes: Vec::new(),
+        claim_candidate_limit: None,
+        nft_discovery_from_block: None,
+        nft_discovery_to_block: None,
+        nft_discovery_limit: None,
+    };
+    let failure = req.validate_fields().unwrap_err();
+    let paths: Vec<&str> = failure.fields().iter().map(|f| f.field.as_str()).collect();
+    assert_eq!(
+        paths,
+        vec!["provider_profile", "token_addresses[1]", "watch_addresses[0].address"]
+    );
+    assert_eq!(
+        failure.fields()[0].message,
+        "provider_profile cannot be combined with all_configured_chains"
+    );
+    assert_eq!(req.validate().unwrap_err(), failure.message());
+}
+
+#[test]
+fn test_treasury_policy_update_fields_use_indexed_paths() {
+    let req = TreasuryPolicyUpdateRequest {
+        enabled: true,
+        allowed_destinations: vec![
+            TreasuryAllowedDestinationInput {
+                address: " ".to_string(),
+                label: None,
+            },
+            TreasuryAllowedDestinationInput {
+                address: "0xnothex".to_string(),
+                label: Some("l".repeat(300)),
+            },
+        ],
+        max_step_native_wei_hex: Some("h".repeat(4100)),
+        max_plan_native_wei_hex: None,
+        require_simulation: None,
+        allow_raw_digest_signing: None,
+        block_cross_party_linkage: None,
+        allow_claim_execution: None,
+        allow_gas_topups: None,
+        max_gas_topup_wei_hex: None,
+        allow_plan_execution: None,
+        allow_sweep_execution: None,
+        allow_revoke_execution: None,
+        allow_exit_execution: None,
+        execution_paused: None,
+        max_fee_per_gas_cap_hex: None,
+        simulation_freshness_secs: None,
+        hot_floor_wei_hex: None,
+        hot_target_wei_hex: None,
+        hot_overflow_wei_hex: None,
+        allow_treasury_automation: None,
+    };
+    let failure = req.validate_fields().unwrap_err();
+    let paths: Vec<&str> = failure.fields().iter().map(|f| f.field.as_str()).collect();
+    assert_eq!(
+        paths,
+        vec![
+            "allowed_destinations[0].address",
+            "allowed_destinations[1].address",
+            "allowed_destinations[1].label",
+            "max_step_native_wei_hex"
+        ]
+    );
+    assert_eq!(
+        failure.fields()[0].message,
+        "allowed_destinations[0].address must not be empty"
+    );
+}
+
+#[test]
+fn test_validate_fields_pass_for_valid_dtos() {
+    let provider = EvmProviderProfileUpsertRequest {
+        name: "mainnet".to_string(),
+        provider: EvmProviderRef {
+            rpc_url: "https://eth.example.com".to_string(),
+            auth_token_key: None,
+            compartment_id: None,
+        },
+        chain_id: 1,
+        max_priority_fee_per_gas_hex: None,
+        max_fee_per_gas_hex: None,
+        native_gas_limit: None,
+        erc20_gas_limit: None,
+        fee_estimation_enabled: None,
+    };
+    assert!(provider.validate_fields().is_ok());
+
+    let policy = TreasuryPolicyUpdateRequest {
+        enabled: true,
+        allowed_destinations: vec![TreasuryAllowedDestinationInput {
+            address: "0x9999999999999999999999999999999999999999".to_string(),
+            label: Some("cold".to_string()),
+        }],
+        max_step_native_wei_hex: None,
+        max_plan_native_wei_hex: None,
+        require_simulation: None,
+        allow_raw_digest_signing: None,
+        block_cross_party_linkage: None,
+        allow_claim_execution: None,
+        allow_gas_topups: None,
+        max_gas_topup_wei_hex: None,
+        allow_plan_execution: None,
+        allow_sweep_execution: None,
+        allow_revoke_execution: None,
+        allow_exit_execution: None,
+        execution_paused: None,
+        max_fee_per_gas_cap_hex: None,
+        simulation_freshness_secs: None,
+        hot_floor_wei_hex: None,
+        hot_target_wei_hex: None,
+        hot_overflow_wei_hex: None,
+        allow_treasury_automation: None,
+    };
+    assert!(policy.validate_fields().is_ok());
+}

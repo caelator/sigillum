@@ -99,6 +99,27 @@ pub(crate) fn err(status: StatusCode, code: &'static str, msg: &str) -> Response
     )
 }
 
+/// 400 `validation_failed` envelope carrying the per-field breakdown when
+/// the DTO reported one.
+pub(crate) fn err_validation(msg: &str, fields: Vec<sigillum_api::response::FieldError>) -> Response {
+    sec_headers(
+        (
+            StatusCode::BAD_REQUEST,
+            Json(ErrorResponse {
+                code: sigillum_api::error_codes::VALIDATION_FAILED.to_string(),
+                error: msg.to_string(),
+                action: None,
+                fields: if fields.is_empty() {
+                    None
+                } else {
+                    Some(fields)
+                },
+            }),
+        )
+            .into_response(),
+    )
+}
+
 pub(crate) fn ok_json(val: serde_json::Value) -> Response {
     sec_headers(Json(val).into_response())
 }
@@ -170,12 +191,9 @@ pub(crate) fn bearer_token(headers: &HeaderMap) -> Option<String> {
 /// Validate a request body and extract it, or return a 400 error Response.
 #[allow(clippy::result_large_err)]
 pub(crate) fn validated<T: Validate>(body: Json<T>) -> Result<T, Response> {
-    body.0.validate().map_err(|e| {
-        err(
-            StatusCode::BAD_REQUEST,
-            sigillum_api::error_codes::VALIDATION_FAILED,
-            &e,
-        )
+    body.0.validate_fields().map_err(|failure| {
+        let message = failure.message().to_string();
+        err_validation(&message, failure.into_fields())
     })?;
     Ok(body.0)
 }

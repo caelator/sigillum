@@ -22,4 +22,4 @@ pub mod validation;
 
 pub use request::*;
 pub use response::*;
-pub use validation::Validate;
+pub use validation::{Validate, ValidationFailure};

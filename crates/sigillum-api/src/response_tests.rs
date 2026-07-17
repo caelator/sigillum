@@ -57,8 +57,8 @@ fn test_error_response_deserializes_legacy_payload_without_code_or_fields() {
 #[test]
 fn test_field_error_roundtrip() {
     let field = FieldError {
-        field: "provider.rpc_url".to_string(),
-        message: "rpc_url exceeds maximum length of 2048 bytes".to_string(),
+        field: "watch_addresses[0].address".to_string(),
+        message: "watch_addresses[0].address must be a valid ethereum address".to_string(),
     };
     roundtrip_test(field);
 }

@@ -2,13 +2,125 @@
 //!
 //! This module provides per-field length validation to prevent excessive memory use
 //! from unbounded string fields. Security fix B6.
+//!
+//! ## Field-level errors
+//!
+//! [`Validate::validate`] is the legacy fail-fast contract: it returns the
+//! first failure as a single string. [`Validate::validate_fields`] is the
+//! structured contract used by the HTTP layer to populate
+//! `ErrorResponse.fields`: the default implementation wraps `validate()`
+//! into one `validation_failed` failure with no field breakdown, so existing
+//! implementations need no changes. DTOs that override `validate_fields()`
+//! accumulate *all* field errors (in the same check order as before) and
+//! implement `validate()` as the first field error's message, keeping the
+//! legacy string byte-identical.
+
+use crate::response::FieldError;
 
 /// Validation trait for request types.
 pub trait Validate {
     fn validate(&self) -> Result<(), String>;
+
+    /// Validate the request and report per-field errors.
+    ///
+    /// The default implementation wraps [`Self::validate`] into a
+    /// [`ValidationFailure`] with no field breakdown.
+    fn validate_fields(&self) -> Result<(), ValidationFailure> {
+        self.validate().map_err(ValidationFailure::without_fields)
+    }
+}
+
+/// A failed request validation: a human-readable summary plus an optional
+/// per-field breakdown for the `fields` array of the error envelope.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ValidationFailure {
+    message: String,
+    fields: Vec<FieldError>,
+}
+
+impl ValidationFailure {
+    /// Failure without a per-field breakdown (legacy single-string path).
+    pub fn without_fields(message: String) -> Self {
+        Self {
+            message,
+            fields: Vec::new(),
+        }
+    }
+
+    /// Failure from a per-field breakdown. The summary message is the first
+    /// field's message so the top-level `error` string matches what the
+    /// fail-fast `validate()` returned before the breakdown existed.
+    pub fn from_fields(fields: Vec<FieldError>) -> Self {
+        debug_assert!(!fields.is_empty());
+        let message = fields
+            .first()
+            .map(|field| field.message.clone())
+            .unwrap_or_default();
+        Self { message, fields }
+    }
+
+    pub fn message(&self) -> &str {
+        &self.message
+    }
+
+    pub fn fields(&self) -> &[FieldError] {
+        &self.fields
+    }
+
+    pub fn into_fields(self) -> Vec<FieldError> {
+        self.fields
+    }
 }
 
 // ── Helper functions ────────────────────────────────────────────────
+
+/// Push a check's error into `fields`, tagged with the offending field path.
+fn collect(fields: &mut Vec<FieldError>, field: &str, result: Result<(), String>) {
+    if let Err(message) = result {
+        fields.push(FieldError {
+            field: field.to_string(),
+            message,
+        });
+    }
+}
+
+/// Push a pre-formatted failure message into `fields` when `check` fails.
+fn collect_if(fields: &mut Vec<FieldError>, field: &str, check: bool, message: String) {
+    if check {
+        fields.push(FieldError {
+            field: field.to_string(),
+            message,
+        });
+    }
+}
+
+/// Check a list of ethereum addresses, accumulating one field error per
+/// offending item (`field[i]` paths).
+fn collect_vec_eth_addresses(fields: &mut Vec<FieldError>, field: &str, items: &[String]) {
+    for (i, item) in items.iter().enumerate() {
+        let path = format!("{field}[{i}]");
+        collect(fields, &path, check_eth_address(&path, item));
+    }
+}
+
+/// Merge a nested DTO's field breakdown without a path prefix. Used for
+/// `#[serde(flatten)]` fields (e.g. `EvmProviderRef` inside
+/// `EvmProviderProfileUpsertRequest`) where the nested fields are top-level
+/// on the wire, so their paths stay top-level too.
+fn collect_flat(fields: &mut Vec<FieldError>, result: Result<(), ValidationFailure>) {
+    if let Err(failure) = result {
+        fields.extend(failure.into_fields());
+    }
+}
+
+/// Return the breakdown as a `ValidationFailure`, or `Ok` when empty.
+fn finish(fields: Vec<FieldError>) -> Result<(), ValidationFailure> {
+    if fields.is_empty() {
+        Ok(())
+    } else {
+        Err(ValidationFailure::from_fields(fields))
+    }
+}
 
 /// Check a string field length.
 fn check_len(field: &str, value: &str, max: usize) -> Result<(), String> {
@@ -59,13 +171,6 @@ fn check_eth_address(field: &str, value: &str) -> Result<(), String> {
 fn check_optional_eth_address(field: &str, value: &Option<String>) -> Result<(), String> {
     if let Some(v) = value {
         check_eth_address(field, v)?;
-    }
-    Ok(())
-}
-
-fn check_vec_eth_addresses(field: &str, items: &[String]) -> Result<(), String> {
-    for (i, item) in items.iter().enumerate() {
-        check_eth_address(&format!("{field}[{i}]"), item)?;
     }
     Ok(())
 }
@@ -160,9 +265,23 @@ impl Validate for crate::request::StealthPaymentRef {
 
 impl Validate for crate::request::EvmProviderRef {
     fn validate(&self) -> Result<(), String> {
-        check_len("rpc_url", &self.rpc_url, MAX_RPC_URL)?;
-        check_optional_len("auth_token_key", &self.auth_token_key, MAX_KEY)?;
-        Ok(())
+        self.validate_fields()
+            .map_err(|failure| failure.message().to_string())
+    }
+
+    fn validate_fields(&self) -> Result<(), ValidationFailure> {
+        let mut fields = Vec::new();
+        collect(
+            &mut fields,
+            "rpc_url",
+            check_len("rpc_url", &self.rpc_url, MAX_RPC_URL),
+        );
+        collect(
+            &mut fields,
+            "auth_token_key",
+            check_optional_len("auth_token_key", &self.auth_token_key, MAX_KEY),
+        );
+        finish(fields)
     }
 }
 
@@ -512,15 +631,35 @@ impl Validate for crate::request::EthStealthSendErc20TransferRequest {
 
 impl Validate for crate::request::EvmProviderProfileUpsertRequest {
     fn validate(&self) -> Result<(), String> {
-        check_len("name", &self.name, MAX_LABEL)?;
-        self.provider.validate()?;
-        check_optional_len(
+        self.validate_fields()
+            .map_err(|failure| failure.message().to_string())
+    }
+
+    fn validate_fields(&self) -> Result<(), ValidationFailure> {
+        let mut fields = Vec::new();
+        collect(
+            &mut fields,
+            "name",
+            check_len("name", &self.name, MAX_LABEL),
+        );
+        // `provider` is #[serde(flatten)], so its fields keep their
+        // top-level wire paths (rpc_url, auth_token_key).
+        collect_flat(&mut fields, self.provider.validate_fields());
+        collect(
+            &mut fields,
             "max_priority_fee_per_gas_hex",
-            &self.max_priority_fee_per_gas_hex,
-            MAX_HEX,
-        )?;
-        check_optional_len("max_fee_per_gas_hex", &self.max_fee_per_gas_hex, MAX_HEX)?;
-        Ok(())
+            check_optional_len(
+                "max_priority_fee_per_gas_hex",
+                &self.max_priority_fee_per_gas_hex,
+                MAX_HEX,
+            ),
+        );
+        collect(
+            &mut fields,
+            "max_fee_per_gas_hex",
+            check_optional_len("max_fee_per_gas_hex", &self.max_fee_per_gas_hex, MAX_HEX),
+        );
+        finish(fields)
     }
 }
 
@@ -547,20 +686,45 @@ impl Validate for crate::request::EthStealthWalletProfileUpsertRequest {
 
 impl Validate for crate::request::EthXpubWalletProfileUpsertRequest {
     fn validate(&self) -> Result<(), String> {
-        check_len("name", &self.name, MAX_LABEL)?;
-        check_len("provider_profile", &self.provider_profile, MAX_LABEL)?;
-        check_optional_len(
+        self.validate_fields()
+            .map_err(|failure| failure.message().to_string())
+    }
+
+    fn validate_fields(&self) -> Result<(), ValidationFailure> {
+        let mut fields = Vec::new();
+        collect(
+            &mut fields,
+            "name",
+            check_len("name", &self.name, MAX_LABEL),
+        );
+        collect(
+            &mut fields,
+            "provider_profile",
+            check_len("provider_profile", &self.provider_profile, MAX_LABEL),
+        );
+        collect(
+            &mut fields,
             "external_receive_xpub",
-            &self.external_receive_xpub,
-            MAX_XPUB,
-        )?;
-        check_optional_bip32_path("external_receive_path", &self.external_receive_path)?;
-        check_optional_len(
+            check_optional_len("external_receive_xpub", &self.external_receive_xpub, MAX_XPUB),
+        );
+        collect(
+            &mut fields,
+            "external_receive_path",
+            check_optional_bip32_path("external_receive_path", &self.external_receive_path),
+        );
+        collect(
+            &mut fields,
             "external_account_xpub",
-            &self.external_account_xpub,
-            MAX_XPUB,
-        )?;
-        check_optional_account_bip32_path("external_account_path", &self.external_account_path)?;
+            check_optional_len("external_account_xpub", &self.external_account_xpub, MAX_XPUB),
+        );
+        collect(
+            &mut fields,
+            "external_account_path",
+            check_optional_account_bip32_path(
+                "external_account_path",
+                &self.external_account_path,
+            ),
+        );
         let has_external_receive_path = self
             .external_receive_path
             .as_deref()
@@ -577,46 +741,88 @@ impl Validate for crate::request::EthXpubWalletProfileUpsertRequest {
             .external_account_xpub
             .as_deref()
             .is_some_and(|value| !value.trim().is_empty());
-        if has_external_receive_path && !has_external_receive_xpub {
-            return Err("external_receive_path requires external_receive_xpub".into());
-        }
-        if has_external_account_path && !has_external_account_xpub {
-            return Err("external_account_path requires external_account_xpub".into());
-        }
-        if has_external_receive_path && has_external_account_path {
-            return Err(
-                "external_receive_path and external_account_path are mutually exclusive".into(),
-            );
-        }
-        if has_external_receive_xpub && has_external_account_xpub {
-            return Err(
-                "external_receive_xpub and external_account_xpub are mutually exclusive".into(),
-            );
-        }
-        check_optional_eth_address(
+        collect_if(
+            &mut fields,
+            "external_receive_path",
+            has_external_receive_path && !has_external_receive_xpub,
+            "external_receive_path requires external_receive_xpub".into(),
+        );
+        collect_if(
+            &mut fields,
+            "external_account_path",
+            has_external_account_path && !has_external_account_xpub,
+            "external_account_path requires external_account_xpub".into(),
+        );
+        collect_if(
+            &mut fields,
+            "external_receive_path",
+            has_external_receive_path && has_external_account_path,
+            "external_receive_path and external_account_path are mutually exclusive".into(),
+        );
+        collect_if(
+            &mut fields,
+            "external_receive_xpub",
+            has_external_receive_xpub && has_external_account_xpub,
+            "external_receive_xpub and external_account_xpub are mutually exclusive".into(),
+        );
+        collect(
+            &mut fields,
             "default_destination_address",
-            &self.default_destination_address,
-        )?;
-        Ok(())
+            check_optional_eth_address(
+                "default_destination_address",
+                &self.default_destination_address,
+            ),
+        );
+        finish(fields)
     }
 }
 
 impl Validate for crate::request::EthSeedWalletProfileUpsertRequest {
     fn validate(&self) -> Result<(), String> {
-        check_len("name", &self.name, MAX_LABEL)?;
-        check_optional_len("label", &self.label, MAX_LABEL)?;
-        check_len("mnemonic", &self.mnemonic, MAX_MNEMONIC)?;
-        check_optional_len(
+        self.validate_fields()
+            .map_err(|failure| failure.message().to_string())
+    }
+
+    fn validate_fields(&self) -> Result<(), ValidationFailure> {
+        let mut fields = Vec::new();
+        collect(
+            &mut fields,
+            "name",
+            check_len("name", &self.name, MAX_LABEL),
+        );
+        collect(
+            &mut fields,
+            "label",
+            check_optional_len("label", &self.label, MAX_LABEL),
+        );
+        collect(
+            &mut fields,
+            "mnemonic",
+            check_len("mnemonic", &self.mnemonic, MAX_MNEMONIC),
+        );
+        collect(
+            &mut fields,
             "mnemonic_passphrase",
-            &self.mnemonic_passphrase,
-            MAX_PASSPHRASE,
-        )?;
-        check_len("provider_profile", &self.provider_profile, MAX_LABEL)?;
-        check_optional_eth_address(
+            check_optional_len(
+                "mnemonic_passphrase",
+                &self.mnemonic_passphrase,
+                MAX_PASSPHRASE,
+            ),
+        );
+        collect(
+            &mut fields,
+            "provider_profile",
+            check_len("provider_profile", &self.provider_profile, MAX_LABEL),
+        );
+        collect(
+            &mut fields,
             "default_destination_address",
-            &self.default_destination_address,
-        )?;
-        Ok(())
+            check_optional_eth_address(
+                "default_destination_address",
+                &self.default_destination_address,
+            ),
+        );
+        finish(fields)
     }
 }
 
@@ -660,167 +866,215 @@ impl Validate for crate::request::EthXpubDeriveRequest {
 
 impl Validate for crate::request::WalletInventoryScanRequest {
     fn validate(&self) -> Result<(), String> {
-        check_optional_len("wallet_family", &self.wallet_family, MAX_LABEL)?;
-        check_optional_len("wallet_profile", &self.wallet_profile, MAX_LABEL)?;
-        check_optional_len("provider_profile", &self.provider_profile, MAX_LABEL)?;
-        if self.all_configured_chains == Some(true)
-            && self
-                .provider_profile
-                .as_deref()
-                .is_some_and(|profile| !profile.trim().is_empty())
-        {
-            return Err("provider_profile cannot be combined with all_configured_chains".into());
-        }
-        check_optional_len("block_tag", &self.block_tag, MAX_LABEL)?;
-        check_optional_len(
+        self.validate_fields()
+            .map_err(|failure| failure.message().to_string())
+    }
+
+    fn validate_fields(&self) -> Result<(), ValidationFailure> {
+        let mut fields = Vec::new();
+        collect(
+            &mut fields,
+            "wallet_family",
+            check_optional_len("wallet_family", &self.wallet_family, MAX_LABEL),
+        );
+        collect(
+            &mut fields,
+            "wallet_profile",
+            check_optional_len("wallet_profile", &self.wallet_profile, MAX_LABEL),
+        );
+        collect(
+            &mut fields,
+            "provider_profile",
+            check_optional_len("provider_profile", &self.provider_profile, MAX_LABEL),
+        );
+        collect_if(
+            &mut fields,
+            "provider_profile",
+            self.all_configured_chains == Some(true)
+                && self
+                    .provider_profile
+                    .as_deref()
+                    .is_some_and(|profile| !profile.trim().is_empty()),
+            "provider_profile cannot be combined with all_configured_chains".into(),
+        );
+        collect(
+            &mut fields,
+            "block_tag",
+            check_optional_len("block_tag", &self.block_tag, MAX_LABEL),
+        );
+        collect(
+            &mut fields,
             "token_discovery_from_block",
-            &self.token_discovery_from_block,
-            MAX_LABEL,
-        )?;
-        check_optional_len(
+            check_optional_len(
+                "token_discovery_from_block",
+                &self.token_discovery_from_block,
+                MAX_LABEL,
+            ),
+        );
+        collect(
+            &mut fields,
             "token_discovery_to_block",
-            &self.token_discovery_to_block,
-            MAX_LABEL,
-        )?;
-        check_optional_len(
+            check_optional_len(
+                "token_discovery_to_block",
+                &self.token_discovery_to_block,
+                MAX_LABEL,
+            ),
+        );
+        collect(
+            &mut fields,
             "nft_discovery_from_block",
-            &self.nft_discovery_from_block,
-            MAX_LABEL,
-        )?;
-        check_optional_len(
+            check_optional_len(
+                "nft_discovery_from_block",
+                &self.nft_discovery_from_block,
+                MAX_LABEL,
+            ),
+        );
+        collect(
+            &mut fields,
             "nft_discovery_to_block",
-            &self.nft_discovery_to_block,
-            MAX_LABEL,
-        )?;
-        if self.token_addresses.len() > MAX_TOKEN_ADDRESSES {
-            return Err(format!(
-                "token_addresses exceeds maximum length of {MAX_TOKEN_ADDRESSES} items"
-            ));
+            check_optional_len(
+                "nft_discovery_to_block",
+                &self.nft_discovery_to_block,
+                MAX_LABEL,
+            ),
+        );
+        for (field, len) in [
+            ("token_addresses", self.token_addresses.len()),
+            (
+                "allowance_spender_addresses",
+                self.allowance_spender_addresses.len(),
+            ),
+            (
+                "permit2_contract_addresses",
+                self.permit2_contract_addresses.len(),
+            ),
+            (
+                "permit2_spender_addresses",
+                self.permit2_spender_addresses.len(),
+            ),
+            ("defi_token_probes", self.defi_token_probes.len()),
+            ("claim_candidate_probes", self.claim_candidate_probes.len()),
+            ("watch_addresses", self.watch_addresses.len()),
+            ("nft_operator_addresses", self.nft_operator_addresses.len()),
+        ] {
+            collect_if(
+                &mut fields,
+                field,
+                len > MAX_TOKEN_ADDRESSES,
+                format!("{field} exceeds maximum length of {MAX_TOKEN_ADDRESSES} items"),
+            );
         }
-        if self.allowance_spender_addresses.len() > MAX_TOKEN_ADDRESSES {
-            return Err(format!(
-                "allowance_spender_addresses exceeds maximum length of {MAX_TOKEN_ADDRESSES} items"
-            ));
-        }
-        if self.permit2_contract_addresses.len() > MAX_TOKEN_ADDRESSES {
-            return Err(format!(
-                "permit2_contract_addresses exceeds maximum length of {MAX_TOKEN_ADDRESSES} items"
-            ));
-        }
-        if self.permit2_spender_addresses.len() > MAX_TOKEN_ADDRESSES {
-            return Err(format!(
-                "permit2_spender_addresses exceeds maximum length of {MAX_TOKEN_ADDRESSES} items"
-            ));
-        }
-        if self.defi_token_probes.len() > MAX_TOKEN_ADDRESSES {
-            return Err(format!(
-                "defi_token_probes exceeds maximum length of {MAX_TOKEN_ADDRESSES} items"
-            ));
-        }
-        if self.claim_candidate_probes.len() > MAX_TOKEN_ADDRESSES {
-            return Err(format!(
-                "claim_candidate_probes exceeds maximum length of {MAX_TOKEN_ADDRESSES} items"
-            ));
-        }
-        if self.watch_addresses.len() > MAX_TOKEN_ADDRESSES {
-            return Err(format!(
-                "watch_addresses exceeds maximum length of {MAX_TOKEN_ADDRESSES} items"
-            ));
-        }
-        if self.nft_operator_addresses.len() > MAX_TOKEN_ADDRESSES {
-            return Err(format!(
-                "nft_operator_addresses exceeds maximum length of {MAX_TOKEN_ADDRESSES} items"
-            ));
-        }
-        check_vec_eth_addresses("token_addresses", &self.token_addresses)?;
-        check_vec_eth_addresses(
+        collect_vec_eth_addresses(&mut fields, "token_addresses", &self.token_addresses);
+        collect_vec_eth_addresses(
+            &mut fields,
             "allowance_spender_addresses",
             &self.allowance_spender_addresses,
-        )?;
-        check_vec_eth_addresses(
+        );
+        collect_vec_eth_addresses(
+            &mut fields,
             "permit2_contract_addresses",
             &self.permit2_contract_addresses,
-        )?;
-        check_vec_eth_addresses("permit2_spender_addresses", &self.permit2_spender_addresses)?;
-        check_vec_eth_addresses("nft_operator_addresses", &self.nft_operator_addresses)?;
+        );
+        collect_vec_eth_addresses(
+            &mut fields,
+            "permit2_spender_addresses",
+            &self.permit2_spender_addresses,
+        );
+        collect_vec_eth_addresses(
+            &mut fields,
+            "nft_operator_addresses",
+            &self.nft_operator_addresses,
+        );
         for (index, probe) in self.defi_token_probes.iter().enumerate() {
-            check_len(
-                &format!("defi_token_probes[{index}].protocol"),
-                &probe.protocol,
-                MAX_LABEL,
-            )?;
-            check_eth_address(
-                &format!("defi_token_probes[{index}].token_address"),
-                &probe.token_address,
-            )?;
-            check_optional_eth_address(
-                &format!("defi_token_probes[{index}].protocol_address"),
-                &probe.protocol_address,
-            )?;
+            let path = format!("defi_token_probes[{index}].protocol");
+            collect(
+                &mut fields,
+                &path,
+                check_len(&path, &probe.protocol, MAX_LABEL),
+            );
+            let path = format!("defi_token_probes[{index}].token_address");
+            collect(&mut fields, &path, check_eth_address(&path, &probe.token_address));
+            let path = format!("defi_token_probes[{index}].protocol_address");
+            collect(
+                &mut fields,
+                &path,
+                check_optional_eth_address(&path, &probe.protocol_address),
+            );
         }
         for (index, probe) in self.claim_candidate_probes.iter().enumerate() {
-            check_len(
-                &format!("claim_candidate_probes[{index}].kind"),
-                &probe.kind,
-                MAX_LABEL,
-            )?;
-            check_len(
-                &format!("claim_candidate_probes[{index}].protocol"),
-                &probe.protocol,
-                MAX_LABEL,
-            )?;
-            check_eth_address(
-                &format!("claim_candidate_probes[{index}].claimant_address"),
-                &probe.claimant_address,
-            )?;
-            check_eth_address(
-                &format!("claim_candidate_probes[{index}].claim_contract_address"),
-                &probe.claim_contract_address,
-            )?;
-            check_eth_address(
-                &format!("claim_candidate_probes[{index}].asset_address"),
-                &probe.asset_address,
-            )?;
-            check_len(
-                &format!("claim_candidate_probes[{index}].amount_hex"),
-                &probe.amount_hex,
-                MAX_HEX,
-            )?;
-            check_len(
-                &format!("claim_candidate_probes[{index}].source_label"),
-                &probe.source_label,
-                MAX_LABEL,
-            )?;
-            check_optional_len(
-                &format!("claim_candidate_probes[{index}].claim_adapter"),
-                &probe.claim_adapter,
-                MAX_LABEL,
-            )?;
-            check_optional_len(
-                &format!("claim_candidate_probes[{index}].claim_index_hex"),
-                &probe.claim_index_hex,
-                MAX_HEX,
-            )?;
-            if probe.claim_proof.len() > MAX_CLAIM_PROOF_WORDS {
-                return Err(format!(
+            let path = format!("claim_candidate_probes[{index}].kind");
+            collect(&mut fields, &path, check_len(&path, &probe.kind, MAX_LABEL));
+            let path = format!("claim_candidate_probes[{index}].protocol");
+            collect(
+                &mut fields,
+                &path,
+                check_len(&path, &probe.protocol, MAX_LABEL),
+            );
+            let path = format!("claim_candidate_probes[{index}].claimant_address");
+            collect(
+                &mut fields,
+                &path,
+                check_eth_address(&path, &probe.claimant_address),
+            );
+            let path = format!("claim_candidate_probes[{index}].claim_contract_address");
+            collect(
+                &mut fields,
+                &path,
+                check_eth_address(&path, &probe.claim_contract_address),
+            );
+            let path = format!("claim_candidate_probes[{index}].asset_address");
+            collect(
+                &mut fields,
+                &path,
+                check_eth_address(&path, &probe.asset_address),
+            );
+            let path = format!("claim_candidate_probes[{index}].amount_hex");
+            collect(&mut fields, &path, check_len(&path, &probe.amount_hex, MAX_HEX));
+            let path = format!("claim_candidate_probes[{index}].source_label");
+            collect(
+                &mut fields,
+                &path,
+                check_len(&path, &probe.source_label, MAX_LABEL),
+            );
+            let path = format!("claim_candidate_probes[{index}].claim_adapter");
+            collect(
+                &mut fields,
+                &path,
+                check_optional_len(&path, &probe.claim_adapter, MAX_LABEL),
+            );
+            let path = format!("claim_candidate_probes[{index}].claim_index_hex");
+            collect(
+                &mut fields,
+                &path,
+                check_optional_len(&path, &probe.claim_index_hex, MAX_HEX),
+            );
+            let path = format!("claim_candidate_probes[{index}].claim_proof");
+            collect_if(
+                &mut fields,
+                &path,
+                probe.claim_proof.len() > MAX_CLAIM_PROOF_WORDS,
+                format!(
                     "claim_candidate_probes[{index}].claim_proof exceeds maximum length of {MAX_CLAIM_PROOF_WORDS} items"
-                ));
+                ),
+            );
+            if probe.claim_proof.len() <= MAX_CLAIM_PROOF_WORDS {
+                for (i, item) in probe.claim_proof.iter().enumerate() {
+                    let path = format!("claim_candidate_probes[{index}].claim_proof[{i}]");
+                    collect(&mut fields, &path, check_len(&path, item, MAX_HEX));
+                }
             }
-            check_vec_items_len(
-                &format!("claim_candidate_probes[{index}].claim_proof"),
-                &probe.claim_proof,
-                MAX_HEX,
-            )?;
         }
         for (index, probe) in self.watch_addresses.iter().enumerate() {
-            check_eth_address(&format!("watch_addresses[{index}].address"), &probe.address)?;
-            check_optional_len(
-                &format!("watch_addresses[{index}].label"),
-                &probe.label,
-                MAX_LABEL,
-            )?;
+            let path = format!("watch_addresses[{index}].address");
+            collect(&mut fields, &path, check_eth_address(&path, &probe.address));
+            let path = format!("watch_addresses[{index}].label");
+            collect(
+                &mut fields,
+                &path,
+                check_optional_len(&path, &probe.label, MAX_LABEL),
+            );
         }
-        Ok(())
+        finish(fields)
     }
 }
 
@@ -1033,39 +1287,74 @@ impl Validate for crate::request::PlanEnqueuePlanRequest {
 
 impl Validate for crate::request::TreasuryPolicyUpdateRequest {
     fn validate(&self) -> Result<(), String> {
-        if self.allowed_destinations.len() > 256 {
-            return Err("allowed_destinations exceeds maximum length of 256 items".into());
-        }
+        self.validate_fields()
+            .map_err(|failure| failure.message().to_string())
+    }
+
+    fn validate_fields(&self) -> Result<(), ValidationFailure> {
+        let mut fields = Vec::new();
+        collect_if(
+            &mut fields,
+            "allowed_destinations",
+            self.allowed_destinations.len() > 256,
+            "allowed_destinations exceeds maximum length of 256 items".into(),
+        );
         for (index, destination) in self.allowed_destinations.iter().enumerate() {
-            if destination.address.trim().is_empty() {
-                return Err(format!(
-                    "allowed_destinations[{index}].address must not be empty"
-                ));
+            let path = format!("allowed_destinations[{index}].address");
+            collect_if(
+                &mut fields,
+                &path,
+                destination.address.trim().is_empty(),
+                format!("allowed_destinations[{index}].address must not be empty"),
+            );
+            if !destination.address.trim().is_empty() {
+                collect(
+                    &mut fields,
+                    &path,
+                    check_eth_address(&path, &destination.address),
+                );
             }
-            check_eth_address(
-                &format!("allowed_destinations[{index}].address"),
-                &destination.address,
-            )?;
-            check_optional_len(
-                &format!("allowed_destinations[{index}].label"),
-                &destination.label,
-                MAX_LABEL,
-            )?;
+            let path = format!("allowed_destinations[{index}].label");
+            collect(
+                &mut fields,
+                &path,
+                check_optional_len(&path, &destination.label, MAX_LABEL),
+            );
         }
-        check_optional_len(
+        collect(
+            &mut fields,
             "max_step_native_wei_hex",
-            &self.max_step_native_wei_hex,
-            MAX_HEX,
-        )?;
-        check_optional_len(
+            check_optional_len(
+                "max_step_native_wei_hex",
+                &self.max_step_native_wei_hex,
+                MAX_HEX,
+            ),
+        );
+        collect(
+            &mut fields,
             "max_plan_native_wei_hex",
-            &self.max_plan_native_wei_hex,
-            MAX_HEX,
-        )?;
-        check_optional_len("hot_floor_wei_hex", &self.hot_floor_wei_hex, MAX_HEX)?;
-        check_optional_len("hot_target_wei_hex", &self.hot_target_wei_hex, MAX_HEX)?;
-        check_optional_len("hot_overflow_wei_hex", &self.hot_overflow_wei_hex, MAX_HEX)?;
-        Ok(())
+            check_optional_len(
+                "max_plan_native_wei_hex",
+                &self.max_plan_native_wei_hex,
+                MAX_HEX,
+            ),
+        );
+        collect(
+            &mut fields,
+            "hot_floor_wei_hex",
+            check_optional_len("hot_floor_wei_hex", &self.hot_floor_wei_hex, MAX_HEX),
+        );
+        collect(
+            &mut fields,
+            "hot_target_wei_hex",
+            check_optional_len("hot_target_wei_hex", &self.hot_target_wei_hex, MAX_HEX),
+        );
+        collect(
+            &mut fields,
+            "hot_overflow_wei_hex",
+            check_optional_len("hot_overflow_wei_hex", &self.hot_overflow_wei_hex, MAX_HEX),
+        );
+        finish(fields)
     }
 }
 
