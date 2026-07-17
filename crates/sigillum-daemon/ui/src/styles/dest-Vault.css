@@ -1,0 +1,340 @@
+/* ── 22. Vault destination (plan task 4.3.5) ─────────────────────────────
+   Styles for src/destinations/Vault.ts, rendered into the legacy
+   #secretsCard host. Everything is scoped under .vault-dest except the
+   PIN-prompt modal, which mounts on <body>. Consumes v2 tokens and
+   consequence tiers only — no hex values, no one-off colors (DESIGN.md). */
+
+.vault-dest {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+}
+
+/* ── Sections ─────────────────────────────────────────────────────────── */
+
+.vault-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--border-faint);
+}
+
+.vault-section-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.vault-section-title {
+  font-size: var(--fs-base);
+  font-weight: 650;
+  color: var(--text);
+  margin: 0 0 var(--space-1);
+}
+
+.vault-section-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-shrink: 0;
+}
+
+.vault-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.vault-inline-form {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.vault-form-label {
+  font-size: var(--fs-sm);
+  color: var(--text-muted);
+}
+
+/* ── Persistent stale-data banner (NOT a toast) ───────────────────────── */
+
+.vault-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--density-pad-x);
+  background: var(--_tier-tint);
+  border: 1px solid var(--_tier-border);
+  border-left: 3px solid var(--_tier-accent);
+  border-radius: var(--radius);
+}
+
+.vault-banner-title {
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  color: var(--_tier-accent-text);
+  margin: 0;
+}
+
+.vault-banner-body {
+  font-size: var(--fs-xs);
+  color: var(--text-muted);
+  margin: var(--space-1) 0 0;
+}
+
+/* ── Action feedback line ─────────────────────────────────────────────── */
+
+.vault-flash {
+  min-height: 1em;
+  font-size: var(--fs-sm);
+  color: var(--text-secondary);
+  margin: 0;
+}
+
+.vault-flash[data-tier="review"] {
+  color: var(--tier-review-accent-text);
+}
+
+.vault-flash[data-tier="danger"] {
+  color: var(--tier-danger-accent-text);
+}
+
+/* ── Lock-state strip (spec item a: lock state always visible) ────────── */
+
+.vault-lock-strip {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--density-pad-y) var(--density-pad-x);
+  background: var(--_tier-surface);
+  border: 1px solid var(--_tier-border);
+  border-left: 3px solid var(--_tier-accent);
+  border-radius: var(--radius);
+}
+
+.vault-lock-strip-main {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  flex: 1;
+}
+
+.vault-lock-title {
+  font-size: var(--fs-base);
+  font-weight: 600;
+  color: var(--text);
+  margin: 0;
+}
+
+.vault-lock-strip[data-tier="review"] .vault-lock-title,
+.vault-lock-strip[data-tier="danger"] .vault-lock-title {
+  color: var(--_tier-accent-text);
+}
+
+.vault-lock-body {
+  font-size: var(--fs-sm);
+  color: var(--text-muted);
+  margin: 0;
+}
+
+.vault-lock-strip-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-shrink: 0;
+}
+
+.vault-countdown {
+  font-size: var(--fs-sm);
+  color: var(--text-dim);
+  margin: 0;
+}
+
+/* ── Keyed item rows (secrets, keys, compartments, FIDO2, checks) ─────── */
+
+.vault-item-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.vault-item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--density-pad-y) var(--density-pad-x);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.vault-item-main {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  flex: 1;
+}
+
+.vault-item-title {
+  font-size: var(--fs-base);
+  font-weight: 600;
+  color: var(--text);
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.vault-item-body {
+  font-size: var(--fs-sm);
+  color: var(--text-muted);
+  margin: 0;
+}
+
+.vault-item-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-shrink: 0;
+}
+
+.vault-reveal {
+  font-size: var(--fs-sm);
+  color: var(--warning-text);
+  background: var(--surface-2);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  padding: var(--space-1) var(--space-2);
+  margin: var(--space-1) 0 0;
+  overflow-wrap: anywhere;
+  user-select: text;
+}
+
+.vault-detect {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--fs-sm);
+  color: var(--text-secondary);
+  margin: 0;
+}
+
+/* ── Disclosures ──────────────────────────────────────────────────────── */
+
+.vault-disclosure {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: var(--space-2) var(--density-pad-x);
+}
+
+.vault-disclosure summary {
+  cursor: pointer;
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  color: var(--accent-text);
+}
+
+.vault-disclosure[open] summary {
+  margin-bottom: var(--space-2);
+}
+
+/* ── Backup-age nudge (spec item e) ───────────────────────────────────── */
+
+.vault-nudge {
+  padding: var(--space-3) var(--density-pad-x);
+  background: var(--_tier-tint);
+  border: 1px solid var(--_tier-border);
+  border-left: 3px solid var(--_tier-accent);
+  border-radius: var(--radius);
+}
+
+.vault-nudge-title {
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  color: var(--_tier-accent-text);
+  margin: 0;
+}
+
+.vault-nudge-body {
+  font-size: var(--fs-sm);
+  color: var(--text-muted);
+  margin: var(--space-1) 0 0;
+  max-width: 64ch;
+}
+
+.vault-danger-zone {
+  margin-top: var(--space-3);
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--border-faint);
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-2);
+}
+
+/* ── Diagnostics groups + self-check (spec item g) ────────────────────── */
+
+.vault-diag-group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.vault-diag-title {
+  font-size: var(--fs-sm);
+  font-weight: 650;
+  color: var(--text-secondary);
+  margin: 0;
+}
+
+.vault-selfcheck {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--border-faint);
+}
+
+.vault-selfcheck-summary {
+  font-size: var(--fs-sm);
+  color: var(--text-muted);
+  margin: 0;
+}
+
+.vault-check-group {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: var(--space-2) var(--density-pad-x);
+}
+
+.vault-check-group summary {
+  cursor: pointer;
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.vault-check-group[open] summary {
+  margin-bottom: var(--space-2);
+}
+
+/* ── PIN-prompt modal (replaces the legacy inline-styled promptPin) ───── */
+
+.vault-modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.7);
+  z-index: 200;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.vault-modal {
+  max-width: 420px;
+  width: 100%;
+}

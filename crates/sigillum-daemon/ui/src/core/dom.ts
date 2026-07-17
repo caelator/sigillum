@@ -130,6 +130,11 @@ export function renderList<T>(
     if (nextByKey.has(key)) continue; // duplicate key: first occurrence wins
     const existing = state.byKey.get(key) ?? null;
     const node = renderItem(item, existing);
+    // A renderItem may return a fresh node for a kept key instead of patching
+    // `existing` in place: the old row must not linger next to the new one.
+    if (existing && existing !== node && existing.parentNode === container) {
+      existing.remove();
+    }
     nextByKey.set(key, node);
     // `children` counts only element nodes, so this index is stable across
     // moves within this container.

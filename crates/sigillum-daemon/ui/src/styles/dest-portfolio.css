@@ -1,0 +1,499 @@
+/* ── Destination partial: Portfolio (plan task 4.3) ─────────────────────────
+   Styles for src/destinations/portfolio.ts only. Every value comes from the
+   v2 tokens (00-design-tokens.css §1/§1b) — no hex, no per-screen one-offs.
+   Consequence grading rides on [data-tier] via the --_tier-* private props
+   defined in 14-components-v2.css. */
+
+.dest-portfolio {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.text-muted {
+  color: var(--text-muted);
+}
+
+/* ── Destination sub-navigation ──────────────────────────────────────────── */
+
+.dest-nav {
+  display: flex;
+  gap: var(--space-2);
+  border-bottom: 1px solid var(--border-faint);
+  padding-bottom: var(--space-2);
+}
+
+.dest-nav-link {
+  display: inline-block;
+  padding: var(--space-1) var(--space-3);
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+  text-decoration: none;
+  font-size: var(--fs-sm);
+}
+
+.dest-nav-link:hover {
+  color: var(--text);
+  background: var(--surface-2);
+}
+
+.dest-nav-link[aria-current="page"] {
+  color: var(--text);
+  background: var(--surface-2);
+  font-weight: 600;
+}
+
+/* ── Persistent stale-data banner (4.4: never a vanishing toast) ─────────── */
+
+.dest-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--density-pad-y) var(--density-pad-x);
+  background: var(--_tier-surface, var(--surface));
+  border: 1px solid var(--_tier-border, var(--border));
+  border-radius: var(--radius);
+}
+
+.dest-banner-title {
+  margin: 0;
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  color: var(--_tier-accent-text, var(--text));
+}
+
+.dest-banner-body {
+  margin: 2px 0 0;
+  font-size: var(--fs-sm);
+  color: var(--text-muted);
+  max-width: 72ch;
+}
+
+/* ── Live status line (action feedback, aria-live) ───────────────────────── */
+
+.dest-status {
+  margin: 0;
+  min-height: 1.2em;
+  font-size: var(--fs-sm);
+  color: var(--text-muted);
+}
+
+/* ── Sections ────────────────────────────────────────────────────────────── */
+
+.dest-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--border-faint);
+}
+
+.dest-section-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.dest-section-head .section-title {
+  margin: 0;
+}
+
+.dest-count {
+  font-size: var(--fs-xs);
+  color: var(--text-dim);
+}
+
+/* ── Filter bar ──────────────────────────────────────────────────────────── */
+
+.filter-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.filter-bar-field {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--fs-sm);
+}
+
+.filter-bar-label {
+  color: var(--text-dim);
+  font-size: var(--fs-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+/* ── Tables ──────────────────────────────────────────────────────────────── */
+
+.table-scroll {
+  overflow-x: auto;
+}
+
+.cell-primary {
+  color: var(--text-secondary);
+  font-size: var(--fs-sm);
+}
+
+.cell-secondary {
+  color: var(--text-muted);
+  font-size: var(--fs-xs);
+  max-width: 64ch;
+}
+
+.cell-wrap {
+  white-space: normal;
+  max-width: 42ch;
+}
+
+.col-actions {
+  white-space: nowrap;
+  text-align: right;
+}
+
+.col-actions .btn-small + .btn-small {
+  margin-left: var(--space-1);
+}
+
+.addr-cell {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.amount {
+  display: inline-flex;
+  align-items: baseline;
+  gap: var(--space-2);
+}
+
+/* Per-row details disclosure (raw values live here, not in the default view) */
+
+.row-details summary {
+  cursor: pointer;
+  color: var(--text-dim);
+  font-size: var(--fs-xs);
+}
+
+.row-details[open] summary {
+  color: var(--text-muted);
+}
+
+.detail-list {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: var(--space-1) var(--space-3);
+  margin: var(--space-2) 0;
+  font-size: var(--fs-xs);
+}
+
+.detail-list dt {
+  color: var(--text-dim);
+}
+
+.detail-list dd {
+  margin: 0;
+  color: var(--text-muted);
+  overflow-wrap: anywhere;
+}
+
+.detail-list-plain {
+  margin: var(--space-2) 0;
+  padding-left: var(--space-4);
+  color: var(--text-muted);
+  font-size: var(--fs-xs);
+}
+
+/* ── Pagination ──────────────────────────────────────────────────────────── */
+
+.dest-pagination {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.dest-page-label {
+  color: var(--text-muted);
+  font-size: var(--fs-sm);
+}
+
+/* ── Live operations (scan progress from the store) ──────────────────────── */
+
+.dest-ops {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.ops-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--density-pad-y) var(--density-pad-x);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.ops-row-main {
+  flex: 1;
+  min-width: 0;
+}
+
+.ops-row-title {
+  margin: 0;
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  color: var(--text);
+}
+
+.ops-row-body {
+  margin: 2px 0 0;
+  font-size: var(--fs-sm);
+  color: var(--text-muted);
+}
+
+/* ── Scan stepper ────────────────────────────────────────────────────────── */
+
+.stepper-steps {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  counter-reset: step;
+}
+
+.stepper-step {
+  padding: var(--space-1) var(--space-3);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-faint);
+  color: var(--text-dim);
+  font-size: var(--fs-sm);
+}
+
+.stepper-step.is-current {
+  color: var(--text);
+  border-color: var(--accent);
+  background: var(--accent-tint);
+  font-weight: 600;
+}
+
+.stepper-step.is-done {
+  color: var(--text-muted);
+  border-color: var(--border);
+}
+
+.stepper-content {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.stepper-nav {
+  display: flex;
+  gap: var(--space-2);
+  align-items: center;
+}
+
+.stepper-lead {
+  margin: 0;
+  font-size: var(--fs-sm);
+  color: var(--text-secondary);
+  max-width: 72ch;
+}
+
+.stepper-note {
+  margin: 0;
+  font-size: var(--fs-sm);
+  color: var(--text-muted);
+  max-width: 72ch;
+}
+
+/* Checkbox lists (wallet / provider picking) */
+
+.check-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.check-list-row {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+.check-list-row:hover {
+  background: var(--surface-2);
+}
+
+.check-list-row input[type="checkbox"] {
+  margin-top: 2px;
+}
+
+.check-list-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.check-list-title {
+  font-size: var(--fs-sm);
+  color: var(--text);
+}
+
+.check-list-body {
+  font-size: var(--fs-xs);
+  color: var(--text-muted);
+  max-width: 72ch;
+}
+
+.check-list-tools {
+  display: flex;
+  gap: var(--space-2);
+}
+
+.check-group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.check-group-title {
+  margin: 0;
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-dim);
+}
+
+.partition-option {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: var(--space-2);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+/* ── Launch summary / review panel ───────────────────────────────────────── */
+
+.launch-summary {
+  border: 1px solid var(--_tier-border, var(--border));
+  background: var(--_tier-surface, var(--surface));
+  border-radius: var(--radius);
+  padding: var(--density-pad-y) var(--density-pad-x);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.launch-summary[data-tier="review"] {
+  border-left-width: 3px;
+  border-left-color: var(--_tier-accent);
+}
+
+.launch-summary-title {
+  margin: 0;
+  font-size: var(--fs-base);
+  font-weight: 600;
+  color: var(--_tier-accent-text, var(--text));
+}
+
+.launch-summary-body {
+  margin: 0;
+  font-size: var(--fs-sm);
+  color: var(--text-muted);
+  max-width: 72ch;
+}
+
+.launch-summary-list {
+  margin: 0;
+  padding-left: var(--space-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  font-size: var(--fs-sm);
+  color: var(--text-secondary);
+}
+
+/* ── Advanced options disclosure ─────────────────────────────────────────── */
+
+.advanced-options summary {
+  cursor: pointer;
+  color: var(--text-muted);
+  font-size: var(--fs-sm);
+}
+
+.advanced-options[open] summary {
+  color: var(--text);
+  margin-bottom: var(--space-2);
+}
+
+.advanced-grid {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+}
+
+.advanced-field {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.advanced-field .advanced-label {
+  flex: 0 0 260px;
+  font-size: var(--fs-sm);
+  color: var(--text-muted);
+}
+
+.advanced-field input[type="text"],
+.advanced-field input[type="number"],
+.advanced-field select,
+.advanced-field textarea {
+  flex: 1 1 220px;
+}
+
+.advanced-field textarea {
+  min-height: 64px;
+}
+
+/* ── Forms & inline validation ───────────────────────────────────────────── */
+
+.dest-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.field-error {
+  margin: 0;
+  font-size: var(--fs-sm);
+  color: var(--danger-text);
+}
+
+input[aria-invalid="true"],
+select[aria-invalid="true"],
+textarea[aria-invalid="true"] {
+  border-color: var(--danger);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .stepper-step.is-current {
+    background: var(--surface-2);
+  }
+}

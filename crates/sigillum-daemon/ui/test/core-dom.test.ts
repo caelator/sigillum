@@ -96,6 +96,37 @@ test("renderList creates, updates, moves, and removes rows by key", () => {
   equal((nodeB as FakeElement).isConnected, false);
 });
 
+test("renderList drops the old row when renderItem returns a fresh node for a kept key", () => {
+  installDom();
+  const container = document.createElement("div");
+  // A signature-style renderer: rebuilds the row whenever `label` changes,
+  // returning a fresh node instead of patching `existing`.
+  const signatures = new Map<string, string>();
+  const renderItem = (
+    item: { id: string; label: string },
+    existing: HTMLElement | null,
+  ): HTMLElement => {
+    if (existing && signatures.get(item.id) === item.label) return existing;
+    signatures.set(item.id, item.label);
+    return el("div", { text: item.label });
+  };
+
+  renderList(container as unknown as Element, [{ id: "a", label: "A" }], (i) => i.id, renderItem);
+  equal(container.children.length, 1);
+  const first: unknown = container.children[0];
+
+  renderList(container as unknown as Element, [{ id: "a", label: "A2" }], (i) => i.id, renderItem);
+  equal(container.children.length, 1, "no zombie row next to the fresh node");
+  equal(container.children[0].textContent, "A2");
+  ok(container.children[0] !== first, "row was rebuilt");
+  equal((first as FakeElement).isConnected, false, "old node detached");
+
+  // Unchanged signature keeps the node (focus-preservation contract).
+  const second: unknown = container.children[0];
+  renderList(container as unknown as Element, [{ id: "a", label: "A2" }], (i) => i.id, renderItem);
+  ok(container.children[0] === second, "unchanged row keeps its node");
+});
+
 test("renderList preserves focus and in-progress input across re-renders", () => {
   const dom = installDom();
   const container = document.createElement("div");

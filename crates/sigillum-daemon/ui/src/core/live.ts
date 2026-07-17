@@ -60,8 +60,12 @@ export interface CoreRuntime {
 
 export interface CoreRuntimeOptions {
   bridge: LegacySectionBridge;
-  /** Migrated destination controllers (none at 4.1 — agents register theirs). */
-  destinations?: DestinationController[];
+  /**
+   * Migrated destination controller factories. Each is called with the
+   * finished runtime (store/api/router/events available) and registered on
+   * the adapter before it starts.
+   */
+  destinations?: Array<(runtime: CoreRuntime) => DestinationController>;
   hashSource?: HashSource;
   /** Pass `null` to force the polling fallback (no EventSource). */
   eventSourceFactory?: EventSourceFactory | null;
@@ -118,7 +122,6 @@ export function startCoreRuntime(options: CoreRuntimeOptions): CoreRuntime {
   const adapter = createLegacySectionAdapter({
     router,
     bridge: options.bridge,
-    destinations: options.destinations,
     onRoute: (route) => store.set("route", route),
   });
   routeHandler = adapter.handleRoute;
@@ -150,14 +153,7 @@ export function startCoreRuntime(options: CoreRuntimeOptions): CoreRuntime {
     store.subscribe("sync", renderRefreshMeta);
   }
 
-  if (options.router !== false) {
-    adapter.start();
-  }
-  if (options.events !== false) {
-    events.start();
-  }
-
-  return {
+  const runtime: CoreRuntime = {
     store,
     api,
     router,
@@ -170,4 +166,19 @@ export function startCoreRuntime(options: CoreRuntimeOptions): CoreRuntime {
       setRefreshMetaSink(null);
     },
   };
+
+  // Destination factories run against the finished runtime, then register on
+  // the adapter — before it starts, so a boot deep link mounts correctly.
+  for (const factory of options.destinations ?? []) {
+    adapter.register(factory(runtime));
+  }
+
+  if (options.router !== false) {
+    adapter.start();
+  }
+  if (options.events !== false) {
+    events.start();
+  }
+
+  return runtime;
 }

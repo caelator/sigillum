@@ -37,6 +37,11 @@ import { createTreasuryActions } from "./views/treasury";
 import { createWalletManagerActions } from "./views/walletManager";
 import { createWalletActions } from "./views/wallets";
 import { startCoreRuntime } from "./core/live";
+import { createOverviewDestination } from "./destinations/Overview";
+import { createMoveDestination } from "./destinations/Move";
+import { createReceivingDestination } from "./destinations/Receiving";
+import { createPortfolioDestination } from "./destinations/portfolio";
+import { createVaultDestination } from "./destinations/Vault";
 
 const SETUP_RESET_CONFIRMATION = 'RESET LOCAL SIGILLUM DATA';
 const OPERATOR_CARD_IDS = [
@@ -1372,5 +1377,12 @@ coreRuntime = startCoreRuntime({
     readSection: () => activeWorkspaceSection,
     selectSection: id => selectWorkspaceSection(id),
   },
+  destinations: [
+    createOverviewDestination,
+    createMoveDestination,
+    createReceivingDestination,
+    createPortfolioDestination,
+    createVaultDestination,
+  ],
 });
 void refresh();

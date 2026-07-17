@@ -328,6 +328,8 @@ export interface LegacySectionAdapter {
   start(): void;
   /** Look up a destination's controller (undefined when unmigrated). */
   controller(destination: Destination): DestinationController | undefined;
+  /** Register a migrated controller (factories run after the runtime exists). */
+  register(controller: DestinationController): void;
 }
 
 export function createLegacySectionAdapter(args: {
@@ -377,6 +379,9 @@ export function createLegacySectionAdapter(args: {
       args.router.navigate(formatHash(sectionId as Destination));
     },
     handleRoute,
+    register(controller) {
+      controllers.set(controller.id, controller);
+    },
     start() {
       if (started) return;
       started = true;
