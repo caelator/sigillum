@@ -51,6 +51,17 @@ ratified), D-E (ERC-6538 deferred).
     then legacy and re-stamps on match; sweeps use the record's stamp with
     address-verified probe fallback; fixed external vectors (SDK-published
     keypair, independent @noble reference) pin both conventions.
+  - 2.5 stealth execution-gate carve-out closed (`9c3bb24`): stealth
+    transfers/sweeps gate under the Sweep family (`allow_plan_execution` +
+    `allow_sweep_execution`) at enqueue and drain, mirroring EthSeed*; the
+    sponsor gas top-up keeps its `allow_gas_topups` carve-out; the policy UI
+    states the coverage; pre-tag adjustment recorded.
+  - 2.6 stealth ergonomics (`5d705cc`, single-key meta-addresses in the
+    follow-up commit): persisted per-(wallet, provider) announcement-scan
+    cursors — `from_block`-less scans resume incrementally, explicit
+    `from_block` still wins, `reset_cursor` re-anchors — and single-key
+    (66-hex) meta-addresses per the EIP single-key rule, pinned by fixed
+    vectors under both hash conventions.
 
 ## Original plan
 

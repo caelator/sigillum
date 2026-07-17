@@ -9,6 +9,16 @@ from 1.0.0 onward, per the stability policy in `docs/stability.md`.
 
 ### Added
 
+- **Single-key (66-hex-char) stealth meta-addresses (plan task 2.6)** —
+  meta-address parsing now accepts the EIP-5564 single-key form
+  (`st:<chain>:0x<key>`, one 33-byte compressed SEC1 key serving as both
+  spending and viewing key) alongside the dual-key spend‖view form.
+  Generation, recipient check (full-wallet and watch-only — the view
+  collapses to viewing key == spending key), and stealth-key recovery handle
+  it through the unchanged code paths, pinned byte-exactly by fixed
+  end-to-end vectors under both hash conventions in `sigillum-core`.
+  Fluidkey's 64-byte X‖Y encoding remains explicitly rejected. See
+  `docs/architecture.md#stealth-addresses-erc-5564`.
 - **Persisted stealth announcement-scan cursors (plan task 2.6)** —
   `deposits/eth-stealth/scan-announcements` no longer needs a manual
   `from_block` per call: a per-(wallet profile, provider profile) cursor of

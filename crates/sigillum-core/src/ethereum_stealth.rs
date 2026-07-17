@@ -61,6 +61,21 @@
 //! vault. Watch views are re-derived per operation and never cached, so the
 //! zeroize-on-lock invariant is preserved.
 //!
+//! ## Meta-address key forms
+//!
+//! Both EIP-5564 meta-address forms parse: the dual-key form
+//! (`st:<chain>:0x<spending‖viewing>`, two 33-byte compressed SEC1 keys) and
+//! the single-key form (`st:<chain>:0x<key>`, one 33-byte compressed key used
+//! as BOTH spending and viewing key). Generation needs no special-casing —
+//! the shared secret runs against the viewing key and the address offset
+//! against the spending key, which for the single-key form are simply the
+//! same point — and a recipient wallet or watch view whose spending and
+//! viewing keys are equal checks and sweeps such payments through the
+//! unchanged full/watch-only paths. Sigillum-derived wallets always use the
+//! dual-key form; the single-key form matters for interoperability with
+//! external meta-addresses. Fluidkey's 64-byte X‖Y encoding remains
+//! unsupported.
+//!
 //! ## Announcement metadata SHOULD layouts
 //!
 //! Beyond the mandatory view-tag first byte, EIP-5564 recommends two 57-byte
@@ -1337,12 +1352,22 @@ fn parse_meta_address(value: &str) -> Result<ParsedMetaAddress, EthereumStealthE
         .or_else(|| raw_keys.strip_prefix("0X"))
         .unwrap_or(raw_keys.as_str());
 
-    if payload.len() != 132 {
-        return Err(EthereumStealthError::InvalidMetaAddress);
-    }
-
-    let spending_public_key = parse_public_key_hex(&payload[..66])?;
-    let viewing_public_key = parse_public_key_hex(&payload[66..])?;
+    // EIP-5564 allows two meta-address key forms: the dual-key form
+    // (spending ‖ viewing compressed SEC1 keys, 66 hex chars each) and the
+    // single-key form (one 33-byte compressed key, 66 hex chars) where the
+    // SAME key serves as both spending and viewing key. Fluidkey's 64-byte
+    // X‖Y encoding (128 hex chars) remains unsupported.
+    let (spending_public_key, viewing_public_key) = match payload.len() {
+        132 => (
+            parse_public_key_hex(&payload[..66])?,
+            parse_public_key_hex(&payload[66..])?,
+        ),
+        66 => {
+            let key = parse_public_key_hex(payload)?;
+            (key, key)
+        }
+        _ => return Err(EthereumStealthError::InvalidMetaAddress),
+    };
 
     Ok(ParsedMetaAddress {
         short_name,
@@ -2236,6 +2261,187 @@ mod tests {
             assert_fixed_vector(StealthHashConvention::XOnly32, vector);
         }
     }
+
+    // ── Single-key (66-hex-char) meta-addresses ──
+
+    /// EIP-5564 single-key meta-address: one compressed SEC1 key serving as
+    /// BOTH spending and viewing key. The key is the SDK-published spending
+    /// key from `VECTOR_META_ADDRESS`, so the vectors stay anchored to
+    /// externally published key material; expected values are computed with
+    /// the implementation and pinned (same pinning strategy as the legacy
+    /// pre-switch vectors).
+    const SINGLE_KEY_META_ADDRESS: &str =
+        "st:eth:0x033404e82cd2a92321d51e13064ec13a0fb0192a9fdaaca1cfb47b37bd27ec1397";
+
+    /// Single-key recipient wallet: spending and viewing private keys are the
+    /// SAME key (the SDK-published spending key). This is how a recipient of
+    /// a single-key meta-address checks and sweeps: no code path
+    /// special-cases it because the math only ever pairs "viewing" for ECDH
+    /// with "spending" for the offset, and here both are one key.
+    fn single_key_wallet() -> EthereumStealthWallet {
+        let private_key = fixed_secret_key(VECTOR_SPENDING_PRIVATE_KEY);
+        // Sanity: the pinned meta-address carries exactly this key.
+        assert_eq!(
+            SINGLE_KEY_META_ADDRESS,
+            format!("st:eth:0x{}", encode_public_key(&private_key.public_key()))
+        );
+        EthereumStealthWallet {
+            meta_address: EthereumStealthMetaAddress {
+                wallet: "vectors".into(),
+                short_name: "eth".into(),
+                scheme_id: ETHEREUM_STEALTH_SCHEME_ID,
+                stealth_meta_address: SINGLE_KEY_META_ADDRESS.into(),
+                spending_public_key_hex: encode_public_key(&private_key.public_key()),
+                viewing_public_key_hex: encode_public_key(&private_key.public_key()),
+            },
+            spending_private_key: private_key.clone(),
+            viewing_private_key: private_key,
+        }
+    }
+
+    fn assert_single_key_vector(convention: StealthHashConvention, vector: &FixedVector) {
+        let wallet = single_key_wallet();
+        let meta = parse_meta_address(SINGLE_KEY_META_ADDRESS).unwrap();
+        // The parse collapses spending == viewing to the same point.
+        assert_eq!(meta.spending_public_key, meta.viewing_public_key);
+        let mut ephemeral_bytes = [0u8; 32];
+        ephemeral_bytes.copy_from_slice(&hex::decode(vector.ephemeral_private_key).unwrap());
+
+        // Payer side: generation from the single-key form is byte-exact.
+        let payment = generate_ethereum_stealth_address(
+            SINGLE_KEY_META_ADDRESS,
+            Some(ephemeral_bytes),
+            convention,
+        )
+        .unwrap();
+        assert_eq!(payment.stealth_address, vector.stealth_address);
+        assert_eq!(payment.ephemeral_public_key_hex, vector.ephemeral_public_key);
+        assert_eq!(payment.view_tag_hex, hex::encode([vector.view_tag]));
+        assert_eq!(payment.stealth_hash_convention, convention);
+
+        // Hash level: the exact bytes feeding every derivation.
+        let ephemeral_secret = ephemeral_private_key_to_secret(ephemeral_bytes).unwrap();
+        let hashed =
+            hashed_shared_secret(&ephemeral_secret, &meta.viewing_public_key, convention).unwrap();
+        assert_eq!(hex::encode(hashed), vector.hashed_shared_secret);
+        assert_eq!(derive_view_tag(&hashed), vector.view_tag);
+
+        // Recipient side: single-convention check and dual-decode both match.
+        let check = check_ethereum_stealth_address(
+            &wallet,
+            vector.stealth_address,
+            vector.ephemeral_public_key,
+            Some(vector.view_tag),
+            convention,
+        )
+        .unwrap();
+        assert!(check.matches);
+        assert_eq!(check.stealth_hash_convention, convention);
+
+        let probed = check_ethereum_stealth_address_any(
+            &wallet,
+            vector.stealth_address,
+            vector.ephemeral_public_key,
+            Some(vector.view_tag),
+            &StealthHashConvention::PROBE_ORDER,
+        )
+        .unwrap();
+        assert!(probed.matches);
+        assert_eq!(probed.stealth_hash_convention, convention);
+
+        // Watch-only recipient side collapses the same way: viewing private
+        // key == spending private key, spending PUBLIC key == its public
+        // half — byte-identical to the full-wallet result.
+        let watch_view = single_key_wallet().watch_view();
+        let watch_check = check_ethereum_stealth_address_watch_only(
+            &watch_view,
+            vector.stealth_address,
+            vector.ephemeral_public_key,
+            Some(vector.view_tag),
+            convention,
+        )
+        .unwrap();
+        assert_eq!(watch_check, check);
+
+        // Sweep side: the derived stealth private key is byte-exact and
+        // address-verified.
+        let (stealth_key, _) = derive_verified_stealth_key(
+            &wallet,
+            vector.stealth_address,
+            vector.ephemeral_public_key,
+            Some(vector.view_tag),
+            convention,
+        )
+        .unwrap();
+        assert_eq!(
+            hex::encode(stealth_key.to_bytes()),
+            vector.stealth_private_key
+        );
+    }
+
+    #[test]
+    fn single_key_meta_address_parses_with_collapsed_keys() {
+        let meta = parse_meta_address(SINGLE_KEY_META_ADDRESS).unwrap();
+        assert_eq!(meta.short_name, "eth");
+        assert_eq!(meta.spending_public_key, meta.viewing_public_key);
+        // The bare form (no `st:chain:` prefix) parses identically.
+        let bare = parse_meta_address(
+            "0x033404e82cd2a92321d51e13064ec13a0fb0192a9fdaaca1cfb47b37bd27ec1397",
+        )
+        .unwrap();
+        assert_eq!(bare.spending_public_key, meta.spending_public_key);
+        // Neither a truncated dual-key form nor Fluidkey's 64-byte X‖Y
+        // encoding is accepted as "single-key".
+        for payload in [
+            format!("0x{}", "03".repeat(32)), // 32 bytes: neither form
+            format!("0x{}", "04".repeat(64)), // Fluidkey X‖Y: unsupported
+            format!("0x{}", "02".repeat(34)), // 34 bytes: neither form
+        ] {
+            assert!(
+                matches!(
+                    parse_meta_address(&payload),
+                    Err(EthereumStealthError::InvalidMetaAddress)
+                ),
+                "{payload}"
+            );
+        }
+    }
+
+    #[test]
+    fn single_key_meta_address_end_to_end_fixed_vectors() {
+        let vectors = [
+            (
+                StealthHashConvention::Compressed33,
+                FixedVector {
+                    ephemeral_private_key: STANDARD_VECTORS[0].ephemeral_private_key,
+                    ephemeral_public_key: STANDARD_VECTORS[0].ephemeral_public_key,
+                    hashed_shared_secret:
+                        "4284cefcb9194b08aadb2c943104476c414eb5ffb913717ef071f7767c2f3a11",
+                    view_tag: 0x42,
+                    stealth_address: "0x1bf254d39212f105e98e720269b2821a9bd78415",
+                    stealth_private_key:
+                        "45e8411b7302cc5e374fb8167db771f04ef169e84e8fa142ad2ad13ee8e7ae67",
+                },
+            ),
+            (
+                StealthHashConvention::XOnly32,
+                FixedVector {
+                    ephemeral_private_key: LEGACY_VECTORS[0].ephemeral_private_key,
+                    ephemeral_public_key: LEGACY_VECTORS[0].ephemeral_public_key,
+                    hashed_shared_secret:
+                        "7476dfdeaad242a8b09c0c78b6ecb7167c967451bab830bd2652c381047f25de",
+                    view_tag: 0x74,
+                    stealth_address: "0xbab0479fe41ae45b113988489444316f88d8c1f6",
+                    stealth_private_key:
+                        "77da51fd64bbc3fe3d1097fb039fe19a8a39283a50346080e30b9d4971379a34",
+                },
+            ),
+        ];
+        for (convention, vector) in &vectors {
+            assert_single_key_vector(*convention, vector);
+        }
+    }
+
 
     /// Watch view built from bare parts — the spending private key never
     /// exists in this test process beyond computing the public half here, so

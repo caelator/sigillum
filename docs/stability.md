@@ -139,6 +139,9 @@ candidates may adjust stable-candidate surfaces with the change recorded in
   standard-convention serde default; the four stealth `QueueJobPayload`
   variants gain it optionally (absent = probe). Fluidkey's 64-byte X‖Y
   encoding remains unsupported.
+- Single-key (66-hex-char) EIP-5564 meta-addresses are now accepted anywhere
+  a meta-address is parsed (plan task 2.6); previously they failed `invalid
+  meta-address format`. The dual-key spend‖view form is unchanged.
 - **Stealth announcement-scan cursors (plan task 2.6)**:
   `EthStealthAnnouncementScanRequest.from_block` changed from required
   `String` to optional `Option<String>` (wire-compatible: callers that send

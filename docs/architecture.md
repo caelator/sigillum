@@ -437,6 +437,20 @@ payments by scanning announcements with their viewing key. Meta-addresses are
 derived from the compartment master key plus a wallet label and short name,
 so each compartment/wallet pair yields a distinct meta-address.
 
+**Meta-address key forms.** Both EIP-5564 meta-address forms parse: the
+dual-key form (`st:<chain>:0x<spending‖viewing>`, two 33-byte compressed
+SEC1 keys) and the single-key form (`st:<chain>:0x<key>`, one 33-byte
+compressed key serving as BOTH spending and viewing key). Sigillum-derived
+wallets always use the dual-key form; the single-key form matters for
+interoperability with external meta-addresses. No path special-cases it:
+generation runs the shared secret against the viewing key and the address
+offset against the spending key — the same point here — and a recipient
+wallet (or watch view) whose spending and viewing keys are equal checks and
+sweeps through the unchanged full/watch-only paths. Fixed vectors pin a
+single-key payment end-to-end (parse → generate → check → stealth-key
+recovery) under both hash conventions. Fluidkey's 64-byte X‖Y encoding
+remains rejected.
+
 **Convention conformance.** Sigillum derives the shared-secret hash as
 keccak256 over the 33-byte compressed SEC1 encoding of the ECDH shared point —
 the de-facto scheme-1 convention implemented by the ScopeLift
