@@ -41,6 +41,7 @@ mod inventory;
 mod lifecycle;
 mod maintenance;
 mod observability;
+mod operations;
 mod profiles;
 mod queue;
 mod recovery;

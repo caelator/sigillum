@@ -49,6 +49,9 @@ use recovery_files::{restore_stashed_ops_dir, stash_snapshot_placeholder_ops};
 use crate::DaemonInitError;
 use crate::audit_db::AuditQuery;
 use crate::audit_log::{AuditEventSpec, StoredAuditEvent};
+use crate::operation_registry::{
+    OperationCancelRequest, OperationHandle, OperationRegistry,
+};
 use crate::operations::{OperationGuard, PendingOperationSpec, list_pending_operations};
 use crate::policy::RuntimePolicy;
 
@@ -191,6 +194,10 @@ pub struct AppState {
     startup_error: ResilientMutex<Option<String>>,
     lock_state: ResilientMutex<LockState>,
     biometric_challenges: ResilientMutex<VecDeque<BiometricChallengeState>>,
+    /// In-memory registry of long-running background operations (discovery
+    /// scans). Process-lifetime by design: durable scan progress lives in
+    /// the persisted inventory checkpoints and discovery job records.
+    operations: ResilientMutex<OperationRegistry>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -237,6 +244,7 @@ impl AppState {
             startup_error: ResilientMutex::new(None),
             lock_state: ResilientMutex::new(LockState::Ready),
             biometric_challenges: ResilientMutex::new(VecDeque::new()),
+            operations: ResilientMutex::new(OperationRegistry::new()),
         })
     }
 
@@ -320,6 +328,64 @@ impl AppState {
 
     pub async fn operation_guard(&self) -> tokio::sync::MutexGuard<'_, ()> {
         self.operation_lock.lock().await
+    }
+
+    // ── Background operation registry ─────────────────────────────
+    //
+    // Cancel signaling deliberately bypasses `operation_lock` so a cancel
+    // lands while a worker (e.g. a discovery scan) holds the mutation guard.
+
+    /// Register a new `running` background operation and return the worker's
+    /// handle (id + shared cancel flag).
+    pub fn start_operation(&self, kind: &str, related_ids: Vec<String>) -> OperationHandle {
+        self.operations.lock().start(kind, related_ids)
+    }
+
+    /// List tracked operations, most recent first, capped at `limit`.
+    pub fn list_operations(&self, limit: usize) -> Vec<sigillum_api::Operation> {
+        self.operations.lock().list(limit)
+    }
+
+    pub fn get_operation(&self, id: &str) -> Option<sigillum_api::Operation> {
+        self.operations.lock().get(id)
+    }
+
+    /// Link a domain record (e.g. a discovery job id) to an operation.
+    pub fn operation_add_related(&self, id: &str, related_id: String) {
+        self.operations.lock().add_related(id, related_id);
+    }
+
+    pub fn operation_set_progress(&self, id: &str, processed: u64) {
+        self.operations.lock().set_progress(id, processed);
+    }
+
+    /// Mark an operation terminal (`canceled`, `completed`, or `failed`).
+    pub fn finish_operation(&self, id: &str, state: &str, error: Option<String>) {
+        self.operations.lock().finish(id, state, error);
+    }
+
+    /// Request cancellation of a single operation by id.
+    pub fn request_operation_cancel(&self, id: &str) -> OperationCancelRequest {
+        self.operations.lock().request_cancel(id)
+    }
+
+    /// Signal cancellation for the newest live operation linked to a domain
+    /// record id (e.g. a discovery job id), if any.
+    pub fn request_operation_cancel_for_related(
+        &self,
+        related_id: &str,
+    ) -> Option<sigillum_api::Operation> {
+        self.operations
+            .lock()
+            .request_cancel_for_related(related_id)
+    }
+
+    /// The newest live (non-terminal) operation linked to a domain record id.
+    pub fn running_operation_for_related(
+        &self,
+        related_id: &str,
+    ) -> Option<sigillum_api::Operation> {
+        self.operations.lock().running_for_related(related_id)
     }
 
     #[must_use]

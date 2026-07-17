@@ -32,6 +32,7 @@ mod generate;
 mod inventory;
 mod lifecycle;
 mod maintenance;
+mod operations;
 mod profiles;
 mod queue;
 mod secrets;
@@ -272,6 +273,7 @@ fn api_routes() -> AppRouter {
         .merge(profile_routes())
         .merge(wallet_routes())
         .merge(inventory_routes())
+        .merge(operation_routes())
         .merge(deposit_routes())
         .merge(queue_routes())
         .merge(fido2_routes())
@@ -311,6 +313,16 @@ fn system_routes() -> AppRouter {
         .route("/api/setup/reset", post(backup::setup_reset))
         .route("/api/backup/export", post(backup::backup_export))
         .route("/api/backup/restore", post(backup::backup_restore))
+}
+
+fn operation_routes() -> AppRouter {
+    Router::new()
+        .route("/api/operations", get(operations::list_operations))
+        .route("/api/operations/{id}", get(operations::get_operation))
+        .route(
+            "/api/operations/{id}/cancel",
+            post(operations::cancel_operation),
+        )
 }
 
 fn compartment_routes() -> AppRouter {
