@@ -3296,7 +3296,7 @@ async fn wallet_inventory_scan_records_ad_hoc_watch_addresses() {
 }
 
 #[tokio::test]
-async fn wallet_inventory_transfer_log_cursors_resume_after_canceled_job_scan_disjoint_ranges() {
+async fn wallet_inventory_transfer_log_cursors_resume_after_completed_job_scan_disjoint_ranges() {
     let dir = TempDir::new().unwrap();
     let (addr, handle) = spawn_daemon(dir.path().to_path_buf()).await;
     let (rpc_addr, rpc_handle, log_ranges) = spawn_cursor_mock_evm_provider().await;
@@ -3384,6 +3384,11 @@ async fn wallet_inventory_transfer_log_cursors_resume_after_canceled_job_scan_di
             .any(|range| range.from_block == "0x0" && range.to_block == "0x9"),
         "first scan ranges: {first_ranges:?}"
     );
+    // Canceling a terminal job is now a conflict: the scan completed, so
+    // there is nothing to stop. Cursor-based resume reads block cursors from
+    // all prior jobs regardless of status, so the second scan below resumes
+    // exactly as before. Mid-run cancellation is covered adversarially in
+    // tests/discovery_operations.rs.
     let cancel = post_json(
         &client,
         addr,
@@ -3396,10 +3401,10 @@ async fn wallet_inventory_transfer_log_cursors_resume_after_canceled_job_scan_di
     let cancel_json: serde_json::Value = cancel.json().await.unwrap();
     assert_eq!(
         cancel_status,
-        StatusCode::OK,
+        StatusCode::CONFLICT,
         "cancel response: {cancel_json}"
     );
-    assert_eq!(cancel_json["job"]["status"], "canceled");
+    assert_eq!(cancel_json["code"], "conflict");
     log_ranges.lock().unwrap().clear();
 
     let second = post_json(

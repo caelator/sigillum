@@ -119,6 +119,10 @@ pub(crate) fn require_full_session_token<'a>(
 /// across sub-modules. Every public method follows the same contract:
 /// validate the session token → acquire the operation guard if mutating →
 /// perform the operation → record an audit event → return the typed response.
+///
+/// `Clone` so background operations (async discovery scans) can drive the
+/// same pipeline from a spawned task.
+#[derive(Clone)]
 pub(crate) struct SigillumService {
     state: Arc<AppState>,
 }

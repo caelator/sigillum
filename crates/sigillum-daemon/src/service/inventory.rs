@@ -34,23 +34,31 @@ mod watch_book;
 mod watch_discovery;
 
 use sigillum_api::{
-    ChainProfile, DEFAULT_DORMANCY_BLOCK_WINDOW, EvmProviderProfile, RiskFindingListResponse,
-    WalletDiscoveryJob, WalletInventoryListResponse, WalletInventoryScanRequest,
+    ChainProfile, DEFAULT_DORMANCY_BLOCK_WINDOW, EthSeedWalletProfile, EvmProviderProfile,
+    OPERATION_KIND_INVENTORY_SCAN_EVM, OPERATION_STATE_CANCELED, OPERATION_STATE_COMPLETED,
+    OPERATION_STATE_FAILED, RiskFindingListResponse, WalletAssetHolding, WalletDiscoveryJob,
+    WalletInventoryAddress, WalletInventoryListResponse, WalletInventoryScanRequest,
     WalletInventoryScanResponse, WatchAddressProbe,
 };
 use sigillum_core::derive_ethereum_address_from_control_xpub;
 
 use crate::audit_log::AuditEventSpec;
+use crate::operation_registry::OperationHandle;
 
-use allowance_discovery::erc20_allowance_discovery_config;
+use allowance_discovery::{Erc20AllowanceDiscoveryConfig, erc20_allowance_discovery_config};
 use checkpoints::{
     ScanCheckpointProgress, latest_block_scan_cursors, latest_resume_checkpoint,
     sync_inventory_job, update_scan_checkpoint,
 };
-use claim_discovery::claim_candidate_discovery_config;
-use defi_discovery::defi_token_position_discovery_config;
-use nft_approval_discovery::nft_operator_approval_discovery_config;
-use nft_discovery::{erc721_transfer_discovery_config, erc1155_transfer_discovery_config};
+use claim_discovery::{ClaimCandidateDiscoveryConfig, claim_candidate_discovery_config};
+use defi_discovery::{DefiTokenPositionDiscoveryConfig, defi_token_position_discovery_config};
+use nft_approval_discovery::{
+    NftOperatorApprovalDiscoveryConfig, nft_operator_approval_discovery_config,
+};
+use nft_discovery::{
+    Erc721TransferDiscoveryConfig, Erc1155TransferDiscoveryConfig,
+    erc721_transfer_discovery_config, erc1155_transfer_discovery_config,
+};
 use observation::AddressActivityContext;
 use permit2_discovery::permit2_allowance_discovery_config;
 use risk::derive_inventory_risk_findings;
@@ -59,13 +67,13 @@ use support::{
     record_inventory_observation, save_inventory_state, select_providers, unique_strings,
     unique_u64s, validated_gap_limit, validated_max_index,
 };
-use token_discovery::erc20_transfer_discovery_config;
+use token_discovery::{Erc20TransferDiscoveryConfig, erc20_transfer_discovery_config};
 use token_registry::{TokenRegistryProbeConfig, token_registry_probe_config};
 use wallet_selection::{
     DERIVATION_PATTERN_PROJECT, DiscoveryWallet, SeedDerivationPattern,
     derive_discovery_wallet_address, scan_account_limit, select_discovery_wallets,
 };
-use watch_discovery::select_watch_addresses;
+use watch_discovery::{WatchDiscoveryAddress, select_watch_addresses};
 
 // W7.3 plan-step execution (service/queue/plan_steps.rs) reuses the
 // inventory domain's evidence-hash re-verification and simulation-time gas
@@ -97,6 +105,94 @@ struct TokenRegistryObservationProbe<'a> {
     block_tag: &'a str,
     config: Option<&'a TokenRegistryProbeConfig>,
     now: u64,
+}
+
+/// Everything the EVM scan loop needs, resolved and validated up front.
+///
+/// [`SigillumService::prepare_evm_scan`] builds this before any state
+/// mutation (and before spawning for async scans) so invalid requests fail
+/// synchronously and the sync/async paths share one pipeline definition.
+struct PreparedEvmScan {
+    gap_limit: u32,
+    max_index: u32,
+    block_tag: String,
+    token_addresses: Vec<String>,
+    token_discovery: Option<Erc20TransferDiscoveryConfig>,
+    allowance_discovery: Option<Erc20AllowanceDiscoveryConfig>,
+    nft_discovery: Option<Erc721TransferDiscoveryConfig>,
+    erc1155_discovery: Option<Erc1155TransferDiscoveryConfig>,
+    nft_operator_approval_discovery: Option<NftOperatorApprovalDiscoveryConfig>,
+    defi_position_discovery: Option<DefiTokenPositionDiscoveryConfig>,
+    claim_candidate_discovery: Option<ClaimCandidateDiscoveryConfig>,
+    token_registry_probe: Option<TokenRegistryProbeConfig>,
+    providers: Vec<EvmProviderProfile>,
+    wallets: Vec<DiscoveryWallet>,
+    watch_addresses: Vec<WatchDiscoveryAddress>,
+    resume_from_latest_checkpoint: bool,
+    discover_permit2_allowances: Option<bool>,
+    permit2_contract_addresses: Vec<String>,
+    permit2_spender_addresses: Vec<String>,
+    permit2_allowance_limit: Option<usize>,
+    seed_profiles: Vec<EthSeedWalletProfile>,
+}
+
+/// The discovery job snapshot returned when an async scan is accepted.
+///
+/// The record is persisted by the runner as its first action under the
+/// operation guard; until then the operation registry is the live view of
+/// the scan. `block_cursors` are filled in at execution time from the
+/// persisted jobs of prior scans.
+fn accepted_scan_job(
+    prepared: &PreparedEvmScan,
+    id: String,
+    started_at_unix: u64,
+) -> WalletDiscoveryJob {
+    WalletDiscoveryJob {
+        id,
+        status: "running".into(),
+        source: DISCOVERY_SOURCE_LOCAL_RPC.into(),
+        wallet_families: unique_strings(
+            prepared
+                .wallets
+                .iter()
+                .map(|wallet| wallet.family.clone())
+                .chain(
+                    prepared
+                        .watch_addresses
+                        .iter()
+                        .map(|watch| watch.wallet.family.clone()),
+                ),
+        ),
+        wallet_profiles: unique_strings(
+            prepared
+                .wallets
+                .iter()
+                .map(|wallet| wallet.profile.clone())
+                .chain(
+                    prepared
+                        .watch_addresses
+                        .iter()
+                        .map(|watch| watch.wallet.profile.clone()),
+                ),
+        ),
+        provider_profiles: unique_strings(
+            prepared
+                .providers
+                .iter()
+                .map(|provider| provider.name.clone()),
+        ),
+        chain_ids: unique_u64s(prepared.providers.iter().map(|provider| provider.chain_id)),
+        gap_limit: prepared.gap_limit,
+        max_index: prepared.max_index,
+        addresses_scanned: 0,
+        active_addresses: 0,
+        holdings_detected: 0,
+        checkpoints: Vec::new(),
+        block_cursors: Vec::new(),
+        started_at_unix,
+        completed_at_unix: None,
+        last_error: None,
+    }
 }
 
 impl SigillumService {
@@ -157,12 +253,54 @@ impl SigillumService {
         Ok(())
     }
 
+    /// Run an EVM discovery scan.
+    ///
+    /// Both the synchronous and `run_async` paths share one pipeline:
+    /// [`Self::prepare_evm_scan`] performs all request validation and
+    /// wallet/provider/watch-address resolution up front (so async
+    /// submissions fail synchronously on bad input), and
+    /// [`Self::execute_evm_scan`] drives the scan loop under the operation
+    /// guard with per-index persistence and cooperative cancellation.
     pub(crate) async fn scan_wallet_inventory_evm(
         &self,
         token: Option<&str>,
         body: WalletInventoryScanRequest,
     ) -> ServiceResult<WalletInventoryScanResponse> {
         let token = self.require_session(token)?;
+        let run_async = body.run_async == Some(true);
+        let prepared = self.prepare_evm_scan(token, body)?;
+        if run_async {
+            let (job, operation) = self.spawn_async_evm_scan(token, prepared);
+            return Ok(WalletInventoryScanResponse {
+                job,
+                addresses: Vec::new(),
+                holdings: Vec::new(),
+                operation: Some(operation),
+            });
+        }
+        // Synchronous path: identical behavior to the historical endpoint,
+        // including the response contract (no `operation` field). The scan
+        // is still registered as an operation so other clients can observe
+        // or cancel it mid-run.
+        let operation = self
+            .state
+            .start_operation(OPERATION_KIND_INVENTORY_SCAN_EVM, Vec::new());
+        self.execute_evm_scan(token, prepared, operation, None)
+            .await
+    }
+
+    /// Validate a scan request and resolve everything the scan loop needs.
+    ///
+    /// Runs before the operation guard (and before spawning for async
+    /// scans) so invalid requests fail fast. The persisted watch address
+    /// book is read without the guard — the same read-only access the list
+    /// endpoints use; discovery is read-only, so a concurrent watch-book
+    /// change before execution is harmless.
+    fn prepare_evm_scan(
+        &self,
+        token: &str,
+        body: WalletInventoryScanRequest,
+    ) -> ServiceResult<PreparedEvmScan> {
         let gap_limit = validated_gap_limit(body.gap_limit)?;
         let max_index = validated_max_index(body.max_index)?;
         let block_tag = body
@@ -268,34 +406,9 @@ impl SigillumService {
             seed_derivation_pattern,
             account_limit,
         )?;
-        let _guard = self.state.operation_guard().await;
-        let mut inventory = load_inventory_state(&self.state.base_dir)?;
-        let chain_profiles = inventory.chain_profiles.clone();
-        let deposits = crate::deposits::load_deposits(&self.state.base_dir)
-            .map(|deposits| deposits.eth_stealth)
-            .unwrap_or_default();
-        let announcement_activity = announcement_activity_blocks(&deposits);
-        let mut chain_tip_blocks = BTreeMap::new();
-        for provider in &providers {
-            let tip = match self.provider_rpc_for_profile(provider.compartment_id, provider) {
-                Ok(rpc) => rpc.get_block_number().await.ok(),
-                Err(_) => None,
-            };
-            chain_tip_blocks.insert(provider.name.clone(), tip);
-        }
-        let permit2_allowance_discovery_for_provider =
-            |provider: &sigillum_api::EvmProviderProfile| {
-                permit2_allowance_discovery_config(
-                    body.discover_permit2_allowances,
-                    &body.permit2_contract_addresses,
-                    &body.permit2_spender_addresses,
-                    body.permit2_allowance_limit,
-                    chain_profile_for_id(&chain_profiles, provider.chain_id)
-                        .and_then(|profile| profile.permit2_address.as_deref()),
-                )
-            };
         let mut watch_probes = body.watch_addresses.clone();
         if body.include_watch_book.unwrap_or(false) {
+            let inventory = load_inventory_state(&self.state.base_dir)?;
             watch_probes.extend(
                 inventory
                     .watch_address_book
@@ -315,91 +428,383 @@ impl SigillumService {
         if wallets.is_empty() && watch_addresses.is_empty() {
             return Err(ServiceError::not_found(NO_DISCOVERY_WALLETS_ERROR));
         }
+        Ok(PreparedEvmScan {
+            gap_limit,
+            max_index,
+            block_tag,
+            token_addresses,
+            token_discovery,
+            allowance_discovery,
+            nft_discovery,
+            erc1155_discovery,
+            nft_operator_approval_discovery,
+            defi_position_discovery,
+            claim_candidate_discovery,
+            token_registry_probe,
+            providers,
+            wallets,
+            watch_addresses,
+            resume_from_latest_checkpoint: body.resume_from_latest_checkpoint.unwrap_or(false),
+            discover_permit2_allowances: body.discover_permit2_allowances,
+            permit2_contract_addresses: body.permit2_contract_addresses,
+            permit2_spender_addresses: body.permit2_spender_addresses,
+            permit2_allowance_limit: body.permit2_allowance_limit,
+            seed_profiles: registry.eth_seed_wallets,
+        })
+    }
+
+    /// Spawn a prepared scan as a background daemon operation, returning the
+    /// accepted discovery job snapshot (pre-generated id; the record itself
+    /// is persisted by the runner as its first action under the operation
+    /// guard) and the operation tracking it.
+    fn spawn_async_evm_scan(
+        &self,
+        token: &str,
+        prepared: PreparedEvmScan,
+    ) -> (WalletDiscoveryJob, sigillum_api::Operation) {
+        let job_id = random_id();
+        let accepted_job = accepted_scan_job(&prepared, job_id.clone(), now_unix());
+        let accepted_job_id = accepted_job.id.clone();
+        let operation = self
+            .state
+            .start_operation(OPERATION_KIND_INVENTORY_SCAN_EVM, vec![job_id]);
+        let operation_id = operation.id().to_string();
+        let service = self.clone();
+        let token = token.to_string();
+        tokio::spawn(async move {
+            if let Err(error) = service
+                .execute_evm_scan(&token, prepared, operation, Some(accepted_job_id))
+                .await
+            {
+                tracing::warn!(error = %error, "async inventory scan failed");
+            }
+        });
+        let operation = self
+            .state
+            .get_operation(&operation_id)
+            .expect("operation registered above");
+        (accepted_job, operation)
+    }
+
+    /// Execute a prepared scan under the operation guard.
+    ///
+    /// The guard is held for the whole run exactly like the historical
+    /// synchronous path, so mutation-serialization semantics are unchanged.
+    /// Cancellation is cooperative: the loop checks the operation's cancel
+    /// flag at every address index and, when set, stops before the next
+    /// index, persists state exactly like the per-index saves, and marks the
+    /// job and operation `canceled`. Mid-run errors persist the job as
+    /// `failed` with `last_error` so a later resume can continue from its
+    /// checkpoints.
+    async fn execute_evm_scan(
+        &self,
+        token: &str,
+        prepared: PreparedEvmScan,
+        operation: OperationHandle,
+        preset_job_id: Option<String>,
+    ) -> ServiceResult<WalletInventoryScanResponse> {
+        let _guard = self.state.operation_guard().await;
+        let mut inventory = load_inventory_state(&self.state.base_dir)?;
+        let chain_profiles = inventory.chain_profiles.clone();
+        let deposits = crate::deposits::load_deposits(&self.state.base_dir)
+            .map(|deposits| deposits.eth_stealth)
+            .unwrap_or_default();
+        let announcement_activity = announcement_activity_blocks(&deposits);
+        let mut chain_tip_blocks = BTreeMap::new();
+        for provider in &prepared.providers {
+            let tip = match self.provider_rpc_for_profile(provider.compartment_id, provider) {
+                Ok(rpc) => rpc.get_block_number().await.ok(),
+                Err(_) => None,
+            };
+            chain_tip_blocks.insert(provider.name.clone(), tip);
+        }
+        let permit2_allowance_discovery_for_provider =
+            |provider: &sigillum_api::EvmProviderProfile| {
+                permit2_allowance_discovery_config(
+                    prepared.discover_permit2_allowances,
+                    &prepared.permit2_contract_addresses,
+                    &prepared.permit2_spender_addresses,
+                    prepared.permit2_allowance_limit,
+                    chain_profile_for_id(&chain_profiles, provider.chain_id)
+                        .and_then(|profile| profile.permit2_address.as_deref()),
+                )
+            };
 
         let started_at_unix = now_unix();
         let mut job = WalletDiscoveryJob {
-            id: random_id(),
-            status: "running".into(),
-            source: DISCOVERY_SOURCE_LOCAL_RPC.into(),
-            wallet_families: unique_strings(
-                wallets.iter().map(|wallet| wallet.family.clone()).chain(
-                    watch_addresses
-                        .iter()
-                        .map(|watch| watch.wallet.family.clone()),
-                ),
-            ),
-            wallet_profiles: unique_strings(
-                wallets.iter().map(|wallet| wallet.profile.clone()).chain(
-                    watch_addresses
-                        .iter()
-                        .map(|watch| watch.wallet.profile.clone()),
-                ),
-            ),
-            provider_profiles: unique_strings(
-                providers.iter().map(|provider| provider.name.clone()),
-            ),
-            chain_ids: unique_u64s(providers.iter().map(|provider| provider.chain_id)),
-            gap_limit,
-            max_index,
-            addresses_scanned: 0,
-            active_addresses: 0,
-            holdings_detected: 0,
-            checkpoints: Vec::new(),
             block_cursors: latest_block_scan_cursors(
                 &inventory.jobs,
-                providers.iter().map(|provider| provider.chain_id),
+                prepared.providers.iter().map(|provider| provider.chain_id),
             ),
-            started_at_unix,
-            completed_at_unix: None,
-            last_error: None,
+            ..accepted_scan_job(
+                &prepared,
+                preset_job_id.unwrap_or_else(random_id),
+                started_at_unix,
+            )
         };
         inventory.jobs.push(job.clone());
         save_inventory_state(&self.state.base_dir, &inventory)?;
+        self.state.operation_add_related(operation.id(), job.id.clone());
+        self.state
+            .operation_set_progress(operation.id(), job.addresses_scanned as u64);
 
-        let mut scanned_addresses = Vec::new();
-        let mut detected_holdings = Vec::new();
+        let mut scanned_addresses: Vec<WalletInventoryAddress> = Vec::new();
+        let mut detected_holdings: Vec<WalletAssetHolding> = Vec::new();
+        // A cancel that raced the submission (before the runner persisted
+        // the job) is honored before any provider call happens.
+        let mut canceled = operation.cancellation_requested();
 
-        for wallet in &wallets {
-            let (mut index, mut empty_run) = if body.resume_from_latest_checkpoint.unwrap_or(false)
-            {
-                latest_resume_checkpoint(&inventory.jobs, wallet, &providers).unwrap_or((0, 0))
-            } else {
-                (0, 0)
-            };
-            while index <= max_index && empty_run < gap_limit {
-                let derived =
-                    derive_discovery_wallet_address(wallet, index).map_err(map_xpub_error)?;
-                let derivation_path = format!("{}/{index}", wallet.receive_path);
-                let mut index_has_activity = false;
+        // The fallible scan loop runs as one async block so mid-run errors
+        // can be finalized below (job and operation marked `failed`) instead
+        // of leaking a permanently `running` record.
+        let loop_result: ServiceResult<()> = async {
+            for wallet in &prepared.wallets {
+                let (mut index, mut empty_run) = if prepared.resume_from_latest_checkpoint {
+                    latest_resume_checkpoint(&inventory.jobs, wallet, &prepared.providers)
+                        .unwrap_or((0, 0))
+                } else {
+                    (0, 0)
+                };
+                while index <= prepared.max_index && empty_run < prepared.gap_limit {
+                    // Cooperative cancel checkpoint: at least once per
+                    // address index, before any provider call for it.
+                    if operation.cancellation_requested() {
+                        canceled = true;
+                        break;
+                    }
+                    let derived =
+                        derive_discovery_wallet_address(wallet, index).map_err(map_xpub_error)?;
+                    let derivation_path = format!("{}/{index}", wallet.receive_path);
+                    let mut index_has_activity = false;
 
-                for provider in &providers {
+                    for provider in &prepared.providers {
+                        let permit2_allowance_discovery =
+                            permit2_allowance_discovery_for_provider(provider)?;
+                        let mut observation = self
+                            .observe_inventory_address(
+                                wallet,
+                                provider,
+                                &derived.address,
+                                &derivation_path,
+                                index,
+                                &prepared.block_tag,
+                                &prepared.token_addresses,
+                                prepared.token_discovery.as_ref(),
+                                prepared.allowance_discovery.as_ref(),
+                                permit2_allowance_discovery.as_ref(),
+                                prepared.nft_discovery.as_ref(),
+                                prepared.erc1155_discovery.as_ref(),
+                                prepared.nft_operator_approval_discovery.as_ref(),
+                                prepared.defi_position_discovery.as_ref(),
+                                prepared.claim_candidate_discovery.as_ref(),
+                                activity_context_for_observation(
+                                    &inventory,
+                                    &chain_profiles,
+                                    &announcement_activity,
+                                    &chain_tip_blocks,
+                                    wallet,
+                                    provider,
+                                    &derived.address,
+                                ),
+                                &mut job.block_cursors,
+                                started_at_unix,
+                            )
+                            .await?;
+                        self.apply_token_registry_probe(
+                            TokenRegistryObservationProbe {
+                                wallet,
+                                provider,
+                                derivation_path: &derivation_path,
+                                block_tag: &prepared.block_tag,
+                                config: prepared.token_registry_probe.as_ref(),
+                                now: started_at_unix,
+                            },
+                            &mut observation,
+                        )
+                        .await?;
+                        if observation.address.activity_state
+                            != sigillum_api::WalletAddressActivityState::Empty
+                        {
+                            index_has_activity = true;
+                        }
+                        record_inventory_observation(
+                            &mut job,
+                            &mut inventory,
+                            observation,
+                            &mut detected_holdings,
+                            &mut scanned_addresses,
+                        );
+                    }
+
+                    if index_has_activity {
+                        empty_run = 0;
+                    } else {
+                        empty_run += 1;
+                    }
+                    for provider in &prepared.providers {
+                        update_scan_checkpoint(
+                            &mut job.checkpoints,
+                            wallet,
+                            provider,
+                            ScanCheckpointProgress {
+                                next_index: index.saturating_add(1),
+                                last_scanned_index: Some(index),
+                                consecutive_empty: empty_run,
+                                completed: false,
+                                updated_at_unix: now_unix(),
+                            },
+                        );
+                    }
+                    sync_inventory_job(&mut inventory, &job);
+                    save_inventory_state(&self.state.base_dir, &inventory)?;
+                    self.state
+                        .operation_set_progress(operation.id(), job.addresses_scanned as u64);
+                    index += 1;
+                }
+                if canceled {
+                    break;
+                }
+                for provider in &prepared.providers {
+                    update_scan_checkpoint(
+                        &mut job.checkpoints,
+                        wallet,
+                        provider,
+                        ScanCheckpointProgress {
+                            next_index: index,
+                            last_scanned_index: index.checked_sub(1),
+                            consecutive_empty: empty_run,
+                            completed: true,
+                            updated_at_unix: now_unix(),
+                        },
+                    );
+                }
+                sync_inventory_job(&mut inventory, &job);
+                save_inventory_state(&self.state.base_dir, &inventory)?;
+
+                if wallet.family == WALLET_FAMILY_ETH_SEED
+                    && wallet.derivation_pattern == DERIVATION_PATTERN_PROJECT
+                {
+                    if let Some(seed_profile) = prepared
+                        .seed_profiles
+                        .iter()
+                        .find(|p| p.name == wallet.profile)
+                    {
+                        if let Some(control_xpub) = &seed_profile.control_xpub {
+                            let control_path =
+                                format!("m/44'/60'/{}'/1", seed_profile.project_account);
+                            for control_index in 0..=2 {
+                                if operation.cancellation_requested() {
+                                    canceled = true;
+                                    break;
+                                }
+                                let derived = derive_ethereum_address_from_control_xpub(
+                                    control_xpub,
+                                    control_index,
+                                )
+                                .map_err(map_xpub_error)?;
+                                let derivation_path = format!("{control_path}/{control_index}");
+                                for provider in &prepared.providers {
+                                    let permit2_allowance_discovery =
+                                        permit2_allowance_discovery_for_provider(provider)?;
+                                    let mut observation = self
+                                        .observe_inventory_address(
+                                            wallet,
+                                            provider,
+                                            &derived.address,
+                                            &derivation_path,
+                                            control_index,
+                                            &prepared.block_tag,
+                                            &prepared.token_addresses,
+                                            prepared.token_discovery.as_ref(),
+                                            prepared.allowance_discovery.as_ref(),
+                                            permit2_allowance_discovery.as_ref(),
+                                            prepared.nft_discovery.as_ref(),
+                                            prepared.erc1155_discovery.as_ref(),
+                                            prepared.nft_operator_approval_discovery.as_ref(),
+                                            prepared.defi_position_discovery.as_ref(),
+                                            prepared.claim_candidate_discovery.as_ref(),
+                                            activity_context_for_observation(
+                                                &inventory,
+                                                &chain_profiles,
+                                                &announcement_activity,
+                                                &chain_tip_blocks,
+                                                wallet,
+                                                provider,
+                                                &derived.address,
+                                            ),
+                                            &mut job.block_cursors,
+                                            started_at_unix,
+                                        )
+                                        .await?;
+                                    self.apply_token_registry_probe(
+                                        TokenRegistryObservationProbe {
+                                            wallet,
+                                            provider,
+                                            derivation_path: &derivation_path,
+                                            block_tag: &prepared.block_tag,
+                                            config: prepared.token_registry_probe.as_ref(),
+                                            now: started_at_unix,
+                                        },
+                                        &mut observation,
+                                    )
+                                    .await?;
+                                    record_inventory_observation(
+                                        &mut job,
+                                        &mut inventory,
+                                        observation,
+                                        &mut detected_holdings,
+                                        &mut scanned_addresses,
+                                    );
+                                    sync_inventory_job(&mut inventory, &job);
+                                    save_inventory_state(&self.state.base_dir, &inventory)?;
+                                }
+                            }
+                        }
+                    }
+                }
+                if canceled {
+                    break;
+                }
+            }
+
+            for watch in &prepared.watch_addresses {
+                if canceled {
+                    break;
+                }
+                if operation.cancellation_requested() {
+                    canceled = true;
+                    break;
+                }
+                let derivation_path =
+                    format!("{}/{}", watch.wallet.receive_path, watch.address_index);
+                for provider in &prepared.providers {
                     let permit2_allowance_discovery =
                         permit2_allowance_discovery_for_provider(provider)?;
                     let mut observation = self
                         .observe_inventory_address(
-                            wallet,
+                            &watch.wallet,
                             provider,
-                            &derived.address,
+                            &watch.address,
                             &derivation_path,
-                            index,
-                            &block_tag,
-                            &token_addresses,
-                            token_discovery.as_ref(),
-                            allowance_discovery.as_ref(),
+                            watch.address_index,
+                            &prepared.block_tag,
+                            &prepared.token_addresses,
+                            prepared.token_discovery.as_ref(),
+                            prepared.allowance_discovery.as_ref(),
                             permit2_allowance_discovery.as_ref(),
-                            nft_discovery.as_ref(),
-                            erc1155_discovery.as_ref(),
-                            nft_operator_approval_discovery.as_ref(),
-                            defi_position_discovery.as_ref(),
-                            claim_candidate_discovery.as_ref(),
+                            prepared.nft_discovery.as_ref(),
+                            prepared.erc1155_discovery.as_ref(),
+                            prepared.nft_operator_approval_discovery.as_ref(),
+                            prepared.defi_position_discovery.as_ref(),
+                            prepared.claim_candidate_discovery.as_ref(),
                             activity_context_for_observation(
                                 &inventory,
                                 &chain_profiles,
                                 &announcement_activity,
                                 &chain_tip_blocks,
-                                wallet,
+                                &watch.wallet,
                                 provider,
-                                &derived.address,
+                                &watch.address,
                             ),
                             &mut job.block_cursors,
                             started_at_unix,
@@ -407,21 +812,16 @@ impl SigillumService {
                         .await?;
                     self.apply_token_registry_probe(
                         TokenRegistryObservationProbe {
-                            wallet,
+                            wallet: &watch.wallet,
                             provider,
                             derivation_path: &derivation_path,
-                            block_tag: &block_tag,
-                            config: token_registry_probe.as_ref(),
+                            block_tag: &prepared.block_tag,
+                            config: prepared.token_registry_probe.as_ref(),
                             now: started_at_unix,
                         },
                         &mut observation,
                     )
                     .await?;
-                    if observation.address.activity_state
-                        != sigillum_api::WalletAddressActivityState::Empty
-                    {
-                        index_has_activity = true;
-                    }
                     record_inventory_observation(
                         &mut job,
                         &mut inventory,
@@ -429,189 +829,57 @@ impl SigillumService {
                         &mut detected_holdings,
                         &mut scanned_addresses,
                     );
+                    sync_inventory_job(&mut inventory, &job);
+                    save_inventory_state(&self.state.base_dir, &inventory)?;
                 }
+            }
+            Ok(())
+        }
+        .await;
 
-                if index_has_activity {
-                    empty_run = 0;
-                } else {
-                    empty_run += 1;
-                }
-                for provider in &providers {
-                    update_scan_checkpoint(
-                        &mut job.checkpoints,
-                        wallet,
-                        provider,
-                        ScanCheckpointProgress {
-                            next_index: index.saturating_add(1),
-                            last_scanned_index: Some(index),
-                            consecutive_empty: empty_run,
-                            completed: false,
-                            updated_at_unix: now_unix(),
-                        },
-                    );
-                }
-                sync_inventory_job(&mut inventory, &job);
-                save_inventory_state(&self.state.base_dir, &inventory)?;
-                index += 1;
-            }
-            for provider in &providers {
-                update_scan_checkpoint(
-                    &mut job.checkpoints,
-                    wallet,
-                    provider,
-                    ScanCheckpointProgress {
-                        next_index: index,
-                        last_scanned_index: index.checked_sub(1),
-                        consecutive_empty: empty_run,
-                        completed: true,
-                        updated_at_unix: now_unix(),
-                    },
-                );
-            }
-            sync_inventory_job(&mut inventory, &job);
-            save_inventory_state(&self.state.base_dir, &inventory)?;
-
-            if wallet.family == WALLET_FAMILY_ETH_SEED
-                && wallet.derivation_pattern == DERIVATION_PATTERN_PROJECT
-            {
-                if let Some(seed_profile) = registry
-                    .eth_seed_wallets
-                    .iter()
-                    .find(|p| p.name == wallet.profile)
-                {
-                    if let Some(control_xpub) = &seed_profile.control_xpub {
-                        let control_path = format!("m/44'/60'/{}'/1", seed_profile.project_account);
-                        for control_index in 0..=2 {
-                            let derived = derive_ethereum_address_from_control_xpub(
-                                control_xpub,
-                                control_index,
-                            )
-                            .map_err(map_xpub_error)?;
-                            let derivation_path = format!("{control_path}/{control_index}");
-                            for provider in &providers {
-                                let permit2_allowance_discovery =
-                                    permit2_allowance_discovery_for_provider(provider)?;
-                                let mut observation = self
-                                    .observe_inventory_address(
-                                        wallet,
-                                        provider,
-                                        &derived.address,
-                                        &derivation_path,
-                                        control_index,
-                                        &block_tag,
-                                        &token_addresses,
-                                        token_discovery.as_ref(),
-                                        allowance_discovery.as_ref(),
-                                        permit2_allowance_discovery.as_ref(),
-                                        nft_discovery.as_ref(),
-                                        erc1155_discovery.as_ref(),
-                                        nft_operator_approval_discovery.as_ref(),
-                                        defi_position_discovery.as_ref(),
-                                        claim_candidate_discovery.as_ref(),
-                                        activity_context_for_observation(
-                                            &inventory,
-                                            &chain_profiles,
-                                            &announcement_activity,
-                                            &chain_tip_blocks,
-                                            wallet,
-                                            provider,
-                                            &derived.address,
-                                        ),
-                                        &mut job.block_cursors,
-                                        started_at_unix,
-                                    )
-                                    .await?;
-                                self.apply_token_registry_probe(
-                                    TokenRegistryObservationProbe {
-                                        wallet,
-                                        provider,
-                                        derivation_path: &derivation_path,
-                                        block_tag: &block_tag,
-                                        config: token_registry_probe.as_ref(),
-                                        now: started_at_unix,
-                                    },
-                                    &mut observation,
-                                )
-                                .await?;
-                                record_inventory_observation(
-                                    &mut job,
-                                    &mut inventory,
-                                    observation,
-                                    &mut detected_holdings,
-                                    &mut scanned_addresses,
-                                );
-                                sync_inventory_job(&mut inventory, &job);
-                                save_inventory_state(&self.state.base_dir, &inventory)?;
-                            }
-                        }
-                    }
-                }
-            }
+        if let Err(error) = loop_result {
+            self.finalize_scan_job(&mut inventory, &mut job, "failed", Some(&error))?;
+            self.state.operation_set_progress(
+                operation.id(),
+                job.addresses_scanned as u64,
+            );
+            self.state.finish_operation(
+                operation.id(),
+                OPERATION_STATE_FAILED,
+                Some(error.message().to_string()),
+            );
+            return Err(error);
         }
 
-        for watch in &watch_addresses {
-            let derivation_path = format!("{}/{}", watch.wallet.receive_path, watch.address_index);
-            for provider in &providers {
-                let permit2_allowance_discovery =
-                    permit2_allowance_discovery_for_provider(provider)?;
-                let mut observation = self
-                    .observe_inventory_address(
-                        &watch.wallet,
-                        provider,
-                        &watch.address,
-                        &derivation_path,
-                        watch.address_index,
-                        &block_tag,
-                        &token_addresses,
-                        token_discovery.as_ref(),
-                        allowance_discovery.as_ref(),
-                        permit2_allowance_discovery.as_ref(),
-                        nft_discovery.as_ref(),
-                        erc1155_discovery.as_ref(),
-                        nft_operator_approval_discovery.as_ref(),
-                        defi_position_discovery.as_ref(),
-                        claim_candidate_discovery.as_ref(),
-                        activity_context_for_observation(
-                            &inventory,
-                            &chain_profiles,
-                            &announcement_activity,
-                            &chain_tip_blocks,
-                            &watch.wallet,
-                            provider,
-                            &watch.address,
-                        ),
-                        &mut job.block_cursors,
-                        started_at_unix,
-                    )
-                    .await?;
-                self.apply_token_registry_probe(
-                    TokenRegistryObservationProbe {
-                        wallet: &watch.wallet,
-                        provider,
-                        derivation_path: &derivation_path,
-                        block_tag: &block_tag,
-                        config: token_registry_probe.as_ref(),
-                        now: started_at_unix,
-                    },
-                    &mut observation,
-                )
-                .await?;
-                record_inventory_observation(
-                    &mut job,
-                    &mut inventory,
-                    observation,
-                    &mut detected_holdings,
-                    &mut scanned_addresses,
-                );
-                sync_inventory_job(&mut inventory, &job);
-                save_inventory_state(&self.state.base_dir, &inventory)?;
-            }
+        if canceled {
+            self.finalize_scan_job(&mut inventory, &mut job, "canceled", None)?;
+            self.state
+                .operation_set_progress(operation.id(), job.addresses_scanned as u64);
+            self.state
+                .finish_operation(operation.id(), OPERATION_STATE_CANCELED, None);
+            self.record_audit(
+                self.state.active_compartment_id_for(token),
+                AuditEventSpec::WalletInventoryDiscoveryJobUpdate {
+                    id: job.id.clone(),
+                    status: "canceled".into(),
+                },
+            )?;
+            return Ok(WalletInventoryScanResponse {
+                job,
+                addresses: scanned_addresses,
+                holdings: detected_holdings,
+                operation: None,
+            });
         }
 
         job.status = "completed".into();
         job.completed_at_unix = Some(now_unix());
         sync_inventory_job(&mut inventory, &job);
         save_inventory_state(&self.state.base_dir, &inventory)?;
+        self.state
+            .operation_set_progress(operation.id(), job.addresses_scanned as u64);
+        self.state
+            .finish_operation(operation.id(), OPERATION_STATE_COMPLETED, None);
 
         self.record_audit(
             self.state.active_compartment_id_for(token),
@@ -630,6 +898,22 @@ impl SigillumService {
             holdings: detected_holdings,
             operation: None,
         })
+    }
+
+    /// Persist a terminal scan-job state (`canceled` or `failed`) with the
+    /// same per-index durability the loop uses.
+    fn finalize_scan_job(
+        &self,
+        inventory: &mut crate::inventory::WalletInventoryState,
+        job: &mut WalletDiscoveryJob,
+        status: &str,
+        error: Option<&ServiceError>,
+    ) -> ServiceResult<()> {
+        job.status = status.to_string();
+        job.completed_at_unix = Some(now_unix());
+        job.last_error = error.map(|error| error.message().to_string());
+        sync_inventory_job(inventory, job);
+        save_inventory_state(&self.state.base_dir, inventory)
     }
 }
 

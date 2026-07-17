@@ -103,7 +103,7 @@ pub struct TokenRegistryDeleteRequest {
 /// are scanned. When no provider filter is provided, every configured EVM
 /// provider profile is scanned so one derived address can be checked across
 /// multiple L1/L2 networks.
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct WalletInventoryScanRequest {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub wallet_family: Option<String>,
