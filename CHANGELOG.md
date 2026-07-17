@@ -73,6 +73,23 @@ from 1.0.0 onward, per the stability policy in `docs/stability.md`.
   Cancel/Resume controls (cancel behind the shared confirm dialog) and the
   scan form gains a "Run in background" option that surfaces the operation
   id; the CLI gains `sigillum api inventory scan-evm --run-async`.
+- **Async queue drains and maintenance cycles** — `queue/process` and
+  `maintenance/run` accept `run_async: true` to validate synchronously,
+  spawn the work as a background operation (`queue_process` /
+  `maintenance_run` kinds), and return immediately with the operation (an
+  absent flag keeps the synchronous contract byte-identical, and every run
+  — sync or async — registers an operation for observability). A drain
+  reports jobs attempted vs the selected-job total and honors cancellation
+  BETWEEN jobs only, at the same boundary as the `execution_paused` kill
+  switch and never mid-broadcast: an in-flight job finishes its attempt and
+  the canceled drain reports processed vs remaining. A maintenance cycle
+  reports per-stage progress (`stage:treasury_automation`,
+  `stage:deposit_refresh`, `stage:queue_drain` in `related_ids`) and honors
+  cancellation between stages, never mid-stage, with completed stages'
+  effects durably persisted. The console's Process Queue and Run
+  Maintenance actions gain a "Run in background" option that surfaces the
+  operation id, and the CLI gains `sigillum api queue process --run-async`
+  and `sigillum api maintenance run --run-async`.
 
 ### Changed
 

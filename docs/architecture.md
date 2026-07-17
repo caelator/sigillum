@@ -282,9 +282,10 @@ Current daemon behavior:
   (`GET /api/operations`, `GET /api/operations/{id}`,
   `POST /api/operations/{id}/cancel`) with progress counters and cooperative
   cancellation. Operations are a process-lifetime observability/control view;
-  durable progress for scans lives in the persisted discovery-job checkpoints
-  and block cursors, so a restart loses only the live view, never the ability
-  to resume
+  durable progress lives in the persisted stores (discovery-job checkpoints
+  and block cursors for scans; the queue and deposit stores for drains and
+  maintenance cycles), so a restart loses only the live view, never the
+  ability to resume or re-drive
 - runs EVM discovery scans either synchronously inside the request (default,
   unchanged for existing clients) or as a background operation
   (`inventory/scan/evm` with `run_async: true`, or a discovery-job resume).
@@ -302,6 +303,27 @@ Current daemon behavior:
   index is persisted before the next starts and observation records upsert on
   wallet/provider/chain/address keys, resume never produces duplicate
   observations
+- runs queue drains (`queue/process`) and maintenance cycles
+  (`maintenance/run`) either synchronously (default, unchanged for existing
+  clients) or as background operations (`run_async: true`). Both paths share
+  one pipeline with the historical endpoints: the request is authenticated
+  synchronously, then the same work runs under the operation mutex, so
+  mutation-serialization semantics are identical. A drain operation
+  (`queue_process`) reports jobs attempted vs the selected-job total — the
+  selection mirrors the loop's own admission decisions and adjusts live when
+  per-source serialization parks or admits a job mid-drain. Drain
+  cancellation is honored BETWEEN jobs only, at the same boundary as the
+  `execution_paused` kill switch and never mid-broadcast (the durable
+  prepared/submitted_unknown barriers bracket that region): an in-flight
+  job finishes its current attempt, and the canceled drain reports
+  processed vs remaining in its progress. A maintenance operation
+  (`maintenance_run`) reports per-stage progress — `related_ids` carries
+  `stage:treasury_automation`, `stage:deposit_refresh`, and
+  `stage:queue_drain` in execution order, `progress.total` is the stage
+  count, and `progress.processed` counts completed stages — and honors
+  cancellation between stages, never mid-stage, with every completed
+  stage's effects durably persisted. The drain stage inside a maintenance
+  cycle registers no nested operation and is not canceled mid-run
 - keeps the gateway surface local-sidecar-only rather than treating it as an internet-facing service boundary
 
 What it intentionally does not do today:
