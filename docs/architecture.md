@@ -680,6 +680,72 @@ by source IP and timing (the jitter only blurs intra-scan timing). Operators
 who need network-layer unlinkability still need their own node or distinct
 network paths per provider.
 
+### At-rest forgetting: prune, purge, and the profile-delete cascade
+
+On-chain unlinkability is only as strong as the at-rest linkage ledger, and
+the ledger is not write-only (plan task 3.2). The wallet-inventory store
+(`wallet_inventory.json`) records every probed address — even empty
+gap-limit ones — with its derivation path, wallet profile, and per-provider
+observation rows; receive allocations bind address → purpose → counterparty.
+Three operator surfaces delete from it, each fail-closed and each writing an
+audit event:
+
+- **Scanned-address prune** — `POST /api/inventory/addresses/delete`.
+  Selectors (`address`, `wallet_family`, `wallet_profile`,
+  `provider_profile`, `chain_id`, `account_index`) combine with AND
+  semantics; at least one is required so a malformed request can never empty
+  the store, and a selector set matching nothing is a 404. Deleting an
+  address row also deletes the holdings recorded for it and the per-address
+  log-scan block cursors past jobs carried for it. The audit event
+  (`wallet_inventory.addresses.prune`) records the selector SCOPE and counts
+  only — never the pruned address value, which would re-create the linkage
+  being removed (the same discipline as `treasury.receive.allocate` omitting
+  derived addresses).
+- **Retired-allocation purge** — `POST /api/treasury/receive-addresses/purge`.
+  Permanently deletes a RETIRED receive allocation and the counterparty
+  binding it carries. Active allocations are refused with 409 (rotate
+  retires first; the profile cascade below retire-then-purges in one
+  operation); unknown ids are a 404. The counterparty record itself always
+  remains — parties are operator-managed entities; only bindings die. The
+  audit event (`treasury.receive.purge`) records the allocation id and
+  whether a binding was removed.
+- **Profile-delete cascade** — every profile delete route
+  (`profiles/evm|eth-stealth|eth-xpub|eth-seed/delete`) accepts an additive
+  optional `prune_inventory` (absent/false preserves the legacy behavior
+  byte-identically: only the profile, and for seed wallets the vault secret,
+  is removed and inventory history is orphaned). When true, one guarded
+  operation forgets, BEFORE the profile registry mutation lands: the
+  profile's scanned-address rows and holdings, its scan state (resume
+  checkpoints, per-address block cursors, and discovery jobs that covered
+  only that profile), its receive allocations — ACTIVE ones included, which
+  are retire-then-purged in the same save so no half-retired record can
+  persist — and the counterparty bindings those allocations carried. One
+  audit event (`wallet_inventory.profile_prune`) carries the per-store
+  counts, and the mutation response carries the same counts as
+  `pruned_inventory`. Scope notes: an EVM PROVIDER delete prunes the rows
+  observed through that provider (its still-referenced-by-a-wallet 409 is
+  unchanged); a stealth profile has no wallet-inventory surface, so its
+  cascade reports zeros — stealth deposit monitors live in the separate
+  deposits store with their own delete route, deliberately out of
+  `prune_inventory` scope.
+
+**What a re-scan does after a prune.** Pruning removes history, not
+derivation. A later scan that re-derives a pruned index re-observes it and
+records a FRESH row (new id, fresh `first_seen_at_unix`, current balances) —
+that is expected and keeps the allocator and gap-limit logic honest; a
+re-scan that does not re-derive the index leaves it gone. What never
+resurrects: receive allocations and counterparty bindings are operator
+actions, not scan products, so no scan recreates them. One candid
+consequence of deterministic derivation: once every record of an index is
+gone (rows pruned AND allocations purged), the next allocation re-derives
+the lowest unused index again — the same address a counterparty may have
+seen before. Forgetting is local; it cannot unsend an address.
+
+**What stays.** The audit log is append-only by design: prune/purge/cascade
+EVENTS (scope and counts, never address values) remain in the trail
+forever. Snapshot archives and `setup/reset` archives taken before a prune
+retain everything they captured — see `docs/backup.md`.
+
 ### xpub exposure and the derivation oracle
 
 An xpub is watch-only material — it cannot sign — but it is **not**

@@ -196,6 +196,26 @@ candidates may adjust stable-candidate surfaces with the change recorded in
   sponsor funds receive addresses attributed to different payer identities.
   Advisory only — execution blocking is unchanged and stays governed by
   `block_cross_party_linkage`.
+- **At-rest forgetting (plan task 3.2)**: two new routes —
+  `POST /api/inventory/addresses/delete` (prune scanned-address rows plus
+  their holdings and per-address block cursors; selectors
+  `address`/`wallet_family`/`wallet_profile`/`provider_profile`/`chain_id`/
+  `account_index` combine with AND semantics, at least one required, no match
+  → 404) and `POST /api/treasury/receive-addresses/purge` (permanently
+  delete a RETIRED receive allocation and its counterparty binding; active →
+  409, unknown → 404; the party record always remains). `EvmProfileDeleteRequest`
+  (shared by all four profile delete routes) gained an additive optional
+  `prune_inventory` flag: absent/false preserves the legacy delete behavior
+  byte-identically; true runs the forget cascade (the profile's inventory
+  rows, scan state, receive allocations — active ones retire-then-purged —
+  and bindings) in the same operation, and the four profile-mutation
+  responses carry the per-store counts in an additive optional
+  `pruned_inventory` field. New audit event kinds:
+  `wallet_inventory.addresses.prune`, `treasury.receive.purge`,
+  `wallet_inventory.profile_prune` (scope and counts only, never pruned
+  address values). CLI: `sigillum api inventory prune-addresses`,
+  `sigillum api treasury receive-purge`, and `--prune-inventory` on all four
+  `profiles * delete` arms.
 
 ## Stable at 1.0
 

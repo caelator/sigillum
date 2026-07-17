@@ -9,6 +9,48 @@ from 1.0.0 onward, per the stability policy in `docs/stability.md`.
 
 ### Added
 
+- **At-rest forgetting: prune, purge, and the profile-delete cascade (plan
+  task 3.2)** — the at-rest linkage ledger is no longer write-only. Three
+  new surfaces, each fail-closed and audited:
+  - `POST /api/inventory/addresses/delete` prunes scanned-address records
+    from the wallet inventory together with their holdings and per-address
+    log-scan block cursors. Selectors (`address`, `wallet_family`,
+    `wallet_profile`, `provider_profile`, `chain_id`, `account_index`)
+    combine with AND semantics; at least one is required so a malformed
+    request can never empty the store, and a selector set matching nothing
+    is a 404. Pruning removes history, not derivation: a later scan that
+    re-derives a pruned index re-observes it as a fresh row (new id, fresh
+    `first_seen_at_unix`), while a re-scan that does not re-derive it leaves
+    it gone. The `wallet_inventory.addresses.prune` audit event records the
+    selector scope and counts only — never the pruned address value.
+  - `POST /api/treasury/receive-addresses/purge` permanently deletes a
+    RETIRED receive allocation and the counterparty binding it carried;
+    active allocations are refused with 409 (rotate retires first), unknown
+    ids with 404, and the counterparty record itself always remains. Audited
+    as `treasury.receive.purge`.
+  - Every profile delete route (`profiles/evm|eth-stealth|eth-xpub|eth-seed
+    /delete`) accepts an additive optional `prune_inventory` flag. Absent or
+    false preserves the legacy behavior byte-identically (profile removed,
+    inventory history orphaned). When true, one guarded operation forgets —
+    before the profile registry mutation lands — the profile's scanned
+    addresses, holdings, scan state (checkpoints, block cursors, and
+    single-profile discovery jobs), receive allocations (ACTIVE ones are
+    retire-then-purged in the same save), and the counterparty bindings
+    those allocations carried; counterparties themselves remain. One
+    `wallet_inventory.profile_prune` audit event carries the per-store
+    counts and the mutation response repeats them as `pruned_inventory`. An
+    EVM provider delete prunes rows observed through that provider; a
+    stealth profile reports zeros (its deposits live in the separate
+    deposits store with their own delete route, deliberately out of scope).
+  - CLI: `sigillum api inventory prune-addresses` (selector flags),
+    `sigillum api treasury receive-purge --allocation-id <ID>`, and
+    `--prune-inventory` on all four `profiles * delete` arms. The console's
+    shared confirm dialog gains an optional checkbox affordance, and the
+    wallet-delete flow uses it to offer the cascade with copy stating
+    exactly what will be forgotten. See
+    `docs/architecture.md` → "At-rest forgetting" and `docs/backup.md` →
+    "What Snapshots Retain After Pruning" (snapshot archives and the
+    append-only audit trail intentionally retain what they captured).
 - **Provider partitioning for inventory scans (plan task 3.1)** —
   `WalletInventoryScanRequest` gains an additive optional
   `partition_providers` flag; absent/false — and any scan where each chain
