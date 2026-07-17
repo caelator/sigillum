@@ -482,6 +482,67 @@ recorded deposit — reusing an ephemeral key with the same meta-address derives
 the identical stealth address, which is linkable and constitutes address
 reuse.
 
+**The gas story.** An ERC-20 stealth deposit cannot sweep itself: the sweep's
+token transfer needs native gas on a fresh stealth address that, by design,
+holds only the token. Sigillum supports two funding paths, composable per
+deposit.
+
+*Payer-attached gas (EIP-5564 metadata).* The EIP-5564 `announce` metadata's
+first byte MUST be the view tag; beyond it the EIP recommends two 57-byte
+SHOULD layouts (byte offsets 0-indexed here; the EIP numbers from 1): for
+native sends, byte 0 the view tag, bytes 1-5 `0xeeeeeeee`, bytes 5-25 the
+sentinel address `0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE`, bytes 25-57 the
+amount of ETH being sent; for token sends, byte 0 the view tag, bytes 1-5 the
+function identifier (the function selector whenever one is available), bytes
+5-25 the token contract, bytes 25-57 the token amount (or NFT id). The EIP's
+"Recipients' transaction costs" security note is the companion pattern: the
+sender attaches a small amount of ETH to each stealth transaction, sponsoring
+the recipient's subsequent transactions. Deposit creation with `request_gas`
+(+ optional `gas_amount_wei_hex`, defaulting to the provider profile's static
+sweep gas estimate) builds the announcement metadata accordingly
+(`encode_erc5564_metadata_native` / `encode_erc5564_metadata_erc20_transfer`):
+native deposits announce the payment+gas total, ERC-20 deposits announce the
+`transfer(address,uint256)` layout and record the requested gas on the deposit
+(`requested_gas_wei_hex`) as payer instructions. On the consume side the
+announcer scan parses the same layouts defensively
+(`decode_erc5564_metadata_hints` — anything that is not exactly one of the two
+57-byte layouts, or carries an unrecognized native marker or selector, yields
+"no hints", never an error): a token-layout announcement auto-creates an
+ERC-20 deposit with the hinted contract and expected amount, so the operator
+no longer passes `--token-address` for standards-following payers. Refresh
+notices native gas arriving on a `funded_needs_gas` deposit and flips it to
+`funded`/sweep-ready on the next pass.
+
+*Sponsor top-ups (`fund_gas` for stealth deposits).* When the treasury policy
+allows sponsor gas top-ups (`allow_gas_topups`, the same flag the seed-plan
+path uses), enqueueing a sweep for an ERC-20 deposit whose last observed
+native balance is short of the sweep's estimated gas plans an
+`eth_stealth_gas_topup` queue job ahead of the sweep: 1.5x the sweep's
+estimated gas (the seed-path formula, still capped by
+`max_gas_topup_wei_hex`), sponsor solvency re-verified at execution (balance ≥
+top-up + the sponsor's own transfer gas), and the sweep job carries the
+top-up's id in `prerequisite_job_ids`. The drain loop mirrors the W6.4
+plan-step dependency semantics for these jobs — an unmet prerequisite defers
+the sweep (`blocked`, retried next drain), a failed or missing one halts it —
+and the sweep's own on-chain gas check stays the authoritative gate, so the
+sweep remains blocked until the top-up is not just broadcast but confirmed.
+The sponsor is derived, not configured: stealth wallets have no seed phrase or
+control branch, so the sponsor key derives deterministically from the
+compartment master key on its own HMAC chain
+(`sigillum/eth-stealth/v1/{wallet}/sponsor`,
+`derive_sigillum_ethereum_stealth_gas_sponsor`), recoverable from the vault
+alone; the operator funds the sponsor address out-of-band. Execution
+re-derives the key, checks it against the recorded sponsor address
+(defense-in-depth, like the seed signer), and treats a locked compartment as a
+retryable `blocked`, never a signature. If any planning precondition fails
+(policy off, cap exceeded, sponsor unavailable or insolvent, gas already
+sufficient, or a live top-up already tracked) no top-up is emitted and the
+deposit keeps its historical behavior: the sweep blocks on gas until the
+operator funds the address manually. Like the other `EthStealth*` families,
+the top-up job is not treasury-plan execution and bypasses the plan gates
+(enqueue is already policy-gated on `allow_gas_topups`); reconciling that
+carve-out with the gate model is plan task 2.5.
+
 ## Privacy & Linkage Model
 
 The receiving/treasury model centers on keeping payers unlinkable. Receive
@@ -519,7 +580,16 @@ a candidate for post-1.0 work.
 This protection is deliberately scoped to **single-hop, destination-axis**
 linkage. Sigillum-generated `fund_gas` top-ups are modeled by a common-funder
 pass in `analyze_plan_linkage`: cross-party sponsor funding warns and hard-blocks
-under the same policy. Manual gas funding, amount/timing correlation, downstream
+under the same policy. Stealth-deposit sponsor top-ups flow through the same
+accounting (`detect_stealth_gas_sponsor_linkage`): one derived sponsor funding
+stealth deposits tagged to *different* counterparties links those parties
+on-chain via the common gas funder, so the enqueue warns by default and
+hard-blocks (`policy_violation: cross_party_linkage`) when
+`block_cross_party_linkage` is on. Because the stealth sponsor is derived per
+wallet, any two differently-tagged gas-sponsored deposits on the same stealth
+wallet trip this analysis — the mitigations are payer-attached gas
+(`request_gas`), distinct stealth wallets per party, or manual funding.
+Manual gas funding, amount/timing correlation, downstream
 re-merging of per-party destinations, and multi-hop flows remain out of scope,
 and RPC provider calls expose queried addresses to the configured endpoint. The
 full threat model and operator-discipline requirements are documented in the

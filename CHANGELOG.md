@@ -189,6 +189,39 @@ from 1.0.0 onward, per the stability policy in `docs/stability.md`.
   unlocked (the viewing key derives from its master key), and there is
   deliberately no viewing-key cache, so locking keeps zeroizing every path to
   key material. Behavior, responses, and detection results are unchanged.
+- **Stealth deposit gas story: payer-attached gas + sponsor top-ups** —
+  ERC-20 stealth deposits no longer require a manual external gas transfer to
+  sweep. (a) Deposit creation accepts `request_gas` (+ optional
+  `gas_amount_wei_hex`, defaulting to the provider's static sweep gas
+  estimate) on `deposits/eth-stealth/create-native` and `/create-erc20`: the
+  announcement metadata then follows the EIP-5564 SHOULD layouts — the
+  57-byte native layout (`view tag ‖ 0xeeeeeeee ‖ sentinel ‖ payment+gas
+  total`) or the token layout (`view tag ‖ transfer(address,uint256) selector
+  ‖ token contract ‖ expected amount`) — so standards-aware payer wallets can
+  attach the requested gas/asset info, per the EIP's "Recipients' transaction
+  costs" sponsorship pattern. (b) The announcer scan parses the same layouts
+  defensively (unknown layouts decode to "no hints", never an error) and
+  auto-populates the created deposit's asset kind, token contract, and
+  expected amount, so `--token-address` is no longer needed for
+  standards-following announcements; refresh flips a `funded_needs_gas`
+  deposit to `funded` once native gas arrives. (c) When the treasury policy
+  allows gas top-ups, enqueueing a sweep for a gas-starved ERC-20 deposit
+  plans an `eth_stealth_gas_topup` queue job ahead of the sweep: 1.5x the
+  sweep's estimated gas (seed-path formula, `max_gas_topup_wei_hex` cap
+  honored), paid by the stealth wallet's gas sponsor — a key derived
+  deterministically from the compartment master key
+  (`sigillum/eth-stealth/v1/{wallet}/sponsor`, funded out-of-band by the
+  operator) and re-verified against the job at execution. The sweep records
+  the top-up in `prerequisite_job_ids` and stays blocked until the top-up
+  broadcasts and the gas is confirmed on-chain; sponsor funding across
+  different counterparties flows through the same cross-party linkage
+  accounting as seed-plan `fund_gas` (warn by default, hard-block
+  `cross_party_linkage` when the policy is on). Deposit records gain
+  `requested_gas_wei_hex`, `gas_topup_job_id`, and `gas_topup_job_state`; the
+  console deposits view gains a "Request gas from payer" option and renders
+  requested/attached gas plus what a `funded_needs_gas` deposit waits for;
+  the CLI gains `--request-gas`/`--gas-amount-wei-hex`. See
+  `docs/architecture.md#stealth-addresses-erc-5564`.
 - **Console data displays are human-readable** — Shared formatting helpers
   render wei hex as ETH/token units, unix seconds as locale timestamps, and
   chain ids as registry names, with raw values behind a details disclosure.
