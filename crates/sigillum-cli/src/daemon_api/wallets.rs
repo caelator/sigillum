@@ -37,9 +37,19 @@ pub(super) fn cmd_api_wallets(args: &[String]) {
 
 fn xpub_export(args: &[String]) {
     let wallet_profile = require_flag(args, "--wallet-profile", XPUB_EXPORT_USAGE);
-    run_api_command(args, true, move |client| async move {
-        client.export_eth_xpub_receive_branch(&wallet_profile).await
-    });
+    run_api_command_with(
+        args,
+        true,
+        move |client| async move { client.export_eth_xpub_receive_branch(&wallet_profile).await },
+        |response| {
+            // The daemon restates the xpub exposure on every export (plan task
+            // 3.4); surface it on stderr exactly like the stealth warnings so
+            // JSON stdout stays clean. Empty on older daemons.
+            if !response.warning.is_empty() {
+                eprintln!("Warning: {}", response.warning);
+            }
+        },
+    );
 }
 
 fn xpub_derive(args: &[String]) {

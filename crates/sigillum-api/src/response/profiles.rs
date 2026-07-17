@@ -170,6 +170,12 @@ pub struct EthXpubExportResponse {
     pub account_path: String,
     pub receive_path: String,
     pub receive_xpub: String,
+    /// Non-blocking cautionary warning restating that an xpub exposes the
+    /// wallet's ENTIRE past and future receive-address tree to any holder.
+    /// Always populated by current daemons; empty when deserialized from
+    /// payloads produced before this field existed.
+    #[serde(default)]
+    pub warning: String,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]

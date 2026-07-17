@@ -634,6 +634,33 @@ full threat model and operator-discipline requirements are documented in the
 README's "Privacy Model — Scope and Limitations" section; the claim is
 intentionally not an unconditional unlinkability guarantee.
 
+### xpub exposure and the derivation oracle
+
+An xpub is watch-only material — it cannot sign — but it is **not**
+privacy-neutral: anyone holding a wallet's receive-branch xpub can derive and
+watch that wallet's ENTIRE past and future receive-address tree, collapsing the
+unlinkability that per-counterparty allocation is built to provide. The export
+surface therefore restates the exposure at every layer instead of treating the
+xpub as an innocuous copy target (plan task 3.4): `wallets/eth-xpub/export`
+carries a non-blocking `warning` string on its response (additive, serde
+default — empty from older daemons) restating the exposure, the CLI prints it
+to stderr on `sigillum api wallets xpub-export` (JSON stdout stays clean), and
+the console toasts the warning, pins it in a warning box next to the exported
+branch, shows a static exposure note in the xpub card, and gates the FIRST
+xpub copy of each session behind an inform-tier acknowledgement dialog rather
+than nagging on every render. Export remains gated only by session +
+compartment match (already audited as `WalletEthXpubExport`); policy-gating it
+was considered and deliberately not added.
+
+`POST /api/wallets/eth-xpub/derive` is a deliberately **unauthenticated**
+derivation oracle: it is pure local math over caller-supplied public material
+and touches no vault, session, or compartment state, so any local process able
+to reach the loopback listener can derive addresses from an xpub it already
+holds. This is accepted because the xpub is not secret to the caller and the
+daemon is loopback-only; it is documented here so the shape is a conscious
+contract, not an oversight, and each use is traced at debug level. The path
+must never gain secret-dependent behavior.
+
 ## Architectural Priorities
 
 The next clean architecture step is not adding more crates. It is tightening invariants around the existing local system:

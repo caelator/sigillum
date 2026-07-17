@@ -52,6 +52,20 @@ from 1.0.0 onward, per the stability policy in `docs/stability.md`.
   Warnings propagate through deposit creation
   (`EthStealthDepositMutationResponse.warnings`), print to stderr in the CLI,
   and surface in the console as toasts plus a pinned warning box.
+- **xpub hygiene warnings (plan task 3.4)** — an xpub exposes a wallet's
+  ENTIRE past and future receive-address tree to anyone holding it, and the
+  export/copy surface now says so everywhere: `wallets/eth-xpub/export`
+  responses carry a non-blocking `warning` string (additive, serde default —
+  empty from older daemons) restating the exposure, the CLI prints it to
+  stderr on `sigillum api wallets xpub-export`, and the console toasts the
+  warning, pins it in a warning box next to the exported branch plus a static
+  note in the xpub card, and gates the first xpub copy of each session behind
+  an inform-tier acknowledgement dialog. Export stays gated by session +
+  compartment match (already audited); policy-gating was considered and
+  deliberately not added. The unauthenticated `wallets/eth-xpub/derive`
+  derivation oracle is now documented as such (rustdoc +
+  `docs/architecture.md#xpub-exposure-and-the-derivation-oracle`) and traces
+  each use at debug level; it is otherwise unchanged.
 - **CLI seed-wallet import and mnemonic hygiene** — New
   `profiles eth-seed upsert` arm imports an existing mnemonic via
   `--mnemonic-env`/`--mnemonic-stdin` or a hidden prompt (never argv).

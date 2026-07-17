@@ -46,6 +46,13 @@ const FOREIGN_STEALTH_META_ADDRESS_WARNING: &str = "This meta-address does not m
 /// ephemeral key was already used for a recorded deposit.
 const EPHEMERAL_KEY_REUSE_WARNING: &str = "This ephemeral key was already used for an existing deposit; reusing it with the same meta-address produces the identical stealth address (linkable, address reuse).";
 
+/// Cautionary warning carried by every xpub export (plan task 3.4): an xpub
+/// is watch-only material, but it exposes the wallet's ENTIRE past and future
+/// receive-address tree to anyone holding it. Restated here so every API
+/// consumer (CLI stderr, console) can surface the exposure at the point of
+/// export without hard-coding the copy.
+pub(crate) const XPUB_EXPOSURE_WARNING: &str = "An xpub exposes this wallet's entire receive tree: anyone holding it can derive and watch every past and future address of the wallet. Share it only with systems that must watch those addresses; never publish it or send it to a payer.";
+
 impl SigillumService {
     pub(crate) fn eth_xpub_export(
         &self,
@@ -79,6 +86,7 @@ impl SigillumService {
                 account_path: parent_derivation_path(&receive_path),
                 receive_path,
                 receive_xpub: receive_xpub.to_string(),
+                warning: XPUB_EXPOSURE_WARNING.to_string(),
             }
         } else if let Some(account_xpub) = profile
             .external_account_xpub
@@ -110,6 +118,7 @@ impl SigillumService {
                 account_path: export.account_path,
                 receive_path: export.receive_path,
                 receive_xpub: export.receive_xpub,
+                warning: XPUB_EXPOSURE_WARNING.to_string(),
             }
         } else {
             let export = self.with_active_vault(token, |vault, _| {
@@ -128,6 +137,7 @@ impl SigillumService {
                 account_path: export.account_path,
                 receive_path: export.receive_path,
                 receive_xpub: export.receive_xpub,
+                warning: XPUB_EXPOSURE_WARNING.to_string(),
             }
         };
 
@@ -142,10 +152,25 @@ impl SigillumService {
         Ok(export)
     }
 
+    /// Derive the receive address at `index` from an operator-supplied xpub.
+    ///
+    /// This endpoint is deliberately **unauthenticated**: it is pure local
+    /// math over caller-supplied public material and touches no vault,
+    /// session, or compartment state, so any local process able to reach the
+    /// loopback listener can use the daemon as a derivation oracle. That is
+    /// accepted and documented (see `docs/architecture.md`): the xpub itself
+    /// is not secret to the caller — but note an xpub handed here still
+    /// exposes the wallet's whole address tree to its holder, and uses are
+    /// traced at debug level for operator visibility. Never add
+    /// secret-dependent behavior to this path.
     pub(crate) fn eth_xpub_derive(
         &self,
         body: EthXpubDeriveRequest,
     ) -> ServiceResult<EthXpubAddressResponse> {
+        tracing::debug!(
+            index = body.index,
+            "eth-xpub/derive invoked (unauthenticated local derivation oracle)"
+        );
         let derived =
             derive_ethereum_address_from_xpub(&body.xpub, body.index).map_err(map_xpub_error)?;
         Ok(EthXpubAddressResponse {
