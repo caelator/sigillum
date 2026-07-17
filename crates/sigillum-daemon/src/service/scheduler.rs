@@ -13,12 +13,11 @@
 //!    `deposit_default_refresh_limit`), at most once per
 //!    `SIGILLUM_SCHEDULER_REFRESH_SECS` (default 5 min), mirroring the
 //!    maintenance refresh path including its auto-enqueue default;
-//! 2.5 one-time receive lifecycle (plan task 3.3) — settle confirmed
-//!    one-time sweeps (retire + optional purge), observe one-time
-//!    allocation balances on the same refresh cadence (auto-watch), and
-//!    enqueue due one-time sweeps (dedupe + Sweep-family gates + destination
-//!    policy + cross-party linkage, mirroring the stealth deposit sweep
-//!    rules);
+//!    one-time receive lifecycle (plan task 3.3) rides the same cadence —
+//!    settle confirmed one-time sweeps (retire + optional purge), observe
+//!    one-time allocation balances (auto-watch), and enqueue due one-time
+//!    sweeps (dedupe + Sweep-family gates + destination policy +
+//!    cross-party linkage, mirroring the stealth deposit sweep rules);
 //! 3. queue drain — a bounded batch of [`DRAIN_JOB_LIMIT`] jobs via
 //!    [`SigillumService::process_queue_state`], so the durable
 //!    `prepared`/`submitted_unknown` barriers, the never-re-sign rule, the

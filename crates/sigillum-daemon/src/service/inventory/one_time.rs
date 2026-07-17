@@ -67,7 +67,9 @@ use super::super::transaction_policy::{
 };
 use super::super::{ServiceResult, SigillumService};
 use super::DISCOVERY_SOURCE_LOCAL_RPC;
-use super::support::{load_inventory_state, save_inventory_state, upsert_address};
+use super::support::{
+    load_inventory_state, quantity_hex_is_nonzero, save_inventory_state, upsert_address,
+};
 use super::treasury::{RECEIVE_STATUS_ACTIVE, RECEIVE_STATUS_RETIRED};
 
 /// `lifecycle_state` values (derived, read-time only).
@@ -528,11 +530,7 @@ impl SigillumService {
                 else {
                     continue;
                 };
-                let activity_state = if native_balance_wei_hex
-                    .trim_start_matches("0x")
-                    .bytes()
-                    .any(|byte| byte != b'0')
-                {
+                let activity_state = if quantity_hex_is_nonzero(&native_balance_wei_hex) {
                     WalletAddressActivityState::Funded
                 } else {
                     WalletAddressActivityState::Empty
