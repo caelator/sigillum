@@ -1154,6 +1154,7 @@ const UI_ACTIONS = {
   copyMnemonicPhrase: walletManagerActions.copyMnemonicPhrase,
   copyText,
   copyWalletAddress: walletManagerActions.copyWalletAddress,
+  copyXpubWithWarning: walletActions.copyXpubWithWarning,
   createTreasuryParty: treasuryActions.createTreasuryParty,
   clearTreasuryPartySweepDest: treasuryActions.clearTreasuryPartySweepDest,
   createErc20Deposit: operationsActions.createErc20Deposit,

@@ -703,10 +703,12 @@
 
         <div class="section-title">Export Receive Branch</div>
         <p class="helper-text">Export the public receive branch of a saved xpub profile; it derives receive addresses without private key material.</p>
+        <p class="helper-text"><strong>Exposure:</strong> an exported xpub reveals this wallet's ENTIRE past and future receive addresses to anyone holding it. Share it only with systems that must watch those addresses &mdash; never publish it or send it to a payer.</p>
         <div class="form-row">
           <select id="xpubPreviewProfile"></select>
           <button class="btn-primary" data-action="exportSelectedXpubWallet">Export Xpub</button>
         </div>
+        <div id="xpubExportWarnings" class="warning-box hidden"></div>
         <div id="xpubExportResult" class="result-box hidden"></div>
 
         <div class="section-divider"></div>

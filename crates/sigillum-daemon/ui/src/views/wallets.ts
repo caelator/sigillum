@@ -7,10 +7,26 @@ import {
   showResultBox,
   textValue,
 } from "../render/forms";
-import { confirmDangerDialog } from "../render/confirm";
+import { confirmDangerDialog, informDialog } from "../render/confirm";
 import { esc, escAttr } from "../render/html";
 
 export type WalletProfileKind = "stealth" | "xpub" | "seed";
+
+// An xpub is watch-only material, but it exposes the wallet's ENTIRE past
+// and future receive-address tree to anyone holding it (plan task 3.4).
+// Export flows pin this warning inline and toast it; copy flows gate the
+// FIRST xpub copy of each session behind an inform-tier acknowledgement
+// instead of nagging on every click.
+export const XPUB_EXPOSURE_WARNING =
+  "An xpub exposes this wallet's entire receive tree — every past and future address — to anyone holding it. Share it only with systems that must watch those addresses; never publish it or send it to a payer.";
+
+// The daemon restates the exposure on every xpub export; older daemons omit
+// the field, so read it defensively and fall back to the local copy.
+export function xpubExportWarnings(response: { warning?: unknown }): string[] {
+  return typeof response.warning === "string" && response.warning.length > 0
+    ? [response.warning]
+    : [XPUB_EXPOSURE_WARNING];
+}
 
 export interface WalletProfileView {
   name: string;
@@ -42,6 +58,10 @@ export function createWalletActions(deps: WalletActionsDeps) {
   let lastWalletProfiles: any[] = [];
   let lastXpubWalletProfiles: any[] = [];
   let lastSeedWalletProfiles: any[] = [];
+  // Session-scoped acknowledgement for the xpub exposure notice: the first
+  // xpub copy of each session confirms the inform dialog once, later copies
+  // proceed directly.
+  let xpubCopyAcknowledged = false;
 
   function renderProviderProfiles(profiles: any[]): void {
     renderEntityList(
@@ -222,7 +242,7 @@ export function createWalletActions(deps: WalletActionsDeps) {
           esc(profile.default_destination_address || "-") +
           "</div></div>" +
           '<div class="entity-actions">' +
-          '<button class="btn-ghost" data-action="copyText" data-arg0="' +
+          '<button class="btn-ghost" data-action="copyXpubWithWarning" data-arg0="' +
           escAttr(profile.receive_xpub || "") +
           '" data-arg1="Seed wallet receive xpub">Copy Xpub</button>' +
           '<button class="btn-ghost" data-action="copyText" data-arg0="' +
@@ -564,6 +584,19 @@ export function createWalletActions(deps: WalletActionsDeps) {
     await exportXpubWalletProfile(walletProfile);
   }
 
+  // Cautions only — never block the flow. The exposure warning gets a toast
+  // and is pinned next to the exported xpub so it stays visible after the
+  // toast fades; the next export refreshes the box.
+  function surfaceXpubExportWarnings(response: { warning?: unknown }): void {
+    const warnings = xpubExportWarnings(response);
+    warnings.forEach((warning) => deps.toast(warning, "warning"));
+    showResultBox(
+      "xpubExportWarnings",
+      "<strong>Xpub exposure — review before sharing.</strong><br>" +
+        warnings.map((warning) => esc(warning)).join("<br>"),
+    );
+  }
+
   async function exportXpubWalletProfile(walletProfile: string): Promise<void> {
     const r = await deps.api("POST", "/api/wallets/eth-xpub/export", {
       wallet_profile: walletProfile,
@@ -576,6 +609,7 @@ export function createWalletActions(deps: WalletActionsDeps) {
     const exportedXpub = r.receive_xpub || "";
     input("xpubPreviewProfile").value = walletProfile;
     input("xpubReceiveXpub").value = exportedXpub;
+    surfaceXpubExportWarnings(r);
 
     showResultBox(
       "xpubExportResult",
@@ -592,13 +626,30 @@ export function createWalletActions(deps: WalletActionsDeps) {
         esc(exportedXpub) +
         "<br>" +
         '<div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap;">' +
-        '<button class="btn-ghost" data-action="copyText" data-arg0="' +
+        '<button class="btn-ghost" data-action="copyXpubWithWarning" data-arg0="' +
         escAttr(exportedXpub) +
         '" data-arg1="Receive branch xpub">Copy Xpub</button>' +
         "</div>",
     );
 
     await previewXpubReceiveAddress();
+  }
+
+  async function copyXpubWithWarning(value: string, label: string): Promise<void> {
+    if (!value) {
+      deps.toast("No xpub to copy", "error");
+      return;
+    }
+    if (!xpubCopyAcknowledged) {
+      const acknowledged = await informDialog({
+        title: "Xpub exposes the whole address tree",
+        body: XPUB_EXPOSURE_WARNING,
+        actionLabel: "Copy xpub",
+      });
+      if (!acknowledged) return;
+      xpubCopyAcknowledged = true;
+    }
+    await deps.copyText(value, label);
   }
 
   async function previewXpubReceiveAddress(): Promise<void> {
@@ -673,6 +724,7 @@ export function createWalletActions(deps: WalletActionsDeps) {
     exportSelectedXpubWallet,
     exportXpubWalletProfile,
     previewXpubReceiveAddress,
+    copyXpubWithWarning,
     exportWalletMeta,
   };
 }

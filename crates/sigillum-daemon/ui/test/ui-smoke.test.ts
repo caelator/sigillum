@@ -4560,6 +4560,106 @@ test("provider profile editor posts fee estimation opt-in", async () => {
   ok(dom.el("providerProfileList").innerHTML.includes("feeEstimation=on"));
 });
 
+test("xpub export surfaces the exposure warning as toast and pinned box", async () => {
+  const dom = installDom([
+    "xpubPreviewProfile",
+    "xpubReceiveXpub",
+    "xpubPreviewIndex",
+    "xpubExportWarnings",
+    "xpubExportResult",
+    "xpubPreviewResult",
+  ]);
+  const toasts: Array<{ message: string; type?: string }> = [];
+  const warning =
+    "An xpub exposes this wallet's entire receive tree to anyone holding it.";
+  let exportBody: any = {
+    wallet_profile: "treasury-watch",
+    project_account: 0,
+    account_path: "m/44'/60'/0'",
+    receive_path: "m/44'/60'/0'/0",
+    receive_xpub: "xpub661example",
+    warning,
+  };
+  const wallets = createWalletActions({
+    api: async (_method, path) => {
+      if (path === "/api/wallets/eth-xpub/export") return exportBody;
+      if (path === "/api/wallets/eth-xpub/derive") {
+        return { index: 0, address: "0x1111111111111111111111111111111111111111" };
+      }
+      return {};
+    },
+    toast: (message, type) => toasts.push({ message, type }),
+    refresh: () => undefined,
+    copyText: async () => undefined,
+  });
+
+  dom.el("xpubPreviewIndex").value = "0";
+  await wallets.exportXpubWalletProfile("treasury-watch");
+
+  deepEqual(toasts.pop(), { message: warning, type: "warning" });
+  equal(dom.el("xpubExportWarnings").classList.contains("hidden"), false);
+  ok(dom.el("xpubExportWarnings").innerHTML.includes("Xpub exposure"));
+  ok(dom.el("xpubExportWarnings").innerHTML.includes(warning));
+  // The exported xpub's copy affordance routes through the gated xpub copy,
+  // not the plain text copier.
+  ok(dom.el("xpubExportResult").innerHTML.includes('data-action="copyXpubWithWarning"'));
+  ok(!dom.el("xpubExportResult").innerHTML.includes('data-action="copyText"'));
+
+  // Older daemons omit the warning field: the pinned box falls back to the
+  // local exposure copy rather than rendering nothing.
+  exportBody = { ...exportBody };
+  delete exportBody.warning;
+  await wallets.exportXpubWalletProfile("treasury-watch");
+  ok(toasts.pop()?.message.includes("entire receive tree"));
+  ok(dom.el("xpubExportWarnings").innerHTML.includes("entire receive tree"));
+});
+
+test("xpub copy gates the first copy per session behind an inform dialog", async () => {
+  const dom = installDom(["seedWalletProfileList"]);
+  const copied: Array<{ value: string; label: string }> = [];
+  const wallets = createWalletActions({
+    api: async () => ({}),
+    toast: () => undefined,
+    refresh: () => undefined,
+    copyText: async (value: string, label: string) => {
+      copied.push({ value, label });
+    },
+  });
+
+  // First xpub copy of the session: inform-tier acknowledgement first.
+  let pending = wallets.copyXpubWithWarning("xpub661example", "Seed wallet receive xpub");
+  await tick();
+  ok(confirmOverlay(), "first xpub copy of the session opens the inform dialog");
+  ok(confirmPart("[data-confirm-body]")?.textContent.includes("entire receive tree"));
+  equal(confirmPart("[data-confirm-cancel]"), null, "inform tier has no cancel button");
+  equal(copied.length, 0);
+  await answerConfirm("action");
+  await pending;
+  deepEqual(copied, [{ value: "xpub661example", label: "Seed wallet receive xpub" }]);
+
+  // Acknowledged for the rest of the session: no second dialog.
+  await wallets.copyXpubWithWarning("xpub661example", "Seed wallet receive xpub");
+  equal(confirmOverlay(), null);
+  equal(copied.length, 2);
+
+  // Seed profile rows route Copy Xpub through the gated action; address copy
+  // stays on the plain copier.
+  wallets.renderSeedWalletProfiles([
+    {
+      name: "ops-seed",
+      word_count: 12,
+      project_account: 0,
+      provider_profile: "mainnet",
+      compartment_id: 0,
+      receive_xpub: "xpub661example",
+      first_receive_address: "0x1111111111111111111111111111111111111111",
+    },
+  ]);
+  const html = dom.el("seedWalletProfileList").innerHTML;
+  ok(html.includes('data-action="copyXpubWithWarning"'));
+  ok(html.includes('data-action="copyText"'));
+});
+
 test("wallet manager quick-add provider validates, posts, and reloads", async () => {
   const dom = installWalletManagerDom();
   const calls: Array<{ method: string; path: string; body?: any }> = [];
