@@ -165,6 +165,16 @@ function depositObservedLine(deposit: any): string {
   );
 }
 
+// Stealth address generation returns non-blocking cautionary warnings
+// (foreign meta-address, ephemeral key reuse). They are always serialized
+// but may be absent on older daemons, so read them defensively.
+export function stealthGenerationWarnings(response: { warnings?: unknown }): string[] {
+  if (!Array.isArray(response.warnings)) return [];
+  return response.warnings.filter(
+    (warning): warning is string => typeof warning === "string" && warning.length > 0,
+  );
+}
+
 export function createOperationsActions(deps: OperationsDeps) {
   let lastDeposits: any[] = [];
   let lastQueueJobs: any[] = [];
@@ -265,6 +275,29 @@ export function createOperationsActions(deps: OperationsDeps) {
     } catch (_) {}
   }
 
+  // Cautions only — never block the flow. Each warning gets a toast, and
+  // the set is pinned next to the fresh deposit address so it stays visible
+  // after the toasts fade. A later warning-free create clears the box.
+  function surfaceStealthGenerationWarnings(response: {
+    warnings?: unknown;
+    deposit?: { stealth_address?: unknown };
+  }): void {
+    const warnings = stealthGenerationWarnings(response);
+    if (!warnings.length) {
+      setHiddenById("depositCreateWarnings", true);
+      return;
+    }
+    warnings.forEach((warning) => deps.toast(warning, "warning"));
+    const stealthAddress = response.deposit?.stealth_address;
+    deps.showResultBox(
+      "depositCreateWarnings",
+      "<strong>Stealth generation warnings — review before sharing this address.</strong>" +
+        (stealthAddress ? "<br>stealth=" + esc(String(stealthAddress)) : "") +
+        "<br>" +
+        warnings.map((warning) => esc(warning)).join("<br>"),
+    );
+  }
+
   async function createNativeDeposit(): Promise<void> {
     const walletProfile = textValue("depositNativeWalletProfile");
     if (!walletProfile) {
@@ -290,6 +323,7 @@ export function createOperationsActions(deps: OperationsDeps) {
       "depositNativeNote",
     ]);
     deps.toast("Native deposit created");
+    surfaceStealthGenerationWarnings(r);
     deps.refresh();
   }
 
@@ -321,6 +355,7 @@ export function createOperationsActions(deps: OperationsDeps) {
       "depositErc20Note",
     ]);
     deps.toast("ERC-20 deposit created");
+    surfaceStealthGenerationWarnings(r);
     deps.refresh();
   }
 

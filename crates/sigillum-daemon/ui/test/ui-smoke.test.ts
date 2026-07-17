@@ -23,7 +23,7 @@ import {
   formatTokenAmount,
   quantityWithRawHtml,
 } from "../src/render/format";
-import { renderEntityList } from "../src/render/forms";
+import { renderEntityList, showResultBox } from "../src/render/forms";
 import {
   buildInventoryReport,
   createInventoryActions,
@@ -1921,6 +1921,111 @@ test("deposit sweep enqueue and deposit delete require confirmation", async () =
       body: { id: "dep-1" },
     },
   );
+});
+
+test("deposit create surfaces stealth generation warnings as toasts and a pinned box", async () => {
+  const dom = installDom([
+    "depositNativeWalletProfile",
+    "depositNativeExpected",
+    "depositNativeMinSweep",
+    "depositNativeDestination",
+    "depositNativeNote",
+    "depositNativeAutoQueue",
+    "depositCreateWarnings",
+  ]);
+  dom.el("depositNativeWalletProfile").value = "stealth-main";
+  const calls: Array<{ method: string; path: string; body?: any }> = [];
+  const toasts: Array<{ message: string; type?: string }> = [];
+  const operations = createOperationsActions({
+    api: async (method, path, body) => {
+      calls.push({ method, path, body });
+      if (path === "/api/deposits/eth-stealth/create-native") {
+        return {
+          status: "created",
+          deposit: { id: "dep-1", stealth_address: "0xstealth1" },
+          warnings: [
+            "This meta-address does not match any of this vault's known stealth wallets.",
+            "This ephemeral key was already used for an existing deposit.",
+          ],
+        };
+      }
+      return {};
+    },
+    toast: (message, type) => {
+      toasts.push({ message, type });
+    },
+    refresh: () => undefined,
+    showResultBox,
+    updateNextStepCard: () => undefined,
+  });
+
+  await operations.createNativeDeposit();
+
+  deepEqual(
+    calls.map((call) => call.path),
+    ["/api/deposits/eth-stealth/create-native"],
+  );
+  deepEqual(
+    toasts.filter((toast) => toast.type === "warning").map((toast) => toast.message),
+    [
+      "This meta-address does not match any of this vault's known stealth wallets.",
+      "This ephemeral key was already used for an existing deposit.",
+    ],
+  );
+  ok(toasts.some((toast) => toast.message === "Native deposit created"));
+  const box = dom.el("depositCreateWarnings");
+  equal(box.classList.contains("hidden"), false);
+  ok(box.innerHTML.includes("0xstealth1"));
+  ok(box.innerHTML.includes("does not match any of this vault"));
+  ok(box.innerHTML.includes("ephemeral key was already used"));
+});
+
+test("deposit create without stealth generation warnings shows no warning UI", async () => {
+  const dom = installDom([
+    "depositErc20WalletProfile",
+    "depositErc20TokenAddress",
+    "depositErc20Expected",
+    "depositErc20MinSweep",
+    "depositErc20Destination",
+    "depositErc20Note",
+    "depositErc20AutoQueue",
+    "depositNativeWalletProfile",
+    "depositNativeExpected",
+    "depositNativeMinSweep",
+    "depositNativeDestination",
+    "depositNativeNote",
+    "depositNativeAutoQueue",
+    "depositCreateWarnings",
+  ]);
+  dom.el("depositErc20WalletProfile").value = "stealth-main";
+  dom.el("depositErc20TokenAddress").value = "0xtoken";
+  dom.el("depositNativeWalletProfile").value = "stealth-main";
+  const toasts: Array<{ message: string; type?: string }> = [];
+  const operations = createOperationsActions({
+    api: async (_method, path) => {
+      if (path === "/api/deposits/eth-stealth/create-erc20") {
+        return { status: "created", deposit: { id: "dep-2" }, warnings: [] };
+      }
+      if (path === "/api/deposits/eth-stealth/create-native") {
+        return { status: "created", deposit: { id: "dep-3" } };
+      }
+      return {};
+    },
+    toast: (message, type) => {
+      toasts.push({ message, type });
+    },
+    refresh: () => undefined,
+    showResultBox,
+    updateNextStepCard: () => undefined,
+  });
+
+  await operations.createErc20Deposit();
+  await operations.createNativeDeposit();
+
+  equal(toasts.filter((toast) => toast.type === "warning").length, 0);
+  const box = dom.el("depositCreateWarnings");
+  equal(box.classList.contains("hidden"), true);
+  equal(box.innerHTML, "");
 });
 
 test("treasury party delete requires confirmation", async () => {

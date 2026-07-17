@@ -671,6 +671,32 @@ export interface EthSeedWalletCreateResponse {
   profile: EthSeedWalletProfile;
 }
 
+export interface EthStealthAnnouncementPayload {
+  announcer_address: string;
+  announce_function: string;
+  scheme_id: number;
+  stealth_address: string;
+  ephemeral_public_key_hex: string;
+  metadata_hex: string;
+  calldata_hex: string;
+  value_wei_hex: string;
+}
+
+export interface EthStealthGenerateResponse {
+  short_name: string;
+  scheme_id: number;
+  stealth_meta_address: string;
+  stealth_address: string;
+  ephemeral_public_key_hex: string;
+  view_tag_hex: string;
+  announcement?: EthStealthAnnouncementPayload | null;
+  /**
+   * Non-blocking cautionary warnings (e.g. foreign meta-address, ephemeral
+   * key reuse). Empty when nothing suspicious was detected.
+   */
+  warnings: string[];
+}
+
 export interface ApiRequestOptions<TBody = unknown> {
   method: "GET" | "POST" | "DELETE";
   path: string;
