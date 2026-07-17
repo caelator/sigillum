@@ -394,6 +394,8 @@ fn deposits_request_roundtrip() {
         ephemeral_private_key_hex: Some(
             "0x1111111111111111111111111111111111111111111111111111111111111111".to_string(),
         ),
+        request_gas: Some(true),
+        gas_amount_wei_hex: Some("0xec350c1800".to_string()),
     });
 }
 
@@ -448,6 +450,9 @@ fn deposits_response_roundtrip() {
                 "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".to_string(),
             ),
             counterparty_id: Some("party_client_alpha".to_string()),
+            requested_gas_wei_hex: Some("0xec350c1800".to_string()),
+            gas_topup_job_id: Some("job_topup_0001".to_string()),
+            gas_topup_job_state: Some("sent".to_string()),
         }],
         pagination: None,
     });

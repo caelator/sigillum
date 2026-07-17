@@ -1156,6 +1156,8 @@ fn test_eth_stealth_deposit_create_native_request_roundtrip() {
         min_sweep_value_wei_hex: Some("0x10".to_string()),
         note: Some("test deposit".to_string()),
         ephemeral_private_key_hex: None,
+        request_gas: Some(true),
+        gas_amount_wei_hex: Some("0x5208".to_string()),
     };
     roundtrip_test(req);
 }
@@ -1171,8 +1173,50 @@ fn test_eth_stealth_deposit_create_erc20_request_roundtrip() {
         min_sweep_amount_hex: None,
         note: None,
         ephemeral_private_key_hex: Some("0xkey".to_string()),
+        request_gas: Some(true),
+        gas_amount_wei_hex: Some("0x5208".to_string()),
     };
     roundtrip_test(req);
+}
+
+#[test]
+fn test_eth_stealth_deposit_create_gas_amount_requires_request_gas() {
+    let base = EthStealthDepositCreateNativeRequest {
+        wallet_profile: "profile1".to_string(),
+        expected_value_wei_hex: None,
+        auto_queue_sweep: None,
+        sweep_destination_address: None,
+        min_sweep_value_wei_hex: None,
+        note: None,
+        ephemeral_private_key_hex: None,
+        request_gas: None,
+        gas_amount_wei_hex: Some("0x5208".to_string()),
+    };
+    assert_eq!(
+        base.validate().unwrap_err(),
+        "gas_amount_wei_hex requires request_gas"
+    );
+    let erc20 = EthStealthDepositCreateErc20Request {
+        wallet_profile: "profile1".to_string(),
+        token_address: "0x2222222222222222222222222222222222222222".to_string(),
+        expected_amount_hex: None,
+        auto_queue_sweep: None,
+        sweep_destination_address: None,
+        min_sweep_amount_hex: None,
+        note: None,
+        ephemeral_private_key_hex: None,
+        request_gas: Some(false),
+        gas_amount_wei_hex: Some("0x5208".to_string()),
+    };
+    assert_eq!(
+        erc20.validate().unwrap_err(),
+        "gas_amount_wei_hex requires request_gas"
+    );
+    let ok = EthStealthDepositCreateErc20Request {
+        request_gas: Some(true),
+        ..erc20
+    };
+    ok.validate().unwrap();
 }
 
 #[test]

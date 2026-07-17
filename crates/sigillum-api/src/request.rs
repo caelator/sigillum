@@ -654,6 +654,15 @@ pub use queue::*;
 ///
 /// When `auto_queue_sweep` is true, a sweep job is automatically enqueued
 /// once the deposit is confirmed on-chain.
+///
+/// `request_gas` asks the payer to attach gas for the recipient's subsequent
+/// sweep (the EIP-5564 "Recipients' transaction costs" sponsorship pattern):
+/// the announcement metadata then follows the EIP-5564 native-token SHOULD
+/// layout (`view tag ‖ 0xeeeeeeee ‖ sentinel address ‖ amount`) whose amount
+/// is the expected value plus the requested gas, so a standards-aware payer
+/// wallet learns the total native value to attach. `gas_amount_wei_hex` is
+/// the requested gas; when omitted, the provider profile's static sweep gas
+/// estimate is used.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct EthStealthDepositCreateNativeRequest {
     pub wallet_profile: String,
@@ -669,9 +678,22 @@ pub struct EthStealthDepositCreateNativeRequest {
     pub note: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ephemeral_private_key_hex: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub request_gas: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub gas_amount_wei_hex: Option<String>,
 }
 
 /// Create an ERC-20 deposit monitor for a fresh stealth address.
+///
+/// `request_gas` asks the payer to attach native gas for the recipient's
+/// subsequent sweep: the announcement metadata then follows the EIP-5564
+/// token SHOULD layout (`view tag ‖ transfer(address,uint256) selector ‖
+/// token contract ‖ amount`), so a standards-aware payer wallet learns the
+/// asset and amount to send; the requested gas amount
+/// (`gas_amount_wei_hex`, defaulting to the provider profile's static sweep
+/// gas estimate) is recorded on the deposit and shown in the payment
+/// instructions as the native amount to attach alongside the token transfer.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct EthStealthDepositCreateErc20Request {
     pub wallet_profile: String,
@@ -688,6 +710,10 @@ pub struct EthStealthDepositCreateErc20Request {
     pub note: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ephemeral_private_key_hex: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub request_gas: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub gas_amount_wei_hex: Option<String>,
 }
 
 /// Remove a deposit monitor.

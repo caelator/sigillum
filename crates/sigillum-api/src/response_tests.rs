@@ -1277,6 +1277,9 @@ fn test_eth_stealth_deposit_roundtrip() {
         last_checked_at_unix: Some(1000002),
         broadcast_transaction_hash_hex: None,
         counterparty_id: None,
+        requested_gas_wei_hex: Some("0x5208".to_string()),
+        gas_topup_job_id: Some("job_topup_1".to_string()),
+        gas_topup_job_state: Some("sent".to_string()),
     };
     roundtrip_test(deposit);
 }
@@ -1315,6 +1318,9 @@ fn test_eth_stealth_deposit_legacy_chain_defaults() {
         last_checked_at_unix: Some(1000002),
         broadcast_transaction_hash_hex: None,
         counterparty_id: None,
+        requested_gas_wei_hex: None,
+        gas_topup_job_id: None,
+        gas_topup_job_state: None,
     };
     let mut json = serde_json::to_value(deposit).unwrap();
     let object = json.as_object_mut().unwrap();
@@ -1403,8 +1409,45 @@ fn test_queue_job_payload_erc20_sweep_roundtrip() {
         gas_limit: None,
         view_tag_hex: None,
         stealth_hash_convention: None,
+        prerequisite_job_ids: vec!["job_topup_1".to_string()],
     };
     roundtrip_test(payload);
+}
+
+#[test]
+fn test_queue_job_payload_erc20_sweep_legacy_without_prerequisites() {
+    // Jobs persisted before sponsor top-ups existed carry no
+    // `prerequisite_job_ids` key at all; serde default keeps them loadable.
+    let json = serde_json::json!({
+        "kind": "eth_stealth_erc20_sweep",
+        "wallet_profile": "profile",
+        "stealth_address": "0xstealth",
+        "ephemeral_public_key_hex": "0xeph",
+        "token_address": "0xtoken",
+    });
+    let payload: QueueJobPayload = serde_json::from_value(json).unwrap();
+    let QueueJobPayload::EthStealthErc20Sweep {
+        prerequisite_job_ids,
+        ..
+    } = payload
+    else {
+        panic!("expected erc20 sweep payload");
+    };
+    assert!(prerequisite_job_ids.is_empty());
+}
+
+#[test]
+fn test_queue_job_payload_gas_topup_roundtrip() {
+    let payload = QueueJobPayload::EthStealthGasTopup {
+        wallet_profile: "profile".to_string(),
+        sponsor_address: "0xsponsor".to_string(),
+        destination_address: "0xstealth".to_string(),
+        value_wei_hex: "0x5208".to_string(),
+        gas_limit: Some(21000),
+    };
+    roundtrip_test(payload.clone());
+    let json = serde_json::to_value(&payload).unwrap();
+    assert_eq!(json["kind"], "eth_stealth_gas_topup");
 }
 
 #[test]

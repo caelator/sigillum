@@ -85,6 +85,32 @@ pub enum QueueJobPayload {
         /// makes execution probe both conventions with address verification.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         stealth_hash_convention: Option<sigillum_core::StealthHashConvention>,
+        /// Queue job ids that must reach `sent` (or `confirmed`) before this
+        /// sweep may execute — the sponsor gas top-up funding this deposit's
+        /// stealth address, when one was enqueued. Mirrors the W6.4
+        /// `PlanStepExecution` prerequisite semantics; empty for jobs
+        /// enqueued before sponsor top-ups existed.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        prerequisite_job_ids: Vec<String>,
+    },
+    /// Sponsor gas top-up funding a gas-starved stealth deposit address:
+    /// a native transfer from the stealth wallet's gas sponsor (derived from
+    /// the compartment master key; see `docs/architecture.md`) to the
+    /// deposit's stealth address. Enqueued only by the deposit sweep flow
+    /// (never via a public enqueue endpoint) when policy `allow_gas_topups`
+    /// is on, at 1.5x the dependent sweep's estimated gas, with the same
+    /// cross-party linkage accounting as seed-plan sponsor funding.
+    EthStealthGasTopup {
+        wallet_profile: String,
+        /// Sponsor source address (derived per stealth wallet); the operator
+        /// funds it out-of-band. Re-verified against the derived key at
+        /// execution time.
+        sponsor_address: String,
+        /// The gas-starved stealth deposit address receiving the top-up.
+        destination_address: String,
+        value_wei_hex: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        gas_limit: Option<u64>,
     },
     EthSeedTransfer {
         wallet_profile: String,

@@ -59,6 +59,19 @@ pub struct EthStealthDeposit {
     pub broadcast_transaction_hash_hex: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub counterparty_id: Option<String>,
+    /// Native gas the operator asked the payer to attach for this deposit's
+    /// sweep (set at creation when `request_gas` was used; the payer-facing
+    /// amount in the payment instructions). Actual native gas observed on the
+    /// stealth address is tracked in `observed_native_balance_wei_hex`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub requested_gas_wei_hex: Option<String>,
+    /// Sponsor gas top-up queue job funding this deposit's stealth address,
+    /// when one was enqueued (ERC-20 deposits lacking native gas; policy
+    /// `allow_gas_topups` on). Its state mirrors into `gas_topup_job_state`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gas_topup_job_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gas_topup_job_state: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]

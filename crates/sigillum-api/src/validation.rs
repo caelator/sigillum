@@ -1496,6 +1496,10 @@ impl Validate for crate::request::EthStealthDepositCreateNativeRequest {
             &self.ephemeral_private_key_hex,
             MAX_HEX,
         )?;
+        check_optional_len("gas_amount_wei_hex", &self.gas_amount_wei_hex, MAX_HEX)?;
+        if self.gas_amount_wei_hex.is_some() && self.request_gas != Some(true) {
+            return Err("gas_amount_wei_hex requires request_gas".into());
+        }
         Ok(())
     }
 }
@@ -1513,6 +1517,10 @@ impl Validate for crate::request::EthStealthDepositCreateErc20Request {
             &self.ephemeral_private_key_hex,
             MAX_HEX,
         )?;
+        check_optional_len("gas_amount_wei_hex", &self.gas_amount_wei_hex, MAX_HEX)?;
+        if self.gas_amount_wei_hex.is_some() && self.request_gas != Some(true) {
+            return Err("gas_amount_wei_hex requires request_gas".into());
+        }
         Ok(())
     }
 }
