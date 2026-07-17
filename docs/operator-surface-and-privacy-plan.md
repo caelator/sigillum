@@ -75,6 +75,18 @@ ratified), D-E (ERC-6538 deferred).
     `from_block` still wins, `reset_cursor` re-anchors — and single-key
     (66-hex) meta-addresses per the EIP single-key rule, pinned by fixed
     vectors under both hash conventions.
+- **Phase 3**:
+  - 3.3 one-time-address mode (`1cbc3f4`, tests `ee51a41`, CLI `e8e98cd`,
+    console `42530d7`): receive allocations gain `one_time` with a required
+    sweep destination, an optional sweep threshold, and `purge_after_sweep`;
+    a `one_time_receive` stage in the scheduler/maintenance cycles
+    auto-watches balances, enqueues ONE `eth_seed_native_sweep` per due
+    allocation (stealth-style dedupe, Sweep-family gates, destination
+    policy, default-on linkage block), retires on settle, and purges when
+    configured; read-time `lifecycle_state`/`sweep_blocker` derivation;
+    e2e covers fund→observe→sweep→retire→purge plus below-threshold,
+    gates-off, dedupe, and linkage companions. (3.1/3.2/3.4/3.5 landed
+    earlier on this branch; their ledger entries were not backfilled.)
 
 ## Original plan
 

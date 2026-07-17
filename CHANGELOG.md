@@ -9,6 +9,56 @@ from 1.0.0 onward, per the stability policy in `docs/stability.md`.
 
 ### Added
 
+- **One-time receive addresses (plan task 3.3)** — receive allocations gain
+  a true one-time mode: `allocate → auto-watch → auto-sweep-on-funds →
+  retire → optional purge`, driven by the background scheduler and the
+  maintenance cycle with no operator in the loop.
+  - `POST /api/treasury/receive-addresses/allocate` accepts additive
+    `one_time` plus its policy fields: `sweep_destination_address`
+    (required in one-time mode, validated against the destination
+    allowlist like any sweep destination), `min_sweep_amount_hex`
+    (optional sweep threshold — below it funds simply sit), and
+    `purge_after_sweep` (default false). One-time mode requires a signing
+    (eth-seed) wallet profile; rotation carries the policy to the
+    replacement address.
+  - A new `one_time_receive` stage in the scheduler cycle and in
+    `maintenance/run` settles (retires on sweep settle; purges when
+    configured), observes (auto-watches balances on the refresh cadence,
+    writing the standard inventory rows), and enqueues ONE
+    `eth_seed_native_sweep` per due allocation — deduped against the
+    allocation's tracked job (mirroring the stealth-deposit sweep
+    dedupe), gated on the Sweep execution family
+    (`allow_plan_execution` + `allow_sweep_execution`) at enqueue
+    evaluation and at drain, the destination allowlist/step cap on every
+    evaluation, and the default-on `block_cross_party_linkage` posture
+    (a shared destination across parties hard-blocks). Gates off means
+    the allocation just accrues (`watching` / `execution_gates`);
+    `execution_paused` halts the drain exactly as today.
+  - Allocation records surface the derived `lifecycle_state`
+    (`watching`/`sweep_queued`/`swept`/`retired`; `purged` is record
+    absence plus the audit event) and `sweep_blocker`
+    (`awaiting_balance`, `below_threshold`, `execution_gates`,
+    `destination_policy`, `step_cap`, `cross_party_linkage`,
+    `sweep_failed`, `sweep_attention`) — computed at read time, never
+    persisted; the store stays schema v21. `MaintenanceRunResponse`
+    carries an additive `one_time_receive` summary. New audit events:
+    `treasury.receive.retire`, a `one_time` flag on
+    `treasury.receive.allocate`, and the existing purge/enqueue events
+    cover the rest.
+  - CLI: `sigillum api treasury receive-allocate` gains
+    `--one-time`/`--no-one-time`, `--sweep-destination`,
+    `--min-sweep-wei-hex`, `--purge-after-sweep`/`--no-purge-after-sweep`,
+    and `--counterparty-id`. The console's allocate form gains the
+    one-time options ("Use this address once — sweep funds here
+    automatically, then retire it"), and allocation rows show the
+    One-time badge, the lifecycle pill, destination/threshold in human
+    terms, and plain-English blockers.
+  - Retire/purge fire when the sweep job reaches its queue family's
+    terminal success state — `sent` for the legacy EthSeed family
+    ("broadcast, done"; those families never poll receipts to finality)
+    — documented with the other scope notes in
+    `docs/architecture.md` → "One-time receive addresses". One-time
+    sweeps are native-only.
 - **At-rest forgetting: prune, purge, and the profile-delete cascade (plan
   task 3.2)** — the at-rest linkage ledger is no longer write-only. Three
   new surfaces, each fail-closed and audited:

@@ -216,6 +216,28 @@ candidates may adjust stable-candidate surfaces with the change recorded in
   address values). CLI: `sigillum api inventory prune-addresses`,
   `sigillum api treasury receive-purge`, and `--prune-inventory` on all four
   `profiles * delete` arms.
+- **One-time receive addresses (plan task 3.3)**: `TreasuryReceiveAllocateRequest`
+  gained additive optional `one_time`, `sweep_destination_address`,
+  `min_sweep_amount_hex`, and `purge_after_sweep` (omitted behaves exactly
+  as before; one-time fields without `one_time` are a 400). The
+  `TreasuryReceiveAllocation` wire type gained additive serde-defaulted
+  fields (`one_time`, `sweep_destination_address`, `min_sweep_amount_hex`,
+  `purge_after_sweep`, `sweep_job_id`, and the read-time derived
+  `lifecycle_state`/`sweep_blocker` — absent on older records and on
+  non-one-time allocations); the wallet-inventory store stays schema v21
+  (additive fields load with defaults, no migration). One-time allocations
+  are advanced by a new `one_time_receive` stage in the scheduler cycle and
+  in `maintenance/run` (the maintenance operation's stage list and progress
+  total grow from 3 to 4 — additive for clients, which already see the
+  stage names as opaque markers), and `MaintenanceRunResponse` carries an
+  additive optional `one_time_receive` summary. Auto-sweeps enqueue as
+  ordinary `eth_seed_native_sweep` jobs under the existing Sweep
+  execution-family gates (no gate semantics change). New audit event kind:
+  `treasury.receive.retire` (id + reason); `treasury.receive.allocate`
+  details gained an additive `one_time` flag (absent on pre-3.3 events).
+  CLI: `treasury receive-allocate` gained `--one-time`/`--no-one-time`,
+  `--sweep-destination`, `--min-sweep-wei-hex`,
+  `--purge-after-sweep`/`--no-purge-after-sweep`, and `--counterparty-id`.
 
 ## Stable at 1.0
 

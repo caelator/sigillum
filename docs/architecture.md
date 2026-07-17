@@ -216,12 +216,15 @@ Current daemon behavior:
   cycle through the SAME code paths as the request-driven endpoints:
   treasury automation only when the persisted policy has
   `enabled && allow_treasury_automation` (both default off), a bounded
-  deposit refresh at most once per refresh interval (default 5 min), and a
-  bounded 25-job queue drain (default cadence 60 s). Fail-closed invariants
-  are preserved by construction: the cycle skips outright while the vault is
-  locked (no vault access without unlock), `execution_paused` skips the
-  drain stage while the drain loop still re-checks the kill switch between
-  jobs, and the execution gates gate at drain time exactly as today. A cycle
+  deposit refresh at most once per refresh interval (default 5 min), the
+  one-time receive lifecycle (plan task 3.3 — settle retired/purged
+  allocations, observe one-time balances on the same refresh cadence,
+  enqueue due one-time sweeps; see "One-time receive addresses" below),
+  and a bounded 25-job queue drain (default cadence 60 s). Fail-closed
+  invariants are preserved by construction: the cycle skips outright while
+  the vault is locked (no vault access without unlock), `execution_paused`
+  skips the drain stage while the drain loop still re-checks the kill switch
+  between jobs, and the execution gates gate at drain time exactly as today. A cycle
   acquires the daemon's `operation_guard` like every other mutating path,
   but a cycle that cannot take it within 500 ms SKIPS rather than queueing
   up behind operator-driven work, so per-(source, chain) serialization is
@@ -745,6 +748,86 @@ seen before. Forgetting is local; it cannot unsend an address.
 EVENTS (scope and counts, never address values) remain in the trail
 forever. Snapshot archives and `setup/reset` archives taken before a prune
 retain everything they captured — see `docs/backup.md`.
+
+### One-time receive addresses (plan task 3.3)
+
+A receive allocation created with `one_time: true` carries its own sweep
+policy — `sweep_destination_address` (required), `min_sweep_amount_hex`
+(optional threshold; unset means any nonzero balance), and
+`purge_after_sweep` (default false) — and runs the full
+`allocate → auto-watch → auto-sweep-on-funds → retire → optional purge`
+lifecycle with no operator in the loop. Creation validates the destination
+against the destination allowlist/policy rules like any sweep destination
+and requires a signing (eth-seed) wallet profile (the auto-sweep signs
+locally; xpub/watch-only profiles are rejected up front). Rotation carries
+the one-time policy to the replacement address ("same promise, fresh
+address").
+
+**The state machine**, derived at read time from the record's `status`, its
+tracked `sweep_job_id`, the queue, the freshest observed balance, and the
+treasury policy — never persisted as duplicated state:
+
+| `lifecycle_state` | Derivation |
+|---|---|
+| `watching` | Active record, no live sweep job. `sweep_blocker` says why no sweep yet: `awaiting_balance` (no observation), `below_threshold`, `execution_gates`, `destination_policy`, `step_cap`, `cross_party_linkage`, `sweep_failed`, `sweep_attention` |
+| `sweep_queued` | The tracked sweep job is active (queued, blocked, retrying, prepared, submitted_unknown) |
+| `swept` | The tracked job reached its queue family's terminal success state — `sent` for the legacy EthSeed family, `confirmed` under W7.4 finality. The next settle pass retires the allocation |
+| `retired` | Terminal record state (auto-retired on settle, or rotated). The index is never re-issued, exactly like rotate-retire |
+| `purged` | Not a record state: the record is GONE (3.2 purge semantics) and the `treasury.receive.purge` audit event is the trail |
+
+**How the automation reuses the existing sweep path.** The scheduler and
+maintenance cycles run a one-time stage (`service/inventory/one_time.rs`,
+wired into `service/scheduler.rs` and `service/maintenance.rs` as the
+`one_time_receive` stage) with three passes. SETTLE retires every active
+one-time allocation whose tracked sweep job settled — same index semantics
+as rotate-retire but no replacement is issued — and, with
+`purge_after_sweep`, deletes the record through the 3.2 purge semantics
+(both audited: `treasury.receive.retire`, `treasury.receive.purge`; the
+auto-watch observation row keeps the index reserved against re-issue even
+after the record is gone). OBSERVE (the auto-watch, on the deposit-refresh
+cadence) queries the wallet profile's provider for each active one-time
+address and upserts the standard inventory address row — the same row
+shape the manual receiving refresh writes, one provider per allocation
+(profile-routed, compatible with provider partitioning). ENQUEUE evaluates
+each allocation and pushes ONE `EthSeedNativeSweep` job when the observed
+balance reaches the threshold, deduped against the allocation's tracked
+job exactly like the stealth-deposit sweep dedupe (a live, broadcast, or
+settled job suppresses re-enqueue; a terminally failed or parked job does
+not auto-retry — the record shows `sweep_failed`/`sweep_attention` and the
+operator rotates or purges).
+
+**Policy and gate interactions are fail-closed at every step.** The
+enqueue evaluation requires the Sweep execution family
+(`allow_plan_execution` + `allow_sweep_execution` on an enabled policy,
+plus the unlatched kill switch) — gates off means nothing enqueues and the
+allocation simply accrues with `execution_gates` as its blocker; the drain
+re-checks the same gates per job exactly as for operator-enqueued work,
+and `execution_paused` halts the drain as today. The destination is
+re-checked against the allowlist and the per-step native cap on EVERY
+evaluation (a policy edit after creation can hold a sweep). The auto-sweep
+is a destination-axis linkage input exactly like a plan sweep: two
+one-time allocations bound to DIFFERENT parties (or left unattributed —
+each is its own identity, mirroring the stealth identity rule) sweeping to
+the SAME destination hard-block under the default-on
+`block_cross_party_linkage` posture, and the plan linkage analyzer covers
+the same axis for generated plan steps — per-party destinations remain the
+mitigation. Every enqueue, retire, and purge is audited.
+
+**What this does and does not protect.** It automates the receive-side
+hygiene that was previously manual — one address per payment, funds moving
+to a per-party destination without the address aging into a reuse point —
+under the same gates and auditability as operator-driven sweeps. It does
+NOT widen the privacy claim: the linkage check stays single-hop and
+destination-axis (amount/timing correlation, downstream re-merging, and
+multi-hop flows remain operator discipline); the provider observes the
+balance queries (partitioning narrows but does not eliminate that — see
+above); and the legacy EthSeed queue family treats `sent` as terminal
+("broadcast, done", no receipt-to-finality polling), so retire/purge fire
+on provider-accepted broadcast — a dropped or reorganized transaction
+leaves the allocation retired with funds unswept, the same blind spot the
+legacy sweep families already carry. One-time sweeps are native-only;
+ERC-20 balances on a one-time address are out of scope (no sponsor gas
+machinery is engaged).
 
 ### xpub exposure and the derivation oracle
 
