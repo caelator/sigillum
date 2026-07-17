@@ -38,7 +38,8 @@ use sigillum_api::{
     EthStealthDepositEnqueueSweepResponse, EthStealthDepositListResponse,
     EthStealthDepositMutationResponse, EthStealthDepositRefreshRequest,
     EthStealthDepositRefreshResponse, EthStealthGenerateRequest, EthStealthWalletProfile,
-    EvmProviderProfile, QueueEnqueueResponse, QueueJob, QueueJobPayload, ReceivingDepositTagRequest,
+    EvmProviderProfile, QueueEnqueueResponse, QueueJob, QueueJobPayload,
+    ReceivingDepositTagRequest,
 };
 use sigillum_core::{
     ERC5564_ANNOUNCE_FUNCTION, ERC5564_ANNOUNCER_ADDRESS, ERC5564_METADATA_ERC20_TRANSFER_SELECTOR,
@@ -96,7 +97,12 @@ mod tests {
         format!("{value:064x}")
     }
 
-    fn scan_cursor(wallet: &str, provider: &str, block: u64, updated: u64) -> EthStealthAnnouncementScanCursor {
+    fn scan_cursor(
+        wallet: &str,
+        provider: &str,
+        block: u64,
+        updated: u64,
+    ) -> EthStealthAnnouncementScanCursor {
         EthStealthAnnouncementScanCursor {
             wallet_profile: wallet.into(),
             provider_profile: provider.into(),

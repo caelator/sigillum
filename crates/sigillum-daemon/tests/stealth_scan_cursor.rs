@@ -112,11 +112,7 @@ fn announcement_log(
     })
 }
 
-async fn spawn_mock_evm_provider() -> (
-    SocketAddr,
-    tokio::task::JoinHandle<()>,
-    Arc<RpcState>,
-) {
+async fn spawn_mock_evm_provider() -> (SocketAddr, tokio::task::JoinHandle<()>, Arc<RpcState>) {
     fn rpc_response(state: &RpcState, request: &Value) -> Value {
         let method = request["method"].as_str().unwrap_or_default();
         let result = match method {
@@ -284,10 +280,7 @@ impl Rig {
             Some(token),
         )
         .await;
-        export["stealth_meta_address"]
-            .as_str()
-            .unwrap()
-            .to_string()
+        export["stealth_meta_address"].as_str().unwrap().to_string()
     }
 
     /// Scan with no explicit range and return the response.
@@ -326,9 +319,7 @@ async fn post_ok(
     body: Value,
     token: Option<&str>,
 ) -> Value {
-    let mut request = client
-        .post(format!("http://{addr}{path}"))
-        .json(&body);
+    let mut request = client.post(format!("http://{addr}{path}")).json(&body);
     if let Some(token) = token {
         request = request.bearer_auth(token);
     }

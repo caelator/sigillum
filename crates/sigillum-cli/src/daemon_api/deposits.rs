@@ -82,8 +82,7 @@ fn scan_announcements(args: &[String]) {
     // Plan task 2.6: `--from-block` is optional — omitted, the daemon resumes
     // from the persisted per-(wallet, provider) announcement cursor;
     // `--reset-cursor` re-anchors the cursor from this scan's range.
-    let usage =
-        "sigillum api deposits scan-announcements --wallet-profile <NAME> [--from-block <TAG|0xN>] [--reset-cursor]";
+    let usage = "sigillum api deposits scan-announcements --wallet-profile <NAME> [--from-block <TAG|0xN>] [--reset-cursor]";
     let request = EthStealthAnnouncementScanRequest {
         wallet_profile: require_flag(args, "--wallet-profile", usage),
         from_block: parse_flag(args, "--from-block"),

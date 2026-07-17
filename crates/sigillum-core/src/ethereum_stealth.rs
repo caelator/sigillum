@@ -2442,7 +2442,6 @@ mod tests {
         }
     }
 
-
     /// Watch view built from bare parts — the spending private key never
     /// exists in this test process beyond computing the public half here, so
     /// detection through this view provably needs only the viewing private

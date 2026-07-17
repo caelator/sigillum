@@ -706,10 +706,7 @@ async fn gate_flip_between_enqueue_and_drain_blocks_then_allows() {
             .contains("allow_sweep_execution"),
         "{process_json}"
     );
-    assert_eq!(
-        process_json["jobs"][0]["transaction_hash_hex"],
-        Value::Null
-    );
+    assert_eq!(process_json["jobs"][0]["transaction_hash_hex"], Value::Null);
 
     let update = post_json(
         &client,
