@@ -35,6 +35,20 @@ from 1.0.0 onward, per the stability policy in `docs/stability.md`.
 - **UI screenshot harness** — `scripts/ui-screenshots/` captures a
   deterministic, mock-driven shot set of the console (setup, unlock, all five
   destinations) via headless Chromium for release-evidence walkthroughs.
+- **Structured error codes and field-level validation** — Every daemon error
+  response now carries a stable machine-readable `code`
+  (`sigillum_api::error_codes`, cataloged in `docs/stability.md`) that
+  disambiguates the overloaded statuses: 403 splits into `vault_locked`,
+  `execution_gate_denied`, `capability_scope_denied`, `policy_violation`, and
+  the generic `forbidden` fallback; 404 into `not_found` and
+  `not_initialized`; 429 into `unlock_throttled` and `rate_limited`. HTTP
+  statuses and top-level `error` messages are unchanged. DTO validation can
+  now also return a `fields` array of per-field errors (wire paths such as
+  `allowed_destinations[0].address`), implemented for treasury policy
+  updates, inventory scans, provider profile upserts, and seed/xpub wallet
+  profile upserts. The client exposes `code()`/`fields()` on API errors, the
+  CLI prints `error[<code>]: <message>` with one line per field error, and
+  the console contracts carry both through for the upcoming UX handling.
 
 ### Changed
 

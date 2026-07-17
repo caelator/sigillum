@@ -30,6 +30,13 @@ candidates may adjust stable-candidate surfaces with the change recorded in
   delivery), and `profiles eth-seed upsert` imports an existing mnemonic.
 - `EthStealthGenerateResponse` and `EthStealthDepositMutationResponse` gained
   a backward-compatible `warnings` array (additive, defaults to empty).
+- `ErrorResponse` gained a required `code` (stable machine-readable string
+  from the catalog below; envelopes serialized before this change deserialize
+  with the fallback `unknown`) and an optional `fields` array carrying
+  per-field validation errors (`{field, message}`). Daemon errors now
+  disambiguate the overloaded 403/404/429 statuses through the catalog, and
+  CLI daemon errors print as `error[<code>]: <message>` (with one indented
+  line per field error) when the daemon supplied a code.
 
 ## Stable at 1.0
 
@@ -58,6 +65,39 @@ Breaking any of these is a major-version event:
    explicit operator opt-in. New capabilities ship default-off behind their own
    opt-ins. Weakening a fail-closed default is treated as a breaking change and
    will not happen within 1.x.
+
+### Error code catalog
+
+Every non-2xx daemon response carries the `ErrorResponse` envelope from
+`sigillum-api`: `code` (one of the strings below), `error` (human-readable
+message), optional `action` (machine-readable remediation payload), and
+optional `fields` (per-field validation breakdown, `{field, message}` with
+wire field paths such as `allowed_destinations[0].address`).
+
+Codes are stable strings, deliberately not an enum: a newer daemon may add
+codes within 1.x, and clients must treat unrecognized codes as opaque and
+fall back to the HTTP status. Removing or repurposing an existing code is a
+major-version event.
+
+| Code | HTTP | Meaning |
+| --- | --- | --- |
+| `validation_failed` | 400 | Request body failed DTO validation; `fields` carries the per-field breakdown when the DTO reports one. |
+| `bad_request` | 400 | Malformed or inconsistent request outside DTO validation. |
+| `typed_confirmation_mismatch` | 400 | Typed-confirmation phrase mismatch; `action` carries the exact expected phrase. |
+| `unauthorized` | 401 | Missing/invalid session token, or credential (passphrase, snapshot key) did not authenticate. |
+| `forbidden` | 403 | Generic refusal not covered by a more specific code (e.g. plan step-state refusals). The 403 fallback; may gain more specific siblings over time. |
+| `vault_locked` | 403 | Vault or relevant compartment is locked, or no compartment is active; unlock (or switch compartment) and retry. |
+| `execution_gate_denied` | 403 | A treasury execution gate denied the operation: `execution_paused` kill switch, a per-family `allow_*_execution` gate, a per-profile `execution_enabled` flag, or a claim/gas-topup gate. |
+| `capability_scope_denied` | 403 | Session is valid but lacks the required capability scope (or the endpoint requires a full daemon session). |
+| `policy_violation` | 403 | A treasury transaction-policy rule blocked the action; `action` carries the policy reason. |
+| `not_found` | 404 | The requested resource does not exist. |
+| `not_initialized` | 404 | The daemon vault has not been initialized; complete first-run setup. |
+| `conflict` | 409 | Operation conflicts with current daemon state (e.g. already unlocked, duplicate profile). |
+| `locked_in_progress` | 423 | The daemon is draining unlocked state; retry once the lock completes. |
+| `rate_limited` | 429 | An upstream provider (EVM RPC) rate-limited the request. |
+| `unlock_throttled` | 429 | Too many failed unlock attempts; the daemon enforces a cooldown. |
+| `internal` | 500 | Unexpected internal failure. |
+| `unavailable` | 503 | The daemon is up but not ready to serve (startup recovery running). |
 
 ## Unstable at 1.0
 
