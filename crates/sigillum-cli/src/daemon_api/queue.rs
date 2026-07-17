@@ -4,7 +4,7 @@ use std::process;
 
 use sigillum_api::request::QueueProcessRequest;
 
-use super::{parse_flag, parse_usize_flag, run_api_command};
+use super::{flag_option, parse_flag, parse_usize_flag, run_api_command};
 
 /// Dispatch `sigillum api queue <list|process|pause|resume>`.
 pub(super) fn cmd_api_queue(args: &[String]) {
@@ -21,6 +21,7 @@ pub(super) fn cmd_api_queue(args: &[String]) {
             let request = QueueProcessRequest {
                 id: parse_flag(args, "--id"),
                 limit: parse_usize_flag(args, "--limit"),
+                run_async: flag_option(args, "--run-async"),
             };
             run_api_command(args, true, move |client| async move {
                 client.process_queue(request).await

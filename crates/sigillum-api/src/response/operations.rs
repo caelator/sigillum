@@ -1,11 +1,12 @@
 //! Async operation resource types.
 //!
-//! Long-running daemon work (EVM discovery scans today; queue drains and
-//! maintenance later) is tracked as an `Operation`: a process-lifetime record
-//! with cooperative cancellation and progress. Operations are the operator
-//! surface for work the daemon performs outside the request/response cycle;
-//! durable domain state (discovery jobs, checkpoints, inventory) stays in the
-//! existing persisted records and is linked via [`Operation::related_ids`].
+//! Long-running daemon work (EVM discovery scans, queue drains, and
+//! maintenance cycles today) is tracked as an `Operation`: a
+//! process-lifetime record with cooperative cancellation and progress.
+//! Operations are the operator surface for work the daemon performs outside
+//! the request/response cycle; durable domain state (discovery jobs,
+//! checkpoints, inventory, the queue itself) stays in the existing persisted
+//! records and is linked via [`Operation::related_ids`].
 //!
 //! State machine:
 //! - `running` — the operation is active (possibly queued behind the
@@ -41,6 +42,27 @@ pub const OPERATION_STATE_FAILED: &str = "failed";
 /// resume). `related_ids` carries the associated discovery job id.
 pub const OPERATION_KIND_INVENTORY_SCAN_EVM: &str = "inventory_scan_evm";
 
+/// [`Operation::kind`] — a queue drain (`POST /api/queue/process`, sync or
+/// `run_async`). `progress.processed` counts jobs attempted so far and
+/// `progress.total` the jobs selected for the run (see
+/// `service/queue/processing.rs` for the exact selection semantics);
+/// `related_ids` stays empty — the queue store itself is the durable domain
+/// record. Cancellation is honored between jobs only — an in-flight job
+/// always finishes its current attempt (including its broadcast, bracketed
+/// by the prepared/submitted barriers), so a canceled drain reports the
+/// processed vs remaining counts in `progress`.
+pub const OPERATION_KIND_QUEUE_PROCESS: &str = "queue_process";
+
+/// [`Operation::kind`] — a maintenance cycle (`POST /api/maintenance/run`,
+/// sync or `run_async`). The cycle runs three stages in order —
+/// `treasury_automation`, `deposit_refresh`, `queue_drain` — encoded in
+/// `related_ids` as `stage:<name>` markers in execution order;
+/// `progress.processed` counts completed stages and `progress.total` the
+/// stage count. Cancellation is honored between stages: a canceled cycle
+/// stops before the next stage with the completed stages' effects durably
+/// persisted.
+pub const OPERATION_KIND_MAINTENANCE_RUN: &str = "maintenance_run";
+
 /// Progress counters for a running or finished [`Operation`].
 ///
 /// `total` is `None` when the work cannot know its extent up front (for
@@ -48,7 +70,9 @@ pub const OPERATION_KIND_INVENTORY_SCAN_EVM: &str = "inventory_scan_evm";
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct OperationProgress {
     /// Units of work completed so far. For discovery scans this is the
-    /// number of per-provider address observations recorded.
+    /// number of per-provider address observations recorded; for queue
+    /// drains the jobs attempted; for maintenance cycles the stages
+    /// completed.
     pub processed: u64,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub total: Option<u64>,
@@ -65,7 +89,9 @@ pub struct Operation {
     pub state: String,
     pub progress: OperationProgress,
     /// Domain records this operation drives — for discovery scans the
-    /// persisted discovery job id from `GET /api/discovery/jobs`.
+    /// persisted discovery job id from `GET /api/discovery/jobs`, for
+    /// maintenance cycles the `stage:<name>` markers in execution order (see
+    /// [`OPERATION_KIND_MAINTENANCE_RUN`]).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub related_ids: Vec<String>,
     pub created_at_unix: u64,

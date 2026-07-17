@@ -1226,6 +1226,7 @@ fn test_maintenance_run_request_full() {
         deposit_refresh_limit: Some(50),
         queue_process_limit: Some(100),
         auto_enqueue: Some(true),
+        run_async: Some(true),
     };
     roundtrip_test(req);
 }
@@ -1236,6 +1237,7 @@ fn test_maintenance_run_request_empty() {
         deposit_refresh_limit: None,
         queue_process_limit: None,
         auto_enqueue: None,
+        run_async: None,
     };
     roundtrip_test(req);
 }
@@ -1245,6 +1247,7 @@ fn test_queue_process_request_with_id() {
     let req = QueueProcessRequest {
         id: Some("job_123".to_string()),
         limit: Some(5),
+        run_async: None,
     };
     roundtrip_test(req);
 }
@@ -1254,6 +1257,7 @@ fn test_queue_process_request_empty() {
     let req = QueueProcessRequest {
         id: None,
         limit: None,
+        run_async: None,
     };
     roundtrip_test(req);
 }

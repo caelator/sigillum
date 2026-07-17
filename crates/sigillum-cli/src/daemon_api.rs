@@ -448,7 +448,7 @@ fn cmd_api_risk(args: &[String]) {
 fn cmd_api_maintenance(args: &[String]) {
     if args.len() < 2 || args[1].as_str() != "run" {
         eprintln!(
-            "Usage: sigillum api maintenance run [--deposit-refresh-limit N] [--queue-process-limit N] [--auto-enqueue|--no-auto-enqueue]"
+            "Usage: sigillum api maintenance run [--deposit-refresh-limit N] [--queue-process-limit N] [--auto-enqueue|--no-auto-enqueue] [--run-async]"
         );
         process::exit(1);
     }
@@ -457,6 +457,7 @@ fn cmd_api_maintenance(args: &[String]) {
         deposit_refresh_limit: parse_usize_flag(args, "--deposit-refresh-limit"),
         queue_process_limit: parse_usize_flag(args, "--queue-process-limit"),
         auto_enqueue: bool_switch(args, "--auto-enqueue", "--no-auto-enqueue"),
+        run_async: flag_option(args, "--run-async"),
     };
     run_api_command(args, true, move |client| async move {
         client.run_maintenance(request).await

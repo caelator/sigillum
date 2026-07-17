@@ -750,6 +750,16 @@ pub struct MaintenanceRunRequest {
     pub queue_process_limit: Option<usize>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub auto_enqueue: Option<bool>,
+    /// Run the cycle as a background daemon operation instead of blocking the
+    /// request until it completes.
+    ///
+    /// When `true`, the daemon validates the request, starts an `Operation`
+    /// of kind `maintenance_run` (see `GET /api/operations`) that drives the
+    /// same maintenance pipeline in a spawned task, and returns immediately
+    /// with the operation tracking it. Absent or `false` keeps the original
+    /// synchronous behavior, so existing clients see no contract change.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub run_async: Option<bool>,
 }
 
 /// Resolve a secret reference into plaintext for command execution.

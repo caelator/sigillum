@@ -48,6 +48,7 @@ impl SigillumService {
                 QueueProcessRequest {
                     id: None,
                     limit: body.queue_process_limit,
+                    run_async: None,
                 },
             )
             .await?;
@@ -95,6 +96,7 @@ impl SigillumService {
             treasury_automation: automation.as_ref().map(|outcome| outcome.summary.clone()),
             deposits: deposits.eth_stealth,
             jobs: processed.jobs,
+            operation: None,
         })
     }
 }

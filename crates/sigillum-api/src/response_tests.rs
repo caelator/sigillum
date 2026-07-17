@@ -1546,6 +1546,7 @@ fn test_queue_process_response_roundtrip() {
             broadcast_transaction_hash_hex: None,
             receipt: Default::default(),
         }],
+        operation: None,
     };
     roundtrip_test(resp);
     roundtrip_test(QueueExecutionPauseResponse {
@@ -1597,6 +1598,7 @@ fn test_maintenance_run_response_roundtrip() {
         treasury_automation: None,
         deposits: vec![],
         jobs: vec![],
+        operation: None,
     };
     roundtrip_test(resp);
 }

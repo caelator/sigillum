@@ -96,4 +96,14 @@ pub struct QueueProcessRequest {
     pub id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub limit: Option<usize>,
+    /// Run the drain as a background daemon operation instead of blocking the
+    /// request until the drain completes.
+    ///
+    /// When `true`, the daemon validates the request, starts an `Operation`
+    /// of kind `queue_process` (see `GET /api/operations`) that drives the
+    /// same drain loop in a spawned task, and returns immediately with the
+    /// operation tracking it. Absent or `false` keeps the original
+    /// synchronous behavior, so existing clients see no contract change.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub run_async: Option<bool>,
 }

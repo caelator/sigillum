@@ -2558,6 +2558,7 @@ async fn profile_and_queue_helpers_roundtrip_response_shapes() {
         .process_queue(QueueProcessRequest {
             id: None,
             limit: None,
+            run_async: None,
         })
         .await
         .unwrap();
@@ -2690,6 +2691,7 @@ async fn profile_and_queue_helpers_roundtrip_response_shapes() {
             deposit_refresh_limit: Some(10),
             queue_process_limit: Some(10),
             auto_enqueue: Some(true),
+            run_async: None,
         })
         .await
         .unwrap();

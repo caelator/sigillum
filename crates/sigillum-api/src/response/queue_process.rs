@@ -52,6 +52,12 @@ pub struct QueueProcessResponse {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub paused_reason: Option<String>,
     pub jobs: Vec<QueueJob>,
+    /// The background operation driving the drain. Present only when the
+    /// request set `run_async: true`; the tally fields and `jobs` are then
+    /// all zero/empty and progress is reported through the operation itself
+    /// (`GET /api/operations/{id}`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub operation: Option<crate::response::Operation>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]

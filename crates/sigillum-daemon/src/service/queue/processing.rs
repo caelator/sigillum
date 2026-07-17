@@ -388,6 +388,7 @@ impl SigillumService {
             failures_by_cause: tally.failures_by_cause,
             paused_reason,
             jobs: processed,
+            operation: None,
         })
     }
 }

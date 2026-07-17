@@ -641,6 +641,12 @@ pub struct MaintenanceRunResponse {
     pub treasury_automation: Option<TreasuryAutomationRunSummary>,
     pub deposits: Vec<EthStealthDeposit>,
     pub jobs: Vec<QueueJob>,
+    /// The background operation driving the cycle. Present only when the
+    /// request set `run_async: true`; the tally fields, `deposits`, and
+    /// `jobs` are then all zero/empty and per-stage progress is reported
+    /// through the operation itself (`GET /api/operations/{id}`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub operation: Option<Operation>,
 }
 
 fn default_ethereum_stealth_scheme_id() -> u64 {
