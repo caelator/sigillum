@@ -459,6 +459,22 @@ derived stealth address is always verified before key use. Queue jobs carry
 the record's stamp from enqueue time; jobs enqueued before the switch have no
 stamp and get the same probe treatment.
 
+**Watch-only detection.** Recipient-side detection follows the EIP-5564
+`checkStealthAddress` key signature: it needs only the stealth address, the
+ephemeral public key, the viewing private key, and the spending PUBLIC key.
+The announcer scan, `wallets/eth-stealth/check`, and the meta-address export
+therefore derive the watch-only view
+(`derive_watch_only_sigillum_ethereum_stealth_wallet`): the spending private
+key is touched only inside the core derivation helper — to compute its public
+half — and zeroized there, so no spending secret material ever enters the
+detection path. The spending private key is derived exclusively at
+sweep-signing time. Detection still requires the wallet compartment
+**unlocked** — the viewing key derives from the compartment master key just
+like the spending key does — so the win is privilege reduction in the scan
+path, not scanning a locked vault. Deliberately, there is no viewing-key
+cache: watch views are re-derived per operation so that locking the
+compartment keeps zeroizing every path to key material.
+
 To keep the boundary visible, the generate endpoint returns cautionary
 `warnings` when a meta-address cannot be matched to any of the vault's known
 stealth wallets, and when a supplied ephemeral key was already used for a

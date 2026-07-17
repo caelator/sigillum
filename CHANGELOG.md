@@ -175,6 +175,20 @@ from 1.0.0 onward, per the stability policy in `docs/stability.md`.
   the additive optional/defaulted convention field. Fluidkey's 64-byte X‖Y
   encoding remains explicitly incompatible and unsupported. See
   `docs/architecture.md#stealth-addresses-erc-5564`.
+- **Stealth deposit detection is watch-only** — The announcer scan
+  (`deposits/eth-stealth/scan-announcements`), `wallets/eth-stealth/check`,
+  and the meta-address export now run from the EIP-5564 `checkStealthAddress`
+  key material — viewing private key + spending PUBLIC key — via the new
+  `sigillum-core` watch-only API (`EthereumStealthWatchView`,
+  `derive_watch_only_sigillum_ethereum_stealth_wallet`,
+  `check_ethereum_stealth_address_watch_only`,
+  `check_ethereum_stealth_address_any_watch_only`; the full-wallet check entry
+  points delegate to the same core). The spending private key no longer
+  enters the detection path at all; it is derived exclusively at
+  sweep-signing time. Detection still requires the wallet compartment
+  unlocked (the viewing key derives from its master key), and there is
+  deliberately no viewing-key cache, so locking keeps zeroizing every path to
+  key material. Behavior, responses, and detection results are unchanged.
 - **Console data displays are human-readable** — Shared formatting helpers
   render wei hex as ETH/token units, unix seconds as locale timestamps, and
   chain ids as registry names, with raw values behind a details disclosure.
