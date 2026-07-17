@@ -219,6 +219,12 @@ pub struct WalletInventoryScanResponse {
     pub job: WalletDiscoveryJob,
     pub addresses: Vec<WalletInventoryAddress>,
     pub holdings: Vec<WalletAssetHolding>,
+    /// The background operation driving the scan. Present only when the
+    /// request set `run_async: true`; `addresses`/`holdings` are then empty
+    /// and the job is the accepted (still running) discovery job. Poll
+    /// `GET /api/operations/{id}` or `GET /api/discovery/jobs` for progress.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub operation: Option<crate::response::Operation>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -284,6 +290,10 @@ pub struct DiscoveryJobListResponse {
 pub struct DiscoveryJobMutationResponse {
     pub status: String,
     pub job: WalletDiscoveryJob,
+    /// The background operation started by a resume (or signaled by a
+    /// cancel). Absent when no live operation is involved.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub operation: Option<crate::response::Operation>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]

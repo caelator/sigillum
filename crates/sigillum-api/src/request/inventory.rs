@@ -133,6 +133,16 @@ pub struct WalletInventoryScanRequest {
     pub max_index: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub resume_from_latest_checkpoint: Option<bool>,
+    /// Run the scan as a background daemon operation instead of blocking the
+    /// request until the scan completes.
+    ///
+    /// When `true`, the daemon validates the request, starts an `Operation`
+    /// (see `GET /api/operations`) that drives the same scan pipeline in a
+    /// spawned task, and returns immediately with the accepted discovery job
+    /// and the operation tracking it. Absent or `false` keeps the original
+    /// synchronous behavior, so existing clients see no contract change.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub run_async: Option<bool>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub token_addresses: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]

@@ -66,6 +66,7 @@ impl SigillumService {
         Ok(DiscoveryJobMutationResponse {
             status: job.status.clone(),
             job,
+            operation: None,
         })
     }
 }

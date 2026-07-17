@@ -686,6 +686,7 @@ fn inventory_request_roundtrip() {
         gap_limit: Some(20),
         max_index: Some(250),
         resume_from_latest_checkpoint: Some(true),
+        run_async: Some(false),
         token_addresses: vec![
             "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48".to_string(),
             "0xdac17f958d2ee523a2206206994597c13d831ec7".to_string(),

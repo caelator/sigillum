@@ -337,6 +337,7 @@ fn scan_evm(args: &[String]) {
         gap_limit: parse_u32_flag(args, "--gap-limit"),
         max_index: parse_u32_flag(args, "--max-index"),
         resume_from_latest_checkpoint: flag_option(args, "--resume-from-latest-checkpoint"),
+        run_async: flag_option(args, "--run-async"),
         token_addresses: parse_multi_flag(args, "--token-address"),
         block_tag: parse_flag(args, "--block-tag"),
         probe_token_registry: flag_option(args, "--probe-token-registry"),

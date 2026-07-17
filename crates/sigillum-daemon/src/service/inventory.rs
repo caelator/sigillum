@@ -628,6 +628,7 @@ impl SigillumService {
             job,
             addresses: scanned_addresses,
             holdings: detected_holdings,
+            operation: None,
         })
     }
 }

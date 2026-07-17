@@ -746,7 +746,120 @@ fn test_wallet_inventory_scan_response_roundtrip() {
         job,
         addresses: vec![address],
         holdings: vec![holding],
+        operation: None,
     });
+}
+
+#[test]
+fn test_operation_dtos_roundtrip() {
+    let operation = Operation {
+        id: "op_1".to_string(),
+        kind: OPERATION_KIND_INVENTORY_SCAN_EVM.to_string(),
+        state: OPERATION_STATE_RUNNING.to_string(),
+        progress: OperationProgress {
+            processed: 7,
+            total: None,
+        },
+        related_ids: vec!["job_1".to_string()],
+        created_at_unix: 10,
+        updated_at_unix: 12,
+        completed_at_unix: None,
+        error: None,
+    };
+    roundtrip_test(operation.clone());
+    roundtrip_test(OperationListResponse {
+        operations: vec![operation.clone()],
+    });
+    roundtrip_test(OperationResponse {
+        operation: operation.clone(),
+    });
+    roundtrip_test(OperationMutationResponse {
+        status: OPERATION_STATE_CANCEL_REQUESTED.to_string(),
+        operation,
+    });
+
+    let finished = Operation {
+        id: "op_2".to_string(),
+        kind: OPERATION_KIND_INVENTORY_SCAN_EVM.to_string(),
+        state: OPERATION_STATE_FAILED.to_string(),
+        progress: OperationProgress {
+            processed: 3,
+            total: Some(10),
+        },
+        related_ids: Vec::new(),
+        created_at_unix: 20,
+        updated_at_unix: 25,
+        completed_at_unix: Some(25),
+        error: Some("provider rpc timeout".to_string()),
+    };
+    roundtrip_test(finished);
+}
+
+#[test]
+fn test_scan_and_discovery_mutation_responses_carry_optional_operation() {
+    let job = WalletDiscoveryJob {
+        id: "job_1".to_string(),
+        status: "running".to_string(),
+        source: "local-rpc".to_string(),
+        wallet_families: vec!["eth-xpub".to_string()],
+        wallet_profiles: vec!["account-xpub".to_string()],
+        provider_profiles: vec!["mainnet".to_string()],
+        chain_ids: vec![1],
+        gap_limit: 20,
+        max_index: 200,
+        addresses_scanned: 0,
+        active_addresses: 0,
+        holdings_detected: 0,
+        checkpoints: Vec::new(),
+        block_cursors: Vec::new(),
+        started_at_unix: 1,
+        completed_at_unix: None,
+        last_error: None,
+    };
+    let operation = Operation {
+        id: "op_1".to_string(),
+        kind: OPERATION_KIND_INVENTORY_SCAN_EVM.to_string(),
+        state: OPERATION_STATE_RUNNING.to_string(),
+        progress: OperationProgress {
+            processed: 0,
+            total: None,
+        },
+        related_ids: vec!["job_1".to_string()],
+        created_at_unix: 1,
+        updated_at_unix: 1,
+        completed_at_unix: None,
+        error: None,
+    };
+    roundtrip_test(WalletInventoryScanResponse {
+        job: job.clone(),
+        addresses: Vec::new(),
+        holdings: Vec::new(),
+        operation: Some(operation.clone()),
+    });
+    roundtrip_test(DiscoveryJobMutationResponse {
+        status: "running".to_string(),
+        job,
+        operation: Some(operation),
+    });
+
+    // Legacy wire payloads without the new optional field still decode.
+    let legacy: DiscoveryJobMutationResponse = serde_json::from_value(serde_json::json!({
+        "status": "canceled",
+        "job": {
+            "id": "job_9",
+            "status": "canceled",
+            "source": "local-rpc",
+            "gap_limit": 20,
+            "max_index": 200,
+            "addresses_scanned": 3,
+            "active_addresses": 1,
+            "holdings_detected": 0,
+            "started_at_unix": 5
+        }
+    }))
+    .unwrap();
+    assert_eq!(legacy.status, "canceled");
+    assert!(legacy.operation.is_none());
 }
 
 #[test]

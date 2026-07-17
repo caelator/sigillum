@@ -592,6 +592,9 @@ pub use wallet_domains::*;
 mod inventory;
 pub use inventory::*;
 
+mod operations;
+pub use operations::*;
+
 mod consolidation_export;
 pub use consolidation_export::*;
 
