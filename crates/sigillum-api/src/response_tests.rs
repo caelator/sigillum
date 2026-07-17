@@ -1741,6 +1741,12 @@ fn test_maintenance_run_response_roundtrip() {
             receipt_timeout: 0,
         },
         treasury_automation: None,
+        one_time_receive: Some(OneTimeReceiveRunSummary {
+            observed_allocations: 2,
+            enqueued_sweeps: 1,
+            retired_allocations: 1,
+            purged_allocations: 0,
+        }),
         deposits: vec![],
         jobs: vec![],
         operation: None,
@@ -2106,6 +2112,13 @@ fn sample_receive_allocation() -> TreasuryReceiveAllocation {
         created_at_unix: 10,
         retired_at_unix: None,
         counterparty_id: None,
+        one_time: false,
+        sweep_destination_address: None,
+        min_sweep_amount_hex: None,
+        purge_after_sweep: false,
+        sweep_job_id: None,
+        lifecycle_state: None,
+        sweep_blocker: None,
     }
 }
 
@@ -2121,6 +2134,30 @@ fn test_treasury_receive_allocation_responses_roundtrip() {
     roundtrip_test(TreasuryReceiveAllocation {
         counterparty_id: Some("cp_1".into()),
         ..sample_receive_allocation()
+    });
+    // Plan task 3.3: one-time allocations roundtrip with their policy fields,
+    // the sweep-job marker, and the read-time lifecycle derivation.
+    roundtrip_test(TreasuryReceiveAllocation {
+        one_time: true,
+        sweep_destination_address: Some("0x2222222222222222222222222222222222222222".into()),
+        min_sweep_amount_hex: Some("0xde0b6b3a7640000".into()),
+        purge_after_sweep: true,
+        sweep_job_id: Some("job_1".into()),
+        lifecycle_state: Some("sweep_queued".into()),
+        ..sample_receive_allocation()
+    });
+    roundtrip_test(TreasuryReceiveAllocation {
+        one_time: true,
+        sweep_destination_address: Some("0x2222222222222222222222222222222222222222".into()),
+        lifecycle_state: Some("watching".into()),
+        sweep_blocker: Some("execution_gates".into()),
+        ..sample_receive_allocation()
+    });
+    roundtrip_test(OneTimeReceiveRunSummary {
+        observed_allocations: 2,
+        enqueued_sweeps: 1,
+        retired_allocations: 1,
+        purged_allocations: 1,
     });
     roundtrip_test(TreasuryReceiveAllocationListResponse {
         allocations: vec![sample_receive_allocation()],
@@ -2144,6 +2181,32 @@ fn test_treasury_receive_allocation_responses_roundtrip() {
     let legacy: TreasuryReceiveAllocation = serde_json::from_value(json).unwrap();
     assert_eq!(legacy.chain_id, 1);
     assert!(legacy.chain_id_assumed);
+    // Records persisted before plan task 3.3 lack the one-time fields entirely:
+    // they load with the mode off and no lifecycle derivation.
+    let mut json = serde_json::to_value(sample_receive_allocation()).unwrap();
+    let object = json.as_object_mut().unwrap();
+    object.remove("one_time");
+    object.remove("purge_after_sweep");
+    let legacy: TreasuryReceiveAllocation = serde_json::from_value(json).unwrap();
+    assert!(!legacy.one_time);
+    assert!(!legacy.purge_after_sweep);
+    assert_eq!(legacy.sweep_destination_address, None);
+    assert_eq!(legacy.min_sweep_amount_hex, None);
+    assert_eq!(legacy.sweep_job_id, None);
+    assert_eq!(legacy.lifecycle_state, None);
+    assert_eq!(legacy.sweep_blocker, None);
+    // Maintenance responses produced before the one-time stage existed lack
+    // the summary field.
+    let legacy_maintenance: MaintenanceRunResponse = serde_json::from_str(
+        r#"{
+            "status": "ok",
+            "refreshed": 0, "detected": 0, "queued": 0, "processed": 0,
+            "succeeded": 0, "failed": 0,
+            "deposits": [], "jobs": []
+        }"#,
+    )
+    .unwrap();
+    assert_eq!(legacy_maintenance.one_time_receive, None);
     roundtrip_test(ReceivingRefreshResponse {
         generated_at_unix: 99,
         addresses_requested: 3,

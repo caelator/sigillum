@@ -543,13 +543,24 @@ pub(crate) enum AuditEventSpec {
     },
     /// Derived addresses are intentionally omitted: the audit log records
     /// that an allocation happened, not which address it produced.
+    /// `one_time` (plan task 3.3) marks allocations under the auto-watch →
+    /// auto-sweep → retire lifecycle; absent on pre-3.3 events.
     #[serde(rename = "treasury.receive.allocate")]
     TreasuryReceiveAllocate {
         wallet_profile: String,
         purpose: String,
+        #[serde(default)]
+        one_time: bool,
     },
     #[serde(rename = "treasury.receive.rotate")]
     TreasuryReceiveRotate { id: String },
+    /// Plan task 3.3: a one-time allocation was automatically retired after
+    /// its auto-sweep settled (the sweep job's terminal success state —
+    /// `sent` for the legacy EthSeed family, `confirmed` under W7.4
+    /// finality). Same index-never-reissued semantics as rotate-retire, but
+    /// no replacement is issued.
+    #[serde(rename = "treasury.receive.retire")]
+    TreasuryReceiveRetire { id: String, reason: String },
     /// A RETIRED receive allocation was permanently purged, forgetting the
     /// address → purpose → counterparty linkage it recorded. The counterparty
     /// record itself always remains.
@@ -697,6 +708,7 @@ impl AuditEventSpec {
             Self::TreasuryAutomationRun { .. } => "treasury.automation_run",
             Self::TreasuryReceiveAllocate { .. } => "treasury.receive.allocate",
             Self::TreasuryReceiveRotate { .. } => "treasury.receive.rotate",
+            Self::TreasuryReceiveRetire { .. } => "treasury.receive.retire",
             Self::TreasuryReceivePurge { .. } => "treasury.receive.purge",
             Self::TreasuryPartyCreate { .. } => "treasury.party.create",
             Self::TreasuryPartyDelete { .. } => "treasury.party.delete",
@@ -1217,8 +1229,16 @@ impl AuditEventSpec {
             Self::TreasuryReceiveAllocate {
                 wallet_profile,
                 purpose,
-            } => json!({ "wallet_profile": wallet_profile, "purpose": purpose }),
+                one_time,
+            } => json!({
+                "wallet_profile": wallet_profile,
+                "purpose": purpose,
+                "one_time": one_time,
+            }),
             Self::TreasuryReceiveRotate { id } => json!({ "id": id }),
+            Self::TreasuryReceiveRetire { id, reason } => {
+                json!({ "id": id, "reason": reason })
+            }
             Self::TreasuryReceivePurge {
                 id,
                 counterparty_binding_removed,

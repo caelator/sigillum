@@ -13,6 +13,12 @@
 //!    `deposit_default_refresh_limit`), at most once per
 //!    `SIGILLUM_SCHEDULER_REFRESH_SECS` (default 5 min), mirroring the
 //!    maintenance refresh path including its auto-enqueue default;
+//! 2.5 one-time receive lifecycle (plan task 3.3) — settle confirmed
+//!    one-time sweeps (retire + optional purge), observe one-time
+//!    allocation balances on the same refresh cadence (auto-watch), and
+//!    enqueue due one-time sweeps (dedupe + Sweep-family gates + destination
+//!    policy + cross-party linkage, mirroring the stealth deposit sweep
+//!    rules);
 //! 3. queue drain — a bounded batch of [`DRAIN_JOB_LIMIT`] jobs via
 //!    [`SigillumService::process_queue_state`], so the durable
 //!    `prepared`/`submitted_unknown` barriers, the never-re-sign rule, the
@@ -130,9 +136,7 @@ impl SchedulerConfig {
         }
         Self {
             enabled: !disabled,
-            queue_tick_secs: queue_tick_secs
-                .unwrap_or(DEFAULT_QUEUE_TICK_SECS)
-                .max(1),
+            queue_tick_secs: queue_tick_secs.unwrap_or(DEFAULT_QUEUE_TICK_SECS).max(1),
             refresh_secs: refresh_secs.unwrap_or(DEFAULT_REFRESH_SECS).max(1),
         }
     }
@@ -185,9 +189,8 @@ async fn run_loop(state: Arc<AppState>, config: SchedulerConfig) {
             .min(MAX_CYCLE_BACKOFF_SECS);
         tokio::time::sleep(Duration::from_secs(delay_secs)).await;
 
-        let refresh_due = last_refresh_at_unix.is_none_or(|last| {
-            now_unix().saturating_sub(last) >= config.refresh_secs
-        });
+        let refresh_due = last_refresh_at_unix
+            .is_none_or(|last| now_unix().saturating_sub(last) >= config.refresh_secs);
         match tokio::time::timeout(CYCLE_BUDGET, run_cycle(&service, &state, refresh_due)).await {
             Ok(Ok(report)) => {
                 if report.refresh_ran {
@@ -248,18 +251,29 @@ async fn run_cycle(
 
     // Read-only due-work pre-check, before touching the guard.
     let paused = service.queue_execution_paused()?;
-    let queue = crate::queue_store::load_queue(&state.base_dir).map_err(|error| {
-        super::ServiceError::internal(format!("Failed to load queue: {error}"))
-    })?;
+    let queue = crate::queue_store::load_queue(&state.base_dir)
+        .map_err(|error| super::ServiceError::internal(format!("Failed to load queue: {error}")))?;
     let drain_due = !paused && super::queue::queue_due_stats(&queue, now_unix()).due_now > 0;
-    let refresh_wanted = refresh_due
-        && !crate::deposits::load_deposits(&state.base_dir)
+    // Plan task 3.3: active one-time allocations are due work on every tick
+    // (settle/enqueue evaluation); their balance observation rides the
+    // refresh cadence exactly like the stealth-deposit refresh.
+    let one_time_tracked = crate::inventory::load_wallet_inventory(&state.base_dir)
+        .map_err(|error| {
+            super::ServiceError::internal(format!("Failed to load wallet inventory: {error}"))
+        })?
+        .receive_allocations
+        .iter()
+        .any(|allocation| allocation.one_time && allocation.status == "active");
+    let refresh_wanted = refresh_due && {
+        let deposits_nonempty = !crate::deposits::load_deposits(&state.base_dir)
             .map_err(|error| {
                 super::ServiceError::internal(format!("Failed to load deposits: {error}"))
             })?
             .eth_stealth
             .is_empty();
-    if !drain_due && !refresh_wanted {
+        deposits_nonempty || one_time_tracked
+    };
+    if !drain_due && !refresh_wanted && !one_time_tracked {
         return Ok(CycleReport {
             outcome: OUTCOME_IDLE,
             refresh_ran: false,
@@ -284,9 +298,8 @@ async fn run_cycle(
     let mut deposits = crate::deposits::load_deposits(&state.base_dir).map_err(|error| {
         super::ServiceError::internal(format!("Failed to load deposits: {error}"))
     })?;
-    let mut queue = crate::queue_store::load_queue(&state.base_dir).map_err(|error| {
-        super::ServiceError::internal(format!("Failed to load queue: {error}"))
-    })?;
+    let mut queue = crate::queue_store::load_queue(&state.base_dir)
+        .map_err(|error| super::ServiceError::internal(format!("Failed to load queue: {error}")))?;
 
     let mut stages = Vec::new();
     if automation.is_some() {
@@ -317,6 +330,17 @@ async fn run_cycle(
         stages.push("stage:deposit_refresh".to_string());
     }
 
+    // Stage 2.5 — one-time receive lifecycle (plan task 3.3): settle
+    // confirmed sweeps (retire + optional purge), observe balances on the
+    // refresh cadence (auto-watch), enqueue due sweeps. Everything it
+    // enqueues drains under the same gates and barriers in stage 3.
+    let one_time = service
+        .advance_one_time_receive_allocations_state(session.token(), &mut queue, refresh_due)
+        .await?;
+    if one_time.tracked {
+        stages.push("stage:one_time_receive".to_string());
+    }
+
     // Stage 3 — queue drain (bounded batch). The kill switch is re-checked
     // here under the guard and again by the drain loop between jobs, and
     // the execution gates gate at drain time exactly as today.
@@ -339,15 +363,14 @@ async fn run_cycle(
     }
 
     let _ = super::deposits::sync_eth_stealth_deposits_with_queue(&mut deposits, &queue);
-    crate::queue_store::save_queue(&state.base_dir, &queue).map_err(|error| {
-        super::ServiceError::internal(format!("Failed to save queue: {error}"))
-    })?;
+    crate::queue_store::save_queue(&state.base_dir, &queue)
+        .map_err(|error| super::ServiceError::internal(format!("Failed to save queue: {error}")))?;
     crate::deposits::save_deposits(&state.base_dir, &deposits).map_err(|error| {
         super::ServiceError::internal(format!("Failed to save deposits: {error}"))
     })?;
 
     let processed_jobs = drain.as_ref().map_or(0, |drain| drain.processed);
-    let advanced = refreshed + processed_jobs;
+    let advanced = refreshed + processed_jobs + one_time.advanced_work();
     if advanced == 0 {
         return Ok(CycleReport {
             outcome: OUTCOME_IDLE,
@@ -444,7 +467,10 @@ mod tests {
 
         for value in ["1", "true", "TRUE", "yes"] {
             let config = SchedulerConfig::from_pairs([("SIGILLUM_SCHEDULER_DISABLE", value)]);
-            assert!(!config.enabled, "disable value {value:?} must turn the loop off");
+            assert!(
+                !config.enabled,
+                "disable value {value:?} must turn the loop off"
+            );
             assert!(!config.status_baseline().enabled);
         }
 

@@ -1416,6 +1416,12 @@ impl Validate for crate::request::TreasuryReceiveAllocateRequest {
         check_len("purpose", &self.purpose, MAX_LABEL)?;
         check_optional_len("label", &self.label, MAX_LABEL)?;
         check_optional_len("counterparty_id", &self.counterparty_id, MAX_ID)?;
+        check_optional_len(
+            "sweep_destination_address",
+            &self.sweep_destination_address,
+            MAX_ADDRESS,
+        )?;
+        check_optional_len("min_sweep_amount_hex", &self.min_sweep_amount_hex, MAX_HEX)?;
         Ok(())
     }
 }

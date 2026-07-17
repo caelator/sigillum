@@ -38,6 +38,19 @@ pub(in crate::service) fn queue_job_failed_state(state: &str) -> bool {
     normalize_queue_state(state) == QUEUE_STATE_FAILED_TERMINAL
 }
 
+/// Terminal SUCCESS for a sweep job: `confirmed` (W7.4 finality, reached by
+/// `PlanStepExecution` jobs) or `sent` — the legacy `EthSeed*`/`EthStealth*`
+/// families' own terminal state ("broadcast, done"; those families never
+/// poll receipts, see `plan_steps/receipts.rs`). The one-time receive
+/// lifecycle (plan task 3.3) retires its allocation when its sweep job
+/// reaches either.
+pub(in crate::service) fn queue_job_sweep_settled_state(state: &str) -> bool {
+    matches!(
+        normalize_queue_state(state),
+        QUEUE_STATE_SENT | QUEUE_STATE_CONFIRMED
+    )
+}
+
 pub(in crate::service) fn queue_job_operator_action_required(state: &str) -> bool {
     normalize_queue_state(state) == QUEUE_STATE_OPERATOR_ACTION_REQUIRED
 }

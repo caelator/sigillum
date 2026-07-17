@@ -264,6 +264,13 @@ mod tests {
             created_at_unix: 1,
             retired_at_unix: None,
             counterparty_id: None,
+            one_time: false,
+            sweep_destination_address: None,
+            min_sweep_amount_hex: None,
+            purge_after_sweep: false,
+            sweep_job_id: None,
+            lifecycle_state: None,
+            sweep_blocker: None,
         }
     }
 

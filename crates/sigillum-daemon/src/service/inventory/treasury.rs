@@ -46,7 +46,7 @@ use super::{
 
 const DEFAULT_NATIVE_SYMBOL: &str = "ETH";
 pub(super) const RECEIVE_STATUS_ACTIVE: &str = "active";
-const RECEIVE_STATUS_RETIRED: &str = "retired";
+pub(super) const RECEIVE_STATUS_RETIRED: &str = "retired";
 const RECEIVING_LINKAGE_WARNING: &str = "Sweeping here would link this payer with another party. Set a distinct per-party sweep destination.";
 const DEFAULT_HOT_FLOOR_WEI_HEX: &str = "0xde0b6b3a7640000";
 const DEFAULT_HOT_TARGET_WEI_HEX: &str = "0xde0b6b3a7640000";
@@ -402,6 +402,15 @@ fn receiving_items_native_total(items: &[ReceivingItem]) -> [u8; 32] {
         }
     }
     total
+}
+
+/// Validated one-time allocation policy (plan task 3.3): the auto-sweep
+/// destination (normalized), the optional sweep threshold, and whether the
+/// record is purged after the sweep confirms. Carried over on rotation.
+struct OneTimePolicy {
+    sweep_destination_address: String,
+    min_sweep_amount_hex: Option<String>,
+    purge_after_sweep: bool,
 }
 
 impl SigillumService {
@@ -1044,9 +1053,17 @@ impl SigillumService {
     ) -> ServiceResult<TreasuryReceiveAllocationListResponse> {
         let _ = self.require_session(token)?;
         let state = load_inventory_state(&self.state.base_dir)?;
-        Ok(TreasuryReceiveAllocationListResponse {
-            allocations: state.receive_allocations,
-        })
+        let queue = crate::queue_store::load_queue(&self.state.base_dir)
+            .map_err(|error| ServiceError::internal(format!("Failed to load queue: {error}")))?;
+        let pause_latched = self.state.queue_execution_pause_latched();
+        let allocations = state
+            .receive_allocations
+            .iter()
+            .map(|allocation| {
+                super::one_time::with_one_time_lifecycle(allocation, &state, &queue, pause_latched)
+            })
+            .collect();
+        Ok(TreasuryReceiveAllocationListResponse { allocations })
     }
 
     pub(crate) fn list_parties(
@@ -1188,6 +1205,12 @@ impl SigillumService {
     /// counterparty only ever sees an address that has never been handed out
     /// for another purpose. Fresh-per-purpose addresses keep unrelated
     /// payments unlinkable on-chain.
+    ///
+    /// Plan task 3.3: `one_time` attaches the auto-watch → auto-sweep →
+    /// retire lifecycle (see `one_time.rs`). The sweep destination is
+    /// required and must pass the destination allowlist/policy rules like
+    /// any sweep destination; the wallet profile must be a signing (eth-seed)
+    /// profile because the auto-sweep signs locally.
     pub(crate) async fn allocate_treasury_receive_address(
         &self,
         token: Option<&str>,
@@ -1198,6 +1221,47 @@ impl SigillumService {
         let wallet_profile = trimmed_required("wallet_profile", &body.wallet_profile)?;
         let purpose = trimmed_required("purpose", &body.purpose)?;
         let label = body.label.and_then(trimmed_optional);
+
+        let one_time = body.one_time.unwrap_or(false);
+        if !one_time
+            && (body.sweep_destination_address.is_some()
+                || body.min_sweep_amount_hex.is_some()
+                || body.purge_after_sweep.is_some())
+        {
+            return Err(ServiceError::bad_request(
+                "sweep_destination_address, min_sweep_amount_hex, and purge_after_sweep require one_time.",
+            ));
+        }
+        let one_time_policy = if one_time {
+            let destination = body
+                .sweep_destination_address
+                .as_deref()
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .ok_or_else(|| {
+                    ServiceError::bad_request(
+                        "sweep_destination_address is required when one_time is set.",
+                    )
+                })?;
+            let destination = normalize_address(destination)?;
+            let min_sweep_amount_hex =
+                validated_cap_hex("min_sweep_amount_hex", body.min_sweep_amount_hex)?;
+            // Same destination allowlist/policy rules as any sweep
+            // destination (re-checked at every enqueue evaluation too).
+            self.authorize_transaction_policy(TransactionPolicyCheck {
+                kind: TransactionPolicyKind::RoutedTransfer,
+                destination_address: Some(&destination),
+                asset_kind: "native",
+                amount_hex: min_sweep_amount_hex.as_deref().unwrap_or("0x0"),
+            })?;
+            Some(OneTimePolicy {
+                sweep_destination_address: destination,
+                min_sweep_amount_hex,
+                purge_after_sweep: body.purge_after_sweep.unwrap_or(false),
+            })
+        } else {
+            None
+        };
 
         let mut state = load_inventory_state(&self.state.base_dir)?;
         let counterparty_id = body.counterparty_id.and_then(trimmed_optional);
@@ -1215,6 +1279,7 @@ impl SigillumService {
             purpose,
             label,
             counterparty_id,
+            one_time_policy,
         )?;
         save_inventory_state(&self.state.base_dir, &state)?;
 
@@ -1223,6 +1288,7 @@ impl SigillumService {
             AuditEventSpec::TreasuryReceiveAllocate {
                 wallet_profile: allocation.wallet_profile.clone(),
                 purpose: allocation.purpose.clone(),
+                one_time: allocation.one_time,
             },
         )?;
         if let Some(name) = counterparty_name {
@@ -1232,6 +1298,7 @@ impl SigillumService {
             )?;
         }
 
+        let allocation = self.with_lifecycle_fields(&state, &allocation)?;
         Ok(TreasuryReceiveAllocationMutationResponse {
             status: "allocated".into(),
             allocation,
@@ -1273,6 +1340,29 @@ impl SigillumService {
         let purpose = existing.purpose.clone();
         let label = existing.label.clone();
         let counterparty_id = existing.counterparty_id.clone();
+        // Rotation carries the one-time policy to the replacement: rotate
+        // means "same promise, fresh address". A one-time record always has a
+        // destination (creation validates); a blank one means corruption.
+        let one_time_policy = if existing.one_time {
+            let destination = existing
+                .sweep_destination_address
+                .as_deref()
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .ok_or_else(|| {
+                    ServiceError::bad_request(
+                        "One-time receive allocation is missing its sweep destination.",
+                    )
+                })?
+                .to_string();
+            Some(OneTimePolicy {
+                sweep_destination_address: destination,
+                min_sweep_amount_hex: existing.min_sweep_amount_hex.clone(),
+                purge_after_sweep: existing.purge_after_sweep,
+            })
+        } else {
+            None
+        };
         let counterparty_name = counterparty_id.as_deref().and_then(|id| {
             state
                 .parties
@@ -1287,6 +1377,7 @@ impl SigillumService {
             purpose,
             label,
             counterparty_id,
+            one_time_policy,
         )?;
         save_inventory_state(&self.state.base_dir, &state)?;
 
@@ -1301,6 +1392,7 @@ impl SigillumService {
             )?;
         }
 
+        let allocation = self.with_lifecycle_fields(&state, &allocation)?;
         Ok(TreasuryReceiveAllocationMutationResponse {
             status: "rotated".into(),
             allocation,
@@ -1364,6 +1456,10 @@ impl SigillumService {
     /// past the highest index either previously allocated or already observed
     /// in scanned inventory, so fresh allocations never collide with
     /// addresses the treasury has used before.
+    ///
+    /// One-time mode (plan task 3.3) requires a signing wallet: the
+    /// auto-sweep signs from the seed vault, so xpub/watch-only profiles are
+    /// rejected up front rather than failing at sweep time.
     fn issue_receive_allocation(
         &self,
         state: &mut WalletInventoryState,
@@ -1371,6 +1467,7 @@ impl SigillumService {
         purpose: String,
         label: Option<String>,
         counterparty_id: Option<String>,
+        one_time_policy: Option<OneTimePolicy>,
     ) -> ServiceResult<TreasuryReceiveAllocation> {
         let registry = crate::profiles::load_profiles(&self.state.base_dir)
             .map_err(|error| ServiceError::internal(format!("Failed to load profiles: {error}")))?;
@@ -1386,6 +1483,11 @@ impl SigillumService {
         let Some(wallet) = wallets.into_iter().next() else {
             return Err(ServiceError::not_found("Wallet profile not found."));
         };
+        if one_time_policy.is_some() && wallet.family != WALLET_FAMILY_ETH_SEED {
+            return Err(ServiceError::bad_request(
+                "One-time allocations require an eth-seed wallet profile (the auto-sweep signs locally).",
+            ));
+        }
         let chain_id = provider_chain_id_for_discovery_wallet(&registry, &wallet)?;
 
         let next_index = next_receive_index(
@@ -1400,6 +1502,16 @@ impl SigillumService {
 
         let derived =
             derive_discovery_wallet_address(&wallet, next_index).map_err(map_xpub_error)?;
+        let (one_time, sweep_destination_address, min_sweep_amount_hex, purge_after_sweep) =
+            match one_time_policy {
+                Some(policy) => (
+                    true,
+                    Some(policy.sweep_destination_address),
+                    policy.min_sweep_amount_hex,
+                    policy.purge_after_sweep,
+                ),
+                None => (false, None, None, false),
+            };
         let allocation = TreasuryReceiveAllocation {
             id: random_id(),
             wallet_family: wallet.family.clone(),
@@ -1415,9 +1527,36 @@ impl SigillumService {
             created_at_unix: now_unix(),
             retired_at_unix: None,
             counterparty_id,
+            one_time,
+            sweep_destination_address,
+            min_sweep_amount_hex,
+            purge_after_sweep,
+            sweep_job_id: None,
+            lifecycle_state: None,
+            sweep_blocker: None,
         };
         state.receive_allocations.push(allocation.clone());
         Ok(allocation)
+    }
+
+    /// Clone an allocation with its read-time one-time lifecycle fields
+    /// populated (no-op for non-one-time records). Never mutates the store.
+    fn with_lifecycle_fields(
+        &self,
+        state: &WalletInventoryState,
+        allocation: &TreasuryReceiveAllocation,
+    ) -> ServiceResult<TreasuryReceiveAllocation> {
+        if !allocation.one_time {
+            return Ok(allocation.clone());
+        }
+        let queue = crate::queue_store::load_queue(&self.state.base_dir)
+            .map_err(|error| ServiceError::internal(format!("Failed to load queue: {error}")))?;
+        Ok(super::one_time::with_one_time_lifecycle(
+            allocation,
+            state,
+            &queue,
+            self.state.queue_execution_pause_latched(),
+        ))
     }
 }
 
@@ -2020,6 +2159,13 @@ mod tests {
             created_at_unix: 1,
             retired_at_unix: None,
             counterparty_id: None,
+            one_time: false,
+            sweep_destination_address: None,
+            min_sweep_amount_hex: None,
+            purge_after_sweep: false,
+            sweep_job_id: None,
+            lifecycle_state: None,
+            sweep_blocker: None,
         }
     }
 
@@ -2072,6 +2218,13 @@ mod tests {
             created_at_unix,
             retired_at_unix: (status == RECEIVE_STATUS_RETIRED).then_some(created_at_unix + 1),
             counterparty_id: counterparty_id.map(str::to_string),
+            one_time: false,
+            sweep_destination_address: None,
+            min_sweep_amount_hex: None,
+            purge_after_sweep: false,
+            sweep_job_id: None,
+            lifecycle_state: None,
+            sweep_blocker: None,
         }
     }
 

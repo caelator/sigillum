@@ -1454,18 +1454,41 @@ fn test_treasury_receive_allocate_request_roundtrip() {
         purpose: "counterparty-acme".to_string(),
         label: Some("Acme invoices".to_string()),
         counterparty_id: None,
+        one_time: None,
+        sweep_destination_address: None,
+        min_sweep_amount_hex: None,
+        purge_after_sweep: None,
     });
     roundtrip_test(TreasuryReceiveAllocateRequest {
         wallet_profile: "seed-main".to_string(),
         purpose: "grant-payout".to_string(),
         label: None,
         counterparty_id: None,
+        one_time: None,
+        sweep_destination_address: None,
+        min_sweep_amount_hex: None,
+        purge_after_sweep: None,
     });
     roundtrip_test(TreasuryReceiveAllocateRequest {
         wallet_profile: "seed-main".to_string(),
         purpose: "counterparty-acme".to_string(),
         label: None,
         counterparty_id: Some("cp_1".to_string()),
+        one_time: None,
+        sweep_destination_address: None,
+        min_sweep_amount_hex: None,
+        purge_after_sweep: None,
+    });
+    // Plan task 3.3 one-time mode fields.
+    roundtrip_test(TreasuryReceiveAllocateRequest {
+        wallet_profile: "seed-main".to_string(),
+        purpose: "one-time-invoice".to_string(),
+        label: None,
+        counterparty_id: Some("cp_1".to_string()),
+        one_time: Some(true),
+        sweep_destination_address: Some("0x2222222222222222222222222222222222222222".to_string()),
+        min_sweep_amount_hex: Some("0xde0b6b3a7640000".to_string()),
+        purge_after_sweep: Some(true),
     });
 }
 

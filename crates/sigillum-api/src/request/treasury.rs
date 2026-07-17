@@ -81,6 +81,22 @@ pub struct TreasuryReceiveAllocateRequest {
     pub label: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub counterparty_id: Option<String>,
+    /// Plan task 3.3 one-time mode: allocate → auto-watch → auto-sweep-on-funds
+    /// → retire → optional purge. One-time fields are rejected when this is
+    /// not `true`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub one_time: Option<bool>,
+    /// Required when `one_time`: the auto-sweep destination, validated against
+    /// the destination allowlist like any sweep destination.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sweep_destination_address: Option<String>,
+    /// One-time sweep threshold (0x-prefixed uint256 wei); below it funds sit.
+    /// Unset means any nonzero balance triggers the sweep.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub min_sweep_amount_hex: Option<String>,
+    /// One-time mode: purge the record after the sweep confirms (default false).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub purge_after_sweep: Option<bool>,
 }
 
 /// Retire an active receive allocation and issue the next index for the same

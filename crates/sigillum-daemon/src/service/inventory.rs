@@ -18,6 +18,7 @@ mod nft_approval_discovery;
 mod nft_discovery;
 mod nft_metadata;
 mod observation;
+pub(in crate::service) mod one_time;
 mod partition;
 mod permit2_discovery;
 mod plan_execution_enqueue;

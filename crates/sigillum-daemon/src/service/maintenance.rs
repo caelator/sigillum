@@ -24,7 +24,12 @@ use treasury_automation::merge_failure_breakdowns;
 /// a canceled cycle stops before the next stage with every completed
 /// stage's effects durably persisted (automation persists its own plans;
 /// the deposit refresh is saved before the cycle returns).
-const MAINTENANCE_STAGES: [&str; 3] = ["treasury_automation", "deposit_refresh", "queue_drain"];
+const MAINTENANCE_STAGES: [&str; 4] = [
+    "treasury_automation",
+    "deposit_refresh",
+    "one_time_receive",
+    "queue_drain",
+];
 
 /// `MaintenanceRunResponse::status` value when the cycle stopped early
 /// because its tracking operation was canceled between stages. Previously
@@ -82,6 +87,7 @@ impl SigillumService {
                 confirmed: 0,
                 failures_by_cause: Default::default(),
                 treasury_automation: None,
+                one_time_receive: None,
                 deposits: Vec::new(),
                 jobs: Vec::new(),
                 operation: Some(operation),
@@ -159,7 +165,7 @@ impl SigillumService {
         if operation.cancellation_requested() {
             self.state
                 .finish_operation(operation.id(), OPERATION_STATE_CANCELED, None);
-            return Ok(self.canceled_maintenance_response(None, None, None, Vec::new()));
+            return Ok(self.canceled_maintenance_response(None, None, None, None, Vec::new()));
         }
         let automation = self.run_treasury_automation(token).await?;
         self.state.operation_set_progress(operation.id(), 1);
@@ -170,7 +176,13 @@ impl SigillumService {
         if operation.cancellation_requested() {
             self.state
                 .finish_operation(operation.id(), OPERATION_STATE_CANCELED, None);
-            return Ok(self.canceled_maintenance_response(automation, None, None, Vec::new()));
+            return Ok(self.canceled_maintenance_response(
+                automation,
+                None,
+                None,
+                None,
+                Vec::new(),
+            ));
         }
 
         let _guard = self.state.operation_guard().await;
@@ -196,7 +208,50 @@ impl SigillumService {
             .await?;
         self.state.operation_set_progress(operation.id(), 2);
 
-        // Stage 3 — queue drain. Cancel checkpoint: the refresh's effects
+        // Stage 3 — one-time receive lifecycle (plan task 3.3). Cancel
+        // checkpoint: the refresh's effects are durable; nothing of this
+        // stage's settle/observe/enqueue or the drain has started.
+        if operation.cancellation_requested() {
+            let _ = super::deposits::sync_eth_stealth_deposits_with_queue(&mut deposits, &queue);
+            crate::queue_store::save_queue(&self.state.base_dir, &queue).map_err(|error| {
+                super::ServiceError::internal(format!("Failed to save queue: {error}"))
+            })?;
+            crate::deposits::save_deposits(&self.state.base_dir, &deposits).map_err(|error| {
+                super::ServiceError::internal(format!("Failed to save deposits: {error}"))
+            })?;
+            self.record_audit(
+                None,
+                AuditEventSpec::MaintenanceRun {
+                    refreshed: refresh.processed,
+                    detected: refresh.detected,
+                    queued: refresh.queued,
+                    processed: 0,
+                    succeeded: 0,
+                    blocked: 0,
+                    retrying: 0,
+                    failed: 0,
+                },
+            )?;
+            self.state
+                .finish_operation(operation.id(), OPERATION_STATE_CANCELED, None);
+            return Ok(self.canceled_maintenance_response(
+                automation,
+                Some((refresh.processed, refresh.detected, refresh.queued)),
+                None,
+                None,
+                deposits.eth_stealth,
+            ));
+        }
+        // Settle confirmed sweeps (retire + optional purge), observe balances
+        // (a manual maintenance run always observes), enqueue due sweeps —
+        // the drain below picks up whatever was enqueued, under the same
+        // gates and durable barriers as operator-enqueued jobs.
+        let one_time = self
+            .advance_one_time_receive_allocations_state(token, &mut queue, true)
+            .await?;
+        self.state.operation_set_progress(operation.id(), 3);
+
+        // Stage 4 — queue drain. Cancel checkpoint: the refresh's effects
         // (including auto-enqueued jobs) are durably saved before returning,
         // exactly like the completed path. The drain itself is NOT canceled
         // mid-run here (maintenance cancel is a between-stages boundary);
@@ -228,6 +283,7 @@ impl SigillumService {
             return Ok(self.canceled_maintenance_response(
                 automation,
                 Some((refresh.processed, refresh.detected, refresh.queued)),
+                Some(one_time.summary()),
                 None,
                 deposits.eth_stealth,
             ));
@@ -245,7 +301,7 @@ impl SigillumService {
                 None,
             )
             .await?;
-        self.state.operation_set_progress(operation.id(), 3);
+        self.state.operation_set_progress(operation.id(), 4);
         let _ = super::deposits::sync_eth_stealth_deposits_with_queue(&mut deposits, &queue);
 
         crate::queue_store::save_queue(&self.state.base_dir, &queue).map_err(|error| {
@@ -291,6 +347,7 @@ impl SigillumService {
             confirmed: processed.confirmed,
             failures_by_cause,
             treasury_automation: automation.as_ref().map(|outcome| outcome.summary.clone()),
+            one_time_receive: Some(one_time.summary()),
             deposits: deposits.eth_stealth,
             jobs: processed.jobs,
             operation: None,
@@ -303,6 +360,7 @@ impl SigillumService {
         &self,
         automation: Option<treasury_automation::TreasuryAutomationOutcome>,
         refresh: Option<(usize, usize, usize)>,
+        one_time: Option<sigillum_api::OneTimeReceiveRunSummary>,
         processed: Option<sigillum_api::QueueProcessResponse>,
         deposits: Vec<sigillum_api::EthStealthDeposit>,
     ) -> MaintenanceRunResponse {
@@ -338,6 +396,7 @@ impl SigillumService {
             confirmed: processed.confirmed,
             failures_by_cause,
             treasury_automation: automation.as_ref().map(|outcome| outcome.summary.clone()),
+            one_time_receive: one_time,
             deposits,
             jobs: processed.jobs,
             operation: None,

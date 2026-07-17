@@ -470,6 +470,13 @@ mod tests {
             created_at_unix: 1,
             retired_at_unix: (status == "retired").then_some(2),
             counterparty_id: counterparty.map(str::to_string),
+            one_time: false,
+            sweep_destination_address: None,
+            min_sweep_amount_hex: None,
+            purge_after_sweep: false,
+            sweep_job_id: None,
+            lifecycle_state: None,
+            sweep_blocker: None,
         }
     }
 

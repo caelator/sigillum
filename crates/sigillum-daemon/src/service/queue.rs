@@ -37,7 +37,8 @@ pub(super) use execution::QueueExecution;
 
 pub(super) use state::{
     is_active_or_completed_queue_state, is_active_queue_state, mark_job_operator_action_required,
-    queue_job_failed_state, queue_job_operator_action_required, recover_queue_job,
+    queue_job_failed_state, queue_job_operator_action_required, queue_job_sweep_settled_state,
+    recover_queue_job,
 };
 pub(super) use status::{count_queue_states, queue_status};
 

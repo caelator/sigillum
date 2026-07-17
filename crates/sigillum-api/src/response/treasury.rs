@@ -108,6 +108,19 @@ pub struct TreasuryAutomationRunSummary {
     pub skipped_reasons: Vec<String>,
 }
 
+/// Per-maintenance-cycle one-time receive lifecycle outcome (plan task 3.3).
+///
+/// Counts what the one-time stage did this cycle: balances observed,
+/// sweeps auto-enqueued, allocations retired on sweep confirmation, and
+/// records purged (`purge_after_sweep`).
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct OneTimeReceiveRunSummary {
+    pub observed_allocations: usize,
+    pub enqueued_sweeps: usize,
+    pub retired_allocations: usize,
+    pub purged_allocations: usize,
+}
+
 /// Treasury-console posture for W8 automation.
 ///
 /// Counts aggregate steps of plans whose origin is `treasury_automation`;
@@ -294,6 +307,16 @@ pub struct TreasuryPolicyMutationResponse {
 /// math (no provider or network calls), and per-purpose addresses keep
 /// unrelated payments unlinkable on-chain. Retired allocations are kept for
 /// history; only `status == "active"` entries should be handed out.
+///
+/// Plan task 3.3 adds the one-time lifecycle: with `one_time` set, the
+/// scheduler watches the address, auto-enqueues a native sweep to
+/// `sweep_destination_address` once the observed balance reaches
+/// `min_sweep_amount_hex` (any nonzero balance when unset), retires the
+/// allocation once the sweep job settles (`sent` — the legacy EthSeed
+/// family's terminal state — or `confirmed`), and purges the record when
+/// `purge_after_sweep` is set. `lifecycle_state`/`sweep_blocker` are computed
+/// at read time from `status`, `sweep_job_id`, the queue, and the treasury
+/// policy — they are never persisted with meaning.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct TreasuryReceiveAllocation {
     pub id: String,
@@ -316,6 +339,43 @@ pub struct TreasuryReceiveAllocation {
     pub retired_at_unix: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub counterparty_id: Option<String>,
+    /// Plan task 3.3: allocate → auto-watch → auto-sweep-on-funds → retire →
+    /// optional purge. Requires `sweep_destination_address` and a signing
+    /// (eth-seed) wallet profile.
+    #[serde(default)]
+    pub one_time: bool,
+    /// Sweep destination for one-time mode; validated against the destination
+    /// allowlist like any sweep destination, both at allocation and again at
+    /// every enqueue evaluation.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sweep_destination_address: Option<String>,
+    /// One-time sweep threshold (0x-prefixed uint256 wei): the auto-sweep only
+    /// enqueues once the observed native balance reaches it. Unset means any
+    /// nonzero balance.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub min_sweep_amount_hex: Option<String>,
+    /// One-time mode: purge the record (3.2 semantics) once the sweep
+    /// confirms and the allocation is retired.
+    #[serde(default)]
+    pub purge_after_sweep: bool,
+    /// Queue job id of the one-time auto-sweep, once enqueued; always tracks
+    /// the LATEST sweep job (a terminally failed job is replaced by the next
+    /// enqueue, never re-signed).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sweep_job_id: Option<String>,
+    /// Read-time derivation for one-time allocations: "watching" |
+    /// "sweep_queued" | "swept" | "retired" ("purged" is terminal record
+    /// absence plus a `treasury.receive.purge` audit event). Absent for
+    /// non-one-time allocations and on stored records.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lifecycle_state: Option<String>,
+    /// Why a `watching` one-time allocation has not swept yet:
+    /// "awaiting_balance" | "below_threshold" | "execution_gates" |
+    /// "destination_policy" | "step_cap" | "cross_party_linkage" |
+    /// "sweep_failed" | "sweep_attention". Absent when the allocation is
+    /// sweep-eligible or not `watching`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sweep_blocker: Option<String>,
 }
 
 /// A payer/counterparty an operator hands a dedicated receive address to.

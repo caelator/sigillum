@@ -691,6 +691,10 @@ pub struct MaintenanceRunResponse {
     pub failures_by_cause: MaintenanceFailureBreakdown,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub treasury_automation: Option<TreasuryAutomationRunSummary>,
+    /// Plan task 3.3: outcome of the one-time receive lifecycle stage
+    /// (absent on responses produced before the stage existed).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub one_time_receive: Option<OneTimeReceiveRunSummary>,
     pub deposits: Vec<EthStealthDeposit>,
     pub jobs: Vec<QueueJob>,
     /// The background operation driving the cycle. Present only when the
