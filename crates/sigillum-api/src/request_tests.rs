@@ -826,6 +826,7 @@ fn test_wallet_inventory_scan_request_roundtrip() {
         max_index: Some(200),
         resume_from_latest_checkpoint: Some(true),
         run_async: Some(true),
+        partition_providers: Some(true),
         token_addresses: vec!["0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48".to_string()],
         block_tag: Some("latest".to_string()),
         probe_token_registry: Some(true),
@@ -1650,6 +1651,7 @@ fn test_wallet_inventory_scan_fields_use_indexed_paths() {
         max_index: None,
         resume_from_latest_checkpoint: None,
         run_async: None,
+        partition_providers: None,
         token_addresses: vec![
             "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48".to_string(),
             "0xtooshort".to_string(),

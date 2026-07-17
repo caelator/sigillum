@@ -77,10 +77,18 @@ pub(super) fn record_inventory_observation(
     observation: InventoryAddressObservation,
     detected_holdings: &mut Vec<WalletAssetHolding>,
     scanned_addresses: &mut Vec<WalletInventoryAddress>,
+    track_provider_partitions: bool,
 ) {
     job.addresses_scanned += 1;
     if observation.address.activity_state != WalletAddressActivityState::Empty {
         job.active_addresses += 1;
+    }
+    if track_provider_partitions {
+        record_provider_partition_observation(
+            job,
+            &observation.address.provider_profile,
+            observation.address.chain_id,
+        );
     }
     for holding in &observation.holdings {
         if quantity_hex_is_nonzero(&holding.amount_hex) {
@@ -113,6 +121,30 @@ pub(super) fn record_inventory_observation(
         }
     }
     scanned_addresses.push(observation.address);
+}
+
+/// Attribute one observed address to its serving provider on the job
+/// record, so a partitioned scan carries per-provider coverage counts an
+/// operator can verify for disjointness (plan task 3.1).
+fn record_provider_partition_observation(
+    job: &mut WalletDiscoveryJob,
+    provider_profile: &str,
+    chain_id: u64,
+) {
+    if let Some(existing) = job
+        .provider_partition_observations
+        .iter_mut()
+        .find(|entry| entry.provider_profile == provider_profile && entry.chain_id == chain_id)
+    {
+        existing.addresses_observed += 1;
+    } else {
+        job.provider_partition_observations
+            .push(sigillum_api::ProviderPartitionObservation {
+                provider_profile: provider_profile.to_string(),
+                chain_id,
+                addresses_observed: 1,
+            });
+    }
 }
 
 pub(super) fn conservative_nft_spam_label(

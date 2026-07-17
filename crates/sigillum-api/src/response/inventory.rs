@@ -126,6 +126,27 @@ pub struct WalletDiscoveryJob {
     pub completed_at_unix: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub last_error: Option<String>,
+    /// Whether same-chain address probes were partitioned across provider
+    /// profiles (stable per-address hash assignment). Present and `true`
+    /// only when the scan request opted in AND at least one chain had
+    /// multiple selected providers; resume replays it so the resumed scan
+    /// keeps the same per-provider disjoint coverage.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub partition_providers: Option<bool>,
+    /// Per-provider observed-address counts for a partitioned scan, so an
+    /// operator can verify disjoint coverage (each count sums into
+    /// `addresses_scanned`). Empty for non-partitioned scans.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub provider_partition_observations: Vec<ProviderPartitionObservation>,
+}
+
+/// Observed-address count attributed to one provider profile within a
+/// partitioned discovery scan (plan task 3.1).
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ProviderPartitionObservation {
+    pub provider_profile: String,
+    pub chain_id: u64,
+    pub addresses_observed: usize,
 }
 
 /// Cached NFT metadata and spam-review state for a discovered token.

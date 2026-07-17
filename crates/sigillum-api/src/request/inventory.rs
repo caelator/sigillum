@@ -143,6 +143,18 @@ pub struct WalletInventoryScanRequest {
     /// synchronous behavior, so existing clients see no contract change.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub run_async: Option<bool>,
+    /// Distribute same-chain address probes across the selected provider
+    /// profiles so no single endpoint observes the full address set.
+    ///
+    /// When `true` and more than one selected provider profile serves the
+    /// same chain, each probed address is assigned to exactly one of that
+    /// chain's providers by a stable hash of the address, so every provider
+    /// observes only a disjoint subset (an address is still probed once per
+    /// chain). Absent or `false` — and whenever each chain has a single
+    /// selected provider — preserves the original behavior exactly. Composes
+    /// with `run_async`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub partition_providers: Option<bool>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub token_addresses: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]

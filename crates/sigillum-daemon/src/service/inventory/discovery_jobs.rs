@@ -207,6 +207,11 @@ impl SigillumService {
             max_index: Some(job.max_index),
             resume_from_latest_checkpoint: Some(true),
             run_async: Some(true),
+            // Replay the interrupted job's partitioning so the resumed scan
+            // keeps the same stable assignment: every remaining address is
+            // probed by the same provider that would have served it
+            // originally, preserving disjoint per-provider coverage.
+            partition_providers: job.partition_providers,
             ..Default::default()
         };
         let prepared = self.prepare_evm_scan(token, request)?;
@@ -258,5 +263,7 @@ fn pending_cancel_acknowledgment(id: &str) -> WalletDiscoveryJob {
         started_at_unix: now_unix(),
         completed_at_unix: None,
         last_error: None,
+        partition_providers: None,
+        provider_partition_observations: Vec::new(),
     }
 }

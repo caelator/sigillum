@@ -18,6 +18,7 @@ mod nft_approval_discovery;
 mod nft_discovery;
 mod nft_metadata;
 mod observation;
+mod partition;
 mod permit2_discovery;
 mod plan_execution_enqueue;
 pub(in crate::service) mod planner;
@@ -60,6 +61,7 @@ use nft_discovery::{
     erc721_transfer_discovery_config, erc1155_transfer_discovery_config,
 };
 use observation::AddressActivityContext;
+use partition::ProviderPartitions;
 use permit2_discovery::permit2_allowance_discovery_config;
 use risk::derive_inventory_risk_findings;
 use support::{
@@ -127,6 +129,9 @@ struct PreparedEvmScan {
     claim_candidate_discovery: Option<ClaimCandidateDiscoveryConfig>,
     token_registry_probe: Option<TokenRegistryProbeConfig>,
     providers: Vec<EvmProviderProfile>,
+    /// Same-chain provider assignment plan; `Some` only when the scan opted
+    /// into partitioning AND at least one chain has multiple providers.
+    provider_partitions: Option<ProviderPartitions>,
     wallets: Vec<DiscoveryWallet>,
     watch_addresses: Vec<WatchDiscoveryAddress>,
     resume_from_latest_checkpoint: bool,
@@ -193,6 +198,10 @@ fn accepted_scan_job(
         started_at_unix,
         completed_at_unix: None,
         last_error: None,
+        // Noted on the job only when partitioning is actually engaged, so
+        // opt-out and single-provider-per-chain jobs stay byte-identical.
+        partition_providers: prepared.provider_partitions.is_some().then_some(true),
+        provider_partition_observations: Vec::new(),
     }
 }
 
@@ -470,6 +479,8 @@ impl SigillumService {
                 .filter(|profile| !profile.is_empty())
         };
         let providers = select_providers(&registry.evm_providers, requested_provider_profile)?;
+        let provider_partitions =
+            ProviderPartitions::build(&providers, body.partition_providers.unwrap_or(false));
         let wallets = select_discovery_wallets(
             self,
             &registry.eth_seed_wallets,
@@ -515,6 +526,7 @@ impl SigillumService {
             claim_candidate_discovery,
             token_registry_probe,
             providers,
+            provider_partitions,
             wallets,
             watch_addresses,
             resume_from_latest_checkpoint: body.resume_from_latest_checkpoint.unwrap_or(false),
@@ -624,6 +636,10 @@ impl SigillumService {
 
         let mut scanned_addresses: Vec<WalletInventoryAddress> = Vec::new();
         let mut detected_holdings: Vec<WalletAssetHolding> = Vec::new();
+        // Partitioned scans attribute observations per provider (job-level
+        // disjoint-coverage evidence) and pace provider batches with jitter.
+        let partitioning_engaged = prepared.provider_partitions.is_some();
+        let mut provider_batches_started = 0usize;
         // A cancel that raced the submission (before the runner persisted
         // the job) is honored before any provider call happens.
         let mut canceled = operation.cancellation_requested();
@@ -651,7 +667,20 @@ impl SigillumService {
                     let derivation_path = format!("{}/{index}", wallet.receive_path);
                     let mut index_has_activity = false;
 
-                    for provider in &prepared.providers {
+                    // Partitioning (opt-in): exactly one provider per
+                    // multi-provider chain probes this address, chosen by
+                    // stable hash; otherwise every provider, as today.
+                    let address_providers = ProviderPartitions::select_for_address(
+                        prepared.provider_partitions.as_ref(),
+                        &prepared.providers,
+                        &derived.address,
+                    );
+                    for provider in address_providers {
+                        if partitioning_engaged {
+                            partition::sleep_between_provider_batches(provider_batches_started)
+                                .await;
+                            provider_batches_started += 1;
+                        }
                         let permit2_allowance_discovery =
                             permit2_allowance_discovery_for_provider(provider)?;
                         let mut observation = self
@@ -707,6 +736,7 @@ impl SigillumService {
                             observation,
                             &mut detected_holdings,
                             &mut scanned_addresses,
+                            partitioning_engaged,
                         );
                     }
 
@@ -777,7 +807,19 @@ impl SigillumService {
                                 )
                                 .map_err(map_xpub_error)?;
                                 let derivation_path = format!("{control_path}/{control_index}");
-                                for provider in &prepared.providers {
+                                let address_providers = ProviderPartitions::select_for_address(
+                                    prepared.provider_partitions.as_ref(),
+                                    &prepared.providers,
+                                    &derived.address,
+                                );
+                                for provider in address_providers {
+                                    if partitioning_engaged {
+                                        partition::sleep_between_provider_batches(
+                                            provider_batches_started,
+                                        )
+                                        .await;
+                                        provider_batches_started += 1;
+                                    }
                                     let permit2_allowance_discovery =
                                         permit2_allowance_discovery_for_provider(provider)?;
                                     let mut observation = self
@@ -828,6 +870,7 @@ impl SigillumService {
                                         observation,
                                         &mut detected_holdings,
                                         &mut scanned_addresses,
+                                        partitioning_engaged,
                                     );
                                     sync_inventory_job(&mut inventory, &job);
                                     save_inventory_state(&self.state.base_dir, &inventory)?;
@@ -851,7 +894,16 @@ impl SigillumService {
                 }
                 let derivation_path =
                     format!("{}/{}", watch.wallet.receive_path, watch.address_index);
-                for provider in &prepared.providers {
+                let address_providers = ProviderPartitions::select_for_address(
+                    prepared.provider_partitions.as_ref(),
+                    &prepared.providers,
+                    &watch.address,
+                );
+                for provider in address_providers {
+                    if partitioning_engaged {
+                        partition::sleep_between_provider_batches(provider_batches_started).await;
+                        provider_batches_started += 1;
+                    }
                     let permit2_allowance_discovery =
                         permit2_allowance_discovery_for_provider(provider)?;
                     let mut observation = self
@@ -902,6 +954,7 @@ impl SigillumService {
                         observation,
                         &mut detected_holdings,
                         &mut scanned_addresses,
+                        partitioning_engaged,
                     );
                     sync_inventory_job(&mut inventory, &job);
                     save_inventory_state(&self.state.base_dir, &inventory)?;

@@ -4,8 +4,9 @@ use sigillum_api::{
     Counterparty, DefiTokenProbe, ErrorResponse, EthStealthAnnouncementPayload, EthStealthDeposit,
     EthStealthDepositCreateNativeRequest, EthStealthDepositListResponse, EvmProviderProfile,
     EvmProviderProfileListResponse, EvmProviderProfileUpsertRequest, EvmProviderRef,
-    NftMetadataCacheEntry, QueueEthStealthNativeSweepRequest, QueueJob, QueueJobListResponse,
-    QueueJobPayload, ReceivingCoverage, ReceivingDepositTagRequest, ReceivingItem,
+    NftMetadataCacheEntry, ProviderPartitionObservation, QueueEthStealthNativeSweepRequest,
+    QueueJob, QueueJobListResponse, QueueJobPayload, ReceivingCoverage, ReceivingDepositTagRequest,
+    ReceivingItem,
     ReceivingOverviewResponse, ReceivingPartyGroup, ReceivingTotals, StatusResponse,
     StealthPaymentRef, TreasuryAllowedDestination, TreasuryAllowedDestinationInput, TreasuryPolicy,
     TreasuryPolicyResponse, TreasuryPolicyUpdateRequest, UnlockedCompartment,
@@ -697,6 +698,7 @@ fn inventory_request_roundtrip() {
         max_index: Some(250),
         resume_from_latest_checkpoint: Some(true),
         run_async: Some(false),
+        partition_providers: Some(true),
         token_addresses: vec![
             "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48".to_string(),
             "0xdac17f958d2ee523a2206206994597c13d831ec7".to_string(),
@@ -784,6 +786,12 @@ fn inventory_response_roundtrip() {
             started_at_unix: 1_783_042_400,
             completed_at_unix: Some(1_783_046_000),
             last_error: None,
+            partition_providers: Some(true),
+            provider_partition_observations: vec![ProviderPartitionObservation {
+                provider_profile: "ethereum-mainnet-alchemy".to_string(),
+                chain_id: 1,
+                addresses_observed: 18,
+            }],
         }],
         addresses: vec![WalletInventoryAddress {
             id: "addr_2026_0001".to_string(),

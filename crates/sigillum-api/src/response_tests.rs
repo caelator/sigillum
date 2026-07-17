@@ -662,8 +662,17 @@ fn test_eth_xpub_export_response_roundtrip() {
         account_path: "m/44'/60'/9'".to_string(),
         receive_path: "m/44'/60'/9'/0".to_string(),
         receive_xpub: "xpub661MyMwAqRbcFexample".to_string(),
+        warning: "An xpub exposes the entire receive tree.".to_string(),
     };
     roundtrip_test(resp);
+
+    // Payloads produced before the warning field existed deserialize with an
+    // empty warning (additive, serde default).
+    let legacy: EthXpubExportResponse = serde_json::from_str(
+        r#"{"wallet_profile":"receive_tree","project_account":9,"account_path":"m/44'/60'/9'","receive_path":"m/44'/60'/9'/0","receive_xpub":"xpub661MyMwAqRbcFexample"}"#,
+    )
+    .unwrap();
+    assert!(legacy.warning.is_empty());
 }
 
 #[test]
@@ -743,6 +752,8 @@ fn test_wallet_inventory_scan_response_roundtrip() {
         started_at_unix: 1,
         completed_at_unix: Some(2),
         last_error: None,
+        partition_providers: None,
+        provider_partition_observations: Vec::new(),
     };
     roundtrip_test(WalletInventoryScanResponse {
         job,
@@ -817,6 +828,8 @@ fn test_scan_and_discovery_mutation_responses_carry_optional_operation() {
         started_at_unix: 1,
         completed_at_unix: None,
         last_error: None,
+        partition_providers: None,
+        provider_partition_observations: Vec::new(),
     };
     let operation = Operation {
         id: "op_1".to_string(),
