@@ -705,7 +705,11 @@ impl Validate for crate::request::EthXpubWalletProfileUpsertRequest {
         collect(
             &mut fields,
             "external_receive_xpub",
-            check_optional_len("external_receive_xpub", &self.external_receive_xpub, MAX_XPUB),
+            check_optional_len(
+                "external_receive_xpub",
+                &self.external_receive_xpub,
+                MAX_XPUB,
+            ),
         );
         collect(
             &mut fields,
@@ -715,15 +719,16 @@ impl Validate for crate::request::EthXpubWalletProfileUpsertRequest {
         collect(
             &mut fields,
             "external_account_xpub",
-            check_optional_len("external_account_xpub", &self.external_account_xpub, MAX_XPUB),
+            check_optional_len(
+                "external_account_xpub",
+                &self.external_account_xpub,
+                MAX_XPUB,
+            ),
         );
         collect(
             &mut fields,
             "external_account_path",
-            check_optional_account_bip32_path(
-                "external_account_path",
-                &self.external_account_path,
-            ),
+            check_optional_account_bip32_path("external_account_path", &self.external_account_path),
         );
         let has_external_receive_path = self
             .external_receive_path
@@ -993,7 +998,11 @@ impl Validate for crate::request::WalletInventoryScanRequest {
                 check_len(&path, &probe.protocol, MAX_LABEL),
             );
             let path = format!("defi_token_probes[{index}].token_address");
-            collect(&mut fields, &path, check_eth_address(&path, &probe.token_address));
+            collect(
+                &mut fields,
+                &path,
+                check_eth_address(&path, &probe.token_address),
+            );
             let path = format!("defi_token_probes[{index}].protocol_address");
             collect(
                 &mut fields,
@@ -1029,7 +1038,11 @@ impl Validate for crate::request::WalletInventoryScanRequest {
                 check_eth_address(&path, &probe.asset_address),
             );
             let path = format!("claim_candidate_probes[{index}].amount_hex");
-            collect(&mut fields, &path, check_len(&path, &probe.amount_hex, MAX_HEX));
+            collect(
+                &mut fields,
+                &path,
+                check_len(&path, &probe.amount_hex, MAX_HEX),
+            );
             let path = format!("claim_candidate_probes[{index}].source_label");
             collect(
                 &mut fields,

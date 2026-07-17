@@ -1479,12 +1479,7 @@ fn test_evm_provider_profile_upsert_fields_accumulate_with_flattened_paths() {
     // stay top-level field paths.
     assert_eq!(
         paths,
-        vec![
-            "name",
-            "rpc_url",
-            "auth_token_key",
-            "max_fee_per_gas_hex"
-        ]
+        vec!["name", "rpc_url", "auth_token_key", "max_fee_per_gas_hex"]
     );
     // Legacy single-string contract: first field message, byte-identical.
     assert_eq!(req.validate().unwrap_err(), failure.message());
@@ -1549,9 +1544,11 @@ fn test_eth_seed_wallet_profile_upsert_fields_accumulate() {
     let failure = req.validate_fields().unwrap_err();
     let paths: Vec<&str> = failure.fields().iter().map(|f| f.field.as_str()).collect();
     assert_eq!(paths, vec!["name", "default_destination_address"]);
-    assert!(failure.fields()[1]
-        .message
-        .contains("must be a valid ethereum address"));
+    assert!(
+        failure.fields()[1]
+            .message
+            .contains("must be a valid ethereum address")
+    );
 }
 
 #[test]
@@ -1607,7 +1604,11 @@ fn test_wallet_inventory_scan_fields_use_indexed_paths() {
     let paths: Vec<&str> = failure.fields().iter().map(|f| f.field.as_str()).collect();
     assert_eq!(
         paths,
-        vec!["provider_profile", "token_addresses[1]", "watch_addresses[0].address"]
+        vec![
+            "provider_profile",
+            "token_addresses[1]",
+            "watch_addresses[0].address"
+        ]
     );
     assert_eq!(
         failure.fields()[0].message,

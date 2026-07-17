@@ -2842,7 +2842,11 @@ async fn api_error_exposes_code_and_field_errors() {
     let client = SigillumClient::new(format!("http://{addr}")).expect("client should build");
 
     let error = client
-        .send::<serde_json::Value>(client.request(reqwest::Method::POST, "/invalid").json(&json!({})))
+        .send::<serde_json::Value>(
+            client
+                .request(reqwest::Method::POST, "/invalid")
+                .json(&json!({})),
+        )
         .await
         .unwrap_err();
     assert_eq!(error.code(), Some("validation_failed"));
@@ -2860,7 +2864,11 @@ async fn api_error_exposes_code_and_field_errors() {
     assert_eq!(fields[1].field, "rpc_url");
 
     let error = client
-        .send::<serde_json::Value>(client.request(reqwest::Method::POST, "/gated").json(&json!({})))
+        .send::<serde_json::Value>(
+            client
+                .request(reqwest::Method::POST, "/gated")
+                .json(&json!({})),
+        )
         .await
         .unwrap_err();
     assert_eq!(error.code(), Some("execution_gate_denied"));
@@ -2875,7 +2883,11 @@ async fn legacy_envelope_without_code_maps_to_none() {
     let client = SigillumClient::new(format!("http://{addr}")).expect("client should build");
 
     let error = client
-        .send::<serde_json::Value>(client.request(reqwest::Method::POST, "/legacy").json(&json!({})))
+        .send::<serde_json::Value>(
+            client
+                .request(reqwest::Method::POST, "/legacy")
+                .json(&json!({})),
+        )
         .await
         .unwrap_err();
     assert_eq!(error.code(), None);

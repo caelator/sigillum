@@ -143,11 +143,7 @@ impl ServiceError {
     }
 
     pub(crate) fn locked(message: impl Into<String>) -> Self {
-        Self::new(
-            StatusCode::LOCKED,
-            error_codes::LOCKED_IN_PROGRESS,
-            message,
-        )
+        Self::new(StatusCode::LOCKED, error_codes::LOCKED_IN_PROGRESS, message)
     }
 
     pub(crate) fn not_found(message: impl Into<String>) -> Self {

@@ -234,7 +234,9 @@ impl SigillumService {
     /// Map a [`VaultError`] to the appropriate HTTP-level [`ServiceError`] for snapshot ops.
     fn snapshot_error(context: &str, error: VaultError) -> ServiceError {
         match error {
-            VaultError::NotInitialized => ServiceError::not_initialized("Sigillum is not initialized."),
+            VaultError::NotInitialized => {
+                ServiceError::not_initialized("Sigillum is not initialized.")
+            }
             VaultError::Decryption(_) => ServiceError::unauthorized(format!(
                 "{context}: wrong passphrase or corrupted snapshot."
             )),

@@ -78,9 +78,8 @@ pub use sigillum_api::response::{
     EvmFeeEstimateResponse, EvmProviderProfile, EvmProviderProfileListResponse,
     EvmProviderProfileMutationResponse, EvmRpcBalanceResponse, EvmRpcBroadcastResponse,
     EvmRpcErc20BalanceResponse, EvmRpcNonceResponse, Fido2DetectResponse, Fido2KeyInfo,
-    FieldError,
     Fido2ListResponse, Fido2RegisterResponse, Fido2RemoveResponse, Fido2SetupResponse,
-    Fido2StatusResponse, GenerateStoreResponse, GenericStatusResponse, KeyListResponse,
+    Fido2StatusResponse, FieldError, GenerateStoreResponse, GenericStatusResponse, KeyListResponse,
     KeyValueResponse, MaintenanceRunResponse, QueueEnqueueResponse, QueueExecutionPauseResponse,
     QueueJob, QueueJobListResponse, QueueProcessResponse, RiskCatalogEntry,
     RiskCatalogListResponse, RiskCatalogMutationResponse, RiskFinding, RiskFindingListResponse,
@@ -1147,25 +1146,25 @@ impl SigillumClient {
         }
 
         if !status.is_success() {
-            let (message, code, fields) = match serde_json::from_value::<ErrorResponse>(value.clone())
-            {
-                Ok(error) => {
-                    // The daemon never emits the `unknown` deserialization
-                    // fallback; map it back to "no code" so legacy envelopes
-                    // keep their old rendering downstream.
-                    let code = (error.code != sigillum_api::error_codes::UNKNOWN)
-                        .then_some(error.code);
-                    (error.error, code, error.fields.unwrap_or_default())
-                }
-                Err(_) => {
-                    let message = if text.is_empty() {
-                        format!("request failed with status {status}")
-                    } else {
-                        text.clone()
-                    };
-                    (message, None, Vec::new())
-                }
-            };
+            let (message, code, fields) =
+                match serde_json::from_value::<ErrorResponse>(value.clone()) {
+                    Ok(error) => {
+                        // The daemon never emits the `unknown` deserialization
+                        // fallback; map it back to "no code" so legacy envelopes
+                        // keep their old rendering downstream.
+                        let code = (error.code != sigillum_api::error_codes::UNKNOWN)
+                            .then_some(error.code);
+                        (error.error, code, error.fields.unwrap_or_default())
+                    }
+                    Err(_) => {
+                        let message = if text.is_empty() {
+                            format!("request failed with status {status}")
+                        } else {
+                            text.clone()
+                        };
+                        (message, None, Vec::new())
+                    }
+                };
             return Err(ClientError::Api {
                 status,
                 message,

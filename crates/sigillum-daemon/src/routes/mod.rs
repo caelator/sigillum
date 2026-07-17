@@ -101,7 +101,10 @@ pub(crate) fn err(status: StatusCode, code: &'static str, msg: &str) -> Response
 
 /// 400 `validation_failed` envelope carrying the per-field breakdown when
 /// the DTO reported one.
-pub(crate) fn err_validation(msg: &str, fields: Vec<sigillum_api::response::FieldError>) -> Response {
+pub(crate) fn err_validation(
+    msg: &str,
+    fields: Vec<sigillum_api::response::FieldError>,
+) -> Response {
     sec_headers(
         (
             StatusCode::BAD_REQUEST,
@@ -772,7 +775,11 @@ mod tests {
         use crate::service::ServiceError;
 
         let cases: [(ServiceError, u16, &str); 7] = [
-            (ServiceError::execution_gate_denied("x"), 403, "execution_gate_denied"),
+            (
+                ServiceError::execution_gate_denied("x"),
+                403,
+                "execution_gate_denied",
+            ),
             (
                 ServiceError::capability_scope_denied("x"),
                 403,
