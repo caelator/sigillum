@@ -1,5 +1,64 @@
+import type { ActiveCompartment, UnlockedCompartment } from "../contracts";
 import { clearSessionToken } from "../api/session";
 import { setHiddenById as setHidden, setTextById as setText } from "../render/dom";
+import { esc, escAttr } from "../render/html";
+
+/// Shell chrome for the compartment switcher and the topbar badge. These
+/// read the daemon's wire shape directly: `active_compartment` carries
+/// `compartment_id`/`compartment_label` while `unlocked_compartments`
+/// entries carry `id`/`label` (see contracts.ts).
+export function renderCompartmentSwitcher(
+  unlocked: UnlockedCompartment[],
+  active: ActiveCompartment | null | undefined,
+): void {
+  const switcher = document.getElementById("compSwitcher");
+  if (!switcher) return;
+  if (unlocked.length <= 1) {
+    switcher.innerHTML = "";
+    setHidden("compSwitcher", true);
+    return;
+  }
+
+  let html = "";
+  unlocked.forEach((compartment) => {
+    const isActive = active && active.compartment_id === compartment.id;
+    html +=
+      '<button class="' +
+      (isActive ? "active" : "") +
+      '" data-action="switchCompartment" data-arg0="' +
+      escAttr(String(compartment.id)) +
+      '" data-arg0-type="number">' +
+      esc(compartment.label) +
+      "</button>";
+  });
+  switcher.innerHTML = html;
+  setHidden("compSwitcher", false);
+}
+
+export function renderActiveCompartment(
+  active: ActiveCompartment | null | undefined,
+  unlocked: UnlockedCompartment[],
+): void {
+  const compBadge = document.getElementById("compartmentBadge");
+  if (active) {
+    if (compBadge) {
+      compBadge.textContent =
+        active.compartment_label || "Compartment " + active.compartment_id;
+    }
+    setHidden("compartmentBadge", false);
+    setText("apiKeyCount", active.api_key_count || 0);
+    setText(
+      "secretCount",
+      active.secret_count != null ? active.secret_count : "(locked)",
+    );
+  } else {
+    setHidden("compartmentBadge", true);
+    setText("apiKeyCount", "-");
+    setText("secretCount", "-");
+  }
+
+  setText("compartmentCount", unlocked.length);
+}
 
 export interface ShellRendererDeps {
   operatorCardIds: string[];
@@ -12,9 +71,15 @@ export interface ShellRendererDeps {
   updateHeroState: (active?: any, unlocked?: any[]) => void;
   updateWizardChrome: (id: string) => void;
   resetSetupWizard: () => void;
-  renderCompartmentSwitcher: (unlocked: any[], active: any) => void;
-  renderActiveCompartment: (active: any, unlocked: any[]) => void;
-  buildPushSelectors: (unlocked: any[]) => void;
+  renderCompartmentSwitcher: (
+    unlocked: UnlockedCompartment[],
+    active: ActiveCompartment | null | undefined,
+  ) => void;
+  renderActiveCompartment: (
+    active: ActiveCompartment | null | undefined,
+    unlocked: UnlockedCompartment[],
+  ) => void;
+  buildPushSelectors: (unlocked: UnlockedCompartment[]) => void;
 }
 
 export function createShellRenderer(deps: ShellRendererDeps) {
@@ -79,7 +144,10 @@ export function createShellRenderer(deps: ShellRendererDeps) {
     }, 0);
   }
 
-  function applyUnlockedUi(active: any, unlocked: any[]): void {
+  function applyUnlockedUi(
+    active: ActiveCompartment | null | undefined,
+    unlocked: UnlockedCompartment[],
+  ): void {
     deps.setUiMode("unlocked");
     document.body.dataset.mode = "unlocked";
     deps.setStatusBadge("status-unlocked", "UNLOCKED");

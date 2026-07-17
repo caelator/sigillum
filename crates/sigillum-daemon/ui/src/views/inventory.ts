@@ -531,10 +531,15 @@ export function createInventoryActions(deps: InventoryActionsDeps) {
         esc(cursorSummary) +
         "</div></div>" +
         '<div class="entity-actions">' +
-        '<button class="btn-ghost" data-action="cancelDiscoveryJob" data-arg0="' +
+        // Plan task 1.2: discovery-job cancel/resume is not yet honored by
+        // the running scan — the verbs only rewrite the stored job status,
+        // so enabling these controls would lie to the operator. They stay
+        // visible but disabled until the daemon implements real
+        // cancellation; the job list itself is unaffected.
+        '<button class="btn-ghost" disabled title="Cancel/resume arrives in a future update" data-action="cancelDiscoveryJob" data-arg0="' +
         escAttr(job.id) +
         '">Cancel</button>' +
-        '<button class="btn-ghost" data-action="resumeDiscoveryJob" data-arg0="' +
+        '<button class="btn-ghost" disabled title="Cancel/resume arrives in a future update" data-action="resumeDiscoveryJob" data-arg0="' +
         escAttr(job.id) +
         '">Resume</button>' +
         "</div></li>"

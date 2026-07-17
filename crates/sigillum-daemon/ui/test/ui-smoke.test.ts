@@ -36,7 +36,11 @@ import { createReceivingActions } from "../src/views/receiving";
 import { createSelfCheckActions, formatClockTime } from "../src/views/selfcheck";
 import { createSessionActions } from "../src/views/session";
 import { createSetupWizard } from "../src/views/setup";
-import { createShellRenderer } from "../src/views/shell";
+import {
+  createShellRenderer,
+  renderActiveCompartment,
+  renderCompartmentSwitcher,
+} from "../src/views/shell";
 import { createWalletActions } from "../src/views/wallets";
 import {
   createTreasuryActions,
@@ -268,10 +272,13 @@ test("shell renderer applies setup, locked, and unlocked DOM state", () => {
   equal(dom.el("lockForm").classList.contains("hidden"), true);
   equal(dom.el("authRecovery").classList.contains("hidden"), false);
 
-  renderer.applyUnlockedUi({ compartment_id: 1 }, [
-    { id: 1, label: "daily" },
-    { id: 2, label: "secure" },
-  ]);
+  renderer.applyUnlockedUi(
+    { compartment_id: 1, compartment_label: "daily", api_key_count: 0 },
+    [
+      { id: 1, label: "daily", threshold: 1 },
+      { id: 2, label: "secure", threshold: 2 },
+    ],
+  );
   equal(mode, "unlocked");
   equal(document.body.dataset.mode, "unlocked");
   equal(dom.el("pushCard").classList.contains("hidden"), false);
@@ -282,6 +289,108 @@ test("shell renderer applies setup, locked, and unlocked DOM state", () => {
   equal(dom.el("policyCard").classList.contains("hidden"), false);
   equal(dom.el("walletManagerCard").classList.contains("hidden"), false);
   ok(calls.includes("push-selectors"));
+});
+
+test("shell renders the active compartment from the canonical status shape", () => {
+  const dom = installDom([
+    "compSwitcher",
+    "compartmentBadge",
+    "apiKeyCount",
+    "secretCount",
+    "compartmentCount",
+  ]);
+  // Canonical daemon wire shape (crates/sigillum-api/src/response.rs):
+  // active_compartment carries compartment_id/compartment_label, while
+  // unlocked_compartments entries carry id/label.
+  const status = {
+    initialized: true,
+    locked: false,
+    active_compartment: {
+      compartment_id: 2,
+      compartment_label: "vault2",
+      api_key_count: 3,
+      secret_count: 7,
+    },
+    unlocked_compartments: [
+      { id: 1, label: "vault1", threshold: 1 },
+      { id: 2, label: "vault2", threshold: 2 },
+    ],
+  };
+  const renderer = createShellRenderer({
+    operatorCardIds: [],
+    setUiMode: () => undefined,
+    setCardsHidden: () => undefined,
+    setStatusBadge: () => undefined,
+    setSecretsAccess: () => undefined,
+    resetVaultCounts: () => undefined,
+    setUnlockGuidance: () => undefined,
+    updateHeroState: () => undefined,
+    updateWizardChrome: () => undefined,
+    resetSetupWizard: () => undefined,
+    renderCompartmentSwitcher,
+    renderActiveCompartment,
+    buildPushSelectors: () => undefined,
+  });
+
+  renderer.applyUnlockedUi(status.active_compartment, status.unlocked_compartments);
+
+  equal(dom.el("compartmentBadge").textContent, "vault2");
+  equal(dom.el("apiKeyCount").textContent, "3");
+  equal(dom.el("secretCount").textContent, "7");
+  equal(dom.el("compartmentCount").textContent, "2");
+  const switcherHtml = dom.el("compSwitcher").innerHTML;
+  ok(switcherHtml.includes(">vault1</button>"));
+  ok(switcherHtml.includes(">vault2</button>"));
+  // Exactly one switcher button is active: the entry whose id matches
+  // active_compartment.compartment_id.
+  equal(switcherHtml.split('class="active"').length - 1, 1);
+  ok(
+    switcherHtml.includes(
+      'class="active" data-action="switchCompartment" data-arg0="2" data-arg0-type="number"',
+    ),
+  );
+
+  // A missing label falls back to the compartment id.
+  renderActiveCompartment(
+    { compartment_id: 3, compartment_label: "", api_key_count: 0, secret_count: null },
+    status.unlocked_compartments,
+  );
+  equal(dom.el("compartmentBadge").textContent, "Compartment 3");
+  equal(dom.el("secretCount").textContent, "(locked)");
+});
+
+test("discovery job cancel and resume controls stay gated until the daemon honors them", () => {
+  const dom = installDom([
+    "inventoryJobList",
+    "inventoryAddressList",
+    "inventoryHoldingList",
+    "nftMetadataList",
+    "nftSuspiciousList",
+  ]);
+  const inventory = createInventoryActions({
+    api: async () => ({}),
+    toast: () => undefined,
+    downloadJson: () => undefined,
+  });
+  inventory.renderInventoryState({
+    jobs: [{ id: "scan-1", status: "running", wallet_profiles: ["daily"] }],
+    addresses: [],
+    holdings: [],
+  });
+  const html = dom.el("inventoryJobList").innerHTML;
+  // The job list itself still renders…
+  ok(html.includes("scan-1"));
+  ok(html.includes(">running</span>"));
+  // …but cancel/resume are visibly disabled with an explanation, because
+  // the daemon verbs do not actually stop a running scan (plan task 1.2).
+  equal(html.split('data-action="cancelDiscoveryJob"').length - 1, 1);
+  equal(html.split('data-action="resumeDiscoveryJob"').length - 1, 1);
+  equal(
+    html.split(
+      '<button class="btn-ghost" disabled title="Cancel/resume arrives in a future update"',
+    ).length - 1,
+    2,
+  );
 });
 
 test("session requests persist fresh tokens and clear stale tokens on 401", async () => {

@@ -27,7 +27,11 @@ import { createOperationsActions } from "./views/operations";
 import { createReceivingActions } from "./views/receiving";
 import { createSelfCheckActions } from "./views/selfcheck";
 import { createSessionActions } from "./views/session";
-import { createShellRenderer } from "./views/shell";
+import {
+  createShellRenderer,
+  renderActiveCompartment,
+  renderCompartmentSwitcher,
+} from "./views/shell";
 import { createSetupWizard } from "./views/setup";
 import { createTreasuryActions } from "./views/treasury";
 import { createWalletManagerActions } from "./views/walletManager";
@@ -479,40 +483,6 @@ function updateHeroState(active, unlocked) {
     { title: 'Wallet families', body: 'Stealth wallets drive deposits and queue workflows today, while xpub receive wallets export public receive branches and preview deterministic addresses.' },
     { title: 'Operator loop', body: 'Deposits, queue, maintenance, snapshots, audit, and diagnostics each live in a dedicated destination.' },
   ]));
-}
-
-function renderCompartmentSwitcher(unlocked, active) {
-  const switcher = document.getElementById('compSwitcher');
-  if (unlocked.length <= 1) {
-    switcher.innerHTML = '';
-    setHidden('compSwitcher', true);
-    return;
-  }
-
-  let html = '';
-  unlocked.forEach(c => {
-    const isActive = active && active.compartment_id === c.id;
-    html += '<button class="' + (isActive ? 'active' : '') + '" data-action="switchCompartment" data-arg0="' +
-      escAttr(String(c.id)) + '" data-arg0-type="number">' + esc(c.label) + '</button>';
-  });
-  switcher.innerHTML = html;
-  setHidden('compSwitcher', false);
-}
-
-function renderActiveCompartment(active, unlocked) {
-  const compBadge = document.getElementById('compartmentBadge');
-  if (active) {
-    compBadge.textContent = active.compartment_label || ('Compartment ' + active.compartment_id);
-    setHidden('compartmentBadge', false);
-    setText('apiKeyCount', active.api_key_count || 0);
-    setText('secretCount', active.secret_count != null ? active.secret_count : '(locked)');
-  } else {
-    setHidden('compartmentBadge', true);
-    setText('apiKeyCount', '-');
-    setText('secretCount', '-');
-  }
-
-  setText('compartmentCount', unlocked.length);
 }
 
 async function api(method, path, body) {

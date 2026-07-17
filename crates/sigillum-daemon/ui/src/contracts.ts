@@ -3,19 +3,29 @@ export interface ErrorResponse {
   action?: string;
 }
 
+/// Mirrors sigillum-api response.rs exactly: structs that *reference* the
+/// active compartment use the qualified `compartment_id`/`compartment_label`
+/// names, while structs that *are* a compartment (`UnlockedCompartment`)
+/// use the short `id`/`label`. Do not collapse these into one shape.
 export interface ActiveCompartment {
+  compartment_id: number;
+  compartment_label: string;
+  api_key_count: number;
+  secret_count?: number | null;
+}
+
+export interface UnlockedCompartment {
   id: number;
   label: string;
   threshold: number;
-  api_key_count: number;
-  secret_count?: number | null;
+  passphrase_mode?: string | null;
 }
 
 export interface StatusResponse {
   initialized: boolean;
   locked: boolean;
   active_compartment?: ActiveCompartment | null;
-  unlocked_compartments: ActiveCompartment[];
+  unlocked_compartments: UnlockedCompartment[];
   session_token?: string;
 }
 
@@ -24,7 +34,7 @@ export interface UnlockResponse {
   method: string;
   cascading?: boolean | null;
   session_token: string;
-  unlocked_compartments: ActiveCompartment[];
+  unlocked_compartments: UnlockedCompartment[];
   active_compartment_id?: number | null;
 }
 
