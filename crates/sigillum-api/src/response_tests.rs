@@ -11,10 +11,56 @@ fn roundtrip_test<T: Serialize + for<'de> Deserialize<'de> + PartialEq + std::fm
 #[test]
 fn test_error_response_roundtrip() {
     let resp = ErrorResponse {
+        code: crate::error_codes::INTERNAL.to_string(),
         error: "Something went wrong".to_string(),
         action: None,
+        fields: None,
     };
     roundtrip_test(resp);
+}
+
+#[test]
+fn test_error_response_with_action_and_fields_roundtrip() {
+    let resp = ErrorResponse {
+        code: crate::error_codes::VALIDATION_FAILED.to_string(),
+        error: "name exceeds maximum length of 256 bytes".to_string(),
+        action: None,
+        fields: Some(vec![
+            FieldError {
+                field: "name".to_string(),
+                message: "name exceeds maximum length of 256 bytes".to_string(),
+            },
+            FieldError {
+                field: "allowed_destinations[0].address".to_string(),
+                message: "allowed_destinations[0].address must be a valid ethereum address"
+                    .to_string(),
+            },
+        ]),
+    };
+    roundtrip_test(resp.clone());
+    let json = serde_json::to_string(&resp).unwrap();
+    assert!(json.contains("\"code\":\"validation_failed\""));
+    assert!(json.contains("\"field\":\"name\""));
+}
+
+#[test]
+fn test_error_response_deserializes_legacy_payload_without_code_or_fields() {
+    // Envelopes produced before `code`/`fields` existed must still parse.
+    let resp: ErrorResponse =
+        serde_json::from_str(r#"{"error":"Vault is locked.","action":"unlock_first"}"#).unwrap();
+    assert_eq!(resp.code, crate::error_codes::UNKNOWN);
+    assert_eq!(resp.error, "Vault is locked.");
+    assert_eq!(resp.action.as_deref(), Some("unlock_first"));
+    assert_eq!(resp.fields, None);
+}
+
+#[test]
+fn test_field_error_roundtrip() {
+    let field = FieldError {
+        field: "provider.rpc_url".to_string(),
+        message: "rpc_url exceeds maximum length of 2048 bytes".to_string(),
+    };
+    roundtrip_test(field);
 }
 
 #[test]

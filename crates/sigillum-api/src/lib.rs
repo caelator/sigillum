@@ -15,6 +15,7 @@
 //! No custom serialization or ad-hoc validation — all validation is explicit and typed
 //! in the `validation` module.
 
+pub mod error_codes;
 pub mod request;
 pub mod response;
 pub mod validation;

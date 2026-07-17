@@ -20,11 +20,39 @@ use crate::request::Eip1559Fees;
 // ── Lifecycle ───────────────────────────────────
 
 /// Standard error envelope returned for non-2xx responses.
+///
+/// `code` is a stable machine-readable `snake_case` string from
+/// [`crate::error_codes`] that refines the HTTP status (403 and 404 are
+/// overloaded without it). Envelopes serialized before `code` existed
+/// deserialize with [`crate::error_codes::UNKNOWN`]; clients should treat
+/// that value as "no code" and fall back to the HTTP status.
+///
+/// `fields` carries a per-field validation breakdown for
+/// `validation_failed` errors; it is absent for all other failures.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ErrorResponse {
+    #[serde(default = "default_error_code")]
+    pub code: String,
     pub error: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub action: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fields: Option<Vec<FieldError>>,
+}
+
+/// One field-level validation failure inside an [`ErrorResponse`].
+///
+/// `field` is the dot/bracket path of the offending request field (for
+/// example `name` or `allowed_destinations[0].address`); `message` is the
+/// human-readable failure for that field.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct FieldError {
+    pub field: String,
+    pub message: String,
+}
+
+fn default_error_code() -> String {
+    crate::error_codes::UNKNOWN.to_string()
 }
 
 /// Summary of the currently active compartment within a session.

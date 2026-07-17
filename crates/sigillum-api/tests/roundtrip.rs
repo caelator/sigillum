@@ -854,8 +854,10 @@ fn unknown_fields_are_tolerated_for_request_and_response() {
     assert_eq!(request, expected_request);
 
     let expected_response = ErrorResponse {
+        code: sigillum_api::error_codes::UNKNOWN.to_string(),
         error: "treasury policy violation".to_string(),
         action: Some("review_treasury_policy".to_string()),
+        fields: None,
     };
     let response: ErrorResponse = serde_json::from_value(serde_json::json!({
         "error": "treasury policy violation",
@@ -864,4 +866,34 @@ fn unknown_fields_are_tolerated_for_request_and_response() {
     }))
     .expect("ErrorResponse should ignore unknown fields");
     assert_eq!(response, expected_response);
+}
+
+#[test]
+fn error_response_code_and_fields_roundtrip() {
+    let expected = ErrorResponse {
+        code: sigillum_api::error_codes::VALIDATION_FAILED.to_string(),
+        error: "name exceeds maximum length of 256 bytes (got 300 bytes)".to_string(),
+        action: None,
+        fields: Some(vec![sigillum_api::response::FieldError {
+            field: "name".to_string(),
+            message: "name exceeds maximum length of 256 bytes (got 300 bytes)".to_string(),
+        }]),
+    };
+    let value = serde_json::to_value(&expected).expect("ErrorResponse should serialize");
+    assert_eq!(value["code"], "validation_failed");
+    assert_eq!(value["fields"][0]["field"], "name");
+
+    let parsed: ErrorResponse =
+        serde_json::from_value(value).expect("ErrorResponse should deserialize");
+    assert_eq!(parsed, expected);
+
+    // Forward-compat: payloads from a newer daemon carrying extra fields parse.
+    let future: ErrorResponse = serde_json::from_value(serde_json::json!({
+        "code": "some_future_code",
+        "error": "new failure mode",
+        "fields": [{"field": "name", "message": "bad", "extra": true}],
+        "__future_field": 123
+    }))
+    .expect("ErrorResponse should tolerate newer fields");
+    assert_eq!(future.code, "some_future_code");
 }
