@@ -1,8 +1,42 @@
 # Operator Surface & Privacy Implementation Plan
 
-Status: **draft for operator sign-off** — 2026-07-16
+Status: **in execution** — started 2026-07-16 on branch
+`codex/operator-surface-privacy` (worktree `.claude/worktrees/agent-ux-privacy-exec`).
 Scope: console UI/UX overhaul, throwaway-wallet privacy, ERC-5564 stealth
 correctness and interoperability.
+
+## Progress ledger
+
+Decisions ratified by the operator at execution start: D-A (stealth hash
+switch with dual decode), D-B option A (zero-dependency frontend
+re-architecture), D-C (C7 as redesign base, ported — see below), D-D (SSE
+ratified), D-E (ERC-6538 deferred).
+
+- **Phase 0 — complete** (gate: full workspace tests + 74-console-test suite green):
+  - 0.1 C7 ported onto main 815d262 as 4 commits (`6988284`, `6e83590`,
+    `04185fd`, `5ddba45`); main-era features (NFT metadata, token registry,
+    manual enqueue, extended policy) preserved into the five-destination IA.
+  - 0.2 topbar compacted + journey card collapses (`685a13c`); 0.3 dead
+    code/copy removed (`cd4cf72`).
+  - 0.5 shared confirm dialog + danger model aligned (`2014278`).
+  - 0.6 humanized displays (`ba72449`); 0.7 policy labels + summary (`4e8d1eb`);
+    0.8 status-contract alignment + cancel gating (`fd853da`), planner
+    fail-closed (`8507f51`), UI CSP test fix (`a0538d6`).
+  - 0.4 stealth guardrails end-to-end (`6dc51bd`, console `2d40fb7`);
+    0.9 CLI mnemonic redaction + eth-seed upsert (`4c9be7d`).
+  - 0.10 screenshot harness `scripts/ui-screenshots/` (`a1efff6`); changelog +
+    stability pre-tag notes (`f4e5968`, `7de4cd6`).
+- **Phase 1**:
+  - 1.4 structured error codes + field validation (`0e6a572`..`e03501d`, 7
+    commits; code catalog in `sigillum-api/src/error_codes.rs`).
+  - 1.1+1.2 async operations framework, real discovery cancel/resume
+    (`ee1540d`..`32ccd22`, 8 commits; adversarial suite
+    `tests/discovery_operations.rs`); 1.1b async drain/maintenance
+    (`12b5ccc`..`8dfbbb8`, 5 commits; `tests/queue_operations.rs`).
+  - 1.3 SSE channel + passive-read idle fix; 1.5 pagination/filter/sort —
+    implementation complete, committing next.
+
+## Original plan
 
 This plan consolidates three evaluations performed against `main` (247cf51) and
 the C7 redesign branch (`worktree-agent-ae37914b9b627cdd5`):
