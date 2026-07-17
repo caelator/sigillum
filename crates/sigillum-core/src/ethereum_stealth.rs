@@ -523,7 +523,7 @@ pub fn build_erc5564_announcement(
 ///
 /// This is the detection core: view-tag pre-filter → shared-secret hash per
 /// `convention` → stealth address recompute (spending public key + hash
-/// offset point) → constant-shape compare. It never touches — and cannot
+/// offset point) → compare. It never touches — and cannot
 /// touch, see [`EthereumStealthWatchView`] — the spending private key, so
 /// announcement scanning and deposit checking run without spending secret
 /// material in memory. The full-wallet entry points

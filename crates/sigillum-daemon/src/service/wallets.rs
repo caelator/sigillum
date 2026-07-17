@@ -833,9 +833,9 @@ mod tests {
             )
             .unwrap();
 
-        // The watch-only view for the exact inputs the service uses. The
-        // export (public info) must match it — and the full wallet's
-        // meta-address — while the view itself carries no spending secret.
+        // The watch-only view for the exact inputs the service uses: the
+        // exported meta-address (public info) must equal the watch-only
+        // derivation's — while the view itself carries no spending secret.
         let watch_view = sigillum_core::derive_watch_only_sigillum_ethereum_stealth_wallet(
             &[7u8; 32],
             "payments",
