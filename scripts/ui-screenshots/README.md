@@ -1,0 +1,102 @@
+# UI screenshot harness
+
+Zero-dependency harness that renders the operator console exactly as the
+daemon serves it and captures a canonical set of screenshots in headless
+Chrome. Use it to review UI changes without a live vault, and to produce the
+operator-reviewed screenshots the release plan calls for
+(`docs/release-1.0-plan.md`: "screenshots of setup, locked, and unlocked
+states reviewed by the operator").
+
+## How it works
+
+- `server.mjs` — a mock daemon. It assembles the page exactly like
+  `crates/sigillum-daemon/src/ui.rs` `render_index_html` (HTML fragments from
+  `crates/sigillum-daemon/ui/src` plus the checked-in vite bundles
+  `src/app.js` / `src/styles.css`; the per-request CSP nonce is dropped —
+  irrelevant for local shots) and answers every `/api/*` route the UI calls
+  with the canned, populated state from `mock-data.mjs`.
+- `drive.mjs` — starts the mock daemon in-process, drives headless Chrome
+  over the raw DevTools protocol (same approach as
+  `scripts/browser-smoke.mjs`), walks the shot list, and writes PNGs.
+- `mock-data.mjs` — the populated vault state: two compartments, providers,
+  seed/xpub/stealth wallets, inventory with balances, a consolidation plan
+  with six steps, queue jobs in mixed states, stealth deposits, parties and
+  receive allocations, an enabled treasury policy, a self-check run with one
+  failing domain, FIDO2 keys, audit events, and diagnostics.
+
+No npm install, no build step, no daemon binary needed.
+
+## Prerequisites
+
+- Built UI bundles: `npm run build` in `crates/sigillum-daemon/ui`. The
+  harness never builds anything itself — it refuses to run when `app.js` /
+  `styles.css` are missing or older than the authored source, and tells you
+  to rebuild. (Type-only sources such as `contracts.ts` are ignored by the
+  staleness check; editing them cannot make the bundles stale.)
+- Chrome or Chromium (`CHROME_BIN` / `GOOGLE_CHROME_BIN` to point at a
+  specific executable).
+- Node 18+ (uses the global `WebSocket` and `fetch`).
+
+## Usage
+
+```sh
+node scripts/ui-screenshots/drive.mjs
+```
+
+Options (argv wins over env):
+
+| Flag | Env | Default |
+| --- | --- | --- |
+| `--out=<dir>` | `SIGILLUM_UI_SHOTS_DIR` | `target/ui-screenshots/` (gitignored) |
+| `--width=<px>` | `SIGILLUM_UI_SHOTS_WIDTH` | `1440` |
+| `--height=<px>` | `SIGILLUM_UI_SHOTS_HEIGHT` | `900` |
+| `--scale=<n>` | `SIGILLUM_UI_SHOTS_SCALE` | `2` (retina) |
+
+Exit code is non-zero on any driver failure; page console errors are printed
+at the end. To browse the mock UI interactively instead of shooting it:
+
+```sh
+node scripts/ui-screenshots/server.mjs 8080   # then open http://127.0.0.1:8080
+# switch daemon mode while browsing:
+curl -X POST -d '{"mode":"setup"|"locked"|"unlocked"}' http://127.0.0.1:8080/__mode
+```
+
+## Output
+
+One PNG per shot in the output directory: `setup-welcome`,
+`setup-protection-model`, `unlock`, one `section-<destination>` per workspace
+destination (overview, receive, portfolio, move, vault), plus card-level
+shots (`section-receive-deposits`, `section-move-plans`,
+`section-move-queue`, `section-vault-diagnostics`) for populated surfaces
+that a top-of-section viewport shot would leave below the fold.
+
+## Adding or changing shots
+
+The shot list is the `SHOTS` array at the top of `drive.mjs` — that array is
+the harness's output contract. Each entry:
+
+```js
+{ name: "section-move-queue",   // writes <name>.png
+  mode: "unlocked",             // daemon mode: setup | locked | unlocked
+  section: "move",              // nav destination to open first (optional)
+  click: "[data-action=...]",   // selector to click before shooting (optional)
+  waitFor: "<js expression>",   // extra precondition (optional)
+  scrollTo: "queueCard",        // element id scrolled into view (optional)
+  fullPage: true }              // whole scroll height instead of viewport (optional)
+```
+
+Entries run in order; the driver reuses one page per daemon mode, so group
+shots by mode. If a shot needs mock state the page does not already show,
+extend `mock-data.mjs` — its shapes mirror
+`crates/sigillum-api/src/response.rs` and `ui/src/contracts.ts`, and stale
+shapes show up as empty cards in the shots.
+
+## Release evidence
+
+Run the harness on the release commit and attach the PNG set to the release
+notes / PR as the operator-reviewed record of the setup, locked, and unlocked
+surfaces. Because the page is assembled from the checked-in bundles and
+fragments, the shots capture exactly what the shipped daemon embeds; the
+bundle-staleness guard guarantees the shots cannot silently lag the authored
+UI source. For UI-affecting PRs, run before and after the change
+(`--out=target/ui-screenshots/before|after`) and diff the sets.

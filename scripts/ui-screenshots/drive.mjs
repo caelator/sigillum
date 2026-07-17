@@ -1,0 +1,415 @@
+#!/usr/bin/env node
+// Screenshot driver for the Sigillum operator console.
+//
+// Starts the in-process mock daemon (server.mjs) serving the REAL assembled
+// UI (fragments + checked-in vite bundles), drives headless Chrome over the
+// raw DevTools protocol — same zero-dependency approach as
+// scripts/browser-smoke.mjs — and captures the shot set below.
+//
+// Usage:
+//   node scripts/ui-screenshots/drive.mjs [--out=<dir>] [--width=1440] [--height=900] [--scale=2]
+//
+// Configuration (argv wins over env):
+//   --out     / SIGILLUM_UI_SHOTS_DIR    output directory
+//                                        (default: target/ui-screenshots/ in the repo)
+//   --width   / SIGILLUM_UI_SHOTS_WIDTH  viewport width  (default: 1440)
+//   --height  / SIGILLUM_UI_SHOTS_HEIGHT viewport height (default: 900)
+//   --scale   / SIGILLUM_UI_SHOTS_SCALE  deviceScaleFactor (default: 2)
+//   CHROME_BIN / GOOGLE_CHROME_BIN       browser executable override
+//
+// Prerequisites: built UI bundles (`npm run build` in
+// crates/sigillum-daemon/ui) and a Chrome/Chromium executable. The harness
+// never runs builds itself — server.mjs refuses on missing/stale bundles.
+
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { spawn } from "node:child_process";
+import { once } from "node:events";
+import { fileURLToPath } from "node:url";
+import { startServer } from "./server.mjs";
+
+const HERE = path.dirname(fileURLToPath(import.meta.url));
+const REPO_ROOT = path.resolve(HERE, "../..");
+const TIMEOUT_MS = 30_000;
+
+function argValue(name) {
+  const prefix = `--${name}=`;
+  const hit = process.argv.slice(2).find((a) => a.startsWith(prefix));
+  return hit ? hit.slice(prefix.length) : undefined;
+}
+
+const OUT_DIR = path.resolve(
+  argValue("out") ||
+    process.env.SIGILLUM_UI_SHOTS_DIR ||
+    path.join(REPO_ROOT, "target/ui-screenshots"),
+);
+const VIEWPORT_WIDTH = Number(argValue("width") || process.env.SIGILLUM_UI_SHOTS_WIDTH || 1440);
+const VIEWPORT_HEIGHT = Number(argValue("height") || process.env.SIGILLUM_UI_SHOTS_HEIGHT || 900);
+const DEVICE_SCALE = Number(argValue("scale") || process.env.SIGILLUM_UI_SHOTS_SCALE || 2);
+
+// ── The shot set ────────────────────────────────────────────────────────────
+// This list IS the harness output contract: add an entry here to add a shot.
+//   name     output file "<name>.png" in the output directory
+//   mode     daemon mode for the page: "setup" | "locked" | "unlocked"
+//   section  workspace destination to open (nav click) before shooting
+//   click    optional selector to click before shooting (wizard flows)
+//   waitFor  optional extra expression that must become true before shooting
+//   scrollTo optional element id scrolled to the top before shooting
+//   fullPage capture the whole scroll height instead of the viewport
+const SHOTS = [
+  { name: "setup-welcome", mode: "setup" },
+  {
+    name: "setup-protection-model",
+    mode: "setup",
+    click: '[data-action="wizGetStarted"]',
+    waitFor: "document.getElementById('wizStep0')?.classList.contains('active')",
+  },
+  { name: "unlock", mode: "locked" },
+  { name: "section-overview", mode: "unlocked", section: "overview" },
+  { name: "section-receive", mode: "unlocked", section: "receive" },
+  // Card-level shots keep populated surfaces visible that a top-of-section
+  // viewport shot would leave below the fold.
+  { name: "section-receive-deposits", mode: "unlocked", section: "receive", scrollTo: "depositsCard" },
+  { name: "section-portfolio", mode: "unlocked", section: "portfolio" },
+  { name: "section-move", mode: "unlocked", section: "move" },
+  { name: "section-move-plans", mode: "unlocked", section: "move", scrollTo: "plansCard" },
+  { name: "section-move-queue", mode: "unlocked", section: "move", scrollTo: "queueCard" },
+  { name: "section-vault", mode: "unlocked", section: "vault" },
+  { name: "section-vault-diagnostics", mode: "unlocked", section: "vault", scrollTo: "diagCard" },
+];
+
+function fail(message) {
+  throw new Error(`ui-screenshots: ${message}`);
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function findChromeExecutable() {
+  const candidates = [
+    process.env.CHROME_BIN,
+    process.env.GOOGLE_CHROME_BIN,
+    "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+    "/Applications/Chromium.app/Contents/MacOS/Chromium",
+    "/Applications/Brave Browser.app/Contents/MacOS/Brave Browser",
+    "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge",
+    "/usr/bin/google-chrome",
+    "/usr/bin/google-chrome-stable",
+    "/usr/bin/chromium",
+    "/usr/bin/chromium-browser",
+  ].filter(Boolean);
+
+  const found = candidates.find((candidate) => fs.existsSync(candidate));
+  if (!found) {
+    fail("Chrome or Chromium was not found. Set CHROME_BIN to a compatible browser executable.");
+  }
+  return found;
+}
+
+function launchChrome() {
+  const executable = findChromeExecutable();
+  const profileDir = fs.mkdtempSync(path.join(os.tmpdir(), "sigillum-ui-shots-profile."));
+  const child = spawn(
+    executable,
+    [
+      "--headless=new",
+      "--remote-debugging-port=0",
+      `--user-data-dir=${profileDir}`,
+      "--no-first-run",
+      "--no-default-browser-check",
+      "--disable-background-networking",
+      "--disable-component-update",
+      "--disable-extensions",
+      "--disable-features=Translate,MediaRouter",
+      "--disable-sync",
+      "--metrics-recording-only",
+      "about:blank",
+    ],
+    { stdio: ["ignore", "ignore", "pipe"] },
+  );
+
+  let stderr = "";
+  let resolved = false;
+  const ready = new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      reject(new Error(`timed out waiting for Chrome DevTools endpoint\n${stderr}`));
+    }, TIMEOUT_MS);
+
+    child.once("exit", (code, signal) => {
+      if (!resolved) {
+        clearTimeout(timer);
+        reject(new Error(`Chrome exited before DevTools was ready: code=${code} signal=${signal}\n${stderr}`));
+      }
+    });
+
+    child.stderr.on("data", (chunk) => {
+      stderr += chunk.toString();
+      const match = stderr.match(/DevTools listening on (ws:\/\/[^\s]+)/);
+      if (!match || resolved) return;
+      resolved = true;
+      clearTimeout(timer);
+      resolve(match[1]);
+    });
+  });
+
+  return {
+    ready,
+    async cleanup() {
+      if (child.exitCode === null && child.signalCode === null) {
+        child.kill("SIGTERM");
+      }
+      if (child.exitCode === null && child.signalCode === null) {
+        await Promise.race([once(child, "exit").catch(() => {}), sleep(2_000)]);
+      }
+      if (child.exitCode === null && child.signalCode === null) {
+        child.kill("SIGKILL");
+        await Promise.race([once(child, "exit").catch(() => {}), sleep(1_000)]);
+      }
+      // Chromium helper processes can outlive the killed main process and
+      // keep writing to the profile dir: retry with backoff, then warn.
+      const rmOptions = { recursive: true, force: true, maxRetries: 10, retryDelay: 200 };
+      try {
+        fs.rmSync(profileDir, rmOptions);
+      } catch {
+        await sleep(1_000);
+        try {
+          fs.rmSync(profileDir, rmOptions);
+        } catch (retryError) {
+          console.warn(`ui-screenshots: leaving temp profile dir behind at ${profileDir}: ${retryError.message}`);
+        }
+      }
+    },
+  };
+}
+
+class CdpClient {
+  constructor(webSocketUrl) {
+    this.webSocket = new WebSocket(webSocketUrl);
+    this.nextId = 1;
+    this.pending = new Map();
+    this.consoleErrors = [];
+    this.opened = new Promise((resolve, reject) => {
+      this.webSocket.addEventListener("open", resolve, { once: true });
+      this.webSocket.addEventListener("error", reject, { once: true });
+    });
+    this.webSocket.addEventListener("message", (event) => this.handleMessage(event.data));
+  }
+
+  handleMessage(data) {
+    const message = JSON.parse(data);
+    if (message.id) {
+      const pending = this.pending.get(message.id);
+      if (!pending) return;
+      this.pending.delete(message.id);
+      if (message.error) {
+        pending.reject(new Error(`${message.error.message || "CDP error"} ${JSON.stringify(message.error)}`));
+      } else {
+        pending.resolve(message.result || {});
+      }
+      return;
+    }
+    if (message.method === "Runtime.consoleAPICalled" && message.params.type === "error") {
+      this.consoleErrors.push(
+        (message.params.args || []).map((arg) => arg.value || arg.description || "").join(" "),
+      );
+    } else if (message.method === "Runtime.exceptionThrown") {
+      this.consoleErrors.push("exception: " + (message.params.exceptionDetails?.text || ""));
+    }
+  }
+
+  async send(method, params = {}) {
+    await this.opened;
+    const id = this.nextId++;
+    const result = new Promise((resolve, reject) => {
+      this.pending.set(id, { resolve, reject });
+    });
+    this.webSocket.send(JSON.stringify({ id, method, params }));
+    return result;
+  }
+
+  close() {
+    this.webSocket.close();
+  }
+}
+
+async function openPage(browserWebSocketUrl) {
+  const debugUrl = new URL(browserWebSocketUrl);
+  const endpoint = `http://${debugUrl.hostname}:${debugUrl.port}/json/new?about:blank`;
+  let response = await fetch(endpoint, { method: "PUT" });
+  if (!response.ok) response = await fetch(endpoint);
+  if (!response.ok) fail(`could not open browser target: HTTP ${response.status}`);
+  const target = await response.json();
+  if (!target.webSocketDebuggerUrl) fail("browser target did not include a DevTools websocket URL");
+  return new CdpClient(target.webSocketDebuggerUrl);
+}
+
+function quoted(value) {
+  return JSON.stringify(value);
+}
+
+async function evaluate(cdp, expression, description = expression) {
+  const result = await cdp.send("Runtime.evaluate", {
+    expression,
+    awaitPromise: true,
+    returnByValue: true,
+    timeout: TIMEOUT_MS,
+  });
+  if (result.exceptionDetails) {
+    const details = result.exceptionDetails;
+    const reason =
+      details.exception?.description || details.exception?.value || details.text || "runtime exception";
+    fail(`${description}: ${reason}`);
+  }
+  return result.result?.value;
+}
+
+async function waitFor(cdp, expression, description, timeoutMs = TIMEOUT_MS) {
+  const deadline = Date.now() + timeoutMs;
+  let lastError = "";
+  while (Date.now() < deadline) {
+    try {
+      if (await evaluate(cdp, expression, description)) return;
+    } catch (error) {
+      lastError = error.message;
+    }
+    await sleep(150);
+  }
+  fail(`${description} did not become true${lastError ? ` (${lastError})` : ""}`);
+}
+
+async function shot(cdp, name, { fullPage = false } = {}) {
+  const params = { format: "png", fromSurface: true };
+  if (fullPage) {
+    const metrics = await cdp.send("Page.getLayoutMetrics");
+    const size = metrics.cssContentSize || metrics.contentSize;
+    params.captureBeyondViewport = true;
+    params.clip = { x: 0, y: 0, width: Math.ceil(size.width), height: Math.ceil(size.height), scale: 1 };
+  }
+  const result = await cdp.send("Page.captureScreenshot", params);
+  const file = path.join(OUT_DIR, name + ".png");
+  fs.writeFileSync(file, Buffer.from(result.data, "base64"));
+  console.log("wrote", file);
+}
+
+// One fresh page per daemon mode. Unlocked pages get the session token the
+// real unlock flow would have stored (the mock daemon accepts any bearer).
+async function openModePage(browserWs, base, mode) {
+  const cdp = await openPage(browserWs);
+  await cdp.send("Page.enable");
+  await cdp.send("Runtime.enable");
+  await cdp.send("Emulation.setDeviceMetricsOverride", {
+    width: VIEWPORT_WIDTH,
+    height: VIEWPORT_HEIGHT,
+    deviceScaleFactor: DEVICE_SCALE,
+    mobile: false,
+  });
+  if (mode === "unlocked") {
+    await cdp.send("Page.addScriptToEvaluateOnNewDocument", {
+      source: "try{sessionStorage.setItem('sigillumSessionToken','ui-shots-session-token')}catch(e){}",
+    });
+  }
+  await cdp.send("Page.navigate", { url: base + "/" });
+  await waitFor(cdp, "document.readyState === 'complete'", `${mode} page load`);
+  await waitFor(cdp, `document.body.dataset.mode === '${mode}'`, `${mode} mode`, 20_000);
+  return cdp;
+}
+
+async function selectWorkspaceSection(cdp, section) {
+  const selector = `[data-action="selectWorkspaceSection"][data-arg0="${section}"]`;
+  await waitFor(cdp, `document.querySelector(${quoted(selector)})`, `workspace ${section} nav item`);
+  await evaluate(
+    cdp,
+    `(() => {
+      const el = document.querySelector(${quoted(selector)});
+      if (!el) throw new Error("missing element");
+      el.click();
+      window.scrollTo(0, 0);
+      return true;
+    })()`,
+    `click workspace ${section}`,
+  );
+  await waitFor(
+    cdp,
+    `document.querySelector(${quoted(selector)})?.classList.contains("active") === true`,
+    `workspace ${section} active`,
+  );
+}
+
+let server;
+let chrome;
+let cdp;
+try {
+  fs.mkdirSync(OUT_DIR, { recursive: true });
+  server = startServer();
+  const port = await server.ready;
+  const base = `http://127.0.0.1:${port}`;
+  chrome = launchChrome();
+  const browserWs = await chrome.ready;
+
+  let pageMode = null;
+  for (const entry of SHOTS) {
+    if (entry.mode !== pageMode) {
+      if (cdp) cdp.close();
+      server.setMode(entry.mode);
+      cdp = await openModePage(browserWs, base, entry.mode);
+      pageMode = entry.mode;
+      if (entry.mode === "unlocked") {
+        // Let the parallel load*() fan-out (and the ambient self-check that
+        // fills the topbar status strip) settle before the first shot.
+        await sleep(2_500);
+      } else {
+        await sleep(800);
+      }
+    }
+    if (entry.section) {
+      await selectWorkspaceSection(cdp, entry.section);
+      await sleep(600);
+    }
+    if (entry.click) {
+      await evaluate(
+        cdp,
+        `(() => {
+          const el = document.querySelector(${quoted(entry.click)});
+          if (!el) throw new Error("missing element");
+          el.click();
+          return true;
+        })()`,
+        `click ${entry.click}`,
+      );
+      await sleep(500);
+    }
+    if (entry.waitFor) {
+      await waitFor(cdp, entry.waitFor, `${entry.name} precondition`);
+    }
+    if (entry.scrollTo) {
+      await evaluate(
+        cdp,
+        `(() => {
+          const el = document.getElementById(${quoted(entry.scrollTo)});
+          if (!el) return false;
+          el.scrollIntoView({ block: "start" });
+          window.scrollBy(0, -16);
+          return true;
+        })()`,
+        `scroll to ${entry.scrollTo}`,
+      );
+      await sleep(400);
+    }
+    await shot(cdp, entry.name, { fullPage: !!entry.fullPage });
+  }
+
+  if (cdp && cdp.consoleErrors.length) {
+    console.log("CONSOLE ERRORS (page was still captured):");
+    cdp.consoleErrors.slice(0, 20).forEach((e) => console.log("  " + e));
+  }
+  console.log(`ui-screenshots: ${SHOTS.length} shot(s) in ${OUT_DIR}`);
+} catch (error) {
+  console.error(error.message);
+  process.exitCode = 1;
+} finally {
+  if (cdp) cdp.close();
+  if (chrome) await chrome.cleanup();
+  if (server) await server.close();
+}
