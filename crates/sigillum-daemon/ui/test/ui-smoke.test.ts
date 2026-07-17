@@ -419,6 +419,32 @@ test("session requests persist fresh tokens and clear stale tokens on 401", asyn
   equal(readSessionToken(), null);
 });
 
+test("session requests carry structured error code and fields through", async () => {
+  installDom();
+  clearSessionToken();
+  const envelope = {
+    code: "validation_failed",
+    error: "name exceeds maximum length of 256 bytes (got 300 bytes)",
+    fields: [
+      {
+        field: "name",
+        message: "name exceeds maximum length of 256 bytes (got 300 bytes)",
+      },
+    ],
+  };
+  (globalThis as any).fetch = async () => ({
+    status: 400,
+    json: async () => envelope,
+  });
+
+  const payload = await requestWithSession("POST", "/api/profiles/evm/upsert", {
+    name: "x",
+  });
+  equal(payload.error, envelope.error);
+  equal(payload.code, "validation_failed");
+  deepEqual(payload.fields, envelope.fields);
+});
+
 test("session actions drive unlock, lock, and browser logout workflow", async () => {
   const dom = installDom(["passphrase", "unlockButton", "unlockError"]);
   dom.el("unlockError").classList.add("hidden");

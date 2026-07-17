@@ -1,3 +1,5 @@
+import type { FieldError } from "../contracts";
+
 export const SESSION_TOKEN_KEY = "sigillumSessionToken";
 
 let volatileSessionToken: string | null = null;
@@ -42,6 +44,8 @@ export type DaemonMethod = "GET" | "POST" | "DELETE";
 
 export interface DaemonPayload {
   error?: string;
+  code?: string;
+  fields?: FieldError[];
   session_token?: string;
   [key: string]: unknown;
 }

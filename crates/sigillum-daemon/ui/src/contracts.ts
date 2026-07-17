@@ -1,6 +1,13 @@
+export interface FieldError {
+  field: string;
+  message: string;
+}
+
 export interface ErrorResponse {
+  code: string;
   error: string;
   action?: string;
+  fields?: FieldError[];
 }
 
 /// Mirrors sigillum-api response.rs exactly: structs that *reference* the
