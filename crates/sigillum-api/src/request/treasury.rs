@@ -90,6 +90,20 @@ pub struct TreasuryReceiveRotateRequest {
     pub allocation_id: String,
 }
 
+/// Permanently delete a RETIRED receive allocation and the counterparty
+/// binding it carries (plan task 3.2).
+///
+/// Purging is the forget half of the receive-address lifecycle: the
+/// allocation record (address → purpose → counterparty linkage) leaves the
+/// store for good. Active allocations are refused with 409 — rotate first
+/// (rotation retires), or use a profile delete with `prune_inventory` to
+/// retire-then-purge in one operation. The counterparty record itself always
+/// remains; only the binding dies.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct TreasuryReceivePurgeRequest {
+    pub allocation_id: String,
+}
+
 /// Create a counterparty the operator can bind receive addresses to.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct CounterpartyCreateRequest {

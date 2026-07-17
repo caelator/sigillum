@@ -23,6 +23,7 @@ mod permit2_discovery;
 mod plan_execution_enqueue;
 pub(in crate::service) mod planner;
 mod preflight;
+pub(in crate::service) mod prune;
 mod risk;
 mod risk_catalog;
 mod simulation;

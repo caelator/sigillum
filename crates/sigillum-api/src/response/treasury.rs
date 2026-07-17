@@ -351,6 +351,18 @@ pub struct TreasuryReceiveAllocationMutationResponse {
     pub allocation: TreasuryReceiveAllocation,
 }
 
+/// Result of purging a retired receive allocation (plan task 3.2).
+///
+/// The record is gone for good, so the response carries only the id and
+/// whether a counterparty binding died with it (the counterparty itself
+/// always remains).
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct TreasuryReceivePurgeResponse {
+    pub status: String,
+    pub allocation_id: String,
+    pub counterparty_binding_removed: bool,
+}
+
 /// All known counterparties, newest-first is NOT required; preserve insertion order.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct CounterpartyListResponse {

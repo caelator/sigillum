@@ -97,6 +97,7 @@ impl SigillumService {
         Ok(EvmProviderProfileMutationResponse {
             status: "ok".into(),
             profile,
+            pruned_inventory: None,
         })
     }
 
@@ -130,6 +131,25 @@ impl SigillumService {
         }
         let profile = remove_named(&mut registry.evm_providers, &body.name, |item| &item.name)
             .ok_or_else(|| ServiceError::not_found("Provider profile not found."))?;
+
+        // Forget cascade (plan task 3.2): rows observed through this provider
+        // plus its scan state. Receive allocations never reference providers,
+        // so those counts are always zero here.
+        let pruned_inventory = if body.prune_inventory == Some(true) {
+            Some(
+                self.prune_inventory_for_deleted_profile(
+                    token,
+                    "evm-provider",
+                    crate::service::inventory::prune::InventoryPruneScope::ProviderProfile {
+                        name: &body.name,
+                    },
+                )
+                .await?,
+            )
+        } else {
+            None
+        };
+
         crate::profiles::save_profiles(&self.state.base_dir, &registry).map_err(|error| {
             ServiceError::internal(format!("Failed to save profile registry: {error}"))
         })?;
@@ -144,6 +164,7 @@ impl SigillumService {
         Ok(EvmProviderProfileMutationResponse {
             status: "deleted".into(),
             profile,
+            pruned_inventory,
         })
     }
 
@@ -217,6 +238,7 @@ impl SigillumService {
         Ok(EthStealthWalletProfileMutationResponse {
             status: "ok".into(),
             profile,
+            pruned_inventory: None,
         })
     }
 
@@ -235,6 +257,28 @@ impl SigillumService {
             &item.name
         })
         .ok_or_else(|| ServiceError::not_found("Wallet profile not found."))?;
+
+        // Forget cascade (plan task 3.2). Stealth wallets have no
+        // wallet-inventory surface (scans cover eth-seed/eth-xpub/eth-watch),
+        // so the summary reports zeros; stealth deposit monitors live in the
+        // separate deposits store with their own delete route and are
+        // deliberately out of `prune_inventory` scope.
+        let pruned_inventory = if body.prune_inventory == Some(true) {
+            Some(
+                self.prune_inventory_for_deleted_profile(
+                    token,
+                    "eth-stealth",
+                    crate::service::inventory::prune::InventoryPruneScope::WalletProfile {
+                        family: "eth-stealth",
+                        name: &body.name,
+                    },
+                )
+                .await?,
+            )
+        } else {
+            None
+        };
+
         crate::profiles::save_profiles(&self.state.base_dir, &registry).map_err(|error| {
             ServiceError::internal(format!("Failed to save profile registry: {error}"))
         })?;
@@ -249,6 +293,7 @@ impl SigillumService {
         Ok(EthStealthWalletProfileMutationResponse {
             status: "deleted".into(),
             profile,
+            pruned_inventory,
         })
     }
 
@@ -397,6 +442,7 @@ impl SigillumService {
         Ok(EthXpubWalletProfileMutationResponse {
             status: "ok".into(),
             profile,
+            pruned_inventory: None,
         })
     }
 
@@ -415,6 +461,27 @@ impl SigillumService {
             &item.name
         })
         .ok_or_else(|| ServiceError::not_found("Wallet profile not found."))?;
+
+        // Forget cascade (plan task 3.2): the profile's scanned-address rows,
+        // holdings, scan state, receive allocations (active ones are
+        // retire-then-purged in the same operation), and the counterparty
+        // bindings those allocations carried.
+        let pruned_inventory = if body.prune_inventory == Some(true) {
+            Some(
+                self.prune_inventory_for_deleted_profile(
+                    token,
+                    "eth-xpub",
+                    crate::service::inventory::prune::InventoryPruneScope::WalletProfile {
+                        family: "eth-xpub",
+                        name: &body.name,
+                    },
+                )
+                .await?,
+            )
+        } else {
+            None
+        };
+
         crate::profiles::save_profiles(&self.state.base_dir, &registry).map_err(|error| {
             ServiceError::internal(format!("Failed to save profile registry: {error}"))
         })?;
@@ -429,6 +496,7 @@ impl SigillumService {
         Ok(EthXpubWalletProfileMutationResponse {
             status: "deleted".into(),
             profile,
+            pruned_inventory,
         })
     }
 }

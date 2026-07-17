@@ -13,9 +13,9 @@ use sigillum_api::{
     TreasuryPolicyMutationResponse, TreasuryPolicyResponse, TreasuryPolicyUpdateRequest,
     TreasuryReceiveAllocateRequest, TreasuryReceiveAllocation,
     TreasuryReceiveAllocationListResponse, TreasuryReceiveAllocationMutationResponse,
-    TreasuryReceiveRotateRequest, TreasuryReceiveSummary, TreasuryRiskSummary,
-    TreasuryRoutingStatus, WalletAddressClassification, WalletAssetHolding, WalletAssetKind,
-    WalletInventoryAddress,
+    TreasuryReceivePurgeRequest, TreasuryReceivePurgeResponse, TreasuryReceiveRotateRequest,
+    TreasuryReceiveSummary, TreasuryRiskSummary, TreasuryRoutingStatus,
+    WalletAddressClassification, WalletAssetHolding, WalletAssetKind, WalletInventoryAddress,
 };
 use sigillum_core::decode_quantity_hex;
 
@@ -45,7 +45,7 @@ use super::{
 };
 
 const DEFAULT_NATIVE_SYMBOL: &str = "ETH";
-const RECEIVE_STATUS_ACTIVE: &str = "active";
+pub(super) const RECEIVE_STATUS_ACTIVE: &str = "active";
 const RECEIVE_STATUS_RETIRED: &str = "retired";
 const RECEIVING_LINKAGE_WARNING: &str = "Sweeping here would link this payer with another party. Set a distinct per-party sweep destination.";
 const DEFAULT_HOT_FLOOR_WEI_HEX: &str = "0xde0b6b3a7640000";
@@ -1304,6 +1304,55 @@ impl SigillumService {
         Ok(TreasuryReceiveAllocationMutationResponse {
             status: "rotated".into(),
             allocation,
+        })
+    }
+
+    /// Permanently delete a RETIRED receive allocation (plan task 3.2).
+    ///
+    /// Purging is the forget half of the receive-address lifecycle: the
+    /// allocation record — and the address → purpose → counterparty linkage
+    /// it carries — leaves the store for good. Active allocations are
+    /// refused with 409 (rotate retires first; a profile delete with
+    /// `prune_inventory` retire-then-purges in one operation). The
+    /// counterparty record itself always remains; only the binding dies.
+    pub(crate) async fn purge_treasury_receive_address(
+        &self,
+        token: Option<&str>,
+        body: TreasuryReceivePurgeRequest,
+    ) -> ServiceResult<TreasuryReceivePurgeResponse> {
+        let token = self.require_session(token)?;
+        let _guard = self.state.operation_guard().await;
+        let allocation_id = body.allocation_id.trim().to_string();
+
+        let mut state = load_inventory_state(&self.state.base_dir)?;
+        let Some(position) = state
+            .receive_allocations
+            .iter()
+            .position(|allocation| allocation.id == allocation_id)
+        else {
+            return Err(ServiceError::not_found("Receive allocation not found."));
+        };
+        if state.receive_allocations[position].status == RECEIVE_STATUS_ACTIVE {
+            return Err(ServiceError::conflict(
+                "Receive allocation is still active; rotate it (rotation retires the address) before purging.",
+            ));
+        }
+        let allocation = state.receive_allocations.remove(position);
+        save_inventory_state(&self.state.base_dir, &state)?;
+
+        let counterparty_binding_removed = allocation.counterparty_id.is_some();
+        self.record_audit(
+            self.state.active_compartment_id_for(token),
+            AuditEventSpec::TreasuryReceivePurge {
+                id: allocation_id.clone(),
+                counterparty_binding_removed,
+            },
+        )?;
+
+        Ok(TreasuryReceivePurgeResponse {
+            status: "purged".into(),
+            allocation_id,
+            counterparty_binding_removed,
         })
     }
 

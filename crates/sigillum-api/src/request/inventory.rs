@@ -303,6 +303,38 @@ pub struct DiscoveryJobMutationRequest {
     pub id: String,
 }
 
+/// Delete scanned-address records (and their holdings) from the wallet
+/// inventory (plan task 3.2).
+///
+/// Selectors combine with AND semantics; at least one must be present so a
+/// malformed request can never empty the store. `address` matches rows for
+/// that address across every family/profile/provider/chain unless narrowed;
+/// `wallet_profile` (optionally with `wallet_family`) forgets a profile's
+/// scanned history; `account_index` scopes to one derivation account branch;
+/// `provider_profile` and `chain_id` narrow any of the above. Deleting an
+/// address row also deletes the holdings recorded for it and the per-address
+/// announcement/log block cursors carried by past discovery jobs.
+///
+/// Pruning removes HISTORY, not derivation: a later scan that re-derives a
+/// pruned index re-observes it and records a fresh row (new id, fresh
+/// `first_seen_at_unix`). Receive allocations and counterparty bindings are
+/// never recreated by scans, so purged bindings stay forgotten.
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct WalletInventoryAddressPruneRequest {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub address: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub wallet_family: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub wallet_profile: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub provider_profile: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub chain_id: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub account_index: Option<u32>,
+}
+
 /// Add or replace a local risk catalog entry for a spender/operator address.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct RiskCatalogUpsertRequest {

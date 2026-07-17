@@ -1140,6 +1140,39 @@ impl Validate for crate::request::WatchAddressBookDeleteRequest {
     }
 }
 
+impl Validate for crate::request::WalletInventoryAddressPruneRequest {
+    fn validate(&self) -> Result<(), String> {
+        // Fail closed on an empty selector set: a selector-less prune would
+        // match every row in the store, so the request is invalid outright.
+        if self.address.is_none()
+            && self.wallet_family.is_none()
+            && self.wallet_profile.is_none()
+            && self.provider_profile.is_none()
+            && self.chain_id.is_none()
+            && self.account_index.is_none()
+        {
+            return Err(
+                "at least one selector (address, wallet_family, wallet_profile, provider_profile, chain_id, account_index) is required"
+                    .into(),
+            );
+        }
+        check_optional_eth_address("address", &self.address)?;
+        if let Some(family) = self.wallet_family.as_deref() {
+            match family {
+                "eth-seed" | "eth-xpub" | "eth-watch" => {}
+                _ => {
+                    return Err(
+                        "wallet_family must be 'eth-seed', 'eth-xpub', or 'eth-watch'".into(),
+                    );
+                }
+            }
+        }
+        check_optional_len("wallet_profile", &self.wallet_profile, MAX_LABEL)?;
+        check_optional_len("provider_profile", &self.provider_profile, MAX_LABEL)?;
+        Ok(())
+    }
+}
+
 impl Validate for crate::request::TokenRegistryImportRequest {
     fn validate(&self) -> Result<(), String> {
         check_len("name", &self.name, MAX_LABEL)?;
@@ -1388,6 +1421,13 @@ impl Validate for crate::request::TreasuryReceiveAllocateRequest {
 }
 
 impl Validate for crate::request::TreasuryReceiveRotateRequest {
+    fn validate(&self) -> Result<(), String> {
+        check_len("allocation_id", &self.allocation_id, MAX_ID)?;
+        Ok(())
+    }
+}
+
+impl Validate for crate::request::TreasuryReceivePurgeRequest {
     fn validate(&self) -> Result<(), String> {
         check_len("allocation_id", &self.allocation_id, MAX_ID)?;
         Ok(())

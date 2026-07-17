@@ -479,9 +479,20 @@ pub struct EvmProviderProfileUpsertRequest {
 }
 
 /// Delete an EVM provider profile by name.
+///
+/// Shared by every profile delete route (`profiles/evm|eth-stealth|eth-xpub|eth-seed
+/// /delete`). `prune_inventory` opts into the forget cascade (plan task 3.2):
+/// when true, the profile's wallet-inventory rows (scanned addresses,
+/// holdings, scan state), its receive allocations, and the counterparty
+/// bindings those allocations carried are removed in the same guarded
+/// operation. Absent/false preserves the legacy behavior exactly: only the
+/// profile record (and, for seed wallets, the vault secret) is removed and
+/// inventory history is left behind.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct EvmProfileDeleteRequest {
     pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prune_inventory: Option<bool>,
 }
 
 /// Create or update a stealth wallet profile (named wallet + provider binding).

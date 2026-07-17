@@ -106,6 +106,7 @@ impl SigillumService {
         Ok(EthSeedWalletProfileMutationResponse {
             status: "ok".into(),
             profile,
+            pruned_inventory: None,
         })
     }
 
@@ -312,6 +313,38 @@ impl SigillumService {
             .cloned()
             .ok_or_else(|| ServiceError::not_found("Seed wallet profile not found."))?;
 
+        // Fail fast before any mutation: with the compartment locked the
+        // secret delete below would fail anyway, but a requested inventory
+        // cascade must not run ahead of that failure.
+        if body.prune_inventory == Some(true) {
+            self.with_vault(profile.compartment_id, |vault| {
+                if !vault.is_unlocked() {
+                    return Err(ServiceError::vault_locked("Wallet compartment is locked."));
+                }
+                Ok(())
+            })?;
+        }
+
+        // Forget cascade (plan task 3.2): the profile's scanned-address rows,
+        // holdings, scan state, receive allocations (active ones are
+        // retire-then-purged in the same operation), and the counterparty
+        // bindings those allocations carried — before the profile itself goes.
+        let pruned_inventory = if body.prune_inventory == Some(true) {
+            Some(
+                self.prune_inventory_for_deleted_profile(
+                    token,
+                    "eth-seed",
+                    crate::service::inventory::prune::InventoryPruneScope::WalletProfile {
+                        family: "eth-seed",
+                        name: &body.name,
+                    },
+                )
+                .await?,
+            )
+        } else {
+            None
+        };
+
         self.with_vault(profile.compartment_id, |vault| {
             if !vault.is_unlocked() {
                 return Err(ServiceError::vault_locked("Wallet compartment is locked."));
@@ -337,6 +370,7 @@ impl SigillumService {
         Ok(EthSeedWalletProfileMutationResponse {
             status: "deleted".into(),
             profile,
+            pruned_inventory,
         })
     }
 

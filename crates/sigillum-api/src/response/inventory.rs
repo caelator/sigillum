@@ -149,6 +149,44 @@ pub struct ProviderPartitionObservation {
     pub addresses_observed: usize,
 }
 
+/// Per-store counts of what a forget/prune operation removed (plan task 3.2).
+///
+/// Carried by the `wallet_inventory.addresses.prune` /
+/// `wallet_inventory.profile_prune` audit events and by the profile-delete
+/// mutation responses when `prune_inventory` was requested, so the operator
+/// can verify exactly what was forgotten. All fields are plain counts — never
+/// addresses or other linkage material.
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct InventoryPruneSummary {
+    /// Scanned-address rows removed.
+    pub addresses: usize,
+    /// Asset-holding rows removed with those addresses.
+    pub holdings: usize,
+    /// Discovery-job records removed outright (jobs that covered only the
+    /// forgotten profile); jobs spanning other profiles are kept.
+    pub jobs: usize,
+    /// Resume checkpoints removed from surviving discovery jobs.
+    pub checkpoints: usize,
+    /// Per-address log-scan block cursors removed from discovery jobs.
+    pub block_cursors: usize,
+    /// Receive allocations removed while still active (retire-then-purge:
+    /// they leave the store in the same operation, so no half-retired record
+    /// persists).
+    pub allocations_active: usize,
+    /// Receive allocations removed that were already retired.
+    pub allocations_retired: usize,
+    /// Counterparty bindings removed with purged allocations. The
+    /// counterparty records themselves always remain.
+    pub counterparty_bindings: usize,
+}
+
+/// Result of a scanned-address prune (`inventory/addresses/delete`).
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct WalletInventoryAddressPruneResponse {
+    pub status: String,
+    pub pruned: InventoryPruneSummary,
+}
+
 /// Cached NFT metadata and spam-review state for a discovered token.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct NftMetadataCacheEntry {

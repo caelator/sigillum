@@ -2,14 +2,15 @@ use reqwest::Method;
 use sigillum_api::request::{
     ChainProfileDeleteRequest, ChainProfileUpsertRequest, NftMetadataFetchRequest,
     NftMetadataOptInDeleteRequest, NftMetadataOptInUpsertRequest, NftMetadataSettingsUpdateRequest,
-    TokenRegistryDeleteRequest, TokenRegistryImportRequest, WalletInventoryScanRequest,
-    WatchAddressBookDeleteRequest, WatchAddressBookUpsertRequest,
+    TokenRegistryDeleteRequest, TokenRegistryImportRequest, WalletInventoryAddressPruneRequest,
+    WalletInventoryScanRequest, WatchAddressBookDeleteRequest, WatchAddressBookUpsertRequest,
 };
 use sigillum_api::response::{
     ChainProfileListResponse, ChainProfileMutationResponse, NftMetadataFetchResponse,
     NftMetadataOptInListResponse, NftMetadataOptInMutationResponse, NftMetadataSettingsResponse,
-    TokenRegistryListResponse, TokenRegistryMutationResponse, WalletInventoryListResponse,
-    WalletInventoryScanResponse, WatchAddressBookListResponse, WatchAddressBookMutationResponse,
+    TokenRegistryListResponse, TokenRegistryMutationResponse, WalletInventoryAddressPruneResponse,
+    WalletInventoryListResponse, WalletInventoryScanResponse, WatchAddressBookListResponse,
+    WatchAddressBookMutationResponse,
 };
 
 use crate::{ClientError, SigillumClient};
@@ -26,6 +27,16 @@ impl SigillumClient {
     ) -> Result<WalletInventoryScanResponse, ClientError> {
         let builder = self
             .request(Method::POST, "/api/inventory/scan/evm")
+            .json(&request);
+        self.send(builder).await
+    }
+
+    pub async fn prune_wallet_inventory_addresses(
+        &self,
+        request: WalletInventoryAddressPruneRequest,
+    ) -> Result<WalletInventoryAddressPruneResponse, ClientError> {
+        let builder = self
+            .request(Method::POST, "/api/inventory/addresses/delete")
             .json(&request);
         self.send(builder).await
     }

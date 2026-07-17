@@ -36,8 +36,8 @@ use serde::Serialize;
 use sigillum_api::request::{
     EthSeedWalletCreateRequest, EthSeedWalletProfileUpsertRequest,
     EthStealthWalletProfileUpsertRequest, EthXpubWalletProfileUpsertRequest,
-    EvmProviderProfileUpsertRequest, EvmProviderRef, Fido2UnlockRequest, MaintenanceRunRequest,
-    RiskCatalogDeleteRequest, RiskCatalogUpsertRequest, SelfCheckRunRequest,
+    EvmProfileDeleteRequest, EvmProviderProfileUpsertRequest, EvmProviderRef, Fido2UnlockRequest,
+    MaintenanceRunRequest, RiskCatalogDeleteRequest, RiskCatalogUpsertRequest, SelfCheckRunRequest,
 };
 use sigillum_api::response::EthSeedWalletCreateResponse;
 use sigillum_client::{ClientError, SigillumClient};
@@ -202,13 +202,16 @@ fn cmd_api_profiles(args: &[String]) {
             });
         }
         ("evm", "delete") => {
-            let name = require_flag(
-                args,
-                "--name",
-                "sigillum api profiles evm delete --name <NAME>",
-            );
+            let request = EvmProfileDeleteRequest {
+                name: require_flag(
+                    args,
+                    "--name",
+                    "sigillum api profiles evm delete --name <NAME> [--prune-inventory]",
+                ),
+                prune_inventory: flag_option(args, "--prune-inventory"),
+            };
             run_api_command(args, true, move |client| async move {
-                client.delete_evm_provider_profile(&name).await
+                client.delete_evm_provider_profile(request).await
             });
         }
         ("stealth", "list") => run_api_command(args, true, |client| async move {
@@ -242,13 +245,16 @@ fn cmd_api_profiles(args: &[String]) {
             });
         }
         ("stealth", "delete") => {
-            let name = require_flag(
-                args,
-                "--name",
-                "sigillum api profiles stealth delete --name <NAME>",
-            );
+            let request = EvmProfileDeleteRequest {
+                name: require_flag(
+                    args,
+                    "--name",
+                    "sigillum api profiles stealth delete --name <NAME> [--prune-inventory]",
+                ),
+                prune_inventory: flag_option(args, "--prune-inventory"),
+            };
             run_api_command(args, true, move |client| async move {
-                client.delete_eth_stealth_wallet_profile(&name).await
+                client.delete_eth_stealth_wallet_profile(request).await
             });
         }
         ("eth-xpub", "list") => run_api_command(args, true, |client| async move {
@@ -274,13 +280,16 @@ fn cmd_api_profiles(args: &[String]) {
             });
         }
         ("eth-xpub", "delete") => {
-            let name = require_flag(
-                args,
-                "--name",
-                "sigillum api profiles eth-xpub delete --name <NAME>",
-            );
+            let request = EvmProfileDeleteRequest {
+                name: require_flag(
+                    args,
+                    "--name",
+                    "sigillum api profiles eth-xpub delete --name <NAME> [--prune-inventory]",
+                ),
+                prune_inventory: flag_option(args, "--prune-inventory"),
+            };
             run_api_command(args, true, move |client| async move {
-                client.delete_eth_xpub_wallet_profile(&name).await
+                client.delete_eth_xpub_wallet_profile(request).await
             });
         }
         ("eth-seed", "list") => run_api_command(args, true, |client| async move {
@@ -321,13 +330,16 @@ fn cmd_api_profiles(args: &[String]) {
             });
         }
         ("eth-seed", "delete") => {
-            let name = require_flag(
-                args,
-                "--name",
-                "sigillum api profiles eth-seed delete --name <NAME>",
-            );
+            let request = EvmProfileDeleteRequest {
+                name: require_flag(
+                    args,
+                    "--name",
+                    "sigillum api profiles eth-seed delete --name <NAME> [--prune-inventory]",
+                ),
+                prune_inventory: flag_option(args, "--prune-inventory"),
+            };
             run_api_command(args, true, move |client| async move {
-                client.delete_eth_seed_wallet_profile(&name).await
+                client.delete_eth_seed_wallet_profile(request).await
             });
         }
         _ => {
@@ -776,12 +788,12 @@ COMMANDS:
   deposits <list|create-native|create-erc20|scan-announcements|refresh|enqueue-sweep|delete> [...]
   evm <nonce|balance|erc20-balance|fees> [...]  (read-only; no broadcast)
   chains <list|upsert|delete> [...]
-  inventory <list|chains|watch|token-registry|scan-evm> [...]  (scan supports --watch-address, --watch-address-file, --include-watch-book, --derivation-pattern, --account-limit, --probe-token-registry)
+  inventory <list|chains|watch|token-registry|scan-evm|prune-addresses> [...]  (scan supports --watch-address, --watch-address-file, --include-watch-book, --derivation-pattern, --account-limit, --probe-token-registry)
   discovery <jobs|scan-evm> [...]
   risk <list|catalog|catalog-upsert|catalog-delete> [...]
   plans <list|generate|approve|simulate|export|enqueue-step|enqueue-plan> [...]  (enqueue-step needs --confirm; enqueue-plan needs --confirmation <PHRASE>)
   receiving <overview|refresh-balances|tag-deposit> [...]
-  treasury <overview|policy|policy-update|receive-list|receive-allocate|receive-rotate|parties> [...]
+  treasury <overview|policy|policy-update|receive-list|receive-allocate|receive-rotate|receive-purge|parties> [...]
   queue <list|process|pause|resume> [...]
   transit <encrypt|decrypt|hmac> [...]
   wallets <xpub-export|xpub-derive|stealth-export|stealth-generate|stealth-check> [...]  (read/derive only; no sign/send)

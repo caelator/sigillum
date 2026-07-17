@@ -515,6 +515,10 @@ fn inventory_routes() -> AppRouter {
             post(inventory::scan_wallet_inventory_evm),
         )
         .route(
+            "/api/inventory/addresses/delete",
+            post(inventory::delete_wallet_inventory_addresses),
+        )
+        .route(
             "/api/inventory/nft-metadata/opt-ins",
             get(inventory::list_nft_metadata_optins),
         )
@@ -634,6 +638,10 @@ fn inventory_routes() -> AppRouter {
         .route(
             "/api/treasury/receive-addresses/rotate",
             post(inventory::rotate_treasury_receive_address),
+        )
+        .route(
+            "/api/treasury/receive-addresses/purge",
+            post(inventory::purge_treasury_receive_address),
         )
         .route(
             "/api/treasury/parties",

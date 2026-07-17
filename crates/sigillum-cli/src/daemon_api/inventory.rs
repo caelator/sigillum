@@ -4,8 +4,8 @@ use std::collections::BTreeMap;
 use std::process;
 
 use sigillum_api::request::{
-    ChainProfileUpsertRequest, TokenRegistryImportRequest, WalletInventoryScanRequest,
-    WatchAddressBookUpsertRequest,
+    ChainProfileUpsertRequest, TokenRegistryImportRequest, WalletInventoryAddressPruneRequest,
+    WalletInventoryScanRequest, WatchAddressBookUpsertRequest,
 };
 
 use super::inventory_args::{
@@ -17,10 +17,9 @@ use super::{
     run_api_command,
 };
 
-const USAGE: &str =
-    "Usage: sigillum api inventory <list|chains|watch|token-registry|scan-evm> [...]";
+const USAGE: &str = "Usage: sigillum api inventory <list|chains|watch|token-registry|scan-evm|prune-addresses> [...]";
 
-/// Dispatch `sigillum api inventory <list|chains|watch|token-registry|scan-evm>`.
+/// Dispatch `sigillum api inventory <list|chains|watch|token-registry|scan-evm|prune-addresses>`.
 pub(super) fn cmd_api_inventory(args: &[String]) {
     if args.len() < 2 {
         eprintln!("{USAGE}");
@@ -33,11 +32,43 @@ pub(super) fn cmd_api_inventory(args: &[String]) {
         "watch" => cmd_inventory_watch(args),
         "token-registry" => cmd_inventory_token_registry(args),
         "scan-evm" => scan_evm(args),
+        "prune-addresses" => prune_addresses(args),
         _ => {
             eprintln!("{USAGE}");
             process::exit(1);
         }
     }
+}
+
+/// Dispatch `sigillum api inventory prune-addresses` — delete scanned-address
+/// records (and their holdings) from the wallet inventory. Selectors combine
+/// with AND semantics; at least one is required.
+fn prune_addresses(args: &[String]) {
+    const PRUNE_USAGE: &str = "sigillum api inventory prune-addresses \
+        [--address 0xADDR] [--wallet-family eth-seed|eth-xpub|eth-watch] \
+        [--wallet-profile <NAME>] [--provider-profile <NAME>] [--chain-id <N>] \
+        [--account-index <N>]  (at least one selector required)";
+    let request = WalletInventoryAddressPruneRequest {
+        address: parse_flag(args, "--address"),
+        wallet_family: parse_flag(args, "--wallet-family"),
+        wallet_profile: parse_flag(args, "--wallet-profile"),
+        provider_profile: parse_flag(args, "--provider-profile"),
+        chain_id: parse_u64_flag(args, "--chain-id"),
+        account_index: parse_u32_flag(args, "--account-index"),
+    };
+    if request.address.is_none()
+        && request.wallet_family.is_none()
+        && request.wallet_profile.is_none()
+        && request.provider_profile.is_none()
+        && request.chain_id.is_none()
+        && request.account_index.is_none()
+    {
+        eprintln!("Usage: {PRUNE_USAGE}");
+        process::exit(1);
+    }
+    run_api_command(args, true, move |client| async move {
+        client.prune_wallet_inventory_addresses(request).await
+    });
 }
 
 fn list_inventory_with_chain_labels(args: &[String]) {

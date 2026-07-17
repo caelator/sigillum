@@ -1,12 +1,13 @@
 use reqwest::Method;
 use sigillum_api::request::{
     CounterpartyCreateRequest, CounterpartyDeleteRequest, CounterpartyUpdateRequest,
-    TreasuryPolicyUpdateRequest, TreasuryReceiveAllocateRequest, TreasuryReceiveRotateRequest,
+    TreasuryPolicyUpdateRequest, TreasuryReceiveAllocateRequest, TreasuryReceivePurgeRequest,
+    TreasuryReceiveRotateRequest,
 };
 use sigillum_api::response::{
     CounterpartyListResponse, CounterpartyMutationResponse, TreasuryOverviewResponse,
     TreasuryPolicyMutationResponse, TreasuryPolicyResponse, TreasuryReceiveAllocationListResponse,
-    TreasuryReceiveAllocationMutationResponse,
+    TreasuryReceiveAllocationMutationResponse, TreasuryReceivePurgeResponse,
 };
 
 use crate::{ClientError, SigillumClient};
@@ -55,6 +56,16 @@ impl SigillumClient {
     ) -> Result<TreasuryReceiveAllocationMutationResponse, ClientError> {
         let builder = self
             .request(Method::POST, "/api/treasury/receive-addresses/rotate")
+            .json(&request);
+        self.send(builder).await
+    }
+
+    pub async fn purge_treasury_receive_address(
+        &self,
+        request: TreasuryReceivePurgeRequest,
+    ) -> Result<TreasuryReceivePurgeResponse, ClientError> {
+        let builder = self
+            .request(Method::POST, "/api/treasury/receive-addresses/purge")
             .json(&request);
         self.send(builder).await
     }

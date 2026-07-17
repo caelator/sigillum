@@ -5,7 +5,7 @@ use std::process;
 use sigillum_api::request::{
     CounterpartyCreateRequest, CounterpartyDeleteRequest, CounterpartyUpdateRequest,
     TreasuryAllowedDestinationInput, TreasuryPolicyUpdateRequest, TreasuryReceiveAllocateRequest,
-    TreasuryReceiveRotateRequest,
+    TreasuryReceivePurgeRequest, TreasuryReceiveRotateRequest,
 };
 
 use super::{
@@ -13,7 +13,7 @@ use super::{
 };
 
 /// Dispatch `sigillum api treasury
-/// <overview|policy|policy-update|receive-list|receive-allocate|receive-rotate>`.
+/// <overview|policy|policy-update|receive-list|receive-allocate|receive-rotate|receive-purge>`.
 pub(super) fn cmd_api_treasury(args: &[String]) {
     const POLICY_UPDATE_USAGE: &str = "sigillum api treasury policy-update <--enabled|--disabled> \
         [--destination 0xADDR[:label]]... [--max-step-wei-hex 0x..] [--max-plan-wei-hex 0x..] \
@@ -31,7 +31,7 @@ pub(super) fn cmd_api_treasury(args: &[String]) {
     const RECEIVE_ALLOCATE_USAGE: &str = "sigillum api treasury receive-allocate \
         --wallet-profile <PROFILE> --purpose <PURPOSE> [--label <LABEL>]";
     const TREASURY_USAGE: &str = "sigillum api treasury \
-        <overview|policy|policy-update|receive-list|receive-allocate|receive-rotate|parties>";
+        <overview|policy|policy-update|receive-list|receive-allocate|receive-rotate|receive-purge|parties>";
     if args.len() < 2 {
         eprintln!("Usage: {TREASURY_USAGE}");
         process::exit(1);
@@ -142,6 +142,18 @@ pub(super) fn cmd_api_treasury(args: &[String]) {
             };
             run_api_command(args, true, move |client| async move {
                 client.rotate_treasury_receive_address(request).await
+            });
+        }
+        "receive-purge" => {
+            let request = TreasuryReceivePurgeRequest {
+                allocation_id: require_flag(
+                    args,
+                    "--allocation-id",
+                    "sigillum api treasury receive-purge --allocation-id <ID>",
+                ),
+            };
+            run_api_command(args, true, move |client| async move {
+                client.purge_treasury_receive_address(request).await
             });
         }
         _ => {

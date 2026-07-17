@@ -425,6 +425,37 @@ pub(crate) enum AuditEventSpec {
     WalletInventoryWatchAddressUpsert { address: String, label: String },
     #[serde(rename = "wallet_inventory.watch_address.delete")]
     WalletInventoryWatchAddressDelete { address: String },
+    /// Scanned-address prune (`inventory/addresses/delete`). Records the
+    /// selector SCOPE and counts only — never the pruned address value
+    /// itself, which would re-create the linkage the prune removed (same
+    /// discipline as `treasury.receive.allocate` omitting derived addresses).
+    #[serde(rename = "wallet_inventory.addresses.prune")]
+    WalletInventoryAddressesPrune {
+        scoped_by_address: bool,
+        wallet_family: Option<String>,
+        wallet_profile: Option<String>,
+        provider_profile: Option<String>,
+        chain_id: Option<u64>,
+        account_index: Option<u32>,
+        addresses: usize,
+        holdings: usize,
+        block_cursors: usize,
+    },
+    /// Profile-delete cascade (`prune_inventory: true`): one event carrying
+    /// the per-store counts of everything forgotten with the profile.
+    #[serde(rename = "wallet_inventory.profile_prune")]
+    WalletInventoryProfilePrune {
+        profile_kind: String,
+        name: String,
+        addresses: usize,
+        holdings: usize,
+        jobs: usize,
+        checkpoints: usize,
+        block_cursors: usize,
+        allocations_active: usize,
+        allocations_retired: usize,
+        counterparty_bindings: usize,
+    },
     #[serde(rename = "wallet_consolidation.plan.generate")]
     WalletConsolidationPlanGenerate {
         id: String,
@@ -519,6 +550,14 @@ pub(crate) enum AuditEventSpec {
     },
     #[serde(rename = "treasury.receive.rotate")]
     TreasuryReceiveRotate { id: String },
+    /// A RETIRED receive allocation was permanently purged, forgetting the
+    /// address → purpose → counterparty linkage it recorded. The counterparty
+    /// record itself always remains.
+    #[serde(rename = "treasury.receive.purge")]
+    TreasuryReceivePurge {
+        id: String,
+        counterparty_binding_removed: bool,
+    },
     #[serde(rename = "treasury.party.create")]
     TreasuryPartyCreate { name: String },
     #[serde(rename = "treasury.party.delete")]
@@ -637,6 +676,8 @@ impl AuditEventSpec {
             Self::WalletInventoryWatchAddressDelete { .. } => {
                 "wallet_inventory.watch_address.delete"
             }
+            Self::WalletInventoryAddressesPrune { .. } => "wallet_inventory.addresses.prune",
+            Self::WalletInventoryProfilePrune { .. } => "wallet_inventory.profile_prune",
             Self::WalletConsolidationPlanGenerate { .. } => "wallet_consolidation.plan.generate",
             Self::WalletConsolidationPlanApprove { .. } => "wallet_consolidation.plan.approve",
             Self::WalletConsolidationPlanSimulate { .. } => "wallet_consolidation.plan.simulate",
@@ -656,6 +697,7 @@ impl AuditEventSpec {
             Self::TreasuryAutomationRun { .. } => "treasury.automation_run",
             Self::TreasuryReceiveAllocate { .. } => "treasury.receive.allocate",
             Self::TreasuryReceiveRotate { .. } => "treasury.receive.rotate",
+            Self::TreasuryReceivePurge { .. } => "treasury.receive.purge",
             Self::TreasuryPartyCreate { .. } => "treasury.party.create",
             Self::TreasuryPartyDelete { .. } => "treasury.party.delete",
             Self::TreasuryReceiveBind { .. } => "treasury.receive.bind",
@@ -998,6 +1040,68 @@ impl AuditEventSpec {
             Self::WalletInventoryWatchAddressDelete { address } => {
                 json!({ "address": address })
             }
+            Self::WalletInventoryAddressesPrune {
+                scoped_by_address,
+                wallet_family,
+                wallet_profile,
+                provider_profile,
+                chain_id,
+                account_index,
+                addresses,
+                holdings,
+                block_cursors,
+            } => {
+                let mut map = Map::new();
+                map.insert("scoped_by_address".into(), Value::Bool(*scoped_by_address));
+                if let Some(wallet_family) = wallet_family {
+                    map.insert("wallet_family".into(), Value::String(wallet_family.clone()));
+                }
+                if let Some(wallet_profile) = wallet_profile {
+                    map.insert(
+                        "wallet_profile".into(),
+                        Value::String(wallet_profile.clone()),
+                    );
+                }
+                if let Some(provider_profile) = provider_profile {
+                    map.insert(
+                        "provider_profile".into(),
+                        Value::String(provider_profile.clone()),
+                    );
+                }
+                if let Some(chain_id) = chain_id {
+                    map.insert("chain_id".into(), json!(chain_id));
+                }
+                if let Some(account_index) = account_index {
+                    map.insert("account_index".into(), json!(account_index));
+                }
+                map.insert("addresses".into(), json!(addresses));
+                map.insert("holdings".into(), json!(holdings));
+                map.insert("block_cursors".into(), json!(block_cursors));
+                Value::Object(map)
+            }
+            Self::WalletInventoryProfilePrune {
+                profile_kind,
+                name,
+                addresses,
+                holdings,
+                jobs,
+                checkpoints,
+                block_cursors,
+                allocations_active,
+                allocations_retired,
+                counterparty_bindings,
+            } => json!({
+                "profile_kind": profile_kind,
+                "name": name,
+                "addresses": addresses,
+                "holdings": holdings,
+                "jobs": jobs,
+                "checkpoints": checkpoints,
+                "block_cursors": block_cursors,
+                "allocations_active": allocations_active,
+                "allocations_retired": allocations_retired,
+                "counterparty_bindings": counterparty_bindings,
+            }),
             Self::WalletConsolidationPlanGenerate { id, steps, blocked } => {
                 json!({ "id": id, "steps": steps, "blocked": blocked })
             }
@@ -1115,6 +1219,13 @@ impl AuditEventSpec {
                 purpose,
             } => json!({ "wallet_profile": wallet_profile, "purpose": purpose }),
             Self::TreasuryReceiveRotate { id } => json!({ "id": id }),
+            Self::TreasuryReceivePurge {
+                id,
+                counterparty_binding_removed,
+            } => json!({
+                "id": id,
+                "counterparty_binding_removed": counterparty_binding_removed,
+            }),
             Self::TreasuryPartyCreate { name }
             | Self::TreasuryPartyDelete { name }
             | Self::TreasuryReceiveBind { name } => json!({ "name": name }),

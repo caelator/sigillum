@@ -14,8 +14,9 @@ use sigillum_api::{
     NftMetadataOptInDeleteRequest, NftMetadataOptInUpsertRequest, NftMetadataSettingsUpdateRequest,
     PlanEnqueuePlanRequest, PlanEnqueueStepRequest, RiskCatalogDeleteRequest,
     RiskCatalogUpsertRequest, TokenRegistryDeleteRequest, TokenRegistryImportRequest,
-    TreasuryPolicyUpdateRequest, TreasuryReceiveAllocateRequest, TreasuryReceiveRotateRequest,
-    WalletInventoryScanRequest, WatchAddressBookDeleteRequest, WatchAddressBookUpsertRequest,
+    TreasuryPolicyUpdateRequest, TreasuryReceiveAllocateRequest, TreasuryReceivePurgeRequest,
+    TreasuryReceiveRotateRequest, WalletInventoryAddressPruneRequest, WalletInventoryScanRequest,
+    WatchAddressBookDeleteRequest, WatchAddressBookUpsertRequest,
 };
 
 use crate::AppState;
@@ -53,6 +54,23 @@ pub(crate) async fn scan_wallet_inventory_evm(
     service_response(
         service
             .scan_wallet_inventory_evm(bearer_token(&headers).as_deref(), body)
+            .await,
+    )
+}
+
+pub(crate) async fn delete_wallet_inventory_addresses(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Json(body): Json<WalletInventoryAddressPruneRequest>,
+) -> Response {
+    let body = match validated(Json(body)) {
+        Ok(b) => b,
+        Err(resp) => return resp,
+    };
+    let service = SigillumService::new(state);
+    service_response(
+        service
+            .prune_wallet_inventory_addresses(bearer_token(&headers).as_deref(), body)
             .await,
     )
 }
@@ -465,6 +483,23 @@ pub(crate) async fn rotate_treasury_receive_address(
     service_response(
         service
             .rotate_treasury_receive_address(bearer_token(&headers).as_deref(), body)
+            .await,
+    )
+}
+
+pub(crate) async fn purge_treasury_receive_address(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Json(body): Json<TreasuryReceivePurgeRequest>,
+) -> Response {
+    let body = match validated(Json(body)) {
+        Ok(b) => b,
+        Err(resp) => return resp,
+    };
+    let service = SigillumService::new(state);
+    service_response(
+        service
+            .purge_treasury_receive_address(bearer_token(&headers).as_deref(), body)
             .await,
     )
 }

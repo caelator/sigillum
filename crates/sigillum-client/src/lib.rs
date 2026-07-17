@@ -799,11 +799,11 @@ impl SigillumClient {
 
     pub async fn delete_evm_provider_profile(
         &self,
-        name: &str,
+        request: EvmProfileDeleteRequest,
     ) -> Result<EvmProviderProfileMutationResponse, ClientError> {
         let builder = self
             .request(Method::POST, "/api/profiles/evm/delete")
-            .json(&EvmProfileDeleteRequest { name: name.into() });
+            .json(&request);
         self.send(builder).await
     }
 
@@ -849,11 +849,11 @@ impl SigillumClient {
 
     pub async fn delete_eth_stealth_wallet_profile(
         &self,
-        name: &str,
+        request: EvmProfileDeleteRequest,
     ) -> Result<EthStealthWalletProfileMutationResponse, ClientError> {
         let builder = self
             .request(Method::POST, "/api/profiles/eth-stealth/delete")
-            .json(&EvmProfileDeleteRequest { name: name.into() });
+            .json(&request);
         self.send(builder).await
     }
 
@@ -869,11 +869,11 @@ impl SigillumClient {
 
     pub async fn delete_eth_xpub_wallet_profile(
         &self,
-        name: &str,
+        request: EvmProfileDeleteRequest,
     ) -> Result<EthXpubWalletProfileMutationResponse, ClientError> {
         let builder = self
             .request(Method::POST, "/api/profiles/eth-xpub/delete")
-            .json(&EvmProfileDeleteRequest { name: name.into() });
+            .json(&request);
         self.send(builder).await
     }
 
@@ -905,11 +905,11 @@ impl SigillumClient {
 
     pub async fn delete_eth_seed_wallet_profile(
         &self,
-        name: &str,
+        request: EvmProfileDeleteRequest,
     ) -> Result<EthSeedWalletProfileMutationResponse, ClientError> {
         let builder = self
             .request(Method::POST, "/api/profiles/eth-seed/delete")
-            .json(&EvmProfileDeleteRequest { name: name.into() });
+            .json(&request);
         self.send(builder).await
     }
 

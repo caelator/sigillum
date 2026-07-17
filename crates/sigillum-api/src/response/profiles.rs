@@ -34,6 +34,11 @@ pub struct EvmProviderProfileListResponse {
 pub struct EvmProviderProfileMutationResponse {
     pub status: String,
     pub profile: EvmProviderProfile,
+    /// Present only when the delete requested `prune_inventory`: what the
+    /// forget cascade removed (plan task 3.2). Absent otherwise, so legacy
+    /// delete responses are byte-identical.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pruned_inventory: Option<crate::response::InventoryPruneSummary>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -61,6 +66,12 @@ pub struct EthStealthWalletProfileListResponse {
 pub struct EthStealthWalletProfileMutationResponse {
     pub status: String,
     pub profile: EthStealthWalletProfile,
+    /// Present only when the delete requested `prune_inventory` (plan task
+    /// 3.2). Stealth wallets have no wallet-inventory rows, so the summary
+    /// reports zeros; stealth deposit monitors live in the separate deposits
+    /// store with their own delete route.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pruned_inventory: Option<crate::response::InventoryPruneSummary>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -104,6 +115,11 @@ pub struct EthXpubWalletProfileListResponse {
 pub struct EthXpubWalletProfileMutationResponse {
     pub status: String,
     pub profile: EthXpubWalletProfile,
+    /// Present only when the delete requested `prune_inventory`: what the
+    /// forget cascade removed (plan task 3.2). Absent otherwise, so legacy
+    /// delete responses are byte-identical.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pruned_inventory: Option<crate::response::InventoryPruneSummary>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -146,6 +162,11 @@ pub struct EthSeedWalletProfileListResponse {
 pub struct EthSeedWalletProfileMutationResponse {
     pub status: String,
     pub profile: EthSeedWalletProfile,
+    /// Present only when the delete requested `prune_inventory`: what the
+    /// forget cascade removed (plan task 3.2). Absent otherwise, so legacy
+    /// delete responses are byte-identical.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pruned_inventory: Option<crate::response::InventoryPruneSummary>,
 }
 
 /// Response for a freshly created seed wallet profile.
