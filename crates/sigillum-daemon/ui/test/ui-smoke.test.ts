@@ -4290,6 +4290,129 @@ test("treasury receive allocate and rotate dispatch api calls with toasts", asyn
   ok(calls.some((call) => call.path === "/api/treasury/receive-addresses"));
 });
 
+test("treasury receive list renders one-time badge, lifecycle, and sweep terms", () => {
+  const dom = installDom(["treasuryReceiveList"]);
+  const treasury = createTreasuryActions({
+    api: async () => ({}),
+    toast: () => undefined,
+  });
+  const oneTime: TreasuryReceiveAllocation = {
+    id: "alloc-ot",
+    wallet_family: "eth-seed",
+    wallet_profile: "archive",
+    chain_id: 1,
+    chain_id_assumed: false,
+    address: "0x7777777777777777777777777777777777777777",
+    derivation_path: "m/44'/60'/0'/0/1",
+    address_index: 1,
+    purpose: "one-time-invoice",
+    status: "active",
+    created_at_unix: 1,
+    counterparty_id: "party-1",
+    one_time: true,
+    sweep_destination_address: "0x8888888888888888888888888888888888888888",
+    min_sweep_amount_hex: "0xde0b6b3a7640000",
+    purge_after_sweep: true,
+    lifecycle_state: "watching",
+    sweep_blocker: "execution_gates",
+  };
+  const swept: TreasuryReceiveAllocation = {
+    ...oneTime,
+    id: "alloc-swept",
+    lifecycle_state: "swept",
+    sweep_blocker: null,
+    min_sweep_amount_hex: null,
+    purge_after_sweep: false,
+  };
+
+  treasury.renderTreasuryReceiveAllocations([oneTime, swept]);
+  const html = dom.el("treasuryReceiveList").innerHTML;
+  equal(html.split(">One-time<").length - 1, 2);
+  ok(html.includes(">watching<"));
+  ok(html.includes(">swept<"));
+  ok(html.includes("one-time sweep"));
+  ok(html.includes("0x8888...8888"));
+  ok(html.includes("threshold 1 ETH"));
+  ok(html.includes("purges after sweep"));
+  ok(html.includes("waiting on execution gates"));
+  // Unset threshold renders as "any funds".
+  ok(html.includes("threshold any funds"));
+});
+
+test("treasury receive allocate sends one-time options with ETH threshold parsing", async () => {
+  const dom = installDom([
+    "treasuryReceiveList",
+    "treasuryReceiveProfile",
+    "treasuryReceivePurpose",
+    "treasuryReceiveLabel",
+    "treasuryReceiveParty",
+    "treasuryReceiveOneTime",
+    "treasuryReceiveSweepDestination",
+    "treasuryReceiveMinSweepEth",
+    "treasuryReceivePurgeAfterSweep",
+  ]);
+  const calls: Array<{ method: string; path: string; body?: any }> = [];
+  const toasts: Array<{ message: string; type?: string }> = [];
+  const treasury = createTreasuryActions({
+    api: async (method, path, body) => {
+      calls.push({ method, path, body });
+      if (path === "/api/treasury/receive-addresses/allocate") {
+        return { status: "allocated", allocation: null };
+      }
+      return {};
+    },
+    toast: (message, type) => toasts.push({ message, type }),
+  });
+
+  dom.el("treasuryReceiveProfile").value = "archive";
+  dom.el("treasuryReceivePurpose").value = "one-time-invoice";
+  dom.el("treasuryReceiveOneTime").checked = true;
+
+  // Destination is required in one-time mode.
+  await treasury.allocateTreasuryReceiveAddress();
+  equal(calls.length, 0);
+  deepEqual(toasts.pop(), {
+    message: "One-time addresses need a sweep destination",
+    type: "error",
+  });
+
+  // A malformed threshold is rejected before any call.
+  dom.el("treasuryReceiveSweepDestination").value =
+    "0x8888888888888888888888888888888888888888";
+  dom.el("treasuryReceiveMinSweepEth").value = "not-a-number";
+  await treasury.allocateTreasuryReceiveAddress();
+  equal(calls.length, 0);
+  deepEqual(toasts.pop(), {
+    message: "Min sweep must be an ETH amount like 0.05",
+    type: "error",
+  });
+
+  dom.el("treasuryReceiveMinSweepEth").value = "0.05";
+  dom.el("treasuryReceivePurgeAfterSweep").checked = true;
+  await treasury.allocateTreasuryReceiveAddress();
+
+  const allocateCall = calls.find(
+    (call) => call.path === "/api/treasury/receive-addresses/allocate",
+  );
+  deepEqual(allocateCall, {
+    method: "POST",
+    path: "/api/treasury/receive-addresses/allocate",
+    body: {
+      wallet_profile: "archive",
+      purpose: "one-time-invoice",
+      one_time: true,
+      sweep_destination_address: "0x8888888888888888888888888888888888888888",
+      min_sweep_amount_hex: "0x" + (50000000000000000n).toString(16),
+      purge_after_sweep: true,
+    },
+  });
+  // One-time controls reset after a successful allocation.
+  equal(dom.el("treasuryReceiveOneTime").checked, false);
+  equal(dom.el("treasuryReceivePurgeAfterSweep").checked, false);
+  equal(dom.el("treasuryReceiveSweepDestination").value, "");
+  equal(dom.el("treasuryReceiveMinSweepEth").value, "");
+});
+
 // ── Wallet manager ──────────────────────────────────────────────────────────
 
 const MNEMONIC_WORDS = [

@@ -635,42 +635,90 @@ export function createTreasuryActions(deps: TreasuryActionsDeps) {
         actionLabel: "Allocate an address",
         action: "focusTreasuryReceive",
       },
-      (allocation) =>
-        '<li><div class="entity-main">' +
-        '<div class="entity-title">' +
-        esc(allocation.address) +
-        " " +
-        statusPill(allocation.status) +
-        "</div>" +
-        '<div class="entity-meta">' +
-        esc(allocation.wallet_family) +
-        "/" +
-        esc(allocation.wallet_profile) +
-        " · chain=" +
-        esc(String(allocation.chain_id)) +
-        (allocation.chain_id_assumed ? " (assumed mainnet)" : "") +
-        " · purpose=" +
-        esc(allocation.purpose) +
-        (allocation.label ? " · label=" + esc(allocation.label) : "") +
-        (allocation.counterparty_id
-          ? " · party=" +
-            esc(partyNameById(allocation.counterparty_id) || allocation.counterparty_id)
-          : "") +
-        "<br>" +
-        "path=" +
-        esc(allocation.derivation_path) +
-        " · index=" +
-        esc(String(allocation.address_index)) +
-        "</div></div>" +
-        (allocation.status === "active"
-          ? '<div class="entity-actions">' +
-            '<button class="btn-ghost" data-action="rotateTreasuryReceiveAddress" data-arg0="' +
-            escAttr(allocation.id) +
-            '">Rotate</button>' +
-            "</div>"
-          : "") +
-        "</li>",
+      (allocation) => {
+        const oneTimeBadge = allocation.one_time
+          ? ' <span class="pill">One-time</span>' +
+            (allocation.lifecycle_state
+              ? " " + statusPill(allocation.lifecycle_state)
+              : "")
+          : "";
+        const oneTimeMeta = allocation.one_time
+          ? "<br>" +
+            "one-time sweep &rarr; " +
+            esc(shortAddress(allocation.sweep_destination_address || "")) +
+            " · threshold " +
+            (allocation.min_sweep_amount_hex
+              ? esc(formatWeiHexAsEth(allocation.min_sweep_amount_hex)) + " ETH"
+              : "any funds") +
+            (allocation.purge_after_sweep ? " · purges after sweep" : "") +
+            (allocation.sweep_blocker
+              ? " · " + esc(oneTimeBlockerCopy(allocation.sweep_blocker))
+              : "")
+          : "";
+        return (
+          '<li><div class="entity-main">' +
+          '<div class="entity-title">' +
+          esc(allocation.address) +
+          " " +
+          statusPill(allocation.status) +
+          oneTimeBadge +
+          "</div>" +
+          '<div class="entity-meta">' +
+          esc(allocation.wallet_family) +
+          "/" +
+          esc(allocation.wallet_profile) +
+          " · chain=" +
+          esc(String(allocation.chain_id)) +
+          (allocation.chain_id_assumed ? " (assumed mainnet)" : "") +
+          " · purpose=" +
+          esc(allocation.purpose) +
+          (allocation.label ? " · label=" + esc(allocation.label) : "") +
+          (allocation.counterparty_id
+            ? " · party=" +
+              esc(partyNameById(allocation.counterparty_id) || allocation.counterparty_id)
+            : "") +
+          "<br>" +
+          "path=" +
+          esc(allocation.derivation_path) +
+          " · index=" +
+          esc(String(allocation.address_index)) +
+          oneTimeMeta +
+          "</div></div>" +
+          (allocation.status === "active"
+            ? '<div class="entity-actions">' +
+              '<button class="btn-ghost" data-action="rotateTreasuryReceiveAddress" data-arg0="' +
+              escAttr(allocation.id) +
+              '">Rotate</button>' +
+              "</div>"
+            : "") +
+          "</li>"
+        );
+      },
     );
+  }
+
+  // Plain-English reason a watching one-time allocation has not swept yet.
+  function oneTimeBlockerCopy(blocker: string): string {
+    switch (blocker) {
+      case "awaiting_balance":
+        return "waiting for a balance check";
+      case "below_threshold":
+        return "below the sweep threshold";
+      case "execution_gates":
+        return "waiting on execution gates";
+      case "destination_policy":
+        return "destination blocked by treasury policy";
+      case "step_cap":
+        return "above the per-step cap";
+      case "cross_party_linkage":
+        return "blocked: shared destination would link parties";
+      case "sweep_failed":
+        return "last sweep failed";
+      case "sweep_attention":
+        return "sweep needs attention";
+      default:
+        return blocker.replace(/_/g, " ");
+    }
   }
 
   function renderTreasuryParties(parties: Counterparty[]): void {
@@ -958,27 +1006,70 @@ export function createTreasuryActions(deps: TreasuryActionsDeps) {
     const partyId =
       (document.getElementById("treasuryReceiveParty") as HTMLSelectElement | null)
         ?.value || "";
+    const oneTime =
+      (document.getElementById("treasuryReceiveOneTime") as HTMLInputElement | null)
+        ?.checked === true;
     const body: {
       wallet_profile: string;
       purpose: string;
       label?: string;
       counterparty_id?: string;
+      one_time?: boolean;
+      sweep_destination_address?: string;
+      min_sweep_amount_hex?: string;
+      purge_after_sweep?: boolean;
     } = {
       wallet_profile: walletProfile,
       purpose,
     };
     if (label) body.label = label;
     if (partyId) body.counterparty_id = partyId;
+    if (oneTime) {
+      const destination = optionalTextValue("treasuryReceiveSweepDestination");
+      if (!destination) {
+        deps.toast("One-time addresses need a sweep destination", "error");
+        return;
+      }
+      const thresholdEth = optionalTextValue("treasuryReceiveMinSweepEth");
+      let thresholdWeiHex: string | null = null;
+      if (thresholdEth) {
+        thresholdWeiHex = parseEthToWeiHex(thresholdEth);
+        if (!thresholdWeiHex) {
+          deps.toast("Min sweep must be an ETH amount like 0.05", "error");
+          return;
+        }
+      }
+      body.one_time = true;
+      body.sweep_destination_address = destination;
+      if (thresholdWeiHex) body.min_sweep_amount_hex = thresholdWeiHex;
+      body.purge_after_sweep =
+        (document.getElementById("treasuryReceivePurgeAfterSweep") as HTMLInputElement | null)
+          ?.checked === true;
+    }
     const r = await deps.api("POST", "/api/treasury/receive-addresses/allocate", body);
     if (r.error) {
       deps.toast(r.error, "error");
       return;
     }
-    clearFields(["treasuryReceiveProfile", "treasuryReceivePurpose", "treasuryReceiveLabel"]);
+    clearFields([
+      "treasuryReceiveProfile",
+      "treasuryReceivePurpose",
+      "treasuryReceiveLabel",
+      "treasuryReceiveSweepDestination",
+      "treasuryReceiveMinSweepEth",
+    ]);
     const partySelect = document.getElementById(
       "treasuryReceiveParty",
     ) as HTMLSelectElement | null;
     if (partySelect) partySelect.value = "";
+    const oneTimeBox = document.getElementById(
+      "treasuryReceiveOneTime",
+    ) as HTMLInputElement | null;
+    if (oneTimeBox) oneTimeBox.checked = false;
+    const purgeBox = document.getElementById(
+      "treasuryReceivePurgeAfterSweep",
+    ) as HTMLInputElement | null;
+    if (purgeBox) purgeBox.checked = false;
     const allocation = r.allocation as TreasuryReceiveAllocation | undefined;
     deps.toast(
       "Receive address allocated" + (allocation?.address ? ": " + allocation.address : ""),

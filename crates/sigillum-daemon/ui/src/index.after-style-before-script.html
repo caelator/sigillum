@@ -400,6 +400,18 @@
           </select>
           <button class="btn-primary" data-action="allocateTreasuryReceiveAddress">Allocate Address</button>
         </div>
+        <div class="form-row">
+          <label class="checkbox-row">
+            <input type="checkbox" id="treasuryReceiveOneTime">
+            Use this address once &mdash; sweep funds here automatically, then retire it
+          </label>
+          <input type="text" id="treasuryReceiveSweepDestination" placeholder="Sweep destination (one-time)">
+          <input type="text" id="treasuryReceiveMinSweepEth" placeholder="Min sweep ETH (optional)">
+          <label class="checkbox-row">
+            <input type="checkbox" id="treasuryReceivePurgeAfterSweep">
+            Purge the record after the sweep
+          </label>
+        </div>
         <div class="section-divider"></div>
         <div class="section-title">Counterparties</div>
         <p class="helper-text">Track payers as first-class parties so you can hand each a dedicated receive address.</p>

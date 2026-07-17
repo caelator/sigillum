@@ -567,6 +567,16 @@ export interface TreasuryReceiveAllocation {
   created_at_unix: number;
   retired_at_unix?: number | null;
   counterparty_id?: string | null;
+  // Plan task 3.3 one-time mode (auto-watch → auto-sweep → retire → optional purge).
+  one_time?: boolean;
+  sweep_destination_address?: string | null;
+  min_sweep_amount_hex?: string | null;
+  purge_after_sweep?: boolean;
+  sweep_job_id?: string | null;
+  // Read-time derivation: watching | sweep_queued | swept | retired.
+  lifecycle_state?: string | null;
+  // Why a watching allocation has not swept yet (see docs/architecture.md).
+  sweep_blocker?: string | null;
 }
 
 export interface Counterparty {
