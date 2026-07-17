@@ -512,6 +512,12 @@ pub struct ConsolidationPlan {
     /// would publicly link multiple distinct payers via a shared recipient.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub linkage_findings: Vec<String>,
+    /// Structured privacy findings from the linkage analysis (plan task 3.5):
+    /// `common_gas_funder` entries when one gas sponsor funds receive
+    /// addresses attributed to different payer identities. Advisory only —
+    /// execution blocking stays governed by `block_cross_party_linkage`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub risk_findings: Vec<RiskFinding>,
     pub steps: Vec<ConsolidationPlanStep>,
 }
 

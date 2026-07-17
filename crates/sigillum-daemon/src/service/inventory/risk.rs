@@ -8,6 +8,68 @@ use super::nft_approval_discovery::DISCOVERY_SOURCE_NFT_OPERATOR_APPROVAL_PROBE;
 use super::permit2_discovery::DISCOVERY_SOURCE_PERMIT2_ALLOWANCE_PROBE;
 use super::support::quantity_hex_is_nonzero;
 
+/// Risk-finding category emitted when one gas funder/sponsor address pays gas
+/// into receive addresses attributed to DIFFERENT payer identities (plan task
+/// 3.5): an observer sees the common funder and links those parties on-chain.
+pub(in crate::service) const RISK_CATEGORY_COMMON_GAS_FUNDER: &str = "common_gas_funder";
+
+/// Build the `common_gas_funder` advisory finding (plan task 3.5). The shape
+/// mirrors the other local-risk-engine findings (approvals, watch-only,
+/// stranded, dormant): same source, stable id, `medium` default level.
+///
+/// This is a surfacing, never a block: execution blocking for the same
+/// detection stays governed by `block_cross_party_linkage`
+/// (`apply_linkage_blockers` / the stealth sweep-enqueue policy check). The
+/// id is stable per (chain, funder) so repeated detections of the same
+/// funder collapse to one finding identity. Re-exported through
+/// `inventory::planner` for the stealth sponsor path (`service/deposits.rs`)
+/// because this module is private to `inventory`.
+pub(in crate::service) fn common_gas_funder_finding(
+    wallet_family: &str,
+    wallet_profile: &str,
+    provider_profile: &str,
+    chain_id: u64,
+    funder_address: &str,
+    linked_labels: &[String],
+    seen_at_unix: u64,
+) -> RiskFinding {
+    let funder = funder_address.trim().to_lowercase();
+    let mut labels: Vec<String> = linked_labels.to_vec();
+    labels.sort();
+    labels.dedup();
+    let mut evidence = vec![
+        format!("Gas funder/sponsor: {funder}"),
+        format!("Distinct payer identities funded: {}", labels.len()),
+    ];
+    evidence.extend(labels.iter().map(|label| format!("Linked payer: {label}")));
+    evidence.push(
+        "Single-hop funder-axis heuristic: only funding this daemon planned or recorded is \
+         modeled; manual gas funding, amount/timing correlation, and multi-hop flows are not."
+            .into(),
+    );
+    RiskFinding {
+        id: format!("{RISK_CATEGORY_COMMON_GAS_FUNDER}:{chain_id}:{funder}"),
+        category: RISK_CATEGORY_COMMON_GAS_FUNDER.into(),
+        risk_level: "medium".into(),
+        status: "open".into(),
+        wallet_family: wallet_family.into(),
+        wallet_profile: wallet_profile.into(),
+        provider_profile: provider_profile.into(),
+        chain_id,
+        address: funder.clone(),
+        subject_type: "gas_funder".into(),
+        subject: funder.clone(),
+        source: "local-risk-engine".into(),
+        recommendation:
+            "Fund each party's gas from a distinct sponsor address (or request payer-attached \
+             gas); one funder paying gas for multiple parties publicly links them on-chain."
+            .into(),
+        evidence,
+        first_seen_at_unix: seen_at_unix,
+        last_checked_at_unix: seen_at_unix,
+    }
+}
+
 pub(super) fn derive_inventory_risk_findings(
     addresses: &[WalletInventoryAddress],
     holdings: &[WalletAssetHolding],
@@ -698,6 +760,50 @@ mod tests {
                 .evidence
                 .iter()
                 .any(|value| { value == "Claim contract is missing from inventory holding" })
+        );
+    }
+
+    #[test]
+    fn common_gas_funder_finding_is_stable_and_lists_linked_payers() {
+        let finding = common_gas_funder_finding(
+            "eth-seed",
+            "seed-main",
+            "mainnet",
+            1,
+            "0xAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+            &["Bob".to_string(), "Acme".to_string(), "Acme".to_string()],
+            42,
+        );
+
+        assert_eq!(finding.category, "common_gas_funder");
+        assert_eq!(
+            finding.id,
+            "common_gas_funder:1:0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        );
+        assert_eq!(finding.risk_level, "medium");
+        assert_eq!(finding.subject_type, "gas_funder");
+        assert_eq!(
+            finding.subject,
+            "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        );
+        assert!(finding.recommendation.contains("distinct sponsor"));
+        assert!(
+            finding
+                .evidence
+                .iter()
+                .any(|value| value == "Distinct payer identities funded: 2")
+        );
+        assert!(
+            finding
+                .evidence
+                .iter()
+                .any(|value| value == "Linked payer: Acme")
+        );
+        assert!(
+            finding
+                .evidence
+                .iter()
+                .any(|value| value == "Linked payer: Bob")
         );
     }
 }

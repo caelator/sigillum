@@ -420,7 +420,7 @@ fn persist_generated_plans(
             .as_ref()
             .map(|policy| plan_policy_violations(policy, &steps))
             .unwrap_or_default();
-        let linkage_findings = analyze_plan_linkage(state, &mut steps);
+        let linkage_analysis = analyze_plan_linkage(state, &mut steps);
         if policy
             .as_ref()
             .map(|policy| policy.block_cross_party_linkage)
@@ -446,7 +446,8 @@ fn persist_generated_plans(
             updated_at_unix: now,
             summary,
             policy_violations,
-            linkage_findings,
+            linkage_findings: linkage_analysis.findings,
+            risk_findings: linkage_analysis.risk_findings,
             steps,
         });
     }
@@ -736,6 +737,7 @@ mod tests {
             summary,
             policy_violations: Vec::new(),
             linkage_findings: Vec::new(),
+            risk_findings: Vec::new(),
             steps: vec![step],
         }
     }

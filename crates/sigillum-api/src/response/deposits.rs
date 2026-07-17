@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use super::{EthStealthAnnouncementPayload, QueueJob};
+use super::{EthStealthAnnouncementPayload, QueueJob, RiskFinding};
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct EthStealthDeposit {
@@ -138,6 +138,13 @@ pub struct EthStealthDepositEnqueueSweepResponse {
     pub job: QueueJob,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub linkage_warning: Option<String>,
+    /// Structured privacy findings from the sponsor-linkage analysis (plan
+    /// task 3.5): a `common_gas_funder` entry when this deposit's gas sponsor
+    /// already funds deposits attributed to different payer identities.
+    /// Advisory only — blocking stays governed by `block_cross_party_linkage`
+    /// (the `linkage_warning`/403 `policy_violation` path is unchanged).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub risk_findings: Vec<RiskFinding>,
 }
 
 fn default_legacy_mainnet_chain_id() -> u64 {

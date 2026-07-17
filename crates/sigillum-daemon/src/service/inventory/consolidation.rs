@@ -99,7 +99,7 @@ impl SigillumService {
                 .as_ref()
                 .map(|policy| plan_policy_violations(policy, &steps))
                 .unwrap_or_default();
-            let linkage_findings = analyze_plan_linkage(&state, &mut steps);
+            let linkage_analysis = analyze_plan_linkage(&state, &mut steps);
             if policy
                 .as_ref()
                 .map(|policy| policy.block_cross_party_linkage)
@@ -125,7 +125,8 @@ impl SigillumService {
                 updated_at_unix: now,
                 summary,
                 policy_violations,
-                linkage_findings,
+                linkage_findings: linkage_analysis.findings,
+                risk_findings: linkage_analysis.risk_findings,
                 steps,
             };
             generated_plans.push(plan);
@@ -187,7 +188,8 @@ impl SigillumService {
             .find(|plan| plan.id == body.plan_id)
             .ok_or_else(|| ServiceError::not_found("Consolidation plan not found."))?;
         if let Some(linkage_state) = linkage_state.as_ref() {
-            let _ = analyze_plan_linkage(linkage_state, &mut plan.steps);
+            let analysis = analyze_plan_linkage(linkage_state, &mut plan.steps);
+            plan.risk_findings = analysis.risk_findings;
             apply_linkage_blockers(&mut plan.steps);
         }
         let freshness_secs = policy

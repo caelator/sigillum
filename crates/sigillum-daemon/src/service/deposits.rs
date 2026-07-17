@@ -39,7 +39,7 @@ use sigillum_api::{
     EthStealthDepositMutationResponse, EthStealthDepositRefreshRequest,
     EthStealthDepositRefreshResponse, EthStealthGenerateRequest, EthStealthWalletProfile,
     EvmProviderProfile, QueueEnqueueResponse, QueueJob, QueueJobPayload,
-    ReceivingDepositTagRequest,
+    ReceivingDepositTagRequest, RiskFinding,
 };
 use sigillum_core::{
     ERC5564_ANNOUNCE_FUNCTION, ERC5564_ANNOUNCER_ADDRESS, ERC5564_METADATA_ERC20_TRANSFER_SELECTOR,
@@ -712,27 +712,47 @@ mod tests {
         other.gas_topup_job_id = Some("topup_1".into());
         let queue = queue_with_gas_topup("topup_1", sponsor, &other.stealth_address);
 
-        let warning =
+        let linkage =
             detect_stealth_gas_sponsor_linkage(&target, sponsor, &[other.clone()], &queue).unwrap();
-        assert!(warning.starts_with("shared gas sponsor links this party"), "{warning}");
+        assert!(
+            linkage.warning.starts_with("shared gas sponsor links this party"),
+            "{}",
+            linkage.warning
+        );
+        // Plan task 3.5: the same detection surfaces a structured
+        // `common_gas_funder` risk finding (advisory).
+        let finding = &linkage.risk_finding;
+        assert_eq!(finding.category, "common_gas_funder");
+        assert_eq!(finding.risk_level, "medium");
+        assert_eq!(finding.subject_type, "gas_funder");
+        assert_eq!(finding.subject, sponsor);
+        assert_eq!(finding.wallet_family, "eth-stealth");
+        assert_eq!(finding.chain_id, target.chain_id);
+        assert!(
+            finding
+                .evidence
+                .iter()
+                .any(|value| value == "Linked payer: counterparty:party_b"),
+            "evidence: {:?}",
+            finding.evidence
+        );
 
         // Same counterparty on both deposits: one identity, no linkage.
         let mut same_party = other.clone();
         same_party.counterparty_id = Some("party_a".into());
-        assert_eq!(
-            detect_stealth_gas_sponsor_linkage(&target, sponsor, &[same_party], &queue),
-            None
+        assert!(
+            detect_stealth_gas_sponsor_linkage(&target, sponsor, &[same_party], &queue).is_none()
         );
 
         // A different sponsor funds the other deposit: no shared funder.
-        assert_eq!(
+        assert!(
             detect_stealth_gas_sponsor_linkage(
                 &target,
                 "0x5555555555555555555555555555555555555555",
                 &[other],
                 &queue
-            ),
-            None
+            )
+            .is_none()
         );
     }
 
@@ -744,10 +764,7 @@ mod tests {
         let queue = queue_with_gas_topup("topup_1", sponsor, &other.stealth_address);
 
         // The other deposit never recorded a top-up job: nothing to link.
-        assert_eq!(
-            detect_stealth_gas_sponsor_linkage(&target, sponsor, &[other], &queue),
-            None
-        );
+        assert!(detect_stealth_gas_sponsor_linkage(&target, sponsor, &[other], &queue).is_none());
     }
 }
 
@@ -1520,6 +1537,7 @@ impl SigillumService {
             deposit: deposit_snapshot.0,
             job: deposit_snapshot.1.enqueue.job,
             linkage_warning: deposit_snapshot.1.linkage_warning,
+            risk_findings: deposit_snapshot.1.risk_findings,
         })
     }
 }
@@ -1536,11 +1554,14 @@ struct DepositSweepJobParams<'a> {
 }
 
 /// Outcome of enqueueing a deposit sweep: the sweep job itself, an optional
-/// non-blocking linkage warning (destination- and/or sponsor-axis), and the
-/// sponsor gas top-up job when one was planned ahead of the sweep.
+/// non-blocking linkage warning (destination- and/or sponsor-axis), the
+/// structured `common_gas_funder` risk findings backing the sponsor-axis
+/// warning (plan task 3.5, advisory only), and the sponsor gas top-up job
+/// when one was planned ahead of the sweep.
 struct DepositSweepEnqueueOutcome {
     enqueue: QueueEnqueueResponse,
     linkage_warning: Option<String>,
+    risk_findings: Vec<RiskFinding>,
     gas_topup_job: Option<QueueJob>,
 }
 
@@ -1583,7 +1604,7 @@ impl SigillumService {
         }
 
         let mut gas_topup_job = None;
-        let mut sponsor_linkage_warning = None;
+        let mut sponsor_linkage: Option<StealthSponsorLinkage> = None;
         let job = if deposit.asset_kind == "erc20" {
             let recipient_address = destination.ok_or_else(|| {
                 ServiceError::bad_request(
@@ -1603,7 +1624,7 @@ impl SigillumService {
             // until gas is confirmed on-chain). Sponsor linkage flows through
             // the same cross-party accounting as seed-plan sponsor funding:
             // warn by default, hard-block when `block_cross_party_linkage`.
-            let (planned_topup, planned_sponsor_warning) = self
+            let (planned_topup, planned_sponsor_linkage) = self
                 .plan_stealth_gas_topup_job(
                     deposit,
                     wallet,
@@ -1613,11 +1634,11 @@ impl SigillumService {
                     queue,
                 )
                 .await?;
-            if planned_sponsor_warning.is_some() && block_cross_party_linkage {
+            if planned_sponsor_linkage.is_some() && block_cross_party_linkage {
                 return Err(ServiceError::policy_violation("cross_party_linkage"));
             }
             gas_topup_job = planned_topup;
-            sponsor_linkage_warning = planned_sponsor_warning;
+            sponsor_linkage = planned_sponsor_linkage;
 
             QueueJob {
                 id: random_id(),
@@ -1702,10 +1723,18 @@ impl SigillumService {
             }
         };
 
-        let linkage_warning = [destination_linkage_warning, sponsor_linkage_warning]
-            .into_iter()
-            .flatten()
-            .reduce(|left, right| format!("{left}; {right}"));
+        let linkage_warning = [
+            destination_linkage_warning,
+            sponsor_linkage
+                .as_ref()
+                .map(|linkage| linkage.warning.clone()),
+        ]
+        .into_iter()
+        .flatten()
+        .reduce(|left, right| format!("{left}; {right}"));
+        let risk_findings = sponsor_linkage
+            .map(|linkage| vec![linkage.risk_finding])
+            .unwrap_or_default();
 
         // The top-up lands in the queue BEFORE its dependent sweep so a
         // single drain broadcasts it first (dependency ordering is by job id
@@ -1736,6 +1765,7 @@ impl SigillumService {
                 job,
             },
             linkage_warning,
+            risk_findings,
             gas_topup_job,
         })
     }
@@ -1743,7 +1773,8 @@ impl SigillumService {
     /// Plan a sponsor gas top-up for an ERC-20 deposit that lacks native gas.
     ///
     /// Returns the top-up job to enqueue ahead of the sweep plus an optional
-    /// sponsor-linkage warning. `(None, _)` means "no top-up": policy off,
+    /// sponsor-linkage detection (warning + structured `common_gas_funder`
+    /// risk finding). `(None, _)` means "no top-up": policy off,
     /// gas already sufficient, fee basis missing, cap exceeded, sponsor
     /// unavailable (locked compartment) or insolvent, or a live top-up
     /// already tracked — in every case the deposit keeps its historical
@@ -1764,7 +1795,7 @@ impl SigillumService {
         other_deposits: &[EthStealthDeposit],
         inventory: &WalletInventoryState,
         queue: &crate::queue_store::QueueState,
-    ) -> ServiceResult<(Option<QueueJob>, Option<String>)> {
+    ) -> ServiceResult<(Option<QueueJob>, Option<StealthSponsorLinkage>)> {
         if !super::inventory::gas_topup::gas_topup_policy_enabled(
             inventory.treasury_policy.as_ref(),
         ) {
@@ -1840,7 +1871,7 @@ impl SigillumService {
             return Ok((None, None));
         }
 
-        let linkage_warning =
+        let linkage =
             detect_stealth_gas_sponsor_linkage(deposit, &sponsor_address, other_deposits, queue);
         let job = QueueJob {
             id: random_id(),
@@ -1861,7 +1892,7 @@ impl SigillumService {
             broadcast_transaction_hash_hex: None,
             receipt: Default::default(),
         };
-        Ok((Some(job), linkage_warning))
+        Ok((Some(job), linkage))
     }
 
     // ── Deposit State Refresh & Sync ───────────────────────────────────────
@@ -2281,6 +2312,15 @@ fn stealth_sweep_identity_key(deposit: &EthStealthDeposit) -> String {
         })
 }
 
+/// Sponsor-linkage detection result for a planned stealth gas top-up: the
+/// long-standing non-blocking warning string plus the structured
+/// `common_gas_funder` risk finding (plan task 3.5, advisory only — blocking
+/// stays governed by `block_cross_party_linkage`).
+struct StealthSponsorLinkage {
+    warning: String,
+    risk_finding: RiskFinding,
+}
+
 /// Cross-party sponsor linkage for stealth gas top-ups (single hop,
 /// destination axis): one sponsor funding stealth deposits attributed to
 /// DIFFERENT identities links those parties on-chain — an observer sees a
@@ -2288,13 +2328,15 @@ fn stealth_sweep_identity_key(deposit: &EthStealthDeposit) -> String {
 /// the seed-plan FundGas funder analysis
 /// (`service/inventory/planner.rs::analyze_plan_linkage`), with the funded
 /// destination's identity resolved from the deposit record's counterparty
-/// tag (`stealth_sweep_identity_key`).
+/// tag (`stealth_sweep_identity_key`). Since plan task 3.5 the detection
+/// also produces the structured `common_gas_funder` risk finding via the
+/// shared risk machinery (`service/inventory/risk.rs`).
 fn detect_stealth_gas_sponsor_linkage(
     target: &EthStealthDeposit,
     sponsor_address: &str,
     other_deposits: &[EthStealthDeposit],
     queue: &crate::queue_store::QueueState,
-) -> Option<String> {
+) -> Option<StealthSponsorLinkage> {
     let sponsor_key = normalize_stealth_linkage_address(sponsor_address);
     if sponsor_key.is_empty() {
         return None;
@@ -2330,11 +2372,24 @@ fn detect_stealth_gas_sponsor_linkage(
     if linked_identities.is_empty() {
         None
     } else {
-        Some(
-            "shared gas sponsor links this party with another payer; fund gas from a distinct \
-             sponsor or request payer-attached gas"
-                .into(),
-        )
+        let mut linked_labels: Vec<String> = linked_identities.into_iter().collect();
+        linked_labels.sort();
+        let risk_finding = super::inventory::planner::common_gas_funder_finding(
+            "eth-stealth",
+            &target.wallet_profile,
+            &target.wallet_profile,
+            target.chain_id,
+            sponsor_address,
+            &linked_labels,
+            now_unix(),
+        );
+        Some(StealthSponsorLinkage {
+            warning:
+                "shared gas sponsor links this party with another payer; fund gas from a distinct \
+                 sponsor or request payer-attached gas"
+                    .into(),
+            risk_finding,
+        })
     }
 }
 

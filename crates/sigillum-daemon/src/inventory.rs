@@ -54,7 +54,9 @@ impl JsonDocument for WalletInventoryState {
     // v20 (W8) adds TreasuryPolicy.hot_overflow_wei_hex /
     // allow_treasury_automation and ConsolidationPlan.origin; older payloads
     // load with overflow None, automation false, origin None.
-    const SCHEMA: JsonSchema = JsonSchema::new("sigillum.wallet-inventory", 20);
+    // v21 (plan task 3.1) adds WalletDiscoveryJob.partition_providers and
+    // provider_partition_observations; older payloads load with both absent.
+    const SCHEMA: JsonSchema = JsonSchema::new("sigillum.wallet-inventory", 21);
 
     fn from_enveloped_json(
         path: &std::path::Path,
@@ -62,7 +64,7 @@ impl JsonDocument for WalletInventoryState {
         data: serde_json::Value,
     ) -> Result<Self, std::io::Error> {
         match version {
-            1..=20 => {
+            1..=21 => {
                 let mut state: Self = serde_json::from_value(data).map_err(|error| {
                     std::io::Error::new(
                         std::io::ErrorKind::InvalidData,
@@ -340,6 +342,7 @@ mod tests {
             },
             policy_violations: Vec::new(),
             linkage_findings: Vec::new(),
+            risk_findings: Vec::new(),
             steps: vec![sigillum_api::ConsolidationPlanStep {
                 id: "step_future".into(),
                 sequence: 0,
@@ -735,7 +738,7 @@ mod tests {
         let saved: serde_json::Value =
             serde_json::from_slice(&std::fs::read(wallet_inventory_path(dir.path())).unwrap())
                 .unwrap();
-        assert_eq!(saved["schema_version"], json!(20));
+        assert_eq!(saved["schema_version"], json!(21));
     }
 
     #[test]
@@ -797,7 +800,7 @@ mod tests {
         let saved: serde_json::Value =
             serde_json::from_slice(&std::fs::read(wallet_inventory_path(dir.path())).unwrap())
                 .unwrap();
-        assert_eq!(saved["schema_version"], json!(20));
+        assert_eq!(saved["schema_version"], json!(21));
         let saved_step = &saved["data"]["consolidation_plans"][0]["steps"][0];
         assert_eq!(saved_step["id"], json!("step_legacy"));
         assert!(saved_step.get("queued_job_id").is_none());
@@ -891,7 +894,54 @@ mod tests {
         let saved: serde_json::Value =
             serde_json::from_slice(&std::fs::read(wallet_inventory_path(dir.path())).unwrap())
                 .unwrap();
-        assert_eq!(saved["schema_version"], json!(20));
+        assert_eq!(saved["schema_version"], json!(21));
+    }
+
+    #[test]
+    fn legacy_v20_discovery_jobs_load_without_partition_fields_and_rewrite_v21() {
+        let dir = TempDir::new().unwrap();
+        let envelope = json!({
+            "schema": "sigillum.wallet-inventory",
+            "schema_version": 20,
+            "data": {
+                "jobs": [{
+                    "id": "job_legacy",
+                    "status": "completed",
+                    "source": "local-rpc",
+                    "wallet_families": ["eth-xpub"],
+                    "wallet_profiles": ["account-xpub"],
+                    "provider_profiles": ["mainnet-a", "mainnet-b"],
+                    "chain_ids": [1],
+                    "gap_limit": 20,
+                    "max_index": 200,
+                    "addresses_scanned": 10,
+                    "active_addresses": 1,
+                    "holdings_detected": 1,
+                    "started_at_unix": 1,
+                    "completed_at_unix": 2
+                }]
+            },
+        });
+        std::fs::write(
+            wallet_inventory_path(dir.path()),
+            serde_json::to_vec_pretty(&envelope).unwrap(),
+        )
+        .unwrap();
+
+        let loaded = load_wallet_inventory(dir.path()).unwrap();
+        let job = &loaded.jobs[0];
+        assert_eq!(job.partition_providers, None);
+        assert!(job.provider_partition_observations.is_empty());
+
+        save_wallet_inventory(dir.path(), &loaded).unwrap();
+        let saved: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(wallet_inventory_path(dir.path())).unwrap())
+                .unwrap();
+        assert_eq!(saved["schema_version"], json!(21));
+        let saved_job = &saved["data"]["jobs"][0];
+        assert_eq!(saved_job["id"], json!("job_legacy"));
+        assert!(saved_job.get("partition_providers").is_none());
+        assert!(saved_job.get("provider_partition_observations").is_none());
     }
 
     #[test]
@@ -903,7 +953,7 @@ mod tests {
             serde_json::from_slice(&std::fs::read(wallet_inventory_path(dir.path())).unwrap())
                 .unwrap();
         assert_eq!(saved["schema"], json!("sigillum.wallet-inventory"));
-        assert_eq!(saved["schema_version"], json!(20));
+        assert_eq!(saved["schema_version"], json!(21));
         assert_eq!(saved["data"]["chain_profiles"].as_array().unwrap().len(), 5);
         assert!(saved["data"]["watch_address_book"].is_array());
         assert!(saved["data"]["jobs"].is_array());

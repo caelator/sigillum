@@ -1169,6 +1169,7 @@ mod tests {
             },
             policy_violations: Vec::new(),
             linkage_findings: Vec::new(),
+            risk_findings: Vec::new(),
             steps: vec![step],
         }
     }

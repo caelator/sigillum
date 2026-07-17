@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 
 use sigillum_api::{
-    ConsolidationPlanGenerateRequest, ConsolidationPlanStep, ConsolidationPlanSummary,
+    ConsolidationPlanGenerateRequest, ConsolidationPlanStep, ConsolidationPlanSummary, RiskFinding,
     TreasuryPolicy, WalletAssetHolding, WalletAssetKind, WalletPlanStepAction,
     WalletPlanStepStatus, WalletSignerStatus, WalletSimulationStatus,
 };
@@ -9,7 +9,7 @@ use sigillum_core::decode_quantity_hex;
 
 use crate::inventory::WalletInventoryState;
 use crate::profiles::ProfileRegistry;
-use crate::service::helpers::{compare_u256, random_id};
+use crate::service::helpers::{compare_u256, now_unix, random_id};
 
 use super::allowance_discovery::DISCOVERY_SOURCE_ERC20_ALLOWANCE_PROBE;
 use super::claim_discovery::CLAIM_ADAPTER_MERKLE_DISTRIBUTOR_V1;
@@ -19,6 +19,11 @@ use super::permit2_discovery::DISCOVERY_SOURCE_PERMIT2_ALLOWANCE_PROBE;
 use super::support::quantity_hex_is_nonzero;
 use super::treasury::{add_u256, policy_blockers_for_step};
 use super::{WALLET_FAMILY_ETH_SEED, WALLET_FAMILY_ETH_WATCH, WALLET_FAMILY_ETH_XPUB};
+
+// Re-exported for the stealth sponsor path (`service/deposits.rs`): the
+// `risk` module is private to `inventory`, so the common-funder finding
+// constructor reaches the rest of the service through this module.
+pub(in crate::service) use super::risk::common_gas_funder_finding;
 
 const DEFAULT_HOT_FLOOR_WEI_HEX: &str = "0xde0b6b3a7640000";
 
@@ -551,11 +556,22 @@ struct LinkageIdentity {
     label: String,
 }
 
+/// Output of the plan linkage analysis (plan task 3.5): the long-standing
+/// human-readable plan-level findings plus structured `common_gas_funder`
+/// risk findings built by the risk machinery (`super::risk`). Both are
+/// advisory — execution blocking stays governed by `block_cross_party_linkage`
+/// via `apply_linkage_blockers` and is unchanged by the structured findings.
+#[derive(Clone, Debug, Default)]
+pub(in crate::service) struct PlanLinkageAnalysis {
+    pub findings: Vec<String>,
+    pub risk_findings: Vec<RiskFinding>,
+}
+
 /// Detect common-recipient privacy linkage without changing plan execution.
 pub(in crate::service) fn analyze_plan_linkage(
     state: &WalletInventoryState,
     steps: &mut [ConsolidationPlanStep],
-) -> Vec<String> {
+) -> PlanLinkageAnalysis {
     let mut counterparty_by_address = BTreeMap::new();
     for allocation in &state.receive_allocations {
         if let Some(counterparty_id) = allocation.counterparty_id.as_deref() {
@@ -658,6 +674,8 @@ pub(in crate::service) fn analyze_plan_linkage(
         ));
     }
 
+    let mut risk_findings = Vec::new();
+    let seen_at_unix = now_unix();
     for (funder, entries) in steps_by_funder {
         let mut labels_by_identity = BTreeMap::new();
         for (_, identity) in &entries {
@@ -676,6 +694,20 @@ pub(in crate::service) fn analyze_plan_linkage(
             short_form(&funder, 10),
             labels_by_identity.len(),
             all_labels.join(", ")
+        ));
+
+        // Plan task 3.5: surface the same common-funder detection as a
+        // structured risk finding (advisory; blocking is unchanged and stays
+        // governed by block_cross_party_linkage).
+        let context_step = &steps[entries[0].0];
+        risk_findings.push(common_gas_funder_finding(
+            &context_step.wallet_family,
+            &context_step.wallet_profile,
+            &context_step.provider_profile,
+            context_step.chain_id,
+            &funder,
+            &all_labels,
+            seen_at_unix,
         ));
 
         for (index, identity) in &entries {
@@ -700,7 +732,10 @@ pub(in crate::service) fn analyze_plan_linkage(
         }
     }
 
-    findings
+    PlanLinkageAnalysis {
+        findings,
+        risk_findings,
+    }
 }
 
 fn linkage_identity_for_step(
@@ -1463,7 +1498,7 @@ mod tests {
         );
         let mut steps = build_plan_steps(&state, &ProfileRegistry::default(), &body, &None);
 
-        let findings = analyze_plan_linkage(&state, &mut steps);
+        let findings = analyze_plan_linkage(&state, &mut steps).findings;
 
         assert!(findings.is_empty());
         assert!(steps.iter().all(|step| step.linkage_warnings.is_empty()));
@@ -1504,7 +1539,7 @@ mod tests {
         );
         let mut steps = build_plan_steps(&state, &ProfileRegistry::default(), &body, &None);
 
-        let findings = analyze_plan_linkage(&state, &mut steps);
+        let findings = analyze_plan_linkage(&state, &mut steps).findings;
 
         assert!(!findings.is_empty());
         assert!(steps.iter().all(|step| !step.linkage_warnings.is_empty()));
@@ -1536,7 +1571,7 @@ mod tests {
             ),
         ];
 
-        let findings = analyze_plan_linkage(&state, &mut steps);
+        let findings = analyze_plan_linkage(&state, &mut steps).findings;
         apply_linkage_blockers(&mut steps);
 
         assert!(!findings.is_empty());
@@ -1572,7 +1607,7 @@ mod tests {
             sample_sweep_step(bob_address, destination),
         ];
 
-        let findings = analyze_plan_linkage(&state, &mut steps);
+        let findings = analyze_plan_linkage(&state, &mut steps).findings;
 
         assert_eq!(findings.len(), 1);
         assert!(findings[0].contains("Destination 0x99999999... links 2 payers"));
@@ -1608,7 +1643,7 @@ mod tests {
             sample_sweep_step(bob_address, destination_upper),
         ];
 
-        let findings = analyze_plan_linkage(&state, &mut steps);
+        let findings = analyze_plan_linkage(&state, &mut steps).findings;
 
         assert_eq!(findings.len(), 1);
         assert!(findings[0].contains("Destination 0xabcdefab... links 2 payers"));
@@ -1640,7 +1675,7 @@ mod tests {
             sample_sweep_step(second_address, destination),
         ];
 
-        let findings = analyze_plan_linkage(&state, &mut steps);
+        let findings = analyze_plan_linkage(&state, &mut steps).findings;
 
         assert!(findings.is_empty());
         assert!(steps.iter().all(|step| step.linkage_warnings.is_empty()));
@@ -1657,7 +1692,7 @@ mod tests {
             sample_sweep_step(second_address, destination),
         ];
 
-        let findings = analyze_plan_linkage(&state, &mut steps);
+        let findings = analyze_plan_linkage(&state, &mut steps).findings;
 
         assert_eq!(findings.len(), 1);
         assert!(findings[0].contains("links 2 payers"));
@@ -1679,7 +1714,7 @@ mod tests {
             sample_sweep_step(address, destination),
         ];
 
-        let findings = analyze_plan_linkage(&state, &mut steps);
+        let findings = analyze_plan_linkage(&state, &mut steps).findings;
 
         assert!(findings.is_empty());
         assert!(steps.iter().all(|step| step.linkage_warnings.is_empty()));
@@ -1706,7 +1741,7 @@ mod tests {
             sample_fund_gas_step("fund_bob", sponsor, bob_address),
         ];
 
-        let findings = analyze_plan_linkage(&state, &mut steps);
+        let findings = analyze_plan_linkage(&state, &mut steps).findings;
 
         assert_eq!(findings.len(), 1);
         assert!(findings[0].contains("Sponsor"));
@@ -1719,6 +1754,90 @@ mod tests {
         assert_eq!(steps[1].linkage_warnings.len(), 1);
         assert!(steps[1].linkage_warnings[0].contains("Acme"));
         assert!(!steps[1].linkage_warnings[0].contains("Bob"));
+    }
+
+    /// Plan task 3.5: a plan whose steps share a gas funder across parties
+    /// produces a structured `common_gas_funder` risk finding (advisory —
+    /// steps are NOT blocked by the finding itself).
+    #[test]
+    fn fund_gas_shared_funder_across_parties_yields_common_gas_funder_finding() {
+        let sponsor = "0x4444444444444444444444444444444444444444";
+        let acme_address = "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+        let bob_address = "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+        let state = WalletInventoryState {
+            receive_allocations: vec![
+                sample_receive_allocation(acme_address, Some("party_acme")),
+                sample_receive_allocation(bob_address, Some("party_bob")),
+            ],
+            parties: vec![
+                sample_party("party_acme", "Acme"),
+                sample_party("party_bob", "Bob"),
+            ],
+            ..Default::default()
+        };
+        let mut steps = vec![
+            sample_fund_gas_step("fund_acme", sponsor, acme_address),
+            sample_fund_gas_step("fund_bob", sponsor, bob_address),
+        ];
+
+        let analysis = analyze_plan_linkage(&state, &mut steps);
+
+        assert_eq!(analysis.risk_findings.len(), 1);
+        let finding = &analysis.risk_findings[0];
+        assert_eq!(finding.category, "common_gas_funder");
+        assert_eq!(finding.risk_level, "medium");
+        assert_eq!(finding.subject_type, "gas_funder");
+        assert_eq!(finding.subject, sponsor);
+        assert_eq!(
+            finding.id,
+            format!("common_gas_funder:{}:{sponsor}", steps[0].chain_id)
+        );
+        assert!(finding.recommendation.contains("distinct sponsor"));
+        assert!(
+            finding
+                .evidence
+                .iter()
+                .any(|value| value == "Distinct payer identities funded: 2")
+        );
+        assert!(
+            finding
+                .evidence
+                .iter()
+                .any(|value| value == "Linked payer: Acme")
+        );
+        assert!(
+            finding
+                .evidence
+                .iter()
+                .any(|value| value == "Linked payer: Bob")
+        );
+        // Advisory only: the analysis itself never blocks steps.
+        assert!(steps.iter().all(|step| step.blockers.is_empty()));
+    }
+
+    #[test]
+    fn fund_gas_same_party_topups_yield_no_common_gas_funder_finding() {
+        let sponsor = "0x4444444444444444444444444444444444444444";
+        let first_address = "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+        let second_address = "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+        let state = WalletInventoryState {
+            receive_allocations: vec![
+                sample_receive_allocation(first_address, Some("party_acme")),
+                sample_receive_allocation(second_address, Some("party_acme")),
+            ],
+            parties: vec![sample_party("party_acme", "Acme")],
+            ..Default::default()
+        };
+        let mut steps = vec![
+            sample_fund_gas_step("fund_1", sponsor, first_address),
+            sample_fund_gas_step("fund_2", sponsor, second_address),
+        ];
+
+        let analysis = analyze_plan_linkage(&state, &mut steps);
+
+        assert!(analysis.findings.is_empty());
+        assert!(analysis.risk_findings.is_empty());
+        assert!(steps.iter().all(|step| step.linkage_warnings.is_empty()));
     }
 
     #[test]
@@ -1739,7 +1858,7 @@ mod tests {
             sample_fund_gas_step("fund_2", sponsor, second_address),
         ];
 
-        let findings = analyze_plan_linkage(&state, &mut steps);
+        let findings = analyze_plan_linkage(&state, &mut steps).findings;
 
         assert!(findings.is_empty());
         assert!(steps.iter().all(|step| step.linkage_warnings.is_empty()));
@@ -1756,7 +1875,7 @@ mod tests {
             sample_fund_gas_step("fund_2", sponsor, second_address),
         ];
 
-        let findings = analyze_plan_linkage(&state, &mut steps);
+        let findings = analyze_plan_linkage(&state, &mut steps).findings;
 
         assert_eq!(findings.len(), 1);
         assert!(findings[0].contains("funds 2 parties"));
@@ -1793,7 +1912,7 @@ mod tests {
             ),
         ];
 
-        let findings = analyze_plan_linkage(&state, &mut steps);
+        let findings = analyze_plan_linkage(&state, &mut steps).findings;
         apply_linkage_blockers(&mut steps);
 
         assert_eq!(findings.len(), 1);

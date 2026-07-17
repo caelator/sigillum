@@ -686,6 +686,36 @@ async fn cross_party_sponsor_funding_warns_and_blocks_per_policy() {
     );
     assert!(funds.iter().all(|step| step["status"] == "blocked"));
     assert_eq!(block_plan["plan"]["status"], "blocked");
+
+    // Plan task 3.5: the same shared-funder detection surfaces a structured
+    // `common_gas_funder` risk finding on the plan — advisory in both policy
+    // modes (the warn plan's steps stay unblocked; the block plan's are
+    // hard-blocked by the policy, not by the finding).
+    for (plan, label) in [(&warn_plan, "warn"), (&block_plan, "block")] {
+        let findings = plan["plan"]["risk_findings"]
+            .as_array()
+            .cloned()
+            .unwrap_or_default();
+        assert_eq!(findings.len(), 1, "{label} plan risk findings: {plan}");
+        assert_eq!(findings[0]["category"], "common_gas_funder");
+        assert_eq!(findings[0]["subject_type"], "gas_funder");
+        assert!(
+            findings[0]["subject"]
+                .as_str()
+                .is_some_and(|subject| subject.starts_with("0x")),
+            "{label} plan finding subject: {plan}"
+        );
+        assert!(
+            findings[0]["evidence"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|entry| entry.as_str().is_some_and(|value| {
+                    value == "Distinct payer identities funded: 2"
+                })),
+            "{label} plan finding evidence: {plan}"
+        );
+    }
 }
 
 async fn cross_party_plan(block_cross_party_linkage: bool) -> Value {

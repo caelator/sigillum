@@ -926,6 +926,13 @@ async fn cross_party_sponsor_funding_warns_or_hard_blocks_per_policy() {
         enqueue_a["linkage_warning"].is_null(),
         "first sponsored deposit links nothing: {enqueue_a}"
     );
+    assert!(
+        enqueue_a["risk_findings"]
+            .as_array()
+            .map(|findings| findings.is_empty())
+            .unwrap_or(true),
+        "first sponsored deposit yields no risk findings: {enqueue_a}"
+    );
     let record_a = rig.deposit_record(&id_a).await;
     assert!(
         record_a["gas_topup_job_id"].is_string(),
@@ -956,6 +963,20 @@ async fn cross_party_sponsor_funding_warns_or_hard_blocks_per_policy() {
     assert_eq!(
         topups[0]["sponsor_address"], topups[1]["sponsor_address"],
         "same wallet derives the same sponsor"
+    );
+
+    // Plan task 3.5: the shared-sponsor detection also surfaces a structured
+    // `common_gas_funder` risk finding (advisory — the enqueue succeeded).
+    let findings = enqueue_b["risk_findings"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default();
+    assert_eq!(findings.len(), 1, "risk findings: {enqueue_b}");
+    assert_eq!(findings[0]["category"], "common_gas_funder");
+    assert_eq!(findings[0]["subject_type"], "gas_funder");
+    assert_eq!(
+        findings[0]["subject"], topups[0]["sponsor_address"],
+        "finding subject is the shared sponsor: {enqueue_b}"
     );
 
     // Hard-block: with `block_cross_party_linkage` on, a THIRD party's deposit
