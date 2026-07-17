@@ -536,7 +536,7 @@ async fn sync_queue_drain_response_shape_unchanged_and_registers_operation() {
 }
 
 /// An async maintenance cycle reports per-stage progress through the
-/// `stage:<name>` encoding and completes all three stages; the synchronous
+/// `stage:<name>` encoding and completes all four stages; the synchronous
 /// path keeps its exact response contract.
 #[tokio::test]
 async fn async_maintenance_run_reports_stage_progress_and_sync_is_unchanged() {
@@ -559,14 +559,15 @@ async fn async_maintenance_run_reports_stage_progress_and_sync_is_unchanged() {
         json!([
             "stage:treasury_automation",
             "stage:deposit_refresh",
+            "stage:one_time_receive",
             "stage:queue_drain"
         ])
     );
-    assert_eq!(operation["progress"]["total"], json!(3));
+    assert_eq!(operation["progress"]["total"], json!(4));
     let operation_id = operation["id"].as_str().unwrap().to_string();
 
     let operation = rig.wait_for_operation(&operation_id, "completed").await;
-    assert_eq!(operation["operation"]["progress"]["processed"], json!(3));
+    assert_eq!(operation["operation"]["progress"]["processed"], json!(4));
 
     let job = job_by_id(&rig.queue_jobs().await, &job_id);
     assert_eq!(job["state"], "sent", "maintenance drained the job: {job}");
@@ -598,7 +599,7 @@ async fn async_maintenance_run_reports_stage_progress_and_sync_is_unchanged() {
 /// Maintenance cancellation is a between-stages boundary: a cancel landing
 /// while a stage is in flight (here the deposit refresh, parked inside its
 /// balance call) is honored only after that stage completes — the cycle
-/// stops before the queue-drain stage with progress at 2/3.
+/// stops before the one-time-receive stage with progress at 2/4.
 #[tokio::test]
 async fn maintenance_cancel_is_honored_between_stages_not_mid_stage() {
     let rig = spawn_rig().await;
@@ -631,7 +632,7 @@ async fn maintenance_cancel_is_honored_between_stages_not_mid_stage() {
     let operation = rig.get(&format!("/api/operations/{operation_id}")).await;
     assert_eq!(operation["operation"]["state"], "running");
     assert_eq!(operation["operation"]["progress"]["processed"], json!(1));
-    assert_eq!(operation["operation"]["progress"]["total"], json!(3));
+    assert_eq!(operation["operation"]["progress"]["total"], json!(4));
 
     let (status, cancel) = rig
         .post(&format!("/api/operations/{operation_id}/cancel"), json!({}))
@@ -640,7 +641,8 @@ async fn maintenance_cancel_is_honored_between_stages_not_mid_stage() {
     assert_eq!(cancel["status"], "cancel_requested");
 
     // Release the gate: the in-flight refresh stage completes (cancel is
-    // NOT honored mid-stage), then the cycle stops before the queue drain.
+    // NOT honored mid-stage), then the cycle stops before the one-time
+    // stage (and therefore before the queue drain as well).
     rig.release_gate();
     let operation = rig.wait_for_operation(&operation_id, "canceled").await;
     assert_eq!(
@@ -648,7 +650,7 @@ async fn maintenance_cancel_is_honored_between_stages_not_mid_stage() {
         json!(2),
         "the refresh stage completed before the cancel was honored"
     );
-    assert_eq!(operation["operation"]["progress"]["total"], json!(3));
+    assert_eq!(operation["operation"]["progress"]["total"], json!(4));
     assert!(operation["operation"]["completed_at_unix"].is_number());
 
     rig.shutdown();
