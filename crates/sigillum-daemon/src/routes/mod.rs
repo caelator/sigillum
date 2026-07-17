@@ -695,10 +695,10 @@ mod tests {
         assert!(html.contains("data-action=\"wizSetAdditionalKeyPin\""));
         assert!(html.contains("data-action=\"fido2SetNewPin\""));
         assert!(html.contains("data-action=\"restoreSetupSnapshot\""));
-        assert!(html.contains("data-action=\"resetLocalData\" data-arg0=\"setupResetConfirm\""));
+        // The typed-confirmation dialog collects the reset phrase; the HTML
+        // only carries the three delegating buttons.
+        assert_eq!(html.matches("data-action=\"resetLocalData\"").count(), 3);
         assert!(html.contains("data-action=\"restoreAuthSnapshot\""));
-        assert!(html.contains("data-action=\"resetLocalData\" data-arg0=\"authResetConfirm\""));
-        assert!(html.contains("data-action=\"resetLocalData\" data-arg0=\"backupResetConfirm\""));
         assert!(html.contains("data-action=\"togglePoisonWarning\""));
         assert!(csp.contains("script-src 'nonce-"));
         assert!(!csp.contains("script-src-attr 'unsafe-inline'"));
