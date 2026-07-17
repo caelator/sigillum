@@ -10,7 +10,9 @@ use sigillum_core::{
 };
 
 use crate::audit_log::AuditEventSpec;
-use crate::service::helpers::{decode_optional_view_tag, map_wallet_error};
+use crate::service::helpers::{
+    decode_optional_view_tag, map_wallet_error, probe_stealth_sign, stealth_convention_or_standard,
+};
 use crate::service::transaction_policy::{TransactionPolicyCheck, TransactionPolicyKind};
 use crate::service::{ServiceError, ServiceResult, SigillumService};
 
@@ -53,6 +55,7 @@ impl SigillumService {
             decode_quantity_hex(&body.fees.max_fee_per_gas_hex).map_err(map_wallet_error)?;
         let value = decode_quantity_hex(&body.value_wei_hex).map_err(map_wallet_error)?;
         let view_tag = decode_optional_view_tag(body.stealth.view_tag_hex.as_deref())?;
+        let convention = stealth_convention_or_standard(body.stealth.stealth_hash_convention);
         let gas_limit = body.gas_limit.unwrap_or(21_000);
         let broadcast = body.broadcast.unwrap_or(false);
 
@@ -63,21 +66,27 @@ impl SigillumService {
             let derived =
                 derive_sigillum_ethereum_stealth_wallet(master_key.as_ref(), &body.wallet, "eth")
                     .map_err(map_wallet_error)?;
-            sign_ethereum_stealth_native_transfer(
-                &derived,
-                &body.stealth.stealth_address,
-                &body.stealth.ephemeral_public_key_hex,
-                view_tag,
-                &EthereumEip1559Transfer {
-                    chain_id: body.fees.chain_id,
-                    nonce,
-                    max_priority_fee_per_gas,
-                    max_fee_per_gas,
-                    gas_limit,
-                    destination_address: body.destination_address.clone(),
-                    value,
-                },
-            )
+            // The record-stamped (or caller-supplied) convention is tried
+            // first; the other convention is probed on mismatch so legacy
+            // payments remain spendable even with a missing/wrong stamp.
+            probe_stealth_sign(convention, |convention| {
+                sign_ethereum_stealth_native_transfer(
+                    &derived,
+                    &body.stealth.stealth_address,
+                    &body.stealth.ephemeral_public_key_hex,
+                    view_tag,
+                    &EthereumEip1559Transfer {
+                        chain_id: body.fees.chain_id,
+                        nonce,
+                        max_priority_fee_per_gas,
+                        max_fee_per_gas,
+                        gas_limit,
+                        destination_address: body.destination_address.clone(),
+                        value,
+                    },
+                    convention,
+                )
+            })
             .map_err(map_wallet_error)
         })?;
 
@@ -156,6 +165,7 @@ impl SigillumService {
             decode_quantity_hex(&body.fees.max_fee_per_gas_hex).map_err(map_wallet_error)?;
         let amount = decode_quantity_hex(&body.amount_hex).map_err(map_wallet_error)?;
         let view_tag = decode_optional_view_tag(body.stealth.view_tag_hex.as_deref())?;
+        let convention = stealth_convention_or_standard(body.stealth.stealth_hash_convention);
         let gas_limit = body.gas_limit.unwrap_or(65_000);
         let broadcast = body.broadcast.unwrap_or(false);
 
@@ -166,22 +176,25 @@ impl SigillumService {
             let derived =
                 derive_sigillum_ethereum_stealth_wallet(master_key.as_ref(), &body.wallet, "eth")
                     .map_err(map_wallet_error)?;
-            sign_ethereum_stealth_erc20_transfer(
-                &derived,
-                &body.stealth.stealth_address,
-                &body.stealth.ephemeral_public_key_hex,
-                view_tag,
-                &EthereumEip1559Erc20Transfer {
-                    chain_id: body.fees.chain_id,
-                    nonce,
-                    max_priority_fee_per_gas,
-                    max_fee_per_gas,
-                    gas_limit,
-                    token_address: body.token_address.clone(),
-                    recipient_address: body.recipient_address.clone(),
-                    amount,
-                },
-            )
+            probe_stealth_sign(convention, |convention| {
+                sign_ethereum_stealth_erc20_transfer(
+                    &derived,
+                    &body.stealth.stealth_address,
+                    &body.stealth.ephemeral_public_key_hex,
+                    view_tag,
+                    &EthereumEip1559Erc20Transfer {
+                        chain_id: body.fees.chain_id,
+                        nonce,
+                        max_priority_fee_per_gas,
+                        max_fee_per_gas,
+                        gas_limit,
+                        token_address: body.token_address.clone(),
+                        recipient_address: body.recipient_address.clone(),
+                        amount,
+                    },
+                    convention,
+                )
+            })
             .map_err(map_wallet_error)
         })?;
 

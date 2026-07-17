@@ -824,6 +824,7 @@ mod tests {
             stealth_address: stealth_address.into(),
             ephemeral_public_key_hex: "0x02".into(),
             view_tag_hex: "0xaa".into(),
+            stealth_hash_convention: sigillum_core::StealthHashConvention::STANDARD,
             announcement: None,
             token_address: None,
             expected_amount_hex: None,

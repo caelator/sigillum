@@ -31,8 +31,8 @@ use sigillum_api::{
 };
 use sigillum_core::{
     ERC5564_ANNOUNCE_FUNCTION, ERC5564_ANNOUNCER_ADDRESS, ETHEREUM_STEALTH_SCHEME_ID,
-    EthereumStealthError, VaultLifecycle, check_ethereum_stealth_address, decode_quantity_hex,
-    derive_sigillum_ethereum_stealth_wallet, encode_erc5564_announce_calldata,
+    EthereumStealthError, StealthHashConvention, VaultLifecycle, check_ethereum_stealth_address_any,
+    decode_quantity_hex, derive_sigillum_ethereum_stealth_wallet, encode_erc5564_announce_calldata,
 };
 
 use crate::audit_log::{AuditEventSpec, AuditQueueJobKind};
@@ -177,6 +177,7 @@ mod tests {
             stealth_address: stealth_address.into(),
             ephemeral_public_key_hex: "0x02".into(),
             view_tag_hex: "0xaa".into(),
+            stealth_hash_convention: StealthHashConvention::STANDARD,
             announcement: None,
             token_address: None,
             expected_amount_hex: None,
@@ -628,11 +629,18 @@ impl SigillumService {
             let view_tag = hex::decode(&event.view_tag_hex)
                 .ok()
                 .and_then(|bytes| bytes.first().copied());
-            let check = match check_ethereum_stealth_address(
+            // Dual-decode: probe the standard compressed-point convention
+            // first, then the legacy x-only one, so announcements created
+            // before the hash-convention switch (whose on-chain view tag only
+            // matches under the legacy convention) are still found in the
+            // same pass. The matched convention is persisted on the record so
+            // sweeping derives the stealth key the same way.
+            let check = match check_ethereum_stealth_address_any(
                 &derived_wallet,
                 &event.stealth_address,
                 &event.ephemeral_public_key_hex,
                 view_tag,
+                &StealthHashConvention::PROBE_ORDER,
             ) {
                 Ok(check) => check,
                 Err(EthereumStealthError::ViewTagMismatch) => continue,
@@ -643,10 +651,15 @@ impl SigillumService {
             }
             matched += 1;
 
-            if let Some(existing_deposit) = deposits.eth_stealth.iter().find(|deposit| {
+            if let Some(existing_index) = deposits.eth_stealth.iter().position(|deposit| {
                 discovered_deposit_matches(deposit, &wallet, &event, asset_kind, &token_address)
             }) {
                 existing += 1;
+                let existing_deposit = &mut deposits.eth_stealth[existing_index];
+                if existing_deposit.stealth_hash_convention != check.stealth_hash_convention {
+                    existing_deposit.stealth_hash_convention = check.stealth_hash_convention;
+                    existing_deposit.updated_at_unix = now;
+                }
                 response_deposits.push(existing_deposit.clone());
                 continue;
             }
@@ -666,6 +679,7 @@ impl SigillumService {
                 stealth_address: event.stealth_address.clone(),
                 ephemeral_public_key_hex: event.ephemeral_public_key_hex.clone(),
                 view_tag_hex: check.view_tag_hex.clone(),
+                stealth_hash_convention: check.stealth_hash_convention,
                 announcement: Some(discovered_announcement_payload(&event)?),
                 token_address: token_address.clone(),
                 expected_amount_hex: None,
@@ -854,6 +868,8 @@ impl SigillumService {
             stealth_address: payment.stealth_address,
             ephemeral_public_key_hex: payment.ephemeral_public_key_hex,
             view_tag_hex: payment.view_tag_hex,
+            // New deposits are always generated with the standard convention.
+            stealth_hash_convention: payment.stealth_hash_convention,
             announcement: payment.announcement,
             token_address: blueprint.token_address,
             expected_amount_hex: blueprint.expected_amount_hex,
@@ -1183,6 +1199,9 @@ impl SigillumService {
                     min_amount_hex: deposit.min_sweep_amount_hex.clone(),
                     gas_limit: provider.erc20_gas_limit,
                     view_tag_hex: Some(deposit.view_tag_hex.clone()),
+                    // The sweep derives the stealth key with the record's
+                    // stored convention (dual-decoded at detection time).
+                    stealth_hash_convention: Some(deposit.stealth_hash_convention),
                 },
                 last_error: None,
                 transaction_hash_hex: None,
@@ -1230,6 +1249,9 @@ impl SigillumService {
                     min_value_wei_hex: deposit.min_sweep_amount_hex.clone(),
                     gas_limit: provider.native_gas_limit,
                     view_tag_hex: Some(deposit.view_tag_hex.clone()),
+                    // The sweep derives the stealth key with the record's
+                    // stored convention (dual-decoded at detection time).
+                    stealth_hash_convention: Some(deposit.stealth_hash_convention),
                 },
                 last_error: None,
                 transaction_hash_hex: None,

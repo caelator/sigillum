@@ -416,6 +416,7 @@ fn deposits_response_roundtrip() {
             ephemeral_public_key_hex:
                 "0x020202020202020202020202020202020202020202020202020202020202020202".to_string(),
             view_tag_hex: "0x7f".to_string(),
+            stealth_hash_convention: sigillum_core::StealthHashConvention::STANDARD,
             announcement: Some(EthStealthAnnouncementPayload {
                 announcer_address: "0x1111222233334444555566667777888899990000".to_string(),
                 announce_function: "announce".to_string(),
@@ -461,6 +462,7 @@ fn queue_request_roundtrip() {
             ephemeral_public_key_hex:
                 "0x020202020202020202020202020202020202020202020202020202020202020202".to_string(),
             view_tag_hex: Some("0x7f".to_string()),
+            stealth_hash_convention: None,
         },
         destination_address: Some("0x8b8b6f6f5e5e4d4d3c3c2b2b1a1a090908080707".to_string()),
         min_value_wei_hex: Some("0x2386f26fc10000".to_string()),
@@ -488,6 +490,7 @@ fn queue_response_roundtrip() {
                 min_value_wei_hex: Some("0x2386f26fc10000".to_string()),
                 gas_limit: Some(42_000),
                 view_tag_hex: Some("0x7f".to_string()),
+                stealth_hash_convention: None,
             },
             last_error: Some("provider rate limited previous attempt".to_string()),
             transaction_hash_hex: None,

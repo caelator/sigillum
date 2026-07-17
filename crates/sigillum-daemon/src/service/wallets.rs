@@ -11,8 +11,8 @@ use sigillum_api::{
     EthXpubAddressResponse, EthXpubDeriveRequest, EthXpubExportRequest, EthXpubExportResponse,
 };
 use sigillum_core::{
-    EthereumEip1559Erc20Transfer, EthereumEip1559Transfer, VaultLifecycle,
-    build_erc5564_announcement, check_ethereum_stealth_address, decode_quantity_hex,
+    EthereumEip1559Erc20Transfer, EthereumEip1559Transfer, StealthHashConvention, VaultLifecycle,
+    build_erc5564_announcement, check_ethereum_stealth_address_any, decode_quantity_hex,
     derive_ethereum_address_from_xpub, derive_ethereum_receive_branch_from_account_xpub,
     derive_ethereum_receive_branch_from_account_xpub_with_path,
     derive_sigillum_ethereum_stealth_wallet, derive_sigillum_ethereum_xpub_receive_branch,
@@ -25,13 +25,14 @@ use crate::audit_log::AuditEventSpec;
 
 use super::helpers::{
     decode_fixed_hex, decode_optional_view_tag, map_wallet_error, map_xpub_error,
+    probe_stealth_sign, stealth_convention_or_standard,
 };
 use super::transaction_policy::{TransactionPolicyCheck, TransactionPolicyKind};
 use super::{ServiceError, ServiceResult, SigillumService};
 
 /// Cautionary warning returned by stealth address generation when the target
 /// meta-address cannot be confirmed as one of this vault's own.
-const FOREIGN_STEALTH_META_ADDRESS_WARNING: &str = "This meta-address does not match any of this vault's known stealth wallets. Sigillum's current stealth derivation is not yet interoperable with standard ERC-5564 tooling — addresses generated here may be undetectable and unspendable by the recipient's wallet. See docs/architecture.md#stealth-addresses-erc-5564.";
+const FOREIGN_STEALTH_META_ADDRESS_WARNING: &str = "This meta-address does not match any of this vault's known stealth wallets. Sigillum generates stealth addresses with the compressed-point scheme-1 convention (ScopeLift-compatible); recipients using a different convention (e.g. Fluidkey's 64-byte encoding) will not detect or spend these. See docs/architecture.md#stealth-addresses-erc-5564.";
 
 /// Cautionary warning returned by stealth address generation when a supplied
 /// ephemeral key was already used for a recorded deposit.
@@ -195,9 +196,14 @@ impl SigillumService {
             .as_deref()
             .map(|value| decode_fixed_hex::<32>(value, "ephemeral_private_key"))
             .transpose()?;
-        let payment =
-            generate_ethereum_stealth_address(&body.stealth_meta_address, ephemeral_private_key)
-                .map_err(map_wallet_error)?;
+        // New payments are always generated with the standard (ScopeLift-
+        // compatible compressed-point) convention.
+        let payment = generate_ethereum_stealth_address(
+            &body.stealth_meta_address,
+            ephemeral_private_key,
+            StealthHashConvention::STANDARD,
+        )
+        .map_err(map_wallet_error)?;
         let announcement = build_erc5564_announcement(&payment).map_err(map_wallet_error)?;
 
         // Best-effort guardrails: load the deposit records once and reuse them
@@ -222,6 +228,7 @@ impl SigillumService {
             stealth_address: payment.stealth_address,
             ephemeral_public_key_hex: payment.ephemeral_public_key_hex,
             view_tag_hex: payment.view_tag_hex,
+            stealth_hash_convention: payment.stealth_hash_convention,
             announcement: Some(EthStealthAnnouncementPayload {
                 announcer_address: announcement.announcer_address,
                 announce_function: announcement.announce_function,
@@ -288,6 +295,9 @@ impl SigillumService {
         let stealth_address = body.stealth.stealth_address;
         let ephemeral_public_key_hex = body.stealth.ephemeral_public_key_hex;
 
+        // Dual-decode: probe the standard convention first, then the legacy
+        // one, so payments created before the hash-convention switch are still
+        // detected.
         let (check, compartment_id) = self.with_active_vault(token, |vault, compartment_id| {
             let master_key = vault
                 .extract_master_key()
@@ -295,15 +305,28 @@ impl SigillumService {
             let derived =
                 derive_sigillum_ethereum_stealth_wallet(master_key.as_ref(), &wallet, "eth")
                     .map_err(map_wallet_error)?;
-            let check = check_ethereum_stealth_address(
+            let check = check_ethereum_stealth_address_any(
                 &derived,
                 &stealth_address,
                 &ephemeral_public_key_hex,
                 view_tag,
+                &StealthHashConvention::PROBE_ORDER,
             )
             .map_err(map_wallet_error)?;
             Ok((check, compartment_id))
         })?;
+
+        // A match records the payment's actual convention on any deposit
+        // record tracking this payment, so later sweeps derive the stealth
+        // key with the right convention even if the stored stamp was missing
+        // or wrong (e.g. a hand-edited store).
+        if check.matches {
+            self.stamp_matching_deposit_convention(
+                &stealth_address,
+                &ephemeral_public_key_hex,
+                check.stealth_hash_convention,
+            );
+        }
 
         self.record_audit(
             Some(compartment_id),
@@ -318,7 +341,38 @@ impl SigillumService {
             matches: check.matches,
             derived_stealth_address: check.derived_stealth_address,
             view_tag_hex: check.view_tag_hex,
+            stealth_hash_convention: check.stealth_hash_convention,
         })
+    }
+
+    /// Best-effort persist of the detected convention onto deposit records
+    /// tracking this payment (matched by stealth address + ephemeral key).
+    /// Load/save failures are ignored: detection still succeeded, and the
+    /// next scan re-probes anyway.
+    fn stamp_matching_deposit_convention(
+        &self,
+        stealth_address: &str,
+        ephemeral_public_key_hex: &str,
+        convention: StealthHashConvention,
+    ) {
+        let wanted_address = stealth_address.to_lowercase();
+        let wanted_key = normalize_hex_key(ephemeral_public_key_hex);
+        let Ok(mut state) = crate::deposits::load_deposits(&self.state.base_dir) else {
+            return;
+        };
+        let mut changed = false;
+        for deposit in &mut state.eth_stealth {
+            if deposit.stealth_address.to_lowercase() == wanted_address
+                && normalize_hex_key(&deposit.ephemeral_public_key_hex) == wanted_key
+                && deposit.stealth_hash_convention != convention
+            {
+                deposit.stealth_hash_convention = convention;
+                changed = true;
+            }
+        }
+        if changed {
+            let _ = crate::deposits::save_deposits(&self.state.base_dir, &state);
+        }
     }
 
     pub(crate) fn eth_stealth_sign(
@@ -335,6 +389,7 @@ impl SigillumService {
         })?;
         let wallet = body.wallet;
         let view_tag = decode_optional_view_tag(body.stealth.view_tag_hex.as_deref())?;
+        let convention = stealth_convention_or_standard(body.stealth.stealth_hash_convention);
         let stealth_address = body.stealth.stealth_address;
         let ephemeral_public_key_hex = body.stealth.ephemeral_public_key_hex;
         let digest = Zeroizing::new(decode_fixed_hex::<32>(&body.digest_hex, "digest")?);
@@ -347,13 +402,16 @@ impl SigillumService {
                 let derived =
                     derive_sigillum_ethereum_stealth_wallet(master_key.as_ref(), &wallet, "eth")
                         .map_err(map_wallet_error)?;
-                let signature = sign_ethereum_stealth_digest(
-                    &derived,
-                    &stealth_address,
-                    &ephemeral_public_key_hex,
-                    view_tag,
-                    digest.as_ref(),
-                )
+                let signature = probe_stealth_sign(convention, |convention| {
+                    sign_ethereum_stealth_digest(
+                        &derived,
+                        &stealth_address,
+                        &ephemeral_public_key_hex,
+                        view_tag,
+                        digest.as_ref(),
+                        convention,
+                    )
+                })
                 .map_err(map_wallet_error)?;
                 Ok((signature, compartment_id))
             })?;
@@ -389,6 +447,7 @@ impl SigillumService {
         })?;
         let wallet = body.wallet;
         let view_tag = decode_optional_view_tag(body.stealth.view_tag_hex.as_deref())?;
+        let convention = stealth_convention_or_standard(body.stealth.stealth_hash_convention);
         let max_priority_fee_per_gas = decode_quantity_hex(&body.fees.max_priority_fee_per_gas_hex)
             .map_err(map_wallet_error)?;
         let max_fee_per_gas =
@@ -402,21 +461,24 @@ impl SigillumService {
             let derived =
                 derive_sigillum_ethereum_stealth_wallet(master_key.as_ref(), &wallet, "eth")
                     .map_err(map_wallet_error)?;
-            let signed = sign_ethereum_stealth_native_transfer(
-                &derived,
-                &body.stealth.stealth_address,
-                &body.stealth.ephemeral_public_key_hex,
-                view_tag,
-                &EthereumEip1559Transfer {
-                    chain_id: body.fees.chain_id,
-                    nonce: body.nonce,
-                    max_priority_fee_per_gas,
-                    max_fee_per_gas,
-                    gas_limit: body.gas_limit,
-                    destination_address: body.destination_address.clone(),
-                    value,
-                },
-            )
+            let signed = probe_stealth_sign(convention, |convention| {
+                sign_ethereum_stealth_native_transfer(
+                    &derived,
+                    &body.stealth.stealth_address,
+                    &body.stealth.ephemeral_public_key_hex,
+                    view_tag,
+                    &EthereumEip1559Transfer {
+                        chain_id: body.fees.chain_id,
+                        nonce: body.nonce,
+                        max_priority_fee_per_gas,
+                        max_fee_per_gas,
+                        gas_limit: body.gas_limit,
+                        destination_address: body.destination_address.clone(),
+                        value,
+                    },
+                    convention,
+                )
+            })
             .map_err(map_wallet_error)?;
             Ok((signed, compartment_id))
         })?;
@@ -459,6 +521,7 @@ impl SigillumService {
         })?;
         let wallet = body.wallet;
         let view_tag = decode_optional_view_tag(body.stealth.view_tag_hex.as_deref())?;
+        let convention = stealth_convention_or_standard(body.stealth.stealth_hash_convention);
         let max_priority_fee_per_gas = decode_quantity_hex(&body.fees.max_priority_fee_per_gas_hex)
             .map_err(map_wallet_error)?;
         let max_fee_per_gas =
@@ -472,22 +535,25 @@ impl SigillumService {
             let derived =
                 derive_sigillum_ethereum_stealth_wallet(master_key.as_ref(), &wallet, "eth")
                     .map_err(map_wallet_error)?;
-            let signed = sign_ethereum_stealth_erc20_transfer(
-                &derived,
-                &body.stealth.stealth_address,
-                &body.stealth.ephemeral_public_key_hex,
-                view_tag,
-                &EthereumEip1559Erc20Transfer {
-                    chain_id: body.fees.chain_id,
-                    nonce: body.nonce,
-                    max_priority_fee_per_gas,
-                    max_fee_per_gas,
-                    gas_limit: body.gas_limit,
-                    token_address: body.token_address.clone(),
-                    recipient_address: body.recipient_address.clone(),
-                    amount,
-                },
-            )
+            let signed = probe_stealth_sign(convention, |convention| {
+                sign_ethereum_stealth_erc20_transfer(
+                    &derived,
+                    &body.stealth.stealth_address,
+                    &body.stealth.ephemeral_public_key_hex,
+                    view_tag,
+                    &EthereumEip1559Erc20Transfer {
+                        chain_id: body.fees.chain_id,
+                        nonce: body.nonce,
+                        max_priority_fee_per_gas,
+                        max_fee_per_gas,
+                        gas_limit: body.gas_limit,
+                        token_address: body.token_address.clone(),
+                        recipient_address: body.recipient_address.clone(),
+                        amount,
+                    },
+                    convention,
+                )
+            })
             .map_err(map_wallet_error)?;
             Ok((signed, compartment_id))
         })?;
@@ -594,6 +660,7 @@ mod tests {
             stealth_address: payment.stealth_address.clone(),
             ephemeral_public_key_hex: payment.ephemeral_public_key_hex.clone(),
             view_tag_hex: Some(payment.view_tag_hex.clone()),
+            stealth_hash_convention: None,
         }
     }
 
@@ -632,6 +699,7 @@ mod tests {
                         stealth_address: payment.stealth_address.clone(),
                         ephemeral_public_key_hex: payment.ephemeral_public_key_hex.clone(),
                         view_tag_hex: Some(payment.view_tag_hex.clone()),
+                        stealth_hash_convention: None,
                     },
                 },
             )
@@ -647,6 +715,7 @@ mod tests {
                         stealth_address: payment.stealth_address.clone(),
                         ephemeral_public_key_hex: payment.ephemeral_public_key_hex.clone(),
                         view_tag_hex: Some(payment.view_tag_hex.clone()),
+                        stealth_hash_convention: None,
                     },
                     digest_hex: hex::encode([9u8; 32]),
                 },
@@ -664,6 +733,7 @@ mod tests {
                         stealth_address: payment.stealth_address.clone(),
                         ephemeral_public_key_hex: payment.ephemeral_public_key_hex.clone(),
                         view_tag_hex: Some(payment.view_tag_hex.clone()),
+                        stealth_hash_convention: None,
                     },
                     fees: sigillum_api::Eip1559Fees {
                         chain_id: 1,
@@ -689,6 +759,7 @@ mod tests {
                         stealth_address: payment.stealth_address,
                         ephemeral_public_key_hex: payment.ephemeral_public_key_hex.clone(),
                         view_tag_hex: Some(payment.view_tag_hex.clone()),
+                        stealth_hash_convention: None,
                     },
                     fees: sigillum_api::Eip1559Fees {
                         chain_id: 1,
@@ -820,6 +891,7 @@ mod tests {
             stealth_address: stealth_address.into(),
             ephemeral_public_key_hex: ephemeral_public_key_hex.into(),
             view_tag_hex: "0xaa".into(),
+            stealth_hash_convention: StealthHashConvention::STANDARD,
             announcement: None,
             token_address: None,
             expected_amount_hex: None,

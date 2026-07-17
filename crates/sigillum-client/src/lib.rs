@@ -652,6 +652,9 @@ impl SigillumClient {
                     stealth_address: stealth_address.to_string(),
                     ephemeral_public_key_hex: hex::encode(ephemeral_public_key),
                     view_tag_hex: view_tag.map(|value| hex::encode([value])),
+                    // Convention unknown to the client: the daemon probes
+                    // both (standard first) and verifies by address match.
+                    stealth_hash_convention: None,
                 },
             });
         self.send(builder).await
@@ -673,6 +676,9 @@ impl SigillumClient {
                     stealth_address: stealth_address.to_string(),
                     ephemeral_public_key_hex: hex::encode(ephemeral_public_key),
                     view_tag_hex: view_tag.map(|value| hex::encode([value])),
+                    // Convention unknown to the client: the daemon probes
+                    // both (standard first) and verifies by address match.
+                    stealth_hash_convention: None,
                 },
                 digest_hex: hex::encode(digest),
             });

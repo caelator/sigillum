@@ -6,9 +6,43 @@
 
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use sigillum_core::{EthereumStealthError, EthereumXpubError};
+use sigillum_core::{EthereumStealthError, EthereumXpubError, StealthHashConvention};
 
 use super::{ServiceError, ServiceResult};
+
+// ── Stealth hash-convention probing ──────────────────────────────
+
+/// Effective convention for a caller-supplied optional convention: the
+/// standard compressed-point convention when absent.
+pub(crate) fn stealth_convention_or_standard(
+    convention: Option<StealthHashConvention>,
+) -> StealthHashConvention {
+    convention.unwrap_or(StealthHashConvention::STANDARD)
+}
+
+/// Run a stealth signing/derivation `operation` with `preferred`, falling back
+/// to the other convention when the first attempt fails with
+/// [`EthereumStealthError::AddressMismatch`] or
+/// [`EthereumStealthError::ViewTagMismatch`].
+///
+/// This is the signing-side half of dual-decode: it covers deposit records
+/// whose stored convention is missing or wrong (corrupt/hand-edited store) and
+/// queue jobs enqueued before the convention switch (no convention field).
+/// Probing is safe because every stealth signing path verifies the derived
+/// stealth address before releasing key material — a wrong convention can
+/// never yield a wrong key, only a mismatch error. Any other error aborts
+/// without probing.
+pub(crate) fn probe_stealth_sign<T>(
+    preferred: StealthHashConvention,
+    operation: impl Fn(StealthHashConvention) -> Result<T, EthereumStealthError>,
+) -> Result<T, EthereumStealthError> {
+    match operation(preferred) {
+        Err(EthereumStealthError::AddressMismatch | EthereumStealthError::ViewTagMismatch) => {
+            operation(preferred.other())
+        }
+        result => result,
+    }
+}
 
 // ── Hex decoding ─────────────────────────────────────────────────
 
@@ -66,6 +100,7 @@ pub(crate) fn map_wallet_error(error: EthereumStealthError) -> ServiceError {
         | EthereumStealthError::InvalidEthereumAddress
         | EthereumStealthError::InvalidAnnouncementField(_)
         | EthereumStealthError::InvalidQuantity(_)
+        | EthereumStealthError::InvalidStealthHashConvention(_)
         | EthereumStealthError::InvalidFeeConfiguration => {
             ServiceError::bad_request(error.to_string())
         }

@@ -22,6 +22,14 @@ pub struct EthStealthDeposit {
     pub stealth_address: String,
     pub ephemeral_public_key_hex: String,
     pub view_tag_hex: String,
+    /// Shared-secret hash convention this deposit's stealth address was
+    /// derived with. New records are always stamped `compressed33` (standard);
+    /// records predating the convention switch are stamped `x32` by the
+    /// deposits-store migration. Defaults to the standard convention when the
+    /// field is absent (e.g. hand-written records); a wrong stamp is corrected
+    /// the next time detection re-probes the record.
+    #[serde(default)]
+    pub stealth_hash_convention: sigillum_core::StealthHashConvention,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub announcement: Option<EthStealthAnnouncementPayload>,
     #[serde(skip_serializing_if = "Option::is_none")]

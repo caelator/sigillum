@@ -4,7 +4,7 @@ use sigillum_api::{
     EthStealthSendErc20WithProfileRequest, EthStealthSendWithProfileRequest, EvmProviderRef,
     StealthPaymentRef,
 };
-use sigillum_core::decode_quantity_hex;
+use sigillum_core::{StealthHashConvention, decode_quantity_hex};
 
 use crate::service::helpers::{
     compare_u256, is_zero_u256, map_wallet_error, multiply_u256_u64, subtract_u256,
@@ -25,6 +25,7 @@ impl SigillumService {
         min_value_wei_hex: Option<&str>,
         gas_limit_override: Option<u64>,
         view_tag_hex: Option<String>,
+        stealth_hash_convention: Option<StealthHashConvention>,
     ) -> ServiceResult<QueueExecution> {
         let (provider, wallet) = self.resolve_wallet_profile(wallet_profile)?;
         let destination_address = destination_address
@@ -91,6 +92,9 @@ impl SigillumService {
                         stealth_address: stealth_address.into(),
                         ephemeral_public_key_hex: ephemeral_public_key_hex.into(),
                         view_tag_hex,
+                        // Record-stamped convention from the sweep job; `None`
+                        // (pre-switch job) makes the send path probe both.
+                        stealth_hash_convention,
                     },
                     value_wei_hex: super::super::evm::encode_quantity_u256(&spendable),
                     destination_address: Some(destination_address),
@@ -116,6 +120,7 @@ impl SigillumService {
         min_amount_hex: Option<&str>,
         gas_limit_override: Option<u64>,
         view_tag_hex: Option<String>,
+        stealth_hash_convention: Option<StealthHashConvention>,
     ) -> ServiceResult<QueueExecution> {
         let (provider, wallet) = self.resolve_wallet_profile(wallet_profile)?;
         let recipient_address = recipient_address
@@ -175,6 +180,9 @@ impl SigillumService {
                         stealth_address: stealth_address.into(),
                         ephemeral_public_key_hex: ephemeral_public_key_hex.into(),
                         view_tag_hex,
+                        // Record-stamped convention from the sweep job; `None`
+                        // (pre-switch job) makes the send path probe both.
+                        stealth_hash_convention,
                     },
                     token_address: token_address.into(),
                     recipient_address,

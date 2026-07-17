@@ -309,6 +309,7 @@ impl SigillumService {
                     nonce,
                     gas_limit,
                     view_tag_hex,
+                    stealth_hash_convention,
                 } => self
                     .eth_stealth_send_with_profile(
                         Some(token),
@@ -318,6 +319,7 @@ impl SigillumService {
                                 stealth_address: stealth_address.clone(),
                                 ephemeral_public_key_hex: ephemeral_public_key_hex.clone(),
                                 view_tag_hex: view_tag_hex.clone(),
+                                stealth_hash_convention: *stealth_hash_convention,
                             },
                             value_wei_hex: value_wei_hex.clone(),
                             destination_address: destination_address.clone(),
@@ -339,6 +341,7 @@ impl SigillumService {
                     nonce,
                     gas_limit,
                     view_tag_hex,
+                    stealth_hash_convention,
                 } => self
                     .eth_stealth_send_erc20_with_profile(
                         Some(token),
@@ -348,6 +351,7 @@ impl SigillumService {
                                 stealth_address: stealth_address.clone(),
                                 ephemeral_public_key_hex: ephemeral_public_key_hex.clone(),
                                 view_tag_hex: view_tag_hex.clone(),
+                                stealth_hash_convention: *stealth_hash_convention,
                             },
                             token_address: token_address.clone(),
                             recipient_address: recipient_address.clone(),
@@ -368,6 +372,7 @@ impl SigillumService {
                     min_value_wei_hex,
                     gas_limit,
                     view_tag_hex,
+                    stealth_hash_convention,
                 } => {
                     self.process_eth_stealth_native_sweep(
                         token,
@@ -378,6 +383,7 @@ impl SigillumService {
                         min_value_wei_hex.as_deref(),
                         *gas_limit,
                         view_tag_hex.clone(),
+                        *stealth_hash_convention,
                     )
                     .await
                 }
@@ -390,6 +396,7 @@ impl SigillumService {
                     min_amount_hex,
                     gas_limit,
                     view_tag_hex,
+                    stealth_hash_convention,
                 } => {
                     self.process_eth_stealth_erc20_sweep(
                         token,
@@ -401,6 +408,7 @@ impl SigillumService {
                         min_amount_hex.as_deref(),
                         *gas_limit,
                         view_tag_hex.clone(),
+                        *stealth_hash_convention,
                     )
                     .await
                 }

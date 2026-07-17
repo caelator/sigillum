@@ -15,10 +15,37 @@
 //! - **EIP-1559 Transaction Signing**: Generates signed transactions compatible with Ethereum's
 //!   dynamic fee market.
 //!
+//! ## Shared-secret hash conventions
+//!
+//! ERC-5564 scheme 1 leaves the exact byte encoding of the hashed ECDH shared
+//! secret implementation-defined, and two encodings exist in the wild:
+//!
+//! - [`StealthHashConvention::Compressed33`] — **standard, used for all new
+//!   payments**: `keccak256` over the 33-byte compressed SEC1 encoding of the
+//!   shared-secret point. This is the de-facto scheme-1 convention implemented
+//!   by the ScopeLift `stealth-address-sdk` (the reference implementation used
+//!   by Umbra-style tooling), confirmed byte-exactly against
+//!   `src/utils/crypto/generateStealthAddress.ts` (`getHashedSharedSecret` =
+//!   `keccak256(getSharedSecret(...))` where `@noble/secp256k1` v2
+//!   `getSharedSecret` returns the compressed point by default) and
+//!   `src/utils/crypto/computeStealthKey.ts` (`(spendingPrivateKey +
+//!   BigInt(hashedSharedSecret)) % CURVE.n`), retrieved 2026-07-17 from
+//!   <https://github.com/ScopeLift/stealth-address-sdk/tree/main/src/utils/crypto>.
+//! - [`StealthHashConvention::XOnly32`] — **legacy Sigillum convention**:
+//!   `keccak256` over the 32-byte x-coordinate of the shared-secret point
+//!   (k256 `SharedSecret::raw_secret_bytes`). Payments created before the
+//!   switch remain detectable and spendable through dual-decode probing; see
+//!   [`check_ethereum_stealth_address_any`].
+//!
+//! A third, incompatible variant exists in the wild (Fluidkey hashes the
+//! 64-byte uncompressed X‖Y encoding); it is intentionally NOT supported.
+//!
 //! ## Security Properties
 //!
 //! - Every signing operation derives and verifies the stealth private key against the expected
-//!   stealth address before use, preventing key-address mismatches.
+//!   stealth address before use, preventing key-address mismatches. Convention
+//!   probing therefore cannot produce a key for the wrong address: a candidate
+//!   key is only usable when its derived address matches the announced one.
 //! - View tag mismatches are rejected immediately without further processing.
 //! - All ephemeral private keys are zeroized after use.
 
@@ -37,6 +64,80 @@ type HmacSha256 = Hmac<Sha256>;
 pub const ETHEREUM_STEALTH_SCHEME_ID: u64 = 1;
 pub const ERC5564_ANNOUNCER_ADDRESS: &str = "0x55649e01b5df198d18d95b5cc5051630cfd45564";
 pub const ERC5564_ANNOUNCE_FUNCTION: &str = "announce(uint256,address,bytes,bytes)";
+
+// ── Shared-secret hash conventions ──
+
+/// Byte-encoding convention for the hashed ECDH shared secret that drives
+/// ERC-5564 scheme-1 stealth derivation (view tag, stealth public key/address,
+/// and stealth private key all derive from this one hash).
+///
+/// The serde representation is the stable lowercase string stored on deposit
+/// records and queue jobs: `"compressed33"` (standard) and `"x32"` (legacy).
+///
+/// See the module-level "Shared-secret hash conventions" section for the
+/// normative references and the unsupported Fluidkey 64-byte variant.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub enum StealthHashConvention {
+    /// Legacy Sigillum convention: `keccak256` over the 32-byte x-coordinate
+    /// of the shared-secret point (k256 `SharedSecret::raw_secret_bytes`).
+    /// Retained solely for payments created before the convention switch.
+    #[serde(rename = "x32")]
+    XOnly32,
+    /// De-facto scheme-1 standard: `keccak256` over the 33-byte compressed
+    /// SEC1 encoding of the shared-secret point. Byte-compatible with the
+    /// ScopeLift `stealth-address-sdk` (`keccak256(getSharedSecret(...))`,
+    /// `@noble/secp256k1` v2 returns the compressed point by default).
+    #[default]
+    #[serde(rename = "compressed33")]
+    Compressed33,
+}
+
+impl StealthHashConvention {
+    /// Convention used for all newly generated payments and deposit records.
+    pub const STANDARD: Self = Self::Compressed33;
+    /// Convention of every payment created before the switch; pre-existing
+    /// deposit records are stamped with it by the store migration.
+    pub const LEGACY: Self = Self::XOnly32;
+    /// Dual-decode probe order: standard first (the overwhelmingly common
+    /// case for new announcements), legacy second.
+    pub const PROBE_ORDER: [Self; 2] = [Self::Compressed33, Self::XOnly32];
+
+    /// Stable string form used in records, logs, and API payloads.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::XOnly32 => "x32",
+            Self::Compressed33 => "compressed33",
+        }
+    }
+
+    /// The other convention, used when probing both after a mismatch.
+    pub fn other(self) -> Self {
+        match self {
+            Self::XOnly32 => Self::Compressed33,
+            Self::Compressed33 => Self::XOnly32,
+        }
+    }
+}
+
+impl std::fmt::Display for StealthHashConvention {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(self.as_str())
+    }
+}
+
+impl std::str::FromStr for StealthHashConvention {
+    type Err = EthereumStealthError;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value {
+            "x32" => Ok(Self::XOnly32),
+            "compressed33" => Ok(Self::Compressed33),
+            _ => Err(EthereumStealthError::InvalidStealthHashConvention(
+                value.to_string(),
+            )),
+        }
+    }
+}
 
 // ── Error types ──
 
@@ -60,6 +161,8 @@ pub enum EthereumStealthError {
     InvalidAnnouncementField(String),
     #[error("view tag mismatch")]
     ViewTagMismatch,
+    #[error("unknown stealth hash convention: {0}")]
+    InvalidStealthHashConvention(String),
     #[error("stealth address does not match derived wallet")]
     AddressMismatch,
     #[error("max fee per gas must be greater than or equal to max priority fee per gas")]
@@ -88,6 +191,9 @@ pub struct EthereumStealthPayment {
     pub stealth_address: String,
     pub ephemeral_public_key_hex: String,
     pub view_tag_hex: String,
+    /// Convention the shared-secret hash was derived with (standard for all
+    /// newly generated payments).
+    pub stealth_hash_convention: StealthHashConvention,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -107,6 +213,10 @@ pub struct EthereumStealthCheck {
     pub matches: bool,
     pub derived_stealth_address: String,
     pub view_tag_hex: String,
+    /// Convention that produced `derived_stealth_address`/`view_tag_hex`. When
+    /// `matches` is true this is the convention the payment was actually made
+    /// with; callers persist it so later key derivation uses the right one.
+    pub stealth_hash_convention: StealthHashConvention,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -222,6 +332,9 @@ pub fn derive_sigillum_ethereum_stealth_wallet(
 ///
 /// - `ephemeral_private_key`: Optional custom ephemeral key for testing/determinism.
 ///   If `None`, a random key is generated.
+/// - `convention`: Shared-secret hash convention. New payments MUST use
+///   [`StealthHashConvention::STANDARD`] (the ScopeLift-compatible compressed-point
+///   convention); the legacy variant exists only for dual-decode of old records.
 ///
 /// # Returns
 ///
@@ -230,13 +343,14 @@ pub fn derive_sigillum_ethereum_stealth_wallet(
 pub fn generate_ethereum_stealth_address(
     stealth_meta_address: &str,
     ephemeral_private_key: Option<[u8; 32]>,
+    convention: StealthHashConvention,
 ) -> Result<EthereumStealthPayment, EthereumStealthError> {
     let meta = parse_meta_address(stealth_meta_address)?;
     let ephemeral_private_key =
         ephemeral_private_key_to_secret(ephemeral_private_key.unwrap_or_else(random_secret_bytes))?;
     let ephemeral_public_key = ephemeral_private_key.public_key();
     let hashed_shared_secret =
-        hashed_shared_secret(&ephemeral_private_key, &meta.viewing_public_key)?;
+        hashed_shared_secret(&ephemeral_private_key, &meta.viewing_public_key, convention)?;
     let stealth_public_key =
         derive_stealth_public_key(&meta.spending_public_key, &hashed_shared_secret)?;
 
@@ -247,6 +361,7 @@ pub fn generate_ethereum_stealth_address(
         stealth_address: ethereum_address_from_public_key(&stealth_public_key),
         ephemeral_public_key_hex: encode_public_key(&ephemeral_public_key),
         view_tag_hex: hex::encode([derive_view_tag(&hashed_shared_secret)]),
+        stealth_hash_convention: convention,
     };
 
     Ok(payment)
@@ -283,12 +398,14 @@ pub fn build_erc5564_announcement(
 
 // ── Stealth address verification ──
 
-/// Verify that a stealth address matches a given ephemeral public key.
+/// Verify that a stealth address matches a given ephemeral public key under one
+/// explicit shared-secret hash convention.
 ///
 /// Recipients call this function during block scanning to determine whether an on-chain
 /// payment was intended for them. The function computes the stealth address that would
 /// have been generated with the given ephemeral public key and compares it to the
-/// provided stealth address.
+/// provided stealth address. Callers that do not know the payment's convention should
+/// use [`check_ethereum_stealth_address_any`] to probe.
 ///
 /// The view tag provides a fast pre-filter: if it doesn't match, the computation short-circuits
 /// immediately without performing full ECDH and point arithmetic.
@@ -302,10 +419,14 @@ pub fn check_ethereum_stealth_address(
     stealth_address: &str,
     ephemeral_public_key_hex: &str,
     view_tag: Option<u8>,
+    convention: StealthHashConvention,
 ) -> Result<EthereumStealthCheck, EthereumStealthError> {
     let ephemeral_public_key = parse_public_key_hex(ephemeral_public_key_hex)?;
-    let hashed_shared_secret =
-        hashed_shared_secret_for_recipient(&wallet.viewing_private_key, &ephemeral_public_key)?;
+    let hashed_shared_secret = hashed_shared_secret_for_recipient(
+        &wallet.viewing_private_key,
+        &ephemeral_public_key,
+        convention,
+    )?;
 
     if let Some(expected_view_tag) = view_tag {
         let derived_view_tag = derive_view_tag(&hashed_shared_secret);
@@ -325,7 +446,65 @@ pub fn check_ethereum_stealth_address(
         matches: derived_stealth_address == expected_stealth_address,
         derived_stealth_address,
         view_tag_hex: hex::encode([derive_view_tag(&hashed_shared_secret)]),
+        stealth_hash_convention: convention,
     })
+}
+
+/// Dual-decode variant of [`check_ethereum_stealth_address`]: probes the given
+/// conventions in order and returns the first full stealth-address match.
+///
+/// Detection paths use this with [`StealthHashConvention::PROBE_ORDER`]
+/// (standard first, legacy second) so payments created with either convention
+/// are found in one pass, including legacy payments whose on-chain view tag
+/// only matches under the legacy convention. The returned
+/// [`EthereumStealthCheck::stealth_hash_convention`] is the convention the
+/// payment was actually made with; callers persist it so sweeping derives the
+/// stealth key with the right convention.
+///
+/// Returns `Ok` with `matches: false` (derived values from the first probed
+/// convention that passed the view-tag filter, or the first convention when no
+/// view tag was supplied) when no convention matches, and
+/// [`EthereumStealthError::ViewTagMismatch`] when every convention is excluded
+/// by the view-tag pre-filter.
+pub fn check_ethereum_stealth_address_any(
+    wallet: &EthereumStealthWallet,
+    stealth_address: &str,
+    ephemeral_public_key_hex: &str,
+    view_tag: Option<u8>,
+    conventions: &[StealthHashConvention],
+) -> Result<EthereumStealthCheck, EthereumStealthError> {
+    let mut tag_filtered = false;
+    let mut first_candidate: Option<EthereumStealthCheck> = None;
+    for &convention in conventions {
+        match check_ethereum_stealth_address(
+            wallet,
+            stealth_address,
+            ephemeral_public_key_hex,
+            view_tag,
+            convention,
+        ) {
+            Ok(check) if check.matches => return Ok(check),
+            Ok(check) => {
+                if first_candidate.is_none() {
+                    first_candidate = Some(check);
+                }
+            }
+            Err(EthereumStealthError::ViewTagMismatch) => tag_filtered = true,
+            Err(error) => return Err(error),
+        }
+    }
+    if let Some(candidate) = first_candidate {
+        return Ok(EthereumStealthCheck {
+            matches: false,
+            ..candidate
+        });
+    }
+    if tag_filtered {
+        return Err(EthereumStealthError::ViewTagMismatch);
+    }
+    Err(EthereumStealthError::InvalidStealthHashConvention(
+        "no conventions to probe".to_string(),
+    ))
 }
 
 // ── Stealth signing ──
@@ -335,6 +514,12 @@ pub fn check_ethereum_stealth_address(
 /// Combines view-tag verification, ECDH shared-secret derivation, and stealth key
 /// computation into a single auditable call site. Every signing operation MUST go
 /// through this function to guarantee address verification before key use.
+///
+/// The `convention` selects the shared-secret hash encoding; it MUST be the
+/// convention the payment was actually created with (persisted on the deposit
+/// record), otherwise the derived address will not match and this function
+/// fails with [`EthereumStealthError::AddressMismatch`] instead of producing a
+/// wrong key.
 ///
 /// # Returns
 ///
@@ -351,10 +536,14 @@ fn derive_verified_stealth_key(
     stealth_address: &str,
     ephemeral_public_key_hex: &str,
     view_tag: Option<u8>,
+    convention: StealthHashConvention,
 ) -> Result<(SecretKey, [u8; 32]), EthereumStealthError> {
     let ephemeral_public_key = parse_public_key_hex(ephemeral_public_key_hex)?;
-    let hashed_shared_secret =
-        hashed_shared_secret_for_recipient(&wallet.viewing_private_key, &ephemeral_public_key)?;
+    let hashed_shared_secret = hashed_shared_secret_for_recipient(
+        &wallet.viewing_private_key,
+        &ephemeral_public_key,
+        convention,
+    )?;
 
     if let Some(expected_view_tag) = view_tag {
         let derived_view_tag = derive_view_tag(&hashed_shared_secret);
@@ -386,6 +575,8 @@ fn derive_verified_stealth_key(
 /// - `digest`: Must be exactly 32 bytes (e.g., Keccak256 hash).
 /// - `view_tag`: Optional view-tag filter. If provided, it must match the derived value
 ///   or the function returns `ViewTagMismatch` without further processing.
+/// - `convention`: Shared-secret hash convention of the payment (from the deposit
+///   record). A wrong convention fails with `AddressMismatch` before any signing.
 ///
 /// # Returns
 ///
@@ -397,13 +588,19 @@ pub fn sign_ethereum_stealth_digest(
     ephemeral_public_key_hex: &str,
     view_tag: Option<u8>,
     digest: &[u8],
+    convention: StealthHashConvention,
 ) -> Result<EthereumStealthSignature, EthereumStealthError> {
     if digest.len() != 32 {
         return Err(EthereumStealthError::InvalidDigestLength);
     }
 
-    let (stealth_private_key, hashed_shared_secret) =
-        derive_verified_stealth_key(wallet, stealth_address, ephemeral_public_key_hex, view_tag)?;
+    let (stealth_private_key, hashed_shared_secret) = derive_verified_stealth_key(
+        wallet,
+        stealth_address,
+        ephemeral_public_key_hex,
+        view_tag,
+        convention,
+    )?;
 
     let mut key_bytes = stealth_private_key.to_bytes();
     let signing_key = SigningKey::from_slice(&key_bytes)
@@ -434,6 +631,8 @@ pub fn sign_ethereum_stealth_digest(
 /// - `transfer`: Contains destination, value, and fee configuration.
 /// - `view_tag`: Optional filter for fast rejection. If provided and mismatched,
 ///   fails immediately without further processing.
+/// - `convention`: Shared-secret hash convention of the payment (from the deposit
+///   record). A wrong convention fails with `AddressMismatch` before any signing.
 ///
 /// # Returns
 ///
@@ -444,6 +643,7 @@ pub fn sign_ethereum_stealth_native_transfer(
     ephemeral_public_key_hex: &str,
     view_tag: Option<u8>,
     transfer: &EthereumEip1559Transfer,
+    convention: StealthHashConvention,
 ) -> Result<EthereumSignedTransaction, EthereumStealthError> {
     let destination_address = normalize_ethereum_address(&transfer.destination_address)?;
     sign_ethereum_stealth_eip1559_transaction(
@@ -463,6 +663,7 @@ pub fn sign_ethereum_stealth_native_transfer(
         },
         "eth-transfer",
         destination_address,
+        convention,
     )
 }
 
@@ -476,6 +677,8 @@ pub fn sign_ethereum_stealth_native_transfer(
 ///
 /// - `transfer`: Contains token address, recipient address, amount, and fee configuration.
 /// - `view_tag`: Optional filter for fast rejection.
+/// - `convention`: Shared-secret hash convention of the payment (from the deposit
+///   record). A wrong convention fails with `AddressMismatch` before any signing.
 ///
 /// # Returns
 ///
@@ -486,6 +689,7 @@ pub fn sign_ethereum_stealth_erc20_transfer(
     ephemeral_public_key_hex: &str,
     view_tag: Option<u8>,
     transfer: &EthereumEip1559Erc20Transfer,
+    convention: StealthHashConvention,
 ) -> Result<EthereumSignedTransaction, EthereumStealthError> {
     let token_address = normalize_ethereum_address(&transfer.token_address)?;
     let recipient_address = normalize_ethereum_address(&transfer.recipient_address)?;
@@ -508,6 +712,7 @@ pub fn sign_ethereum_stealth_erc20_transfer(
         },
         "erc20-transfer",
         token_address,
+        convention,
     )
 }
 
@@ -538,6 +743,7 @@ fn derive_wallet_secret_key(
 /// Derives the stealth private key, verifies the address, constructs the transaction,
 /// and signs it with Keccak256 hashing. This function is the core logic used by both
 /// native ETH and ERC20 transfer signing paths.
+#[allow(clippy::too_many_arguments)]
 fn sign_ethereum_stealth_eip1559_transaction(
     wallet: &EthereumStealthWallet,
     stealth_address: &str,
@@ -546,9 +752,15 @@ fn sign_ethereum_stealth_eip1559_transaction(
     tx: UnsignedEip1559Transaction,
     kind: &str,
     to_address: String,
+    convention: StealthHashConvention,
 ) -> Result<EthereumSignedTransaction, EthereumStealthError> {
-    let (stealth_private_key, _hashed_shared_secret) =
-        derive_verified_stealth_key(wallet, stealth_address, ephemeral_public_key_hex, view_tag)?;
+    let (stealth_private_key, _hashed_shared_secret) = derive_verified_stealth_key(
+        wallet,
+        stealth_address,
+        ephemeral_public_key_hex,
+        view_tag,
+        convention,
+    )?;
 
     let mut key_bytes = stealth_private_key.to_bytes();
     let signing_key = SigningKey::from_slice(&key_bytes)
@@ -768,19 +980,51 @@ fn random_secret_bytes() -> [u8; 32] {
     }
 }
 
+/// Hash the ECDH shared secret between `private_key` and `public_key` with the
+/// given convention. This single hash drives the view tag, the stealth public
+/// key/address, and the stealth private key, so the convention must match the
+/// one the payer used.
+///
+/// - `XOnly32` (legacy): `keccak256` over the 32-byte x-coordinate, exactly the
+///   pre-switch code path (k256 `diffie_hellman` + `raw_secret_bytes`).
+/// - `Compressed33` (standard): `keccak256` over the 33-byte compressed SEC1
+///   encoding of the same shared point. Byte-compatible with the ScopeLift
+///   `stealth-address-sdk`, where `getHashedSharedSecret` is
+///   `keccak256(getSharedSecret(...))` and `@noble/secp256k1` v2
+///   `getSharedSecret(privA, pubB, isCompressed = true)` returns
+///   `Point.fromBytes(pubB).multiply(privA).toBytes(true)` — the compressed
+///   point (confirmed 2026-07-17, see module docs).
+///
+/// The shared point is a secret: scalar multiplication uses k256's
+/// constant-time arithmetic and the encoding is hashed immediately.
 fn hashed_shared_secret(
     private_key: &SecretKey,
     public_key: &PublicKey,
+    convention: StealthHashConvention,
 ) -> Result<[u8; 32], EthereumStealthError> {
-    let shared_secret = diffie_hellman(private_key.to_nonzero_scalar(), public_key.as_affine());
-    Ok(Keccak256::digest(shared_secret.raw_secret_bytes()).into())
+    match convention {
+        StealthHashConvention::XOnly32 => {
+            let shared_secret =
+                diffie_hellman(private_key.to_nonzero_scalar(), public_key.as_affine());
+            Ok(Keccak256::digest(shared_secret.raw_secret_bytes()).into())
+        }
+        StealthHashConvention::Compressed33 => {
+            let shared_point = (ProjectivePoint::from(*public_key.as_affine())
+                * *private_key.to_nonzero_scalar().as_ref())
+            .to_affine();
+            let compressed = shared_point.to_encoded_point(true);
+            debug_assert_eq!(compressed.as_bytes().len(), 33);
+            Ok(Keccak256::digest(compressed.as_bytes()).into())
+        }
+    }
 }
 
 fn hashed_shared_secret_for_recipient(
     viewing_private_key: &SecretKey,
     ephemeral_public_key: &PublicKey,
+    convention: StealthHashConvention,
 ) -> Result<[u8; 32], EthereumStealthError> {
-    hashed_shared_secret(viewing_private_key, ephemeral_public_key)
+    hashed_shared_secret(viewing_private_key, ephemeral_public_key, convention)
 }
 
 fn derive_stealth_public_key(
@@ -1145,6 +1389,7 @@ mod tests {
         let payment = generate_ethereum_stealth_address(
             &wallet.meta_address.stealth_meta_address,
             Some([3u8; 32]),
+            StealthHashConvention::STANDARD,
         )
         .unwrap();
 
@@ -1153,6 +1398,7 @@ mod tests {
             &payment.stealth_address,
             &payment.ephemeral_public_key_hex,
             Some(hex::decode(&payment.view_tag_hex).unwrap()[0]),
+            StealthHashConvention::STANDARD,
         )
         .unwrap();
         assert!(check.matches);
@@ -1166,6 +1412,7 @@ mod tests {
         let payment = generate_ethereum_stealth_address(
             &wallet.meta_address.stealth_meta_address,
             Some([3u8; 32]),
+            StealthHashConvention::STANDARD,
         )
         .unwrap();
 
@@ -1187,6 +1434,7 @@ mod tests {
         let payment = generate_ethereum_stealth_address(
             &wallet.meta_address.stealth_meta_address,
             Some([11u8; 32]),
+            StealthHashConvention::STANDARD,
         )
         .unwrap();
         let digest = [42u8; 32];
@@ -1198,6 +1446,7 @@ mod tests {
             &payment.ephemeral_public_key_hex,
             Some(view_tag),
             &digest,
+            StealthHashConvention::STANDARD,
         )
         .unwrap();
 
@@ -1211,6 +1460,7 @@ mod tests {
         let payment = generate_ethereum_stealth_address(
             &wallet.meta_address.stealth_meta_address,
             Some([17u8; 32]),
+            StealthHashConvention::STANDARD,
         )
         .unwrap();
 
@@ -1219,6 +1469,7 @@ mod tests {
             &payment.stealth_address,
             &payment.ephemeral_public_key_hex,
             Some(0xff),
+            StealthHashConvention::STANDARD,
         )
         .unwrap_err();
         assert_eq!(error, EthereumStealthError::ViewTagMismatch);
@@ -1230,6 +1481,7 @@ mod tests {
         let payment = generate_ethereum_stealth_address(
             &wallet.meta_address.stealth_meta_address,
             Some([23u8; 32]),
+            StealthHashConvention::STANDARD,
         )
         .unwrap();
 
@@ -1247,6 +1499,7 @@ mod tests {
                 destination_address: "0x1111111111111111111111111111111111111111".into(),
                 value: decode_quantity_hex("0xde0b6b3a7640000").unwrap(),
             },
+            StealthHashConvention::STANDARD,
         )
         .unwrap();
 
@@ -1262,6 +1515,7 @@ mod tests {
         let payment = generate_ethereum_stealth_address(
             &wallet.meta_address.stealth_meta_address,
             Some([37u8; 32]),
+            StealthHashConvention::STANDARD,
         )
         .unwrap();
 
@@ -1280,6 +1534,7 @@ mod tests {
                 recipient_address: "0x2222222222222222222222222222222222222222".into(),
                 amount: decode_quantity_hex("0x0f4240").unwrap(),
             },
+            StealthHashConvention::STANDARD,
         )
         .unwrap();
 
@@ -1325,5 +1580,273 @@ mod tests {
             signed.transaction_hash_hex,
             signed_tampered.transaction_hash_hex
         );
+    }
+
+    // ── Fixed external test vectors (no self-roundtrip) ─────────────────────
+    //
+    // PROVENANCE (recorded 2026-07-17):
+    // * Inputs: the spending/viewing private keys are PUBLISHED by the ScopeLift
+    //   stealth-address-sdk test suite (src/utils/crypto/test/computeStealthKey.test.ts
+    //   @ main; the spending key is printed there as 63 hex chars with the leading
+    //   zero nibble elided — left-padded to 32 bytes here). The reference generator
+    //   asserts these keys reproduce the SDK-published meta-address
+    //   `st:eth:0x033404e8...97` + `0390ad5e...46e`. Ephemeral private keys are
+    //   Sigillum-chosen fixed constants.
+    // * Expected values: computed with an independent Node.js reference using the
+    //   SDK's own dependency stack (@noble/secp256k1 v2.3.0, @noble/hashes v2.2.0),
+    //   mirroring the SDK source retrieved 2026-07-17 byte-for-byte:
+    //   - https://raw.githubusercontent.com/ScopeLift/stealth-address-sdk/main/src/utils/crypto/generateStealthAddress.ts
+    //     (`getHashedSharedSecret` = `keccak256(getSharedSecret(...))`; `getViewTag`
+    //     = most significant byte of the hash; `getStealthPublicKey` =
+    //     spending point + `ProjectivePoint.fromPrivateKey(hash)`; address =
+    //     keccak256(uncompressed X‖Y)[12..])
+    //   - https://raw.githubusercontent.com/ScopeLift/stealth-address-sdk/main/src/utils/crypto/computeStealthKey.ts
+    //     (`(spendingPrivateKey + BigInt(hashedSharedSecret)) % CURVE.n`)
+    //   `@noble/secp256k1` v2 `getSharedSecret(privA, pubB, isCompressed = true)`
+    //   returns the 33-byte compressed SEC1 point by default (confirmed against
+    //   the published v2.3.0 source), which makes the standard convention
+    //   `keccak256` over those 33 bytes.
+    // * The legacy `XOnly32` expected values were additionally verified
+    //   byte-exactly against the pre-switch Sigillum implementation (the code
+    //   path is unchanged; these vectors pin it for migration safety so
+    //   dual-decode of pre-switch deposits can never regress).
+    // * The SDK does not publish byte-exact end-to-end vectors for a fixed
+    //   ephemeral key; its only fixed hash-level vector is the `getViewTag`
+    //   example, pinned verbatim in `sdk_view_tag_vector_matches`.
+
+    /// Spending/viewing keys + meta-address published by the SDK test suite.
+    const VECTOR_SPENDING_PRIVATE_KEY: &str =
+        "0363721eb9e981558c748b824cb32a840da2b3e8957c2fc3bcb8d9c86cb87456";
+    const VECTOR_VIEWING_PRIVATE_KEY: &str =
+        "b52a0555f6a8663d89f00365893b1ef9e38eaf2e8bc48a63319c9ea5cb4a27c5";
+    const VECTOR_META_ADDRESS: &str = "st:eth:0x033404e82cd2a92321d51e13064ec13a0fb0192a9fdaaca1cfb47b37bd27ec13970390ad5eca026c05ab5cf4d620a2ac65241b11df004ddca360e954db1b26e3846e";
+
+    struct FixedVector {
+        ephemeral_private_key: &'static str,
+        ephemeral_public_key: &'static str,
+        hashed_shared_secret: &'static str,
+        view_tag: u8,
+        stealth_address: &'static str,
+        stealth_private_key: &'static str,
+    }
+
+    /// Standard (`compressed33`, ScopeLift-compatible) vectors.
+    const STANDARD_VECTORS: [FixedVector; 2] = [
+        FixedVector {
+            ephemeral_private_key:
+                "0000000000000000000000000000000000000000000000000000000000000003",
+            ephemeral_public_key:
+                "02f9308a019258c31049344f85f89d5229b531c845836f99b08601f113bce036f9",
+            hashed_shared_secret:
+                "040e0548482e80fe8fa5ca6d6b199a19856651812273993bce46595c2b17d4b4",
+            view_tag: 0x04,
+            stealth_address: "0xc4781e62ebcd5457deef51b90ba4acbb3b17ff30",
+            stealth_private_key:
+                "07717767021802541c1a55efb7ccc49d93090569b7efc8ff8aff332497d0490a",
+        },
+        FixedVector {
+            ephemeral_private_key:
+                "9d61b19deffd5a60ba844af492ec2cc44449c5697b326919703bac031cae7f60",
+            ephemeral_public_key:
+                "028db55b05db86c0b1786ca49f095d76344c9e6056b2f02701a7e7f3c20aabfd91",
+            hashed_shared_secret:
+                "7257024d9481707535109cde1f6add9bde15dd973d1197ad488e1faefdd64726",
+            view_tag: 0x72,
+            stealth_address: "0x8f8c077011630d8076a8fe179675221e7d2a2167",
+            stealth_private_key:
+                "75ba746c4e6af1cac18528606c1e081febb8917fd28dc7710546f9776a8ebb7c",
+        },
+    ];
+
+    /// Legacy (`x32`) vectors, pinning the pre-switch implementation.
+    const LEGACY_VECTORS: [FixedVector; 2] = [
+        FixedVector {
+            ephemeral_private_key:
+                "0000000000000000000000000000000000000000000000000000000000000003",
+            ephemeral_public_key:
+                "02f9308a019258c31049344f85f89d5229b531c845836f99b08601f113bce036f9",
+            hashed_shared_secret:
+                "089b8f4b70e7b614390a0daf3dba95b3f389a79d24da91ebc15d8aa2a518f868",
+            view_tag: 0x08,
+            stealth_address: "0x4039e78bd8141082a667050b3a19b6f58c9fe46b",
+            stealth_private_key:
+                "0bff016a2ad13769c57e99318a6dc038012c5b85ba56c1af7e16646b11d16cbe",
+        },
+        FixedVector {
+            ephemeral_private_key:
+                "9d61b19deffd5a60ba844af492ec2cc44449c5697b326919703bac031cae7f60",
+            ephemeral_public_key:
+                "028db55b05db86c0b1786ca49f095d76344c9e6056b2f02701a7e7f3c20aabfd91",
+            hashed_shared_secret:
+                "54f9376d308b9f4e06383b663fae19e8ea6d84e83a1fcc1d660b926642b6bfd7",
+            view_tag: 0x54,
+            stealth_address: "0x239b96cf4b6b15dc2bdd233988d6ac1867adf7fa",
+            stealth_private_key:
+                "585ca98bea7520a392acc6e88c61446cf81038d0cf9bfbe122c46c2eaf6f342d",
+        },
+    ];
+
+    fn fixed_secret_key(hex_key: &str) -> SecretKey {
+        SecretKey::from_slice(&hex::decode(hex_key).unwrap()).unwrap()
+    }
+
+    fn vector_wallet() -> EthereumStealthWallet {
+        let spending_private_key = fixed_secret_key(VECTOR_SPENDING_PRIVATE_KEY);
+        let viewing_private_key = fixed_secret_key(VECTOR_VIEWING_PRIVATE_KEY);
+        // The SDK-published private keys must reproduce the SDK-published
+        // meta-address keys (this is the reference generator's sanity check).
+        assert_eq!(
+            format!(
+                "st:eth:0x{}{}",
+                encode_public_key(&spending_private_key.public_key()),
+                encode_public_key(&viewing_private_key.public_key())
+            ),
+            VECTOR_META_ADDRESS
+        );
+        EthereumStealthWallet {
+            meta_address: EthereumStealthMetaAddress {
+                wallet: "vectors".into(),
+                short_name: "eth".into(),
+                scheme_id: ETHEREUM_STEALTH_SCHEME_ID,
+                stealth_meta_address: VECTOR_META_ADDRESS.into(),
+                spending_public_key_hex: encode_public_key(&spending_private_key.public_key()),
+                viewing_public_key_hex: encode_public_key(&viewing_private_key.public_key()),
+            },
+            spending_private_key,
+            viewing_private_key,
+        }
+    }
+
+    fn assert_fixed_vector(convention: StealthHashConvention, vector: &FixedVector) {
+        let wallet = vector_wallet();
+        let meta = parse_meta_address(VECTOR_META_ADDRESS).unwrap();
+        let mut ephemeral_bytes = [0u8; 32];
+        ephemeral_bytes.copy_from_slice(&hex::decode(vector.ephemeral_private_key).unwrap());
+
+        // Payer side: generation from the meta-address is byte-exact.
+        let payment =
+            generate_ethereum_stealth_address(VECTOR_META_ADDRESS, Some(ephemeral_bytes), convention)
+                .unwrap();
+        assert_eq!(payment.stealth_address, vector.stealth_address);
+        assert_eq!(payment.ephemeral_public_key_hex, vector.ephemeral_public_key);
+        assert_eq!(payment.view_tag_hex, hex::encode([vector.view_tag]));
+        assert_eq!(payment.stealth_hash_convention, convention);
+
+        // Hash level: the exact bytes feeding every derivation.
+        let ephemeral_secret = ephemeral_private_key_to_secret(ephemeral_bytes).unwrap();
+        let hashed =
+            hashed_shared_secret(&ephemeral_secret, &meta.viewing_public_key, convention).unwrap();
+        assert_eq!(hex::encode(hashed), vector.hashed_shared_secret);
+        assert_eq!(derive_view_tag(&hashed), vector.view_tag);
+
+        // Recipient side: single-convention check and dual-decode both match,
+        // and the derived stealth private key is byte-exact.
+        let check = check_ethereum_stealth_address(
+            &wallet,
+            vector.stealth_address,
+            vector.ephemeral_public_key,
+            Some(vector.view_tag),
+            convention,
+        )
+        .unwrap();
+        assert!(check.matches);
+        assert_eq!(check.stealth_hash_convention, convention);
+
+        let probed = check_ethereum_stealth_address_any(
+            &wallet,
+            vector.stealth_address,
+            vector.ephemeral_public_key,
+            Some(vector.view_tag),
+            &StealthHashConvention::PROBE_ORDER,
+        )
+        .unwrap();
+        assert!(probed.matches);
+        assert_eq!(probed.stealth_hash_convention, convention);
+
+        let (stealth_key, _) = derive_verified_stealth_key(
+            &wallet,
+            vector.stealth_address,
+            vector.ephemeral_public_key,
+            Some(vector.view_tag),
+            convention,
+        )
+        .unwrap();
+        assert_eq!(
+            hex::encode(stealth_key.to_bytes()),
+            vector.stealth_private_key
+        );
+    }
+
+    #[test]
+    fn standard_convention_matches_fixed_scopelift_vectors() {
+        for vector in &STANDARD_VECTORS {
+            assert_fixed_vector(StealthHashConvention::Compressed33, vector);
+        }
+    }
+
+    #[test]
+    fn legacy_convention_matches_fixed_pre_switch_vectors() {
+        for vector in &LEGACY_VECTORS {
+            assert_fixed_vector(StealthHashConvention::XOnly32, vector);
+        }
+    }
+
+    #[test]
+    fn conventions_produce_distinct_addresses_for_same_inputs() {
+        // The two conventions must never collide for the same inputs: the view
+        // tags and stealth addresses differ, which is exactly why dual-decode
+        // probing is required to find legacy payments in one scan pass.
+        for (standard, legacy) in STANDARD_VECTORS.iter().zip(LEGACY_VECTORS.iter()) {
+            assert_eq!(standard.ephemeral_private_key, legacy.ephemeral_private_key);
+            assert_ne!(standard.hashed_shared_secret, legacy.hashed_shared_secret);
+            assert_ne!(standard.view_tag, legacy.view_tag);
+            assert_ne!(standard.stealth_address, legacy.stealth_address);
+            assert_ne!(standard.stealth_private_key, legacy.stealth_private_key);
+        }
+    }
+
+    #[test]
+    fn dual_decode_rejects_unknown_announcement_by_view_tag() {
+        let wallet = vector_wallet();
+        // A view tag that matches neither convention's tag for this ephemeral
+        // key must fail fast, preserving the scan prefilter semantics.
+        let error = check_ethereum_stealth_address_any(
+            &wallet,
+            STANDARD_VECTORS[0].stealth_address,
+            STANDARD_VECTORS[0].ephemeral_public_key,
+            Some(0xff),
+            &StealthHashConvention::PROBE_ORDER,
+        )
+        .unwrap_err();
+        assert_eq!(error, EthereumStealthError::ViewTagMismatch);
+    }
+
+    #[test]
+    fn sdk_view_tag_vector_matches() {
+        // Verbatim ScopeLift SDK test vector (src/utils/crypto/test/
+        // generateStealthAddress.test.ts): view tag = most significant byte.
+        let hashed: [u8; 32] = hex::decode(
+            "158ce29a3dd0c8dca524e5776c2ba6361c280e013f87eee5eb799a713a939501",
+        )
+        .unwrap()
+        .try_into()
+        .unwrap();
+        assert_eq!(derive_view_tag(&hashed), 0x15);
+    }
+
+    #[test]
+    fn convention_strings_roundtrip() {
+        for convention in StealthHashConvention::PROBE_ORDER {
+            let encoded = convention.as_str();
+            assert_eq!(encoded.parse::<StealthHashConvention>().unwrap(), convention);
+            assert_eq!(serde_json::to_string(&convention).unwrap(), format!("\"{encoded}\""));
+            assert_eq!(
+                serde_json::from_str::<StealthHashConvention>(&format!("\"{encoded}\"")).unwrap(),
+                convention
+            );
+        }
+        assert_eq!(StealthHashConvention::STANDARD.as_str(), "compressed33");
+        assert_eq!(StealthHashConvention::LEGACY.as_str(), "x32");
+        assert!("uncompressed64".parse::<StealthHashConvention>().is_err());
     }
 }

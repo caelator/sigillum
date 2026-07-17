@@ -512,6 +512,10 @@ pub struct EthStealthGenerateResponse {
     pub stealth_address: String,
     pub ephemeral_public_key_hex: String,
     pub view_tag_hex: String,
+    /// Shared-secret hash convention the address was derived with (always the
+    /// standard `compressed33` for newly generated payments).
+    #[serde(default)]
+    pub stealth_hash_convention: sigillum_core::StealthHashConvention,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub announcement: Option<EthStealthAnnouncementPayload>,
     /// Non-blocking cautionary warnings (e.g. foreign meta-address, ephemeral
@@ -539,6 +543,10 @@ pub struct EthStealthCheckResponse {
     pub matches: bool,
     pub derived_stealth_address: String,
     pub view_tag_hex: String,
+    /// Convention that produced the derived values; when `matches` is true,
+    /// the convention the payment was actually made with.
+    #[serde(default)]
+    pub stealth_hash_convention: sigillum_core::StealthHashConvention,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]

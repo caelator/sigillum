@@ -2277,6 +2277,7 @@ async fn transaction_signing_helpers_roundtrip_response_shapes() {
                 stealth_address: "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".into(),
                 ephemeral_public_key_hex: "03".repeat(33),
                 view_tag_hex: Some("01".into()),
+                stealth_hash_convention: None,
             },
             fees: sigillum_api::Eip1559Fees {
                 chain_id: 1,
@@ -2300,6 +2301,7 @@ async fn transaction_signing_helpers_roundtrip_response_shapes() {
                 stealth_address: "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".into(),
                 ephemeral_public_key_hex: "03".repeat(33),
                 view_tag_hex: Some("01".into()),
+                stealth_hash_convention: None,
             },
             fees: sigillum_api::Eip1559Fees {
                 chain_id: 1,
@@ -2415,6 +2417,7 @@ async fn stealth_send_helpers_roundtrip_response_shapes() {
                 stealth_address: "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".into(),
                 ephemeral_public_key_hex: "03".repeat(33),
                 view_tag_hex: Some("01".into()),
+                stealth_hash_convention: None,
             },
             fees: Eip1559Fees {
                 chain_id: 1,
@@ -2443,6 +2446,7 @@ async fn stealth_send_helpers_roundtrip_response_shapes() {
                 stealth_address: "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".into(),
                 ephemeral_public_key_hex: "03".repeat(33),
                 view_tag_hex: Some("01".into()),
+                stealth_hash_convention: None,
             },
             fees: Eip1559Fees {
                 chain_id: 1,
@@ -2520,6 +2524,7 @@ async fn profile_and_queue_helpers_roundtrip_response_shapes() {
                 stealth_address: "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".into(),
                 ephemeral_public_key_hex: "03".repeat(33),
                 view_tag_hex: Some("01".into()),
+                stealth_hash_convention: None,
             },
             value_wei_hex: "0x1".into(),
             destination_address: None,
@@ -2542,6 +2547,7 @@ async fn profile_and_queue_helpers_roundtrip_response_shapes() {
                 stealth_address: "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".into(),
                 ephemeral_public_key_hex: "03".repeat(33),
                 view_tag_hex: Some("01".into()),
+                stealth_hash_convention: None,
             },
             value_wei_hex: "0x1".into(),
             destination_address: None,
@@ -2654,6 +2660,7 @@ async fn profile_and_queue_helpers_roundtrip_response_shapes() {
                 stealth_address: "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb".into(),
                 ephemeral_public_key_hex: "03".repeat(33),
                 view_tag_hex: Some("01".into()),
+                stealth_hash_convention: None,
             },
             destination_address: Some("0x1111111111111111111111111111111111111111".into()),
             min_value_wei_hex: Some("0x1".into()),
@@ -2670,6 +2677,7 @@ async fn profile_and_queue_helpers_roundtrip_response_shapes() {
                 stealth_address: "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb".into(),
                 ephemeral_public_key_hex: "03".repeat(33),
                 view_tag_hex: Some("01".into()),
+                stealth_hash_convention: None,
             },
             token_address: "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48".into(),
             recipient_address: Some("0x1111111111111111111111111111111111111111".into()),

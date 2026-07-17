@@ -24,6 +24,11 @@ pub enum QueueJobPayload {
         gas_limit: Option<u64>,
         #[serde(skip_serializing_if = "Option::is_none")]
         view_tag_hex: Option<String>,
+        /// Shared-secret hash convention copied from the deposit record at
+        /// enqueue time; `None` (jobs enqueued before the convention switch)
+        /// makes execution probe both conventions with address verification.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        stealth_hash_convention: Option<sigillum_core::StealthHashConvention>,
     },
     EthStealthErc20Transfer {
         wallet_profile: String,
@@ -38,6 +43,11 @@ pub enum QueueJobPayload {
         gas_limit: Option<u64>,
         #[serde(skip_serializing_if = "Option::is_none")]
         view_tag_hex: Option<String>,
+        /// Shared-secret hash convention copied from the deposit record at
+        /// enqueue time; `None` (jobs enqueued before the convention switch)
+        /// makes execution probe both conventions with address verification.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        stealth_hash_convention: Option<sigillum_core::StealthHashConvention>,
     },
     EthStealthNativeSweep {
         wallet_profile: String,
@@ -51,6 +61,11 @@ pub enum QueueJobPayload {
         gas_limit: Option<u64>,
         #[serde(skip_serializing_if = "Option::is_none")]
         view_tag_hex: Option<String>,
+        /// Shared-secret hash convention copied from the deposit record at
+        /// enqueue time; `None` (jobs enqueued before the convention switch)
+        /// makes execution probe both conventions with address verification.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        stealth_hash_convention: Option<sigillum_core::StealthHashConvention>,
     },
     EthStealthErc20Sweep {
         wallet_profile: String,
@@ -65,6 +80,11 @@ pub enum QueueJobPayload {
         gas_limit: Option<u64>,
         #[serde(skip_serializing_if = "Option::is_none")]
         view_tag_hex: Option<String>,
+        /// Shared-secret hash convention copied from the deposit record at
+        /// enqueue time; `None` (jobs enqueued before the convention switch)
+        /// makes execution probe both conventions with address verification.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        stealth_hash_convention: Option<sigillum_core::StealthHashConvention>,
     },
     EthSeedTransfer {
         wallet_profile: String,

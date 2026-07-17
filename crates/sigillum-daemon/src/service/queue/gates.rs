@@ -311,6 +311,7 @@ mod tests {
                 nonce: None,
                 gas_limit: None,
                 view_tag_hex: None,
+                stealth_hash_convention: None,
             },
             QueueJobPayload::EthStealthErc20Transfer {
                 wallet_profile: "stealth".into(),
@@ -322,6 +323,7 @@ mod tests {
                 nonce: None,
                 gas_limit: None,
                 view_tag_hex: None,
+                stealth_hash_convention: None,
             },
             QueueJobPayload::EthStealthNativeSweep {
                 wallet_profile: "stealth".into(),
@@ -331,6 +333,7 @@ mod tests {
                 min_value_wei_hex: None,
                 gas_limit: None,
                 view_tag_hex: None,
+                stealth_hash_convention: None,
             },
             QueueJobPayload::EthStealthErc20Sweep {
                 wallet_profile: "stealth".into(),
@@ -341,6 +344,7 @@ mod tests {
                 min_amount_hex: None,
                 gas_limit: None,
                 view_tag_hex: None,
+                stealth_hash_convention: None,
             },
         ];
 
@@ -494,6 +498,7 @@ mod tests {
             min_value_wei_hex: None,
             gas_limit: None,
             view_tag_hex: None,
+            stealth_hash_convention: None,
         };
 
         assert_eq!(service.execution_gate_block_reason(&payload).unwrap(), None);

@@ -304,6 +304,7 @@ fn test_eth_stealth_generate_response_roundtrip() {
         stealth_address: "0xstealth".to_string(),
         ephemeral_public_key_hex: "0xeph".to_string(),
         view_tag_hex: "0xaa".to_string(),
+        stealth_hash_convention: sigillum_core::StealthHashConvention::STANDARD,
         announcement: Some(EthStealthAnnouncementPayload {
             announcer_address: "0x55649e01b5df198d18d95b5cc5051630cfd45564".to_string(),
             announce_function: "announce(uint256,address,bytes,bytes)".to_string(),
@@ -346,6 +347,7 @@ fn test_eth_stealth_check_response_roundtrip() {
         matches: true,
         derived_stealth_address: "0xderived".to_string(),
         view_tag_hex: "0xaa".to_string(),
+        stealth_hash_convention: sigillum_core::StealthHashConvention::STANDARD,
     };
     roundtrip_test(resp);
 }
@@ -1249,6 +1251,7 @@ fn test_eth_stealth_deposit_roundtrip() {
         stealth_address: "0xstealth".to_string(),
         ephemeral_public_key_hex: "0xeph".to_string(),
         view_tag_hex: "0xaa".to_string(),
+        stealth_hash_convention: sigillum_core::StealthHashConvention::STANDARD,
         announcement: Some(EthStealthAnnouncementPayload {
             announcer_address: "0x55649e01b5df198d18d95b5cc5051630cfd45564".to_string(),
             announce_function: "announce(uint256,address,bytes,bytes)".to_string(),
@@ -1295,6 +1298,7 @@ fn test_eth_stealth_deposit_legacy_chain_defaults() {
         stealth_address: "0xstealth".to_string(),
         ephemeral_public_key_hex: "0xeph".to_string(),
         view_tag_hex: "0xaa".to_string(),
+        stealth_hash_convention: sigillum_core::StealthHashConvention::STANDARD,
         announcement: None,
         token_address: None,
         expected_amount_hex: None,
@@ -1350,6 +1354,7 @@ fn test_queue_job_payload_native_transfer_roundtrip() {
         nonce: Some(5),
         gas_limit: Some(21000),
         view_tag_hex: Some("0xaa".to_string()),
+        stealth_hash_convention: None,
     };
     roundtrip_test(payload);
 }
@@ -1366,6 +1371,7 @@ fn test_queue_job_payload_erc20_transfer_roundtrip() {
         nonce: None,
         gas_limit: Some(100000),
         view_tag_hex: None,
+        stealth_hash_convention: None,
     };
     roundtrip_test(payload);
 }
@@ -1380,6 +1386,7 @@ fn test_queue_job_payload_native_sweep_roundtrip() {
         min_value_wei_hex: Some("0x1".to_string()),
         gas_limit: Some(21000),
         view_tag_hex: Some("0xaa".to_string()),
+        stealth_hash_convention: None,
     };
     roundtrip_test(payload);
 }
@@ -1395,6 +1402,7 @@ fn test_queue_job_payload_erc20_sweep_roundtrip() {
         min_amount_hex: Some("0x10".to_string()),
         gas_limit: None,
         view_tag_hex: None,
+        stealth_hash_convention: None,
     };
     roundtrip_test(payload);
 }
@@ -1417,6 +1425,7 @@ fn test_queue_job_with_flatten_and_tag_roundtrip() {
             nonce: Some(5),
             gas_limit: Some(21000),
             view_tag_hex: None,
+            stealth_hash_convention: None,
         },
         last_error: None,
         transaction_hash_hex: None,
@@ -1443,6 +1452,7 @@ fn test_queue_job_with_error_roundtrip() {
             min_value_wei_hex: None,
             gas_limit: None,
             view_tag_hex: None,
+            stealth_hash_convention: None,
         },
         last_error: Some("Insufficient funds".to_string()),
         transaction_hash_hex: None,
@@ -1471,6 +1481,7 @@ fn test_queue_job_list_response_roundtrip() {
                 nonce: None,
                 gas_limit: None,
                 view_tag_hex: None,
+                stealth_hash_convention: None,
             },
             last_error: None,
             transaction_hash_hex: None,
@@ -1503,6 +1514,7 @@ fn test_queue_enqueue_response_roundtrip() {
                 nonce: None,
                 gas_limit: None,
                 view_tag_hex: None,
+                stealth_hash_convention: None,
             },
             last_error: None,
             transaction_hash_hex: None,
@@ -1543,6 +1555,7 @@ fn test_queue_process_response_roundtrip() {
                 min_value_wei_hex: Some("0x1".to_string()),
                 gas_limit: Some(21000),
                 view_tag_hex: Some("0xaa".to_string()),
+                stealth_hash_convention: None,
             },
             last_error: None,
             transaction_hash_hex: Some("0xhash".to_string()),

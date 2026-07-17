@@ -21,6 +21,11 @@ pub struct StealthPaymentRef {
     pub ephemeral_public_key_hex: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub view_tag_hex: Option<String>,
+    /// Shared-secret hash convention of the payment (`"compressed33"` standard,
+    /// `"x32"` legacy). Absent means unknown: the daemon probes both
+    /// conventions (standard first) and verifies by address match.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stealth_hash_convention: Option<sigillum_core::StealthHashConvention>,
 }
 
 /// Connection parameters for an EVM JSON-RPC provider.

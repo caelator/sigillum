@@ -292,6 +292,7 @@ fn test_eth_stealth_check_request_roundtrip() {
             stealth_address: "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".to_string(),
             ephemeral_public_key_hex: "0xephemeral".to_string(),
             view_tag_hex: Some("0xaa".to_string()),
+            stealth_hash_convention: None,
         },
     };
     roundtrip_test(req);
@@ -452,6 +453,7 @@ fn test_optional_eth_address_validation_allows_omitted_address() {
             stealth_address: "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".to_string(),
             ephemeral_public_key_hex: "0xeph".to_string(),
             view_tag_hex: None,
+            stealth_hash_convention: None,
         },
         value_wei_hex: "0x100".to_string(),
         destination_address: None,
@@ -486,6 +488,7 @@ fn test_eth_stealth_send_transfer_request_full() {
             stealth_address: "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".to_string(),
             ephemeral_public_key_hex: "0xeph".to_string(),
             view_tag_hex: Some("0xaa".to_string()),
+            stealth_hash_convention: None,
         },
         fees: Eip1559Fees {
             chain_id: 1,
@@ -513,6 +516,7 @@ fn test_eth_stealth_send_transfer_request_minimal() {
             stealth_address: "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".to_string(),
             ephemeral_public_key_hex: "0xeph".to_string(),
             view_tag_hex: None,
+            stealth_hash_convention: None,
         },
         fees: Eip1559Fees {
             chain_id: 1,
@@ -594,6 +598,7 @@ fn test_eth_stealth_send_erc20_transfer_request_roundtrip() {
             stealth_address: "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".to_string(),
             ephemeral_public_key_hex: "0xeph".to_string(),
             view_tag_hex: None,
+            stealth_hash_convention: None,
         },
         fees: Eip1559Fees {
             chain_id: 1,
@@ -1091,6 +1096,7 @@ fn test_eth_stealth_send_with_profile_request_roundtrip() {
             stealth_address: "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".to_string(),
             ephemeral_public_key_hex: "0xeph".to_string(),
             view_tag_hex: None,
+            stealth_hash_convention: None,
         },
         value_wei_hex: "0x100".to_string(),
         destination_address: Some("0x000000000000000000000000000000000000dEaD".to_string()),
@@ -1110,6 +1116,7 @@ fn test_eth_stealth_send_erc20_with_profile_request_roundtrip() {
             stealth_address: "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".to_string(),
             ephemeral_public_key_hex: "0xeph".to_string(),
             view_tag_hex: Some("0xff".to_string()),
+            stealth_hash_convention: None,
         },
         token_address: "0x2222222222222222222222222222222222222222".to_string(),
         recipient_address: "0x4444444444444444444444444444444444444444".to_string(),
@@ -1130,6 +1137,7 @@ fn test_queue_eth_stealth_native_sweep_request_full() {
             stealth_address: "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".to_string(),
             ephemeral_public_key_hex: "0xeph".to_string(),
             view_tag_hex: Some("0xaa".to_string()),
+            stealth_hash_convention: None,
         },
         destination_address: Some("0x000000000000000000000000000000000000dEaD".to_string()),
         min_value_wei_hex: Some("0x1".to_string()),
