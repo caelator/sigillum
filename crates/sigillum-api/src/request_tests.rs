@@ -1251,7 +1251,7 @@ fn test_eth_stealth_deposit_refresh_request_empty() {
 fn test_eth_stealth_announcement_scan_request_roundtrip() {
     let req = EthStealthAnnouncementScanRequest {
         wallet_profile: "profile2".to_string(),
-        from_block: "0x100".to_string(),
+        from_block: Some("0x100".to_string()),
         to_block: Some("latest".to_string()),
         token_address: Some("0x2222222222222222222222222222222222222222".to_string()),
         limit: Some(250),
@@ -1259,7 +1259,31 @@ fn test_eth_stealth_announcement_scan_request_roundtrip() {
         sweep_destination_address: Some("0x000000000000000000000000000000000000dEaD".to_string()),
         min_sweep_amount_hex: Some("0x10".to_string()),
         note: Some("scan known claim window".to_string()),
+        reset_cursor: Some(true),
     };
+    roundtrip_test(req);
+}
+
+#[test]
+fn test_eth_stealth_announcement_scan_request_cursor_resume_defaults() {
+    // Plan task 2.6: a cursor-resuming scan omits `from_block` entirely;
+    // legacy payloads without it (and without `reset_cursor`) deserialize to
+    // the same shape.
+    let req = EthStealthAnnouncementScanRequest {
+        wallet_profile: "profile2".to_string(),
+        from_block: None,
+        to_block: None,
+        token_address: None,
+        limit: None,
+        auto_queue_sweep: None,
+        sweep_destination_address: None,
+        min_sweep_amount_hex: None,
+        note: None,
+        reset_cursor: None,
+    };
+    let legacy: EthStealthAnnouncementScanRequest =
+        serde_json::from_value(serde_json::json!({ "wallet_profile": "profile2" })).unwrap();
+    assert_eq!(req, legacy);
     roundtrip_test(req);
 }
 

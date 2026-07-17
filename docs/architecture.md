@@ -488,6 +488,21 @@ recorded deposit — reusing an ephemeral key with the same meta-address derives
 the identical stealth address, which is linkable and constitutes address
 reuse.
 
+**Announcement-scan cursors.** The announcer scan persists a per-(wallet
+profile, provider profile) cursor (`announcement_scan_cursors` in the
+deposits store — additive with a serde default, so the schema stays v3)
+holding the highest announcement block scanned. Calling
+`deposits/eth-stealth/scan-announcements` without `from_block` resumes at
+cursor+1; the first scan (or one with `reset_cursor: true`) starts at
+`earliest`, and an explicit `from_block` always wins for manual rescans and
+never drags the cursor backward. After a successful scan the cursor advances
+to the highest PROCESSED log block — the same conservative semantics as the
+ERC-20 transfer-log cursors, so a `limit`-capped scan re-reads the tail on
+the next call — or, when the range held no logs at all, to the concrete
+upper bound (a numeric `to_block`, or the chain head for the default
+`latest`; other block tags leave the cursor untouched). The response's
+`from_block`/`to_block` always report the effective range scanned.
+
 **The gas story.** An ERC-20 stealth deposit cannot sweep itself: the sweep's
 token transfer needs native gas on a fresh stealth address that, by design,
 holds only the token. Sigillum supports two funding paths, composable per

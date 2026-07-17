@@ -31,14 +31,14 @@ use std::collections::{BTreeSet, HashMap};
 
 use sha3::{Digest, Keccak256};
 use sigillum_api::{
-    Counterparty, EthStealthAnnouncementPayload, EthStealthAnnouncementScanRequest,
-    EthStealthAnnouncementScanResponse, EthStealthDeposit, EthStealthDepositCreateErc20Request,
-    EthStealthDepositCreateNativeRequest, EthStealthDepositDeleteRequest,
-    EthStealthDepositEnqueueSweepRequest, EthStealthDepositEnqueueSweepResponse,
-    EthStealthDepositListResponse, EthStealthDepositMutationResponse,
-    EthStealthDepositRefreshRequest, EthStealthDepositRefreshResponse, EthStealthGenerateRequest,
-    EthStealthWalletProfile, EvmProviderProfile, QueueEnqueueResponse, QueueJob, QueueJobPayload,
-    ReceivingDepositTagRequest,
+    Counterparty, EthStealthAnnouncementPayload, EthStealthAnnouncementScanCursor,
+    EthStealthAnnouncementScanRequest, EthStealthAnnouncementScanResponse, EthStealthDeposit,
+    EthStealthDepositCreateErc20Request, EthStealthDepositCreateNativeRequest,
+    EthStealthDepositDeleteRequest, EthStealthDepositEnqueueSweepRequest,
+    EthStealthDepositEnqueueSweepResponse, EthStealthDepositListResponse,
+    EthStealthDepositMutationResponse, EthStealthDepositRefreshRequest,
+    EthStealthDepositRefreshResponse, EthStealthGenerateRequest, EthStealthWalletProfile,
+    EvmProviderProfile, QueueEnqueueResponse, QueueJob, QueueJobPayload, ReceivingDepositTagRequest,
 };
 use sigillum_core::{
     ERC5564_ANNOUNCE_FUNCTION, ERC5564_ANNOUNCER_ADDRESS, ERC5564_METADATA_ERC20_TRANSFER_SELECTOR,
@@ -94,6 +94,60 @@ mod tests {
 
     fn abi_word(value: usize) -> String {
         format!("{value:064x}")
+    }
+
+    fn scan_cursor(wallet: &str, provider: &str, block: u64, updated: u64) -> EthStealthAnnouncementScanCursor {
+        EthStealthAnnouncementScanCursor {
+            wallet_profile: wallet.into(),
+            provider_profile: provider.into(),
+            chain_id: 1,
+            last_scanned_block: block,
+            updated_at_unix: updated,
+        }
+    }
+
+    #[test]
+    fn announcement_cursor_upsert_is_monotonic_unless_reset() {
+        let mut cursors = vec![scan_cursor("w", "p", 100, 10)];
+
+        // A lower rescan never drags the cursor backward.
+        upsert_announcement_scan_cursor(&mut cursors, scan_cursor("w", "p", 40, 20), false);
+        assert_eq!(cursors[0].last_scanned_block, 100);
+        assert_eq!(cursors[0].updated_at_unix, 20);
+
+        // Forward progress lands.
+        upsert_announcement_scan_cursor(&mut cursors, scan_cursor("w", "p", 160, 30), false);
+        assert_eq!(cursors[0].last_scanned_block, 160);
+
+        // Reset re-anchors, even backward.
+        upsert_announcement_scan_cursor(&mut cursors, scan_cursor("w", "p", 50, 40), true);
+        assert_eq!(cursors[0].last_scanned_block, 50);
+
+        // A different (wallet, provider) pair gets its own entry.
+        upsert_announcement_scan_cursor(&mut cursors, scan_cursor("w", "q", 7, 50), false);
+        assert_eq!(cursors.len(), 2);
+        assert_eq!(
+            latest_announcement_scan_cursor(&cursors, "w", "p").map(|c| c.last_scanned_block),
+            Some(50)
+        );
+        assert_eq!(
+            latest_announcement_scan_cursor(&cursors, "w", "q").map(|c| c.last_scanned_block),
+            Some(7)
+        );
+        assert!(latest_announcement_scan_cursor(&cursors, "w", "unknown").is_none());
+    }
+
+    #[test]
+    fn max_log_block_tracks_the_highest_processed_log() {
+        assert_eq!(max_log_block(None, None), None);
+        assert_eq!(max_log_block(None, Some("0x20")), Some(32));
+        assert_eq!(max_log_block(Some(32), Some("0x10")), Some(32));
+        assert_eq!(max_log_block(Some(32), Some("0x40")), Some(64));
+        // Named tags and junk never move the cursor.
+        assert_eq!(max_log_block(Some(32), Some("latest")), Some(32));
+        assert_eq!(parse_block_quantity("latest"), None);
+        assert_eq!(parse_block_quantity("0X0A"), Some(10));
+        assert_eq!(encode_block_quantity(31), "0x1f");
     }
 
     fn abi_dynamic_bytes(bytes: &[u8]) -> String {
@@ -766,7 +820,6 @@ impl SigillumService {
         if body.auto_queue_sweep.unwrap_or(false) {
             self.require_scope(Some(token), super::capability_scopes::QUEUE_ENQUEUE_SWEEP)?;
         }
-        let from_block = normalize_log_block_tag(&body.from_block, "from_block")?;
         let to_block = body
             .to_block
             .as_deref()
@@ -781,6 +834,35 @@ impl SigillumService {
             .transpose()?;
         validate_optional_quantity(body.min_sweep_amount_hex.as_deref(), "min_sweep_amount")?;
         let (provider, wallet) = self.resolve_wallet_profile(&body.wallet_profile)?;
+
+        // Plan task 2.6: an explicit `from_block` always wins (manual
+        // rescan); when omitted, resume from the persisted per-(wallet,
+        // provider) announcement cursor, or scan from `earliest` when no
+        // cursor is stored (first scan, or after `reset_cursor`). The cursor
+        // read is a cheap store load; the authoritative mutation copy loads
+        // under the operation guard below.
+        let reset_cursor = body.reset_cursor.unwrap_or(false);
+        let from_block = match body.from_block.as_deref() {
+            Some(value) => normalize_log_block_tag(value, "from_block")?,
+            None => {
+                let stored = crate::deposits::load_deposits(&self.state.base_dir)
+                    .map_err(|error| {
+                        ServiceError::internal(format!("Failed to load deposits: {error}"))
+                    })?;
+                match latest_announcement_scan_cursor(
+                    &stored.announcement_scan_cursors,
+                    &wallet.name,
+                    &provider.name,
+                )
+                .filter(|_| !reset_cursor)
+                {
+                    Some(cursor) => {
+                        encode_block_quantity(cursor.last_scanned_block.saturating_add(1))
+                    }
+                    None => "earliest".into(),
+                }
+            }
+        };
 
         // Watch-only detection: the scan derives the viewing private key +
         // spending PUBLIC key only; the spending private key never
@@ -823,9 +905,13 @@ impl SigillumService {
         let mut created = 0usize;
         let mut existing = 0usize;
         let mut response_deposits = Vec::new();
+        // Farthest announcement block this scan actually decoded (the cursor
+        // anchor; mirrors the ERC-20 transfer-log `max_log_block` semantics).
+        let mut cursor_block: Option<u64> = None;
 
         for log in logs.iter().take(limit) {
             let event = decode_erc5564_announcement_log(log)?;
+            cursor_block = max_log_block(cursor_block, event.block_number.as_deref());
             let view_tag = hex::decode(&event.view_tag_hex)
                 .ok()
                 .and_then(|bytes| bytes.first().copied());
@@ -923,6 +1009,39 @@ impl SigillumService {
             created += 1;
             response_deposits.push(deposit.clone());
             deposits.eth_stealth.push(deposit);
+        }
+
+        // Plan task 2.6: advance the persisted announcement cursor to the
+        // farthest block this scan covered — the highest PROCESSED log block
+        // (never beyond what was decoded, so a `limit`-capped scan re-reads
+        // the tail next time). When the range held no logs at all, anchor at
+        // the concrete upper bound: a numeric `to_block`, or the chain head
+        // for the default `latest` (best-effort — a head-read failure leaves
+        // the cursor untouched rather than failing the scan); other block
+        // tags can't be anchored honestly and also leave it untouched. The
+        // cursor write rides the same atomic store save as the deposits.
+        if cursor_block.is_none() && logs.is_empty() {
+            cursor_block = match parse_block_quantity(&to_block) {
+                Some(block) => Some(block),
+                None if to_block == "latest" => self
+                    .evm_block_number_for_provider(provider.compartment_id, &provider)
+                    .await
+                    .ok(),
+                None => None,
+            };
+        }
+        if let Some(last_scanned_block) = cursor_block {
+            upsert_announcement_scan_cursor(
+                &mut deposits.announcement_scan_cursors,
+                EthStealthAnnouncementScanCursor {
+                    wallet_profile: wallet.name.clone(),
+                    provider_profile: provider.name.clone(),
+                    chain_id: provider.chain_id,
+                    last_scanned_block,
+                    updated_at_unix: now,
+                },
+                reset_cursor,
+            );
         }
 
         deposits
@@ -2253,6 +2372,70 @@ fn validated_announcement_scan_limit(limit: Option<usize>) -> ServiceResult<usiz
         )));
     }
     Ok(limit)
+}
+
+/// Highest block number seen across processed announcement logs (mirrors the
+/// ERC-20 transfer-log `max_log_block` cursor semantics).
+fn max_log_block(cursor: Option<u64>, block_number: Option<&str>) -> Option<u64> {
+    match (cursor, block_number.and_then(parse_block_quantity)) {
+        (Some(current), Some(next)) => Some(current.max(next)),
+        (None, Some(next)) => Some(next),
+        (current, None) => current,
+    }
+}
+
+/// Parse a `0x`-prefixed block quantity; `None` for named block tags.
+fn parse_block_quantity(value: &str) -> Option<u64> {
+    let raw = value
+        .strip_prefix("0x")
+        .or_else(|| value.strip_prefix("0X"))?;
+    if raw.is_empty() || !raw.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        return None;
+    }
+    u64::from_str_radix(raw, 16).ok()
+}
+
+fn encode_block_quantity(value: u64) -> String {
+    format!("0x{value:x}")
+}
+
+/// The stored announcement-scan cursor for a (wallet profile, provider
+/// profile) pair, if any.
+fn latest_announcement_scan_cursor<'a>(
+    cursors: &'a [EthStealthAnnouncementScanCursor],
+    wallet_profile: &str,
+    provider_profile: &str,
+) -> Option<&'a EthStealthAnnouncementScanCursor> {
+    cursors
+        .iter()
+        .filter(|cursor| {
+            cursor.wallet_profile == wallet_profile && cursor.provider_profile == provider_profile
+        })
+        .max_by_key(|cursor| cursor.last_scanned_block)
+}
+
+/// Upsert the cursor for a (wallet, provider) pair: monotonic max normally
+/// (a manual rescan of old blocks never drags the cursor backward), a
+/// wholesale re-anchor after `reset_cursor`.
+fn upsert_announcement_scan_cursor(
+    cursors: &mut Vec<EthStealthAnnouncementScanCursor>,
+    next: EthStealthAnnouncementScanCursor,
+    reset: bool,
+) {
+    if let Some(existing) = cursors.iter_mut().find(|existing| {
+        existing.wallet_profile == next.wallet_profile
+            && existing.provider_profile == next.provider_profile
+    }) {
+        existing.chain_id = next.chain_id;
+        existing.updated_at_unix = next.updated_at_unix;
+        existing.last_scanned_block = if reset {
+            next.last_scanned_block
+        } else {
+            existing.last_scanned_block.max(next.last_scanned_block)
+        };
+    } else {
+        cursors.push(next);
+    }
 }
 
 fn normalize_log_block_tag(value: &str, label: &str) -> ServiceResult<String> {

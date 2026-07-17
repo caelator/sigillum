@@ -1542,7 +1542,7 @@ impl Validate for crate::request::EthStealthDepositRefreshRequest {
 impl Validate for crate::request::EthStealthAnnouncementScanRequest {
     fn validate(&self) -> Result<(), String> {
         check_len("wallet_profile", &self.wallet_profile, MAX_LABEL)?;
-        check_len("from_block", &self.from_block, MAX_LABEL)?;
+        check_optional_len("from_block", &self.from_block, MAX_LABEL)?;
         check_optional_len("to_block", &self.to_block, MAX_LABEL)?;
         check_optional_eth_address("token_address", &self.token_address)?;
         check_optional_eth_address("sweep_destination_address", &self.sweep_destination_address)?;

@@ -1631,6 +1631,7 @@ mod tests {
                     Some("party_1"),
                 ),
             ],
+            announcement_scan_cursors: Vec::new(),
         };
 
         let overview = build_receiving_overview(&state, &deposits, 123);
@@ -1743,6 +1744,7 @@ mod tests {
         };
         let deposits = DepositState {
             eth_stealth: vec![party_one_deposit, party_two_deposit],
+            announcement_scan_cursors: Vec::new(),
         };
 
         let overview = build_receiving_overview(&state, &deposits, 123);
@@ -1788,6 +1790,7 @@ mod tests {
             },
             &DepositState {
                 eth_stealth: vec![first_same_party_deposit, second_same_party_deposit],
+                announcement_scan_cursors: Vec::new(),
             },
             123,
         );

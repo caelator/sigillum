@@ -15,11 +15,20 @@
 //! convention and detection re-probes both conventions on the next scan/check,
 //! correcting the stamp on match (documented fail-safe: signing verifies the
 //! derived address, so a wrong stamp can never produce a wrong key).
+//!
+//! ## Announcement-scan cursors (plan task 2.6)
+//!
+//! `announcement_scan_cursors` persists the per-(wallet profile, provider
+//! profile) announcement-scan progress so `scan-announcements` can resume
+//! incrementally instead of requiring a manual `from_block` per call. The
+//! field is additive with a serde default, so the schema stays v3: v3 files
+//! written before cursors existed load with an empty cursor list, and older
+//! binaries ignore the field outright.
 
 use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
-use sigillum_api::EthStealthDeposit;
+use sigillum_api::{EthStealthAnnouncementScanCursor, EthStealthDeposit};
 use sigillum_core::StealthHashConvention;
 
 use crate::json_store::{JsonDocument, JsonSchema};
@@ -28,6 +37,8 @@ use crate::json_store::{JsonDocument, JsonSchema};
 pub struct DepositState {
     #[serde(default)]
     pub eth_stealth: Vec<EthStealthDeposit>,
+    #[serde(default)]
+    pub announcement_scan_cursors: Vec<EthStealthAnnouncementScanCursor>,
 }
 
 impl DepositState {

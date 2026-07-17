@@ -346,6 +346,7 @@ mod tests {
 
         let deposits = crate::deposits::DepositState {
             eth_stealth: vec![sample_deposit("job-1")],
+            announcement_scan_cursors: Vec::new(),
         };
         crate::deposits::save_deposits(dir.path(), &deposits).unwrap();
 

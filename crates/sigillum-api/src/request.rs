@@ -738,8 +738,13 @@ pub struct EthStealthDepositRefreshRequest {
 }
 
 /// Scan bounded ERC-5564 announcement logs for a stealth wallet profile.
-/// `from_block` is required; `token_address` turns matches into ERC-20 deposit
-/// candidates instead of native deposit candidates.
+/// `from_block` is optional: when omitted the scan resumes from the persisted
+/// per-(wallet, provider) announcement cursor (or `earliest` on the first
+/// scan); when supplied it wins over the cursor for manual rescans. A
+/// successful scan advances the cursor. `reset_cursor` first drops the
+/// stored cursor, so the scan re-anchors from the given `from_block` (or
+/// `earliest`). `token_address` turns matches into ERC-20 deposit candidates
+/// instead of native deposit candidates.
 ///
 /// Detection is watch-only: matching uses the viewing private key + spending
 /// PUBLIC key only; the spending private key is never loaded for scanning
@@ -748,7 +753,8 @@ pub struct EthStealthDepositRefreshRequest {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct EthStealthAnnouncementScanRequest {
     pub wallet_profile: String,
-    pub from_block: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub from_block: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub to_block: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -763,6 +769,8 @@ pub struct EthStealthAnnouncementScanRequest {
     pub min_sweep_amount_hex: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub note: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reset_cursor: Option<bool>,
 }
 
 /// Enqueue a sweep job for a specific deposit.

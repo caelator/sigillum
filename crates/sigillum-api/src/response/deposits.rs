@@ -102,6 +102,21 @@ pub struct EthStealthDepositRefreshResponse {
     pub deposits: Vec<EthStealthDeposit>,
 }
 
+/// Persisted per-(wallet profile, provider profile) announcement-scan cursor
+/// (plan task 2.6): the highest announcement block scanned, so an announcer
+/// scan with no explicit `from_block` resumes at `last_scanned_block + 1`
+/// instead of re-reading history. Stored in the deposits store; mirrored
+/// here so responses and clients can share the shape.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct EthStealthAnnouncementScanCursor {
+    pub wallet_profile: String,
+    pub provider_profile: String,
+    #[serde(default = "default_legacy_mainnet_chain_id")]
+    pub chain_id: u64,
+    pub last_scanned_block: u64,
+    pub updated_at_unix: u64,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct EthStealthAnnouncementScanResponse {
     pub status: String,

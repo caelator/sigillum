@@ -139,6 +139,14 @@ candidates may adjust stable-candidate surfaces with the change recorded in
   standard-convention serde default; the four stealth `QueueJobPayload`
   variants gain it optionally (absent = probe). Fluidkey's 64-byte X‖Y
   encoding remains unsupported.
+- **Stealth announcement-scan cursors (plan task 2.6)**:
+  `EthStealthAnnouncementScanRequest.from_block` changed from required
+  `String` to optional `Option<String>` (wire-compatible: callers that send
+  it are unaffected; omitting it now resumes from the persisted per-(wallet,
+  provider) cursor instead of failing validation) and the request gained an
+  optional `reset_cursor`. The deposits store gained the additive
+  serde-defaulted `announcement_scan_cursors` list (schema stays v3) with the
+  new `EthStealthAnnouncementScanCursor` DTO.
 - **Stealth execution-gate carve-out closed (plan task 2.5)**: the stealth
   transfer/sweep queue jobs (`EthStealthTransfer`, `EthStealthErc20Transfer`,
   `EthStealthNativeSweep`, `EthStealthErc20Sweep`) no longer bypass the

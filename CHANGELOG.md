@@ -9,6 +9,22 @@ from 1.0.0 onward, per the stability policy in `docs/stability.md`.
 
 ### Added
 
+- **Persisted stealth announcement-scan cursors (plan task 2.6)** —
+  `deposits/eth-stealth/scan-announcements` no longer needs a manual
+  `from_block` per call: a per-(wallet profile, provider profile) cursor of
+  the last scanned announcement block persists in the deposits store
+  (additive with a serde default — the schema stays v3). An omitted
+  `from_block` resumes at cursor+1 (`earliest` on the first scan), an
+  explicit `from_block` still wins for manual rescans and never drags the
+  cursor backward, and a successful scan advances the cursor to the highest
+  processed log block (a `limit`-capped scan re-reads the tail next call; an
+  empty range anchors at the concrete `to_block`, or the chain head for the
+  default `latest`). The request gains an additive optional `reset_cursor`
+  (drop the stored cursor and re-anchor from this scan's range) and
+  `from_block` becomes optional on the wire; the CLI's `--from-block` is now
+  optional with a new `--reset-cursor` flag. The response's
+  `from_block`/`to_block` report the effective range scanned. See
+  `docs/architecture.md#stealth-addresses-erc-5564`.
 - **Five-destination operator console (C7)** — The console is restructured
   around operator goals: Overview, Receive, Portfolio, Move, and Vault, with a
   compact single-row topbar status strip, the unlocked hero shown once on

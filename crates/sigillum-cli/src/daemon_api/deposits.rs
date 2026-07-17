@@ -79,11 +79,14 @@ fn create_erc20(args: &[String]) {
 }
 
 fn scan_announcements(args: &[String]) {
+    // Plan task 2.6: `--from-block` is optional — omitted, the daemon resumes
+    // from the persisted per-(wallet, provider) announcement cursor;
+    // `--reset-cursor` re-anchors the cursor from this scan's range.
     let usage =
-        "sigillum api deposits scan-announcements --wallet-profile <NAME> --from-block <TAG|0xN>";
+        "sigillum api deposits scan-announcements --wallet-profile <NAME> [--from-block <TAG|0xN>] [--reset-cursor]";
     let request = EthStealthAnnouncementScanRequest {
         wallet_profile: require_flag(args, "--wallet-profile", usage),
-        from_block: require_flag(args, "--from-block", usage),
+        from_block: parse_flag(args, "--from-block"),
         to_block: parse_flag(args, "--to-block"),
         token_address: parse_flag(args, "--token-address"),
         limit: parse_usize_flag(args, "--limit"),
@@ -91,6 +94,7 @@ fn scan_announcements(args: &[String]) {
         sweep_destination_address: parse_flag(args, "--sweep-destination-address"),
         min_sweep_amount_hex: parse_flag(args, "--min-sweep-amount-hex"),
         note: parse_flag(args, "--note"),
+        reset_cursor: flag_option(args, "--reset-cursor"),
     };
     run_api_command(args, true, move |client| async move {
         client.scan_eth_stealth_announcements(request).await

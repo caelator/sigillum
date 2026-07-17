@@ -1166,6 +1166,7 @@ mod tests {
                     &first.stealth_address,
                     &first.ephemeral_public_key_hex,
                 )],
+                announcement_scan_cursors: Vec::new(),
             },
         )
         .unwrap();

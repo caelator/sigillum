@@ -2623,7 +2623,7 @@ async fn profile_and_queue_helpers_roundtrip_response_shapes() {
     let announced = client
         .scan_eth_stealth_announcements(EthStealthAnnouncementScanRequest {
             wallet_profile: "payments-mainnet".into(),
-            from_block: "0x100".into(),
+            from_block: Some("0x100".into()),
             to_block: Some("latest".into()),
             token_address: Some("0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48".into()),
             limit: Some(100),
@@ -2631,6 +2631,7 @@ async fn profile_and_queue_helpers_roundtrip_response_shapes() {
             sweep_destination_address: Some("0x1111111111111111111111111111111111111111".into()),
             min_sweep_amount_hex: Some("0xf4240".into()),
             note: None,
+            reset_cursor: None,
         })
         .await
         .unwrap();
