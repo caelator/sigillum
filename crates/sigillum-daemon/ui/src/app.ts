@@ -36,6 +36,7 @@ import { createSetupWizard } from "./views/setup";
 import { createTreasuryActions } from "./views/treasury";
 import { createWalletManagerActions } from "./views/walletManager";
 import { createWalletActions } from "./views/wallets";
+import { startCoreRuntime } from "./core/live";
 
 const SETUP_RESET_CONFIRMATION = 'RESET LOCAL SIGILLUM DATA';
 const OPERATOR_CARD_IDS = [
@@ -101,6 +102,11 @@ let lastApiKeys = [];
 let lastSecretKeys = [];
 let nextStepPrimaryTarget = null;
 let nextStepSecondaryTarget = null;
+// Strict-typed core runtime (plan task 4.1): store + SSE + hash router with
+// the legacy-section adapter. Started at the bottom of this module; legacy
+// behavior is unchanged except where the core intentionally takes over
+// (refresh-meta rendering; URL hash mirrors the workspace section).
+let coreRuntime = null;
 
 try {
   activeWorkspaceSection =
@@ -158,6 +164,9 @@ function storeWorkspaceSection(sectionId) {
   try {
     window.sessionStorage.setItem(WORKSPACE_SECTION_KEY, sectionId);
   } catch (_) {}
+  // Migration seam (adapter contract rule 3): keep the URL hash in sync
+  // with the legacy switcher. Guarded — null until the core starts below.
+  if (coreRuntime) coreRuntime.notifyLegacySection(sectionId);
 }
 
 function ensureActiveWorkspaceSection() {
@@ -1354,4 +1363,14 @@ function enhanceUiChrome() {
 }
 
 enhanceUiChrome();
+// Start the strict-typed core: store + typed API + hash router (synced with
+// the legacy section switcher via the adapter) + SSE-fed live slices, and
+// the proof-of-life refresh-meta migration. Legacy views keep their own
+// refresh loop until each migrates.
+coreRuntime = startCoreRuntime({
+  bridge: {
+    readSection: () => activeWorkspaceSection,
+    selectSection: id => selectWorkspaceSection(id),
+  },
+});
 void refresh();
