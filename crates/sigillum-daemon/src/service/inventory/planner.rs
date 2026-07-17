@@ -418,9 +418,10 @@ fn resolve_default_destination(
             .iter()
             .find(|p| p.name == holding.wallet_profile)
         {
-            if seed_profile.hot_address.is_some() && seed_profile.treasury_address.is_some() {
-                let hot_addr = seed_profile.hot_address.as_ref().unwrap();
-                let treasury_addr = seed_profile.treasury_address.as_ref().unwrap();
+            if let (Some(hot_addr), Some(treasury_addr)) = (
+                seed_profile.hot_address.as_ref(),
+                seed_profile.treasury_address.as_ref(),
+            ) {
                 let hot_balance = state
                     .addresses
                     .iter()
@@ -433,15 +434,34 @@ fn resolve_default_destination(
                     .treasury_policy
                     .as_ref()
                     .and_then(|policy| decode_quantity_hex(&policy.hot_floor_wei_hex).ok())
-                    .unwrap_or_else(|| decode_quantity_hex(DEFAULT_HOT_FLOOR_WEI_HEX).unwrap());
+                    .or_else(|| decode_quantity_hex(DEFAULT_HOT_FLOOR_WEI_HEX).ok());
                 // hot_target_wei_hex is the execution refill ceiling, not a
                 // routing trigger: only balance below the floor routes hot.
+                let Some(floor) = floor else {
+                    // Fail closed: without a decodable floor the hot-wallet
+                    // routing decision is undefined, so fall back to the
+                    // profile's static default destination.
+                    tracing::warn!(
+                        wallet_profile = %seed_profile.name,
+                        "treasury hot floor is undecodable; using default destination"
+                    );
+                    return seed_profile.default_destination_address.clone();
+                };
                 if compare_u256(&hot_balance, &floor).is_lt() {
                     Some(hot_addr.clone())
                 } else {
                     Some(treasury_addr.clone())
                 }
             } else {
+                if seed_profile.hot_address.is_some() || seed_profile.treasury_address.is_some() {
+                    // Fail closed: hot/treasury routing requires both
+                    // addresses; an inconsistent profile record falls back to
+                    // the static default destination.
+                    tracing::warn!(
+                        wallet_profile = %seed_profile.name,
+                        "seed profile sets only one of hot/treasury address; using default destination"
+                    );
+                }
                 seed_profile.default_destination_address.clone()
             }
         } else {
@@ -1054,6 +1074,62 @@ mod tests {
 
         assert_eq!(
             default_destination_for_hot_balance("0x1", Some(policy)).as_deref(),
+            Some("0x3333333333333333333333333333333333333333")
+        );
+    }
+
+    #[test]
+    fn inconsistent_hot_treasury_pair_falls_back_to_default_destination() {
+        let default = "0x9999999999999999999999999999999999999999";
+        let hot = "0x2222222222222222222222222222222222222222";
+        let treasury = "0x3333333333333333333333333333333333333333";
+
+        for (hot_address, treasury_address) in [(Some(hot), None), (None, Some(treasury))] {
+            let mut registry = sample_seed_registry();
+            registry.eth_seed_wallets[0].hot_address = hot_address.map(str::to_string);
+            registry.eth_seed_wallets[0].treasury_address = treasury_address.map(str::to_string);
+            registry.eth_seed_wallets[0].default_destination_address = Some(default.into());
+            let state = WalletInventoryState {
+                addresses: vec![sample_hot_address("0x1")],
+                ..WalletInventoryState::default()
+            };
+            let holding = sample_native_holding_at("0x1111111111111111111111111111111111111111");
+
+            assert_eq!(
+                resolve_default_destination(&state, &registry, &holding, &None).as_deref(),
+                Some(default)
+            );
+        }
+    }
+
+    #[test]
+    fn inconsistent_hot_treasury_pair_without_default_yields_no_destination() {
+        let mut registry = sample_seed_registry();
+        registry.eth_seed_wallets[0].treasury_address = None;
+        let state = WalletInventoryState {
+            addresses: vec![sample_hot_address("0x1")],
+            ..WalletInventoryState::default()
+        };
+        let holding = sample_native_holding_at("0x1111111111111111111111111111111111111111");
+
+        // No destination resolves here, so downstream sweep steps pick up the
+        // missing_destination blocker and stay blocked instead of panicking.
+        assert_eq!(
+            resolve_default_destination(&state, &registry, &holding, &None),
+            None
+        );
+    }
+
+    #[test]
+    fn undecodable_policy_hot_floor_uses_default_floor_without_panic() {
+        let policy = sample_routing_policy("0xzz", "0x2");
+
+        assert_eq!(
+            default_destination_for_hot_balance("0x1", Some(policy.clone())).as_deref(),
+            Some("0x2222222222222222222222222222222222222222")
+        );
+        assert_eq!(
+            default_destination_for_hot_balance("0xde0b6b3a7640001", Some(policy)).as_deref(),
             Some("0x3333333333333333333333333333333333333333")
         );
     }
