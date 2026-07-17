@@ -853,3 +853,365 @@ export interface DiscoveryJobListQuery extends PaginationQuery {
   sort?: "created" | "updated";
   order?: ListSortOrder;
 }
+
+// ── Response envelopes & SSE DTOs (plan task 4.1, core/api + core/events) ──
+// Mirrors sigillum-api response/{operations,queue,deposits,inventory,
+// treasury}.rs, response.rs (audit/diagnostics), and response/events.rs.
+// These complete the wire contract for the strict-typed core client; shapes
+// are additive and never restate an existing interface above.
+
+export interface OperationListResponse {
+  operations: Operation[];
+}
+
+export interface OperationResponse {
+  operation: Operation;
+}
+
+/** `POST /api/operations/{id}/cancel` — status mirrors the post-request state. */
+export interface OperationMutationResponse {
+  status: string;
+  operation: Operation;
+}
+
+// ── Queue ────────────────────────────────────────────────────────────
+
+export type QueueJobKind = WireString<
+  | "eth_stealth_transfer"
+  | "eth_stealth_erc20_transfer"
+  | "eth_stealth_native_sweep"
+  | "eth_stealth_erc20_sweep"
+  | "eth_stealth_gas_topup"
+  | "eth_seed_transfer"
+  | "eth_seed_native_sweep"
+  | "eth_seed_erc20_sweep"
+  | "plan_step_execution"
+>;
+
+/**
+ * Queue job record (`GET /api/queue/jobs`, enqueue/process responses).
+ * The Rust wire shape flattens a `kind`-tagged payload enum plus the W7.4
+ * receipt fields into one object; which optional fields are present depends
+ * on `kind` (e.g. `stealth_address` on stealth jobs, `plan_id`/`step_id` on
+ * plan-step executions). Receipt fields are absent until a receipt exists.
+ */
+export interface QueueJob {
+  id: string;
+  kind: QueueJobKind;
+  state: string;
+  attempts: number;
+  created_at_unix: number;
+  updated_at_unix: number;
+  next_attempt_after_unix?: number | null;
+  last_error?: string | null;
+  transaction_hash_hex?: string | null;
+  broadcast_transaction_hash_hex?: string | null;
+  // ── Flattened payload fields (subset; presence depends on `kind`) ──
+  wallet_profile?: string;
+  address?: string;
+  stealth_address?: string;
+  derivation_path?: string;
+  token_address?: string;
+  destination_address?: string | null;
+  recipient_address?: string | null;
+  sponsor_address?: string;
+  value_wei_hex?: string;
+  amount_hex?: string;
+  min_value_wei_hex?: string | null;
+  min_amount_hex?: string | null;
+  plan_id?: string;
+  step_id?: string;
+  chain_id?: number;
+  source_address?: string;
+  action?: WalletPlanStepAction;
+  asset_kind?: WalletAssetKind;
+  // ── Flattened receipt fields (W7.4; all absent pre-broadcast) ──
+  prepared_at_unix?: number | null;
+  broadcast_at_unix?: number | null;
+  confirmations?: number | null;
+  receipt_block_number?: number | null;
+  receipt_gas_used_hex?: string | null;
+  /** `"success"` or `"reverted"` once a receipt is recorded. */
+  receipt_status?: string | null;
+}
+
+export interface QueueJobListResponse {
+  jobs: QueueJob[];
+  pagination?: PaginationInfo | null;
+}
+
+export interface QueueEnqueueResponse {
+  status: string;
+  job: QueueJob;
+}
+
+export interface QueueExecutionPauseResponse {
+  status: string;
+  execution_paused: boolean;
+}
+
+export interface MaintenanceFailureBreakdown {
+  provider_error: number;
+  policy_block: number;
+  insufficient_gas: number;
+  validation: number;
+  unknown: number;
+  on_chain_revert: number;
+  broadcast_rejected: number;
+  receipt_timeout: number;
+}
+
+export interface QueueProcessResponse {
+  processed: number;
+  succeeded: number;
+  blocked: number;
+  retrying: number;
+  operator_action_required: number;
+  failed: number;
+  confirmed: number;
+  failures_by_cause?: MaintenanceFailureBreakdown;
+  paused_reason?: string | null;
+  jobs: QueueJob[];
+  /** Present only for `run_async` requests; tallies are then zero. */
+  operation?: Operation | null;
+}
+
+/** `POST /api/queue/process` request body (all fields optional). */
+export interface QueueProcessRequest {
+  id?: string;
+  limit?: number;
+  run_async?: boolean;
+}
+
+// ── Consolidation plans ──────────────────────────────────────────────
+
+export interface ConsolidationPlanListResponse {
+  plans: ConsolidationPlan[];
+  pagination?: PaginationInfo | null;
+}
+
+// ── Stealth deposits ─────────────────────────────────────────────────
+
+export interface EthStealthDeposit {
+  id: string;
+  status: string;
+  asset_kind: string;
+  wallet_profile: string;
+  chain_id: number;
+  chain_id_assumed?: boolean;
+  wallet_compartment_id?: number;
+  provider_compartment_id?: number;
+  wallet: string;
+  short_name: string;
+  stealth_meta_address: string;
+  stealth_address: string;
+  ephemeral_public_key_hex: string;
+  view_tag_hex: string;
+  stealth_hash_convention?: string;
+  announcement?: EthStealthAnnouncementPayload | null;
+  token_address?: string | null;
+  expected_amount_hex?: string | null;
+  observed_amount_hex?: string | null;
+  observed_native_balance_wei_hex?: string | null;
+  auto_queue_sweep: boolean;
+  sweep_destination_address?: string | null;
+  min_sweep_amount_hex?: string | null;
+  queue_job_id?: string | null;
+  queue_job_state?: string | null;
+  note?: string | null;
+  created_at_unix: number;
+  updated_at_unix: number;
+  last_checked_at_unix?: number | null;
+  broadcast_transaction_hash_hex?: string | null;
+  counterparty_id?: string | null;
+  requested_gas_wei_hex?: string | null;
+  gas_topup_job_id?: string | null;
+  gas_topup_job_state?: string | null;
+}
+
+export interface EthStealthDepositListResponse {
+  deposits: EthStealthDeposit[];
+  pagination?: PaginationInfo | null;
+}
+
+// ── Wallet inventory ─────────────────────────────────────────────────
+
+export interface WalletAssetHolding {
+  id: string;
+  wallet_family: string;
+  wallet_profile: string;
+  provider_profile: string;
+  chain_id: number;
+  address: string;
+  derivation_path: string;
+  asset_kind: WalletAssetKind;
+  asset_address?: string | null;
+  token_id_hex?: string | null;
+  counterparty_address?: string | null;
+  protocol_address?: string | null;
+  claim_adapter?: string | null;
+  claim_index_hex?: string | null;
+  claim_proof?: string[];
+  metadata_uri?: string | null;
+  metadata_name?: string | null;
+  spam_label?: string | null;
+  amount_hex: string;
+  source: string;
+  status: string;
+  first_seen_at_unix: number;
+  last_checked_at_unix: number;
+}
+
+export interface WalletInventoryListResponse {
+  jobs: WalletDiscoveryJob[];
+  addresses: WalletInventoryAddress[];
+  holdings: WalletAssetHolding[];
+  nft_metadata_cache?: NftMetadataCacheEntry[];
+  /** Window metadata for `addresses` only; other lists are always full. */
+  pagination?: PaginationInfo | null;
+}
+
+// ── Treasury policy ──────────────────────────────────────────────────
+
+/** Current treasury policy; `policy` is null until one is configured. */
+export interface TreasuryPolicyResponse {
+  policy: TreasuryPolicy | null;
+}
+
+export interface TreasuryPolicyMutationResponse {
+  status: string;
+  policy: TreasuryPolicy;
+}
+
+// ── Audit ────────────────────────────────────────────────────────────
+
+export interface AuditEvent {
+  created_at_unix: number;
+  kind: string;
+  compartment_id?: number | null;
+  details?: Record<string, unknown>;
+}
+
+export interface AuditResponse {
+  events: AuditEvent[];
+}
+
+/** `GET /api/audit` query params (`tail` and `limit` are aliases). */
+export interface AuditListQuery {
+  tail?: number;
+  limit?: number;
+  kind?: string;
+  since?: number;
+  key?: string;
+}
+
+// ── Diagnostics ──────────────────────────────────────────────────────
+
+export interface RuntimePolicyResponse {
+  queue_default_process_limit: number;
+  queue_max_process_limit: number;
+  deposit_default_refresh_limit: number;
+  deposit_max_refresh_limit: number;
+  audit_default_limit: number;
+  audit_max_limit: number;
+  queue_retry_base_delay_secs: number;
+  queue_retry_max_delay_secs: number;
+  provider_balance_observation_concurrency: number;
+  receiving_refresh_address_cap: number;
+  idle_lock_secs: number;
+  idle_lock_drain_secs: number;
+  idle_lock_force_after_secs: number;
+}
+
+export interface SchedulerStatusResponse {
+  enabled: boolean;
+  queue_tick_secs: number;
+  refresh_secs: number;
+  last_tick_at_unix?: number | null;
+  /** `advanced | idle | skipped_locked | skipped_guard_busy | failed`. */
+  last_cycle_outcome?: string | null;
+  consecutive_failures: number;
+  due_queue_job_count: number;
+  next_retry_at_unix?: number | null;
+}
+
+export interface DiagnosticsResponse {
+  status: string;
+  version: string;
+  unlock_scope: string;
+  session_scope: string;
+  started_at_unix: number;
+  initialized: boolean;
+  unlocked_compartment_count: number;
+  active_session_count: number;
+  default_active_compartment_id?: number | null;
+  max_unlocked_threshold?: number | null;
+  audit_log_present: boolean;
+  pending_operation_count: number;
+  queue_job_count: number;
+  blocked_queue_job_count: number;
+  retrying_queue_job_count: number;
+  failed_queue_job_count: number;
+  operator_action_required_queue_job_count: number;
+  deferred_queue_job_count: number;
+  startup_interrupted_operation_count: number;
+  startup_recovered_operation_count: number;
+  startup_unresolved_operation_count: number;
+  startup_recovered_queue_job_count: number;
+  startup_reconciled_deposit_count: number;
+  runtime_policy: RuntimePolicyResponse;
+  eth_stealth_deposit_count: number;
+  funded_eth_stealth_deposit_count: number;
+  scheduler: SchedulerStatusResponse;
+}
+
+// ── SSE channel (GET /api/events; mirrors sigillum-api response/events.rs) ──
+// Wire framing: the SSE `event:` field carries the name, `data:` one JSON
+// payload. Every payload carries `v: EVENTS_PROTOCOL_VERSION`. Within 1.x
+// the daemon may add event names and optional fields; clients MUST ignore
+// unknown names and unknown fields (see parseDaemonEvent in core/events.ts).
+
+export const EVENTS_PROTOCOL_VERSION = 1;
+
+export const EVENT_NAME_SNAPSHOT = "snapshot";
+export const EVENT_NAME_OPERATION = "operation";
+export const EVENT_NAME_QUEUE = "queue";
+export const EVENT_NAME_STATUS = "status";
+
+export const STATUS_EVENT_LOCKED = "locked";
+export const STATUS_EVENT_UNLOCKED = "unlocked";
+export const STATUS_EVENT_COMPARTMENT_SWITCHED = "compartment_switched";
+
+/** `operation` event: the full operation record after the transition. */
+export interface OperationEvent {
+  v: number;
+  operation: Operation;
+}
+
+/** `queue` event: job id + new state (`last_error` when one was recorded). */
+export interface QueueJobEvent {
+  v: number;
+  job_id: string;
+  state: string;
+  last_error?: string | null;
+}
+
+/** `status` event: lock state or active-compartment changes. */
+export interface StatusEvent {
+  v: number;
+  /** `locked`, `unlocked`, or `compartment_switched`. */
+  kind: string;
+  active_compartment_id?: number | null;
+}
+
+/**
+ * `snapshot` event: first frame on every connection, and the resync frame
+ * after a lagging subscriber misses events. Queue state is NOT included
+ * (durable; list via `GET /api/queue/jobs`).
+ */
+export interface EventsSnapshot {
+  v: number;
+  locked: boolean;
+  active_compartment_id?: number | null;
+  operations: Operation[];
+}
