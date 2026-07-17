@@ -209,6 +209,38 @@ Current daemon behavior:
   blast-radius wallet signing, route-facing balance operations, and shared
   address/quantity helpers
 - exposes a maintenance cycle that refreshes deposits, auto-enqueues sweeps, and processes queue work
+- runs a background scheduler (`service/scheduler.rs`, plan task 1.6) so
+  queue retries whose backoff elapsed, receipt confirmation for `sent`
+  plan-step jobs, and stealth-deposit refreshes advance without a client
+  calling `queue/process` or `maintenance/run`. Each tick runs a bounded
+  cycle through the SAME code paths as the request-driven endpoints:
+  treasury automation only when the persisted policy has
+  `enabled && allow_treasury_automation` (both default off), a bounded
+  deposit refresh at most once per refresh interval (default 5 min), and a
+  bounded 25-job queue drain (default cadence 60 s). Fail-closed invariants
+  are preserved by construction: the cycle skips outright while the vault is
+  locked (no vault access without unlock), `execution_paused` skips the
+  drain stage while the drain loop still re-checks the kill switch between
+  jobs, and the execution gates gate at drain time exactly as today. A cycle
+  acquires the daemon's `operation_guard` like every other mutating path,
+  but a cycle that cannot take it within 500 ms SKIPS rather than queueing
+  up behind operator-driven work, so per-(source, chain) serialization is
+  never violated and no drain storms form; each cycle is bounded by a 120 s
+  time budget (abandonment is crash-equivalent under the durable queue
+  barriers), and consecutive failures back off exponentially (to 30 min)
+  with a daemon log warning. The loop mints an ephemeral full session per
+  cycle and revokes it on every exit, so background work cannot defeat the
+  idle auto-lock. Ticks are not registered as operations (the registry
+  retains 50): only a cycle that actually advanced work (processed > 0 jobs
+  or refreshed > 0 deposits) registers a completed `scheduler_cycle`
+  operation (with SSE events from the registry) and records a
+  `maintenance.run` audit event, keeping background value movement
+  accountable; `GET /api/diagnostics` exposes the loop's status (effective
+  config, last tick time and outcome, consecutive-failure count, due-work
+  counters) under its additive `scheduler` block. The loop is enabled by
+  default and configured via `SIGILLUM_SCHEDULER_DISABLE`,
+  `SIGILLUM_SCHEDULER_QUEUE_TICK_SECS`, and
+  `SIGILLUM_SCHEDULER_REFRESH_SECS`
 - generates reviewable approval revoke plan steps for ERC-20 allowances,
   Permit2 allowances, and NFT operator approvals
 - records operator-configured DeFi receipt/share token probes as first-class

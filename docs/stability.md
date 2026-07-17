@@ -85,6 +85,29 @@ candidates may adjust stable-candidate surfaces with the change recorded in
   `sigillum-client` grows matching `list_*_with_options` methods taking
   typed `sigillum_api::request::*ListOptions` structs; the legacy no-arg
   methods are unchanged.
+- A background scheduler (plan task 1.6) now advances queue retries whose
+  backoff elapsed, receipt confirmation for `sent` plan-step jobs, and
+  stealth-deposit balance refreshes without a client calling
+  `POST /api/queue/process` or `POST /api/maintenance/run`. The loop runs
+  through the identical drain/refresh code paths (durable
+  `prepared`/`submitted_unknown` barriers, never re-sign, execution gates
+  and the `execution_paused` kill switch re-checked at drain, no vault
+  access while locked) and is enabled by default: queue tick 60 s, deposit
+  refresh 5 min, bounded batches (25 jobs / the policy deposit-refresh
+  limit), guard acquisition with skip-on-contention, a 120 s cycle budget,
+  and exponential backoff (to 30 min) on consecutive failures. Env
+  overrides: `SIGILLUM_SCHEDULER_DISABLE=1` (also `true`/`yes`) turns the
+  loop off, `SIGILLUM_SCHEDULER_QUEUE_TICK_SECS` and
+  `SIGILLUM_SCHEDULER_REFRESH_SECS` retune the cadences (clamped to >= 1).
+  Treasury automation runs in a cycle only when the persisted policy has
+  `enabled && allow_treasury_automation` (both default off). Observability:
+  cycles that actually advanced work register a completed `scheduler_cycle`
+  operation (a new `Operation::kind`; kinds remain free-form strings clients
+  must treat as opaque) and a `maintenance.run` audit event, and
+  `DiagnosticsResponse` gained an additive `scheduler` block
+  (`SchedulerStatusResponse`: effective config, last tick time, last cycle
+  outcome, consecutive-failure count, due-queue-job count, next retry
+  timestamp) that deserializes with defaults from older payloads.
 
 ## Stable at 1.0
 

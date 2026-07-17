@@ -130,6 +130,28 @@ from 1.0.0 onward, per the stability policy in `docs/stability.md`.
   `sigillum_api::request::*ListOptions` structs (legacy no-arg methods
   unchanged), and the console contracts carry the additive query/response
   types.
+- **Background scheduler** — Queue retries whose backoff elapsed, receipt
+  confirmation for `sent` plan-step jobs, and stealth-deposit balance
+  refreshes now advance without a client calling `queue/process` or
+  `maintenance/run` (plan task 1.6). A daemon-side loop
+  (`service/scheduler.rs`) runs bounded cycles through the identical
+  request-driven code paths, so every fail-closed invariant holds unchanged:
+  no vault access while locked, `execution_paused` skips the drain stage,
+  execution gates gate at drain time, the durable
+  `prepared`/`submitted_unknown` barriers still bracket every broadcast, and
+  no job is ever re-signed. A cycle skips when the operation guard is
+  contended (no queueing behind operator-driven work), runs under a 120 s
+  crash-safe time budget, and backs off exponentially (to 30 min) on
+  consecutive failures with a daemon log warning. Enabled by default (queue
+  tick 60 s, deposit refresh 5 min, 25-job batches); configured via
+  `SIGILLUM_SCHEDULER_DISABLE=1`, `SIGILLUM_SCHEDULER_QUEUE_TICK_SECS`, and
+  `SIGILLUM_SCHEDULER_REFRESH_SECS`. Treasury automation only runs in a
+  cycle when `allow_treasury_automation` is on (default off). Ticks are not
+  registered as operations — only cycles that advanced work appear as
+  completed `scheduler_cycle` operations (with SSE events) and record a
+  `maintenance.run` audit event — and `GET /api/diagnostics` exposes the
+  additive `scheduler` status block (effective config, last tick/outcome,
+  consecutive-failure count, due-work counters).
 
 ### Changed
 
