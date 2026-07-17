@@ -155,6 +155,26 @@ from 1.0.0 onward, per the stability policy in `docs/stability.md`.
 
 ### Changed
 
+- **ERC-5564 stealth shared-secret hash switched to the compressed-point
+  scheme-1 standard** — New stealth payments and deposit records now derive
+  the shared-secret hash as keccak256 over the 33-byte compressed SEC1 point,
+  the de-facto convention of the ScopeLift `stealth-address-sdk`
+  (Umbra-compatible tooling), replacing Sigillum's pre-release x-only 32-byte
+  encoding. Derivation is pinned byte-exactly by fixed external test vectors
+  (SDK-published keys, independently computed expectations) in
+  `sigillum-core`. Pre-switch payments stay detectable and spendable:
+  detection (`wallets/eth-stealth/check`, announcer scans) dual-probes the
+  standard then the legacy convention in one pass, deposit records carry a
+  `stealth_hash_convention` stamp (`compressed33`/`x32`) that sweeping uses
+  for key derivation, the deposits store migrates to schema v3 stamping all
+  pre-existing records `x32`, and a missing or wrong stamp falls back to
+  probing both conventions with derived-address verification. Sweep/transfer
+  queue jobs carry the record's stamp; `StealthPaymentRef`,
+  `EthStealthDeposit`, `EthStealthGenerateResponse`,
+  `EthStealthCheckResponse`, and the stealth `QueueJobPayload` variants gain
+  the additive optional/defaulted convention field. Fluidkey's 64-byte X‖Y
+  encoding remains explicitly incompatible and unsupported. See
+  `docs/architecture.md#stealth-addresses-erc-5564`.
 - **Console data displays are human-readable** — Shared formatting helpers
   render wei hex as ETH/token units, unix seconds as locale timestamps, and
   chain ids as registry names, with raw values behind a details disclosure.
@@ -182,11 +202,11 @@ from 1.0.0 onward, per the stability policy in `docs/stability.md`.
 - **Status response contract drift** — Console contract types now match the
   daemon's `active_compartment` (`compartment_id`/`compartment_label`) and
   `unlocked_compartments` shapes exactly.
-- **Stealth interoperability caveat documented** — `docs/architecture.md` now
-  states the shared-secret hash convention deviation (keccak256 over the
-  32-byte x-only encoding vs the 33-byte compressed-point scheme-1 SDK
-  convention) and warns against pointing third-party ERC-5564 senders at
-  Sigillum meta-addresses until the conformance switch lands.
+- **Stealth interoperability caveat documented** — `docs/architecture.md`
+  stated the pre-release shared-secret hash convention deviation and warned
+  against pointing third-party ERC-5564 senders at Sigillum meta-addresses.
+  Superseded by the conformance switch above: the caveat is now a conformance
+  statement.
 
 ## [1.0.0] - 2026-07-10
 

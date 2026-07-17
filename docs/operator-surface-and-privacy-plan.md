@@ -43,6 +43,14 @@ ratified), D-E (ERC-6538 deferred).
   - 1.7+1.8 (`0d509dc`): status/operations polling joins events as passive
     reads (idle-lock can no longer be defeated by an open console);
     `/api/chains*` canonical, `/api/inventory/chains*` deprecated alias.
+- **Phase 2**:
+  - 2.1+2.2 stealth hash-convention switch with dual decode (`53152f2`,
+    coverage `c0a231f`): new payments derive keccak256 over the 33-byte
+    compressed SEC1 point (ScopeLift-compatible); deposits store migrates to
+    schema v3 stamping pre-switch records `x32`; detection probes standard
+    then legacy and re-stamps on match; sweeps use the record's stamp with
+    address-verified probe fallback; fixed external vectors (SDK-published
+    keypair, independent @noble reference) pin both conventions.
 
 ## Original plan
 

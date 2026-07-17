@@ -121,6 +121,24 @@ candidates may adjust stable-candidate surfaces with the change recorded in
   alias is scheduled for removal at the next major version. Collection-route
   convention going forward: `GET` reads plus `POST` mutations
   (`…/upsert`, `…/delete` verb forms), matching the rest of the daemon API.
+- **ERC-5564 stealth hash-convention switch (plan tasks 2.1+2.2)**: new
+  stealth payments and deposit records derive the shared-secret hash as
+  keccak256 over the 33-byte compressed SEC1 point (the ScopeLift
+  `stealth-address-sdk` scheme-1 convention) instead of the pre-release
+  x-only 32-byte encoding — a behavior change to
+  `wallets/eth-stealth/generate` and everything derived from it. On-disk
+  migration: the deposits store advances to schema v3 and stamps all
+  pre-existing records `x32` (legacy); new records are stamped `compressed33`.
+  Dual-decode keeps pre-switch payments detectable and spendable: the check
+  endpoint and announcer scans probe standard-then-legacy, a match re-stamps
+  the record, sweeping derives the key with the record's stamp, and a missing
+  or corrupt stamp re-probes both conventions (derived-address verification
+  makes probing fail-safe). `StealthPaymentRef` gains an optional
+  `stealth_hash_convention`; `EthStealthDeposit`,
+  `EthStealthGenerateResponse`, and `EthStealthCheckResponse` gain it with a
+  standard-convention serde default; the four stealth `QueueJobPayload`
+  variants gain it optionally (absent = probe). Fluidkey's 64-byte X‖Y
+  encoding remains unsupported.
 
 ## Stable at 1.0
 
