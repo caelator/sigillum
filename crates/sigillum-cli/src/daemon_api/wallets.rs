@@ -4,6 +4,7 @@ use std::process;
 
 use super::{
     parse_flag, read_optional_sensitive_input, require_flag, require_u32_flag, run_api_command,
+    run_api_command_with,
 };
 
 const USAGE: &str = "Usage: sigillum api wallets <xpub-export|xpub-derive|stealth-export|stealth-generate|stealth-check> [...]";
@@ -63,11 +64,20 @@ fn stealth_generate(args: &[String]) {
     reject_raw_ephemeral_key_flags(args);
     let meta_address = require_flag(args, "--meta-address", STEALTH_GENERATE_USAGE);
     let ephemeral = read_optional_ephemeral_private_key(args);
-    run_api_command(args, true, move |client| async move {
-        client
-            .generate_eth_stealth_address(&meta_address, ephemeral.as_ref())
-            .await
-    });
+    run_api_command_with(
+        args,
+        true,
+        move |client| async move {
+            client
+                .generate_eth_stealth_address(&meta_address, ephemeral.as_ref())
+                .await
+        },
+        |response| {
+            for warning in &response.warnings {
+                eprintln!("Warning: {warning}");
+            }
+        },
+    );
 }
 
 fn stealth_check(args: &[String]) {

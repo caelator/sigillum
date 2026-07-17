@@ -784,3 +784,174 @@ fn empty_args_shows_help_or_usage() {
     // Should produce some output
     assert!(!combined.is_empty(), "should produce help or usage output");
 }
+
+// ── eth-seed profile commands ────────────────────────────────────
+
+fn run_with_str_env(args: &[&str], envs: &[(&str, &str)]) -> std::process::Output {
+    let mut command = Command::new(sigillum_bin());
+    command.args(args);
+    for (key, value) in envs {
+        command.env(key, value);
+    }
+    command.output().expect("Failed to execute sigillum binary")
+}
+
+#[test]
+fn api_profiles_eth_seed_upsert_missing_flags_exits_nonzero() {
+    let output = run(&["api", "profiles", "eth-seed", "upsert"]);
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("--name") || stderr.contains("Usage"),
+        "should mention required flags"
+    );
+}
+
+#[test]
+fn api_profiles_eth_seed_upsert_requires_mnemonic_channel() {
+    // Name and provider present, but no --mnemonic-env/--mnemonic-stdin and no
+    // terminal to prompt on (stdin is null here): must fail before any network
+    // access rather than silently sending an empty phrase.
+    let output = run(&[
+        "api",
+        "profiles",
+        "eth-seed",
+        "upsert",
+        "--name",
+        "ops-seed",
+        "--provider-profile",
+        "mainnet",
+        "--url",
+        "http://127.0.0.1:1",
+        "--session",
+        "test-token",
+    ]);
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("mnemonic"),
+        "should complain about the missing mnemonic channel: {stderr}"
+    );
+    assert!(!stderr.contains("Usage:"));
+}
+
+#[test]
+fn api_profiles_eth_seed_upsert_reaches_network_with_mnemonic_env() {
+    let output = run_with_str_env(
+        &[
+            "api",
+            "profiles",
+            "eth-seed",
+            "upsert",
+            "--name",
+            "ops-seed",
+            "--provider-profile",
+            "mainnet",
+            "--mnemonic-env",
+            "SIGILLUM_TEST_MNEMONIC",
+            "--url",
+            "http://127.0.0.1:1",
+            "--session",
+            "test-token",
+        ],
+        &[(
+            "SIGILLUM_TEST_MNEMONIC",
+            "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about",
+        )],
+    );
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        !stderr.contains("Usage:"),
+        "valid args should reach the network layer: {stderr}"
+    );
+    assert!(
+        !stderr.contains("abandon"),
+        "the mnemonic must never be echoed to stderr: {stderr}"
+    );
+}
+
+#[test]
+fn api_profiles_eth_seed_create_reveal_mnemonic_requires_tty() {
+    // stdout is piped in tests (not a TTY), so --reveal-mnemonic must be
+    // rejected before any network access.
+    let output = run(&[
+        "api",
+        "profiles",
+        "eth-seed",
+        "create",
+        "--name",
+        "ops-seed",
+        "--provider-profile",
+        "mainnet",
+        "--reveal-mnemonic",
+        "--url",
+        "http://127.0.0.1:1",
+        "--session",
+        "test-token",
+    ]);
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("--mnemonic-out"),
+        "should redirect scripts to --mnemonic-out: {stderr}"
+    );
+}
+
+#[test]
+fn api_profiles_eth_seed_create_mnemonic_out_refuses_existing_file() {
+    let tmp = tempfile::tempdir().unwrap();
+    let existing = tmp.path().join("mnemonic.txt");
+    std::fs::write(&existing, "existing").unwrap();
+    let output = run(&[
+        "api",
+        "profiles",
+        "eth-seed",
+        "create",
+        "--name",
+        "ops-seed",
+        "--provider-profile",
+        "mainnet",
+        "--mnemonic-out",
+        existing.to_str().unwrap(),
+        "--url",
+        "http://127.0.0.1:1",
+        "--session",
+        "test-token",
+    ]);
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("Refusing to overwrite"),
+        "should refuse to clobber the existing file: {stderr}"
+    );
+    assert_eq!(
+        std::fs::read_to_string(&existing).unwrap(),
+        "existing",
+        "the existing file must be left untouched"
+    );
+}
+
+#[test]
+fn api_profiles_eth_seed_create_reaches_network_with_valid_args() {
+    let output = run(&[
+        "api",
+        "profiles",
+        "eth-seed",
+        "create",
+        "--name",
+        "ops-seed",
+        "--provider-profile",
+        "mainnet",
+        "--url",
+        "http://127.0.0.1:1",
+        "--session",
+        "test-token",
+    ]);
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        !stderr.contains("Usage:"),
+        "valid args should reach the network layer: {stderr}"
+    );
+}

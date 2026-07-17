@@ -15,24 +15,31 @@
 //! 1. `--session <TOKEN>` flag
 //! 2. `SIGILLUM_SESSION_TOKEN` environment variable
 //!
-//! Sensitive passphrases support three delivery modes:
+//! Sensitive passphrases and mnemonics support three delivery modes:
 //! `--*-env VAR` (read from environment), `--*-stdin` (read from stdin),
 //! or interactive terminal prompt via `rpassword`. Optional FIDO2 PINs are
 //! accepted through `--pin-env` or `--pin-stdin` when a specific key requires
 //! one; otherwise the touch-only path sends no PIN at all.
+//!
+//! `profiles eth-seed create` never prints the freshly generated mnemonic by
+//! default: the JSON output carries a redacted placeholder unless the operator
+//! reveals it on an interactive terminal (`--reveal-mnemonic`) or files it
+//! away with owner-only permissions (`--mnemonic-out <PATH>`).
 
 use std::future::Future;
-use std::io;
+use std::io::{self, IsTerminal, Write};
+use std::path::{Path, PathBuf};
 use std::process::{self, Stdio};
 use std::time::{Duration, Instant};
 
 use serde::Serialize;
 use sigillum_api::request::{
-    EthSeedWalletCreateRequest, EthStealthWalletProfileUpsertRequest,
-    EthXpubWalletProfileUpsertRequest, EvmProviderProfileUpsertRequest, EvmProviderRef,
-    Fido2UnlockRequest, MaintenanceRunRequest, RiskCatalogDeleteRequest, RiskCatalogUpsertRequest,
-    SelfCheckRunRequest,
+    EthSeedWalletCreateRequest, EthSeedWalletProfileUpsertRequest,
+    EthStealthWalletProfileUpsertRequest, EthXpubWalletProfileUpsertRequest,
+    EvmProviderProfileUpsertRequest, EvmProviderRef, Fido2UnlockRequest, MaintenanceRunRequest,
+    RiskCatalogDeleteRequest, RiskCatalogUpsertRequest, SelfCheckRunRequest,
 };
+use sigillum_api::response::EthSeedWalletCreateResponse;
 use sigillum_client::{ClientError, SigillumClient};
 use url::Url;
 
@@ -280,7 +287,7 @@ fn cmd_api_profiles(args: &[String]) {
             client.list_eth_seed_wallet_profiles().await
         }),
         ("eth-seed", "create") => {
-            const CREATE_USAGE: &str = "sigillum api profiles eth-seed create --name <NAME> --provider-profile <PROFILE> [--word-count 12|24] [--label <LABEL>] [--project-account <N>] [--compartment-id <N>] [--chain-id <N>] [--default-destination-address <ADDR>] [--mnemonic-passphrase-env VAR|--mnemonic-passphrase-stdin]";
+            const CREATE_USAGE: &str = "sigillum api profiles eth-seed create --name <NAME> --provider-profile <PROFILE> [--word-count 12|24] [--label <LABEL>] [--project-account <N>] [--compartment-id <N>] [--chain-id <N>] [--default-destination-address <ADDR>] [--mnemonic-passphrase-env VAR|--mnemonic-passphrase-stdin] [--reveal-mnemonic|--mnemonic-out <PATH>]";
             let request = EthSeedWalletCreateRequest {
                 name: require_flag(args, "--name", CREATE_USAGE),
                 label: parse_flag(args, "--label"),
@@ -293,8 +300,24 @@ fn cmd_api_profiles(args: &[String]) {
                 default_destination_address: parse_flag(args, "--default-destination-address"),
                 execution_enabled: bool_switch(args, "--execution-enabled", "--execution-disabled"),
             };
+            run_eth_seed_create(args, request);
+        }
+        ("eth-seed", "upsert") => {
+            const UPSERT_USAGE: &str = "sigillum api profiles eth-seed upsert --name <NAME> --provider-profile <PROFILE> [--mnemonic-env VAR|--mnemonic-stdin] [--label <LABEL>] [--project-account <N>] [--compartment-id <N>] [--chain-id <N>] [--default-destination-address <ADDR>] [--mnemonic-passphrase-env VAR|--mnemonic-passphrase-stdin] [--execution-enabled|--execution-disabled]";
+            let request = EthSeedWalletProfileUpsertRequest {
+                name: require_flag(args, "--name", UPSERT_USAGE),
+                provider_profile: require_flag(args, "--provider-profile", UPSERT_USAGE),
+                label: parse_flag(args, "--label"),
+                mnemonic: read_mnemonic(args),
+                mnemonic_passphrase: read_optional_mnemonic_passphrase(args),
+                project_account: parse_u32_flag(args, "--project-account").unwrap_or(0),
+                compartment_id: parse_usize_flag(args, "--compartment-id"),
+                chain_id: parse_u64_flag(args, "--chain-id"),
+                default_destination_address: parse_flag(args, "--default-destination-address"),
+                execution_enabled: bool_switch(args, "--execution-enabled", "--execution-disabled"),
+            };
             run_api_command(args, true, move |client| async move {
-                client.create_eth_seed_wallet_profile(request).await
+                client.upsert_eth_seed_wallet_profile(request).await
             });
         }
         ("eth-seed", "delete") => {
@@ -453,6 +476,19 @@ where
     F: FnOnce(SigillumClient) -> Fut,
     Fut: Future<Output = Result<T, ClientError>>,
 {
+    run_api_command_with(args, require_session, f, |_| {});
+}
+
+/// Like [`run_api_command`], but invokes `inspect` on the response before it
+/// is printed, so callers can surface non-blocking findings (e.g. response
+/// warnings) on stderr without polluting the JSON stdout.
+fn run_api_command_with<T, F, Fut, I>(args: &[String], require_session: bool, f: F, inspect: I)
+where
+    T: Serialize,
+    F: FnOnce(SigillumClient) -> Fut,
+    Fut: Future<Output = Result<T, ClientError>>,
+    I: FnOnce(&T),
+{
     let client = build_client(args, require_session);
     let runtime = tokio::runtime::Runtime::new().unwrap_or_else(|error| {
         eprintln!("Failed to start async runtime: {error}");
@@ -462,6 +498,7 @@ where
         Ok(response) => response,
         Err(error) => report_client_error(error),
     };
+    inspect(&response);
     print_json(&response);
 }
 
@@ -565,6 +602,129 @@ pub(super) fn print_json<T: Serialize>(value: &T) {
     println!("{body}");
 }
 
+// ── Seed-phrase output hygiene ───────────────────────────────────
+
+/// Placeholder substituted for the BIP-39 phrase in `eth-seed create` JSON
+/// output unless the operator explicitly reveals or files it away.
+const MNEMONIC_REDACTED_PLACEHOLDER: &str =
+    "<redacted: use --reveal-mnemonic or --mnemonic-out PATH>";
+
+/// How the freshly generated mnemonic of `profiles eth-seed create` may leave
+/// the CLI. The phrase never reaches stdout scrollback by default: pipelines
+/// and interactive shells alike get the redacted placeholder unless the
+/// operator opts into an explicit disclosure channel.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct MnemonicOutputPlan {
+    /// Print the phrase in the stdout JSON (interactive terminal only).
+    reveal_on_stdout: bool,
+    /// Write the phrase to this path with 0600 permissions (must not exist).
+    out_path: Option<PathBuf>,
+}
+
+/// Resolve `--reveal-mnemonic` / `--mnemonic-out <PATH>` into a
+/// [`MnemonicOutputPlan`]. Revealing on stdout requires an interactive
+/// terminal; scripts and pipelines must use `--mnemonic-out` so the phrase
+/// never travels through captured stdout.
+fn plan_mnemonic_output(args: &[String], stdout_tty: bool) -> Result<MnemonicOutputPlan, String> {
+    let reveal_on_stdout = has_flag(args, "--reveal-mnemonic");
+    let out_path = parse_flag(args, "--mnemonic-out").map(PathBuf::from);
+    if reveal_on_stdout && !stdout_tty {
+        return Err(
+            "--reveal-mnemonic requires an interactive terminal; in scripts and pipelines use --mnemonic-out <PATH> instead"
+                .to_string(),
+        );
+    }
+    Ok(MnemonicOutputPlan {
+        reveal_on_stdout,
+        out_path,
+    })
+}
+
+fn stdout_is_tty() -> bool {
+    io::stdout().is_terminal()
+}
+
+/// Split the phrase out of a create response according to the disclosure
+/// plan: redacted in place unless revealed on stdout. Returns the phrase
+/// itself so the caller can file it away before printing the response.
+fn split_mnemonic_for_output(
+    response: &mut EthSeedWalletCreateResponse,
+    plan: &MnemonicOutputPlan,
+) -> String {
+    let mnemonic = std::mem::take(&mut response.mnemonic);
+    response.mnemonic = if plan.reveal_on_stdout {
+        mnemonic.clone()
+    } else {
+        MNEMONIC_REDACTED_PLACEHOLDER.to_string()
+    };
+    mnemonic
+}
+
+/// Write `mnemonic` to `path` with owner-only (0600) permissions, refusing to
+/// overwrite an existing file.
+fn write_mnemonic_file(path: &Path, mnemonic: &str) -> io::Result<()> {
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    let mut file = options.open(path)?;
+    file.write_all(mnemonic.as_bytes())?;
+    file.write_all(b"\n")
+}
+
+/// Run `profiles eth-seed create` with mnemonic hygiene: the freshly
+/// generated phrase is redacted from the stdout JSON unless the operator
+/// reveals it on a terminal (`--reveal-mnemonic`) or files it away
+/// (`--mnemonic-out <PATH>`).
+fn run_eth_seed_create(args: &[String], request: EthSeedWalletCreateRequest) {
+    let plan = plan_mnemonic_output(args, stdout_is_tty()).unwrap_or_else(|error| {
+        eprintln!("{error}");
+        process::exit(1);
+    });
+    // Fail fast before the daemon mints a phrase we cannot deliver.
+    if let Some(path) = plan.out_path.as_deref()
+        && path.exists()
+    {
+        eprintln!(
+            "Refusing to overwrite existing file {}. Choose a new --mnemonic-out path.",
+            path.display()
+        );
+        process::exit(1);
+    }
+
+    let client = build_client(args, true);
+    let runtime = tokio::runtime::Runtime::new().unwrap_or_else(|error| {
+        eprintln!("Failed to start async runtime: {error}");
+        process::exit(1);
+    });
+    let mut response = match runtime.block_on(client.create_eth_seed_wallet_profile(request)) {
+        Ok(response) => response,
+        Err(error) => report_client_error(error),
+    };
+
+    let mnemonic = split_mnemonic_for_output(&mut response, &plan);
+    if let Some(path) = plan.out_path.as_deref() {
+        if let Err(error) = write_mnemonic_file(path, &mnemonic) {
+            eprintln!(
+                "Profile '{}' was created, but writing the mnemonic to {} failed: {error}. The phrase was not printed; it remains stored only as an encrypted daemon vault secret.",
+                response.profile.name,
+                path.display()
+            );
+            process::exit(1);
+        }
+        eprintln!("Mnemonic written to {} (mode 0600).", path.display());
+    }
+    if !plan.reveal_on_stdout {
+        eprintln!(
+            "note: the new mnemonic is redacted from stdout; use --reveal-mnemonic on a terminal or --mnemonic-out <PATH> to back it up."
+        );
+    }
+    print_json(&response);
+}
+
 pub(super) fn report_client_error(error: ClientError) -> ! {
     eprintln!("{error}");
     process::exit(1);
@@ -588,7 +748,7 @@ COMMANDS:
   profiles evm <list|upsert|delete> [...]
   profiles stealth <list|upsert|delete> [...]
   profiles eth-xpub <list|upsert|delete> [...]
-  profiles eth-seed <list|create|delete> [...]  (create generates a new BIP-39 mnemonic and prints it exactly once)
+  profiles eth-seed <list|upsert|create|delete> [...]  (upsert imports an existing mnemonic via --mnemonic-env VAR|--mnemonic-stdin or hidden prompt; create generates a new BIP-39 mnemonic, redacted from stdout unless --reveal-mnemonic or filed via --mnemonic-out <PATH>)
   deposits <list|create-native|create-erc20|scan-announcements|refresh|enqueue-sweep|delete> [...]
   evm <nonce|balance|erc20-balance|fees> [...]  (read-only; no broadcast)
   chains <list|upsert|delete> [...]
@@ -607,4 +767,169 @@ GLOBAL FLAGS:
   --url <BASE_URL>        Override daemon URL (default: SIGILLUM_BASE_URL or http://127.0.0.1:9743)
   --session <TOKEN>       Override daemon session token (default: SIGILLUM_SESSION_TOKEN)"
     );
+}
+
+// ── Tests ────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use sigillum_api::response::EthSeedWalletProfile;
+
+    const TEST_MNEMONIC: &str = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
+
+    fn args(values: &[&str]) -> Vec<String> {
+        values.iter().map(|value| value.to_string()).collect()
+    }
+
+    fn create_response() -> EthSeedWalletCreateResponse {
+        EthSeedWalletCreateResponse {
+            status: "created".into(),
+            mnemonic: TEST_MNEMONIC.into(),
+            profile: EthSeedWalletProfile {
+                name: "ops-seed".into(),
+                label: None,
+                project_account: 0,
+                provider_profile: "mainnet".into(),
+                compartment_id: 0,
+                chain_id: Some(1),
+                word_count: 12,
+                mnemonic_secret_key: "seed-wallet/ops-seed".into(),
+                account_path: "m/44'/60'/0'".into(),
+                receive_path: "m/44'/60'/0'/0".into(),
+                receive_xpub: "xpub...".into(),
+                first_receive_address: "0x9858EfFD232B4033E47d90003D41EC34EcaEda94".into(),
+                default_destination_address: None,
+                control_xpub: None,
+                sponsor_address: None,
+                hot_address: None,
+                treasury_address: None,
+                execution_enabled: false,
+            },
+        }
+    }
+
+    // ── MnemonicOutputPlan ───────────────────────────────────────
+
+    #[test]
+    fn plan_mnemonic_output_redacts_by_default_on_tty() {
+        let plan = plan_mnemonic_output(&args(&[]), true).unwrap();
+        assert_eq!(
+            plan,
+            MnemonicOutputPlan {
+                reveal_on_stdout: false,
+                out_path: None,
+            }
+        );
+    }
+
+    #[test]
+    fn plan_mnemonic_output_redacts_by_default_off_tty() {
+        let plan = plan_mnemonic_output(&args(&[]), false).unwrap();
+        assert!(!plan.reveal_on_stdout);
+        assert_eq!(plan.out_path, None);
+    }
+
+    #[test]
+    fn plan_mnemonic_output_reveal_allowed_on_tty() {
+        let plan = plan_mnemonic_output(&args(&["--reveal-mnemonic"]), true).unwrap();
+        assert!(plan.reveal_on_stdout);
+        assert_eq!(plan.out_path, None);
+    }
+
+    #[test]
+    fn plan_mnemonic_output_reveal_rejected_off_tty() {
+        let error = plan_mnemonic_output(&args(&["--reveal-mnemonic"]), false).unwrap_err();
+        assert!(
+            error.contains("--mnemonic-out"),
+            "error should point scripts at --mnemonic-out: {error}"
+        );
+    }
+
+    #[test]
+    fn plan_mnemonic_output_file_only() {
+        for stdout_tty in [true, false] {
+            let plan =
+                plan_mnemonic_output(&args(&["--mnemonic-out", "/tmp/seed.txt"]), stdout_tty)
+                    .unwrap();
+            assert!(!plan.reveal_on_stdout);
+            assert_eq!(plan.out_path, Some(PathBuf::from("/tmp/seed.txt")));
+        }
+    }
+
+    #[test]
+    fn plan_mnemonic_output_reveal_and_file_on_tty() {
+        let plan = plan_mnemonic_output(
+            &args(&["--reveal-mnemonic", "--mnemonic-out", "/tmp/seed.txt"]),
+            true,
+        )
+        .unwrap();
+        assert!(plan.reveal_on_stdout);
+        assert_eq!(plan.out_path, Some(PathBuf::from("/tmp/seed.txt")));
+    }
+
+    #[test]
+    fn plan_mnemonic_output_reveal_and_file_rejected_off_tty() {
+        let error = plan_mnemonic_output(
+            &args(&["--reveal-mnemonic", "--mnemonic-out", "/tmp/seed.txt"]),
+            false,
+        )
+        .unwrap_err();
+        assert!(error.contains("--mnemonic-out"));
+    }
+
+    // ── Redaction ────────────────────────────────────────────────
+
+    #[test]
+    fn split_mnemonic_for_output_redacts_by_default() {
+        let plan = MnemonicOutputPlan {
+            reveal_on_stdout: false,
+            out_path: None,
+        };
+        let mut response = create_response();
+        let mnemonic = split_mnemonic_for_output(&mut response, &plan);
+        assert_eq!(mnemonic, TEST_MNEMONIC);
+        assert_eq!(response.mnemonic, MNEMONIC_REDACTED_PLACEHOLDER);
+        assert_eq!(response.profile.name, "ops-seed");
+        assert!(!response.mnemonic.contains("abandon"));
+    }
+
+    #[test]
+    fn split_mnemonic_for_output_reveal_keeps_phrase() {
+        let plan = MnemonicOutputPlan {
+            reveal_on_stdout: true,
+            out_path: None,
+        };
+        let mut response = create_response();
+        let mnemonic = split_mnemonic_for_output(&mut response, &plan);
+        assert_eq!(mnemonic, TEST_MNEMONIC);
+        assert_eq!(response.mnemonic, TEST_MNEMONIC);
+    }
+
+    // ── Mnemonic file output ─────────────────────────────────────
+
+    #[test]
+    fn write_mnemonic_file_creates_owner_only_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("mnemonic.txt");
+        write_mnemonic_file(&path, TEST_MNEMONIC).unwrap();
+        let body = std::fs::read_to_string(&path).unwrap();
+        assert_eq!(body, format!("{TEST_MNEMONIC}\n"));
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+            assert_eq!(mode, 0o600, "mnemonic file must be owner-only");
+        }
+    }
+
+    #[test]
+    fn write_mnemonic_file_refuses_to_overwrite() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("mnemonic.txt");
+        std::fs::write(&path, "existing").unwrap();
+        let error = write_mnemonic_file(&path, TEST_MNEMONIC).unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::AlreadyExists);
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "existing");
+    }
 }

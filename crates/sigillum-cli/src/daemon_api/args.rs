@@ -31,6 +31,27 @@ pub(crate) fn read_optional_mnemonic_passphrase(args: &[String]) -> Option<Strin
     None
 }
 
+/// Read a BIP-39 mnemonic without accepting it as a raw CLI argument (so it
+/// never lands in shell history or the process list).
+///
+/// Delivery modes follow [`read_sensitive_input`]: `--mnemonic-env VAR`,
+/// `--mnemonic-stdin`, or a hidden interactive terminal prompt. The phrase is
+/// trimmed of surrounding whitespace and must be non-empty.
+pub(crate) fn read_mnemonic(args: &[String]) -> String {
+    let mnemonic = read_sensitive_input(
+        args,
+        "--mnemonic-env",
+        "--mnemonic-stdin",
+        "BIP-39 mnemonic: ",
+    );
+    let mnemonic = mnemonic.trim().to_string();
+    if mnemonic.is_empty() {
+        eprintln!("Expected non-empty mnemonic.");
+        process::exit(1);
+    }
+    mnemonic
+}
+
 /// Read a sensitive value using one of three delivery modes (in priority order):
 /// 1. Environment variable (`env_flag`): `--*-env VAR`
 /// 2. Standard input (`stdin_flag`): `--*-stdin`
