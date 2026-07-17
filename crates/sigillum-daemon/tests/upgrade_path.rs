@@ -755,7 +755,7 @@ async fn upgrade_0_1_datadir_migrates_all_stores() {
         "watch address upsert",
     )
     .await;
-    assert_schema_version(base.path(), "wallet_inventory.json", 20);
+    assert_schema_version(base.path(), "wallet_inventory.json", 21);
     assert_schema_version(base.path(), "token_registry.json", 1);
 
     let policy = assert_success(
