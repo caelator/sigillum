@@ -578,6 +578,11 @@ pub struct EthXpubDeriveRequest {
 mod inventory;
 pub use inventory::*;
 
+// ── List pagination / filtering / sorting ──────────────────────────
+
+mod pagination;
+pub use pagination::*;
+
 // ── Treasury policy ─────────────────────────────────────────────────
 
 mod treasury;

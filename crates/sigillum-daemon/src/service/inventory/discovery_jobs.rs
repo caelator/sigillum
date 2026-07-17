@@ -25,6 +25,10 @@ use sigillum_api::{
 
 use crate::audit_log::AuditEventSpec;
 use crate::service::helpers::now_unix;
+use crate::service::list_query::{
+    self, CreatedUpdatedSort, DISCOVERY_JOB_STATES, SortOrder, effective_order, paginate,
+    validated_value,
+};
 use crate::service::{ServiceError, ServiceResult, SigillumService};
 
 use super::DISCOVERY_SOURCE_LOCAL_RPC;
@@ -38,10 +42,33 @@ impl SigillumService {
     pub(crate) fn list_discovery_jobs(
         &self,
         token: Option<&str>,
+        query: list_query::DiscoveryJobListQuery,
     ) -> ServiceResult<DiscoveryJobListResponse> {
         let _ = self.require_session(token)?;
+        let state_filter = query
+            .state
+            .map(|value| validated_value("state", value, &DISCOVERY_JOB_STATES))
+            .transpose()?;
         let state = load_inventory_state(&self.state.base_dir)?;
-        Ok(DiscoveryJobListResponse { jobs: state.jobs })
+        let mut jobs = state.jobs;
+        if let Some(status) = state_filter.as_deref() {
+            jobs.retain(|job| job.status == status);
+        }
+        if let Some(sort) = query.sort {
+            let order = effective_order(query.sort.as_ref(), query.order);
+            // `updated` has no dedicated field: completion time for terminal
+            // jobs, start time for still-running ones.
+            let key = |job: &WalletDiscoveryJob| match sort {
+                CreatedUpdatedSort::Created => job.started_at_unix,
+                CreatedUpdatedSort::Updated => job.completed_at_unix.unwrap_or(job.started_at_unix),
+            };
+            match order {
+                SortOrder::Asc => jobs.sort_by_key(|job| key(job)),
+                SortOrder::Desc => jobs.sort_by(|a, b| key(b).cmp(&key(a))),
+            }
+        }
+        let (jobs, pagination) = paginate(jobs, query.page);
+        Ok(DiscoveryJobListResponse { jobs, pagination })
     }
 
     pub(crate) async fn cancel_discovery_job(

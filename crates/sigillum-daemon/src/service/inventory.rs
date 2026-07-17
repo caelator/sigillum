@@ -85,6 +85,7 @@ pub(in crate::service) use simulation::zero_value_transaction_gas_limit;
 use super::chains::chain_profile_for_id;
 use super::evm::normalize_address;
 use super::helpers::{map_xpub_error, now_unix, random_id};
+use super::list_query;
 use super::{ServiceError, ServiceResult, SigillumService};
 
 pub(in crate::service) const WALLET_FAMILY_ETH_SEED: &str = "eth-seed";
@@ -199,25 +200,64 @@ impl SigillumService {
     pub(crate) fn list_wallet_inventory(
         &self,
         token: Option<&str>,
+        query: list_query::WalletInventoryListQuery,
     ) -> ServiceResult<WalletInventoryListResponse> {
         let _ = self.require_session(token)?;
         let state =
             crate::inventory::load_wallet_inventory(&self.state.base_dir).map_err(|error| {
                 ServiceError::internal(format!("Failed to load wallet inventory: {error}"))
             })?;
+        // Filters, sorts, and the pagination window apply to `addresses`
+        // only; the sibling lists always return in full.
+        let mut addresses = state.addresses;
+        if let Some(chain_id) = query.chain_id {
+            addresses.retain(|address| address.chain_id == chain_id);
+        }
+        if let Some(funded) = query.funded {
+            addresses.retain(|address| {
+                (address.activity_state == sigillum_api::WalletAddressActivityState::Funded)
+                    == funded
+            });
+        }
+        if let Some(sort) = query.sort {
+            let order = list_query::effective_order(query.sort.as_ref(), query.order);
+            match (sort, order) {
+                (list_query::WalletInventorySort::Address, list_query::SortOrder::Asc) => {
+                    addresses.sort_by(|a, b| a.address.cmp(&b.address));
+                }
+                (list_query::WalletInventorySort::Address, list_query::SortOrder::Desc) => {
+                    addresses.sort_by(|a, b| b.address.cmp(&a.address));
+                }
+                (list_query::WalletInventorySort::LastScanned, list_query::SortOrder::Asc) => {
+                    addresses.sort_by_key(|address| address.last_checked_at_unix);
+                }
+                (list_query::WalletInventorySort::LastScanned, list_query::SortOrder::Desc) => {
+                    addresses.sort_by(|a, b| b.last_checked_at_unix.cmp(&a.last_checked_at_unix));
+                }
+            }
+        }
+        let (addresses, pagination) = list_query::paginate(addresses, query.page);
         Ok(WalletInventoryListResponse {
             jobs: state.jobs,
-            addresses: state.addresses,
+            addresses,
             holdings: state.holdings,
             nft_metadata_cache: state.nft_metadata_cache,
+            pagination,
         })
     }
 
     pub(crate) fn list_risk_findings(
         &self,
         token: Option<&str>,
+        query: list_query::RiskFindingListQuery,
     ) -> ServiceResult<RiskFindingListResponse> {
         let _ = self.require_session(token)?;
+        let severity = query
+            .severity
+            .map(|value| {
+                list_query::validated_value("severity", value, &list_query::RISK_SEVERITIES)
+            })
+            .transpose()?;
         let state = load_inventory_state(&self.state.base_dir)?;
         let mut findings = state.risk_findings;
         findings.extend(derive_inventory_risk_findings(
@@ -226,7 +266,40 @@ impl SigillumService {
             &state.risk_catalog,
             &state.chain_profiles,
         ));
-        Ok(RiskFindingListResponse { findings })
+        if let Some(severity) = severity.as_deref() {
+            findings.retain(|finding| finding.risk_level == severity);
+        }
+        if let Some(kind) = query.kind.as_deref() {
+            findings.retain(|finding| finding.category == kind);
+        }
+        if let Some(chain_id) = query.chain_id {
+            findings.retain(|finding| finding.chain_id == chain_id);
+        }
+        if let Some(sort) = query.sort {
+            let order = list_query::effective_order(query.sort.as_ref(), query.order);
+            match (sort, order) {
+                (list_query::RiskFindingSort::Severity, list_query::SortOrder::Asc) => {
+                    findings.sort_by_key(|finding| list_query::severity_rank(&finding.risk_level));
+                }
+                (list_query::RiskFindingSort::Severity, list_query::SortOrder::Desc) => {
+                    findings.sort_by(|a, b| {
+                        list_query::severity_rank(&b.risk_level)
+                            .cmp(&list_query::severity_rank(&a.risk_level))
+                    });
+                }
+                (list_query::RiskFindingSort::FoundAt, list_query::SortOrder::Asc) => {
+                    findings.sort_by_key(|finding| finding.first_seen_at_unix);
+                }
+                (list_query::RiskFindingSort::FoundAt, list_query::SortOrder::Desc) => {
+                    findings.sort_by(|a, b| b.first_seen_at_unix.cmp(&a.first_seen_at_unix));
+                }
+            }
+        }
+        let (findings, pagination) = list_query::paginate(findings, query.page);
+        Ok(RiskFindingListResponse {
+            findings,
+            pagination,
+        })
     }
 
     async fn apply_token_registry_probe(

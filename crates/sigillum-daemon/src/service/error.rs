@@ -82,6 +82,17 @@ impl ServiceError {
         Self::new(StatusCode::BAD_REQUEST, error_codes::BAD_REQUEST, message)
     }
 
+    /// 400 — a request parameter failed validation outside DTO validation
+    /// (e.g. an unknown list-endpoint filter/sort value). Carries no
+    /// per-field breakdown; the message names the offending parameter.
+    pub(crate) fn validation_failed(message: impl Into<String>) -> Self {
+        Self::new(
+            StatusCode::BAD_REQUEST,
+            error_codes::VALIDATION_FAILED,
+            message,
+        )
+    }
+
     pub(crate) fn unauthorized(message: impl Into<String>) -> Self {
         Self::new(StatusCode::UNAUTHORIZED, error_codes::UNAUTHORIZED, message)
     }
@@ -209,11 +220,16 @@ mod tests {
 
     #[test]
     fn constructors_map_to_documented_codes_and_statuses() {
-        let cases: [(ServiceError, StatusCode, &str); 14] = [
+        let cases: [(ServiceError, StatusCode, &str); 15] = [
             (
                 ServiceError::bad_request("x"),
                 StatusCode::BAD_REQUEST,
                 error_codes::BAD_REQUEST,
+            ),
+            (
+                ServiceError::validation_failed("x"),
+                StatusCode::BAD_REQUEST,
+                error_codes::VALIDATION_FAILED,
             ),
             (
                 ServiceError::unauthorized("x"),

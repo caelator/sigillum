@@ -730,3 +730,116 @@ export interface ApiRequestOptions<TBody = unknown> {
   body?: TBody;
   sessionToken?: string | null;
 }
+
+// ── List pagination / filtering / sorting (plan task 1.5) ────────────
+// Query-string shapes for the six list endpoints (queue jobs, inventory
+// wallets, deposits, consolidation plans, risk findings, discovery jobs).
+// A parameterless request keeps the legacy response: full list in store
+// order and no `pagination` key. Unknown enum values are rejected by the
+// daemon with 400 `validation_failed` naming the parameter.
+
+/** Offset pagination window shared by all paginated list endpoints. */
+export interface PaginationQuery {
+  limit?: number;
+  offset?: number;
+}
+
+/**
+ * Pagination metadata on list responses. Present only when the request
+ * supplied `limit` and/or `offset`; legacy parameterless responses have no
+ * `pagination` key. `total` counts items after filtering, before the
+ * window; `has_more` is `offset + returned length < total`.
+ */
+export interface PaginationInfo {
+  total: number;
+  limit: number;
+  offset: number;
+  has_more: boolean;
+}
+
+/**
+ * Sort direction for list endpoints. When `sort` is given without `order`
+ * the daemon defaults to `desc` for time/severity fields and `asc` for
+ * `address`. `order` requires `sort`.
+ */
+export type ListSortOrder = "asc" | "desc";
+
+export interface QueueJobListQuery extends PaginationQuery {
+  state?:
+    | "queued"
+    | "blocked"
+    | "retrying"
+    | "prepared"
+    | "submitted_unknown"
+    | "sent"
+    | "confirmed"
+    | "failed_terminal"
+    | "operator_action_required"
+    | "deferred"
+    | "failed";
+  kind?:
+    | "eth_stealth_transfer"
+    | "eth_stealth_erc20_transfer"
+    | "eth_stealth_native_sweep"
+    | "eth_stealth_erc20_sweep"
+    | "eth_seed_transfer"
+    | "eth_seed_native_sweep"
+    | "eth_seed_erc20_sweep"
+    | "plan_step_execution";
+  /** Matches only payloads that carry a chain id (`plan_step_execution`). */
+  chain_id?: number;
+  sort?: "created" | "updated";
+  order?: ListSortOrder;
+}
+
+export interface WalletInventoryListQuery extends PaginationQuery {
+  chain_id?: number;
+  /** true = non-zero native balance (`activity_state == "funded"`). */
+  funded?: boolean;
+  sort?: "address" | "last_scanned";
+  order?: ListSortOrder;
+}
+
+export interface EthStealthDepositListQuery extends PaginationQuery {
+  status?:
+    | "pending"
+    | "underfunded"
+    | "funded_needs_gas"
+    | "funded"
+    | "sweep_queued"
+    | "sweep_blocked"
+    | "sweep_retrying"
+    | "sweep_prepared"
+    | "sweep_submitted_unknown"
+    | "sweep_sent"
+    | "sweep_confirmed"
+    | "sweep_failed"
+    | "sweep_operator_action_required";
+  chain_id?: number;
+  /** Exact match; free-form (not value-validated). */
+  counterparty_id?: string;
+  sort?: "created" | "updated";
+  order?: ListSortOrder;
+}
+
+export interface ConsolidationPlanListQuery extends PaginationQuery {
+  status?: "empty" | "blocked" | "review_required" | "approved";
+  sort?: "created" | "updated";
+  order?: ListSortOrder;
+}
+
+export interface RiskFindingListQuery extends PaginationQuery {
+  /** Exact match on the finding's `risk_level`. */
+  severity?: "critical" | "high" | "medium" | "low" | "trusted";
+  /** Exact match on the finding's `category`; free-form (not validated). */
+  kind?: string;
+  chain_id?: number;
+  sort?: "severity" | "found_at";
+  order?: ListSortOrder;
+}
+
+export interface DiscoveryJobListQuery extends PaginationQuery {
+  state?: "running" | "completed" | "canceled" | "failed" | "resume_requested";
+  sort?: "created" | "updated";
+  order?: ListSortOrder;
+}

@@ -10,6 +10,9 @@ use crate::audit_log::AuditEventSpec;
 use crate::inventory::WalletInventoryState;
 
 use super::super::helpers::{now_unix, random_id};
+use super::super::list_query::{
+    self, CreatedUpdatedSort, PLAN_STATUSES, SortOrder, effective_order, paginate, validated_value,
+};
 use super::super::{ServiceError, ServiceResult, SigillumService};
 use super::claim_gate::{claim_execution_gate_satisfied, refresh_claim_execution_blocker};
 use super::planner::{
@@ -23,12 +26,31 @@ impl SigillumService {
     pub(crate) fn list_consolidation_plans(
         &self,
         token: Option<&str>,
+        query: list_query::ConsolidationPlanListQuery,
     ) -> ServiceResult<ConsolidationPlanListResponse> {
         let _ = self.require_session(token)?;
+        let status = query
+            .status
+            .map(|value| validated_value("status", value, &PLAN_STATUSES))
+            .transpose()?;
         let state = load_inventory_state(&self.state.base_dir)?;
-        Ok(ConsolidationPlanListResponse {
-            plans: state.consolidation_plans,
-        })
+        let mut plans = state.consolidation_plans;
+        if let Some(status) = status.as_deref() {
+            plans.retain(|plan| plan.status.as_str() == status);
+        }
+        if let Some(sort) = query.sort {
+            let order = effective_order(query.sort.as_ref(), query.order);
+            let key = |plan: &ConsolidationPlan| match sort {
+                CreatedUpdatedSort::Created => plan.created_at_unix,
+                CreatedUpdatedSort::Updated => plan.updated_at_unix,
+            };
+            match order {
+                SortOrder::Asc => plans.sort_by_key(|plan| key(plan)),
+                SortOrder::Desc => plans.sort_by(|a, b| key(b).cmp(&key(a))),
+            }
+        }
+        let (plans, pagination) = paginate(plans, query.page);
+        Ok(ConsolidationPlanListResponse { plans, pagination })
     }
 
     pub(crate) async fn generate_consolidation_plan(

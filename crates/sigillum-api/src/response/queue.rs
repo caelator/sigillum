@@ -129,6 +129,10 @@ pub struct QueueJob {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct QueueJobListResponse {
     pub jobs: Vec<QueueJob>,
+    /// Pagination window metadata. Present only when the request supplied
+    /// `limit` and/or `offset`; absent on legacy (parameterless) calls.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pagination: Option<super::PaginationInfo>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]

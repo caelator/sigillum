@@ -431,6 +431,7 @@ mod tests {
                 last_checked_at_unix: 2,
             }],
             nft_metadata_cache: Vec::new(),
+            pagination: None,
         };
         let chains = ChainProfileListResponse {
             profiles: vec![ChainProfile {

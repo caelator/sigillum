@@ -212,6 +212,11 @@ pub struct WalletInventoryListResponse {
     pub holdings: Vec<WalletAssetHolding>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub nft_metadata_cache: Vec<NftMetadataCacheEntry>,
+    /// Pagination window metadata for the `addresses` list (the other lists
+    /// are always returned in full). Present only when the request supplied
+    /// `limit` and/or `offset`; absent on legacy (parameterless) calls.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pagination: Option<super::PaginationInfo>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -284,6 +289,10 @@ fn default_inventory_chain_id() -> u64 {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct DiscoveryJobListResponse {
     pub jobs: Vec<WalletDiscoveryJob>,
+    /// Pagination window metadata. Present only when the request supplied
+    /// `limit` and/or `offset`; absent on legacy (parameterless) calls.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pagination: Option<super::PaginationInfo>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -374,6 +383,10 @@ pub struct RiskFinding {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct RiskFindingListResponse {
     pub findings: Vec<RiskFinding>,
+    /// Pagination window metadata. Present only when the request supplied
+    /// `limit` and/or `offset`; absent on legacy (parameterless) calls.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pagination: Option<super::PaginationInfo>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -484,6 +497,10 @@ pub struct ConsolidationPlan {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ConsolidationPlanListResponse {
     pub plans: Vec<ConsolidationPlan>,
+    /// Pagination window metadata. Present only when the request supplied
+    /// `limit` and/or `offset`; absent on legacy (parameterless) calls.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pagination: Option<super::PaginationInfo>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]

@@ -3,7 +3,7 @@
 use std::sync::Arc;
 
 use axum::Json;
-use axum::extract::State;
+use axum::extract::{Query, State};
 use axum::http::HeaderMap;
 use axum::response::Response;
 use sigillum_api::{
@@ -21,14 +21,23 @@ use sigillum_api::{
 use crate::AppState;
 use crate::service::SigillumService;
 
+use super::list_query::{
+    ConsolidationPlansRawQuery, DiscoveryJobsRawQuery, RiskFindingsRawQuery,
+    WalletInventoryRawQuery,
+};
 use super::{bearer_token, service_response, validated};
 
 pub(crate) async fn list_wallet_inventory(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
+    Query(query): Query<WalletInventoryRawQuery>,
 ) -> Response {
+    let query = match query.resolve() {
+        Ok(query) => query,
+        Err(resp) => return resp,
+    };
     let service = SigillumService::new(state);
-    service_response(service.list_wallet_inventory(bearer_token(&headers).as_deref()))
+    service_response(service.list_wallet_inventory(bearer_token(&headers).as_deref(), query))
 }
 
 pub(crate) async fn scan_wallet_inventory_evm(
@@ -253,9 +262,14 @@ pub(crate) async fn delete_chain_profile(
 pub(crate) async fn list_discovery_jobs(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
+    Query(query): Query<DiscoveryJobsRawQuery>,
 ) -> Response {
+    let query = match query.resolve() {
+        Ok(query) => query,
+        Err(resp) => return resp,
+    };
     let service = SigillumService::new(state);
-    service_response(service.list_discovery_jobs(bearer_token(&headers).as_deref()))
+    service_response(service.list_discovery_jobs(bearer_token(&headers).as_deref(), query))
 }
 
 pub(crate) async fn cancel_discovery_job(
@@ -295,9 +309,14 @@ pub(crate) async fn resume_discovery_job(
 pub(crate) async fn list_risk_findings(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
+    Query(query): Query<RiskFindingsRawQuery>,
 ) -> Response {
+    let query = match query.resolve() {
+        Ok(query) => query,
+        Err(resp) => return resp,
+    };
     let service = SigillumService::new(state);
-    service_response(service.list_risk_findings(bearer_token(&headers).as_deref()))
+    service_response(service.list_risk_findings(bearer_token(&headers).as_deref(), query))
 }
 
 pub(crate) async fn list_risk_catalog(
@@ -345,9 +364,14 @@ pub(crate) async fn delete_risk_catalog_entry(
 pub(crate) async fn list_consolidation_plans(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
+    Query(query): Query<ConsolidationPlansRawQuery>,
 ) -> Response {
+    let query = match query.resolve() {
+        Ok(query) => query,
+        Err(resp) => return resp,
+    };
     let service = SigillumService::new(state);
-    service_response(service.list_consolidation_plans(bearer_token(&headers).as_deref()))
+    service_response(service.list_consolidation_plans(bearer_token(&headers).as_deref(), query))
 }
 
 pub(crate) async fn treasury_overview(

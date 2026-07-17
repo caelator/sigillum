@@ -448,6 +448,7 @@ fn deposits_response_roundtrip() {
             ),
             counterparty_id: Some("party_client_alpha".to_string()),
         }],
+        pagination: None,
     });
 }
 
@@ -493,6 +494,7 @@ fn queue_response_roundtrip() {
             broadcast_transaction_hash_hex: None,
             receipt: Default::default(),
         }],
+        pagination: None,
     });
 }
 
@@ -837,6 +839,7 @@ fn inventory_response_roundtrip() {
             fetch_skipped_reason: None,
             updated_at_unix: 1_783_046_000,
         }],
+        pagination: None,
     });
 }
 

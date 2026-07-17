@@ -1072,6 +1072,7 @@ fn test_wallet_operations_response_roundtrips() {
     };
     roundtrip_test(RiskFindingListResponse {
         findings: vec![finding],
+        pagination: None,
     });
     let catalog_entry = RiskCatalogEntry {
         address: "0x4444444444444444444444444444444444444444".to_string(),
@@ -1172,6 +1173,7 @@ fn test_wallet_operations_response_roundtrips() {
     };
     roundtrip_test(ConsolidationPlanListResponse {
         plans: vec![plan.clone()],
+        pagination: None,
     });
     roundtrip_test(ConsolidationPlanMutationResponse {
         status: "generated".to_string(),
@@ -1475,6 +1477,7 @@ fn test_queue_job_list_response_roundtrip() {
             broadcast_transaction_hash_hex: None,
             receipt: Default::default(),
         }],
+        pagination: None,
     };
     roundtrip_test(resp);
 }
@@ -2298,4 +2301,44 @@ fn test_token_registry_entry_accepts_chain_id_alias() {
     .unwrap();
 
     assert_eq!(entry.chain_id, 1);
+}
+
+// ── List pagination / filtering / sorting ──────────────────────────
+
+#[test]
+fn test_pagination_info_roundtrip() {
+    roundtrip_test(PaginationInfo {
+        total: 42,
+        limit: 10,
+        offset: 20,
+        has_more: true,
+    });
+}
+
+#[test]
+fn test_list_response_pagination_is_omitted_when_absent() {
+    // Legacy (parameterless) responses stay byte-identical: the
+    // `pagination` key is not serialized when no window was requested.
+    let resp = QueueJobListResponse {
+        jobs: Vec::new(),
+        pagination: None,
+    };
+    let json = serde_json::to_value(&resp).unwrap();
+    assert!(json.get("pagination").is_none());
+
+    let paged = QueueJobListResponse {
+        jobs: Vec::new(),
+        pagination: Some(PaginationInfo {
+            total: 0,
+            limit: 25,
+            offset: 0,
+            has_more: false,
+        }),
+    };
+    let json = serde_json::to_value(&paged).unwrap();
+    assert_eq!(json["pagination"]["limit"], serde_json::json!(25));
+
+    // The legacy wire shape deserializes with `pagination: None`.
+    let legacy: QueueJobListResponse = serde_json::from_str("{\"jobs\":[]}").unwrap();
+    assert_eq!(legacy.pagination, None);
 }

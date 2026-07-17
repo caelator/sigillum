@@ -1720,3 +1720,72 @@ fn test_validate_fields_pass_for_valid_dtos() {
     };
     assert!(policy.validate_fields().is_ok());
 }
+
+// ── List pagination / filtering / sorting ──────────────────────────
+
+#[test]
+fn test_pagination_query_roundtrip() {
+    roundtrip_test(PaginationQuery {
+        limit: Some(50),
+        offset: Some(100),
+    });
+    roundtrip_test(PaginationQuery::default());
+}
+
+#[test]
+fn test_list_options_roundtrip() {
+    roundtrip_test(QueueJobListOptions {
+        page: PaginationQuery {
+            limit: Some(25),
+            offset: None,
+        },
+        state: Some("queued".to_string()),
+        kind: Some("plan_step_execution".to_string()),
+        chain_id: Some(1),
+        sort: Some("created".to_string()),
+        order: Some("desc".to_string()),
+    });
+    roundtrip_test(WalletInventoryListOptions {
+        chain_id: Some(1),
+        funded: Some(true),
+        sort: Some("last_scanned".to_string()),
+        ..Default::default()
+    });
+    roundtrip_test(EthStealthDepositListOptions {
+        status: Some("sweep_queued".to_string()),
+        counterparty_id: Some("party_client_alpha".to_string()),
+        ..Default::default()
+    });
+    roundtrip_test(ConsolidationPlanListOptions {
+        status: Some("review_required".to_string()),
+        sort: Some("updated".to_string()),
+        order: Some("asc".to_string()),
+        ..Default::default()
+    });
+    roundtrip_test(RiskFindingListOptions {
+        severity: Some("critical".to_string()),
+        kind: Some("risky_approval".to_string()),
+        chain_id: Some(1),
+        sort: Some("severity".to_string()),
+        ..Default::default()
+    });
+    roundtrip_test(DiscoveryJobListOptions {
+        state: Some("running".to_string()),
+        sort: Some("created".to_string()),
+        ..Default::default()
+    });
+}
+
+#[test]
+fn test_list_options_default_serializes_to_empty_object() {
+    // A default options struct adds no query parameters: the legacy
+    // request shape (and therefore the legacy response) is unchanged.
+    assert_eq!(
+        serde_json::to_value(QueueJobListOptions::default()).unwrap(),
+        serde_json::json!({})
+    );
+    assert_eq!(
+        serde_json::to_value(PaginationQuery::default()).unwrap(),
+        serde_json::json!({})
+    );
+}

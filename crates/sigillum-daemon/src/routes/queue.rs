@@ -3,7 +3,7 @@
 use std::sync::Arc;
 
 use axum::Json;
-use axum::extract::State;
+use axum::extract::{Query, State};
 use axum::http::HeaderMap;
 use axum::response::Response;
 use sigillum_api::{
@@ -14,11 +14,20 @@ use sigillum_api::{
 use crate::AppState;
 use crate::service::SigillumService;
 
+use super::list_query::QueueJobsRawQuery;
 use super::{bearer_token, service_response, validated};
 
-pub(crate) async fn list_jobs(State(state): State<Arc<AppState>>, headers: HeaderMap) -> Response {
+pub(crate) async fn list_jobs(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Query(query): Query<QueueJobsRawQuery>,
+) -> Response {
+    let query = match query.resolve() {
+        Ok(query) => query,
+        Err(resp) => return resp,
+    };
     let service = SigillumService::new(state);
-    service_response(service.list_queue_jobs(bearer_token(&headers).as_deref()))
+    service_response(service.list_queue_jobs(bearer_token(&headers).as_deref(), query))
 }
 
 pub(crate) async fn enqueue_eth_stealth_transfer(

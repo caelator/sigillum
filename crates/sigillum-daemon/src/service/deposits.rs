@@ -516,12 +516,44 @@ impl SigillumService {
     pub(crate) fn list_eth_stealth_deposits(
         &self,
         token: Option<&str>,
+        query: super::list_query::EthStealthDepositListQuery,
     ) -> ServiceResult<EthStealthDepositListResponse> {
+        use super::list_query::{
+            CreatedUpdatedSort, DEPOSIT_STATUSES, SortOrder, effective_order, paginate,
+            validated_value,
+        };
         let _ = self.require_scope(token, super::capability_scopes::DEPOSITS_READ)?;
+        let status = query
+            .status
+            .map(|value| validated_value("status", value, &DEPOSIT_STATUSES))
+            .transpose()?;
         let deposits = crate::deposits::load_deposits(&self.state.base_dir)
             .map_err(|error| ServiceError::internal(format!("Failed to load deposits: {error}")))?;
+        let mut deposits = deposits.eth_stealth;
+        if let Some(status) = status.as_deref() {
+            deposits.retain(|deposit| deposit.status == status);
+        }
+        if let Some(chain_id) = query.chain_id {
+            deposits.retain(|deposit| deposit.chain_id == chain_id);
+        }
+        if let Some(counterparty_id) = query.counterparty_id.as_deref() {
+            deposits.retain(|deposit| deposit.counterparty_id.as_deref() == Some(counterparty_id));
+        }
+        if let Some(sort) = query.sort {
+            let order = effective_order(query.sort.as_ref(), query.order);
+            let key = |deposit: &EthStealthDeposit| match sort {
+                CreatedUpdatedSort::Created => deposit.created_at_unix,
+                CreatedUpdatedSort::Updated => deposit.updated_at_unix,
+            };
+            match order {
+                SortOrder::Asc => deposits.sort_by_key(|deposit| key(deposit)),
+                SortOrder::Desc => deposits.sort_by(|a, b| key(b).cmp(&key(a))),
+            }
+        }
+        let (deposits, pagination) = paginate(deposits, query.page);
         Ok(EthStealthDepositListResponse {
-            deposits: deposits.eth_stealth,
+            deposits,
+            pagination,
         })
     }
 
