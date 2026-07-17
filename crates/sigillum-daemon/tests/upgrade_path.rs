@@ -723,7 +723,15 @@ async fn upgrade_0_1_datadir_migrates_all_stores() {
         "deposit tag",
     )
     .await;
-    assert_schema_version(base.path(), "deposits.json", 2);
+    assert_schema_version(base.path(), "deposits.json", 3);
+    // The 0.1 deposit record predates the stealth hash-convention switch:
+    // the v1→v3 migration must have stamped it with the legacy convention.
+    let deposits_store = read_json(&base.path().join("deposits.json"));
+    assert_eq!(
+        deposits_store["data"]["eth_stealth"][0]["stealth_hash_convention"],
+        json!("x32"),
+        "pre-switch deposit record must be stamped with the legacy convention"
+    );
 
     assert_success(
         post_json(&client, addr, "/api/queue/process", json!({}), Some(&token)).await,
