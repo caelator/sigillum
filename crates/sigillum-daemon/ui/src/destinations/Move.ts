@@ -679,12 +679,20 @@ export function treasuryPolicySummary(policy: TreasuryPolicy): string[] {
       ? "Cross-party linkage blocking is on; destinations are limited to the allow-list below."
       : "Cross-party linkage blocking is off — plans may route different payers to a shared destination.",
   );
+  const gasTopupCap = (policy.max_gas_topup_wei_hex || "").trim();
+  const gasTopupCapIsValid = /^0[xX][0-9a-fA-F]{1,64}$/.test(gasTopupCap);
   const operational: string[] = [];
-  operational.push(
-    policy.allow_gas_topups
-      ? "Sponsor gas top-ups (plan and stealth) are allowed"
-      : "Sponsor gas top-ups (plan and stealth) are off",
-  );
+  if (!policy.allow_gas_topups) {
+    operational.push("Sponsor gas top-ups (plan and stealth) are off");
+  } else if (!gasTopupCapIsValid) {
+    operational.push(
+      "Sponsor gas top-ups (plan and stealth) remain disabled until a valid explicit maximum is saved",
+    );
+  } else {
+    operational.push(
+      "Sponsor gas top-ups (plan and stealth) are allowed up to the explicit maximum",
+    );
+  }
   if (policy.execution_paused) {
     operational.push("queue execution is currently paused");
   }
@@ -738,7 +746,7 @@ export const POLICY_PRESETS: PolicyPreset[] = [
     id: "recovery",
     label: "Recovery operator",
     description:
-      "Everything needed to evacuate a wallet: sweeps, revokes, DeFi exits, and sponsor gas top-ups on. Claims stay off; simulation and linkage blocking stay on.",
+      "Everything needed to evacuate a wallet: sweeps, revokes, DeFi exits, and sponsor gas top-ups on. Claims stay off; simulation and linkage blocking stay on. Enter a finite maximum gas top-up below before saving; Sigillum does not assume a cap.",
     values: {
       enabled: true,
       require_simulation: true,
@@ -3536,8 +3544,9 @@ export function createMoveDestination(
       hint: "Largest native value a whole plan may move.",
     });
     const maxGasTopup = textField("Max gas top-up (ETH)", {
-      placeholder: "optional, e.g. 0.05",
+      placeholder: "required when top-ups are on, e.g. 0.05",
       region: "policy-max-gas-topup",
+      hint: "Required when sponsor gas top-ups are on; no default cap is assumed.",
     });
     const maxFee = textField("Max fee per gas (gwei)", {
       placeholder: "optional, e.g. 50",
@@ -3781,6 +3790,7 @@ export function createMoveDestination(
       allow_exit_execution: shell.allowExitExec.checked,
       allow_claim_execution: shell.allowClaimExec.checked,
       allow_gas_topups: shell.allowGasTopups.checked,
+      max_gas_topup_wei_hex: parseEthToWeiHex(shell.maxGasTopup.value),
       allow_treasury_automation: shell.allowAutomation.checked,
       execution_paused: Boolean(state.policy?.execution_paused),
       allowed_destinations: parseTreasuryDestinationLines(
@@ -4064,6 +4074,13 @@ export function createMoveDestination(
       shell.maxGasTopup,
       "Max gas top-up must be a decimal ETH amount with up to 18 decimals",
     );
+    if (shell.allowGasTopups.checked && !shell.maxGasTopup.value.trim()) {
+      errors.push({
+        input: shell.maxGasTopup,
+        message:
+          "Enter a finite max gas top-up before enabling sponsor gas top-ups",
+      });
+    }
     const hotFloorWei = ethField(
       shell.hotFloor,
       "Hot refill floor must be a decimal ETH amount with up to 18 decimals",

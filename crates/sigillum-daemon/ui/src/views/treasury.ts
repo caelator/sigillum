@@ -109,6 +109,39 @@ function nativeAmount(
   return symbol ? amount + " " + symbol : amount;
 }
 
+function countLabel(
+  count: number | null | undefined,
+  singular: string,
+  plural = singular + "s",
+): string {
+  const value = count || 0;
+  return String(value) + " " + (value === 1 ? singular : plural);
+}
+
+function humanizePolicyViolation(value: string): string {
+  const trimmed = value.trim();
+  const match = /^([^:=]+)(?:[:=](.*))?$/.exec(trimmed);
+  const code = (match?.[1] || trimmed).trim();
+  const detail = (match?.[2] || "").trim();
+  switch (code) {
+    case "exceeds_policy_plan_cap":
+      return "The plan exceeds the policy's native-value cap";
+    case "destination_not_allowed":
+      return detail
+        ? "Destination " + detail + " is not on the policy allow-list"
+        : "A destination is not on the policy allow-list";
+    case "cross_party_linkage":
+      return "The plan would link different payers through a shared route";
+    default: {
+      const words = code.replace(/[_-]+/g, " ").trim();
+      const label = words
+        ? words.charAt(0).toUpperCase() + words.slice(1)
+        : "Policy review required";
+      return detail ? label + ": " + detail : label;
+    }
+  }
+}
+
 function shortAddress(value: string): string {
   const trimmed = value.trim();
   if (trimmed.startsWith("0x") && trimmed.length > 14) {
@@ -203,7 +236,7 @@ export function createTreasuryActions(deps: TreasuryActionsDeps) {
       (chain) =>
         '<li><div class="entity-main">' +
         '<div class="entity-title">' +
-        "chain " +
+        "Chain " +
         esc(String(chain.chain_id)) +
         " · " +
         esc(chain.native_symbol || "-") +
@@ -211,12 +244,12 @@ export function createTreasuryActions(deps: TreasuryActionsDeps) {
         statusPill((chain.funded_address_count || 0) > 0 ? "funded" : "empty") +
         "</div>" +
         '<div class="entity-meta">' +
-        "addresses=" +
         esc(String(chain.funded_address_count || 0)) +
-        "/" +
+        " of " +
         esc(String(chain.address_count || 0)) +
-        " funded · native=" +
+        " addresses funded · " +
         esc(nativeAmount(chain.native_total_wei_hex, chain.native_symbol)) +
+        " native" +
         "</div></div></li>",
     );
   }
@@ -245,31 +278,30 @@ export function createTreasuryActions(deps: TreasuryActionsDeps) {
           : "") +
         "</div>" +
         '<div class="entity-meta">' +
-        "chain=" +
+        "Chain " +
         esc(String(group.chain_id)) +
-        " · addresses=" +
+        " · " +
         esc(String(group.funded_address_count || 0)) +
-        "/" +
+        " of " +
         esc(String(group.address_count || 0)) +
-        " funded · native=" +
+        " addresses funded · " +
         esc(nativeAmount(group.native_total_wei_hex, symbolByChain.get(group.chain_id))) +
-        " · signers=" +
-        esc(String(group.signer_address_count || 0)) +
-        " · watchOnly=" +
-        esc(String(group.watch_only_address_count || 0)) +
+        " native · " +
+        esc(countLabel(group.signer_address_count, "signer address")) +
+        " · " +
+        esc(countLabel(group.watch_only_address_count, "watch-only address")) +
         "<br>" +
-        "erc20=" +
-        esc(String(group.erc20_holding_count || 0)) +
-        " · nft=" +
-        esc(String(group.nft_holding_count || 0)) +
-        " · defi=" +
-        esc(String(group.defi_holding_count || 0)) +
-        " · claimable=" +
-        esc(String(group.claimable_holding_count || 0)) +
-        " · approvals=" +
-        esc(String(group.approval_exposure_count || 0)) +
-        " · dormant=" +
-        esc(String(group.dormant_candidate_count || 0)) +
+        esc(countLabel(group.erc20_holding_count, "ERC-20 holding")) +
+        " · " +
+        esc(countLabel(group.nft_holding_count, "NFT holding")) +
+        " · " +
+        esc(countLabel(group.defi_holding_count, "DeFi holding")) +
+        " · " +
+        esc(countLabel(group.claimable_holding_count, "claimable holding")) +
+        " · " +
+        esc(countLabel(group.approval_exposure_count, "approval exposure")) +
+        " · " +
+        esc(countLabel(group.dormant_candidate_count, "dormant candidate")) +
         "</div></div></li>",
     );
   }
@@ -287,20 +319,24 @@ export function createTreasuryActions(deps: TreasuryActionsDeps) {
         statusPill(route.routing_ready ? "ready" : "unconfigured") +
         "</div>" +
         '<div class="entity-meta">' +
-        "hot=" +
-        esc(route.hot_address || "-") +
+        "Hot wallet: " +
+        esc(route.hot_address || "Not configured") +
         (route.hot_native_balance_wei_hex
-          ? " (" + esc(formatWeiHexAsEth(route.hot_native_balance_wei_hex)) + ")"
+          ? " · " +
+            esc(formatWeiHexAsEth(route.hot_native_balance_wei_hex)) +
+            " native units"
           : "") +
         "<br>" +
-        "treasury=" +
-        esc(route.treasury_address || "-") +
+        "Treasury: " +
+        esc(route.treasury_address || "Not configured") +
         (route.treasury_native_balance_wei_hex
-          ? " (" + esc(formatWeiHexAsEth(route.treasury_native_balance_wei_hex)) + ")"
+          ? " · " +
+            esc(formatWeiHexAsEth(route.treasury_native_balance_wei_hex)) +
+            " native units"
           : "") +
         "<br>" +
-        "defaultDestination=" +
-        esc(route.default_destination_address || "-") +
+        "Default destination: " +
+        esc(route.default_destination_address || "Not configured") +
         "</div></div></li>",
     );
   }
@@ -330,16 +366,15 @@ export function createTreasuryActions(deps: TreasuryActionsDeps) {
             statusPill((row.risk.total_findings || 0) > 0 ? "detected" : "ok") +
             "</div>" +
             '<div class="entity-meta">' +
-            "critical=" +
-            esc(String(row.risk.critical_findings || 0)) +
-            " · high=" +
-            esc(String(row.risk.high_findings || 0)) +
-            " · medium=" +
-            esc(String(row.risk.medium_findings || 0)) +
-            " · low=" +
-            esc(String(row.risk.low_findings || 0)) +
-            " · total=" +
-            esc(String(row.risk.total_findings || 0)) +
+            esc(countLabel(row.risk.critical_findings, "critical finding")) +
+            " · " +
+            esc(countLabel(row.risk.high_findings, "high finding")) +
+            " · " +
+            esc(countLabel(row.risk.medium_findings, "medium finding")) +
+            " · " +
+            esc(countLabel(row.risk.low_findings, "low finding")) +
+            " · " +
+            esc(countLabel(row.risk.total_findings, "total finding")) +
             "</div></div></li>"
           );
         }
@@ -350,12 +385,16 @@ export function createTreasuryActions(deps: TreasuryActionsDeps) {
             statusPill(row.automation.enabled ? "enabled" : "off") +
             "</div>" +
             '<div class="entity-meta">' +
-            "overflow=" +
-            esc(capAsEth(row.automation.hot_overflow_wei_hex)) +
-            " · generatedSteps=" +
-            esc(String(row.automation.generated_steps || 0)) +
-            " · enqueuedSteps=" +
-            esc(String(row.automation.enqueued_steps || 0)) +
+            "Overflow threshold: " +
+            esc(
+              row.automation.hot_overflow_wei_hex
+                ? capAsEth(row.automation.hot_overflow_wei_hex)
+                : "Not configured",
+            ) +
+            " · " +
+            esc(countLabel(row.automation.generated_steps, "step generated")) +
+            " · " +
+            esc(countLabel(row.automation.enqueued_steps, "step enqueued")) +
             (row.automation.enabled
               ? "<br>auto-enqueue still requires passed simulation + execution gates"
               : "") +
@@ -370,21 +409,20 @@ export function createTreasuryActions(deps: TreasuryActionsDeps) {
           statusPill(row.plans.latest_plan_status || "none") +
           "</div>" +
           '<div class="entity-meta">' +
-          "plans=" +
-          esc(String(row.plans.total_plans || 0)) +
-          " · latest=" +
+          esc(countLabel(row.plans.total_plans, "plan")) +
+          " · Latest plan: " +
           esc(row.plans.latest_plan_id || "-") +
           "<br>" +
-          "review=" +
-          esc(String(row.plans.latest_review_required_steps || 0)) +
-          " · approved=" +
-          esc(String(row.plans.latest_approved_steps || 0)) +
-          " · executable=" +
-          esc(String(row.plans.latest_executable_steps || 0)) +
-          " · blocked=" +
-          esc(String(row.plans.latest_blocked_steps || 0)) +
+          esc(countLabel(row.plans.latest_review_required_steps, "step needing review")) +
+          " · " +
+          esc(countLabel(row.plans.latest_approved_steps, "approved step")) +
+          " · " +
+          esc(countLabel(row.plans.latest_executable_steps, "executable step")) +
+          " · " +
+          esc(countLabel(row.plans.latest_blocked_steps, "blocked step")) +
           (policyViolations.length
-            ? " · policyViolations=" + esc(policyViolations.join(", "))
+            ? " · Policy review: " +
+              esc(policyViolations.map(humanizePolicyViolation).join("; "))
             : "") +
           "</div></div></li>"
         );

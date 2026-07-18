@@ -19,6 +19,7 @@ export interface SetupWizardDeps {
   api: (method: string, path: string, body?: unknown) => Promise<any>;
   toast: (message: string, type?: string) => void;
   refresh: () => unknown;
+  navigateToMovePolicy?: () => void;
   submitNewFido2Pin: (
     pinId: string,
     confirmId: string,
@@ -657,27 +658,12 @@ export function createSetupWizard(deps: SetupWizardDeps) {
     deps.toast("You can enable Merkle claim execution later in Treasury policy.");
   }
 
-  async function wizEnableGasTopups(): Promise<void> {
-    try {
-      const policy = await fetchCurrentTreasuryPolicy();
-      const body: TreasuryPolicyUpdateRequest = policy
-        ? {
-            ...treasuryPolicyUpdateFromCurrent(policy),
-            allow_gas_topups: true,
-          }
-        : { enabled: false, allow_gas_topups: true };
-      const r = await deps.api("POST", "/api/treasury/policy/update", body);
-      if (r.error) {
-        deps.toast(r.error, "error");
-        return;
-      }
-      showGasTopupsChoiceStatus(
-        "Sponsor gas top-up opt-in recorded. Top-ups only appear inside reviewed consolidation plans, are capped by the Treasury policy, and cross-party sponsor funding is still linkage-checked.",
-      );
-      deps.toast("Sponsor gas top-up opt-in recorded");
-    } catch (e: any) {
-      deps.toast(String(e?.message ?? e), "error");
-    }
+  function wizEnableGasTopups(): void {
+    showGasTopupsChoiceStatus(
+      "Sponsor gas top-ups need a finite maximum. Open Move, enter the cap in Treasury policy, review the recovery gates, and save.",
+    );
+    deps.toast("Set a finite sponsor gas top-up cap in Treasury policy.");
+    deps.navigateToMovePolicy?.();
   }
 
   function wizDeclineGasTopups(): void {

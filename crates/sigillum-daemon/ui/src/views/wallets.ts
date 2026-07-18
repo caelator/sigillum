@@ -9,6 +9,7 @@ import {
 } from "../render/forms";
 import { confirmDangerDialog, informDialog } from "../render/confirm";
 import { esc, escAttr } from "../render/html";
+import { formatWeiHexAsGwei } from "./treasury";
 
 export type WalletProfileKind = "stealth" | "xpub" | "seed";
 
@@ -63,6 +64,14 @@ export function createWalletActions(deps: WalletActionsDeps) {
   // proceed directly.
   let xpubCopyAcknowledged = false;
 
+  function feeCap(value: unknown): string {
+    if (value === null || value === undefined) return "Not configured";
+    if (typeof value !== "string" || !/^0x[0-9a-fA-F]+$/.test(value)) {
+      return "Invalid saved value";
+    }
+    return formatWeiHexAsGwei(value) + " gwei";
+  }
+
   function renderProviderProfiles(profiles: any[]): void {
     renderEntityList(
       "providerProfileList",
@@ -70,15 +79,15 @@ export function createWalletActions(deps: WalletActionsDeps) {
       "No provider profiles yet. Save an RPC endpoint and fee policy above to let deposits and queue work talk to a chain.",
       (profile) => {
         const feeInfo =
-          "priority=" +
-          (profile.max_priority_fee_per_gas_hex || "-") +
-          " · max=" +
-          (profile.max_fee_per_gas_hex || "-") +
-          " · nativeGas=" +
-          (profile.native_gas_limit || "-") +
-          " · erc20Gas=" +
-          (profile.erc20_gas_limit || "-") +
-          " · feeEstimation=" +
+          "Priority fee cap: " +
+          feeCap(profile.max_priority_fee_per_gas_hex) +
+          " · Max fee cap: " +
+          feeCap(profile.max_fee_per_gas_hex) +
+          " · Native gas limit: " +
+          (profile.native_gas_limit || "Not configured") +
+          " · ERC-20 gas limit: " +
+          (profile.erc20_gas_limit || "Not configured") +
+          " · Fee estimation " +
           (profile.fee_estimation_enabled ? "on" : "off");
         return (
           '<li><div class="entity-main">' +
@@ -86,17 +95,26 @@ export function createWalletActions(deps: WalletActionsDeps) {
           esc(profile.name) +
           "</div>" +
           '<div class="entity-meta">' +
-          "rpc=" +
+          "RPC endpoint: " +
           esc(profile.rpc_url) +
           "<br>" +
-          "chain=" +
+          "Chain " +
           esc(String(profile.chain_id)) +
-          " · compartment=" +
-          esc(String(profile.compartment_id)) +
-          " · authKey=" +
-          esc(profile.auth_token_key || "-") +
+          " · " +
+          (profile.compartment_id != null
+            ? "Compartment " + esc(String(profile.compartment_id))
+            : "Compartment not specified") +
+          " · " +
+          (profile.auth_token_key
+            ? "Authentication key configured"
+            : "No authentication key") +
           "<br>" +
           esc(feeInfo) +
+          (profile.auth_token_key
+            ? '<details class="technical-detail"><summary>Connection key reference</summary><code>' +
+              esc(profile.auth_token_key) +
+              "</code></details>"
+            : "") +
           "</div></div>" +
           '<div class="entity-actions">' +
           '<button class="btn-ghost" data-action="copyText" data-arg0="' +
@@ -122,19 +140,21 @@ export function createWalletActions(deps: WalletActionsDeps) {
         esc(profile.name) +
         "</div>" +
         '<div class="entity-meta">' +
-        "wallet=" +
+        "Wallet " +
         esc(profile.wallet) +
-        " · short=" +
+        " · Short name " +
         esc(profile.short_name) +
-        " · provider=" +
+        " · Provider " +
         esc(profile.provider_profile) +
         "<br>" +
-        "compartment=" +
+        "Compartment " +
         esc(String(profile.compartment_id)) +
-        " · chain=" +
-        esc(profile.chain_id != null ? String(profile.chain_id) : "-") +
-        " · defaultDestination=" +
-        esc(profile.default_destination_address || "-") +
+        " · " +
+        (profile.chain_id != null
+          ? "Chain " + esc(String(profile.chain_id))
+          : "Chain not specified") +
+        " · Default destination: " +
+        esc(profile.default_destination_address || "Not configured") +
         "</div></div>" +
         '<div class="entity-actions">' +
         '<button class="btn-ghost" data-action="exportWalletMeta" data-arg0="' +
@@ -173,24 +193,26 @@ export function createWalletActions(deps: WalletActionsDeps) {
           esc(profile.name) +
           "</div>" +
           '<div class="entity-meta">' +
-          "projectAccount=" +
+          "Project account " +
           esc(String(profile.project_account)) +
-          " · provider=" +
+          " · Provider " +
           esc(profile.provider_profile) +
-          " · source=" +
+          " · Source: " +
           esc(source) +
           "<br>" +
-          "accountPath=" +
+          "Account path " +
           esc(accountPath) +
-          " · receivePath=" +
+          " · Receive path " +
           esc(receivePath) +
           "<br>" +
-          "compartment=" +
+          "Compartment " +
           esc(String(profile.compartment_id)) +
-          " · chain=" +
-          esc(profile.chain_id != null ? String(profile.chain_id) : "-") +
-          " · defaultDestination=" +
-          esc(profile.default_destination_address || "-") +
+          " · " +
+          (profile.chain_id != null
+            ? "Chain " + esc(String(profile.chain_id))
+            : "Chain not specified") +
+          " · Default destination: " +
+          esc(profile.default_destination_address || "Not configured") +
           "</div></div>" +
           '<div class="entity-actions">' +
           '<button class="btn-ghost" data-action="exportXpubWalletProfile" data-arg0="' +
@@ -211,35 +233,37 @@ export function createWalletActions(deps: WalletActionsDeps) {
       profiles,
       "No imported seed wallets yet. Import a 12-word or 24-word phrase to add another receive wallet profile.",
       (profile) => {
-        const label = profile.label ? " · label=" + profile.label : "";
+        const label = profile.label ? " · Label: " + profile.label : "";
         return (
           '<li><div class="entity-main">' +
           '<div class="entity-title">' +
           esc(profile.name) +
           "</div>" +
           '<div class="entity-meta">' +
-          "words=" +
           esc(String(profile.word_count)) +
-          " · account=" +
+          " words" +
+          " · Account " +
           esc(String(profile.project_account)) +
-          " · provider=" +
+          " · Provider " +
           esc(profile.provider_profile) +
           esc(label) +
           "<br>" +
-          "accountPath=" +
-          esc(profile.account_path || "-") +
-          " · receivePath=" +
-          esc(profile.receive_path || "-") +
+          "Account path " +
+          esc(profile.account_path || "Not available") +
+          " · Receive path " +
+          esc(profile.receive_path || "Not available") +
           "<br>" +
-          "firstAddress=" +
-          esc(profile.first_receive_address || "-") +
+          "First address: " +
+          esc(profile.first_receive_address || "Not available") +
           "<br>" +
-          "compartment=" +
+          "Compartment " +
           esc(String(profile.compartment_id)) +
-          " · chain=" +
-          esc(profile.chain_id != null ? String(profile.chain_id) : "-") +
-          " · defaultDestination=" +
-          esc(profile.default_destination_address || "-") +
+          " · " +
+          (profile.chain_id != null
+            ? "Chain " + esc(String(profile.chain_id))
+            : "Chain not specified") +
+          " · Default destination: " +
+          esc(profile.default_destination_address || "Not configured") +
           "</div></div>" +
           '<div class="entity-actions">' +
           '<button class="btn-ghost" data-action="copyXpubWithWarning" data-arg0="' +

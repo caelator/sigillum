@@ -1496,7 +1496,7 @@ export const selfCheckRun = {
 // DiagnosticsResponse in response.rs (the diag grid renders a subset).
 export const diagnostics = {
   status: "ok",
-  version: "0.9.4",
+  version: "1.0.0",
   unlock_scope: "compartment",
   session_scope: "browser-session",
   active_session_count: 1,

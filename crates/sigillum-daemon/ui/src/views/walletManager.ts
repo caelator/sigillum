@@ -112,24 +112,37 @@ export function walletRowMeta(
       : xpubDisplay(profile as EthXpubWalletProfile),
   );
   const facts = [
-    "provider=" + profile.provider_profile,
-    "chain=" + (profile.chain_id != null ? String(profile.chain_id) : "-"),
-    "account=" + profile.project_account,
+    "Provider " + profile.provider_profile,
+    profile.chain_id != null
+      ? "Chain " + String(profile.chain_id)
+      : "Chain not specified",
+    "Account " + profile.project_account,
   ];
-  if (seed) facts.push("words=" + seed.word_count);
+  if (seed) facts.push(seed.word_count + " words");
   if (!seed) {
     const xpub = profile as EthXpubWalletProfile;
     if (xpub.external_account_xpub) {
-      facts.push(xpub.external_account_path ? "source=external custom account xpub" : "source=external account xpub");
-    }
-    else if (xpub.external_receive_xpub) {
-      facts.push(xpub.external_receive_path ? "source=external custom xpub" : "source=external receive xpub");
+      facts.push(
+        xpub.external_account_path
+          ? "Source: external custom account xpub"
+          : "Source: external account xpub",
+      );
+    } else if (xpub.external_receive_xpub) {
+      facts.push(
+        xpub.external_receive_path
+          ? "Source: external custom xpub"
+          : "Source: external receive xpub",
+      );
     }
   }
   lines.push(facts.join(" · "));
-  lines.push("balance=" + walletNativeBalanceFromGroups(profile.name, groups));
+  lines.push("Balance: " + walletNativeBalanceFromGroups(profile.name, groups));
   if (activeReceiveCount) {
-    lines.push("receive allocations=" + activeReceiveCount);
+    lines.push(
+      activeReceiveCount +
+        " receive " +
+        (activeReceiveCount === 1 ? "allocation" : "allocations"),
+    );
   }
   return lines.join("\n");
 }

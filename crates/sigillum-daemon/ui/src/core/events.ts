@@ -5,10 +5,11 @@
  * `?session=` because browser `EventSource` cannot set headers) and keeps
  * the `status`, `operations`, and `queueEvents` slices live:
  *
- * - `snapshot`  → replace `operations`, refetch full status via the PASSIVE
- *                 `GET /api/status` (snapshots carry only the locked flag),
- *                 and bump `resync` so views refetch their own resources.
- *                 Snapshots arrive on connect AND on lag-recovery resync.
+ * - `snapshot`  → reconcile live `operations`, passively fetch and reconcile
+ *                 the bounded history from `GET /api/operations`, refetch
+ *                 full status via `GET /api/status` (snapshots carry only the
+ *                 locked flag), and bump `resync` so views refetch their own
+ *                 resources. Snapshots arrive on connect AND on lag recovery.
  * - `operation` → upsert the full record into `operations` by id.
  * - `queue`     → prepend to `queueEvents` (capped); full records come from
  *                 `core/api.ts` list calls, per the slice contract.
@@ -51,6 +52,92 @@ export const QUEUE_EVENTS_CAP = 50;
 export const DEFAULT_MAX_CONSECUTIVE_ERRORS = 3;
 export const DEFAULT_POLL_INTERVAL_MS = 5000;
 export const MAX_RECONNECT_DELAY_MS = 30000;
+
+const TERMINAL_OPERATION_STATES = new Set(["canceled", "completed", "failed"]);
+const LIVE_OPERATION_STATES = new Set(["running", "cancel_requested"]);
+
+function isTerminalOperation(operation: Operation): boolean {
+  return TERMINAL_OPERATION_STATES.has(operation.state);
+}
+
+function isKnownLiveOperation(operation: Operation): boolean {
+  return LIVE_OPERATION_STATES.has(operation.state);
+}
+
+/**
+ * An SSE snapshot is authoritative for live operations, but intentionally
+ * omits terminal records. Keep only terminal records from the prior slice and
+ * let a snapshot record win if an id appears in both sets.
+ */
+function applyLiveSnapshot(
+  liveOperations: Operation[],
+  currentOperations: Operation[],
+): Operation[] {
+  const seen = new Set<string>();
+  const next: Operation[] = [];
+  for (const operation of liveOperations) {
+    if (seen.has(operation.id)) continue;
+    seen.add(operation.id);
+    next.push(operation);
+  }
+  for (const operation of currentOperations) {
+    if (!isTerminalOperation(operation) || seen.has(operation.id)) continue;
+    seen.add(operation.id);
+    next.push(operation);
+  }
+  return next;
+}
+
+/**
+ * Reconcile a completed bounded-list request with the live slice. The list is
+ * authoritative for which pre-request terminal records are still retained by
+ * the daemon. Current records win for ids that are in both sets, and records
+ * created or changed while the request was in flight are kept even when the
+ * response snapshot does not contain them yet.
+ *
+ * All listed records are accepted, not just the terminal states known by this
+ * client: operation states are an opaque, forward-compatible wire string.
+ */
+function reconcileOperationHistory(
+  currentOperations: Operation[],
+  listedOperations: Operation[],
+  requestBaseline: Map<string, Operation>,
+): Operation[] {
+  const currentById = new Map<string, Operation>();
+  for (const operation of currentOperations) {
+    if (!currentById.has(operation.id)) currentById.set(operation.id, operation);
+  }
+
+  const seen = new Set<string>();
+  const next: Operation[] = [];
+
+  // Keep snapshot-live work and in-flight SSE transitions at the front of the
+  // slice, where existing consumers expect active work to appear. A prior
+  // non-live record absent from the list was evicted and is deliberately not
+  // retained; only the server can classify an opaque future state reliably.
+  for (const current of currentOperations) {
+    const baseline = requestBaseline.get(current.id);
+    const changedWhileInFlight = baseline === undefined || baseline !== current;
+    if (
+      seen.has(current.id) ||
+      (!isKnownLiveOperation(current) && !changedWhileInFlight)
+    ) {
+      continue;
+    }
+    seen.add(current.id);
+    next.push(current);
+  }
+
+  for (const listed of listedOperations) {
+    if (seen.has(listed.id)) continue;
+    seen.add(listed.id);
+    // A live snapshot or a newer SSE transition must not be overwritten by a
+    // list response that was serialized before that frame reached the client.
+    next.push(currentById.get(listed.id) ?? listed);
+  }
+
+  return next;
+}
 
 /** Minimal EventSource surface the client relies on (mockable in tests). */
 export interface EventSourceLike {
@@ -152,6 +239,13 @@ export function createEventsClient(options: EventsClientOptions): EventsClient {
   let lastErrorHadNoSession = false;
   // Guards against stale async completions after stop().
   let generation = 0;
+  // Invalidates a terminal-history request when a newer snapshot arrives.
+  let snapshotRevision = 0;
+  // Last-trigger-wins guards for overlapping passive reads in one generation.
+  let statusRevision = 0;
+  let pollRequestRevision = 0;
+  let historyRetryTimer: unknown = null;
+  let historyRetryAttempt = 0;
 
   function setTransport(next: EventTransport): void {
     transport = next;
@@ -161,25 +255,103 @@ export function createEventsClient(options: EventsClientOptions): EventsClient {
   }
 
   async function refetchStatus(): Promise<void> {
+    const gen = generation;
+    const revision = ++statusRevision;
     const status: StatusResponse = await api.getStatus();
-    if (!running) return;
+    if (!running || gen !== generation || revision !== statusRevision) return;
     store.set("status", status);
   }
 
+  function clearHistoryRetry(resetAttempt = true): void {
+    if (historyRetryTimer !== null) {
+      clearTimeoutFn(historyRetryTimer);
+      historyRetryTimer = null;
+    }
+    if (resetAttempt) historyRetryAttempt = 0;
+  }
+
+  function invalidateSnapshotHistory(): void {
+    snapshotRevision += 1;
+    clearHistoryRetry();
+  }
+
+  function scheduleHistoryRetry(gen: number, revision: number): void {
+    if (
+      !running ||
+      gen !== generation ||
+      revision !== snapshotRevision ||
+      historyRetryTimer !== null
+    ) {
+      return;
+    }
+    historyRetryAttempt += 1;
+    const delay = Math.min(
+      1000 * 2 ** (historyRetryAttempt - 1),
+      MAX_RECONNECT_DELAY_MS,
+    );
+    historyRetryTimer = setTimeoutFn(() => {
+      historyRetryTimer = null;
+      if (!running || gen !== generation || revision !== snapshotRevision) return;
+      void refetchTerminalHistory(gen, revision);
+    }, delay);
+  }
+
+  async function refetchTerminalHistory(
+    gen: number,
+    revision: number,
+  ): Promise<void> {
+    const requestBaseline = new Map(
+      store.get("operations").map((operation) => [operation.id, operation]),
+    );
+    try {
+      const response = await api.listOperations();
+      if (!running || gen !== generation || revision !== snapshotRevision) return;
+      clearHistoryRetry();
+      store.update("operations", (operations) =>
+        reconcileOperationHistory(
+          operations,
+          response.operations,
+          requestBaseline,
+        ),
+      );
+    } catch (_) {
+      // The snapshot still carries complete live state. Retry this passive
+      // enrichment without degrading the healthy SSE transport.
+      scheduleHistoryRetry(gen, revision);
+    }
+  }
+
   async function pollTick(): Promise<void> {
+    if (!running || pollTimer === null) return;
     const gen = generation;
+    const pollRevision = ++pollRequestRevision;
+    const pollStatusRevision = ++statusRevision;
     try {
       const [status, operations] = await Promise.all([
         api.getStatus(),
         api.listOperations(),
       ]);
-      if (!running || gen !== generation) return;
-      store.set("status", status);
+      if (
+        !running ||
+        gen !== generation ||
+        pollRevision !== pollRequestRevision ||
+        pollTimer === null
+      ) {
+        return;
+      }
+      if (pollStatusRevision === statusRevision) store.set("status", status);
       store.set("operations", operations.operations);
       setTransport("poll");
       maybeUpgradeToSse();
     } catch (_) {
-      if (!running || gen !== generation) return;
+      if (
+        !running ||
+        gen !== generation ||
+        pollRevision !== pollRequestRevision ||
+        pollTimer === null
+      ) {
+        return;
+      }
       setTransport("error");
     }
   }
@@ -197,12 +369,18 @@ export function createEventsClient(options: EventsClientOptions): EventsClient {
   function startPolling(): void {
     stopSource();
     if (pollTimer !== null) return;
+    // A completed poll replaces the full operations slice, so no snapshot
+    // request from the retired SSE transport may merge into it afterward.
+    invalidateSnapshotHistory();
     setTransport("poll");
     pollTimer = setIntervalFn(() => void pollTick(), pollIntervalMs);
     void pollTick();
   }
 
   function stopPolling(): void {
+    // Clearing an interval does not cancel callbacks or requests already in
+    // flight. Invalidate both before connecting a new SSE source.
+    pollRequestRevision += 1;
     if (pollTimer !== null) {
       clearIntervalFn(pollTimer);
       pollTimer = null;
@@ -225,8 +403,14 @@ export function createEventsClient(options: EventsClientOptions): EventsClient {
     if (!event) return;
     switch (event.name) {
       case EVENT_NAME_SNAPSHOT: {
-        store.set("operations", event.payload.operations ?? []);
+        const gen = generation;
+        clearHistoryRetry();
+        const revision = ++snapshotRevision;
+        store.update("operations", (operations) =>
+          applyLiveSnapshot(event.payload.operations ?? [], operations),
+        );
         store.update("resync", (n) => n + 1);
+        void refetchTerminalHistory(gen, revision);
         // The snapshot carries only the locked flag; the full status (init
         // state, compartments) comes from the passive status endpoint.
         void refetchStatus().catch(() => {});
@@ -330,6 +514,7 @@ export function createEventsClient(options: EventsClientOptions): EventsClient {
       if (!running) return;
       running = false;
       generation += 1;
+      invalidateSnapshotHistory();
       stopSource();
       stopPolling();
       setTransport("off");

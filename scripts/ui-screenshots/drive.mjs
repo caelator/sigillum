@@ -391,6 +391,63 @@ function assertNoUnknownRequests(server, context) {
   );
 }
 
+async function assertNoHorizontalDocumentOverflow(cdp, context) {
+  const layout = await evaluate(
+    cdp,
+    `(() => {
+      const root = document.documentElement;
+      const clientWidth = root.clientWidth;
+      const scrollWidth = root.scrollWidth;
+      const measured = Array.from(document.body.querySelectorAll("*"))
+        .map((element) => {
+          const rect = element.getBoundingClientRect();
+          return {
+            selector: element.id
+              ? "#" + element.id
+              : element.tagName.toLowerCase() +
+                (element.classList.length
+                  ? "." + Array.from(element.classList).slice(0, 3).join(".")
+                  : ""),
+            left: Math.floor(rect.left),
+            right: Math.ceil(rect.right),
+            width: Math.ceil(rect.width),
+            height: Math.ceil(rect.height),
+            scrollWidth: element.scrollWidth,
+            clientWidth: element.clientWidth,
+          };
+        })
+        .filter((item) => item.width > 0 && item.height > 0);
+      const leftClipped = measured
+        .filter((item) => item.left < -1)
+        .sort((a, b) => a.left - b.left)
+        .slice(0, 5);
+      const offenders = measured
+        .filter(
+          (item) =>
+            item.left < -1 ||
+            item.right > clientWidth + 1 ||
+            item.scrollWidth > item.clientWidth + 1,
+        )
+        .sort((a, b) => Math.max(b.right, b.scrollWidth) - Math.max(a.right, a.scrollWidth))
+        .slice(0, 5);
+      return { clientWidth, scrollWidth, leftClipped, offenders };
+    })()`,
+    `${context} horizontal-overflow check`,
+  );
+  if (layout.scrollWidth <= layout.clientWidth && !layout.leftClipped.length) return;
+  const detail = layout.offenders
+    .map(
+      (item) =>
+        `${item.selector} (left=${item.left}, right=${item.right}, ` +
+        `scroll=${item.scrollWidth}, client=${item.clientWidth})`,
+    )
+    .join("; ");
+  fail(
+    `${context} has horizontal clipping or document overflow: scrollWidth=${layout.scrollWidth}, ` +
+      `clientWidth=${layout.clientWidth}${detail ? `; likely offenders: ${detail}` : ""}`,
+  );
+}
+
 let server;
 let chrome;
 let cdp;
@@ -466,6 +523,7 @@ try {
       }
       await sleep(400);
     }
+    await assertNoHorizontalDocumentOverflow(cdp, entry.name);
     await shot(cdp, entry.name, { fullPage: !!entry.fullPage });
     await sleep(100);
     assertNoPageErrors(cdp, entry.name);

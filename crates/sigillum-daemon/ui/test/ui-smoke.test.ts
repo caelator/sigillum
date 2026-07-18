@@ -78,6 +78,87 @@ async function tick(): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, 0));
 }
 
+const KEY_VALUE_PROSE = /\b[A-Za-z][A-Za-z0-9_-]*=/;
+const MACHINE_CODE_PROSE =
+  /\b(?:[a-z][a-z0-9]*(?:_[a-z0-9]+)+|[a-z][a-z0-9]*(?:[A-Z][A-Za-z0-9]*)+)\b/;
+
+function renderedText(html: string): string {
+  return html
+    // Closed technical disclosures are not part of the default view. Their
+    // exact wire identifiers remain available to an operator who expands
+    // them, while the acceptance gate audits the prose visible by default.
+    .replace(/<details\b(?![^>]*\bopen\b)[^>]*>[\s\S]*?<\/details>/gi, " ")
+    .replace(/<[^>]*>/g, " ")
+    .replace(/&nbsp;|&#160;/g, " ")
+    .replace(/&amp;/g, "&")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function assertNoKeyValueProse(html: string, surface: string): void {
+  const text = renderedText(html);
+  const match = text.match(KEY_VALUE_PROSE);
+  equal(
+    match,
+    null,
+    `${surface} must use operator-facing labels, not key=value prose${
+      match ? ` (found ${match[0]})` : ""
+    }`,
+  );
+}
+
+function assertNoRawQuantityHex(
+  html: string,
+  surface: string,
+  allowedAddresses: readonly string[] = [],
+): void {
+  const text = renderedText(html);
+  const allowed = new Set(allowedAddresses.map((address) => address.toLowerCase()));
+  const unexpected = (text.match(/\b0x[0-9a-fA-F]+\b/g) || []).filter((token) => {
+    return !allowed.has(token.toLowerCase());
+  });
+  deepEqual(
+    unexpected,
+    [],
+    `${surface} must format quantities for people; only explicitly expected EVM addresses may remain hex`,
+  );
+}
+
+function assertNoMachineCodeProse(html: string, surface: string): void {
+  const text = renderedText(html);
+  const match = text.match(MACHINE_CODE_PROSE);
+  equal(
+    match,
+    null,
+    `${surface} must translate machine codes into operator-facing language${
+      match ? ` (found ${match[0]})` : ""
+    }`,
+  );
+}
+
+test("visual prose guards reject camelCase and unapproved full-length hex", () => {
+  function rejected(run: () => void): boolean {
+    try {
+      run();
+      return false;
+    } catch (_) {
+      return true;
+    }
+  }
+  equal(
+    rejected(() =>
+      assertNoMachineCodeProse("<p>defaultDestination</p>", "guard fixture"),
+    ),
+    true,
+  );
+  const address = "0x1111111111111111111111111111111111111111";
+  equal(
+    rejected(() => assertNoRawQuantityHex("<p>" + address + "</p>", "guard fixture")),
+    true,
+  );
+  assertNoRawQuantityHex("<p>" + address + "</p>", "guard fixture", [address]);
+});
+
 function confirmOverlay(): any {
   return (
     ((document.body.children as unknown as any[]) || []).find(
@@ -929,45 +1010,38 @@ test("setup wizard can defer merkle claim execution without policy update", () =
   });
 });
 
-test("setup wizard enables sponsor gas top-ups from done step", async () => {
+test("setup wizard routes gas top-up opt-in through the finite-cap policy editor", () => {
   const dom = installDom(["wizGasTopupsChoiceStatus"]);
   dom.el("wizGasTopupsChoiceStatus").classList.add("hidden");
   const calls: Array<{ method: string; path: string; body?: any }> = [];
   const toasts: Array<{ message: string; type?: string }> = [];
+  let policyNavigations = 0;
 
   const wizard = createSetupWizard({
     api: async (method, path, body) => {
       calls.push({ method, path, body });
-      if (path === "/api/treasury/policy") return { policy: null };
       return {};
     },
     toast: (message, type) => toasts.push({ message, type }),
     refresh: () => undefined,
+    navigateToMovePolicy: () => {
+      policyNavigations += 1;
+    },
     submitNewFido2Pin: async () => undefined,
     friendlyFidoError: (message) => String(message),
   });
 
-  await wizard.wizEnableGasTopups();
+  wizard.wizEnableGasTopups();
 
-  deepEqual(calls, [
-    {
-      method: "GET",
-      path: "/api/treasury/policy",
-      body: undefined,
-    },
-    {
-      method: "POST",
-      path: "/api/treasury/policy/update",
-      body: { enabled: false, allow_gas_topups: true },
-    },
-  ]);
+  deepEqual(calls, []);
+  equal(policyNavigations, 1);
   equal(dom.el("wizGasTopupsChoiceStatus").classList.contains("hidden"), false);
   equal(
     dom.el("wizGasTopupsChoiceStatus").textContent,
-    "Sponsor gas top-up opt-in recorded. Top-ups only appear inside reviewed consolidation plans, are capped by the Treasury policy, and cross-party sponsor funding is still linkage-checked.",
+    "Sponsor gas top-ups need a finite maximum. Open Move, enter the cap in Treasury policy, review the recovery gates, and save.",
   );
   deepEqual(toasts.pop(), {
-    message: "Sponsor gas top-up opt-in recorded",
+    message: "Set a finite sponsor gas top-up cap in Treasury policy.",
     type: undefined,
   });
 });
@@ -3151,7 +3225,10 @@ test("treasury overview loader renders tiles, chains, groups, routing, and risk"
       latest_approved_steps: 1,
       latest_executable_steps: 2,
       latest_blocked_steps: 1,
-      policy_violations: ["destination_not_allowed:0xdead"],
+      policy_violations: [
+        "exceeds_policy_plan_cap",
+        "destination_not_allowed:0x3333333333333333333333333333333333333333",
+      ],
     },
     receive: {
       active_allocations: 3,
@@ -3186,44 +3263,76 @@ test("treasury overview loader renders tiles, chains, groups, routing, and risk"
   ok(dom.el("treasuryPartyList").innerHTML.includes("No counterparties yet."));
   ok(dom.el("treasuryReceiveParty").innerHTML.includes("No party (optional)"));
 
-  ok(dom.el("treasuryChainList").innerHTML.includes("chain 1 · ETH"));
-  ok(dom.el("treasuryChainList").innerHTML.includes("addresses=3/5 funded"));
-  ok(dom.el("treasuryChainList").innerHTML.includes("native=1.5 ETH"));
+  ok(dom.el("treasuryChainList").innerHTML.includes("Chain 1 · ETH"));
+  ok(dom.el("treasuryChainList").innerHTML.includes("3 of 5 addresses funded"));
+  ok(dom.el("treasuryChainList").innerHTML.includes("1.5 ETH native"));
 
   ok(dom.el("treasuryGroupList").innerHTML.includes("eth-seed/archive"));
-  ok(dom.el("treasuryGroupList").innerHTML.includes("native=1 ETH"));
-  ok(dom.el("treasuryGroupList").innerHTML.includes("erc20=2"));
-  ok(dom.el("treasuryGroupList").innerHTML.includes("claimable=1"));
-  ok(dom.el("treasuryGroupList").innerHTML.includes("approvals=2"));
-  ok(dom.el("treasuryGroupList").innerHTML.includes("dormant=1"));
+  ok(dom.el("treasuryGroupList").innerHTML.includes("1 ETH native"));
+  ok(dom.el("treasuryGroupList").innerHTML.includes("2 ERC-20 holdings"));
+  ok(dom.el("treasuryGroupList").innerHTML.includes("1 claimable holding"));
+  ok(dom.el("treasuryGroupList").innerHTML.includes("2 approval exposures"));
+  ok(dom.el("treasuryGroupList").innerHTML.includes("1 dormant candidate"));
   ok(dom.el("treasuryGroupList").innerHTML.includes("approval exposure"));
   ok(dom.el("treasuryGroupList").innerHTML.includes("eth-watch/watch:client"));
-  ok(dom.el("treasuryGroupList").innerHTML.includes("native=0 ·"));
+  ok(dom.el("treasuryGroupList").innerHTML.includes("0 native ·"));
 
   ok(
     dom
       .el("treasuryRoutingList")
-      .innerHTML.includes("hot=0x1111111111111111111111111111111111111111 (0.5)"),
+      .innerHTML.includes(
+        "Hot wallet: 0x1111111111111111111111111111111111111111 · 0.5 native units",
+      ),
   );
   ok(
     dom
       .el("treasuryRoutingList")
-      .innerHTML.includes("treasury=0x2222222222222222222222222222222222222222 (2)"),
+      .innerHTML.includes(
+        "Treasury: 0x2222222222222222222222222222222222222222 · 2 native units",
+      ),
   );
   ok(dom.el("treasuryRoutingList").innerHTML.includes("ready"));
   ok(dom.el("treasuryRoutingList").innerHTML.includes("unconfigured"));
-  ok(dom.el("treasuryRoutingList").innerHTML.includes("hot=-"));
+  ok(dom.el("treasuryRoutingList").innerHTML.includes("Hot wallet: Not configured"));
 
-  ok(dom.el("treasuryRiskPlanList").innerHTML.includes("critical=1"));
-  ok(dom.el("treasuryRiskPlanList").innerHTML.includes("total=4"));
+  ok(dom.el("treasuryRiskPlanList").innerHTML.includes("1 critical finding"));
+  ok(dom.el("treasuryRiskPlanList").innerHTML.includes("4 total findings"));
   ok(dom.el("treasuryRiskPlanList").innerHTML.includes("plan-9"));
   ok(dom.el("treasuryRiskPlanList").innerHTML.includes("review required"));
-  ok(dom.el("treasuryRiskPlanList").innerHTML.includes("executable=2"));
+  ok(dom.el("treasuryRiskPlanList").innerHTML.includes("2 executable steps"));
   ok(
     dom
       .el("treasuryRiskPlanList")
-      .innerHTML.includes("policyViolations=destination_not_allowed:0xdead"),
+      .innerHTML.includes(
+        "Destination 0x3333333333333333333333333333333333333333 is not on the policy allow-list",
+      ),
   );
+  ok(
+    dom
+      .el("treasuryRiskPlanList")
+      .innerHTML.includes("The plan exceeds the policy's native-value cap"),
+  );
+  const expectedAddresses: Record<string, readonly string[]> = {
+    treasuryRoutingList: [
+      "0x1111111111111111111111111111111111111111",
+      "0x2222222222222222222222222222222222222222",
+    ],
+    treasuryRiskPlanList: ["0x3333333333333333333333333333333333333333"],
+  };
+  for (const id of [
+    "treasuryChainList",
+    "treasuryGroupList",
+    "treasuryRoutingList",
+    "treasuryRiskPlanList",
+  ]) {
+    assertNoKeyValueProse(dom.el(id).innerHTML, `visible Portfolio #${id}`);
+    assertNoRawQuantityHex(
+      dom.el(id).innerHTML,
+      `visible Portfolio #${id}`,
+      expectedAddresses[id] || [],
+    );
+    assertNoMachineCodeProse(dom.el(id).innerHTML, `visible Portfolio #${id}`);
+  }
 
   const toasts: Array<{ message: string; type?: string }> = [];
   const failing = createTreasuryActions({
@@ -4556,9 +4665,9 @@ test("wallet row meta helpers summarize identity, balances, and xpub display", (
   equal(
     walletRowMeta(walletManagerSeedProfile(), groups, 2),
     "0x1111111111111111111111111111111111111111\n" +
-      "provider=mainnet · chain=1 · account=0 · words=24\n" +
-      "balance=1.5 ETH on chain 1 · 0.2 on 8453\n" +
-      "receive allocations=2",
+      "Provider mainnet · Chain 1 · Account 0 · 24 words\n" +
+      "Balance: 1.5 ETH on chain 1 · 0.2 on 8453\n" +
+      "2 receive allocations",
   );
 
   const xpubProfile: EthXpubWalletProfile = {
@@ -4572,8 +4681,8 @@ test("wallet row meta helpers summarize identity, balances, and xpub display", (
   equal(
     walletRowMeta(xpubProfile, [], null),
     "receive path m/44'/60'/3'/0\n" +
-      "provider=base · chain=- · account=3\n" +
-      "balance=not scanned yet",
+      "Provider base · Chain not specified · Account 3\n" +
+      "Balance: not scanned yet",
   );
   const accountXpubProfile = {
     ...xpubProfile,
@@ -4584,16 +4693,16 @@ test("wallet row meta helpers summarize identity, balances, and xpub display", (
   equal(
     walletRowMeta(accountXpubProfile, [], null),
     "external account path m/44'/60'/8'/0\n" +
-      "provider=base · chain=- · account=3 · source=external custom account xpub\n" +
-      "balance=not scanned yet",
+      "Provider base · Chain not specified · Account 3 · Source: external custom account xpub\n" +
+      "Balance: not scanned yet",
   );
   const defaultAccountXpubProfile = { ...xpubProfile, external_account_xpub: "xpub-account" };
   equal(xpubDisplay(defaultAccountXpubProfile), "external receive path m/44'/60'/3'/0");
   equal(
     walletRowMeta(defaultAccountXpubProfile, [], null),
     "external receive path m/44'/60'/3'/0\n" +
-      "provider=base · chain=- · account=3 · source=external account xpub\n" +
-      "balance=not scanned yet",
+      "Provider base · Chain not specified · Account 3 · Source: external account xpub\n" +
+      "Balance: not scanned yet",
   );
   const customXpubProfile = {
     ...xpubProfile,
@@ -4604,8 +4713,8 @@ test("wallet row meta helpers summarize identity, balances, and xpub display", (
   equal(
     walletRowMeta(customXpubProfile, [], null),
     "external receive path m/44'/60'/3'/1\n" +
-      "provider=base · chain=- · account=3 · source=external custom xpub\n" +
-      "balance=not scanned yet",
+      "Provider base · Chain not specified · Account 3 · Source: external custom xpub\n" +
+      "Balance: not scanned yet",
   );
 });
 
@@ -4660,10 +4769,15 @@ test("wallet manager list renders unified wallets with balances and fallbacks", 
   ok(html.includes(">signer<"));
   ok(html.includes(">watch-only<"));
   ok(html.includes("0x1111111111111111111111111111111111111111"));
-  ok(html.includes("balance=1.5 ETH on chain 1 · 0.2 on 8453"));
-  ok(html.includes("receive allocations=1"));
+  ok(html.includes("Balance: 1.5 ETH on chain 1 · 0.2 on 8453"));
+  ok(html.includes("1 receive allocation"));
   ok(html.includes("receive path m/44'/60'/3'/0"));
-  ok(html.includes("balance=not scanned yet"));
+  ok(html.includes("Balance: not scanned yet"));
+  assertNoKeyValueProse(html, "visible Portfolio #walletManagerCard");
+  assertNoRawQuantityHex(html, "visible Portfolio #walletManagerCard", [
+    "0x1111111111111111111111111111111111111111",
+  ]);
+  assertNoMachineCodeProse(html, "visible Portfolio #walletManagerCard");
   equal(html.split('data-action="copyWalletAddress"').length - 1, 1);
   equal(html.split('data-action="promptWalletReceiveAddress"').length - 1, 2);
   equal(html.split('data-action="deleteManagedWallet"').length - 1, 2);
@@ -4831,8 +4945,124 @@ test("provider profile editor posts fee estimation opt-in", async () => {
       compartment_id: null,
       fee_estimation_enabled: true,
     },
+    {
+      name: "invalid-fees",
+      rpc_url: "https://invalid-fees.example.test",
+      chain_id: 10,
+      compartment_id: 2,
+      max_priority_fee_per_gas_hex: "0xnot-hex",
+      max_fee_per_gas_hex: 123,
+      native_gas_limit: 21000,
+      erc20_gas_limit: 90000,
+      fee_estimation_enabled: false,
+    },
   ]);
-  ok(dom.el("providerProfileList").innerHTML.includes("feeEstimation=on"));
+  ok(dom.el("providerProfileList").innerHTML.includes("Fee estimation on"));
+  equal(
+    dom.el("providerProfileList").innerHTML.split("Invalid saved value").length - 1,
+    2,
+  );
+});
+
+test("visible Portfolio legacy profile rows reject key=value prose", () => {
+  const dom = installDom([
+    "providerProfileList",
+    "walletProfileList",
+    "xpubWalletProfileList",
+    "seedWalletProfileList",
+  ]);
+  const wallets = createWalletActions({
+    api: async () => ({}),
+    toast: () => undefined,
+    refresh: () => undefined,
+    copyText: async () => undefined,
+  });
+
+  wallets.renderProviderProfiles([
+    {
+      name: "mainnet",
+      rpc_url: "https://rpc.example.test",
+      chain_id: 1,
+      compartment_id: 2,
+      auth_token_key: "mainnet_rpc_token",
+      max_priority_fee_per_gas_hex: "0x3b9aca00",
+      max_fee_per_gas_hex: "0x77359400",
+      native_gas_limit: 21000,
+      erc20_gas_limit: 90000,
+      fee_estimation_enabled: true,
+    },
+  ]);
+  wallets.renderWalletProfiles([
+    {
+      name: "stealth-ops",
+      wallet: "ops-wallet",
+      short_name: "OPS",
+      provider_profile: "mainnet",
+      compartment_id: 2,
+      chain_id: 1,
+      default_destination_address: "0x1111111111111111111111111111111111111111",
+    },
+  ]);
+  wallets.renderXpubWalletProfiles([
+    {
+      name: "watch-vault",
+      project_account: 3,
+      provider_profile: "mainnet",
+      compartment_id: 2,
+      chain_id: 1,
+      external_account_xpub: "xpub-account",
+      external_account_path: "m/44'/60'/3'",
+      default_destination_address: "0x2222222222222222222222222222222222222222",
+    },
+  ]);
+  wallets.renderSeedWalletProfiles([
+    {
+      name: "ops-seed",
+      label: "Operations",
+      word_count: 24,
+      project_account: 0,
+      provider_profile: "mainnet",
+      compartment_id: 2,
+      chain_id: 1,
+      account_path: "m/44'/60'/0'",
+      receive_path: "m/44'/60'/0'/0",
+      receive_xpub: "xpub-receive",
+      first_receive_address: "0x3333333333333333333333333333333333333333",
+      default_destination_address: "0x4444444444444444444444444444444444444444",
+    },
+  ]);
+
+  ok(dom.el("providerProfileList").innerHTML.includes("RPC endpoint: https://rpc.example.test"));
+  ok(dom.el("providerProfileList").innerHTML.includes("Priority fee cap: 1 gwei"));
+  ok(dom.el("providerProfileList").innerHTML.includes("Max fee cap: 2 gwei"));
+  ok(dom.el("providerProfileList").innerHTML.includes("Authentication key configured"));
+  ok(dom.el("providerProfileList").innerHTML.includes("Connection key reference"));
+  ok(dom.el("providerProfileList").innerHTML.includes("mainnet_rpc_token"));
+  ok(dom.el("walletProfileList").innerHTML.includes("Default destination: 0x1111"));
+  ok(dom.el("xpubWalletProfileList").innerHTML.includes("Account path m/44'/60'/3'"));
+  ok(dom.el("seedWalletProfileList").innerHTML.includes("First address: 0x3333"));
+  const expectedAddresses: Record<string, readonly string[]> = {
+    walletProfileList: ["0x1111111111111111111111111111111111111111"],
+    xpubWalletProfileList: ["0x2222222222222222222222222222222222222222"],
+    seedWalletProfileList: [
+      "0x3333333333333333333333333333333333333333",
+      "0x4444444444444444444444444444444444444444",
+    ],
+  };
+  for (const id of [
+    "providerProfileList",
+    "walletProfileList",
+    "xpubWalletProfileList",
+    "seedWalletProfileList",
+  ]) {
+    assertNoKeyValueProse(dom.el(id).innerHTML, `visible Portfolio #${id}`);
+    assertNoRawQuantityHex(
+      dom.el(id).innerHTML,
+      `visible Portfolio #${id}`,
+      expectedAddresses[id] || [],
+    );
+    assertNoMachineCodeProse(dom.el(id).innerHTML, `visible Portfolio #${id}`);
+  }
 });
 
 test("xpub export surfaces the exposure warning as toast and pinned box", async () => {

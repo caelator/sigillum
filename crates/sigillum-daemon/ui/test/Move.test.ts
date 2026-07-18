@@ -440,6 +440,48 @@ test("Move treasuryPolicySummary ports the Phase 0 plain-English summary", () =>
     on.some((line) => line.includes("Cross-party linkage blocking is on")),
     on.join(" "),
   );
+
+  const legacyUncapped = treasuryPolicySummary(
+    makePolicy({ allow_gas_topups: true, max_gas_topup_wei_hex: null }),
+  );
+  ok(
+    legacyUncapped.some((line) =>
+      line.includes("remain disabled until a valid explicit maximum is saved"),
+    ),
+    legacyUncapped.join(" "),
+  );
+  const malformedCap = treasuryPolicySummary(
+    makePolicy({
+      allow_gas_topups: true,
+      max_gas_topup_wei_hex: "0xnot-hex",
+    }),
+  );
+  ok(
+    malformedCap.some((line) => line.includes("remain disabled")),
+    malformedCap.join(" "),
+  );
+  const barePrefixCap = treasuryPolicySummary(
+    makePolicy({
+      allow_gas_topups: true,
+      max_gas_topup_wei_hex: "0x",
+    }),
+  );
+  ok(
+    barePrefixCap.some((line) => line.includes("remain disabled")),
+    barePrefixCap.join(" "),
+  );
+  const explicitlyCapped = treasuryPolicySummary(
+    makePolicy({
+      allow_gas_topups: true,
+      max_gas_topup_wei_hex: "0x1",
+    }),
+  );
+  ok(
+    explicitlyCapped.some((line) =>
+      line.includes("allowed up to the explicit maximum"),
+    ),
+    explicitlyCapped.join(" "),
+  );
 });
 
 test("Move amount parsers round-trip ETH and gwei", () => {
@@ -896,5 +938,105 @@ test("Move policy editor flags client-side validation before any request", async
     ),
     "inline message shown",
   );
+  controller.unmount();
+});
+
+test("Move recovery preset requires an explicit gas top-up cap before save", async () => {
+  const dom = installMoveDom();
+  const updates: Record<string, unknown>[] = [];
+  const api = fakeApi({
+    getTreasuryPolicy: async () => ({ policy: makePolicy() }),
+    updateTreasuryPolicy: async (body) => {
+      updates.push(body as unknown as Record<string, unknown>);
+      return { status: "ok", policy: makePolicy() };
+    },
+  });
+  const { runtime } = makeRuntime(api);
+  const controller = createMoveDestination(runtime);
+  controller.mount(runtime.store.get("route"));
+  await flush();
+
+  const policyCard = dom.el("policyCard");
+  const recoveryPreset = findByRegion(policyCard, "preset-recovery");
+  ok(recoveryPreset, "recovery preset rendered");
+  recoveryPreset.click();
+
+  const allowTopups = findByRegion(
+    policyCard,
+    "policy-allow-gas-topups",
+  ) as FakeElement & { checked: boolean };
+  const maxTopup = findByRegion(
+    policyCard,
+    "policy-max-gas-topup",
+  ) as FakeElement & { value: string };
+  equal(allowTopups.checked, true, "recovery preset turns the gate on");
+  equal(maxTopup.value, "", "preset does not invent a numeric cap");
+  ok(
+    textOf(findByRegion(policyCard, "preset-note")).includes(
+      "Enter a finite maximum gas top-up",
+    ),
+    "preset explains the required operator choice",
+  );
+  ok(
+    textOf(findByRegion(policyCard, "policy-preview")).includes(
+      "remain disabled until a valid explicit maximum is saved",
+    ),
+    "preview reflects the effective fail-closed gate",
+  );
+
+  const form = findAll(policyCard, (element) => element.tagName === "FORM")[0];
+  form.dispatchEvent({
+    type: "submit",
+    target: form,
+    preventDefault: () => {},
+  });
+  await flush();
+
+  equal(updates.length, 0, "invalid policy never reaches the API");
+  ok(maxTopup.classList.contains("input-invalid"), "cap field marked invalid");
+  ok(
+    textOf(findByRegion(policyCard, "policy-field-errors")).includes(
+      "Enter a finite max gas top-up",
+    ),
+    "inline cap requirement is visible",
+  );
+  equal(
+    findAll(dom.document.body, (element) =>
+      Boolean(element.attributes["data-confirm-overlay"]),
+    ).length,
+    0,
+    "danger confirm does not open for an invalid policy",
+  );
+
+  maxTopup.value = "0.05";
+  form.dispatchEvent({ type: "input", target: maxTopup });
+  ok(
+    textOf(findByRegion(policyCard, "policy-preview")).includes(
+      "allowed up to the explicit maximum",
+    ),
+    "preview reflects the operator-entered cap",
+  );
+  form.dispatchEvent({
+    type: "submit",
+    target: form,
+    preventDefault: () => {},
+  });
+  await flush();
+  const overlay = findAll(dom.document.body, (element) =>
+    Boolean(element.attributes["data-confirm-overlay"]),
+  )[0];
+  ok(
+    textOf(overlay).includes("allowed up to the explicit maximum"),
+    "confirmation reflects the capped policy",
+  );
+  const action = findAll(overlay, (element) =>
+    "data-confirm-action" in element.attributes,
+  )[0];
+  action.click();
+  await flush();
+
+  equal(updates.length, 1, "capped recovery policy reaches the API");
+  equal(updates[0].allow_gas_topups, true);
+  equal(updates[0].max_gas_topup_wei_hex, "0xb1a2bc2ec50000");
   controller.unmount();
 });

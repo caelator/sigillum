@@ -278,10 +278,10 @@
               <p class="helper-text hidden" id="wizClaimExecutionChoiceStatus"></p>
             </div>
             <div class="trust-point">
-              <div class="tp-head">Allow sponsor gas top-ups (optional)</div>
-              <div class="tp-body">Off by default. Enabling lets consolidation plans add fund_gas steps from the wallet's sponsor address when a source address cannot pay gas. Sigillum-generated top-ups are checked by the payer-linkage analysis: cross-party sponsor funding warns, and is blocked when linkage protection is on. Manual gas funding stays your responsibility - fund per-payer gas from per-payer sources. You can change this anytime in Treasury policy.</div>
+              <div class="tp-head">Configure sponsor gas top-ups (optional)</div>
+              <div class="tp-body">Off by default. Gas top-ups require an explicit finite maximum in Treasury policy. Configure the cap in Move before enabling this gate. Sigillum-generated top-ups are checked by the payer-linkage analysis: cross-party sponsor funding warns, and is blocked when linkage protection is on. Manual gas funding stays your responsibility - fund per-payer gas from per-payer sources.</div>
               <div class="form-row">
-                <button class="btn-primary" data-action="wizEnableGasTopups">Enable gas top-ups</button>
+                <button class="btn-primary" data-action="wizEnableGasTopups">Set gas top-up cap</button>
                 <button class="btn-ghost" data-action="wizDeclineGasTopups">Decide later</button>
               </div>
               <p class="helper-text hidden" id="wizGasTopupsChoiceStatus"></p>

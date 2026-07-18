@@ -542,6 +542,7 @@ const setupWizard = createSetupWizard({
   api,
   toast,
   refresh: () => refresh(),
+  navigateToMovePolicy: () => coreRuntime?.router.navigate('#/move'),
   submitNewFido2Pin: fido2Actions.submitNewFido2Pin,
   friendlyFidoError: fido2Actions.friendlyFidoError,
 });

@@ -683,6 +683,30 @@
   gap: var(--space-3);
 }
 
+/* The shared dense-form label stays on one line, which is useful in legacy
+   row forms but makes a policy-grid cell use the combined width of its label,
+   input, and hint. Stack only these fields so long guidance wraps inside the
+   grid column instead of widening the document. */
+.move-policy-grid > .field-label {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  align-self: stretch;
+  gap: var(--space-1);
+  min-width: 0;
+  white-space: normal;
+}
+
+.move-policy-grid > .field-label > .input-mid {
+  flex: none !important;
+  width: 100%;
+}
+
+.move-policy-grid > .field-label > .field-hint {
+  margin-top: 0;
+  white-space: normal;
+}
+
 .move-policy-preview {
   padding: var(--space-3) var(--space-4);
   background: var(--accent-tint);
