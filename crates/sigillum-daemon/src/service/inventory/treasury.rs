@@ -54,6 +54,8 @@ const DEFAULT_HOT_TARGET_WEI_HEX: &str = "0xde0b6b3a7640000";
 /// runaway caller, not a treasury that genuinely needs a million addresses.
 const MAX_RECEIVE_INDEX: u32 = 1_000_000;
 
+type ReceivingAllocationIdentity = (String, String, u64, String);
+
 /// Saturating big-endian addition of two 256-bit quantities.
 pub(in crate::service) fn add_u256(left: &[u8; 32], right: &[u8; 32]) -> [u8; 32] {
     let mut out = [0u8; 32];
@@ -102,6 +104,52 @@ fn balance_is_nonzero(value: &[u8; 32]) -> bool {
 
 fn usize_to_u32_count(value: usize) -> u32 {
     value.min(u32::MAX as usize) as u32
+}
+
+fn receiving_allocation_identity(
+    allocation: &TreasuryReceiveAllocation,
+) -> ServiceResult<ReceivingAllocationIdentity> {
+    Ok((
+        allocation.wallet_family.clone(),
+        allocation.wallet_profile.clone(),
+        allocation.chain_id,
+        normalize_address(&allocation.address)?,
+    ))
+}
+
+fn active_receiving_allocations(
+    allocations: &[TreasuryReceiveAllocation],
+) -> ServiceResult<Vec<TreasuryReceiveAllocation>> {
+    let mut seen = BTreeSet::new();
+    let mut active = Vec::new();
+    for allocation in allocations
+        .iter()
+        .filter(|allocation| allocation.status == RECEIVE_STATUS_ACTIVE)
+    {
+        let identity = receiving_allocation_identity(allocation)?;
+        if seen.insert(identity.clone()) {
+            let mut allocation = allocation.clone();
+            allocation.address = identity.3;
+            active.push(allocation);
+        }
+    }
+    Ok(active)
+}
+
+fn receiving_refresh_work_items(
+    allocations: &[TreasuryReceiveAllocation],
+    providers: &[EvmProviderProfile],
+) -> Vec<(TreasuryReceiveAllocation, EvmProviderProfile)> {
+    let mut work_items = Vec::new();
+    for allocation in allocations {
+        for provider in providers
+            .iter()
+            .filter(|provider| provider.chain_id == allocation.chain_id)
+        {
+            work_items.push((allocation.clone(), provider.clone()));
+        }
+    }
+    work_items
 }
 
 fn has_classification(
@@ -661,20 +709,7 @@ impl SigillumService {
             select_providers(&registry.evm_providers, None)?
         };
         let mut inventory = load_inventory_state(&self.state.base_dir)?;
-        let mut seen_addresses = BTreeSet::new();
-        let mut active_allocations = Vec::new();
-        for allocation in inventory
-            .receive_allocations
-            .iter()
-            .filter(|allocation| allocation.status == RECEIVE_STATUS_ACTIVE)
-        {
-            let normalized_address = normalize_address(&allocation.address)?;
-            if seen_addresses.insert(normalized_address.clone()) {
-                let mut allocation = allocation.clone();
-                allocation.address = normalized_address;
-                active_allocations.push(allocation);
-            }
-        }
+        let mut active_allocations = active_receiving_allocations(&inventory.receive_allocations)?;
 
         let addresses_requested = usize_to_u32_count(active_allocations.len());
         let cap = self.state.runtime_policy().receiving_refresh_address_cap;
@@ -683,19 +718,29 @@ impl SigillumService {
 
         let mut errors = Vec::new();
         let mut provider_error_count = 0usize;
-        let mut refreshed_addresses = BTreeSet::new();
+        let mut refreshed_allocations = BTreeSet::new();
         if !providers.is_empty() {
             let limit = self
                 .state
                 .runtime_policy()
                 .provider_balance_observation_concurrency
                 .max(1);
-            let mut work_items: Vec<(TreasuryReceiveAllocation, EvmProviderProfile)> = Vec::new();
             for allocation in &active_allocations {
-                for provider in &providers {
-                    work_items.push((allocation.clone(), provider.clone()));
+                if !providers
+                    .iter()
+                    .any(|provider| provider.chain_id == allocation.chain_id)
+                {
+                    provider_error_count += 1;
+                    errors.push(format!(
+                        "no provider configured for chain={} wallet_family={} wallet_profile={} address={}",
+                        allocation.chain_id,
+                        allocation.wallet_family,
+                        allocation.wallet_profile,
+                        allocation.address
+                    ));
                 }
             }
+            let work_items = receiving_refresh_work_items(&active_allocations, &providers);
 
             for chunk in work_items.chunks(limit) {
                 for (allocation, provider) in chunk {
@@ -739,7 +784,8 @@ impl SigillumService {
                                     last_checked_at_unix: now,
                                 },
                             );
-                            refreshed_addresses.insert(allocation.address.to_ascii_lowercase());
+                            refreshed_allocations
+                                .insert(receiving_allocation_identity(allocation)?);
                         }
                         Err(error) => {
                             provider_error_count += 1;
@@ -791,7 +837,7 @@ impl SigillumService {
             }
         };
 
-        let addresses_refreshed = usize_to_u32_count(refreshed_addresses.len());
+        let addresses_refreshed = usize_to_u32_count(refreshed_allocations.len());
         let addresses_skipped = usize_to_u32_count(addresses_skipped);
         let provider_status =
             if providers.is_empty() || (provider_error_count > 0 && addresses_refreshed == 0) {
@@ -2303,6 +2349,21 @@ mod tests {
         }
     }
 
+    fn receiving_provider(name: &str, chain_id: u64) -> EvmProviderProfile {
+        EvmProviderProfile {
+            name: name.into(),
+            rpc_url: format!("https://{name}.invalid"),
+            auth_token_key: None,
+            compartment_id: 0,
+            chain_id,
+            max_priority_fee_per_gas_hex: None,
+            max_fee_per_gas_hex: None,
+            native_gas_limit: None,
+            erc20_gas_limit: None,
+            fee_estimation_enabled: false,
+        }
+    }
+
     #[test]
     fn next_receive_index_starts_at_zero_when_nothing_is_known() {
         assert_eq!(next_receive_index(&[], &[], "eth-seed", "seed-main"), 0);
@@ -2436,6 +2497,92 @@ mod tests {
 
         assert!(item.balance_known);
         assert_eq!(item.balance_native_wei_hex.as_deref(), Some("0x2"));
+    }
+
+    #[test]
+    fn active_receiving_allocations_deduplicate_by_wallet_chain_and_address() {
+        let address = "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+        let base = receiving_allocation("alloc-base", address, RECEIVE_STATUS_ACTIVE, None, 1);
+        let mut exact_duplicate = base.clone();
+        exact_duplicate.id = "alloc-duplicate".into();
+        exact_duplicate.address = address.to_ascii_uppercase();
+        let mut other_family = base.clone();
+        other_family.id = "alloc-family".into();
+        other_family.wallet_family = "eth-seed".into();
+        let mut other_profile = base.clone();
+        other_profile.id = "alloc-profile".into();
+        other_profile.wallet_profile = "other-profile".into();
+        let mut other_chain = base.clone();
+        other_chain.id = "alloc-chain".into();
+        other_chain.chain_id = 8453;
+        let mut retired = base.clone();
+        retired.id = "alloc-retired".into();
+        retired.status = RECEIVE_STATUS_RETIRED.into();
+
+        let active = active_receiving_allocations(&[
+            base,
+            exact_duplicate,
+            other_family,
+            other_profile,
+            other_chain,
+            retired,
+        ])
+        .expect("active receiving allocations");
+
+        assert_eq!(active.len(), 4);
+        assert!(
+            active
+                .iter()
+                .all(|allocation| allocation.address == address)
+        );
+        let identities = active
+            .iter()
+            .map(receiving_allocation_identity)
+            .collect::<ServiceResult<BTreeSet<_>>>()
+            .expect("receiving identities");
+        assert_eq!(identities.len(), 4);
+    }
+
+    #[test]
+    fn receiving_refresh_work_items_match_chain_and_preserve_provider_partitions() {
+        let address = "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+        let mainnet =
+            receiving_allocation("alloc-mainnet", address, RECEIVE_STATUS_ACTIVE, None, 1);
+        let mut second_wallet = mainnet.clone();
+        second_wallet.id = "alloc-second-wallet".into();
+        second_wallet.wallet_profile = "second-wallet".into();
+        let mut base = mainnet.clone();
+        base.id = "alloc-base".into();
+        base.chain_id = 8453;
+        let providers = [
+            receiving_provider("mainnet-primary", 1),
+            receiving_provider("mainnet-backup", 1),
+            receiving_provider("base-primary", 8453),
+            receiving_provider("optimism-unrelated", 10),
+        ];
+
+        let work_items = receiving_refresh_work_items(&[mainnet, second_wallet, base], &providers);
+
+        assert_eq!(work_items.len(), 5);
+        assert!(
+            work_items
+                .iter()
+                .all(|(allocation, provider)| allocation.chain_id == provider.chain_id)
+        );
+        assert!(
+            work_items
+                .iter()
+                .all(|(_, provider)| provider.name != "optimism-unrelated")
+        );
+        let mainnet_provider_names = work_items
+            .iter()
+            .filter(|(allocation, _)| allocation.id == "alloc-mainnet")
+            .map(|(_, provider)| provider.name.as_str())
+            .collect::<BTreeSet<_>>();
+        assert_eq!(
+            mainnet_provider_names,
+            BTreeSet::from(["mainnet-backup", "mainnet-primary"])
+        );
     }
 
     #[test]
