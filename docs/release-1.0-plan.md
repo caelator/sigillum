@@ -73,8 +73,10 @@ Read this section before every work session.
   `.github/workflows/ci.yml`).
 - A Chromium-family browser for `scripts/check-browser-smoke.sh`; if the host
   has none, export `SIGILLUM_SKIP_BROWSER_SMOKE=1` and note it in the PR.
-- Task F6 (testnet receipts) needs a human to supply funded Sepolia/L2-testnet
-  accounts and RPC endpoints; it is flagged as human-in-the-loop.
+- Task F6 (testnet receipts) needs a human to supply funded Ethereum Sepolia
+  (`11155111`) plus Base Sepolia (`84532`), Arbitrum Sepolia (`421614`), or OP
+  Sepolia (`11155420`) accounts and RPC endpoints; it is flagged as
+  human-in-the-loop.
 
 ### 0.3 Verification commands
 
@@ -318,7 +320,7 @@ any requires human sign-off recorded here.
 |----|----------|-----------|
 | D-1 | **No crates.io publish at 1.0.** All crates get `publish = false`; 1.0 ships as source + GitHub Release binaries. | Publishing 12 interdependent crates is a large irreversible surface; the product is a local-first app. |
 | D-2 | **macOS is the supported desktop platform at 1.0.** Linux desktop compile-only; Windows unsupported. | Dev + soak evidence is macOS; no Linux desktop user yet. |
-| D-3 | **Desktop bundles ship ad-hoc signed by default** (no Apple account; Tauri's default when no identity is configured — verify and enforce in C3); full signing/notarization env-gated. macOS 15+ removed the right-click Gatekeeper bypass, so C3/C6 must document the exact System Settings → Privacy & Security → "Open Anyway" path plus `SHA256SUMS` verification. | No Apple Developer credentials assumed; unsigned-and-undocumented would fail H1's clean-machine install check on macOS 15+. |
+| D-3 | **Desktop bundles ship with a project-enforced full-bundle ad-hoc signature by default** (no Apple account; set `APPLE_SIGNING_IDENTITY=-` explicitly after fail-closed credential validation); full Developer ID signing/notarization remains env-gated. macOS 15+ removed the right-click Gatekeeper bypass, so C3/C6 must document the exact System Settings → Privacy & Security → "Open Anyway" path plus `SHA256SUMS` verification. | No Apple Developer credentials assumed. Tauri's no-identity path can leave only a linker signature, as RC3 proved, so source and release bundles must pass strict app/dmg verification before H1. |
 | D-4 | **No external penetration test for 1.0.** Claim stays "source-verified local-first release gate". | The audit doc already draws this boundary honestly. |
 | D-5 | **CLI parity for scriptable families only** — `transit`, read-only `evm`, `wallets` export/derive/check/generate, `compartment list`, plus the wallet-management surfaces already bridged. `wallets` sign/send and `evm broadcast` stay API+UI-only. | Signing/broadcast from shell history is an operator hazard; UI/API cover it. |
 | D-6 | **All policy guardrails stay fail-closed opt-in.** Every NEW execution capability (plan execution, claim execution, treasury automation, gas top-ups) defaults OFF behind its own `TreasuryPolicy` opt-in, surfaced in onboarding like `block_cross_party_linkage`. | Execution is the highest-risk surface 1.0 adds; defaults must be safe. |
@@ -329,7 +331,7 @@ any requires human sign-off recorded here.
 | D-11 | **DeFi exit-adapter set at 1.0:** Aave v3 withdraw (exists), generic ERC-4626 redeem, Uniswap v2 LP removeLiquidity, Lido wstETH unwrap. Nothing else; other positions surface as `review_asset`. | Standard interfaces with dominant TVL coverage; bounded and testable. Uniswap v3 NFT positions and Lido withdrawal queue are disproportionate for 1.0. |
 | D-12 | **Claim execution at 1.0 = `merkle-distributor-v1` adapter only**, gated by simulation pass + explicit step approval + risk-catalog review + a policy opt-in. All other claim types remain review/export-only. | The simulation slice for this adapter already exists; it is the only claim shape safe to automate. |
 | D-13 | **No swap step type at 1.0.** Planner does not emit swap steps; dust keeps the `review_asset` fallback. | The roadmap marks swaps "optionally"; DEX routing/slippage is a large adversarial surface orthogonal to the completion bar. |
-| D-14 | **Execution testing bar:** every execution family needs mock-RPC integration tests (mandatory) AND a recorded public-testnet receipt (Sepolia + one L2 testnet) for native sweep, ERC-20 sweep, revoke, and gas top-up. Adapter exits and Merkle claims: mock-mandatory, testnet best-effort (contract availability permitting). | Real broadcasts need real-network evidence; contract-dependent families should not block on deploying testnet contracts. |
+| D-14 | **Execution testing bar:** every execution family needs mock-RPC integration tests (mandatory) AND recorded public-testnet evidence on Sepolia (`11155111`) plus one supported L2 testnet — Base Sepolia (`84532`), Arbitrum Sepolia (`421614`), or OP Sepolia (`11155420`) — for native sweep, ERC-20 sweep, revoke, and gas top-up. Four families require five transactions: gas top-up must include both receipt-confirmed `fund_gas` and dependent-sweep legs, with the sweep blocked until the top-up reaches finality. Adapter exits and Merkle claims: mock-mandatory, testnet best-effort (contract availability permitting). | Real broadcasts need real-network evidence; contract-dependent families should not block on deploying testnet contracts. The offline bundle checker validates schema-v2 structure and runtime identity bindings, while H2 independently verifies all five claimed transactions on the named public chains. |
 | D-15 | **Registries stay local.** Token lists, spender labels, spam heuristics: operator-imported files + the existing risk catalog. No runtime fetching of external feeds. | Preserves the local-first/no-phone-home boundary; RPC endpoints remain the only outbound surface. |
 | D-16 | **No valuation at 1.0.** Holdings show raw amounts; no fiat/floor pricing. | Price feeds add an external dependency + phone-home surface for cosmetic value; the completion bar doesn't need it. |
 | D-17 | **Quorum model at 1.0 = unlock-time compartment threshold** (already implemented in `service/lifecycle.rs`). Execution adds per-plan explicit approval + typed confirmation at enqueue (W7.2) + policy gates + gate-flip audit events (W7.1), not a second quorum ceremony. **Recorded residual risk:** with `allow_plan_execution` on, a stolen session token on the local machine can move funds — the mitigations above detect and bound it, they do not prevent it. This residual risk MUST be stated in `docs/stability.md` and the readiness docs (G2/G5). FIDO2 tap-to-execute is the named post-1.0 hardening candidate. | The threshold ceremony already exists at unlock; on a single-operator machine the marginal boundary of a second ceremony is real but small, and the risk is honestly documented instead of silently accepted. |
@@ -478,24 +480,41 @@ A → (B ∥ C ∥ D) → E → (W1 ∥ W2) → (W3 ∥ W4 ∥ W5 ∥ W6) → W7
 
 #### C3 — Env-gated signing/notarization (D-3)
 
-- **Steps:** wire Tauri v2 standard signing env vars (sign fully when
-  present, never fail on absence); with no credentials, verify the bundle
-  is at least **ad-hoc signed** (`codesign -dv` shows a signature; Apple
-  Silicon refuses wholly unsigned binaries) and enforce that in
-  `scripts/check-desktop.sh` (C4). Document in `docs/deployment.md`: macOS
+- **Steps:** validate Tauri v2 signing and notarization variables as complete,
+  mutually exclusive credential families; fail closed on partial/mixed values.
+  With no credentials, set `APPLE_SIGNING_IDENTITY=-` so Tauri signs the whole
+  app bundle. With Developer ID credentials, explicitly submit and staple the
+  signed dmg after Tauri creates it because the pinned bundler notarizes the app
+  first. Enforce nonempty `CodeResources`, strict deep verification, the
+  exact identifier and executable, bound `Info.plist`, sealed resources, and
+  the expected ad-hoc or Developer ID mode in `scripts/check-desktop.sh` (C4).
+  Document in `docs/deployment.md`: macOS
   15+ removed the right-click Gatekeeper bypass — give the exact System
   Settings → Privacy & Security → "Open Anyway" flow, `SHA256SUMS`
   verification before opening, and the full-credentials path.
-- **Accept:** clean-shell build yields an ad-hoc signed bundle (asserted by
-  the check script); docs cover both paths including the macOS 15 flow.
+- **Accept:** clean-shell build yields a strictly verified full-bundle ad-hoc
+  signature; complete Developer ID inputs plus exactly one notarization family
+  select the signed/notarized/stapled path; every incomplete credential matrix
+  or Developer ID-without-notarization configuration fails before build; docs
+  cover both paths including the macOS 15 flow.
   **Size:** S.
 
 #### C4 — Desktop check script in the release gate
 
-- **Steps:** new `scripts/check-desktop.sh`: always
+- **Steps:** `scripts/check-desktop.sh`: always
   `cargo build -p sigillum-desktop --locked`; macOS-only (skippable via
-  `SIGILLUM_SKIP_DESKTOP_BUNDLE=1`) `cargo tauri build --debug` + bundle
-  path assertion; explicit skip line on other OSes. Wire into
+  `SIGILLUM_SKIP_DESKTOP_BUNDLE=1` outside CI) wrapper-driven debug bundle
+  build; require exactly one app/dmg; mount the dmg read-only and run one
+  reusable verifier against source and mounted apps, including CDHash parity.
+  Run negative regressions for the RC3 linker-only shape, missing seal,
+  missing hardened runtime, tampering, wrong identifier, CDHash mismatch,
+  zero/multiple/wrong-name apps, symlink escape, and paths with spaces. In
+  Developer ID mode, require the dmg to be non-ad-hoc and signed by the same
+  team as the app and validate stapled tickets on source app, mounted app, and
+  dmg. Keep mode-independent hostile dmg-layout regressions in the always-on
+  ad-hoc suite; use a scoped stapler-failure injection for the Developer ID dmg
+  ticket error because Tauri deletes its temporary certificate keychain after
+  bundling. Print an explicit skip line on other OSes. Wire into
   `check-release.sh` after browser smoke; add tauri-cli install to the CI
   macOS leg if needed; document the toggle in the audit doc.
 - **Accept:** gate runs the desktop step on both OSes; the added macOS CI
@@ -560,7 +579,8 @@ A → (B ∥ C ∥ D) → E → (W1 ∥ W2) → (W3 ∥ W4 ∥ W5 ∥ W6) → W7
 
 - **Steps:** README + `docs/deployment.md`: install from `.dmg`; shared
   `~/.sigillum` data dir + `SIGILLUM_BASE_DIR`; single-instance; tray lock
-  state; close-to-tray auto-lock; quit zeroization; unsigned caveat;
+  state; close-to-tray auto-lock; quit zeroization; ad-hoc
+  signing/Gatekeeper caveat;
   troubleshooting.
 - **Accept:** a fresh reader goes `.dmg` → unlocked console without reading
   source. **Size:** S.
@@ -1288,7 +1308,10 @@ Order within W7 is strict: W7.1 → W7.2 → W7.3 → W7.4 → W7.5.
 - **Steps:** on each host named supported in
   `docs/production-readiness-audit.md` (currently `mac-server`): 3600s
   standard soak + 600s chaos soak at the RC commit; record receipt
-  filename, SHA, host, OS in the audit doc.
+  filename, SHA, host, and OS in the sanitized external release-evidence
+  bundle. H2 binds that bundle's digest into the immutable final tag; H3 writes
+  the sanitized summary and bundle link into the audit doc. Receipts cannot be
+  committed into their own receipt-bearing RC SHA.
 - **Accept:** fresh receipts per host at the RC SHA. **Size:** M (wall-clock).
 
 #### F5 — Execution-path security review
@@ -1307,15 +1330,28 @@ Order within W7 is strict: W7.1 → W7.2 → W7.3 → W7.4 → W7.5.
 
 - **Ordering note:** runs with Phase H, against the RC build. Needs a human
   to fund accounts.
-- **Steps:** with operator-supplied Sepolia + one L2-testnet RPC endpoints
-  and funded seed profiles: execute and record (tx hashes + audit export)
-  one each of native sweep, ERC-20 sweep (faucet token), ERC-20 revoke, gas
-  top-up chain (`fund_gas` → sweep). Adapter exits and a Merkle claim:
+- **Steps:** with operator-supplied Sepolia (`11155111`) plus one supported
+  L2-testnet RPC endpoint — Base Sepolia (`84532`), Arbitrum Sepolia
+  (`421614`), or OP Sepolia (`11155420`) — and funded seed profiles: execute
+  and record five transaction hashes plus audit exports: one each for native
+  sweep, ERC-20 sweep (faucet token), and ERC-20 revoke, plus both legs of the
+  gas top-up chain (`fund_gas` → dependent sweep). Process the top-up to
+  receipt-confirmed finality before allowing the dependent sweep to sign.
+  Adapter exits and a Merkle claim:
   attempt if suitable contracts are available; otherwise record
-  "mock-verified only" explicitly. Store the receipt summary in
-  `docs/production-readiness-audit.md`.
-- **Accept:** the four core families have real-testnet tx evidence at the RC
-  SHA; adapter/claim status recorded honestly either way. **Size:** M
+  "mock-verified only" explicitly. Store the sanitized receipt summary and
+  audit export in the external release-evidence bundle. H2 binds that bundle's
+  digest into the immutable final tag; H3 records the public bundle link and
+  sanitized summary in `docs/production-readiness-audit.md`.
+- **Accept:** the four core families have five real-testnet transactions at the
+  RC SHA. F6 schema v2 binds the two gas legs to one plan/network/chain, their
+  distinct jobs and steps, the top-up destination/dependent source, the
+  prerequisite edge, confirmed successful receipts, and strict block order.
+  Before H2, the operator independently confirms every transaction on the
+  claimed public chain (chain ID, successful receipt, finality, and the family
+  effect represented by its audit export). The offline evidence checker proves
+  archive structure and internal bindings, not live-chain truth. Adapter/claim
+  status is recorded honestly either way. **Size:** M
   (wall-clock + human).
 
 #### F7 — 0.1 → 1.0 data-directory upgrade verification
@@ -1394,17 +1430,22 @@ Order within W7 is strict: W7.1 → W7.2 → W7.3 → W7.4 → W7.5.
 - **Steps:** new `.github/workflows/release.yml` on `push: tags: ['v*']`:
   job `verify` (ubuntu+macos matrix mirroring ci.yml) runs
   `./scripts/check-release.sh`; job `artifacts-macos` (needs verify)
-  installs tauri-cli, `cargo tauri build`, `cargo build --release -p
+  installs tauri-cli, builds through the fail-closed signing wrapper, strictly
+  verifies the release app and read-only-mounted dmg before staging,
+  `cargo build --release -p
   sigillum-cli`, uploads `.dmg`/zipped `.app`/CLI binary; job
   `artifacts-linux` builds + uploads the CLI binary; job `release` creates
   a draft GitHub Release with the `[1.0.0]` CHANGELOG section and a
   `SHA256SUMS` file. Job 4 also attaches a `THIRD-PARTY-NOTICES` file
   generated with a pinned `cargo-about` (MIT/Apache attribution for shipped
   binaries) and includes it in the `.dmg` resources — `cargo deny` gates
-  licenses but does not produce attribution. Dry-run with `v1.0.0-rc.1`,
-  then delete the rc
-  tag/release.
-- **Accept:** rc dry run produces all artifacts + draft release. **Size:** M.
+  licenses but does not produce attribution. Dry-run with the next monotonically
+  numbered annotated RC tag, retain that tag permanently as the receipt anchor,
+  and retain its draft/assets through final-draft verification. Delete only the
+  older RC draft after final publication.
+- **Accept:** rc dry run produces all artifacts + draft release, and the exact
+  release app/dmg pair passes the reusable strict verifier before upload.
+  **Size:** M.
 
 #### G5 — Readiness and product docs final sync
 
@@ -1437,17 +1478,35 @@ below; the remaining items are operator human-gates.
 > 2026-07-10 auth/payment/queue/release hardening supersedes it; none of these
 > checks certifies the current line. A fresh RC must rerun H1 at one new commit.
 
-- [x] Fresh clone of `main` at the RC commit; `./scripts/check-release.sh`
-      passes there. (release.yml `verify` jobs — fresh checkout, both OS legs — green)
-- [x] CI green on the RC commit, both legs. (main push-CI run 29071505668, both legs green)
-- [ ] F4 soak receipts (standard + chaos) reference the RC SHA. (operator: mac-server soak at a22a98a)
-- [ ] F6 testnet receipts recorded for the four core execution families. (operator: funded testnet)
-- [x] F7 upgrade-path tests green: 0.1-era fixture dir boots and migrates on
-      the RC build; 0.1-era snapshot restores. (runs inside check-release.sh — green in the RC gate)
-- [~] Desktop `.dmg` from the G4 rc run installs and reaches the unlock
-      screen on a machine without a dev toolchain. (dry-run produced + checksum-verified
-      `Sigillum-v1.0.0-rc.1-macos-aarch64.dmg`; clean-machine install is the operator step)
-- [ ] `sigillum doctor` passes on each supported host. (operator: per-host)
+> **RC3 failure:** `v1.0.0-rc.3` at `0a97c18` passed the legacy workflows and
+> produced checksum-valid assets, but its macOS app had no bundle resource seal
+> and failed `codesign --verify --deep --strict`. Its F4, doctor, asset, and any
+> install receipts are void for final promotion. At that point RC4 became the
+> next candidate, contingent on protected-main signing-remediation gates.
+
+> **RC4 failure:** `v1.0.0-rc.4` at `f73b861` contains the signing remediation,
+> but its F6 evidence validator accepted any numeric chain other than Sepolia
+> as the L2 and represented the two-transaction gas-top-up chain with one hash.
+> Its queue also treated `sent` (broadcast, unconfirmed) as prerequisite
+> success. Preserve RC4 as immutable failed-contract evidence; no RC4 operator
+> receipt can promote a final tag. The next candidate is RC5 after the runtime,
+> L2 allowlist, and F6 schema-v2 fixes pass protected-main gates.
+
+- [ ] Fresh clone of `main` at RC5; `./scripts/check-release.sh` passes there.
+      (No RC5 workflow exists yet.)
+- [ ] CI green on the RC5 commit, both legs. (No qualifying RC5 run yet.)
+- [ ] F4 soak receipts (standard + chaos) reference the RC5 SHA. (No
+      qualifying RC5 receipt yet.)
+- [ ] F6 testnet receipts record five transactions for the four core execution
+      families, including both confirmed gas-chain legs. (No qualifying RC5
+      receipt yet; funded testnet access is required.)
+- [ ] F7 upgrade-path tests green: 0.1-era fixture dir boots and migrates on
+      the RC5 build; 0.1-era snapshot restores. (The tests remain in the source
+      gate but must rerun at the RC5 SHA.)
+- [ ] Desktop `.dmg` from RC5 strictly verifies, installs, and reaches the unlock
+      screen on a machine without a dev toolchain. (No RC5 artifact exists yet.)
+- [ ] `sigillum doctor` passes on each supported host at the RC5 SHA. (No
+      qualifying RC5 receipt yet.)
 - [~] A full local walkthrough of the completion bar: import a seed →
       multi-chain scan → review inventory/risk → generate plan → approve →
       execute against a local mock provider → audit trail complete. (execute→audit
@@ -1462,12 +1521,223 @@ below; the remaining items are operator human-gates.
 #### H2 — Tag and release
 
 ```bash
-git checkout main && git pull --ff-only
-./scripts/check-release.sh
-git tag -a v1.0.0 -m "Sigillum 1.0.0 — Local-first wallet-management workstation"
-git push origin v1.0.0
-# watch .github/workflows/release.yml, verify artifacts + SHA256SUMS,
-# publish the draft GitHub Release.
+(
+  set -euo pipefail
+
+  REPO=caelator/sigillum
+  FINAL_TAG=v1.0.0
+  RC_TAG=v1.0.0-rc.N # replace with the receipt-bearing retained RC
+  EVIDENCE_BUNDLE="${EVIDENCE_BUNDLE:?set the absolute path to the sanitized release evidence archive}"
+  EVIDENCE_NAME="$(basename -- "${EVIDENCE_BUNDLE}")"
+  test "${EVIDENCE_NAME}" = "sigillum-v1.0.0-release-evidence.tar.gz"
+  test -f "${EVIDENCE_BUNDLE}"
+
+  git fetch --prune --tags origin
+  RC_REFS="$(git ls-remote --exit-code --tags origin \
+    "refs/tags/${RC_TAG}" "refs/tags/${RC_TAG}^{}")"
+  RC_TAG_OBJECT="$(awk -v ref="refs/tags/${RC_TAG}" \
+    '$2 == ref { print $1 }' <<< "${RC_REFS}")"
+  RC_SHA="$(awk -v ref="refs/tags/${RC_TAG}^{}" \
+    '$2 == ref { print $1 }' <<< "${RC_REFS}")"
+  [[ "${RC_TAG_OBJECT}" =~ ^[0-9a-f]{40}$ ]]
+  [[ "${RC_SHA}" =~ ^[0-9a-f]{40}$ ]]
+  test "${RC_TAG_OBJECT}" != "${RC_SHA}"
+
+  git switch --detach "${RC_SHA}"
+  test -z "$(git status --porcelain)"
+  test "$(git rev-parse origin/main)" = "${RC_SHA}" || {
+    echo "main moved beyond ${RC_TAG}; create and qualify a new RC" >&2
+    exit 1
+  }
+  bash ./scripts/check-release-tag-contract.sh \
+    "${RC_TAG}" "${RC_SHA}" origin "${RC_TAG_OBJECT}"
+  bash ./scripts/check-release-evidence-bundle.sh \
+    "${EVIDENCE_BUNDLE}" "${RC_TAG}" "${RC_SHA}" "${RC_TAG_OBJECT}"
+  EVIDENCE_SHA256="$(shasum -a 256 "${EVIDENCE_BUNDLE}" | awk '{print $1}')"
+  [[ "${EVIDENCE_SHA256}" =~ ^[0-9a-f]{64}$ ]]
+  ./scripts/check-release.sh
+
+  # The gate is long: refresh and reassert every code and evidence identity
+  # immediately before creating the immutable final tag.
+  git fetch --prune --tags origin
+  test "$(git rev-parse HEAD)" = "${RC_SHA}"
+  test -z "$(git status --porcelain)"
+  test "$(git rev-parse origin/main)" = "${RC_SHA}" || {
+    echo "main moved during the gate; create and qualify a new RC" >&2
+    exit 1
+  }
+  bash ./scripts/check-release-tag-contract.sh \
+    "${RC_TAG}" "${RC_SHA}" origin "${RC_TAG_OBJECT}"
+  bash ./scripts/check-release-evidence-bundle.sh \
+    "${EVIDENCE_BUNDLE}" "${RC_TAG}" "${RC_SHA}" "${RC_TAG_OBJECT}"
+  test "$(shasum -a 256 "${EVIDENCE_BUNDLE}" | awk '{print $1}')" = \
+    "${EVIDENCE_SHA256}"
+
+  if git ls-remote --exit-code --tags --refs origin "refs/tags/${FINAL_TAG}"; then
+    # Safe resume after an interrupted H2: the immutable existing tag must
+    # already match the exact RC and evidence binding.
+    bash ./scripts/check-release-tag-contract.sh \
+      "${FINAL_TAG}" "${RC_SHA}" origin
+    EXISTING_FINAL_OBJECT="$(git ls-remote --exit-code --tags --refs origin \
+      "refs/tags/${FINAL_TAG}" | awk '{print $1}')"
+    test "$(git cat-file tag "${EXISTING_FINAL_OBJECT}" |
+      sed -n 's/^Release-Evidence-File: //p')" = "${EVIDENCE_NAME}"
+    test "$(git cat-file tag "${EXISTING_FINAL_OBJECT}" |
+      sed -n 's/^Release-Evidence-SHA256: //p')" = "${EVIDENCE_SHA256}"
+  else
+    test "$?" -eq 2 # exit 2 means the exact remote tag is absent
+    git tag -a "${FINAL_TAG}" "${RC_SHA}" \
+      -m "Sigillum 1.0.0 — Local-first wallet-management workstation" \
+      -m "Release-Evidence-File: ${EVIDENCE_NAME}" \
+      -m "Release-Evidence-SHA256: ${EVIDENCE_SHA256}"
+    git push origin "refs/tags/${FINAL_TAG}:refs/tags/${FINAL_TAG}"
+  fi
+
+  # Wait for the exact final-tag workflow and require all six release jobs.
+  FINAL_RUN_JSON=""
+  for _ in {1..120}; do
+    FINAL_RUN_JSON="$(
+      gh run list -R "${REPO}" --workflow release.yml --event push --limit 20 \
+        --json databaseId,headBranch,headSha,status,conclusion,url,createdAt |
+        jq -c --arg tag "${FINAL_TAG}" --arg sha "${RC_SHA}" '
+          [.[] | select(
+            .headBranch == $tag and
+            .headSha == $sha and
+            (.status != "completed" or .conclusion == "success"))]
+          | sort_by(.createdAt) | last // empty'
+    )"
+    [[ -n "${FINAL_RUN_JSON}" ]] && break
+    sleep 5
+  done
+  [[ -n "${FINAL_RUN_JSON}" ]]
+  FINAL_RUN_ID="$(jq -r '.databaseId' <<< "${FINAL_RUN_JSON}")"
+  gh run watch -R "${REPO}" "${FINAL_RUN_ID}" --exit-status
+  FINAL_RUN_RESULT="$(gh run view -R "${REPO}" "${FINAL_RUN_ID}" \
+    --json headBranch,headSha,conclusion,url,jobs)"
+  jq -e --arg tag "${FINAL_TAG}" --arg sha "${RC_SHA}" '
+    .headBranch == $tag and
+    .headSha == $sha and
+    .conclusion == "success" and
+    (["release-contract", "verify (ubuntu-24.04)", "verify (macos-15)",
+      "artifacts-macos", "artifacts-linux", "release"] -
+      [.jobs[] | select(.conclusion == "success") | .name] | length == 0) and
+    all(.jobs[]; .conclusion == "success")
+  ' <<< "${FINAL_RUN_RESULT}" >/dev/null
+
+  # Require the exact draft and independently verify every generated asset.
+  FINAL_RELEASE="$(gh api "repos/${REPO}/releases?per_page=100" |
+    jq -c --arg tag "${FINAL_TAG}" '
+      [.[] | select(.tag_name == $tag)]
+      | if length == 1 then .[0] else error("expected one final release") end')"
+  jq -e '.draft == true and .published_at == null' \
+    <<< "${FINAL_RELEASE}" >/dev/null
+
+  VERIFY_DIR="$(mktemp -d "${TMPDIR:-/tmp}/sigillum-final-release.XXXXXX")"
+  trap 'rm -rf "${VERIFY_DIR}"' EXIT
+  EXPECTED_ASSETS="${VERIFY_DIR}/expected-assets"
+  REMOTE_ASSETS="${VERIFY_DIR}/remote-assets"
+  printf '%s\n' \
+    "SHA256SUMS" \
+    "Sigillum-v1.0.0-macos-aarch64.app.zip" \
+    "Sigillum-v1.0.0-macos-aarch64.dmg" \
+    "THIRD-PARTY-NOTICES.txt" \
+    "sigillum-cli-v1.0.0-linux-x86_64.tar.gz" \
+    "sigillum-cli-v1.0.0-macos-aarch64.tar.gz" |
+    LC_ALL=C sort > "${EXPECTED_ASSETS}"
+  EVIDENCE_ASSET_COUNT="$(jq -r --arg name "${EVIDENCE_NAME}" \
+    '[.assets[] | select(.name == $name)] | length' <<< "${FINAL_RELEASE}")"
+  test "${EVIDENCE_ASSET_COUNT}" -le 1
+  jq -r --arg name "${EVIDENCE_NAME}" \
+    '.assets[] | select(.name != $name) | .name' \
+    <<< "${FINAL_RELEASE}" | LC_ALL=C sort > "${REMOTE_ASSETS}"
+  cmp -s "${EXPECTED_ASSETS}" "${REMOTE_ASSETS}"
+
+  while IFS=$'\t' read -r asset_name asset_id; do
+    gh api -H 'Accept: application/octet-stream' \
+      "repos/${REPO}/releases/assets/${asset_id}" > "${VERIFY_DIR}/${asset_name}"
+  done < <(jq -r --arg name "${EVIDENCE_NAME}" \
+    '.assets[] | select(.name != $name) | [.name, (.id | tostring)] | @tsv' \
+    <<< "${FINAL_RELEASE}")
+  (
+    cd "${VERIFY_DIR}"
+    shasum -a 256 --check SHA256SUMS
+  )
+
+  # Upload without replacement, re-download, and compare with the protected
+  # tag object immediately before publication.
+  if [[ "${EVIDENCE_ASSET_COUNT}" -eq 0 ]]; then
+    gh release upload -R "${REPO}" "${FINAL_TAG}" "${EVIDENCE_BUNDLE}"
+  fi
+  FINAL_RELEASE="$(gh api "repos/${REPO}/releases?per_page=100" |
+    jq -c --arg tag "${FINAL_TAG}" '
+      [.[] | select(.tag_name == $tag)]
+      | if length == 1 then .[0] else error("expected one final release") end')"
+  EVIDENCE_ASSET_ID="$(jq -r --arg name "${EVIDENCE_NAME}" '
+    [.assets[] | select(.name == $name)]
+    | if length == 1 then .[0].id else error("expected one evidence asset") end' \
+    <<< "${FINAL_RELEASE}")"
+  gh api -H 'Accept: application/octet-stream' \
+    "repos/${REPO}/releases/assets/${EVIDENCE_ASSET_ID}" > \
+    "${VERIFY_DIR}/${EVIDENCE_NAME}"
+
+  bash ./scripts/check-release-tag-contract.sh \
+    "${FINAL_TAG}" "${RC_SHA}" origin
+  FINAL_TAG_OBJECT="$(git ls-remote --exit-code --tags --refs origin \
+    "refs/tags/${FINAL_TAG}" | awk '{print $1}')"
+  TAG_EVIDENCE_SHA256="$(git cat-file tag "${FINAL_TAG_OBJECT}" |
+    sed -n 's/^Release-Evidence-SHA256: //p')"
+  test "${TAG_EVIDENCE_SHA256}" = "${EVIDENCE_SHA256}"
+  test "$(shasum -a 256 "${VERIFY_DIR}/${EVIDENCE_NAME}" | awk '{print $1}')" = \
+    "${TAG_EVIDENCE_SHA256}"
+
+  # Re-fetch and reverify all seven live draft assets immediately before the
+  # publish mutation, closing the draft-asset replacement window.
+  PREPUBLISH_RELEASE="$(gh api "repos/${REPO}/releases?per_page=100" |
+    jq -c --arg tag "${FINAL_TAG}" '
+      [.[] | select(.tag_name == $tag)]
+      | if length == 1 then .[0] else error("expected one final release") end')"
+  jq -e '.draft == true and .published_at == null' \
+    <<< "${PREPUBLISH_RELEASE}" >/dev/null
+  PREPUBLISH_EXPECTED="${VERIFY_DIR}/prepublish-expected-assets"
+  PREPUBLISH_ACTUAL="${VERIFY_DIR}/prepublish-actual-assets"
+  printf '%s\n' \
+    "${EVIDENCE_NAME}" \
+    "SHA256SUMS" \
+    "Sigillum-v1.0.0-macos-aarch64.app.zip" \
+    "Sigillum-v1.0.0-macos-aarch64.dmg" \
+    "THIRD-PARTY-NOTICES.txt" \
+    "sigillum-cli-v1.0.0-linux-x86_64.tar.gz" \
+    "sigillum-cli-v1.0.0-macos-aarch64.tar.gz" |
+    LC_ALL=C sort > "${PREPUBLISH_EXPECTED}"
+  jq -r '.assets[].name' <<< "${PREPUBLISH_RELEASE}" |
+    LC_ALL=C sort > "${PREPUBLISH_ACTUAL}"
+  cmp -s "${PREPUBLISH_EXPECTED}" "${PREPUBLISH_ACTUAL}"
+
+  PREPUBLISH_DIR="${VERIFY_DIR}/prepublish"
+  mkdir -p "${PREPUBLISH_DIR}"
+  while IFS=$'\t' read -r asset_name asset_id; do
+    gh api -H 'Accept: application/octet-stream' \
+      "repos/${REPO}/releases/assets/${asset_id}" > \
+      "${PREPUBLISH_DIR}/${asset_name}"
+  done < <(jq -r '.assets[] | [.name, (.id | tostring)] | @tsv' \
+    <<< "${PREPUBLISH_RELEASE}")
+  (
+    cd "${PREPUBLISH_DIR}"
+    shasum -a 256 --check SHA256SUMS
+  )
+  TAG_EVIDENCE_SHA256="$(git cat-file tag "${FINAL_TAG_OBJECT}" |
+    sed -n 's/^Release-Evidence-SHA256: //p')"
+  test "${TAG_EVIDENCE_SHA256}" = "${EVIDENCE_SHA256}"
+  test "$(shasum -a 256 "${PREPUBLISH_DIR}/${EVIDENCE_NAME}" |
+    awk '{print $1}')" = "${TAG_EVIDENCE_SHA256}"
+
+  FINAL_RELEASE_ID="$(jq -r '.id' <<< "${PREPUBLISH_RELEASE}")"
+  PUBLISHED_RELEASE="$(gh api --method PATCH \
+    "repos/${REPO}/releases/${FINAL_RELEASE_ID}" \
+    -F draft=false -F prerelease=false -f make_latest=true)"
+  jq -e '.draft == false and .prerelease == false and .published_at != null' \
+    <<< "${PUBLISHED_RELEASE}" >/dev/null
+)
 ```
 
 #### H3 — Post-release
@@ -1496,8 +1766,12 @@ Phase B — Workspace hygiene
 Phase C — Desktop productization
 - [x] C1 real icon set
 - [x] C2 bundling enabled (.app/.dmg)
-- [x] C3 env-gated signing, unsigned default documented
-- [x] C4 check-desktop.sh in the release gate
+- [~] C3 fail-closed env-gated signing and explicit full-bundle ad-hoc default
+      (landed and source-gate proven on protected `main`; the complete claim
+      needs fresh RC5 release-workflow proof)
+- [~] C4 strict source + mounted-dmg verification and negative regressions in
+      the release gate (landed and source-gate proven on protected `main`; the
+      complete claim needs fresh RC5 release-workflow proof)
 - [x] C5 boot helpers extracted + tested
 - [x] C6 desktop docs
 - [ ] C7 operator console UX redesign (user-directed)
@@ -1550,11 +1824,16 @@ Phase G — Release engineering
 - [x] G1 CHANGELOG.md
 - [x] G2 docs/stability.md
 - [x] G3 version bump to 1.0.0
-- [x] G4 release workflow (rc dry run validated on a22a98a, reversed)
+- [~] G4 release workflow (historical dry run validated on a22a98a; RC3 exposed
+      a signature false positive; RC4 exposed an evidence-contract false
+      positive and unconfirmed-dependency execution; RC5 must prove all
+      remediations)
 - [x] G5 readiness + product docs final sync
 
 Phase H — Ship
-- [~] H1 RC verification checklist (autonomous items verified on a22a98a; F4/F6/clean-machine .dmg install/`doctor` per host = operator human-gates)
+- [~] H1 RC verification checklist (RC3 void after bundle-signature failure;
+      RC4 void after the F6 schema and dependency-finality failures; all source,
+      release, F4/F6, clean-machine, and doctor evidence must bind RC5)
 - [ ] H2 v1.0.0 tagged, artifacts published (human gate — operator go)
 - [ ] H3 post-release bump + planning issue
 
@@ -1893,3 +2172,27 @@ Phase H — Ship
   + unlock, `sigillum doctor` per host. The CHANGELOG date must be committed
   before the next RC tag; H2 (real v1.0.0 tag/publish) is the final human gate;
   H3 follows publish.
+- 2026-07-12 RC3 FAILURE (`0a97c18`, release run 29216941593): the protected
+  source gate, six-job draft workflow, asset checksums, local standard/chaos
+  soak, and checksum-verified RC CLI doctor passed. Independent inspection of
+  the dmg then found that the app had only a linker signature: no
+  `_CodeSignature/CodeResources`, unbound `Info.plist`, unsealed resources,
+  and failing `codesign --verify --deep --strict`. Preserve RC3 and its draft as
+  immutable failure evidence; none of its receipts can promote a final tag.
+- 2026-07-12 C3/C4/G4 RC4 remediation (this change): credential-free builds
+  explicitly select Tauri identity `-`; partial/mixed signing and notarization
+  inputs fail closed; one reusable verifier checks the source and read-only
+  mounted-dmg apps plus CDHash parity; negative regressions cover the RC3 shape,
+  tampering, identifier, symlink, path, and dmg-layout failures; the release
+  artifact job runs the verifier after adding notices and before upload.
+- 2026-07-12 RC4 FAILURE (`f73b861`): the signing remediation passed the
+  protected-main source gate, but the F6 validator accepted arbitrary numeric
+  chains as the L2 and collapsed a two-transaction gas-top-up chain to one
+  hash. Runtime dependency ordering also treated broadcast-only `sent` as
+  success instead of requiring `confirmed`. Preserve RC4 and its receipts as
+  immutable failed-contract evidence; RC5 must fix dependency finality, require
+  Ethereum Sepolia (`11155111`) plus Base Sepolia (`84532`), Arbitrum Sepolia
+  (`421614`), or OP Sepolia (`11155420`), require F6 schema v2 with five
+  transactions, and re-run every same-SHA gate. Historical release run
+  `29230844456` completed all six jobs and its six-asset unpublished draft,
+  proving the signing fix but not curing the assurance/runtime failures.

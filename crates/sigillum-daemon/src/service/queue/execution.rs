@@ -7,6 +7,9 @@ pub(in crate::service) enum QueueExecution {
         signed_raw_transaction_hex: String,
         transaction_hash_hex: String,
     },
+    /// Prepared authority is retained, but submission is held until a
+    /// dependency reaches receipt-confirmed success.
+    PreparedHeld(String),
     /// The provider accepted the exact prepared bytes.
     Broadcasted {
         broadcast_transaction_hash_hex: String,

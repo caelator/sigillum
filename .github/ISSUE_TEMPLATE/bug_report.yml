@@ -1,0 +1,66 @@
+name: Bug report
+description: Report a reproducible Sigillum defect without sensitive data
+title: "[Bug]: "
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: >
+        Do not include private keys, seed phrases, tokens, sensitive addresses,
+        data directories, or vulnerabilities. Report security issues privately.
+  - type: input
+    id: commit
+    attributes:
+      label: Commit or version
+      description: Paste the full commit SHA or release identifier you tested.
+    validations:
+      required: true
+  - type: dropdown
+    id: surface
+    attributes:
+      label: Surface
+      options:
+        - Desktop app
+        - Browser console / daemon
+        - CLI
+        - Gateway preview
+        - Rust library / API
+        - Build or release tooling
+        - Documentation
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: Environment
+      description: Operating system, architecture, and relevant tool versions.
+    validations:
+      required: true
+  - type: textarea
+    id: behavior
+    attributes:
+      label: What happened?
+      description: Describe the observed and expected behavior.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Safe reproduction
+      description: Use only synthetic wallets and redact all sensitive values.
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Redacted logs
+      render: shell
+  - type: checkboxes
+    id: safety
+    attributes:
+      label: Safety check
+      options:
+        - label: I removed all secrets, tokens, private wallet data, and customer information.
+          required: true
+        - label: This is not a security vulnerability.
+          required: true

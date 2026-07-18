@@ -1,10 +1,20 @@
 # Sigillum — Production Readiness
 
-**Date:** June 4, 2026 (updated July 10, 2026)
-**Current Verdict:** the earlier Sigillum 1.0 RC receipts are historical and do
-not certify the current hardening line. Capability authorization, payment
-truth, queue broadcast durability/pause behavior, no-HID compilation, and
-release governance must pass the updated source gate together before a new RC.
+**Date:** June 4, 2026 (updated July 12, 2026)
+**Current Verdict:** there is no valid release candidate. `v1.0.0-rc.2` is an
+immutable annotated-tag-contract failure. `v1.0.0-rc.3` passed the legacy
+source and release workflows and produced checksum-valid assets, but its
+macOS app had only a linker signature: strict bundle verification failed,
+`Info.plist` was unbound, resources were unsealed, and `CodeResources` was
+absent. RC3 and every same-SHA operator receipt are historical failure evidence
+only. `v1.0.0-rc.4` proved the bundle-signing remediation on protected `main`,
+but its release-evidence validator could accept a mainnet or arbitrary chain as
+the required L2 testnet and represented the two-transaction gas-top-up chain
+with one hash. Its queue also treated a broadcast-but-unconfirmed prerequisite
+as successful. RC4 and every same-SHA operator receipt are therefore historical
+failure evidence too. The next candidate is the monotonically required
+`v1.0.0-rc.5`, after the runtime and F6 schema-v2 remediations pass
+protected-main gates. Every pushed RC tag remains an immutable receipt anchor.
 The supported boundary remains local-first, single-host, and not
 internet-facing; remote-platform scope is explicitly unsupported.
 
@@ -99,11 +109,21 @@ not the shipped local-first wallet-management baseline:
   not claim one. Automated local adversarial/fuzz coverage through
   `scripts/check-adversarial.sh` is not an independent security audit.
 - The remaining RC-time evidence is:
+  - a successful draft release workflow and checksum-verified asset set at the
+    fresh `v1.0.0-rc.5` SHA, including strict verification of the source app
+    and the app mounted from its dmg; `v1.0.0-rc.2`, `v1.0.0-rc.3`, and
+    `v1.0.0-rc.4` are historical failure evidence only
   - standard and chaos doctor/soak receipts on every supported host at the new
     RC SHA; the earlier `mac-server` receipt is historical baseline evidence,
     not evidence for the current hardening candidate (F4)
-  - public-testnet execution receipts for the four core execution families:
-    native sweep, ERC-20 sweep, revoke, and gas top-up (F6)
+  - five public-testnet transactions for the four core execution families:
+    native sweep, ERC-20 sweep, revoke, plus both the `fund_gas` and dependent
+    sweep legs of gas top-up on Ethereum Sepolia (`11155111`) and Base Sepolia
+    (`84532`), Arbitrum Sepolia (`421614`), or OP Sepolia (`11155420`) (F6)
+  - one sanitized external evidence bundle containing the same-RC operator
+    receipts; H2 binds its filename and SHA-256 digest into the immutable final
+    tag, verifies the uploaded copy before publication, and H3 records the
+    public linkage in the tracked audit
 - Within wallet management, only non-EVM chains (roadmap phase 10), swap
   execution (D-13), and fiat/NFT valuation (D-16) are deferred.
 
@@ -158,7 +178,8 @@ immediate move is:
 1. keep `./scripts/check-release.sh` enforced in CI across Ubuntu and macOS
 2. keep `./scripts/check-adversarial.sh` green and expand it when new API,
    gateway, or UI boundary surfaces are added
-3. collect the remaining per-host doctor/soak receipts beyond `mac-server` (F4)
+3. collect fresh doctor plus standard and chaos soak receipts on the currently
+   supported `mac-server` at the exact new RC SHA (F4)
 4. collect public-testnet execution receipts for native sweep, ERC-20 sweep,
    revoke, and gas top-up (F6)
 5. keep documentation and audits anchored to the local-on-your-computer boundary

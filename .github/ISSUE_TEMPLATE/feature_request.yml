@@ -1,0 +1,33 @@
+name: Feature request
+description: Propose a scoped improvement within Sigillum's local-only boundary
+title: "[Feature]: "
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Operator problem
+      description: What concrete local wallet-management problem needs solving?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed behavior
+      description: Describe the workflow and its failure behavior.
+    validations:
+      required: true
+  - type: textarea
+    id: risks
+    attributes:
+      label: Security, privacy, and recovery impact
+      description: Note trust-boundary, key, transaction, persistence, and rollback implications.
+    validations:
+      required: true
+  - type: checkboxes
+    id: scope
+    attributes:
+      label: Scope check
+      options:
+        - label: This proposal preserves the single-host, local-only product boundary.
+          required: true

@@ -444,9 +444,10 @@ fiat/NFT valuation is out of 1.0 scope (D-16).
     `submitted_unknown`, or broadcast-but-unconfirmed) job per (source address,
     chain id) may submit at a time; a same-source
     job still queued behind it is skipped with a visible reason until the
-    source frees (dependency-ordered same-source chains, e.g.
-    sweep→revoke→fund_gas on one wallet, are exempt from this and still
-    resolve in one drain batch, as before). Linkage enforcement parity at
+    source frees. Dependency-ordered same-source chains are exempt from this
+    independent-job serialization check, but every dependent still waits for
+    its prerequisite to reach receipt-confirmed finality; a newly broadcast
+    multi-step chain therefore advances across confirmation cycles. Linkage enforcement parity at
     execution is now proven (W7.5): a matrix of tagged/untagged-counterparty,
     same/distinct-destination, and `block_cross_party_linkage` on/off cases
     (including `fund_gas` common-funder collisions) exercises the plan-step

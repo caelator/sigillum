@@ -9,8 +9,7 @@ use crate::service::{ServiceResult, SigillumService};
 
 use super::state::normalize_queue_state;
 use super::{
-    QUEUE_STATE_BLOCKED, QUEUE_STATE_PREPARED, QUEUE_STATE_SENT, QUEUE_STATE_SUBMITTED_UNKNOWN,
-    QueueExecution,
+    QUEUE_STATE_PREPARED, QUEUE_STATE_SENT, QUEUE_STATE_SUBMITTED_UNKNOWN, QueueExecution,
 };
 
 pub(super) fn is_sent_plan_step(job: &QueueJob) -> bool {
@@ -70,23 +69,49 @@ impl SigillumService {
             return Ok(None);
         }
 
-        // `blocked` + replay bytes + a broadcast marker can exist from the
-        // pre-v5 gate-order bug. Reconcile it as submitted-unknown before any
-        // exact-byte resubmission.
+        let dependency_block_reason = match &job.payload {
+            QueueJobPayload::PlanStepExecution(payload) => {
+                super::plan_steps::dependency_block_reason(payload, job_states)
+            }
+            _ => None,
+        };
+
+        // A durable marker means the RPC submission boundary may have been
+        // crossed regardless of the job state subsequently recorded. For
+        // example, provider acceptance followed by an audit-write failure is
+        // reduced to `retrying` while the marker and replay bytes remain.
+        // Always reconcile chain truth before any exact-byte resubmission.
         let resume_existing_submission = normalized_state == QUEUE_STATE_SUBMITTED_UNKNOWN
-            || (normalized_state == QUEUE_STATE_BLOCKED && job.receipt.broadcast_at_unix.is_some());
+            || job.receipt.broadcast_at_unix.is_some();
+        if let Some(reason) = dependency_block_reason.as_deref()
+            && !resume_existing_submission
+        {
+            // No submission marker exists, so there is no chain truth to
+            // reconcile. Preserve the signed authority and its source
+            // occupancy without resolving a provider or touching the network.
+            return Ok(Some(Ok(QueueExecution::PreparedHeld(reason.into()))));
+        }
+        let allow_submission = allow_submission && dependency_block_reason.is_none();
         if allow_submission || resume_existing_submission {
             self.persist_queue_submission_marker(queue, job_index, now)?;
         }
         let submitted_job = queue.jobs[job_index].clone();
-        Ok(Some(
-            self.broadcast_prepared_queue_job(
+        let result = self
+            .broadcast_prepared_queue_job(
                 token,
                 &submitted_job,
                 resume_existing_submission,
                 allow_submission,
             )
-            .await,
-        ))
+            .await
+            .map(
+                |outcome| match (dependency_block_reason.as_deref(), outcome) {
+                    (Some(reason), QueueExecution::SubmittedUnknown(_)) => {
+                        QueueExecution::SubmittedUnknown(reason.into())
+                    }
+                    (_, outcome) => outcome,
+                },
+            );
+        Ok(Some(result))
     }
 }

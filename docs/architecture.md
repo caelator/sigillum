@@ -189,8 +189,10 @@ Current daemon behavior:
   `PlanStepExecution`-only distinctions (W7.4): `sent` means
   broadcast-and-awaiting-confirmation, and `confirmed` means the receipt
   reached the chain registry's `finality_blocks` depth (W1.1) with a success
-  status; `EthSeed*`/`EthStealth*` jobs keep `sent` as their terminal success
-  state after the same prepare/submission barriers
+  status. A dependent `PlanStepExecution` remains unsigned until every named
+  prerequisite is `confirmed`; a merely `sent` prerequisite is still pending.
+  `EthSeed*`/`EthStealth*` jobs keep `sent` as their terminal success state
+  after the same prepare/submission barriers
 - keeps queue ownership split inside `service/queue/*`: the façade owns public
   enqueue/list methods, `payloads` owns job construction, `processing` owns the
   drain loop and both durable submission barriers, `serialization` limits

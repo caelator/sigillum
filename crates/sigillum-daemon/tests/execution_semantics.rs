@@ -90,10 +90,12 @@ enum ReceiptMode {
 
 #[derive(Clone)]
 struct RpcState {
+    provider_calls: Arc<AtomicUsize>,
     broadcast_calls: Arc<AtomicUsize>,
     broadcast_raw_hexes: Arc<Mutex<Vec<String>>>,
     broadcast_error: Arc<Mutex<Option<String>>>,
     transaction_count_calls: Arc<AtomicUsize>,
+    receipt_calls: Arc<AtomicUsize>,
     receipt_mode: Arc<Mutex<ReceiptMode>>,
     block_number_hex: Arc<Mutex<String>>,
 }
@@ -101,10 +103,12 @@ struct RpcState {
 impl Default for RpcState {
     fn default() -> Self {
         Self {
+            provider_calls: Arc::new(AtomicUsize::new(0)),
             broadcast_calls: Arc::new(AtomicUsize::new(0)),
             broadcast_raw_hexes: Arc::new(Mutex::new(Vec::new())),
             broadcast_error: Arc::new(Mutex::new(None)),
             transaction_count_calls: Arc::new(AtomicUsize::new(0)),
+            receipt_calls: Arc::new(AtomicUsize::new(0)),
             receipt_mode: Arc::new(Mutex::new(ReceiptMode::Unsupported)),
             block_number_hex: Arc::new(Mutex::new("0x20".to_string())),
         }
@@ -124,8 +128,16 @@ impl RpcState {
         self.broadcast_calls.load(Ordering::SeqCst)
     }
 
+    fn provider_call_count(&self) -> usize {
+        self.provider_calls.load(Ordering::SeqCst)
+    }
+
     fn transaction_count_call_count(&self) -> usize {
         self.transaction_count_calls.load(Ordering::SeqCst)
+    }
+
+    fn receipt_call_count(&self) -> usize {
+        self.receipt_calls.load(Ordering::SeqCst)
     }
 
     fn broadcast_raw_hexes(&self) -> Vec<String> {
@@ -134,6 +146,7 @@ impl RpcState {
 }
 
 fn rpc_response(state: &RpcState, request: &Value) -> Value {
+    state.provider_calls.fetch_add(1, Ordering::SeqCst);
     let method = request["method"].as_str().unwrap_or_default();
     let id = request.get("id").cloned().unwrap_or(json!(1));
     let result = match method {
@@ -176,28 +189,31 @@ fn rpc_response(state: &RpcState, request: &Value) -> Value {
             }
             submitted_raw_transaction_hash(request)
         }
-        "eth_getTransactionReceipt" => match state.receipt_mode.lock().unwrap().clone() {
-            ReceiptMode::Unsupported => json!({ "unsupported": "eth_getTransactionReceipt" }),
-            ReceiptMode::Pending => Value::Null,
-            ReceiptMode::Success {
-                block_number_hex,
-                gas_used_hex,
-            } => json!({
-                "transactionHash": request["params"][0].clone(),
-                "status": "0x1",
-                "blockNumber": block_number_hex,
-                "gasUsed": gas_used_hex,
-            }),
-            ReceiptMode::Reverted {
-                block_number_hex,
-                gas_used_hex,
-            } => json!({
-                "transactionHash": request["params"][0].clone(),
-                "status": "0x0",
-                "blockNumber": block_number_hex,
-                "gasUsed": gas_used_hex,
-            }),
-        },
+        "eth_getTransactionReceipt" => {
+            state.receipt_calls.fetch_add(1, Ordering::SeqCst);
+            match state.receipt_mode.lock().unwrap().clone() {
+                ReceiptMode::Unsupported => json!({ "unsupported": "eth_getTransactionReceipt" }),
+                ReceiptMode::Pending => Value::Null,
+                ReceiptMode::Success {
+                    block_number_hex,
+                    gas_used_hex,
+                } => json!({
+                    "transactionHash": request["params"][0].clone(),
+                    "status": "0x1",
+                    "blockNumber": block_number_hex,
+                    "gasUsed": gas_used_hex,
+                }),
+                ReceiptMode::Reverted {
+                    block_number_hex,
+                    gas_used_hex,
+                } => json!({
+                    "transactionHash": request["params"][0].clone(),
+                    "status": "0x0",
+                    "blockNumber": block_number_hex,
+                    "gasUsed": gas_used_hex,
+                }),
+            }
+        }
         other => json!({ "unsupported": other }),
     };
     json!({
@@ -532,6 +548,24 @@ async fn process_queue(env: &PlanEnv) -> Value {
     response.json().await.unwrap()
 }
 
+async fn process_queue_job(
+    client: &reqwest::Client,
+    addr: SocketAddr,
+    token: &str,
+    job_id: &str,
+) -> Value {
+    let response = post_json(
+        client,
+        addr,
+        "/api/queue/process",
+        json!({ "id": job_id }),
+        Some(token),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::OK);
+    response.json().await.unwrap()
+}
+
 async fn queue_jobs(env: &PlanEnv) -> Vec<Value> {
     let jobs = get(&env.client, env.addr, "/api/queue/jobs", Some(&env.token)).await;
     assert_eq!(jobs.status(), StatusCode::OK);
@@ -610,6 +644,45 @@ fn edit_queue_job(env: &PlanEnv, job_id: &str, edit: impl FnOnce(&mut Value)) {
         .expect("job exists");
     edit(job);
     write_store(&path, &store);
+}
+
+/// Give a queued plan-step a terminal prerequisite before it is signed. The
+/// prerequisite is cloned only to preserve the complete persisted wire shape;
+/// targeted processing below never executes it.
+fn attach_confirmed_prerequisite(env: &PlanEnv, dependent_job_id: &str) -> String {
+    let path = queue_path(env);
+    let mut store = read_store(&path);
+    let jobs = store["data"]["jobs"].as_array_mut().unwrap();
+    let dependent_index = jobs
+        .iter()
+        .position(|job| job["id"] == json!(dependent_job_id))
+        .expect("dependent queue job exists");
+    let prerequisite_id = format!("confirmed-prerequisite-{dependent_job_id}");
+    let mut prerequisite = jobs[dependent_index].clone();
+
+    jobs[dependent_index]["prerequisite_job_ids"] = json!([prerequisite_id.clone()]);
+    prerequisite["id"] = json!(prerequisite_id.clone());
+    prerequisite["step_id"] = json!(format!("synthetic-prerequisite-{dependent_job_id}"));
+    prerequisite["prerequisite_job_ids"] = json!([]);
+    prerequisite["state"] = json!("confirmed");
+    prerequisite["attempts"] = json!(0);
+    prerequisite["last_error"] = Value::Null;
+    prerequisite["next_attempt_after_unix"] = Value::Null;
+    prerequisite["transaction_hash_hex"] = Value::Null;
+    prerequisite["broadcast_transaction_hash_hex"] = Value::Null;
+    prerequisite["signed_raw_transaction_hex"] = Value::Null;
+    prerequisite["prepared_at_unix"] = Value::Null;
+    prerequisite["prepared_payload_hash_hex"] = Value::Null;
+    prerequisite["prepared_binding_hash_hex"] = Value::Null;
+    prerequisite["broadcast_at_unix"] = Value::Null;
+    prerequisite["confirmations"] = json!(1);
+    prerequisite["receipt_block_number"] = json!(1);
+    prerequisite["receipt_gas_used_hex"] = json!("0x5208");
+    prerequisite["receipt_status"] = json!("success");
+    jobs.push(prerequisite);
+
+    write_store(&path, &store);
+    prerequisite_id
 }
 
 // ── 1. Per-source serialization ─────────────────────────────────────────
@@ -1309,6 +1382,398 @@ async fn execution_gate_flips_preserve_every_in_flight_plan_step_state() {
     assert_eq!(confirmed_on_disk["state"], json!("confirmed"));
     assert!(confirmed_on_disk["signed_raw_transaction_hex"].is_null());
 
+    env.shutdown();
+}
+
+#[tokio::test]
+async fn recovered_plan_steps_recheck_dependencies_before_replay() {
+    let env = setup_plan_env().await;
+    update_policy(&env, gates_on_policy_body()).await;
+    let (plan_id, step_id) = generate_and_simulate_plan(&env).await;
+    let sibling_step_id = add_plan_step(&env, &plan_id, &step_id, |step| {
+        step["depends_on"] = json!([]);
+    });
+    approve_plan(&env, &plan_id).await;
+    let (status, body) = enqueue_step(&env, &plan_id, &step_id).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let (sibling_status, sibling_body) = enqueue_step(&env, &plan_id, &sibling_step_id).await;
+    assert_eq!(sibling_status, StatusCode::OK, "{sibling_body}");
+
+    // Attach the dependency before signing so the persisted payload and
+    // prepared-integrity bindings commit to the same prerequisite set that
+    // recovery will enforce.
+    let queued = queue_job_by_step(&env, &step_id);
+    let job_id = queued["id"].as_str().unwrap().to_string();
+    let sibling_job_id = queue_job_by_step(&env, &sibling_step_id)["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let prerequisite_id = attach_confirmed_prerequisite(&env, &job_id);
+
+    // Produce one valid set of signed replay bytes and integrity hashes while
+    // the prerequisite is confirmed. The following store edits model crash
+    // snapshots; recovery must never sign a replacement transaction.
+    let first = process_queue(&env).await;
+    assert_eq!(first["succeeded"], json!(1), "{first}");
+    let sent = queue_job_by_step(&env, &step_id);
+    let transaction_hash = sent["transaction_hash_hex"]
+        .as_str()
+        .expect("sent job has its signed transaction hash")
+        .to_string();
+    let prepared_payload_hash = sent["prepared_payload_hash_hex"]
+        .as_str()
+        .expect("sent job retains its prepared payload hash")
+        .to_string();
+    let prepared_binding_hash = sent["prepared_binding_hash_hex"]
+        .as_str()
+        .expect("sent job retains its prepared binding hash")
+        .to_string();
+    let signed_raw = env
+        .rpc_state
+        .broadcast_raw_hexes()
+        .last()
+        .expect("initial processing broadcasts prepared bytes")
+        .trim_start_matches("0x")
+        .to_string();
+    let provider_calls_after_sign = env.rpc_state.provider_call_count();
+    let broadcasts_after_sign = env.rpc_state.broadcast_call_count();
+    let nonce_calls_after_sign = env.rpc_state.transaction_count_call_count();
+    let receipt_calls_after_sign = env.rpc_state.receipt_call_count();
+
+    // Crash snapshot A: bytes are prepared but no submission marker exists.
+    // A pending prerequisite must hold the exact authority without touching
+    // any provider method (including nonce, receipt, and broadcast methods).
+    edit_queue_job(&env, &prerequisite_id, |job| {
+        job["state"] = json!("queued");
+        job["last_error"] = Value::Null;
+        job["receipt_status"] = Value::Null;
+        job["receipt_block_number"] = Value::Null;
+        job["confirmations"] = Value::Null;
+    });
+    edit_queue_job(&env, &job_id, |job| {
+        job["state"] = json!("prepared");
+        job["signed_raw_transaction_hex"] = json!(signed_raw.clone());
+        job["broadcast_transaction_hash_hex"] = Value::Null;
+        job["broadcast_at_unix"] = Value::Null;
+        job["next_attempt_after_unix"] = Value::Null;
+        job["last_error"] = Value::Null;
+        job["receipt_status"] = Value::Null;
+        job["receipt_block_number"] = Value::Null;
+        job["receipt_gas_used_hex"] = Value::Null;
+        job["confirmations"] = Value::Null;
+    });
+
+    env.daemon.abort();
+    let (recovery_addr, recovery_daemon) = spawn_daemon(env.base_dir.clone()).await;
+    let unlock = post_json(
+        &env.client,
+        recovery_addr,
+        "/api/unlock",
+        json!({ "passphrase": COMPARTMENT_PASSPHRASE }),
+        None,
+    )
+    .await;
+    assert_eq!(unlock.status(), StatusCode::OK, "{unlock:?}");
+    let recovery_token = unlock.json::<Value>().await.unwrap()["session_token"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    let pending_prepared =
+        process_queue_job(&env.client, recovery_addr, &recovery_token, &job_id).await;
+    assert_eq!(pending_prepared["blocked"], json!(1), "{pending_prepared}");
+    assert_eq!(pending_prepared["jobs"][0]["state"], json!("prepared"));
+    assert!(
+        pending_prepared["jobs"][0]["last_error"]
+            .as_str()
+            .unwrap()
+            .starts_with("dependency_pending:"),
+        "{pending_prepared}"
+    );
+    assert_eq!(
+        env.rpc_state.provider_call_count(),
+        provider_calls_after_sign
+    );
+    assert_eq!(env.rpc_state.broadcast_call_count(), broadcasts_after_sign);
+    assert_eq!(
+        env.rpc_state.transaction_count_call_count(),
+        nonce_calls_after_sign
+    );
+    assert_eq!(env.rpc_state.receipt_call_count(), receipt_calls_after_sign);
+    let pending_on_disk = queue_job_by_step(&env, &step_id);
+    assert_eq!(pending_on_disk["state"], json!("prepared"));
+    assert_eq!(
+        pending_on_disk["signed_raw_transaction_hex"],
+        json!(signed_raw)
+    );
+    assert_eq!(
+        pending_on_disk["prepared_payload_hash_hex"],
+        json!(prepared_payload_hash)
+    );
+    assert_eq!(
+        pending_on_disk["prepared_binding_hash_hex"],
+        json!(prepared_binding_hash)
+    );
+
+    // The held authority continues to occupy its (chain, source) slot. An
+    // unrelated sibling using that source remains queued and cannot enter
+    // the signer or provider while the prepared bytes are retained.
+    let sibling_hold =
+        process_queue_job(&env.client, recovery_addr, &recovery_token, &sibling_job_id).await;
+    assert_eq!(sibling_hold["processed"], json!(0), "{sibling_hold}");
+    let sibling_on_disk = queue_job_by_step(&env, &sibling_step_id);
+    let sibling_reason = sibling_on_disk["last_error"]
+        .as_str()
+        .expect("serialized sibling records its occupying job");
+    assert!(
+        sibling_reason.starts_with("source_serialization:") && sibling_reason.contains(&job_id),
+        "{sibling_on_disk}"
+    );
+    assert_eq!(
+        env.rpc_state.provider_call_count(),
+        provider_calls_after_sign
+    );
+    assert_eq!(env.rpc_state.broadcast_call_count(), broadcasts_after_sign);
+    assert_eq!(
+        env.rpc_state.transaction_count_call_count(),
+        nonce_calls_after_sign
+    );
+
+    // A terminal prerequisite failure is also a no-I/O hold. Crucially, the
+    // prepared job stays `prepared` so it continues occupying its source.
+    edit_queue_job(&env, &prerequisite_id, |job| {
+        job["state"] = json!("operator_action_required");
+        job["last_error"] = json!("synthetic prerequisite failure");
+    });
+    let failed_prepared =
+        process_queue_job(&env.client, recovery_addr, &recovery_token, &job_id).await;
+    assert_eq!(failed_prepared["blocked"], json!(1), "{failed_prepared}");
+    assert_eq!(failed_prepared["jobs"][0]["state"], json!("prepared"));
+    assert!(
+        failed_prepared["jobs"][0]["last_error"]
+            .as_str()
+            .unwrap()
+            .starts_with("dependency_failed:"),
+        "{failed_prepared}"
+    );
+    assert_eq!(
+        env.rpc_state.provider_call_count(),
+        provider_calls_after_sign
+    );
+    assert_eq!(env.rpc_state.broadcast_call_count(), broadcasts_after_sign);
+    assert_eq!(
+        env.rpc_state.transaction_count_call_count(),
+        nonce_calls_after_sign
+    );
+    assert_eq!(env.rpc_state.receipt_call_count(), receipt_calls_after_sign);
+    assert_eq!(
+        queue_job_by_step(&env, &step_id)["signed_raw_transaction_hex"],
+        json!(signed_raw)
+    );
+
+    // Once confirmation is durable, recovery submits the original bytes
+    // exactly once and still never resolves another nonce.
+    edit_queue_job(&env, &prerequisite_id, |job| {
+        job["state"] = json!("confirmed");
+        job["last_error"] = Value::Null;
+        job["receipt_status"] = json!("success");
+    });
+    let released_prepared =
+        process_queue_job(&env.client, recovery_addr, &recovery_token, &job_id).await;
+    assert_eq!(
+        released_prepared["succeeded"],
+        json!(1),
+        "{released_prepared}"
+    );
+    assert_eq!(
+        env.rpc_state.broadcast_call_count(),
+        broadcasts_after_sign + 1
+    );
+    assert_eq!(
+        env.rpc_state.transaction_count_call_count(),
+        nonce_calls_after_sign
+    );
+    assert_eq!(
+        env.rpc_state
+            .broadcast_raw_hexes()
+            .last()
+            .unwrap()
+            .trim_start_matches("0x"),
+        signed_raw
+    );
+
+    // Crash snapshot B: a submission marker exists, but an error after the
+    // provider call (for example, an audit-write failure) reduced the job to
+    // `retrying`. State cannot erase the durable submission uncertainty:
+    // recovery must poll receipt truth even while the dependency is pending.
+    // A missing receipt cannot authorize resubmission until confirmation.
+    edit_queue_job(&env, &prerequisite_id, |job| {
+        job["state"] = json!("operator_action_required");
+        job["last_error"] = json!("synthetic prerequisite failure");
+        job["receipt_status"] = Value::Null;
+    });
+    edit_queue_job(&env, &job_id, |job| {
+        job["state"] = json!("retrying");
+        job["signed_raw_transaction_hex"] = json!(signed_raw.clone());
+        job["broadcast_transaction_hash_hex"] = Value::Null;
+        job["broadcast_at_unix"] = json!(now_unix_test());
+        job["next_attempt_after_unix"] = Value::Null;
+        job["last_error"] = json!("synthetic post-submission audit failure");
+        job["receipt_status"] = Value::Null;
+        job["receipt_block_number"] = Value::Null;
+        job["receipt_gas_used_hex"] = Value::Null;
+        job["confirmations"] = Value::Null;
+    });
+    env.rpc_state.set_receipt_mode(ReceiptMode::Pending);
+    let broadcasts_before_unknown_hold = env.rpc_state.broadcast_call_count();
+    let receipts_before_failed_unknown = env.rpc_state.receipt_call_count();
+    let failed_unknown =
+        process_queue_job(&env.client, recovery_addr, &recovery_token, &job_id).await;
+    assert_eq!(failed_unknown["retrying"], json!(1), "{failed_unknown}");
+    assert_eq!(
+        failed_unknown["jobs"][0]["state"],
+        json!("submitted_unknown")
+    );
+    assert!(
+        failed_unknown["jobs"][0]["last_error"]
+            .as_str()
+            .unwrap()
+            .starts_with("dependency_failed:"),
+        "{failed_unknown}"
+    );
+    assert_eq!(
+        env.rpc_state.receipt_call_count(),
+        receipts_before_failed_unknown + 1
+    );
+    assert_eq!(
+        env.rpc_state.broadcast_call_count(),
+        broadcasts_before_unknown_hold
+    );
+    assert_eq!(
+        env.rpc_state.transaction_count_call_count(),
+        nonce_calls_after_sign
+    );
+
+    edit_queue_job(&env, &prerequisite_id, |job| {
+        job["state"] = json!("queued");
+        job["last_error"] = Value::Null;
+    });
+    let receipts_before_unknown_hold = env.rpc_state.receipt_call_count();
+    let pending_unknown =
+        process_queue_job(&env.client, recovery_addr, &recovery_token, &job_id).await;
+    assert_eq!(pending_unknown["retrying"], json!(1), "{pending_unknown}");
+    assert_eq!(
+        pending_unknown["jobs"][0]["state"],
+        json!("submitted_unknown")
+    );
+    assert!(
+        pending_unknown["jobs"][0]["last_error"]
+            .as_str()
+            .unwrap()
+            .starts_with("dependency_pending:"),
+        "{pending_unknown}"
+    );
+    assert_eq!(
+        env.rpc_state.receipt_call_count(),
+        receipts_before_unknown_hold + 1
+    );
+    assert_eq!(
+        env.rpc_state.broadcast_call_count(),
+        broadcasts_before_unknown_hold
+    );
+    assert_eq!(
+        env.rpc_state.transaction_count_call_count(),
+        nonce_calls_after_sign
+    );
+    assert_eq!(
+        queue_job_by_step(&env, &step_id)["signed_raw_transaction_hex"],
+        json!(signed_raw)
+    );
+
+    // Confirmation releases exactly one byte-identical resubmission after a
+    // receipt-first lookup; the forced targeted request ignores retry timing.
+    edit_queue_job(&env, &prerequisite_id, |job| {
+        job["state"] = json!("confirmed");
+        job["receipt_status"] = json!("success");
+    });
+    let receipts_before_unknown_release = env.rpc_state.receipt_call_count();
+    let released_unknown =
+        process_queue_job(&env.client, recovery_addr, &recovery_token, &job_id).await;
+    assert_eq!(
+        released_unknown["succeeded"],
+        json!(1),
+        "{released_unknown}"
+    );
+    assert_eq!(
+        env.rpc_state.receipt_call_count(),
+        receipts_before_unknown_release + 1
+    );
+    assert_eq!(
+        env.rpc_state.broadcast_call_count(),
+        broadcasts_before_unknown_hold + 1
+    );
+    assert_eq!(
+        env.rpc_state.transaction_count_call_count(),
+        nonce_calls_after_sign
+    );
+    assert_eq!(
+        env.rpc_state
+            .broadcast_raw_hexes()
+            .last()
+            .unwrap()
+            .trim_start_matches("0x"),
+        signed_raw
+    );
+
+    // If chain truth becomes visible while the prerequisite is pending, it
+    // wins: confirm by the prepared hash without resubmission or re-signing.
+    edit_queue_job(&env, &prerequisite_id, |job| {
+        job["state"] = json!("sent");
+        job["receipt_status"] = Value::Null;
+    });
+    edit_queue_job(&env, &job_id, |job| {
+        job["state"] = json!("submitted_unknown");
+        job["signed_raw_transaction_hex"] = json!(signed_raw.clone());
+        job["broadcast_transaction_hash_hex"] = Value::Null;
+        job["broadcast_at_unix"] = json!(now_unix_test());
+        job["next_attempt_after_unix"] = Value::Null;
+        job["last_error"] = Value::Null;
+        job["receipt_status"] = Value::Null;
+        job["receipt_block_number"] = Value::Null;
+        job["receipt_gas_used_hex"] = Value::Null;
+        job["confirmations"] = Value::Null;
+    });
+    env.rpc_state.set_receipt_mode(ReceiptMode::Success {
+        block_number_hex: "0x2a".into(),
+        gas_used_hex: "0x5208".into(),
+    });
+    let broadcasts_before_visible_receipt = env.rpc_state.broadcast_call_count();
+    let receipts_before_visible_receipt = env.rpc_state.receipt_call_count();
+    let visible_receipt =
+        process_queue_job(&env.client, recovery_addr, &recovery_token, &job_id).await;
+    assert_eq!(visible_receipt["confirmed"], json!(1), "{visible_receipt}");
+    assert_eq!(visible_receipt["jobs"][0]["state"], json!("confirmed"));
+    assert_eq!(
+        visible_receipt["jobs"][0]["transaction_hash_hex"],
+        json!(transaction_hash)
+    );
+    assert_eq!(
+        env.rpc_state.receipt_call_count(),
+        receipts_before_visible_receipt + 1
+    );
+    assert_eq!(
+        env.rpc_state.broadcast_call_count(),
+        broadcasts_before_visible_receipt
+    );
+    assert_eq!(
+        env.rpc_state.transaction_count_call_count(),
+        nonce_calls_after_sign
+    );
+    let confirmed_on_disk = queue_job_by_step(&env, &step_id);
+    assert_eq!(confirmed_on_disk["state"], json!("confirmed"));
+    assert!(confirmed_on_disk["signed_raw_transaction_hex"].is_null());
+
+    recovery_daemon.abort();
     env.shutdown();
 }
 

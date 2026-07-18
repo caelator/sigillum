@@ -459,6 +459,13 @@ from 1.0.0 onward, per the stability policy in `docs/stability.md`.
   against pointing third-party ERC-5564 senders at Sigillum meta-addresses.
   Superseded by the conformance switch above: the caveat is now a conformance
   statement.
+### Documentation
+
+- Reframed the public project landing page around Sigillum's local-first EVM
+  wallet-management product, added an indexed documentation map and community
+  health files, clarified the unreleased/unsupported status and invalid RC tag,
+  corrected stale crate descriptions, and enabled private vulnerability
+  reporting.
 
 ## [1.0.0] - 2026-07-10
 
@@ -548,9 +555,10 @@ from 1.0.0 onward, per the stability policy in `docs/stability.md`.
   fresh loopback port, shares the `~/.sigillum` data directory, keeps a single
   focused instance, shows a tray with live lock state and "Lock now", locks and
   hides to tray on close, and locks before quit so loaded keys are zeroized;
-  `.app`/`.dmg` bundling with a generated icon set, ad-hoc signing by default
-  with env-gated full signing/notarization; macOS is the supported desktop
-  platform, while Linux desktop is compile-only.
+  `.app`/`.dmg` bundling with a generated icon set, project-enforced full-bundle
+  ad-hoc signing by default with fail-closed env-gated Developer ID signing and
+  notarization; macOS is the supported desktop platform, while Linux desktop
+  is compile-only.
 - **CLI** — Setup flows, `sigillum doctor` host preflight, snapshot commands, a
   daemon launcher, and JSON operator commands under `sigillum api` covering
   sessions, compartment listing, provider/wallet profiles, deposits, inventory
@@ -589,6 +597,18 @@ from 1.0.0 onward, per the stability policy in `docs/stability.md`.
 
 ### Fixed
 
+- **Plan-step dependency finality** — Dependent execution jobs remain unsigned
+  while prerequisites are merely prepared, submitted, or broadcast, and may
+  proceed only after every prerequisite reaches receipt-confirmed success.
+  Crash-recovered prepared authority follows the same rule: unknown submissions
+  remain receipt-observable but cannot be resubmitted early.
+- **Release evidence network and gas-chain contract** — Restricted execution
+  evidence to Ethereum Sepolia (`11155111`) plus Base Sepolia (`84532`),
+  Arbitrum Sepolia (`421614`), or OP Sepolia (`11155420`), rejecting mainnet,
+  arbitrary, and non-integer chain IDs. F6 schema v2 now proves five
+  transactions for four families, including distinct ordered `fund_gas` and
+  dependent-sweep legs bound to their runtime plan, job, step, receipt, address,
+  prerequisite, and broadcast-time identities.
 - **`sigillum-fido2` no-HID builds** — Compiling with `default-features = false`
   keeps the API surface but returns explicit errors for hardware-only
   operations; the release gate compiles, tests, and lints this configuration.
@@ -596,6 +616,21 @@ from 1.0.0 onward, per the stability policy in `docs/stability.md`.
   uses a real subprocess and SIGKILL at the durable `prepared` and
   `submitted_unknown` barriers, with a test-only minimal unlock fixture so the
   proof remains reliable across CI runners.
+- **Release tag contract** — Annotated-tag validation queries the authoritative
+  remote tag and peeled commit instead of a runner-local ref that checkout may
+  rewrite, safely recovers a locally absent tag object through a non-tag scratch
+  ref, pins tag-object identity across jobs, and enforces monotonic retained RC
+  numbers. The normal release gate exercises annotated, object-absent,
+  lightweight, wrong-SHA, off-main, skipped-number, malformed, and
+  changelog-negative fixtures before tag time.
+- **macOS release bundle signature** — Replaced the weak signature-metadata
+  check that allowed RC3's linker-only app to pass. Credential-free builds now
+  explicitly sign the whole app bundle, partial Apple credentials fail closed,
+  Developer ID mode requires notarization and stapling for both app copies and
+  the dmg (including an explicit post-Tauri dmg submission), and both source-gate
+  and release-artifact paths require strict app and read-only-mounted dmg
+  verification with bound plist, sealed resources,
+  expected identifier/mode, matching CDHash, and negative regression fixtures.
 
 [Unreleased]: https://github.com/caelator/sigillum/compare/v1.0.0...HEAD
 [1.0.0]: https://github.com/caelator/sigillum/releases/tag/v1.0.0
