@@ -144,6 +144,58 @@ test("events client feeds store slices from SSE frames", async () => {
   equal(store.get("operations").length, 1); // stopped client ignores frames
 });
 
+test("session token changes retire stale SSE authorization and reconnect", async () => {
+  installDom();
+  MockEventSource.instances = [];
+  const store = createCoreStore(BOOT_ROUTE);
+  let token: string | null = "old-token";
+  let onTokenChange: ((token: string | null) => void) | null = null;
+  let unsubscribed = false;
+  const client = createEventsClient({
+    store,
+    api: {
+      getStatus: async () => sampleStatus(token === null),
+      listOperations: async () => ({ operations: [] as Operation[] }),
+    },
+    eventSourceFactory: (url) => new MockEventSource(url),
+    sessionToken: () => token,
+    sessionTokenChanges: (listener) => {
+      onTokenChange = listener;
+      return () => {
+        unsubscribed = true;
+        onTokenChange = null;
+      };
+    },
+    pollIntervalMs: 60_000,
+  });
+
+  client.start();
+  const oldSource = MockEventSource.instances[0];
+  equal(oldSource.url, "/api/events?session=old-token");
+  oldSource.emit("open");
+
+  token = null;
+  onTokenChange?.(null);
+  equal(oldSource.closed, true);
+  equal(client.transport(), "poll");
+  oldSource.emit(
+    "operation",
+    JSON.stringify({ v: 1, operation: sampleOperation("stale") }),
+  );
+  await tick();
+  equal(store.get("operations").length, 0);
+
+  token = "new-token";
+  onTokenChange?.(token);
+  equal(MockEventSource.instances.length, 2);
+  equal(MockEventSource.instances[1].url, "/api/events?session=new-token");
+  equal(client.transport(), "connecting");
+
+  client.stop();
+  equal(MockEventSource.instances[1].closed, true);
+  equal(unsubscribed, true);
+});
+
 test("snapshot merges terminal history while live SSE records take precedence", async () => {
   installDom();
   MockEventSource.instances = [];

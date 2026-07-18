@@ -61,6 +61,71 @@ export function focusableElements(root: HTMLElement): HTMLElement[] {
   return focusables;
 }
 
+function isWithin(root: HTMLElement, target: EventTarget | null): boolean {
+  let node = target as Node | null;
+  while (node) {
+    if (node === root) return true;
+    node = node.parentNode;
+  }
+  return false;
+}
+
+/**
+ * Remove every sibling behind the modal from pointer, keyboard, and
+ * accessibility navigation, including siblings appended while async work is
+ * in flight. A focusin guard closes the MutationObserver microtask gap for
+ * programmatic focus, then every original inert state is restored on close.
+ */
+function isolateModalBackground(
+  overlay: HTMLElement,
+  dialog: HTMLElement,
+): () => void {
+  const isolated = new Map<HTMLElement, boolean>();
+
+  function isolate(element: HTMLElement): void {
+    if (element === overlay || isolated.has(element)) return;
+    isolated.set(element, element.hasAttribute("inert"));
+    element.setAttribute("inert", "");
+  }
+
+  for (const element of Array.from(document.body.children) as HTMLElement[]) {
+    isolate(element);
+  }
+
+  const observer =
+    typeof MutationObserver === "function"
+      ? new MutationObserver((records) => {
+          for (const record of records) {
+            for (const node of Array.from(record.addedNodes)) {
+              const element = node as HTMLElement;
+              if (
+                element.parentNode === document.body &&
+                typeof element.setAttribute === "function"
+              ) {
+                isolate(element);
+              }
+            }
+          }
+        })
+      : null;
+  observer?.observe(document.body, { childList: true });
+
+  function onFocusIn(event: FocusEvent): void {
+    if (isWithin(overlay, event.target)) return;
+    const fallback = focusableElements(dialog)[0] ?? dialog;
+    fallback.focus();
+  }
+  document.addEventListener("focusin", onFocusIn, true);
+
+  return () => {
+    observer?.disconnect();
+    document.removeEventListener("focusin", onFocusIn, true);
+    for (const [element, hadInert] of isolated) {
+      if (!hadInert) element.removeAttribute("inert");
+    }
+  };
+}
+
 /** Mount and activate a modal. The lifecycle owns overlay removal. */
 export function openModal(options: ModalOptions): ModalHandle {
   // Dismiss first so the previous modal restores its underlying invoker before
@@ -69,6 +134,7 @@ export function openModal(options: ModalOptions): ModalHandle {
 
   const previousFocus = document.activeElement as HTMLElement | null;
   let closed = false;
+  let restoreBackground = (): void => undefined;
 
   const handle: ModalHandle = {
     close,
@@ -90,6 +156,7 @@ export function openModal(options: ModalOptions): ModalHandle {
     closed = true;
     document.removeEventListener("keydown", onKeydown, true);
     options.overlay.removeEventListener("click", onBackdropClick);
+    restoreBackground();
     options.overlay.remove();
     if (activeModal === handle) activeModal = null;
     restoreFocus();
@@ -147,6 +214,7 @@ export function openModal(options: ModalOptions): ModalHandle {
   if (initial === options.dialog && !initial.hasAttribute("tabindex")) {
     initial.setAttribute("tabindex", "-1");
   }
+  restoreBackground = isolateModalBackground(options.overlay, options.dialog);
   initial.focus();
 
   return handle;

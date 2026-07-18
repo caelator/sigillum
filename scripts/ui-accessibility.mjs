@@ -120,6 +120,13 @@ const SCENARIOS = [
     route: "#/vault",
     ready: '[data-vault="root"]',
   },
+  {
+    name: "unlocked command palette",
+    mode: "unlocked",
+    route: "#/overview",
+    shortcut: "command-palette",
+    ready: '[data-palette="dialog"]',
+  },
 ];
 
 function fail(message) {
@@ -415,6 +422,26 @@ async function prepareScenario(cdp, scenario) {
         return true;
       })()`,
       `${scenario.name} interaction`,
+    );
+  }
+  if (scenario.shortcut === "command-palette") {
+    await evaluate(
+      cdp,
+      `(() => {
+        const event = new KeyboardEvent("keydown", {
+          key: "k",
+          code: "KeyK",
+          metaKey: true,
+          bubbles: true,
+          cancelable: true,
+        });
+        document.dispatchEvent(event);
+        if (!event.defaultPrevented) {
+          throw new Error("command palette shortcut was not consumed");
+        }
+        return true;
+      })()`,
+      `${scenario.name} shortcut`,
     );
   }
   await waitFor(

@@ -170,6 +170,11 @@ export function createShellRenderer(deps: ShellRendererDeps) {
     setHidden("compartmentBadge", true);
     deps.setCardsHidden(deps.operatorCardIds, true);
     deps.resetVaultCounts();
+    // An unlocked render hides both unlock panels. Reveal the passphrase
+    // baseline synchronously so transition focus is valid while the async
+    // hardware-key detection decides whether tabs should also be offered.
+    setHidden("unlockPassphrase", false);
+    setHidden("unlockFido2", true);
     setHidden("lockForm", true);
     setHidden("authRecovery", false);
     setHidden("compSwitcher", true);

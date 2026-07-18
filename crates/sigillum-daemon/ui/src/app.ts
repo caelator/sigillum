@@ -2,7 +2,12 @@
 
 import "./styles/app.css";
 
-import { clearSessionToken, readSessionToken, requestWithSession } from "./api/session";
+import {
+  clearSessionToken,
+  readSessionToken,
+  requestWithSession,
+  subscribeSessionToken,
+} from "./api/session";
 import { handleActionEvent as handleDispatchedActionEvent } from "./actions/dispatcher";
 import {
   setHiddenById as setHidden,
@@ -39,6 +44,7 @@ import { createWalletManagerActions } from "./views/walletManager";
 import { createWalletActions } from "./views/wallets";
 import { startCoreRuntime } from "./core/live";
 import { handleLegacyEnter } from "./core/keyboard";
+import { createCommandPalette, createCommandRegistry } from "./core/palette";
 import { createOverviewDestination } from "./destinations/Overview";
 import { createMoveDestination } from "./destinations/Move";
 import { createReceivingDestination } from "./destinations/Receiving";
@@ -114,6 +120,7 @@ let nextStepSecondaryTarget = null;
 // behavior is unchanged except where the core intentionally takes over
 // (refresh-meta rendering; URL hash mirrors the workspace section).
 let coreRuntime = null;
+let commandPalette = null;
 
 try {
   activeWorkspaceSection =
@@ -612,6 +619,19 @@ const shellRenderer = createShellRenderer({
   buildPushSelectors,
 });
 
+function applyLockedShell() {
+  shellRenderer.applyLockedUi();
+  syncSectionNav();
+  void fido2Actions.showUnlockTabs();
+}
+
+// Revocation and 401 handling clear the token synchronously. Mirror that
+// authorization boundary in the visible shell in the same task so unlocked
+// chrome and palette eligibility never linger until the periodic refresh.
+subscribeSessionToken(token => {
+  if (token === null && currentUiMode === 'unlocked') applyLockedShell();
+});
+
 async function runRefreshCycle() {
   const sessionTokenAtStart = readSessionToken();
   const s = await api('GET', '/api/status');
@@ -637,9 +657,7 @@ async function runRefreshCycle() {
       refreshQueued = true;
       return;
     }
-    shellRenderer.applyLockedUi();
-    syncSectionNav();
-    fido2Actions.showUnlockTabs();
+    applyLockedShell();
     return;
   }
 
@@ -1330,6 +1348,7 @@ const LEGACY_ENTER_ACTIONS = {
 };
 
 document.addEventListener('keydown', e => {
+  if (commandPalette?.handleKeydown(e)) return;
   handleLegacyEnter(e, LEGACY_ENTER_ACTIONS);
 });
 
@@ -1386,5 +1405,17 @@ coreRuntime = startCoreRuntime({
     createPortfolioDestination,
     createVaultDestination,
   ],
+});
+commandPalette = createCommandPalette({
+  isUnlocked: () => currentUiMode === 'unlocked',
+  commands: createCommandRegistry({
+    navigate: hash => coreRuntime.router.navigate(hash),
+    refreshWorkspace: refresh,
+    runSelfCheck: selfCheckActions.runSelfCheck,
+  }),
+  onError: (error, command) => {
+    const message = error instanceof Error ? error.message : String(error);
+    toast(command.label + ' failed: ' + message, 'error');
+  },
 });
 void refresh();

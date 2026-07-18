@@ -43,7 +43,7 @@ import {
   type StatusEvent,
   type StatusResponse,
 } from "../contracts";
-import { readSessionToken } from "../api/session";
+import { readSessionToken, subscribeSessionToken } from "../api/session";
 import type { DaemonApi } from "./api";
 import type { CoreStore, EventTransport } from "./state";
 
@@ -193,6 +193,10 @@ export interface EventsClientOptions {
   eventSourceFactory?: EventSourceFactory;
   /** Session token source; defaults to the session storage token. */
   sessionToken?: () => string | null;
+  /** Same-tab token change source; inferred for the default token source. */
+  sessionTokenChanges?: (
+    listener: (token: string | null) => void,
+  ) => () => void;
   eventsPath?: string;
   /** Consecutive SSE errors before falling back to polling (default 3). */
   maxConsecutiveErrors?: number;
@@ -216,7 +220,6 @@ export function createEventsClient(options: EventsClientOptions): EventsClient {
   const {
     store,
     api,
-    sessionToken = readSessionToken,
     eventsPath = "/api/events",
     maxConsecutiveErrors = DEFAULT_MAX_CONSECUTIVE_ERRORS,
     pollIntervalMs = DEFAULT_POLL_INTERVAL_MS,
@@ -227,6 +230,10 @@ export function createEventsClient(options: EventsClientOptions): EventsClient {
     setIntervalFn = (fn, ms) => setInterval(fn, ms),
     clearIntervalFn = (handle) => clearInterval(handle as never),
   } = options;
+  const sessionToken = options.sessionToken ?? readSessionToken;
+  const sessionTokenChanges =
+    options.sessionTokenChanges ??
+    (options.sessionToken === undefined ? subscribeSessionToken : undefined);
 
   let transport: EventTransport = "off";
   let source: EventSourceLike | null = null;
@@ -234,6 +241,7 @@ export function createEventsClient(options: EventsClientOptions): EventsClient {
   let reconnectTimer: unknown = null;
   let pollTimer: unknown = null;
   let running = false;
+  let unsubscribeSessionToken: (() => void) | null = null;
   // True when the last SSE failure (or boot) happened with no session token —
   // the one case where a later poll success upgrades back to SSE (unlock).
   let lastErrorHadNoSession = false;
@@ -398,6 +406,20 @@ export function createEventsClient(options: EventsClientOptions): EventsClient {
     }
   }
 
+  function handleSessionTokenChange(): void {
+    if (!running) return;
+    // The daemon authenticates EventSource only when the stream opens. A
+    // revoked or rotated browser token therefore has to retire that stream
+    // locally; otherwise it can remain live with stale authorization.
+    generation += 1;
+    invalidateSnapshotHistory();
+    consecutiveErrors = 0;
+    stopSource();
+    stopPolling();
+    lastErrorHadNoSession = !sessionToken();
+    connect();
+  }
+
   function handleEvent(name: string, data: string): void {
     const event = parseDaemonEvent(name, data);
     if (!event) return;
@@ -508,12 +530,16 @@ export function createEventsClient(options: EventsClientOptions): EventsClient {
       if (running) return;
       running = true;
       generation += 1;
+      unsubscribeSessionToken =
+        sessionTokenChanges?.(() => handleSessionTokenChange()) ?? null;
       connect();
     },
     stop() {
       if (!running) return;
       running = false;
       generation += 1;
+      unsubscribeSessionToken?.();
+      unsubscribeSessionToken = null;
       invalidateSnapshotHistory();
       stopSource();
       stopPolling();

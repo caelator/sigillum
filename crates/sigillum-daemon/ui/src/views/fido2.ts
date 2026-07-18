@@ -152,6 +152,9 @@ export function createFido2Actions(deps: Fido2Deps) {
   async function showUnlockTabs(): Promise<void> {
     try {
       const detect = await deps.api("GET", "/api/fido2/detect");
+      // Detection can resolve after a successful unlock. A stale locked-mode
+      // request must never re-show unlock panels over the unlocked shell.
+      if (document.body.dataset.mode !== "locked") return;
       const hasFido = detect.device_present;
       lastFidoDetect = detect;
       const tabs = document.getElementById("unlockTabs");
@@ -175,6 +178,7 @@ export function createFido2Actions(deps: Fido2Deps) {
         switchUnlockTab("passphrase");
       }
     } catch (_) {
+      if (document.body.dataset.mode !== "locked") return;
       setTextById(
         "authLead",
         "Unlock with the passphrase you configured during setup. Hardware-key unlock becomes available when a FIDO2 device is detected.",

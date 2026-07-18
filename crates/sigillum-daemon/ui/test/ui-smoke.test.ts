@@ -6,6 +6,7 @@ import {
   clearSessionToken,
   readSessionToken,
   requestWithSession,
+  subscribeSessionToken,
   writeSessionToken,
 } from "../src/api/session";
 import { dispatchDataAction } from "../src/actions/dispatcher";
@@ -71,7 +72,7 @@ import type {
   TreasuryPolicy,
   TreasuryReceiveAllocation,
 } from "../src/contracts";
-import { installDom } from "./dom-fixture";
+import { installDom, type FakeElement } from "./dom-fixture";
 
 // ── Shared confirm-dialog drivers ───────────────────────────────────────────
 // Dangerous actions are gated by the modal in src/render/confirm.ts. The
@@ -333,7 +334,10 @@ test("confirm dialog checkbox rides along with the decision", async () => {
 test("shared modal lifecycle traps current focusables, coordinates, and restores focus", async () => {
   const dom = installDom();
   const invoker = dom.document.createElement("button");
+  const alreadyInert = dom.document.createElement("div");
+  alreadyInert.setAttribute("inert", "");
   dom.document.body.appendChild(invoker);
+  dom.document.body.appendChild(alreadyInert);
   invoker.focus();
 
   let first = confirmDangerDialog({
@@ -343,6 +347,8 @@ test("shared modal lifecycle traps current focusables, coordinates, and restores
     valueDisplay: "read-only value",
   });
   equal(hasActiveModal(), true);
+  equal(invoker.hasAttribute("inert"), true, "modal background is inert");
+  equal(confirmOverlay().hasAttribute("inert"), false, "modal remains interactive");
   const firstCheckbox = confirmPart("[data-confirm-checkbox]");
   const firstValue = confirmPart("[data-confirm-value]");
   const firstCancel = confirmPart("[data-confirm-cancel]");
@@ -381,6 +387,8 @@ test("shared modal lifecycle traps current focusables, coordinates, and restores
   confirmPart("[data-confirm-cancel]").click();
   equal(await second, false);
   equal(hasActiveModal(), false);
+  equal(invoker.hasAttribute("inert"), false, "background inert state is restored");
+  equal(alreadyInert.hasAttribute("inert"), true, "pre-existing inert state is preserved");
   equal(document.activeElement, invoker, "focus returns to the connected invoker");
 
   // A removed invoker is never focused after the modal closes.
@@ -392,6 +400,41 @@ test("shared modal lifecycle traps current focusables, coordinates, and restores
   confirmPart("[data-confirm-cancel]").click();
   equal(await third, false);
   ok((document.activeElement as any) !== removedInvoker);
+
+  // Body siblings appended after open are isolated too, and programmatic
+  // focus is redirected before the observer microtask can run.
+  const originalMutationObserver = (globalThis as any).MutationObserver;
+  let notifyAdded: ((nodes: FakeElement[]) => void) | null = null;
+  let observerDisconnected = false;
+  (globalThis as any).MutationObserver = class {
+    constructor(callback: (records: Array<{ addedNodes: FakeElement[] }>) => void) {
+      notifyAdded = (nodes) => callback([{ addedNodes: nodes }]);
+    }
+    observe(): void {}
+    disconnect(): void {
+      observerDisconnected = true;
+    }
+  };
+  try {
+    const fourth = confirmDangerDialog({ title: "Fourth", body: "Dynamic background." });
+    const dynamic = dom.document.createElement("textarea");
+    dom.document.body.appendChild(dynamic);
+    notifyAdded?.([dynamic]);
+    equal(dynamic.hasAttribute("inert"), true, "late sibling becomes inert");
+    dynamic.focus();
+    (document as any).dispatchEvent({ type: "focusin", target: dynamic });
+    equal(
+      document.activeElement,
+      confirmPart("[data-confirm-cancel]"),
+      "late programmatic focus is returned to the modal",
+    );
+    confirmPart("[data-confirm-cancel]").click();
+    equal(await fourth, false);
+    equal(dynamic.hasAttribute("inert"), false, "late sibling inert state is restored");
+    equal(observerDisconnected, true);
+  } finally {
+    (globalThis as any).MutationObserver = originalMutationObserver;
+  }
 });
 
 test("secret prompt distinguishes dismissal from explicit blank submission", async () => {
@@ -442,10 +485,21 @@ test("secret prompt distinguishes dismissal from explicit blank submission", asy
 });
 
 test("legacy FIDO removal cancellation issues no request; blank submission remains valid", async () => {
-  installDom();
+  const dom = installDom([
+    "authLead",
+    "unlockTabs",
+    "unlockPassphrase",
+    "unlockFido2",
+  ]);
   const calls: Array<{ method: string; path: string; body?: any }> = [];
+  let resolveDetect: ((value: any) => void) | null = null;
   const actions = createFido2Actions({
     api: async (method, path, body) => {
+      if (path === "/api/fido2/detect") {
+        return new Promise((resolve) => {
+          resolveDetect = resolve;
+        });
+      }
       calls.push({ method, path, body });
       return {};
     },
@@ -492,6 +546,18 @@ test("legacy FIDO removal cancellation issues no request; blank submission remai
     path: "/api/fido2/remove",
     body: { label: "backup", pin: "5678" },
   });
+
+  dom.el("unlockTabs").classList.add("hidden");
+  dom.el("unlockPassphrase").classList.add("hidden");
+  dom.el("unlockFido2").classList.add("hidden");
+  document.body.dataset.mode = "locked";
+  const staleDetection = actions.showUnlockTabs();
+  document.body.dataset.mode = "unlocked";
+  resolveDetect?.({ device_present: true, device_count: 1 });
+  await staleDetection;
+  equal(dom.el("unlockTabs").classList.contains("hidden"), true);
+  equal(dom.el("unlockPassphrase").classList.contains("hidden"), true);
+  equal(dom.el("unlockFido2").classList.contains("hidden"), true);
 });
 
 test("shell renderer applies setup, locked, and unlocked DOM state", async () => {
@@ -562,12 +628,16 @@ test("shell renderer applies setup, locked, and unlocked DOM state", async () =>
   renderer.applySetupUi();
   equal(calls.filter((entry) => entry === "wizard:reset").length, 1);
 
+  dom.el("unlockPassphrase").classList.add("hidden");
+  dom.el("unlockFido2").classList.remove("hidden");
   renderer.applyLockedUi();
   await tick();
   equal(mode, "locked");
   equal(document.body.dataset.mode, "locked");
   equal(dom.el("lockForm").classList.contains("hidden"), true);
   equal(dom.el("authRecovery").classList.contains("hidden"), false);
+  equal(dom.el("unlockPassphrase").classList.contains("hidden"), false);
+  equal(dom.el("unlockFido2").classList.contains("hidden"), true);
 
   renderer.applyUnlockedUi(
     { compartment_id: 1, compartment_label: "daily", api_key_count: 0 },
@@ -881,6 +951,8 @@ test("discovery job cancel and resume controls drive the real endpoints", async 
 test("session requests persist fresh tokens and clear stale tokens on 401", async () => {
   installDom();
   clearSessionToken();
+  const tokenChanges: Array<string | null> = [];
+  const unsubscribe = subscribeSessionToken((token) => tokenChanges.push(token));
   writeSessionToken("old-token");
   let captured: any = null;
   (globalThis as any).fetch = async (_path: string, init: any) => {
@@ -902,6 +974,31 @@ test("session requests persist fresh tokens and clear stale tokens on 401", asyn
   });
   await requestWithSession("GET", "/api/expired");
   equal(readSessionToken(), null);
+
+  let finishStaleRequest: (() => void) | null = null;
+  writeSessionToken("request-token");
+  (globalThis as any).fetch = async () => {
+    await new Promise<void>((resolve) => {
+      finishStaleRequest = resolve;
+    });
+    return {
+      status: 401,
+      json: async () => ({ error: "expired old request" }),
+    };
+  };
+  const staleRequest = requestWithSession("GET", "/api/stale");
+  writeSessionToken("replacement-token");
+  finishStaleRequest?.();
+  await staleRequest;
+  equal(readSessionToken(), "replacement-token");
+  deepEqual(tokenChanges, [
+    "old-token",
+    "new-token",
+    null,
+    "request-token",
+    "replacement-token",
+  ]);
+  unsubscribe();
 });
 
 test("session requests carry structured error code and fields through", async () => {
@@ -1032,9 +1129,12 @@ test("wizard steps focus the first enabled control or the step container", () =>
   const dom = installDom();
   const controlStep = dom.el("wizFocusControls");
   controlStep.classList.add("wizard-step");
+  const helpTip = dom.document.createElement("span");
+  helpTip.setAttribute("tabindex", "0");
   const disabledInput = dom.document.createElement("input");
   disabledInput.disabled = true;
   const enabledButton = dom.document.createElement("button");
+  controlStep.appendChild(helpTip);
   controlStep.appendChild(disabledInput);
   controlStep.appendChild(enabledButton);
   dom.document.body.appendChild(controlStep);

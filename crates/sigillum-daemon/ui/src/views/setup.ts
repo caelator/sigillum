@@ -175,7 +175,11 @@ export function createSetupWizard(deps: SetupWizardDeps) {
     updateWizardChrome(id);
     if (!step) return;
 
-    const firstControl = focusableElements(step)[0];
+    const firstControl = focusableElements(step).find((element) =>
+      ["INPUT", "BUTTON", "SELECT", "TEXTAREA", "SUMMARY", "A"].includes(
+        element.tagName.toUpperCase(),
+      ),
+    );
     if (firstControl) {
       firstControl.focus();
       return;
