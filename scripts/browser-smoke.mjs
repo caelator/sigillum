@@ -451,7 +451,9 @@ async function waitForRefreshCycle(cdp, description) {
       timer = setTimeout(() => {
         finish(new Error(
           "timed out waiting for refresh busy -> live; state=" +
-          (indicator.dataset.state || "missing")
+          (indicator.dataset.state || "missing") +
+          "; visibility=" +
+          document.visibilityState
         ));
       }, ${REFRESH_CYCLE_TIMEOUT_MS});
       inspect();
@@ -681,12 +683,26 @@ async function runBrowserSmoke(cdp) {
   });
 
   await cdp.send("Page.enable");
+  // `/json/new` creates a second tab alongside Chrome's initial about:blank
+  // target. macOS headless Chrome does not consistently make that new target
+  // foreground, and the shipped UI correctly pauses refresh while hidden.
+  // Activate the smoke target before navigation so refresh-liveness assertions
+  // exercise a visible operator console on every CI platform.
+  await cdp.send("Page.bringToFront");
   await cdp.send("Runtime.enable");
   await cdp.send("Network.enable");
   await cdp.send("Page.setViewport", { width: 1440, height: 1100, deviceScaleFactor: 1, mobile: false }).catch(() => {});
   await cdp.send("Page.navigate", { url: TARGET_URL });
 
   await waitFor(cdp, "document.readyState === 'complete'", "page load");
+  const targetVisibility = await evaluate(
+    cdp,
+    "document.visibilityState",
+    "browser smoke target visibility",
+  );
+  if (targetVisibility !== "visible") {
+    fail(`browser smoke target is not foreground; visibility=${targetVisibility}`);
+  }
   await waitFor(cdp, "document.title.includes('Sigillum Vault')", "Sigillum title");
   await waitFor(
     cdp,
