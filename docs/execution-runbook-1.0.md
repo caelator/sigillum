@@ -14,9 +14,9 @@ release gate from `2026-07-18T17:15:16Z` through `2026-07-18T17:30:35Z` (919
 seconds), with `gate_rc=0`, `tee_rc=0`, `filter_rc=0`, and `overall_rc=0`. The
 receipt log SHA-256 is
 `efb8e2240949d32f0f53ff8ee028d1016724df849e038b361b9fed78f23dab94`.
-This receipt is exact to `fc1e93b`; a later documentation-only successor may
-carry the record, but its exact HEAD needs an external clean-gate receipt before
-protected-main integration and RC6.
+This receipt is exact to `fc1e93b`; any later successor may carry the record,
+but its exact HEAD needs an external clean-gate receipt before protected-main
+integration and RC6.
 
 **Plan authority:** [release-1.0-plan.md](./release-1.0-plan.md)
 
@@ -77,12 +77,11 @@ a commit that contains later hardening changes.
 
 ## 2. Execution order
 
-1. Preserve the `fc1e93b` receipt as SHA-bound predecessor evidence. If a later
-   documentation-only commit succeeds it, run `./scripts/check-release.sh` from
-   a clean checkout at that exact HEAD and retain the external receipt before
-   protected-main integration. Do not edit the commit solely to embed its own
-   receipt. Never overlap a full gate with another agent or build modifying the
-   checkout.
+1. Preserve the passing `fc1e93b` and failed `8c654fc` receipts as SHA-bound
+   evidence. Run `./scripts/check-release.sh` from a clean checkout at the exact
+   current successor and retain the external receipt before protected-main
+   integration. Do not edit the commit solely to embed its own receipt. Never
+   overlap a full gate with another agent or build modifying the checkout.
 2. Review the 12 screenshots manually. Preserve any negative finding; automated
    mock rendering is not operator sign-off or runtime proof.
 3. Before merge, verify that `main` protection requires both fixed-runner CI

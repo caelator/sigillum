@@ -8,6 +8,9 @@
 **Audited documentation/release-gate checkpoint:**
 `fc1e93b1aa2cf9524b2b99fd04342863ba6b2b1d` (`fc1e93b`)
 
+**Latest failed exact-HEAD gate checkpoint:**
+`8c654fc854bbc03696a51fc8dd8f8342765211af` (`8c654fc`)
+
 **Historical accessibility checkpoint:** `29426df`
 (`Harden keyboard and accessibility gates`)
 
@@ -33,9 +36,14 @@ updates the architecture contract to the live UI core/destination layout. Grok
 4.5 reported `CONVERGED: YES` for both the plan and final implementation.
 `fc1e93b` synchronizes the current documentation and passes the complete
 clean-tree release gate in 919 seconds with every recorded return code zero.
-That receipt proves `fc1e93b` only; a documentation-only successor may carry it
-as predecessor evidence but requires an external exact-HEAD clean-gate receipt
-before protected-main integration and RC6.
+That receipt proves `fc1e93b` only. The exact-HEAD rerun at documentation
+successor `8c654fc` preserved a real failure in the scheduler integration test:
+an unlocked one-second tick could legitimately cross its final pause check
+after the test read a queued job but before the pause handler set the in-memory
+latch. Production pause/drain/broadcast code is byte-identical across the two
+commits; the current handoff fixes only the test fixture by establishing pause
+before scheduler startup. This HEAD still requires an external clean-gate
+receipt before protected-main integration and RC6.
 
 ## 1. Mission and non-negotiable boundaries
 
@@ -45,8 +53,10 @@ The branch now contains the privacy/backend work and the five-destination
 operator console, including the interaction and browser-smoke work through
 `c435611` and the release-gate architecture repair through `8ea6f8e`.
 `fc1e93b` records that repair and passes the complete local source gate.
-Remaining work is any successor's external exact-HEAD gate receipt, operator
-visual sign-off, protected-main integration/CI, and same-SHA RC6 evidence.
+The current test-only successor repairs the scheduler fixture race exposed at
+`8c654fc`. Remaining work is this HEAD's external exact-HEAD gate receipt,
+operator visual sign-off, protected-main integration/CI, and same-SHA RC6
+evidence.
 
 - Work only in the designated worktree and branch. Do not push, tag, publish,
   or change GitHub settings unless the operator explicitly authorizes it.
@@ -176,6 +186,9 @@ accessibility foundations.
 - `7042178` — documented the architecture repair and focused verification
 - `fc1e93b` — synchronized release checkpoint documentation and passed the
   complete clean-tree release gate with an auditable external receipt
+- `8c654fc` — recorded the passing predecessor receipt; its exact-HEAD gate
+  failed in the scheduler integration test and is preserved as negative
+  evidence
 
 ## 3. Verification by checkpoint
 
@@ -230,20 +243,42 @@ The auditable clean gate at exact SHA
 external receipt ID is `20260718T171516Z-fc1e93b1aa2c`; the log SHA-256 is
 `efb8e2240949d32f0f53ff8ee028d1016724df849e038b361b9fed78f23dab94`.
 
-The focused checks at `8ea6f8e` are source-slice evidence; the auditable
-`fc1e93b` run proves the complete local source gate. Neither proves the external
-operator/release receipts below:
+The exact-HEAD clean gate at `8c654fc854bbc03696a51fc8dd8f8342765211af`
+started at `2026-07-18T17:36:36Z` and failed after 532 seconds in
+`scheduler_skips_everything_when_locked_and_when_execution_paused`:
+`gate_rc=101`, `tee_rc=0`, `filter_rc=0`, and `overall_rc=101`. The
+operator-local external receipt ID is `20260718T173636Z-8c654fc854bb`; the log
+SHA-256 is
+`7544419aaa610e91a6bd45ad93cdf5cc416c061a3d8df0427110d6f03aa46b61`.
+The job advanced from `queued` to `sent`; the scheduler had crossed its final
+pause check before the handler set the in-memory latch. Ten subsequent pre-fix
+whole-binary runs passed, confirming a timing-sensitive fixture race rather
+than a production-code regression.
 
+The current test-only repair starts the daemon without the scheduler, enqueues
+and pauses through the real HTTP API, locks, then starts the scheduler. It
+proves `skipped_locked`, advances unlocked paused ticks with zero job attempts,
+and broadcasts exactly once only after the real resume endpoint. Cursor CLI
+Grok 4.5 High reported `CONVERGED: YES`. Focused evidence is green: scheduler
+**3/3**, scheduler-disabled **1/1**, the existing mid-drain pause regression
+**1/1**, and **20/20** repeated exact repaired cases. Production scheduler,
+pause, drain, broadcast, and persistence code is unchanged.
+
+The focused checks at `8ea6f8e` are source-slice evidence; the auditable
+`fc1e93b` run proves the complete local source gate. Neither proves the
+same-candidate operator/release receipts below:
+
+- RC6-bound standard/chaos F4, doctor, or F7 upgrade-path rerun evidence;
 - clean-install desktop behavior or operator visual sign-off;
 - public-testnet F6 execution receipts;
 - a same-candidate sanitized release-evidence bundle.
 
 ## 4. Exact continuation order
 
-1. Preserve the `fc1e93b` receipt as SHA-bound predecessor evidence. If this
-   receipt-recording documentation creates a successor, run the clean gate at
-   that exact HEAD and retain the external receipt before protected-main
-   integration; do not edit the commit solely to embed its own receipt.
+1. Preserve both the passing `fc1e93b` receipt and failed `8c654fc` receipt.
+   Run the clean gate at this test-fix HEAD and retain the external exact-SHA
+   receipt before protected-main integration; do not edit the commit solely to
+   embed its own receipt.
 2. Review the 12 screenshots manually; automated mock rendering is not
    operator visual sign-off or runtime proof.
 3. Review and merge through protected `main`, with required Ubuntu and macOS CI
@@ -251,9 +286,9 @@ operator/release receipts below:
    `8ea6f8e`.
 4. Create the next immutable annotated candidate, `v1.0.0-rc.6`, only from the
    protected-main commit. Verify the six-job draft release and asset checksums.
-5. Bind F4 standard/chaos, F6 public-testnet receipts, desktop clean-install,
-   doctor, and UI sign-off to the exact RC6 peeled SHA. Build and validate the
-   external sanitized evidence archive.
+5. Bind F4 standard/chaos, F6 public-testnet receipts, F7 upgrade-path tests,
+   desktop clean-install, doctor, and UI sign-off to the exact RC6 peeled SHA.
+   Build and validate the external sanitized evidence archive.
 6. Only after every H1 receipt agrees may the operator make the explicit H2
    final-tag/publish decision. No final `v1.0.0` tag or published release exists
    at this handoff.

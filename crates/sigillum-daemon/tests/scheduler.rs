@@ -52,6 +52,27 @@ async fn spawn_daemon_with_state(
     Arc<sigillum_daemon::AppState>,
     tokio::task::JoinHandle<()>,
 ) {
+    spawn_daemon_with_scheduler(base_dir, true).await
+}
+
+async fn spawn_daemon_without_scheduler(
+    base_dir: PathBuf,
+) -> (
+    SocketAddr,
+    Arc<sigillum_daemon::AppState>,
+    tokio::task::JoinHandle<()>,
+) {
+    spawn_daemon_with_scheduler(base_dir, false).await
+}
+
+async fn spawn_daemon_with_scheduler(
+    base_dir: PathBuf,
+    start_scheduler: bool,
+) -> (
+    SocketAddr,
+    Arc<sigillum_daemon::AppState>,
+    tokio::task::JoinHandle<()>,
+) {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
     let (app, state) =
@@ -59,7 +80,9 @@ async fn spawn_daemon_with_state(
     // The scheduler spawns with the server entry point in production
     // (`run_inner`), so tests opt in explicitly — exactly the call the
     // production path makes.
-    sigillum_daemon::spawn_scheduler(state.clone());
+    if start_scheduler {
+        sigillum_daemon::spawn_scheduler(state.clone());
+    }
     let handle = tokio::spawn(async move {
         axum::serve(listener, app).await.unwrap();
     });
@@ -478,16 +501,38 @@ async fn retrying_job_drains_to_broadcast_without_a_client() {
 async fn scheduler_skips_everything_when_locked_and_when_execution_paused() {
     set_scheduler_env();
     let dir = TempDir::new().unwrap();
-    let (addr, state, handle) = spawn_daemon_with_state(dir.path().to_path_buf()).await;
+    // Defer scheduler startup until both safety gates are established. Starting
+    // it during setup would leave an unlock -> pause-request window in which a
+    // legitimate tick could cross its final pause check before the handler set
+    // the in-memory latch.
+    let (addr, state, handle) = spawn_daemon_without_scheduler(dir.path().to_path_buf()).await;
     let (rpc_addr, rpc_handle, control) = spawn_mock_evm_provider().await;
     let client = reqwest::Client::new();
     let setup = setup_stealth_queue(&client, addr, rpc_addr).await;
     enqueue_stealth_transfer(&client, addr, &setup).await;
 
+    // Persist and latch pause through the real HTTP path before the scheduler
+    // exists. The dedicated mid-drain pause test covers preemption after a
+    // drain has started; this test covers the scheduler respecting an already
+    // authoritative pause across ticks.
+    let pause = post_json(
+        &client,
+        addr,
+        "/api/queue/pause",
+        json!({}),
+        Some(&setup.token),
+    )
+    .await;
+    assert_eq!(pause.status(), StatusCode::OK);
+    let pause_json: Value = pause.json().await.unwrap();
+    assert_eq!(pause_json["status"], json!("paused"));
+    assert_eq!(pause_json["execution_paused"], json!(true));
+
     // Locked: several ticks pass; nothing may run (no vault access without
     // unlock), and the status block says why it skipped.
     let lock = post_json(&client, addr, "/api/lock", json!({}), Some(&setup.token)).await;
     assert_eq!(lock.status(), StatusCode::OK);
+    sigillum_daemon::spawn_scheduler(state.clone());
     wait_for(
         "a locked scheduler tick",
         Duration::from_secs(10),
@@ -498,6 +543,10 @@ async fn scheduler_skips_everything_when_locked_and_when_execution_paused() {
     .await;
     tokio::time::sleep(Duration::from_millis(1500)).await;
     assert_eq!(control.broadcast_count.load(Ordering::SeqCst), 0);
+    let locked_tick_at_unix = state
+        .scheduler_status()
+        .last_tick_at_unix
+        .expect("the locked scheduler cycle recorded a tick");
 
     let unlock = post_json(
         &client,
@@ -510,14 +559,31 @@ async fn scheduler_skips_everything_when_locked_and_when_execution_paused() {
     assert_eq!(unlock.status(), StatusCode::OK);
     let unlock_json: Value = unlock.json().await.unwrap();
     let token = unlock_json["session_token"].as_str().unwrap().to_string();
-    let job = first_queue_job(&client, addr, &token).await;
-    assert_eq!(job["state"], json!("queued"), "{job}");
-    assert_eq!(job["attempts"], json!(0), "{job}");
 
-    // Paused: the drain stage must not start jobs even though work is due.
-    let pause = post_json(&client, addr, "/api/queue/pause", json!({}), Some(&token)).await;
-    assert_eq!(pause.status(), StatusCode::OK);
-    tokio::time::sleep(Duration::from_millis(2500)).await;
+    // Paused: unlocked scheduler ticks continue, but the drain stage must not
+    // start the due job. Confirm the loop actually advanced after unlock so a
+    // stalled scheduler cannot make the assertion pass vacuously. Poll instead
+    // of assuming a fixed sleep is enough on a loaded test host.
+    wait_for(
+        "an unlocked paused scheduler tick",
+        Duration::from_secs(10),
+        || async {
+            let status = state.scheduler_status();
+            status
+                .last_tick_at_unix
+                .is_some_and(|tick| tick > locked_tick_at_unix)
+                && status.last_cycle_outcome.as_deref() == Some("idle")
+        },
+    )
+    .await;
+    let paused_status = state.scheduler_status();
+    assert!(
+        paused_status
+            .last_tick_at_unix
+            .is_some_and(|tick| tick > locked_tick_at_unix),
+        "an unlocked paused scheduler cycle must run: {paused_status:?}"
+    );
+    assert_eq!(paused_status.last_cycle_outcome.as_deref(), Some("idle"));
     let job = first_queue_job(&client, addr, &token).await;
     assert_eq!(job["state"], json!("queued"), "{job}");
     assert_eq!(job["attempts"], json!(0), "{job}");

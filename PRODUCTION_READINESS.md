@@ -23,9 +23,9 @@ checkpoint `fc1e93b1aa2cf9524b2b99fd04342863ba6b2b1d` passed the complete
 clean-tree release gate in 919 seconds with every recorded return code zero;
 the receipt log SHA-256 is
 `efb8e2240949d32f0f53ff8ee028d1016724df849e038b361b9fed78f23dab94`.
-That receipt proves `fc1e93b` only. A later documentation-only successor may
-carry this record as predecessor evidence, but its exact HEAD still requires an
-external clean-gate receipt before protected-main integration and RC6. RC5
+That receipt proves `fc1e93b` only. Any later successor may carry this record as
+predecessor evidence, but its exact HEAD still requires an external clean-gate
+receipt before protected-main integration and RC6. RC5
 evidence is therefore historical baseline for this feature line; after that
 integration the next eligible candidate is RC6 and all release evidence must
 bind to RC6's exact peeled SHA. There is no final `v1.0.0` tag and no published
@@ -198,10 +198,10 @@ its phases 1–3 are absorbed into the 1.0 plan.
 The next work should still avoid speculative new product scope first. The right
 immediate move is:
 
-1. retain the exact `fc1e93b` gate receipt as predecessor evidence; if a later
-   documentation-only commit succeeds it, capture a clean external gate receipt
-   at that exact HEAD before protected-main integration without editing the
-   commit merely to embed its own receipt
+1. retain the passing `fc1e93b` and failed `8c654fc` gate receipts as SHA-bound
+   evidence; capture a clean external gate receipt at the exact current successor
+   before protected-main integration without editing that commit merely to embed
+   its own receipt
 2. review the 12 screenshots manually and preserve any negative finding
 3. merge through protected `main` with required Ubuntu and macOS contexts green
 4. create immutable annotated RC6 and independently verify its draft assets
