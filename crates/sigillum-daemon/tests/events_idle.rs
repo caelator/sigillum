@@ -69,7 +69,7 @@ async fn sse_connection_does_not_extend_session_idle_life() {
     let active_token = unlock_json["session_token"].as_str().unwrap().to_string();
 
     // The passive session opens the stream (accepted, 200) and KEEPS IT OPEN.
-    let stream = client
+    let mut stream = client
         .get(format!("http://{addr}/api/events"))
         .bearer_auth(&passive_token)
         .send()
@@ -79,7 +79,8 @@ async fn sse_connection_does_not_extend_session_idle_life() {
 
     // ~1s in: the active session makes one ACTIVE request (`/api/diagnostics`
     // — `/api/operations` is itself passive since plan task 1.7, so it would
-    // not refresh the clock). The stream keeps flowing in the background.
+    // not refresh the clock). The stream remains open in the background only
+    // while its passive session is valid.
     tokio::time::sleep(Duration::from_millis(1000)).await;
     let active_probe = client
         .get(format!("http://{addr}/api/diagnostics"))
@@ -117,6 +118,16 @@ async fn sse_connection_does_not_extend_session_idle_life() {
         StatusCode::OK,
         "active requests still defer the idle lock for their own session"
     );
+
+    // The daemon also retires the already-open stream once passive
+    // revalidation observes that the session has expired. Drain the initial
+    // snapshot bytes and require EOF within one revalidation window plus a
+    // generous scheduling margin.
+    tokio::time::timeout(Duration::from_secs(3), async {
+        while stream.chunk().await.unwrap().is_some() {}
+    })
+    .await
+    .expect("idle-expired SSE stream should terminate promptly");
 
     drop(stream);
     handle.abort();

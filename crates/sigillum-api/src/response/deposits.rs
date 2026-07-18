@@ -103,17 +103,32 @@ pub struct EthStealthDepositRefreshResponse {
 }
 
 /// Persisted per-(wallet profile, provider profile) announcement-scan cursor
-/// (plan task 2.6): the highest announcement block scanned, so an announcer
-/// scan with no explicit `from_block` resumes at `last_scanned_block + 1`
-/// instead of re-reading history. Stored in the deposits store; mirrored
-/// here so responses and clients can share the shape.
+/// (plan task 2.6).
+///
+/// Position version 1 uses `last_scanned_log_index = Some(index)` for a
+/// partially consumed block; the next implicit scan resumes at that block and
+/// skips log positions up to and including `index`. `None` records a completely
+/// covered block, so the next scan starts at `last_scanned_block + 1`.
+///
+/// Cursors written before intra-block positions existed have neither additive
+/// field and deserialize with `position_version = 0`. Their entire historical
+/// range is ambiguous: an old limit-capped scan may have skipped a same-block
+/// tail and then advanced through later blocks. The daemon therefore replays
+/// history once from `earliest` before upgrading the cursor to v1.
+///
+/// Stored in the deposits store; mirrored here so responses and clients can
+/// share the shape.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct EthStealthAnnouncementScanCursor {
     pub wallet_profile: String,
     pub provider_profile: String,
     #[serde(default = "default_legacy_mainnet_chain_id")]
     pub chain_id: u64,
+    #[serde(default, skip_serializing_if = "is_zero_u8")]
+    pub position_version: u8,
     pub last_scanned_block: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_scanned_log_index: Option<u64>,
     pub updated_at_unix: u64,
 }
 
@@ -153,4 +168,33 @@ fn default_legacy_mainnet_chain_id() -> u64 {
 
 fn default_legacy_chain_id_assumed() -> bool {
     true
+}
+
+fn is_zero_u8(value: &u8) -> bool {
+    *value == 0
+}
+
+#[cfg(test)]
+mod tests {
+    use super::EthStealthAnnouncementScanCursor;
+
+    #[test]
+    fn legacy_announcement_cursor_defaults_to_an_ambiguous_v0_position() {
+        let legacy = serde_json::json!({
+            "wallet_profile": "payments",
+            "provider_profile": "mainnet",
+            "chain_id": 1,
+            "last_scanned_block": 32,
+            "updated_at_unix": 7
+        });
+
+        let cursor: EthStealthAnnouncementScanCursor =
+            serde_json::from_value(legacy).expect("legacy cursor should deserialize");
+        assert_eq!(cursor.position_version, 0);
+        assert_eq!(cursor.last_scanned_log_index, None);
+
+        let encoded = serde_json::to_value(cursor).expect("cursor should serialize");
+        assert!(encoded.get("position_version").is_none());
+        assert!(encoded.get("last_scanned_log_index").is_none());
+    }
 }

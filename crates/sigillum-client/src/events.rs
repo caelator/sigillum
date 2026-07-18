@@ -21,8 +21,9 @@
 //! Note that the subscription is a PASSIVE read on the daemon: it
 //! authenticates the session but does not refresh its idle-activity clock,
 //! so an always-open subscription cannot defeat the vault auto-lock. A
-//! session that goes idle may be evicted while the stream is open; the next
-//! ACTIVE request then fails with 401 and the client must unlock again.
+//! session that goes idle is evicted and the daemon closes its stream after
+//! passive revalidation; `next()` then yields `None` and the client must
+//! unlock again before reconnecting.
 
 use std::pin::Pin;
 use std::task::{Context, Poll};
@@ -37,10 +38,10 @@ use crate::{ClientError, SigillumClient};
 impl SigillumClient {
     /// Open a subscription to the daemon's event stream.
     ///
-    /// Uses the session token exactly like every other call (the daemon also
-    /// accepts a `?session=` query token for browser `EventSource`, which
-    /// this client never needs). See the module docs for the reconnect
-    /// contract and the passive-read idle-lock rule.
+    /// Uses the session token exactly like every other call (a daemon served
+    /// on a verified loopback listener also accepts a `?session=` query token
+    /// for browser `EventSource`, which this client never needs). See the
+    /// module docs for the reconnect contract and passive-read idle-lock rule.
     pub async fn subscribe_events(&self) -> Result<EventSubscription, ClientError> {
         let builder = self.stream_request(Method::GET, "/api/events");
         let response = builder.send().await?;

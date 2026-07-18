@@ -61,6 +61,7 @@ use super::{ServiceError, ServiceResult, SigillumService};
 
 const DEFAULT_ANNOUNCEMENT_SCAN_LIMIT: usize = 1_000;
 const MAX_ANNOUNCEMENT_SCAN_LIMIT: usize = 10_000;
+const ANNOUNCEMENT_SCAN_CURSOR_POSITION_VERSION: u8 = 1;
 const ERC5564_DISCOVERY_SOURCE: &str = "erc5564-announcement";
 
 // ── Deposit Blueprint & Plans ──────────────────────────────────────────────
@@ -103,11 +104,23 @@ mod tests {
         block: u64,
         updated: u64,
     ) -> EthStealthAnnouncementScanCursor {
+        scan_cursor_at(wallet, provider, block, None, updated)
+    }
+
+    fn scan_cursor_at(
+        wallet: &str,
+        provider: &str,
+        block: u64,
+        log_index: Option<u64>,
+        updated: u64,
+    ) -> EthStealthAnnouncementScanCursor {
         EthStealthAnnouncementScanCursor {
             wallet_profile: wallet.into(),
             provider_profile: provider.into(),
             chain_id: 1,
+            position_version: ANNOUNCEMENT_SCAN_CURSOR_POSITION_VERSION,
             last_scanned_block: block,
+            last_scanned_log_index: log_index,
             updated_at_unix: updated,
         }
     }
@@ -125,9 +138,55 @@ mod tests {
         upsert_announcement_scan_cursor(&mut cursors, scan_cursor("w", "p", 160, 30), false);
         assert_eq!(cursors[0].last_scanned_block, 160);
 
-        // Reset re-anchors, even backward.
-        upsert_announcement_scan_cursor(&mut cursors, scan_cursor("w", "p", 50, 40), true);
+        // Reset re-anchors, even backward and inside a block.
+        upsert_announcement_scan_cursor(
+            &mut cursors,
+            scan_cursor_at("w", "p", 50, Some(4), 40),
+            true,
+        );
         assert_eq!(cursors[0].last_scanned_block, 50);
+        assert_eq!(cursors[0].last_scanned_log_index, Some(4));
+
+        // Intra-block progress is lexicographic. A lower index cannot move
+        // backward, a higher index advances, and a completed block sorts
+        // after every partial index in that block.
+        upsert_announcement_scan_cursor(
+            &mut cursors,
+            scan_cursor_at("w", "p", 50, Some(2), 41),
+            false,
+        );
+        assert_eq!(cursors[0].last_scanned_log_index, Some(4));
+        upsert_announcement_scan_cursor(
+            &mut cursors,
+            scan_cursor_at("w", "p", 50, Some(9), 42),
+            false,
+        );
+        assert_eq!(cursors[0].last_scanned_log_index, Some(9));
+        upsert_announcement_scan_cursor(&mut cursors, scan_cursor("w", "p", 50, 43), false);
+        assert_eq!(cursors[0].last_scanned_log_index, None);
+        upsert_announcement_scan_cursor(
+            &mut cursors,
+            scan_cursor_at("w", "p", 50, Some(99), 44),
+            false,
+        );
+        assert_eq!(cursors[0].last_scanned_log_index, None);
+
+        // Exact v1 progress may re-anchor below a legacy v0 boundary because
+        // the migration replays the old format's entire untrusted history.
+        let mut legacy = scan_cursor("legacy", "p", 75, 45);
+        legacy.position_version = 0;
+        let mut legacy_cursors = vec![legacy];
+        upsert_announcement_scan_cursor(
+            &mut legacy_cursors,
+            scan_cursor_at("legacy", "p", 32, Some(3), 46),
+            false,
+        );
+        assert_eq!(
+            legacy_cursors[0].position_version,
+            ANNOUNCEMENT_SCAN_CURSOR_POSITION_VERSION
+        );
+        assert_eq!(legacy_cursors[0].last_scanned_block, 32);
+        assert_eq!(legacy_cursors[0].last_scanned_log_index, Some(3));
 
         // A different (wallet, provider) pair gets its own entry.
         upsert_announcement_scan_cursor(&mut cursors, scan_cursor("w", "q", 7, 50), false);
@@ -144,13 +203,7 @@ mod tests {
     }
 
     #[test]
-    fn max_log_block_tracks_the_highest_processed_log() {
-        assert_eq!(max_log_block(None, None), None);
-        assert_eq!(max_log_block(None, Some("0x20")), Some(32));
-        assert_eq!(max_log_block(Some(32), Some("0x10")), Some(32));
-        assert_eq!(max_log_block(Some(32), Some("0x40")), Some(64));
-        // Named tags and junk never move the cursor.
-        assert_eq!(max_log_block(Some(32), Some("latest")), Some(32));
+    fn parses_log_positions_and_block_quantities() {
         assert_eq!(parse_block_quantity("latest"), None);
         assert_eq!(parse_block_quantity("0X0A"), Some(10));
         assert_eq!(encode_block_quantity(31), "0x1f");
@@ -902,30 +955,50 @@ impl SigillumService {
         // Plan task 2.6: an explicit `from_block` always wins (manual
         // rescan); when omitted, resume from the persisted per-(wallet,
         // provider) announcement cursor, or scan from `earliest` when no
-        // cursor is stored (first scan, or after `reset_cursor`). The cursor
-        // read is a cheap store load; the authoritative mutation copy loads
-        // under the operation guard below.
+        // cursor is stored (first scan, or after `reset_cursor`). A v1 partial
+        // cursor resumes inside its block, while a v1 completed cursor resumes
+        // at the following block. A legacy v0 cursor replays from `earliest`:
+        // the old block-only format cannot prove that an earlier capped scan
+        // did not skip a same-block tail before later scans advanced the
+        // cursor. The cursor read is a cheap store load; the authoritative
+        // mutation copy loads under the operation guard below.
         let reset_cursor = body.reset_cursor.unwrap_or(false);
+        let resume_cursor = if body.from_block.is_none() && !reset_cursor {
+            let stored = crate::deposits::load_deposits(&self.state.base_dir).map_err(|error| {
+                ServiceError::internal(format!("Failed to load deposits: {error}"))
+            })?;
+            latest_announcement_scan_cursor(
+                &stored.announcement_scan_cursors,
+                &wallet.name,
+                &provider.name,
+            )
+            .cloned()
+        } else {
+            None
+        };
         let from_block = match body.from_block.as_deref() {
             Some(value) => normalize_log_block_tag(value, "from_block")?,
-            None => {
-                let stored =
-                    crate::deposits::load_deposits(&self.state.base_dir).map_err(|error| {
-                        ServiceError::internal(format!("Failed to load deposits: {error}"))
-                    })?;
-                match latest_announcement_scan_cursor(
-                    &stored.announcement_scan_cursors,
-                    &wallet.name,
-                    &provider.name,
-                )
-                .filter(|_| !reset_cursor)
+            None => match resume_cursor.as_ref() {
+                Some(cursor) if cursor.position_version == 0 => "earliest".into(),
+                Some(cursor)
+                    if cursor.position_version == ANNOUNCEMENT_SCAN_CURSOR_POSITION_VERSION
+                        && cursor.last_scanned_log_index.is_some() =>
                 {
-                    Some(cursor) => {
-                        encode_block_quantity(cursor.last_scanned_block.saturating_add(1))
-                    }
-                    None => "earliest".into(),
+                    encode_block_quantity(cursor.last_scanned_block)
                 }
-            }
+                Some(cursor)
+                    if cursor.position_version == ANNOUNCEMENT_SCAN_CURSOR_POSITION_VERSION =>
+                {
+                    encode_block_quantity(cursor.last_scanned_block.saturating_add(1))
+                }
+                Some(cursor) => {
+                    return Err(ServiceError::internal(format!(
+                        "Unsupported ERC-5564 announcement cursor position version {}",
+                        cursor.position_version
+                    )));
+                }
+                None => "earliest".into(),
+            },
         };
 
         // Watch-only detection: the scan derives the viewing private key +
@@ -950,6 +1023,18 @@ impl SigillumService {
             erc5564_announcement_topic(),
             padded_u64_topic(ETHEREUM_STEALTH_SCHEME_ID),
         ];
+        // Capture `latest` before querying logs. If the chain advances between
+        // the two calls, this older head is a conservative completed-range
+        // anchor (the next scan may re-read, but can never skip, the new
+        // block). A numeric upper bound is already an exact anchor.
+        let completed_range_anchor = match parse_block_quantity(&to_block) {
+            Some(block) => Some(block),
+            None if to_block == "latest" => self
+                .evm_block_number_for_provider(provider.compartment_id, &provider)
+                .await
+                .ok(),
+            None => None,
+        };
         let logs = self
             .evm_logs_for_provider(
                 provider.compartment_id,
@@ -961,6 +1046,36 @@ impl SigillumService {
             )
             .await?;
 
+        // Providers are expected to return canonical log order, but cursor
+        // safety must not depend on that convention. Parse every position,
+        // sort deterministically, reject impossible duplicate positions, and
+        // only then apply the persisted resume floor and caller limit.
+        let mut positioned_logs = logs
+            .into_iter()
+            .map(|log| announcement_log_position(&log).map(|position| (position, log)))
+            .collect::<ServiceResult<Vec<_>>>()?;
+        positioned_logs.sort_by_key(|(position, _)| *position);
+        if positioned_logs
+            .windows(2)
+            .any(|window| window[0].0 == window[1].0)
+        {
+            return Err(ServiceError::internal(
+                "Provider returned duplicate ERC-5564 announcement log positions",
+            ));
+        }
+        if let Some(cursor) = resume_cursor
+            .as_ref()
+            .filter(|cursor| cursor.position_version == ANNOUNCEMENT_SCAN_CURSOR_POSITION_VERSION)
+        {
+            positioned_logs
+                .retain(|(position, _)| announcement_log_is_after_cursor(*position, cursor));
+        }
+        let eligible_count = positioned_logs.len();
+        let processed_logs = positioned_logs.into_iter().take(limit).collect::<Vec<_>>();
+        let scanned = processed_logs.len();
+        let has_more_logs = eligible_count > scanned;
+        let last_processed_position = processed_logs.last().map(|(position, _)| *position);
+
         let _guard = self.state.operation_guard().await;
         let mut deposits = crate::deposits::load_deposits(&self.state.base_dir)
             .map_err(|error| ServiceError::internal(format!("Failed to load deposits: {error}")))?;
@@ -969,13 +1084,8 @@ impl SigillumService {
         let mut created = 0usize;
         let mut existing = 0usize;
         let mut response_deposits = Vec::new();
-        // Farthest announcement block this scan actually decoded (the cursor
-        // anchor; mirrors the ERC-20 transfer-log `max_log_block` semantics).
-        let mut cursor_block: Option<u64> = None;
-
-        for log in logs.iter().take(limit) {
+        for (_, log) in &processed_logs {
             let event = decode_erc5564_announcement_log(log)?;
-            cursor_block = max_log_block(cursor_block, event.block_number.as_deref());
             let view_tag = hex::decode(&event.view_tag_hex)
                 .ok()
                 .and_then(|bytes| bytes.first().copied());
@@ -1075,33 +1185,33 @@ impl SigillumService {
             deposits.eth_stealth.push(deposit);
         }
 
-        // Plan task 2.6: advance the persisted announcement cursor to the
-        // farthest block this scan covered — the highest PROCESSED log block
-        // (never beyond what was decoded, so a `limit`-capped scan re-reads
-        // the tail next time). When the range held no logs at all, anchor at
-        // the concrete upper bound: a numeric `to_block`, or the chain head
-        // for the default `latest` (best-effort — a head-read failure leaves
-        // the cursor untouched rather than failing the scan); other block
-        // tags can't be anchored honestly and also leave it untouched. The
-        // cursor write rides the same atomic store save as the deposits.
-        if cursor_block.is_none() && logs.is_empty() {
-            cursor_block = match parse_block_quantity(&to_block) {
-                Some(block) => Some(block),
-                None if to_block == "latest" => self
-                    .evm_block_number_for_provider(provider.compartment_id, &provider)
-                    .await
-                    .ok(),
-                None => None,
-            };
-        }
-        if let Some(last_scanned_block) = cursor_block {
+        // A limit-capped result records the exact last processed log and
+        // resumes inside that block next time. Once every eligible result was
+        // consumed, the whole completed block/range is safe to mark covered:
+        // prefer the concrete upper-bound anchor, falling back to the last
+        // processed block for named tags. This prevents both same-block skips
+        // and repeatedly processing the first page forever. The cursor write
+        // rides the same atomic store save as the deposits.
+        let cursor_position = if has_more_logs {
+            last_processed_position.map(|(block, log_index)| (block, Some(log_index)))
+        } else {
+            match (completed_range_anchor, last_processed_position) {
+                (Some(anchor), Some((last_block, _))) => Some((anchor.max(last_block), None)),
+                (Some(anchor), None) => Some((anchor, None)),
+                (None, Some((last_block, _))) => Some((last_block, None)),
+                (None, None) => None,
+            }
+        };
+        if let Some((last_scanned_block, last_scanned_log_index)) = cursor_position {
             upsert_announcement_scan_cursor(
                 &mut deposits.announcement_scan_cursors,
                 EthStealthAnnouncementScanCursor {
                     wallet_profile: wallet.name.clone(),
                     provider_profile: provider.name.clone(),
                     chain_id: provider.chain_id,
+                    position_version: ANNOUNCEMENT_SCAN_CURSOR_POSITION_VERSION,
                     last_scanned_block,
+                    last_scanned_log_index,
                     updated_at_unix: now,
                 },
                 reset_cursor,
@@ -1119,7 +1229,7 @@ impl SigillumService {
             AuditEventSpec::DepositsEthStealthAnnouncementScan {
                 wallet_profile: wallet.name.clone(),
                 provider_profile: provider.name.clone(),
-                scanned: logs.len().min(limit),
+                scanned,
                 matched,
                 created,
             },
@@ -1131,7 +1241,7 @@ impl SigillumService {
             provider_profile: provider.name,
             from_block,
             to_block,
-            scanned: logs.len().min(limit),
+            scanned,
             matched,
             created,
             existing,
@@ -2483,16 +2593,6 @@ fn validated_announcement_scan_limit(limit: Option<usize>) -> ServiceResult<usiz
     Ok(limit)
 }
 
-/// Highest block number seen across processed announcement logs (mirrors the
-/// ERC-20 transfer-log `max_log_block` cursor semantics).
-fn max_log_block(cursor: Option<u64>, block_number: Option<&str>) -> Option<u64> {
-    match (cursor, block_number.and_then(parse_block_quantity)) {
-        (Some(current), Some(next)) => Some(current.max(next)),
-        (None, Some(next)) => Some(next),
-        (current, None) => current,
-    }
-}
-
 /// Parse a `0x`-prefixed block quantity; `None` for named block tags.
 fn parse_block_quantity(value: &str) -> Option<u64> {
     let raw = value
@@ -2508,6 +2608,71 @@ fn encode_block_quantity(value: u64) -> String {
     format!("0x{value:x}")
 }
 
+/// Canonical `(block number, log index)` for an announcement log. Both
+/// fields are required for limit pagination; accepting an unpositioned log
+/// could either skip it or keep replaying the same page forever.
+fn announcement_log_position(log: &super::evm::EvmLogEntry) -> ServiceResult<(u64, u64)> {
+    let block = log
+        .block_number
+        .as_deref()
+        .and_then(parse_block_quantity)
+        .ok_or_else(|| {
+            ServiceError::internal(
+                "Provider ERC-5564 announcement log is missing a valid block number",
+            )
+        })?;
+    let log_index = log
+        .log_index
+        .as_deref()
+        .and_then(parse_block_quantity)
+        .ok_or_else(|| {
+            ServiceError::internal(
+                "Provider ERC-5564 announcement log is missing a valid log index",
+            )
+        })?;
+    Ok((block, log_index))
+}
+
+/// Whether a positioned log is strictly beyond a v1 persisted cursor. `None`
+/// means the cursor's whole block is complete; `Some(index)` means only
+/// positions through that index are complete. Legacy v0 cursors deliberately
+/// bypass this filter and replay their entire ambiguous history.
+fn announcement_log_is_after_cursor(
+    (block, log_index): (u64, u64),
+    cursor: &EthStealthAnnouncementScanCursor,
+) -> bool {
+    match block.cmp(&cursor.last_scanned_block) {
+        std::cmp::Ordering::Greater => true,
+        std::cmp::Ordering::Less => false,
+        std::cmp::Ordering::Equal => cursor
+            .last_scanned_log_index
+            .is_some_and(|last_index| log_index > last_index),
+    }
+}
+
+/// Lexicographic cursor ordering. At the same block, a precise v1 cursor sorts
+/// after an ambiguous legacy v0 cursor so a replay can upgrade in place. Among
+/// v1 positions, a completed block (`None`) sorts after every partial index.
+fn announcement_cursor_position_cmp(
+    left: &EthStealthAnnouncementScanCursor,
+    right: &EthStealthAnnouncementScanCursor,
+) -> std::cmp::Ordering {
+    left.last_scanned_block
+        .cmp(&right.last_scanned_block)
+        .then_with(|| left.position_version.cmp(&right.position_version))
+        .then_with(|| {
+            if left.position_version != ANNOUNCEMENT_SCAN_CURSOR_POSITION_VERSION {
+                return std::cmp::Ordering::Equal;
+            }
+            match (left.last_scanned_log_index, right.last_scanned_log_index) {
+                (Some(left), Some(right)) => left.cmp(&right),
+                (Some(_), None) => std::cmp::Ordering::Less,
+                (None, Some(_)) => std::cmp::Ordering::Greater,
+                (None, None) => std::cmp::Ordering::Equal,
+            }
+        })
+}
+
 /// The stored announcement-scan cursor for a (wallet profile, provider
 /// profile) pair, if any.
 fn latest_announcement_scan_cursor<'a>(
@@ -2520,12 +2685,12 @@ fn latest_announcement_scan_cursor<'a>(
         .filter(|cursor| {
             cursor.wallet_profile == wallet_profile && cursor.provider_profile == provider_profile
         })
-        .max_by_key(|cursor| cursor.last_scanned_block)
+        .max_by(|left, right| announcement_cursor_position_cmp(left, right))
 }
 
-/// Upsert the cursor for a (wallet, provider) pair: monotonic max normally
-/// (a manual rescan of old blocks never drags the cursor backward), a
-/// wholesale re-anchor after `reset_cursor`.
+/// Upsert the cursor for a (wallet, provider) pair: monotonic lexicographic
+/// progress normally (a manual rescan never drags a block or intra-block
+/// position backward), a wholesale re-anchor after `reset_cursor`.
 fn upsert_announcement_scan_cursor(
     cursors: &mut Vec<EthStealthAnnouncementScanCursor>,
     next: EthStealthAnnouncementScanCursor,
@@ -2537,11 +2702,16 @@ fn upsert_announcement_scan_cursor(
     }) {
         existing.chain_id = next.chain_id;
         existing.updated_at_unix = next.updated_at_unix;
-        existing.last_scanned_block = if reset {
-            next.last_scanned_block
-        } else {
-            existing.last_scanned_block.max(next.last_scanned_block)
-        };
+        let upgrading_legacy_cursor = existing.position_version == 0
+            && next.position_version == ANNOUNCEMENT_SCAN_CURSOR_POSITION_VERSION;
+        if reset
+            || upgrading_legacy_cursor
+            || announcement_cursor_position_cmp(&next, existing).is_gt()
+        {
+            existing.position_version = next.position_version;
+            existing.last_scanned_block = next.last_scanned_block;
+            existing.last_scanned_log_index = next.last_scanned_log_index;
+        }
     } else {
         cursors.push(next);
     }

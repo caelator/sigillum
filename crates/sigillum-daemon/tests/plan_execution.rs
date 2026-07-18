@@ -8,7 +8,7 @@
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 use axum::extract::State;
 use axum::http::{HeaderMap, header};
@@ -49,7 +49,8 @@ async fn spawn_daemon(base_dir: PathBuf) -> (SocketAddr, tokio::task::JoinHandle
 #[derive(Clone, Default)]
 struct RpcState {
     fail_broadcast: Arc<AtomicBool>,
-    broadcast_count: Arc<std::sync::atomic::AtomicUsize>,
+    broadcast_count: Arc<AtomicUsize>,
+    nonce_count: Arc<AtomicUsize>,
 }
 
 fn rpc_response(state: &RpcState, request: &Value) -> Value {
@@ -57,7 +58,10 @@ fn rpc_response(state: &RpcState, request: &Value) -> Value {
     let result = match method {
         "eth_chainId" => json!("0x1"),
         "eth_blockNumber" => json!("0x20"),
-        "eth_getTransactionCount" => json!("0x7"),
+        "eth_getTransactionCount" => {
+            state.nonce_count.fetch_add(1, Ordering::SeqCst);
+            json!("0x7")
+        }
         "eth_getBalance" => json!(ONE_ETH_HEX),
         "eth_maxPriorityFeePerGas" => json!("0x59682f00"),
         "eth_feeHistory" => json!({
@@ -1229,6 +1233,70 @@ async fn eth_seed_jobs_are_gate_driven_and_execute_once_gates_pass() {
     let job = jobs.iter().find(|job| job["id"] == json!(job_id)).unwrap();
     assert_eq!(job["state"], json!("sent"), "{job}");
     assert!(job["transaction_hash_hex"].is_string(), "{job}");
+
+    env.shutdown();
+}
+
+#[tokio::test]
+async fn eth_seed_native_sweep_reauthorizes_fresh_spendable_before_signing() {
+    let env = setup_plan_env().await;
+    let mut policy = gates_on_policy_body();
+    // The raw queue payload's minimum is allowed at enqueue/drain-gate time,
+    // while the provider's fresh one-ETH balance is deliberately over cap.
+    policy["max_step_native_wei_hex"] = json!("0x1");
+    update_policy(&env, policy).await;
+    let job_id = insert_eth_seed_job(
+        &env,
+        json!({
+            "kind": "eth_seed_native_sweep",
+            "wallet_profile": "seed-main",
+            "address": SEED_ADDRESS,
+            "derivation_path": "m/44'/60'/0'/0/0",
+            "destination_address": DESTINATION,
+            "min_value_wei_hex": "0x1",
+        }),
+    );
+    let nonce_count_before = env.rpc_state.nonce_count.load(Ordering::SeqCst);
+    let broadcast_count_before = env.rpc_state.broadcast_count.load(Ordering::SeqCst);
+
+    let process_json = process_queue(&env).await;
+    assert_eq!(process_json["blocked"], json!(1), "process: {process_json}");
+    assert_eq!(
+        process_json["succeeded"],
+        json!(0),
+        "process: {process_json}"
+    );
+
+    let jobs = queue_jobs(&env).await;
+    let job = jobs.iter().find(|job| job["id"] == json!(job_id)).unwrap();
+    assert_eq!(job["state"], json!("blocked"), "{job}");
+    assert_eq!(
+        job["last_error"],
+        json!("policy_violation: block_step_cap"),
+        "{job}"
+    );
+    assert!(job["transaction_hash_hex"].is_null(), "never signed: {job}");
+    assert_eq!(
+        env.rpc_state.nonce_count.load(Ordering::SeqCst),
+        nonce_count_before,
+        "policy must block before nonce resolution"
+    );
+    assert_eq!(
+        env.rpc_state.broadcast_count.load(Ordering::SeqCst),
+        broadcast_count_before,
+        "policy must block before broadcast"
+    );
+    let persisted = read_store(&queue_path(&env));
+    let persisted_job = persisted["data"]["jobs"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|job| job["id"] == json!(job_id))
+        .expect("persisted queue job exists");
+    assert!(
+        persisted_job.get("signed_raw_transaction_hex").is_none(),
+        "policy block must not produce replayable signed bytes: {persisted_job}"
+    );
 
     env.shutdown();
 }

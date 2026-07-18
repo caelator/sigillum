@@ -133,6 +133,11 @@ struct SessionState {
     expires_at: Instant,
     last_activity: Instant,
     scopes: Option<Vec<String>>,
+    /// Internal scheduler sessions authenticate through the normal session
+    /// path, but do not consume or displace the bounded operator-session
+    /// pool. They remain subject to expiry, lock clearing, and explicit
+    /// revocation like every other session.
+    internal: bool,
 }
 
 impl Default for SessionState {
@@ -144,6 +149,7 @@ impl Default for SessionState {
             expires_at: now + SESSION_TTL,
             last_activity: now,
             scopes: None,
+            internal: false,
         }
     }
 }
@@ -518,7 +524,7 @@ impl AppState {
     /// Enforces a maximum session count ([`MAX_SESSIONS`]) and evicts
     /// expired sessions before allocating a new one.
     pub fn create_session(&self, preferred_active: Option<usize>) -> String {
-        self.create_session_inner(preferred_active, None, SESSION_TTL)
+        self.create_session_inner(preferred_active, None, SESSION_TTL, false)
             .0
     }
 
@@ -528,7 +534,17 @@ impl AppState {
         scopes: Vec<String>,
         ttl: Duration,
     ) -> (String, u64) {
-        self.create_session_inner(preferred_active, Some(scopes), ttl)
+        self.create_session_inner(preferred_active, Some(scopes), ttl, false)
+    }
+
+    /// Create an ephemeral full session for daemon-internal work.
+    ///
+    /// Internal sessions are verified and revoked normally, but are kept
+    /// outside the bounded operator-session pool so background maintenance
+    /// cannot evict an authenticated operator.
+    pub(crate) fn create_internal_session(&self, preferred_active: Option<usize>) -> String {
+        self.create_session_inner(preferred_active, None, SESSION_TTL, true)
+            .0
     }
 
     fn create_session_inner(
@@ -536,6 +552,7 @@ impl AppState {
         preferred_active: Option<usize>,
         scopes: Option<Vec<String>>,
         ttl: Duration,
+        internal: bool,
     ) -> (String, u64) {
         let active = preferred_active.or_else(|| self.default_active_compartment_id());
         let expires_at_unix = SystemTime::now()
@@ -555,10 +572,18 @@ impl AppState {
             let now = Instant::now();
             sessions.retain(|_, s| now < s.expires_at);
 
-            // If still at capacity, evict the oldest session.
-            if sessions.len() >= MAX_SESSIONS {
+            // Internal scheduler sessions neither consume user capacity nor
+            // participate in user-session eviction. A new user session at
+            // capacity still evicts the oldest user session exactly as
+            // before, even if an internal session is concurrently active.
+            let user_session_count = sessions
+                .values()
+                .filter(|session| !session.internal)
+                .count();
+            if !internal && user_session_count >= MAX_SESSIONS {
                 if let Some(oldest_key) = sessions
                     .iter()
+                    .filter(|(_, session)| !session.internal)
                     .min_by_key(|(_, s)| s.created_at)
                     .map(|(k, _)| k.clone())
                 {
@@ -575,6 +600,7 @@ impl AppState {
                         expires_at: now + ttl,
                         last_activity: now,
                         scopes: scopes.clone(),
+                        internal,
                     },
                 );
                 return (token, expires_at_unix);
@@ -717,12 +743,14 @@ impl AppState {
         let mut sessions = self.sessions.lock();
         let now = Instant::now();
         sessions.retain(|_, state| now < state.expires_at);
-        if sessions.is_empty() {
-            return true;
-        }
-        sessions
-            .values()
-            .all(|state| state.last_activity.elapsed() >= Duration::from_secs(idle_lock_secs))
+        // Scheduler credentials authorize bounded internal work, not operator
+        // presence. Counting a fresh internal token here would let frequent
+        // background cycles postpone an otherwise-due vault lock. The
+        // operation guard in the idle-lock task still serializes zeroization
+        // with any in-flight cycle.
+        !sessions.values().any(|state| {
+            !state.internal && state.last_activity.elapsed() < Duration::from_secs(idle_lock_secs)
+        })
     }
 
     #[must_use]
@@ -763,9 +791,15 @@ impl AppState {
         }
     }
 
+    /// Number of active operator and capability sessions. Ephemeral
+    /// daemon-internal sessions are deliberately excluded from diagnostics.
     #[must_use]
     pub fn session_count(&self) -> usize {
-        self.sessions.lock().len()
+        self.sessions
+            .lock()
+            .values()
+            .filter(|session| !session.internal)
+            .count()
     }
 
     #[cfg(test)]

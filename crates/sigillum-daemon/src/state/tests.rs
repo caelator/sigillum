@@ -74,6 +74,58 @@ fn sessions_track_active_compartments_independently() {
 }
 
 #[test]
+fn internal_sessions_do_not_consume_or_displace_user_capacity() {
+    let dir = TempDir::new().unwrap();
+    let state = AppState::new(dir.path().to_path_buf()).expect("app state should initialize");
+
+    state.unlock_compartment(0, [1u8; 32], meta(0, 1, "daily"));
+    let user_sessions: Vec<String> = (0..MAX_SESSIONS)
+        .map(|_| state.create_session(Some(0)))
+        .collect();
+    let internal = state.create_internal_session(Some(0));
+
+    assert_eq!(state.session_count(), MAX_SESSIONS);
+    assert!(state.verify_token_passive(&internal));
+    assert!(
+        user_sessions
+            .iter()
+            .all(|session| state.verify_token_passive(session)),
+        "all user sessions must survive while an internal session is active"
+    );
+
+    let replacement = state.create_session(Some(0));
+    assert_eq!(state.session_count(), MAX_SESSIONS);
+    assert!(state.verify_token_passive(&internal));
+    assert!(state.verify_token_passive(&replacement));
+    assert_eq!(
+        user_sessions
+            .iter()
+            .filter(|session| state.verify_token_passive(session))
+            .count(),
+        MAX_SESSIONS - 1,
+        "only the oldest user session should be evicted at user capacity"
+    );
+
+    state.revoke_session(&internal);
+    assert_eq!(state.session_count(), MAX_SESSIONS);
+}
+
+#[test]
+fn internal_session_does_not_defer_operator_idle_lock() {
+    let dir = TempDir::new().unwrap();
+    let state = AppState::new(dir.path().to_path_buf()).expect("app state should initialize");
+
+    state.unlock_compartment(0, [1u8; 32], meta(0, 1, "daily"));
+    let internal = state.create_internal_session(Some(0));
+
+    assert!(state.verify_token_passive(&internal));
+    assert!(
+        state.idle_lock_due(),
+        "an internal scheduler token is not operator presence"
+    );
+}
+
+#[test]
 fn removing_active_compartment_repoints_sessions() {
     let dir = TempDir::new().unwrap();
     let state = AppState::new(dir.path().to_path_buf()).expect("app state should initialize");

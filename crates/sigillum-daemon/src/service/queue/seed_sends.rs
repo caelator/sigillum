@@ -6,7 +6,7 @@
 //! the same way as `PlanStepExecution` (`ExecutionFamily::Sweep`, see
 //! `gates.rs`): with gates off the drain loop never reaches this module.
 
-use sigillum_api::{EthSeedWalletProfile, EvmProviderProfile};
+use sigillum_api::{EthSeedWalletProfile, EvmProviderProfile, error_codes};
 use sigillum_core::{
     EthereumEip1559Erc20Transfer, EthereumEip1559Transfer, decode_quantity_hex,
     ethereum_address_from_signing_key, sign_ethereum_erc20_transfer, sign_ethereum_native_transfer,
@@ -15,6 +15,7 @@ use sigillum_core::{
 use crate::service::helpers::{
     compare_u256, is_zero_u256, map_wallet_error, multiply_u256_u64, subtract_u256,
 };
+use crate::service::transaction_policy::{TransactionPolicyCheck, TransactionPolicyKind};
 use crate::service::{ServiceError, ServiceResult, SigillumService};
 
 use super::QueueExecution;
@@ -96,6 +97,27 @@ impl SigillumService {
                     "seed wallet balance has not reached the sweep threshold".into(),
                 ));
             }
+        }
+        // The queued sweep threshold is only a lower bound. Re-authorize the
+        // freshly observed, gas-adjusted amount before deriving the signer or
+        // fetching its nonce so a balance increase cannot bypass the per-step
+        // treasury cap between enqueue and execution.
+        let spendable_hex = super::super::evm::encode_quantity_u256(&spendable);
+        if let Err(error) = self.authorize_transaction_policy(TransactionPolicyCheck {
+            kind: TransactionPolicyKind::RoutedTransfer,
+            destination_address: Some(&destination_address),
+            asset_kind: "native",
+            amount_hex: &spendable_hex,
+        }) {
+            if error.code() == error_codes::POLICY_VIOLATION {
+                let Some(action) = error.action() else {
+                    return Err(error);
+                };
+                return Ok(QueueExecution::Blocked(format!(
+                    "policy_violation: {action}"
+                )));
+            }
+            return Err(error);
         }
         let (signing_key, nonce) = self
             .prepare_eth_seed_signer(&provider, &wallet, address, derivation_path, None)

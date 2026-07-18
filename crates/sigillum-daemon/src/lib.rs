@@ -55,10 +55,10 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
-use axum::Router;
 use axum::extract::DefaultBodyLimit;
 use axum::http::{HeaderValue, Method, header};
 use axum::middleware;
+use axum::{Extension, Router};
 use tower_http::cors::CorsLayer;
 use tower_http::trace::TraceLayer;
 
@@ -67,10 +67,66 @@ pub struct DaemonRunOptions {
     pub force_daemon_lock: bool,
 }
 
-/// Build the Axum router with multi-compartment vault state.
+/// Request-local policy for the browser-only `?session=` SSE authentication
+/// fallback. Bearer-header authentication is independent of this flag.
+#[derive(Clone, Copy, Debug)]
+struct EventQuerySessionPolicy {
+    allow_query_token: bool,
+}
+
+impl EventQuerySessionPolicy {
+    const fn header_only() -> Self {
+        Self {
+            allow_query_token: false,
+        }
+    }
+
+    fn for_bind_addr(addr: SocketAddr) -> Self {
+        Self {
+            allow_query_token: addr.ip().is_loopback(),
+        }
+    }
+}
+
+/// Build the Axum router with multi-compartment vault state when the eventual
+/// listener address is not available to this constructor.
+///
+/// Query-carried SSE session tokens are disabled because a port alone cannot
+/// prove that the router will be served on loopback. Bearer-header
+/// authentication remains available. Call [`build_router_for_addr`] when the
+/// concrete listener address is known and browser `EventSource` support is
+/// required.
 pub fn build_router(
     base_dir: PathBuf,
     listen_port: u16,
+) -> Result<(Router, Arc<AppState>), DaemonInitError> {
+    build_router_with_event_query_policy(
+        base_dir,
+        listen_port,
+        EventQuerySessionPolicy::header_only(),
+    )
+}
+
+/// Build the Axum router for a concrete listener address.
+///
+/// The browser-only `?session=` SSE fallback is enabled only when
+/// `listen_addr` is loopback; bearer-header authentication is accepted for
+/// every address.
+pub fn build_router_for_addr(
+    base_dir: PathBuf,
+    listen_addr: SocketAddr,
+) -> Result<(Router, Arc<AppState>), DaemonInitError> {
+    build_router_with_event_query_policy(
+        base_dir,
+        listen_addr.port(),
+        EventQuerySessionPolicy::for_bind_addr(listen_addr),
+    )
+}
+
+fn build_router_with_event_query_policy(
+    base_dir: PathBuf,
+    listen_port: u16,
+    event_query_session_policy: EventQuerySessionPolicy,
 ) -> Result<(Router, Arc<AppState>), DaemonInitError> {
     if let Err(error) = prepare_base_dir(&base_dir) {
         tracing::warn!(
@@ -106,6 +162,7 @@ pub fn build_router(
         .layer(DefaultBodyLimit::max(2 * 1024 * 1024)) // Snapshot import/export needs larger JSON payloads
         .layer(cors)
         .layer(TraceLayer::new_for_http())
+        .layer(Extension(event_query_session_policy))
         .with_state(state.clone());
 
     Ok((app, state))
@@ -155,7 +212,7 @@ where
 
     prepare_base_dir(&base_dir)?;
     let _daemon_lock = DaemonLock::acquire(&base_dir, options.force_daemon_lock)?;
-    let (app, state) = build_router(base_dir, addr.port())?;
+    let (app, state) = build_router_for_addr(base_dir, addr)?;
     spawn_idle_lock_task(state.clone());
     // Background scheduler (plan task 1.6): advances queue retries, receipt
     // confirmations, and deposit refreshes without a client. Spawned here —
@@ -357,7 +414,11 @@ impl Drop for DaemonLock {
 
 #[cfg(test)]
 mod tests {
-    use super::{DaemonLock, prepare_base_dir};
+    use axum::body::Body;
+    use axum::http::{Request, StatusCode, header};
+    use tower::ServiceExt;
+
+    use super::{DaemonLock, build_router, build_router_for_addr, prepare_base_dir};
 
     #[test]
     fn prepare_base_dir_restricts_unix_permissions() {
@@ -390,5 +451,55 @@ mod tests {
 
         assert_eq!(error.kind(), std::io::ErrorKind::AlreadyExists);
         assert!(error.to_string().contains("daemon lock already held"));
+    }
+
+    #[tokio::test]
+    async fn address_unknown_router_is_header_only() {
+        let dir = tempfile::tempdir().unwrap();
+        let (app, state) = build_router(dir.path().to_path_buf(), 9743).unwrap();
+        let token = state.create_session(None);
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri(format!("/api/events?session={token}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn non_loopback_event_policy_rejects_query_token_but_accepts_bearer() {
+        let dir = tempfile::tempdir().unwrap();
+        let bind_addr: std::net::SocketAddr = "0.0.0.0:9743".parse().unwrap();
+        let (app, state) = build_router_for_addr(dir.path().to_path_buf(), bind_addr).unwrap();
+        let token = state.create_session(None);
+
+        let query_response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri(format!("/api/events?session={token}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(query_response.status(), StatusCode::UNAUTHORIZED);
+
+        let bearer_response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/api/events")
+                    .header(header::AUTHORIZATION, format!("Bearer {token}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(bearer_response.status(), StatusCode::OK);
     }
 }

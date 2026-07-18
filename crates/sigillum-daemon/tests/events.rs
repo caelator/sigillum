@@ -31,7 +31,7 @@ async fn spawn_daemon(base_dir: PathBuf) -> (SocketAddr, tokio::task::JoinHandle
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
     let (app, _state) =
-        sigillum_daemon::build_router(base_dir, addr.port()).expect("router should initialize");
+        sigillum_daemon::build_router_for_addr(base_dir, addr).expect("router should initialize");
     let handle = tokio::spawn(async move {
         axum::serve(listener, app).await.unwrap();
     });
@@ -494,6 +494,25 @@ async fn snapshot_on_connect_via_header_and_query_token() {
     rig.shutdown();
 }
 
+/// A stream is authorized for its full lifetime, not only at connect time.
+/// Revoking the owning session closes an otherwise idle subscription without
+/// waiting for another daemon event.
+#[tokio::test]
+async fn stream_ends_promptly_after_session_revoke() {
+    let rig = spawn_rig().await;
+    let mut reader = rig.subscribe().await;
+
+    let (status, revoked) = rig.post("/api/session/revoke", json!({})).await;
+    assert_eq!(status, StatusCode::OK, "revoke: {revoked}");
+
+    let ended = tokio::time::timeout(Duration::from_secs(5), reader.next_frame())
+        .await
+        .expect("revoked stream should terminate promptly");
+    assert!(ended.is_none(), "revoked stream emitted another event");
+
+    rig.shutdown();
+}
+
 /// An async discovery scan streams its create/state/progress transitions as
 /// `operation` events; a subscriber connecting mid-run sees the live
 /// operation in its snapshot.
@@ -604,9 +623,12 @@ async fn queue_transitions_stream_to_subscriber() {
     rig.shutdown();
 }
 
-/// Lock, unlock, and compartment switch stream as `status` events.
+/// Compartment switches stream while the session remains valid. Lock clears
+/// every session, so the old stream receives one non-sensitive terminal
+/// `locked` frame, closes, and a post-unlock subscriber reconnects with the
+/// newly minted token and an authoritative snapshot.
 #[tokio::test]
-async fn status_events_for_lock_unlock_and_compartment_switch() {
+async fn compartment_switch_streams_and_lock_requires_reconnect() {
     let rig = spawn_rig().await;
     let mut reader = rig.subscribe().await;
 
@@ -622,22 +644,38 @@ async fn status_events_for_lock_unlock_and_compartment_switch() {
 
     let (status, locked) = rig.post("/api/lock", json!({})).await;
     assert_eq!(status, StatusCode::OK, "lock: {locked}");
-    let event = reader
+
+    // Re-unlock before polling the old connection. Its receiver now contains
+    // both lifecycle transitions, but stale authorization may emit only the
+    // terminal locked frame and must never leak the later unlock.
+    let unlock = rig
+        .client
+        .post(format!("http://{}/api/unlock", rig.addr))
+        .json(&json!({ "passphrase": "correct horse battery staple" }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(unlock.status(), StatusCode::OK);
+    let unlocked: Value = unlock.json().await.unwrap();
+    let new_token = unlocked["session_token"]
+        .as_str()
+        .expect("unlock returns a replacement session");
+
+    let locked_event = reader
         .wait_for_event("status", |data| data["kind"] == "locked")
         .await;
-    assert!(event.get("active_compartment_id").is_none());
+    assert!(locked_event.get("active_compartment_id").is_none());
+    let ended = tokio::time::timeout(Duration::from_secs(5), reader.next_frame()).await;
+    assert_eq!(
+        ended.expect("lock-cleared stream should terminate promptly"),
+        None,
+        "lock-cleared stream emitted another event"
+    );
 
-    let (status, unlocked) = rig
-        .post(
-            "/api/unlock",
-            json!({ "passphrase": "correct horse battery staple" }),
-        )
-        .await;
-    assert_eq!(status, StatusCode::OK, "unlock: {unlocked}");
-    let event = reader
-        .wait_for_event("status", |data| data["kind"] == "unlocked")
-        .await;
-    assert_eq!(event["active_compartment_id"], json!(0));
+    let mut reconnected = SseReader::connect(&rig.client, rig.addr, new_token).await;
+    let snapshot = reconnected.wait_for_event("snapshot", |_| true).await;
+    assert_eq!(snapshot["locked"], json!(false));
+    assert_eq!(snapshot["active_compartment_id"], json!(0));
 
     rig.shutdown();
 }

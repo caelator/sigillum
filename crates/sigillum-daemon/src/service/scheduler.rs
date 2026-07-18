@@ -48,9 +48,10 @@
 //! `GET /api/diagnostics` under the `scheduler` block.
 //!
 //! Session discipline: a cycle mints an ephemeral full session to drive the
-//! request-time code paths and revokes it on every exit (RAII), so the
+//! request-time code paths and revokes it on every exit (RAII). The internal
+//! session neither consumes nor evicts operator-session capacity, and the
 //! scheduler cannot defeat the idle auto-lock — between cycles no scheduler
-//! session exists, and an in-flight cycle only ever refreshes its own
+//! session exists, while an in-flight cycle only ever refreshes its own
 //! session's activity clock.
 
 use std::sync::Arc;
@@ -419,7 +420,7 @@ impl<'a> InternalSession<'a> {
     fn create(state: &'a AppState) -> Self {
         Self {
             state,
-            token: state.create_session(None),
+            token: state.create_internal_session(None),
         }
     }
 
@@ -486,5 +487,36 @@ mod tests {
 
         assert_eq!(config.queue_tick_secs, 1);
         assert_eq!(config.refresh_secs, DEFAULT_REFRESH_SECS);
+    }
+
+    #[test]
+    fn internal_session_is_full_normal_auth_and_raii_revoked() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let state = AppState::new(dir.path().to_path_buf()).expect("app state should initialize");
+        state.unlock_compartment(
+            0,
+            [1u8; 32],
+            sigillum_fido2::config::CompartmentMeta {
+                id: 0,
+                label: "daily".into(),
+                threshold: 1,
+                passphrase_mode: None,
+            },
+        );
+
+        let token;
+        {
+            let session = InternalSession::create(&state);
+            token = session.token().to_string();
+            assert!(state.verify_token_passive(&token));
+            assert!(state.session_is_full(&token));
+            assert_eq!(
+                state.session_count(),
+                0,
+                "internal credentials are not operator sessions"
+            );
+        }
+
+        assert!(!state.verify_token_passive(&token));
     }
 }

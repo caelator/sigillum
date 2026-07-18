@@ -408,9 +408,10 @@ export function createEventsClient(options: EventsClientOptions): EventsClient {
 
   function handleSessionTokenChange(): void {
     if (!running) return;
-    // The daemon authenticates EventSource only when the stream opens. A
-    // revoked or rotated browser token therefore has to retire that stream
-    // locally; otherwise it can remain live with stale authorization.
+    // The daemon passively revalidates an EventSource for its full lifetime,
+    // but a revoked or rotated browser token still retires the local source
+    // immediately so the replacement token reconnects without waiting for
+    // the bounded server-side revalidation interval.
     generation += 1;
     invalidateSnapshotHistory();
     consecutiveErrors = 0;

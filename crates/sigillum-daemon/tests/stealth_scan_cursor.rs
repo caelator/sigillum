@@ -10,6 +10,12 @@
 //!   blocks leaves the cursor at its monotonic high.
 //! * `cursor_survives_a_daemon_restart` — the cursor lives in the deposits
 //!   store, so a fresh daemon over the same base dir resumes from it.
+//! * `v1_same_block_limit_resumes_without_skip_or_livelock` — an ordinary v1
+//!   cursor consumes two same-block logs across consecutive limited pages.
+//! * `legacy_cursor_replays_full_history_and_upgrades_without_skip` — two logs
+//!   in one block split by `limit = 1` survive a simulated legacy cursor that
+//!   later advanced past them; history replays once, upgrades to exact v1
+//!   log-index progress, then advances without a skip or livelock.
 //! * `reset_cursor_reanchors_the_scan_range` — `reset_cursor` drops the
 //!   stored cursor, scans from the given/default range, and re-anchors.
 //! * `empty_range_anchors_the_cursor_at_the_scanned_head` — a range with no
@@ -86,6 +92,7 @@ fn announcement_log(
     ephemeral_public_key_hex: &str,
     metadata: &[u8],
     block_hex: &str,
+    log_index_hex: &str,
 ) -> Value {
     let ephemeral_public_key = hex::decode(ephemeral_public_key_hex).unwrap();
     let first_tail = abi_dynamic_bytes(&ephemeral_public_key);
@@ -108,7 +115,7 @@ fn announcement_log(
         "data": data,
         "blockNumber": block_hex,
         "transactionHash": format!("0x{}", "55".repeat(32)),
-        "logIndex": "0x0",
+        "logIndex": log_index_hex,
     })
 }
 
@@ -348,7 +355,43 @@ async fn serve_payment_log(rig: &Rig, token: &str, ephemeral: [u8; 32], block_he
         &payment.ephemeral_public_key_hex,
         &hex::decode(&payment.view_tag_hex).unwrap(),
         block_hex,
+        "0x0",
     )];
+}
+
+/// Two payments in one block, deliberately served in reverse provider order.
+/// The scan must canonicalize them by `logIndex` before applying its limit.
+async fn serve_two_payment_logs_same_block(rig: &Rig, token: &str, block_hex: &str) -> [String; 2] {
+    let meta_address = rig.export_meta_address(token).await;
+    let first = sigillum_core::generate_ethereum_stealth_address(
+        &meta_address,
+        Some([0x54u8; 32]),
+        StealthHashConvention::Compressed33,
+    )
+    .unwrap();
+    let second = sigillum_core::generate_ethereum_stealth_address(
+        &meta_address,
+        Some([0x55u8; 32]),
+        StealthHashConvention::Compressed33,
+    )
+    .unwrap();
+    *rig.rpc_state.announcement_logs.write().unwrap() = vec![
+        announcement_log(
+            &second.stealth_address,
+            &second.ephemeral_public_key_hex,
+            &hex::decode(&second.view_tag_hex).unwrap(),
+            block_hex,
+            "0x1",
+        ),
+        announcement_log(
+            &first.stealth_address,
+            &first.ephemeral_public_key_hex,
+            &hex::decode(&first.view_tag_hex).unwrap(),
+            block_hex,
+            "0x0",
+        ),
+    ];
+    [first.stealth_address, second.stealth_address]
 }
 
 // ── Tests ────────────────────────────────────────────────────────
@@ -380,6 +423,143 @@ async fn scans_resume_incrementally_from_the_persisted_cursor() {
     );
 
     rig.abort();
+}
+
+/// The primary v1 path records an intra-block position, resumes inclusively
+/// while filtering the completed log, then marks the block complete. Provider
+/// order is reversed by the fixture, so this also locks deterministic sorting
+/// before the page limit.
+#[tokio::test]
+async fn v1_same_block_limit_resumes_without_skip_or_livelock() {
+    let dir = TempDir::new().unwrap();
+    let rig = spawn_rig(&dir).await;
+    let expected = serve_two_payment_logs_same_block(&rig, &rig.token, "0x20").await;
+
+    let first = rig.scan(&rig.token, json!({ "limit": 1 })).await;
+    assert_eq!(first["from_block"], "earliest");
+    assert_eq!(first["scanned"], 1);
+    assert_eq!(first["created"], 1);
+    assert_eq!(first["deposits"][0]["stealth_address"], expected[0]);
+
+    let second = rig.scan(&rig.token, json!({ "limit": 1 })).await;
+    assert_eq!(second["from_block"], "0x20");
+    assert_eq!(second["scanned"], 1, "v1 response: {second}");
+    assert_eq!(second["created"], 1);
+    assert_eq!(second["deposits"][0]["stealth_address"], expected[1]);
+
+    let third = rig.scan(&rig.token, json!({ "limit": 1 })).await;
+    assert_eq!(third["from_block"], "0x21");
+    assert_eq!(third["scanned"], 0);
+    assert_eq!(third["created"], 0);
+    assert_eq!(
+        rig.scanned_ranges(),
+        vec![
+            ("earliest".to_string(), "latest".to_string()),
+            ("0x20".to_string(), "latest".to_string()),
+            ("0x21".to_string(), "latest".to_string()),
+        ]
+    );
+
+    rig.abort();
+}
+
+/// A legacy block-only cursor may have advanced beyond an earlier page
+/// boundary that skipped a same-block tail. Replay the entire ambiguous
+/// history, allow the v1 cursor to re-anchor below the v0 block, then consume
+/// the remaining log and mark the range complete.
+#[tokio::test]
+async fn legacy_cursor_replays_full_history_and_upgrades_without_skip() {
+    let dir = TempDir::new().unwrap();
+    let rig = spawn_rig(&dir).await;
+    let expected = serve_two_payment_logs_same_block(&rig, &rig.token, "0x20").await;
+
+    let first = rig.scan(&rig.token, json!({ "limit": 1 })).await;
+    assert_eq!(first["from_block"], "earliest");
+    assert_eq!(first["scanned"], 1);
+    assert_eq!(first["created"], 1);
+    assert_eq!(first["deposits"][0]["stealth_address"], expected[0]);
+
+    let mut persisted: Value = serde_json::from_slice(
+        &std::fs::read(dir.path().join("deposits.json")).expect("cursor store should exist"),
+    )
+    .expect("cursor store should be valid JSON");
+    {
+        let cursor = persisted["data"]["announcement_scan_cursors"][0]
+            .as_object_mut()
+            .expect("persisted cursor should be an object");
+        assert_eq!(cursor["position_version"], 1);
+        assert_eq!(cursor["last_scanned_block"], 32);
+        assert_eq!(cursor["last_scanned_log_index"], 0);
+        // Simulate the old block-only implementation having advanced through
+        // later scans after it skipped the second log in block 32.
+        cursor.insert("last_scanned_block".into(), json!(48));
+        cursor.remove("position_version");
+        cursor.remove("last_scanned_log_index");
+    }
+
+    // Stop the writer before replacing its valid store with the legacy shape.
+    let rpc_state = rig.rpc_state.clone();
+    rig.daemon_handle.abort();
+    std::fs::write(
+        dir.path().join("deposits.json"),
+        serde_json::to_vec_pretty(&persisted).expect("legacy cursor should serialize"),
+    )
+    .expect("legacy cursor store should be writable");
+    let (restarted_addr, restarted_handle) = spawn_daemon(dir.path().to_path_buf()).await;
+    let restarted = Rig {
+        addr: restarted_addr,
+        token: String::new(),
+        rpc_state,
+        daemon_handle: restarted_handle,
+        rpc_handle: rig.rpc_handle,
+    };
+    let token = restarted.unlock().await;
+    assert_eq!(
+        restarted.rpc_state.announcement_logs.read().unwrap().len(),
+        2,
+        "legacy replay fixture must retain both provider logs"
+    );
+
+    let second = restarted.scan(&token, json!({ "limit": 1 })).await;
+    assert_eq!(second["from_block"], "earliest");
+    assert_eq!(second["scanned"], 1, "replay response: {second}");
+    assert_eq!(second["created"], 0);
+    assert_eq!(second["existing"], 1);
+    assert_eq!(second["deposits"][0]["stealth_address"], expected[0]);
+
+    // The replay upgrades the ambiguous block-48 cursor atomically to a v1
+    // partial position at block 32, so the next page skips only the
+    // already-consumed log.
+    let upgraded: Value = serde_json::from_slice(
+        &std::fs::read(dir.path().join("deposits.json")).expect("cursor store should exist"),
+    )
+    .expect("cursor store should be valid JSON");
+    let cursor = &upgraded["data"]["announcement_scan_cursors"][0];
+    assert_eq!(cursor["position_version"], 1);
+    assert_eq!(cursor["last_scanned_block"], 32);
+    assert_eq!(cursor["last_scanned_log_index"], 0);
+
+    let third = restarted.scan(&token, json!({ "limit": 1 })).await;
+    assert_eq!(third["from_block"], "0x20");
+    assert_eq!(third["scanned"], 1);
+    assert_eq!(third["created"], 1);
+    assert_eq!(third["deposits"][0]["stealth_address"], expected[1]);
+
+    let fourth = restarted.scan(&token, json!({ "limit": 1 })).await;
+    assert_eq!(fourth["from_block"], "0x21");
+    assert_eq!(fourth["scanned"], 0);
+    assert_eq!(fourth["created"], 0);
+    assert_eq!(
+        restarted.scanned_ranges(),
+        vec![
+            ("earliest".to_string(), "latest".to_string()),
+            ("earliest".to_string(), "latest".to_string()),
+            ("0x20".to_string(), "latest".to_string()),
+            ("0x21".to_string(), "latest".to_string()),
+        ]
+    );
+
+    restarted.abort();
 }
 
 /// (b) An explicit `from_block` always wins over the cursor (manual rescan),
@@ -425,6 +605,18 @@ async fn cursor_survives_a_daemon_restart() {
     let first = rig.scan(&rig.token, json!({})).await;
     assert_eq!(first["from_block"], "earliest");
     assert_eq!(rig.scanned_ranges().len(), 1);
+
+    // A completed v1 cursor omits the optional intra-block index but retains
+    // its version discriminator, so it cannot be confused with a legacy
+    // block-only boundary after restart.
+    let persisted: Value = serde_json::from_slice(
+        &std::fs::read(dir.path().join("deposits.json")).expect("cursor store should exist"),
+    )
+    .expect("cursor store should be valid JSON");
+    let cursor = &persisted["data"]["announcement_scan_cursors"][0];
+    assert_eq!(cursor["position_version"], 1);
+    assert_eq!(cursor["last_scanned_block"], 32);
+    assert!(cursor.get("last_scanned_log_index").is_none());
 
     // Restart the daemon over the same base dir (the deposits store — and
     // with it the cursor — is on disk); the mock provider keeps serving.
