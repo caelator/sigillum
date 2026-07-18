@@ -55,7 +55,7 @@ const DEVICE_SCALE = Number(argValue("scale") || process.env.SIGILLUM_UI_SHOTS_S
 //   section  workspace destination to open (nav click) before shooting
 //   click    optional selector to click before shooting (wizard flows)
 //   waitFor  optional extra expression that must become true before shooting
-//   scrollTo optional element id scrolled to the top before shooting
+//   scrollTo optional CSS selector scrolled below the sticky topbar
 //   fullPage capture the whole scroll height instead of the viewport
 const SHOTS = [
   { name: "setup-welcome", mode: "setup" },
@@ -70,13 +70,23 @@ const SHOTS = [
   { name: "section-receive", mode: "unlocked", section: "receive" },
   // Card-level shots keep populated surfaces visible that a top-of-section
   // viewport shot would leave below the fold.
-  { name: "section-receive-deposits", mode: "unlocked", section: "receive", scrollTo: "depositsCard" },
+  {
+    name: "section-receive-deposits",
+    mode: "unlocked",
+    section: "receive",
+    scrollTo: '[data-section="deposits"]',
+  },
   { name: "section-portfolio", mode: "unlocked", section: "portfolio" },
   { name: "section-move", mode: "unlocked", section: "move" },
-  { name: "section-move-plans", mode: "unlocked", section: "move", scrollTo: "plansCard" },
-  { name: "section-move-queue", mode: "unlocked", section: "move", scrollTo: "queueCard" },
+  { name: "section-move-plans", mode: "unlocked", section: "move", scrollTo: "#plansCard" },
+  { name: "section-move-queue", mode: "unlocked", section: "move", scrollTo: "#queueCard" },
   { name: "section-vault", mode: "unlocked", section: "vault" },
-  { name: "section-vault-diagnostics", mode: "unlocked", section: "vault", scrollTo: "diagCard" },
+  {
+    name: "section-vault-diagnostics",
+    mode: "unlocked",
+    section: "vault",
+    scrollTo: '[data-vault="diagnostics"]',
+  },
 ];
 
 function fail(message) {
@@ -185,8 +195,10 @@ function launchChrome() {
 }
 
 class CdpClient {
-  constructor(webSocketUrl) {
+  constructor(webSocketUrl, targetId, debugOrigin) {
     this.webSocket = new WebSocket(webSocketUrl);
+    this.targetId = targetId;
+    this.debugOrigin = debugOrigin;
     this.nextId = 1;
     this.pending = new Map();
     this.consoleErrors = [];
@@ -215,7 +227,17 @@ class CdpClient {
         (message.params.args || []).map((arg) => arg.value || arg.description || "").join(" "),
       );
     } else if (message.method === "Runtime.exceptionThrown") {
-      this.consoleErrors.push("exception: " + (message.params.exceptionDetails?.text || ""));
+      const details = message.params.exceptionDetails || {};
+      const reason =
+        details.exception?.description ||
+        details.exception?.value ||
+        details.text ||
+        "runtime exception";
+      const frame = details.stackTrace?.callFrames?.[0];
+      const location = frame
+        ? ` at ${frame.functionName || "<anonymous>"} (${frame.url || "inline"}:${frame.lineNumber + 1}:${frame.columnNumber + 1})`
+        : "";
+      this.consoleErrors.push("exception: " + reason + location);
     }
   }
 
@@ -229,20 +251,31 @@ class CdpClient {
     return result;
   }
 
-  close() {
+  takeErrors() {
+    return this.consoleErrors.splice(0);
+  }
+
+  async close() {
     this.webSocket.close();
+    if (!this.targetId) return;
+    try {
+      await fetch(`${this.debugOrigin}/json/close/${encodeURIComponent(this.targetId)}`);
+    } catch (_) {
+      // Chrome may already be exiting; cleanup() remains authoritative.
+    }
   }
 }
 
 async function openPage(browserWebSocketUrl) {
   const debugUrl = new URL(browserWebSocketUrl);
-  const endpoint = `http://${debugUrl.hostname}:${debugUrl.port}/json/new?about:blank`;
+  const debugOrigin = `http://${debugUrl.hostname}:${debugUrl.port}`;
+  const endpoint = `${debugOrigin}/json/new?about:blank`;
   let response = await fetch(endpoint, { method: "PUT" });
   if (!response.ok) response = await fetch(endpoint);
   if (!response.ok) fail(`could not open browser target: HTTP ${response.status}`);
   const target = await response.json();
   if (!target.webSocketDebuggerUrl) fail("browser target did not include a DevTools websocket URL");
-  return new CdpClient(target.webSocketDebuggerUrl);
+  return new CdpClient(target.webSocketDebuggerUrl, target.id, debugOrigin);
 }
 
 function quoted(value) {
@@ -335,6 +368,27 @@ async function selectWorkspaceSection(cdp, section) {
     `document.querySelector(${quoted(selector)})?.classList.contains("active") === true`,
     `workspace ${section} active`,
   );
+  await waitFor(
+    cdp,
+    `Array.from(document.querySelectorAll(".skeleton")).every((el) => el.offsetParent === null)`,
+    `workspace ${section} populated`,
+    20_000,
+  );
+}
+
+function assertNoPageErrors(cdp, context) {
+  const errors = cdp?.takeErrors() || [];
+  if (!errors.length) return;
+  fail(`${context} produced browser errors:\n${errors.map((error) => "  " + error).join("\n")}`);
+}
+
+function assertNoUnknownRequests(server, context) {
+  const unknown = server?.getUnknownRequests?.() || [];
+  if (!unknown.length) return;
+  fail(
+    `${context} called unregistered mock routes:\n` +
+      unknown.map((request) => `  ${request.method} ${request.path}`).join("\n"),
+  );
 }
 
 let server;
@@ -342,6 +396,11 @@ let chrome;
 let cdp;
 try {
   fs.mkdirSync(OUT_DIR, { recursive: true });
+  // Remove only this harness's contract files. A failed rerun must not leave
+  // old PNGs behind that can be mistaken for current evidence.
+  for (const entry of SHOTS) {
+    fs.rmSync(path.join(OUT_DIR, entry.name + ".png"), { force: true });
+  }
   server = startServer();
   const port = await server.ready;
   const base = `http://127.0.0.1:${port}`;
@@ -351,7 +410,11 @@ try {
   let pageMode = null;
   for (const entry of SHOTS) {
     if (entry.mode !== pageMode) {
-      if (cdp) cdp.close();
+      if (cdp) {
+        assertNoPageErrors(cdp, `${pageMode} page`);
+        assertNoUnknownRequests(server, `${pageMode} page`);
+        await cdp.close();
+      }
       server.setMode(entry.mode);
       cdp = await openModePage(browserWs, base, entry.mode);
       pageMode = entry.mode;
@@ -384,32 +447,43 @@ try {
       await waitFor(cdp, entry.waitFor, `${entry.name} precondition`);
     }
     if (entry.scrollTo) {
-      await evaluate(
+      const scrolled = await evaluate(
         cdp,
         `(() => {
-          const el = document.getElementById(${quoted(entry.scrollTo)});
+          const found = document.querySelector(${quoted(entry.scrollTo)});
+          const el = found?.closest("section") || found;
           if (!el) return false;
           el.scrollIntoView({ block: "start" });
-          window.scrollBy(0, -16);
-          return true;
+          const topbar = document.querySelector(".topbar");
+          window.scrollBy(0, -((topbar?.getBoundingClientRect().height || 0) + 16));
+          const rect = el.getBoundingClientRect();
+          return el.isConnected && rect.height > 0 && rect.bottom > 0 && rect.top < window.innerHeight;
         })()`,
         `scroll to ${entry.scrollTo}`,
       );
+      if (!scrolled) {
+        fail(`${entry.name} scroll target ${entry.scrollTo} was not connected and visible`);
+      }
       await sleep(400);
     }
     await shot(cdp, entry.name, { fullPage: !!entry.fullPage });
+    await sleep(100);
+    assertNoPageErrors(cdp, entry.name);
+    assertNoUnknownRequests(server, entry.name);
   }
 
-  if (cdp && cdp.consoleErrors.length) {
-    console.log("CONSOLE ERRORS (page was still captured):");
-    cdp.consoleErrors.slice(0, 20).forEach((e) => console.log("  " + e));
+  for (const entry of SHOTS) {
+    const file = path.join(OUT_DIR, entry.name + ".png");
+    if (!fs.existsSync(file) || fs.statSync(file).size === 0) {
+      fail(`missing or empty screenshot: ${file}`);
+    }
   }
   console.log(`ui-screenshots: ${SHOTS.length} shot(s) in ${OUT_DIR}`);
 } catch (error) {
   console.error(error.message);
   process.exitCode = 1;
 } finally {
-  if (cdp) cdp.close();
+  if (cdp) await cdp.close();
   if (chrome) await chrome.cleanup();
   if (server) await server.close();
 }
