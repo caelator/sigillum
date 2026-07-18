@@ -69,7 +69,8 @@ impl SigillumService {
                 "latest",
             )
             .await?;
-        let sponsor_balance = decode_quantity_hex(&sponsor_balance_hex).map_err(map_wallet_error)?;
+        let sponsor_balance =
+            decode_quantity_hex(&sponsor_balance_hex).map_err(map_wallet_error)?;
         let required = add_u256(&value, &multiply_u256_u64(&max_fee, gas_limit));
         if compare_u256(&sponsor_balance, &required).is_lt() {
             return Ok(QueueExecution::Blocked(
@@ -93,7 +94,10 @@ impl SigillumService {
         };
         // Defense in depth: the derived key must match the recorded sponsor
         // address, exactly like the seed signer's source-address check.
-        if !sponsor.sponsor_address().eq_ignore_ascii_case(sponsor_address) {
+        if !sponsor
+            .sponsor_address()
+            .eq_ignore_ascii_case(sponsor_address)
+        {
             return Ok(QueueExecution::Blocked(format!(
                 "block_watch_only_signer: derived gas sponsor {} does not match the job's \
                  sponsor address {sponsor_address}",
@@ -166,7 +170,7 @@ pub(in crate::service::queue) fn sweep_dependency_block_reason(
                     QUEUE_STATE_SENT | QUEUE_STATE_CONFIRMED
                 ) =>
             {
-                continue
+                continue;
             }
             Some(state)
                 if matches!(

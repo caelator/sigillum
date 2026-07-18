@@ -673,14 +673,17 @@ mod tests {
         )
         .unwrap();
         let event = announcement_event_with_metadata(metadata);
-        let (asset_kind, token, expected) =
-            resolve_announcement_asset_hints(&event, None).unwrap();
+        let (asset_kind, token, expected) = resolve_announcement_asset_hints(&event, None).unwrap();
         assert_eq!(asset_kind, "erc20");
         assert!(token.is_some());
         assert_eq!(expected, None);
     }
 
-    fn queue_with_gas_topup(id: &str, sponsor: &str, destination: &str) -> crate::queue_store::QueueState {
+    fn queue_with_gas_topup(
+        id: &str,
+        sponsor: &str,
+        destination: &str,
+    ) -> crate::queue_store::QueueState {
         crate::queue_store::QueueState {
             jobs: vec![sigillum_api::QueueJob {
                 id: id.into(),
@@ -707,15 +710,35 @@ mod tests {
     #[test]
     fn sponsor_funding_two_parties_warns_with_mirrored_identity_axis() {
         let sponsor = "0x4444444444444444444444444444444444444444";
-        let target = test_deposit("dep_1", "w", "0xaaaa00000000000000000000000000000000aaaa", Some("party_a"), None);
-        let mut other = test_deposit("dep_2", "w", "0xbbbb00000000000000000000000000000000bbbb", Some("party_b"), None);
+        let target = test_deposit(
+            "dep_1",
+            "w",
+            "0xaaaa00000000000000000000000000000000aaaa",
+            Some("party_a"),
+            None,
+        );
+        let mut other = test_deposit(
+            "dep_2",
+            "w",
+            "0xbbbb00000000000000000000000000000000bbbb",
+            Some("party_b"),
+            None,
+        );
         other.gas_topup_job_id = Some("topup_1".into());
         let queue = queue_with_gas_topup("topup_1", sponsor, &other.stealth_address);
 
-        let linkage =
-            detect_stealth_gas_sponsor_linkage(&target, sponsor, "mainnet", &[other.clone()], &queue).unwrap();
+        let linkage = detect_stealth_gas_sponsor_linkage(
+            &target,
+            sponsor,
+            "mainnet",
+            &[other.clone()],
+            &queue,
+        )
+        .unwrap();
         assert!(
-            linkage.warning.starts_with("shared gas sponsor links this party"),
+            linkage
+                .warning
+                .starts_with("shared gas sponsor links this party"),
             "{}",
             linkage.warning
         );
@@ -762,8 +785,20 @@ mod tests {
     #[test]
     fn sponsor_linkage_ignores_deposits_without_tracked_topups() {
         let sponsor = "0x4444444444444444444444444444444444444444";
-        let target = test_deposit("dep_1", "w", "0xaaaa00000000000000000000000000000000aaaa", Some("party_a"), None);
-        let other = test_deposit("dep_2", "w", "0xbbbb00000000000000000000000000000000bbbb", Some("party_b"), None);
+        let target = test_deposit(
+            "dep_1",
+            "w",
+            "0xaaaa00000000000000000000000000000000aaaa",
+            Some("party_a"),
+            None,
+        );
+        let other = test_deposit(
+            "dep_2",
+            "w",
+            "0xbbbb00000000000000000000000000000000bbbb",
+            Some("party_b"),
+            None,
+        );
         let queue = queue_with_gas_topup("topup_1", sponsor, &other.stealth_address);
 
         // The other deposit never recorded a top-up job: nothing to link.
@@ -829,8 +864,8 @@ impl SigillumService {
                 CreatedUpdatedSort::Updated => deposit.updated_at_unix,
             };
             match order {
-                SortOrder::Asc => deposits.sort_by_key(|deposit| key(deposit)),
-                SortOrder::Desc => deposits.sort_by(|a, b| key(b).cmp(&key(a))),
+                SortOrder::Asc => deposits.sort_by_key(&key),
+                SortOrder::Desc => deposits.sort_by_key(|deposit| std::cmp::Reverse(key(deposit))),
             }
         }
         let (deposits, pagination) = paginate(deposits, query.page);
@@ -874,8 +909,8 @@ impl SigillumService {
         let from_block = match body.from_block.as_deref() {
             Some(value) => normalize_log_block_tag(value, "from_block")?,
             None => {
-                let stored = crate::deposits::load_deposits(&self.state.base_dir)
-                    .map_err(|error| {
+                let stored =
+                    crate::deposits::load_deposits(&self.state.base_dir).map_err(|error| {
                         ServiceError::internal(format!("Failed to load deposits: {error}"))
                     })?;
                 match latest_announcement_scan_cursor(
@@ -1869,7 +1904,8 @@ impl SigillumService {
                 "latest",
             )
             .await?;
-        let sponsor_balance = decode_quantity_hex(&sponsor_balance_hex).map_err(map_wallet_error)?;
+        let sponsor_balance =
+            decode_quantity_hex(&sponsor_balance_hex).map_err(map_wallet_error)?;
         let sponsor_gas_cost =
             multiply_u256_u64(&max_fee, provider.native_gas_limit.unwrap_or(21_000));
         let required = super::inventory::treasury::add_u256(&topup, &sponsor_gas_cost);
@@ -2676,7 +2712,8 @@ fn discovered_deposit_matches(
     event: &Erc5564AnnouncementEvent,
     asset_kind: &str,
     token_address: &Option<String>,
-) -> bool {    deposit.wallet_profile == wallet.name
+) -> bool {
+    deposit.wallet_profile == wallet.name
         && deposit.asset_kind == asset_kind
         && deposit
             .stealth_address

@@ -18,9 +18,8 @@ use sigillum_api::{
 };
 use sigillum_core::{
     EthereumEip1559Erc20Transfer, EthereumEip1559Transfer, StealthHashConvention, VaultLifecycle,
-    build_erc5564_announcement, check_ethereum_stealth_address_any_watch_only,
-    decode_quantity_hex, derive_ethereum_address_from_xpub,
-    derive_ethereum_receive_branch_from_account_xpub,
+    build_erc5564_announcement, check_ethereum_stealth_address_any_watch_only, decode_quantity_hex,
+    derive_ethereum_address_from_xpub, derive_ethereum_receive_branch_from_account_xpub,
     derive_ethereum_receive_branch_from_account_xpub_with_path,
     derive_sigillum_ethereum_stealth_wallet, derive_sigillum_ethereum_xpub_receive_branch,
     derive_watch_only_sigillum_ethereum_stealth_wallet, generate_ethereum_stealth_address,
@@ -862,12 +861,13 @@ mod tests {
         // exported meta-address (public info) must equal the watch-only
         // derivation's — while the view itself carries no spending secret.
         let watch_view = sigillum_core::derive_watch_only_sigillum_ethereum_stealth_wallet(
-            &[7u8; 32],
-            "payments",
-            "eth",
+            &[7u8; 32], "payments", "eth",
         )
         .unwrap();
-        assert_eq!(watch_view.meta_address().stealth_meta_address, meta.stealth_meta_address);
+        assert_eq!(
+            watch_view.meta_address().stealth_meta_address,
+            meta.stealth_meta_address
+        );
 
         for convention in [
             StealthHashConvention::Compressed33,
@@ -896,7 +896,10 @@ mod tests {
                     },
                 )
                 .unwrap();
-            assert!(check.matches, "daemon check must detect a {convention} payment");
+            assert!(
+                check.matches,
+                "daemon check must detect a {convention} payment"
+            );
             assert_eq!(check.stealth_hash_convention, convention);
 
             // Detection from the viewing key + spending public key alone
@@ -910,9 +913,15 @@ mod tests {
             )
             .unwrap();
             assert!(watch_only.matches);
-            assert_eq!(watch_only.derived_stealth_address, check.derived_stealth_address);
+            assert_eq!(
+                watch_only.derived_stealth_address,
+                check.derived_stealth_address
+            );
             assert_eq!(watch_only.view_tag_hex, check.view_tag_hex);
-            assert_eq!(watch_only.stealth_hash_convention, check.stealth_hash_convention);
+            assert_eq!(
+                watch_only.stealth_hash_convention,
+                check.stealth_hash_convention
+            );
         }
 
         // Watch-only ≠ lock-tolerant: the viewing key derives from the

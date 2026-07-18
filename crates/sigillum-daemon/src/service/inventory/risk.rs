@@ -63,7 +63,7 @@ pub(in crate::service) fn common_gas_funder_finding(
         recommendation:
             "Fund each party's gas from a distinct sponsor address (or request payer-attached \
              gas); one funder paying gas for multiple parties publicly links them on-chain."
-            .into(),
+                .into(),
         evidence,
         first_seen_at_unix: seen_at_unix,
         last_checked_at_unix: seen_at_unix,

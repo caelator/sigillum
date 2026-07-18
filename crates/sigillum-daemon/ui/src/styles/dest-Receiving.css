@@ -1,7 +1,8 @@
 /* ── dest-Receiving.css — Receive destination (plan §4.3.3) ────────────────
    Scoped to the rebuilt destination rendered by src/destinations/Receiving.ts
    into the legacy #receivingCard container. Everything consumes design
-   tokens + v2 components (00-design-tokens.css, 14-components-v2.css); no
+   tokens + v2 components (00-design-tokens.css,
+   00-design-tokens-v2.css, 14-components-v2.css); no
    hex values, no restyling of legacy components. Rules: ui/DESIGN.md. */
 
 .dest-recv {

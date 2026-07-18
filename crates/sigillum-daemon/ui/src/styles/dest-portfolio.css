@@ -1,6 +1,7 @@
 /* ── Destination partial: Portfolio (plan task 4.3) ─────────────────────────
    Styles for src/destinations/portfolio.ts only. Every value comes from the
-   v2 tokens (00-design-tokens.css §1/§1b) — no hex, no per-screen one-offs.
+   base + v2 tokens (00-design-tokens.css §1,
+   00-design-tokens-v2.css §1b) — no hex, no per-screen one-offs.
    Consequence grading rides on [data-tier] via the --_tier-* private props
    defined in 14-components-v2.css. */
 

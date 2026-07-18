@@ -1,0 +1,55 @@
+/* ── 1b. Design system v2 (plan task 4.2) ────────────────────────────────
+   Additive tokens for the destination rebuilds. Existing tokens above are
+   unchanged; everything here is new vocabulary. Components consume these
+   via 14-components-v2.css — never hard-code tier colors in components. */
+
+:root {
+  /* Consequence tiers — visual weight proportional to money at stake.
+     quiet  → browsing/reading state, calm and low-emphasis
+     review → deliberate attention required before proceeding
+     danger → value-moving or irreversible; loud by design
+     The three `--tier-*-accent` values form the consequence accent scale;
+     pair them with the confirm-dialog tiers (inform → confirm → typed
+     phrase) per the consequence matrix in DESIGN.md. */
+  --tier-quiet-surface: var(--surface);
+  --tier-quiet-border: var(--border);
+  --tier-quiet-text: var(--text-secondary);
+  --tier-quiet-accent: var(--info);
+  --tier-quiet-accent-text: var(--info-text);
+  --tier-quiet-tint: var(--info-tint);
+
+  --tier-review-surface: #1d1912;
+  --tier-review-border: rgba(224, 168, 60, 0.45);
+  --tier-review-text: var(--warning-text);
+  --tier-review-accent: var(--warning);
+  --tier-review-accent-text: var(--warning-text);
+  --tier-review-tint: var(--warning-tint);
+
+  --tier-danger-surface: #211214;
+  --tier-danger-border: rgba(229, 84, 79, 0.5);
+  --tier-danger-text: var(--danger-text);
+  --tier-danger-accent: var(--danger);
+  --tier-danger-accent-text: var(--danger-text);
+  --tier-danger-tint: var(--danger-tint);
+
+  /* Tabular numerals — apply to amounts, stat values, balances, and any
+     column of figures via the `.nums` utility (14-components-v2.css) so
+     digits align and values don't jitter as they update. */
+  --nums-feature: "tnum" 1;
+
+  /* Density scale — vertical rhythm that privileges the next action:
+     comfortable forms at rest, compact rows for scan-heavy lists. */
+  --density-pad-y: 12px;
+  --density-pad-x: 16px;
+  --density-row-h: 44px;
+  --density-row-h-compact: 34px;
+
+  /* Motion v2 — budget: --t-fast for state flips, --t-med for reveals,
+     --t-slow reserved for overlays/sheets only. Every animation must hold
+     under prefers-reduced-motion (the global guard in
+     12-utilities-responsive.css zeroes durations; components that
+     rely on motion for meaning must also render a static state). */
+  --t-slow: 260ms var(--ease-standard);
+  --ease-standard: cubic-bezier(0.2, 0, 0, 1);
+  --ease-entrance: cubic-bezier(0, 0, 0.2, 1);
+}

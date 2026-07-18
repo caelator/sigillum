@@ -175,12 +175,7 @@ async fn post_json(
     req.send().await.unwrap()
 }
 
-async fn get_json(
-    client: &reqwest::Client,
-    addr: SocketAddr,
-    path: &str,
-    token: &str,
-) -> Value {
+async fn get_json(client: &reqwest::Client, addr: SocketAddr, path: &str, token: &str) -> Value {
     let response = client
         .get(format!("http://{addr}{path}"))
         .bearer_auth(token)
@@ -385,9 +380,13 @@ async fn retrying_job_drains_to_broadcast_without_a_client() {
     let setup = setup_stealth_queue(&client, addr, rpc_addr).await;
     enqueue_stealth_transfer(&client, addr, &setup).await;
 
-    wait_for("the job to reach retrying", Duration::from_secs(20), || async {
-        first_queue_job(&client, addr, &setup.token).await["state"] == json!("retrying")
-    })
+    wait_for(
+        "the job to reach retrying",
+        Duration::from_secs(20),
+        || async {
+            first_queue_job(&client, addr, &setup.token).await["state"] == json!("retrying")
+        },
+    )
     .await;
     let retrying = first_queue_job(&client, addr, &setup.token).await;
     assert!(retrying["next_attempt_after_unix"].is_u64(), "{retrying}");
@@ -399,9 +398,7 @@ async fn retrying_job_drains_to_broadcast_without_a_client() {
     wait_for(
         "the scheduler to drain the job to sent",
         Duration::from_secs(20),
-        || async {
-            first_queue_job(&client, addr, &setup.token).await["state"] == json!("sent")
-        },
+        || async { first_queue_job(&client, addr, &setup.token).await["state"] == json!("sent") },
     )
     .await;
 
@@ -575,9 +572,7 @@ async fn client_operation_holding_the_guard_skips_the_scheduler_cycle() {
     wait_for(
         "the scheduler to drain once the guard is free",
         Duration::from_secs(20),
-        || async {
-            first_queue_job(&client, addr, &setup.token).await["state"] == json!("sent")
-        },
+        || async { first_queue_job(&client, addr, &setup.token).await["state"] == json!("sent") },
     )
     .await;
     let job = first_queue_job(&client, addr, &setup.token).await;

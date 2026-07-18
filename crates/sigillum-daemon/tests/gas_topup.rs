@@ -711,9 +711,9 @@ async fn cross_party_sponsor_funding_warns_and_blocks_per_policy() {
                 .as_array()
                 .unwrap()
                 .iter()
-                .any(|entry| entry.as_str().is_some_and(|value| {
-                    value == "Distinct payer identities funded: 2"
-                })),
+                .any(|entry| entry
+                    .as_str()
+                    .is_some_and(|value| { value == "Distinct payer identities funded: 2" })),
             "{label} plan finding evidence: {plan}"
         );
     }

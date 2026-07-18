@@ -91,10 +91,12 @@ async fn spawn_mock_evm_provider() -> (SocketAddr, tokio::task::JoinHandle<()>, 
                     .unwrap_or_default()
                     .to_ascii_lowercase();
                 let balances = state.balances.read().unwrap();
-                json!(balances
-                    .get(&address)
-                    .cloned()
-                    .unwrap_or_else(|| "0xde0b6b3a7640000".to_string()))
+                json!(
+                    balances
+                        .get(&address)
+                        .cloned()
+                        .unwrap_or_else(|| "0xde0b6b3a7640000".to_string())
+                )
             }
             // Any calldata carries a balanceOf-style probe: report 1_000_000
             // raw token units so ERC-20 deposits read as funded.
@@ -228,7 +230,11 @@ fn announcement_topic() -> String {
 
 /// Craft an ERC-5564 announcer log for a payment, with `metadata` as the
 /// on-chain metadata (first byte = view tag).
-fn announcement_log(stealth_address: &str, ephemeral_public_key_hex: &str, metadata: &[u8]) -> Value {
+fn announcement_log(
+    stealth_address: &str,
+    ephemeral_public_key_hex: &str,
+    metadata: &[u8],
+) -> Value {
     let ephemeral_public_key = hex::decode(ephemeral_public_key_hex).unwrap();
     let first_tail = abi_dynamic_bytes(&ephemeral_public_key);
     let second_offset = 64 + first_tail.len() / 2;
@@ -437,7 +443,8 @@ impl Rig {
 
 fn metadata_hints(metadata_hex: &str) -> sigillum_core::Erc5564MetadataHints {
     let raw = hex::decode(metadata_hex.strip_prefix("0x").unwrap_or(metadata_hex)).unwrap();
-    sigillum_core::decode_erc5564_metadata_hints(&raw).expect("metadata carries SHOULD-layout hints")
+    sigillum_core::decode_erc5564_metadata_hints(&raw)
+        .expect("metadata carries SHOULD-layout hints")
 }
 
 fn u64_word(value: u64) -> [u8; 32] {
@@ -598,12 +605,9 @@ async fn scan_autopopulates_deposit_from_metadata_hints() {
     )
     .unwrap();
     let view_tag = hex::decode(&token_payment.view_tag_hex).unwrap()[0];
-    let token_metadata = sigillum_core::encode_erc5564_metadata_erc20_transfer(
-        view_tag,
-        TOKEN,
-        &u64_word(0x2a),
-    )
-    .unwrap();
+    let token_metadata =
+        sigillum_core::encode_erc5564_metadata_erc20_transfer(view_tag, TOKEN, &u64_word(0x2a))
+            .unwrap();
     // Native-layout announcement for this wallet.
     let native_payment = sigillum_core::generate_ethereum_stealth_address(
         &meta_address,
@@ -721,10 +725,14 @@ async fn funded_needs_gas_transitions_to_funded_when_gas_arrives() {
     .await;
     let record = &refresh["deposits"][0];
     assert_eq!(record["status"], "funded_needs_gas", "refresh: {refresh}");
-    assert_eq!(refresh["queued"], 0, "no auto-sweep without request flag: {refresh}");
+    assert_eq!(
+        refresh["queued"], 0,
+        "no auto-sweep without request flag: {refresh}"
+    );
 
     // Gas arrives (payer-attached or manual): the next refresh flips it.
-    rig.set_balance(&stealth_address, EXPECTED_TOPUP_WEI_HEX).await;
+    rig.set_balance(&stealth_address, EXPECTED_TOPUP_WEI_HEX)
+        .await;
     let refresh = post_ok(
         &client,
         rig.addr,
@@ -838,7 +846,8 @@ async fn erc20_deposit_gas_topup_then_sweep_end_to_end() {
 
     // The top-up confirms on-chain (gas visible at the stealth address): the
     // sweep now executes.
-    rig.set_balance(&stealth_address, EXPECTED_TOPUP_WEI_HEX).await;
+    rig.set_balance(&stealth_address, EXPECTED_TOPUP_WEI_HEX)
+        .await;
     let drained = post_ok(
         &client,
         rig.addr,
@@ -880,8 +889,12 @@ async fn cross_party_sponsor_funding_warns_or_hard_blocks_per_policy() {
     // Two ERC-20 deposits on the same wallet (hence the same derived
     // sponsor), each with its OWN sweep destination so only the sponsor axis
     // can link them.
-    let deposit_a = rig.create_erc20_deposit(true, true, Some(DESTINATION)).await;
-    let deposit_b = rig.create_erc20_deposit(true, true, Some(DESTINATION_B)).await;
+    let deposit_a = rig
+        .create_erc20_deposit(true, true, Some(DESTINATION))
+        .await;
+    let deposit_b = rig
+        .create_erc20_deposit(true, true, Some(DESTINATION_B))
+        .await;
     let id_a = deposit_a["id"].as_str().unwrap().to_string();
     let id_b = deposit_b["id"].as_str().unwrap().to_string();
     for deposit in [&deposit_a, &deposit_b] {
@@ -982,13 +995,12 @@ async fn cross_party_sponsor_funding_warns_or_hard_blocks_per_policy() {
 
     // Hard-block: with `block_cross_party_linkage` on, a THIRD party's deposit
     // cannot get sponsor funding at all (policy_violation).
-    let deposit_c = rig.create_erc20_deposit(true, true, Some(DESTINATION)).await;
+    let deposit_c = rig
+        .create_erc20_deposit(true, true, Some(DESTINATION))
+        .await;
     let id_c = deposit_c["id"].as_str().unwrap().to_string();
-    rig.set_balance(
-        deposit_c["stealth_address"].as_str().unwrap(),
-        "0x0",
-    )
-    .await;
+    rig.set_balance(deposit_c["stealth_address"].as_str().unwrap(), "0x0")
+        .await;
     let party_c = post_ok(
         &client,
         rig.addr,

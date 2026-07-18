@@ -6,11 +6,14 @@ use axum::{Json, Router};
 use serde_json::json;
 use sigillum_api::request::{
     CounterpartyCreateRequest, CounterpartyDeleteRequest, CounterpartyUpdateRequest, Eip1559Fees,
-    EvmProviderRef, NftMetadataFetchRequest, NftMetadataOptInDeleteRequest,
-    NftMetadataOptInUpsertRequest, NftMetadataSettingsUpdateRequest,
-    QueueEthStealthErc20SweepRequest, QueueEthStealthNativeSweepRequest,
-    QueueEthStealthTransferRequest, QueueProcessRequest, ReceivingDepositTagRequest,
-    TokenRegistryImportRequest,
+    EthStealthAnnouncementScanRequest, EthStealthDepositCreateErc20Request,
+    EthStealthDepositCreateNativeRequest, EthStealthDepositDeleteRequest,
+    EthStealthDepositEnqueueSweepRequest, EthStealthDepositRefreshRequest,
+    EthStealthWalletProfileUpsertRequest, EvmProviderProfileUpsertRequest, EvmProviderRef,
+    NftMetadataFetchRequest, NftMetadataOptInDeleteRequest, NftMetadataOptInUpsertRequest,
+    NftMetadataSettingsUpdateRequest, QueueEthStealthErc20SweepRequest,
+    QueueEthStealthNativeSweepRequest, QueueEthStealthTransferRequest, QueueProcessRequest,
+    ReceivingDepositTagRequest, TokenRegistryImportRequest,
 };
 
 use super::*;

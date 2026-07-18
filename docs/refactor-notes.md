@@ -64,6 +64,35 @@ Future API/client/CLI domain splits should follow this shape: move one domain
 end to end, keep public names stable, add or update tests, document ownership,
 ratchet guardrails, then re-run GitNexus indexing after commit.
 
+## Release-Cap Repair Checkpoint
+
+The operator-surface branch keeps the existing parent-file budgets by assigning
+new growth to explicit owners instead of relaxing the architecture gate:
+
+- `audit_log/queue_job_kind.rs` owns typed queue audit kinds;
+  `audit_log/test_support.rs` owns legacy JSONL fixtures. Their historical
+  `audit_log::*` paths remain available through crate-local re-exports.
+- `service/inventory/scan_execution.rs` owns the long-running EVM inventory scan
+  loop. The inventory facade retains preparation, checkpoint, and finalization
+  policy.
+- `state/runtime.rs` owns operation coordination, event publication, scheduler
+  status, execution pause state, and the locking transition. `AppState` method
+  paths and visibility remain unchanged.
+- `service/queue/enqueue.rs` owns queue admission and durable enqueue;
+  `service/queue/dispatch.rs` owns only fresh payload execution. The processing
+  loop retains replay, gates, outcome application, and durable broadcast
+  barriers. Queue-state tests live under `queue/state/tests.rs`.
+- FIDO2 request DTOs and queue payload responses live in API child modules with
+  public re-exports. Client profile and deposit methods live in matching
+  crate-local modules. CLI API tests no longer inflate the production dispatch
+  file.
+- Authored UI styles are split by token, shell status, policy form, raw-detail,
+  modal, and responsive ownership. Import order remains the cascade contract;
+  the embedded `styles.css` remains a generated build output.
+
+`scripts/check-architecture.sh` records each child path and line budget, plus
+the public re-export and no-inline-test invariants that make these moves stable.
+
 ## W7.3 Queue Execution Split
 
 Mirrors the sweeps split for the two families the drain loop lifts behind

@@ -7,14 +7,16 @@
    include_str!.
 
    Contents
-     1. Design tokens
+     1. Base design tokens
+    1b. Design system v2 tokens
      2. Reset & base
      3. App shell (sidebar / topbar / main / focus modes)
+    3b. Topbar status and compartment badges
      4. Sidebar chrome (brand, nav, badges, session controls)
      5. Cards
      6. Typography helpers & section structure
      7. Buttons
-     8. Forms (inputs, selects, textareas, checkboxes, file)
+     8. Forms (inputs, selects, textareas, checkboxes, file, policy)
      9. Pills & badges
     10. Stat tiles
     11. Entity & key lists
@@ -25,25 +27,30 @@
     16. Setup wizard
     17. Guide & next-step content
     17b. Journey checklist, status chips & inline help
-    18. Pin modal
+    18. Shared modal and confirmation dialogs
     19. Utilities
     20. Scrollbars, selection, motion & responsive
     21. Components v2 (design system v2: tiers, table, skeleton, …)
    ═══════════════════════════════════════════════════════════════════════════ */
 
 @import "./00-design-tokens.css";
+@import "./00-design-tokens-v2.css";
 @import "./01-reset-base.css";
 @import "./02-app-shell.css";
+@import "./02-topbar-status.css";
 @import "./03-sidebar.css";
 @import "./04-cards-typography.css";
 @import "./05-buttons.css";
 @import "./06-forms.css";
+@import "./06-policy-forms.css";
 @import "./07-pills-stats-lists.css";
+@import "./07-raw-details.css";
 @import "./08-states-wallet-toasts.css";
 @import "./09-overview-auth.css";
 @import "./10-setup-wizard.css";
 @import "./11-guide-journey.css";
-@import "./12-modal-utilities-responsive.css";
+@import "./12-modal.css";
+@import "./12-utilities-responsive.css";
 @import "./13-onboarding.css";
 @import "./14-components-v2.css";
 @import "./15-command-palette.css";

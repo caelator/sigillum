@@ -1,104 +1,4 @@
-/* ── 18. Shared modal shell ───────────────────────────────────────────────── */
-
-.modal-overlay,
-.confirm-overlay {
-  position: fixed;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.7);
-  z-index: 200;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.modal-dialog,
-.confirm-dialog {
-  width: min(460px, calc(100vw - 48px));
-  box-shadow: var(--shadow-3);
-}
-
-.modal-dialog h2,
-.confirm-dialog h2 {
-  font-size: var(--fs-base);
-  font-weight: 600;
-  line-height: 1.5;
-  margin-bottom: var(--space-3);
-}
-
-.modal-actions {
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  gap: var(--space-2);
-  margin-top: var(--space-3);
-}
-
-.secret-prompt-form,
-.secret-prompt-input {
-  width: 100%;
-}
-
-/* ── 18b. Confirmation dialog (created at runtime by render/confirm.ts) ───── */
-
-.confirm-body {
-  color: var(--text-secondary);
-  font-size: var(--fs-sm);
-  line-height: 1.5;
-  margin-bottom: var(--space-4);
-  overflow-wrap: anywhere;
-}
-
-.confirm-value {
-  width: 100%;
-  margin-bottom: var(--space-4);
-}
-
-.confirm-checkbox {
-  display: flex;
-  align-items: flex-start;
-  gap: var(--space-2);
-  color: var(--text-secondary);
-  font-size: var(--fs-sm);
-  line-height: 1.45;
-  margin-bottom: var(--space-2);
-  cursor: pointer;
-}
-
-.confirm-checkbox input {
-  margin-top: 3px;
-  accent-color: var(--danger);
-}
-
-.confirm-phrase-label {
-  color: var(--text-muted);
-  font-size: var(--fs-xs);
-  margin-bottom: var(--space-2);
-}
-
-.confirm-phrase {
-  background: var(--danger-tint);
-  border: 1px solid rgba(229, 84, 79, 0.4);
-  border-radius: var(--radius-sm);
-  color: var(--danger-text);
-  font-size: var(--fs-xs);
-  padding: var(--space-2) var(--space-3);
-  margin-bottom: var(--space-3);
-  user-select: none;
-  overflow-wrap: anywhere;
-}
-
-.confirm-input {
-  width: 100%;
-}
-
-.confirm-actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: var(--space-2);
-  margin-top: var(--space-4);
-}
-
-/* ── 19. Utilities ────────────────────────────────────────────────────────── */
+/* ── 19. Utilities ─────────────────────────────────────────────────────────── */
 
 .flex-1 { flex: 1 1 160px; min-width: 0; }
 .mt-8   { margin-top: var(--space-2); }
@@ -111,7 +11,7 @@ textarea.mono {
   font-size: var(--fs-xs);
 }
 
-/* ── 20. Scrollbars, selection, motion & responsive ───────────────────────── */
+/* ── 20. Scrollbars, selection, motion & responsive ──────────────────────── */
 
 ::selection {
   background: rgba(91, 124, 250, 0.35);

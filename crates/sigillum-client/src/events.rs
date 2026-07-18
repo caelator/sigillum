@@ -320,7 +320,7 @@ mod tests {
         });
 
         let waker = std::task::Waker::noop();
-        let mut cx = Context::from_waker(&waker);
+        let mut cx = Context::from_waker(waker);
         let mut events = Vec::new();
         loop {
             match Pin::new(&mut subscription).poll_next(&mut cx) {

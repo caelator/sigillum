@@ -30,8 +30,6 @@
 //! Old events (before versioning) are automatically converted by `StoredAuditEvent::from_legacy_json()`.
 //! This ensures that old audit trails don't become unreadable after upgrades.
 
-#[cfg(test)]
-use std::io::{BufRead, BufReader, Write};
 use std::path::Path;
 
 use serde::{Deserialize, Serialize};
@@ -39,12 +37,17 @@ use serde_json::{Map, Value, json};
 use sigillum_api::AuditEvent as PublicAuditEvent;
 
 use crate::json_store::{JsonDocument, JsonSchema};
-#[cfg(test)]
-use crate::json_store::{decode_json_document, encode_json_document_compact};
 
 mod legacy_details;
+mod queue_job_kind;
+#[cfg(test)]
+mod test_support;
 
 use legacy_details::*;
+pub(crate) use queue_job_kind::AuditQueueJobKind;
+use queue_job_kind::parse_queue_job_kind;
+#[cfg(test)]
+pub(crate) use test_support::{append_audit_event, read_recent_audit_events};
 
 // ── Core Structures ─────────────────────────────
 
@@ -95,58 +98,6 @@ impl JsonDocument for StoredAuditEvent {
             compartment_id: legacy.compartment_id,
             spec: AuditEventSpec::from_legacy_details(path, legacy.kind, legacy.details)?,
         })
-    }
-}
-
-// ── Queue Job Kinds ────────────────────────────
-
-#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-pub(crate) enum AuditQueueJobKind {
-    EthStealthTransfer,
-    EthStealthErc20Transfer,
-    EthStealthNativeSweep,
-    EthStealthErc20Sweep,
-    EthStealthGasTopup,
-    EthSeedTransfer,
-    EthSeedNativeSweep,
-    EthSeedErc20Sweep,
-    PlanStepExecution,
-}
-
-impl AuditQueueJobKind {
-    pub(crate) fn as_str(&self) -> &'static str {
-        match self {
-            Self::EthStealthTransfer => "eth_stealth_transfer",
-            Self::EthStealthErc20Transfer => "eth_stealth_erc20_transfer",
-            Self::EthStealthNativeSweep => "eth_stealth_native_sweep",
-            Self::EthStealthErc20Sweep => "eth_stealth_erc20_sweep",
-            Self::EthStealthGasTopup => "eth_stealth_gas_topup",
-            Self::EthSeedTransfer => "eth_seed_transfer",
-            Self::EthSeedNativeSweep => "eth_seed_native_sweep",
-            Self::EthSeedErc20Sweep => "eth_seed_erc20_sweep",
-            Self::PlanStepExecution => "plan_step_execution",
-        }
-    }
-
-    pub(crate) fn from_payload(payload: &sigillum_api::QueueJobPayload) -> Self {
-        match payload {
-            sigillum_api::QueueJobPayload::EthStealthTransfer { .. } => Self::EthStealthTransfer,
-            sigillum_api::QueueJobPayload::EthStealthErc20Transfer { .. } => {
-                Self::EthStealthErc20Transfer
-            }
-            sigillum_api::QueueJobPayload::EthStealthNativeSweep { .. } => {
-                Self::EthStealthNativeSweep
-            }
-            sigillum_api::QueueJobPayload::EthStealthErc20Sweep { .. } => {
-                Self::EthStealthErc20Sweep
-            }
-            sigillum_api::QueueJobPayload::EthStealthGasTopup { .. } => Self::EthStealthGasTopup,
-            sigillum_api::QueueJobPayload::EthSeedTransfer { .. } => Self::EthSeedTransfer,
-            sigillum_api::QueueJobPayload::EthSeedNativeSweep { .. } => Self::EthSeedNativeSweep,
-            sigillum_api::QueueJobPayload::EthSeedErc20Sweep { .. } => Self::EthSeedErc20Sweep,
-            sigillum_api::QueueJobPayload::PlanStepExecution { .. } => Self::PlanStepExecution,
-        }
     }
 }
 
@@ -1812,97 +1763,6 @@ impl AuditEventSpec {
             )),
         }
     }
-}
-
-// Test-only legacy JSONL writer: fixture for audit/migration.rs tests and legacy-format regression tests; live writes go through audit_db::append_event_chained.
-#[cfg(test)]
-pub(crate) fn append_audit_event(
-    path: &Path,
-    event: &StoredAuditEvent,
-) -> Result<(), std::io::Error> {
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-
-    let line = encode_json_document_compact(event)?;
-    let mut file = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(path)?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))?;
-    }
-    file.write_all(&line)?;
-    file.write_all(b"\n")?;
-    file.flush()?;
-    Ok(())
-}
-
-// Test-only legacy JSONL reader: regression-tests the legacy decode fallback that audit/migration.rs relies on.
-#[cfg(test)]
-pub(crate) fn read_recent_audit_events(
-    path: &Path,
-    limit: usize,
-) -> Result<Vec<PublicAuditEvent>, std::io::Error> {
-    let limit = limit.max(1);
-    let file = match std::fs::File::open(path) {
-        Ok(file) => file,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
-        Err(error) => return Err(error),
-    };
-
-    let mut events = Vec::new();
-    for line in BufReader::new(file).lines() {
-        let line = line?;
-        if line.trim().is_empty() {
-            continue;
-        }
-        let event: StoredAuditEvent = decode_json_document(path, line.as_bytes())?;
-        events.push(event.to_public_event());
-    }
-
-    if events.len() > limit {
-        events.drain(0..events.len() - limit);
-    }
-    events.reverse();
-    Ok(events)
-}
-
-fn parse_legacy_details<T>(path: &Path, kind: &str, details: Value) -> Result<T, std::io::Error>
-where
-    T: for<'de> Deserialize<'de>,
-{
-    serde_json::from_value(details).map_err(|error| invalid_audit_data(path, kind, error))
-}
-
-fn parse_queue_job_kind(path: &Path, value: &str) -> Result<AuditQueueJobKind, std::io::Error> {
-    match value {
-        "eth_stealth_transfer" => Ok(AuditQueueJobKind::EthStealthTransfer),
-        "eth_stealth_erc20_transfer" => Ok(AuditQueueJobKind::EthStealthErc20Transfer),
-        "eth_stealth_native_sweep" => Ok(AuditQueueJobKind::EthStealthNativeSweep),
-        "eth_stealth_erc20_sweep" => Ok(AuditQueueJobKind::EthStealthErc20Sweep),
-        other => Err(std::io::Error::new(
-            std::io::ErrorKind::InvalidData,
-            format!(
-                "unsupported queue audit job kind {} in {}",
-                other,
-                path.display()
-            ),
-        )),
-    }
-}
-
-fn invalid_audit_data(path: &Path, kind: &str, error: serde_json::Error) -> std::io::Error {
-    std::io::Error::new(
-        std::io::ErrorKind::InvalidData,
-        format!(
-            "failed to parse audit event {} in {}: {error}",
-            kind,
-            path.display()
-        ),
-    )
 }
 
 #[cfg(test)]

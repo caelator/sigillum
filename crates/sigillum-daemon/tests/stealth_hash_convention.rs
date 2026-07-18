@@ -64,11 +64,7 @@ fn submitted_raw_transaction_hash(request: &Value) -> Value {
     json!(format!("0x{}", hex::encode(Keccak256::digest(bytes))))
 }
 
-async fn spawn_mock_evm_provider() -> (
-    SocketAddr,
-    tokio::task::JoinHandle<()>,
-    Arc<RpcState>,
-) {
+async fn spawn_mock_evm_provider() -> (SocketAddr, tokio::task::JoinHandle<()>, Arc<RpcState>) {
     fn rpc_response(state: &RpcState, request: &Value) -> Value {
         let method = request["method"].as_str().unwrap_or_default();
         let result = match method {
@@ -144,9 +140,7 @@ async fn post_json(
     body: Value,
     token: Option<&str>,
 ) -> reqwest::Response {
-    let mut request = client
-        .post(format!("http://{addr}{path}"))
-        .json(&body);
+    let mut request = client.post(format!("http://{addr}{path}")).json(&body);
     if let Some(token) = token {
         request = request.bearer_auth(token);
     }
@@ -345,10 +339,7 @@ impl Rig {
             Some(&self.token),
         )
         .await;
-        export["stealth_meta_address"]
-            .as_str()
-            .unwrap()
-            .to_string()
+        export["stealth_meta_address"].as_str().unwrap().to_string()
     }
 
     async fn deposit_record(&self, id: &str) -> Value {
@@ -762,9 +753,7 @@ async fn announcement_scan_finds_both_conventions_in_one_pass() {
     assert_eq!(rescan["matched"], 2);
     assert_eq!(rescan["created"], 0);
     assert_eq!(rescan["existing"], 2);
-    let record = rig
-        .deposit_record(legacy["id"].as_str().unwrap())
-        .await;
+    let record = rig.deposit_record(legacy["id"].as_str().unwrap()).await;
     assert_eq!(record["stealth_hash_convention"], "x32");
 
     rig.daemon_handle.abort();

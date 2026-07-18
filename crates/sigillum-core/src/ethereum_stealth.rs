@@ -132,7 +132,9 @@ pub const ERC5564_ANNOUNCE_FUNCTION: &str = "announce(uint256,address,bytes,byte
 ///
 /// See the module-level "Shared-secret hash conventions" section for the
 /// normative references and the unsupported Fluidkey 64-byte variant.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Clone, Copy, Debug, Default, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize,
+)]
 pub enum StealthHashConvention {
     /// Legacy Sigillum convention: `keccak256` over the 32-byte x-coordinate
     /// of the shared-secret point (k256 `SharedSecret::raw_secret_bytes`).
@@ -675,9 +677,7 @@ pub const ERC5564_METADATA_ERC20_TRANSFER_SELECTOR: [u8; 4] = [0xa9, 0x05, 0x9c,
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Erc5564MetadataHints {
     /// Native-token layout: the amount of native token (wei) being sent.
-    Native {
-        amount_wei: [u8; 32],
-    },
+    Native { amount_wei: [u8; 32] },
     /// Token layout: the function identifier, token contract address, and
     /// amount (fungible) or token id (non-fungible) being sent.
     Token {
@@ -2078,56 +2078,40 @@ mod tests {
     /// Standard (`compressed33`, ScopeLift-compatible) vectors.
     const STANDARD_VECTORS: [FixedVector; 2] = [
         FixedVector {
-            ephemeral_private_key:
-                "0000000000000000000000000000000000000000000000000000000000000003",
-            ephemeral_public_key:
-                "02f9308a019258c31049344f85f89d5229b531c845836f99b08601f113bce036f9",
-            hashed_shared_secret:
-                "040e0548482e80fe8fa5ca6d6b199a19856651812273993bce46595c2b17d4b4",
+            ephemeral_private_key: "0000000000000000000000000000000000000000000000000000000000000003",
+            ephemeral_public_key: "02f9308a019258c31049344f85f89d5229b531c845836f99b08601f113bce036f9",
+            hashed_shared_secret: "040e0548482e80fe8fa5ca6d6b199a19856651812273993bce46595c2b17d4b4",
             view_tag: 0x04,
             stealth_address: "0xc4781e62ebcd5457deef51b90ba4acbb3b17ff30",
-            stealth_private_key:
-                "07717767021802541c1a55efb7ccc49d93090569b7efc8ff8aff332497d0490a",
+            stealth_private_key: "07717767021802541c1a55efb7ccc49d93090569b7efc8ff8aff332497d0490a",
         },
         FixedVector {
-            ephemeral_private_key:
-                "9d61b19deffd5a60ba844af492ec2cc44449c5697b326919703bac031cae7f60",
-            ephemeral_public_key:
-                "028db55b05db86c0b1786ca49f095d76344c9e6056b2f02701a7e7f3c20aabfd91",
-            hashed_shared_secret:
-                "7257024d9481707535109cde1f6add9bde15dd973d1197ad488e1faefdd64726",
+            ephemeral_private_key: "9d61b19deffd5a60ba844af492ec2cc44449c5697b326919703bac031cae7f60",
+            ephemeral_public_key: "028db55b05db86c0b1786ca49f095d76344c9e6056b2f02701a7e7f3c20aabfd91",
+            hashed_shared_secret: "7257024d9481707535109cde1f6add9bde15dd973d1197ad488e1faefdd64726",
             view_tag: 0x72,
             stealth_address: "0x8f8c077011630d8076a8fe179675221e7d2a2167",
-            stealth_private_key:
-                "75ba746c4e6af1cac18528606c1e081febb8917fd28dc7710546f9776a8ebb7c",
+            stealth_private_key: "75ba746c4e6af1cac18528606c1e081febb8917fd28dc7710546f9776a8ebb7c",
         },
     ];
 
     /// Legacy (`x32`) vectors, pinning the pre-switch implementation.
     const LEGACY_VECTORS: [FixedVector; 2] = [
         FixedVector {
-            ephemeral_private_key:
-                "0000000000000000000000000000000000000000000000000000000000000003",
-            ephemeral_public_key:
-                "02f9308a019258c31049344f85f89d5229b531c845836f99b08601f113bce036f9",
-            hashed_shared_secret:
-                "089b8f4b70e7b614390a0daf3dba95b3f389a79d24da91ebc15d8aa2a518f868",
+            ephemeral_private_key: "0000000000000000000000000000000000000000000000000000000000000003",
+            ephemeral_public_key: "02f9308a019258c31049344f85f89d5229b531c845836f99b08601f113bce036f9",
+            hashed_shared_secret: "089b8f4b70e7b614390a0daf3dba95b3f389a79d24da91ebc15d8aa2a518f868",
             view_tag: 0x08,
             stealth_address: "0x4039e78bd8141082a667050b3a19b6f58c9fe46b",
-            stealth_private_key:
-                "0bff016a2ad13769c57e99318a6dc038012c5b85ba56c1af7e16646b11d16cbe",
+            stealth_private_key: "0bff016a2ad13769c57e99318a6dc038012c5b85ba56c1af7e16646b11d16cbe",
         },
         FixedVector {
-            ephemeral_private_key:
-                "9d61b19deffd5a60ba844af492ec2cc44449c5697b326919703bac031cae7f60",
-            ephemeral_public_key:
-                "028db55b05db86c0b1786ca49f095d76344c9e6056b2f02701a7e7f3c20aabfd91",
-            hashed_shared_secret:
-                "54f9376d308b9f4e06383b663fae19e8ea6d84e83a1fcc1d660b926642b6bfd7",
+            ephemeral_private_key: "9d61b19deffd5a60ba844af492ec2cc44449c5697b326919703bac031cae7f60",
+            ephemeral_public_key: "028db55b05db86c0b1786ca49f095d76344c9e6056b2f02701a7e7f3c20aabfd91",
+            hashed_shared_secret: "54f9376d308b9f4e06383b663fae19e8ea6d84e83a1fcc1d660b926642b6bfd7",
             view_tag: 0x54,
             stealth_address: "0x239b96cf4b6b15dc2bdd233988d6ac1867adf7fa",
-            stealth_private_key:
-                "585ca98bea7520a392acc6e88c61446cf81038d0cf9bfbe122c46c2eaf6f342d",
+            stealth_private_key: "585ca98bea7520a392acc6e88c61446cf81038d0cf9bfbe122c46c2eaf6f342d",
         },
     ];
 
@@ -2169,11 +2153,17 @@ mod tests {
         ephemeral_bytes.copy_from_slice(&hex::decode(vector.ephemeral_private_key).unwrap());
 
         // Payer side: generation from the meta-address is byte-exact.
-        let payment =
-            generate_ethereum_stealth_address(VECTOR_META_ADDRESS, Some(ephemeral_bytes), convention)
-                .unwrap();
+        let payment = generate_ethereum_stealth_address(
+            VECTOR_META_ADDRESS,
+            Some(ephemeral_bytes),
+            convention,
+        )
+        .unwrap();
         assert_eq!(payment.stealth_address, vector.stealth_address);
-        assert_eq!(payment.ephemeral_public_key_hex, vector.ephemeral_public_key);
+        assert_eq!(
+            payment.ephemeral_public_key_hex,
+            vector.ephemeral_public_key
+        );
         assert_eq!(payment.view_tag_hex, hex::encode([vector.view_tag]));
         assert_eq!(payment.stealth_hash_convention, convention);
 
@@ -2315,7 +2305,10 @@ mod tests {
         )
         .unwrap();
         assert_eq!(payment.stealth_address, vector.stealth_address);
-        assert_eq!(payment.ephemeral_public_key_hex, vector.ephemeral_public_key);
+        assert_eq!(
+            payment.ephemeral_public_key_hex,
+            vector.ephemeral_public_key
+        );
         assert_eq!(payment.view_tag_hex, hex::encode([vector.view_tag]));
         assert_eq!(payment.stealth_hash_convention, convention);
 
@@ -2415,12 +2408,10 @@ mod tests {
                 FixedVector {
                     ephemeral_private_key: STANDARD_VECTORS[0].ephemeral_private_key,
                     ephemeral_public_key: STANDARD_VECTORS[0].ephemeral_public_key,
-                    hashed_shared_secret:
-                        "4284cefcb9194b08aadb2c943104476c414eb5ffb913717ef071f7767c2f3a11",
+                    hashed_shared_secret: "4284cefcb9194b08aadb2c943104476c414eb5ffb913717ef071f7767c2f3a11",
                     view_tag: 0x42,
                     stealth_address: "0x1bf254d39212f105e98e720269b2821a9bd78415",
-                    stealth_private_key:
-                        "45e8411b7302cc5e374fb8167db771f04ef169e84e8fa142ad2ad13ee8e7ae67",
+                    stealth_private_key: "45e8411b7302cc5e374fb8167db771f04ef169e84e8fa142ad2ad13ee8e7ae67",
                 },
             ),
             (
@@ -2428,12 +2419,10 @@ mod tests {
                 FixedVector {
                     ephemeral_private_key: LEGACY_VECTORS[0].ephemeral_private_key,
                     ephemeral_public_key: LEGACY_VECTORS[0].ephemeral_public_key,
-                    hashed_shared_secret:
-                        "7476dfdeaad242a8b09c0c78b6ecb7167c967451bab830bd2652c381047f25de",
+                    hashed_shared_secret: "7476dfdeaad242a8b09c0c78b6ecb7167c967451bab830bd2652c381047f25de",
                     view_tag: 0x74,
                     stealth_address: "0xbab0479fe41ae45b113988489444316f88d8c1f6",
-                    stealth_private_key:
-                        "77da51fd64bbc3fe3d1097fb039fe19a8a39283a50346080e30b9d4971379a34",
+                    stealth_private_key: "77da51fd64bbc3fe3d1097fb039fe19a8a39283a50346080e30b9d4971379a34",
                 },
             ),
         ];
@@ -2535,15 +2524,17 @@ mod tests {
         // meta-address as the full wallet, and detection results are
         // byte-identical on both conventions.
         let master_key = [19u8; 32];
-        let full =
-            derive_sigillum_ethereum_stealth_wallet(&master_key, "treasury", "eth").unwrap();
+        let full = derive_sigillum_ethereum_stealth_wallet(&master_key, "treasury", "eth").unwrap();
         let watch =
             derive_watch_only_sigillum_ethereum_stealth_wallet(&master_key, "treasury", "eth")
                 .unwrap();
         assert_eq!(watch.meta_address(), full.meta_address());
         assert_eq!(watch.meta_address(), full.watch_view().meta_address());
 
-        for convention in [StealthHashConvention::Compressed33, StealthHashConvention::XOnly32] {
+        for convention in [
+            StealthHashConvention::Compressed33,
+            StealthHashConvention::XOnly32,
+        ] {
             let payment = generate_ethereum_stealth_address(
                 &full.meta_address().stealth_meta_address,
                 Some([23u8; 32]),
@@ -2620,12 +2611,11 @@ mod tests {
     fn sdk_view_tag_vector_matches() {
         // Verbatim ScopeLift SDK test vector (src/utils/crypto/test/
         // generateStealthAddress.test.ts): view tag = most significant byte.
-        let hashed: [u8; 32] = hex::decode(
-            "158ce29a3dd0c8dca524e5776c2ba6361c280e013f87eee5eb799a713a939501",
-        )
-        .unwrap()
-        .try_into()
-        .unwrap();
+        let hashed: [u8; 32] =
+            hex::decode("158ce29a3dd0c8dca524e5776c2ba6361c280e013f87eee5eb799a713a939501")
+                .unwrap()
+                .try_into()
+                .unwrap();
         assert_eq!(derive_view_tag(&hashed), 0x15);
     }
 
@@ -2633,8 +2623,14 @@ mod tests {
     fn convention_strings_roundtrip() {
         for convention in StealthHashConvention::PROBE_ORDER {
             let encoded = convention.as_str();
-            assert_eq!(encoded.parse::<StealthHashConvention>().unwrap(), convention);
-            assert_eq!(serde_json::to_string(&convention).unwrap(), format!("\"{encoded}\""));
+            assert_eq!(
+                encoded.parse::<StealthHashConvention>().unwrap(),
+                convention
+            );
+            assert_eq!(
+                serde_json::to_string(&convention).unwrap(),
+                format!("\"{encoded}\"")
+            );
             assert_eq!(
                 serde_json::from_str::<StealthHashConvention>(&format!("\"{encoded}\"")).unwrap(),
                 convention
@@ -2676,9 +2672,10 @@ mod tests {
         let mut amount = [0u8; 32];
         amount[30] = 0x0f;
         amount[31] = 0x42;
-        let metadata =
-            hex::decode(encode_erc5564_metadata_erc20_transfer(0xcd, token_address, &amount).unwrap())
-                .unwrap();
+        let metadata = hex::decode(
+            encode_erc5564_metadata_erc20_transfer(0xcd, token_address, &amount).unwrap(),
+        )
+        .unwrap();
 
         assert_eq!(metadata.len(), ERC5564_METADATA_LAYOUT_LEN);
         assert_eq!(metadata[0], 0xcd);
@@ -2706,8 +2703,7 @@ mod tests {
         );
 
         let token_address = "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
-        let token =
-            encode_erc5564_metadata_erc20_transfer(0x22, token_address, &amount).unwrap();
+        let token = encode_erc5564_metadata_erc20_transfer(0x22, token_address, &amount).unwrap();
         assert_eq!(
             decode_erc5564_metadata_hints(&hex::decode(token).unwrap()),
             Some(Erc5564MetadataHints::Token {
@@ -2780,8 +2776,8 @@ mod tests {
         // rejected (the EIP mandates the view tag as the first metadata byte).
         let mut wrong_tag = hex::decode(&metadata_hex).unwrap();
         wrong_tag[0] ^= 0xff;
-        let error =
-            build_erc5564_announcement_with_metadata(&payment, &hex::encode(wrong_tag)).unwrap_err();
+        let error = build_erc5564_announcement_with_metadata(&payment, &hex::encode(wrong_tag))
+            .unwrap_err();
         assert_eq!(
             error,
             EthereumStealthError::InvalidAnnouncementField(
@@ -2804,13 +2800,15 @@ mod tests {
         let other_wallet =
             derive_sigillum_ethereum_stealth_gas_sponsor(&[31u8; 32], "treasury").unwrap();
         assert_ne!(first.sponsor_address(), other_wallet.sponsor_address());
-        let other_master = derive_sigillum_ethereum_stealth_gas_sponsor(&[37u8; 32], "payments").unwrap();
+        let other_master =
+            derive_sigillum_ethereum_stealth_gas_sponsor(&[37u8; 32], "payments").unwrap();
         assert_ne!(first.sponsor_address(), other_master.sponsor_address());
 
         // The sponsor chain is independent of the spend/view chains: the
         // sponsor address must not collide with the stealth wallet's own
         // meta-address-derived keys' addresses.
-        let wallet = derive_sigillum_ethereum_stealth_wallet(&[31u8; 32], "payments", "eth").unwrap();
+        let wallet =
+            derive_sigillum_ethereum_stealth_wallet(&[31u8; 32], "payments", "eth").unwrap();
         let payment = generate_ethereum_stealth_address(
             &wallet.meta_address.stealth_meta_address,
             Some([41u8; 32]),
@@ -2822,7 +2820,8 @@ mod tests {
 
     #[test]
     fn gas_sponsor_signing_key_matches_sponsor_address() {
-        let sponsor = derive_sigillum_ethereum_stealth_gas_sponsor(&[43u8; 32], "payments").unwrap();
+        let sponsor =
+            derive_sigillum_ethereum_stealth_gas_sponsor(&[43u8; 32], "payments").unwrap();
         let signing_key = sponsor.signing_key();
         // The signing key's address must be the advertised sponsor address —
         // same defense-in-depth invariant the seed signer enforces.

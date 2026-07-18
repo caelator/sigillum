@@ -40,22 +40,17 @@ use secrecy::SecretString;
 use serde::de::DeserializeOwned;
 use sigillum_api::request::{
     BiometricEnrollRequest, BiometricUnlockRequest, CompartmentSwitchRequest,
-    DiscoveryJobMutationRequest, EthSeedWalletCreateRequest, EthSeedWalletProfileUpsertRequest,
-    EthStealthAnnouncementScanRequest, EthStealthCheckRequest, EthStealthDepositCreateErc20Request,
-    EthStealthDepositCreateNativeRequest, EthStealthDepositDeleteRequest,
-    EthStealthDepositEnqueueSweepRequest, EthStealthDepositRefreshRequest, EthStealthExportRequest,
+    DiscoveryJobMutationRequest, EthStealthCheckRequest, EthStealthExportRequest,
     EthStealthGenerateRequest, EthStealthSendErc20TransferRequest,
     EthStealthSendErc20WithProfileRequest, EthStealthSendTransferRequest,
     EthStealthSendWithProfileRequest, EthStealthSignErc20TransferRequest, EthStealthSignRequest,
-    EthStealthSignTransferRequest, EthStealthWalletProfileUpsertRequest, EthXpubDeriveRequest,
-    EthXpubExportRequest, EthXpubWalletProfileUpsertRequest, EvmFeeEstimateRequest,
-    EvmProfileDeleteRequest, EvmProviderProfileUpsertRequest, EvmRpcBalanceRequest,
-    EvmRpcBroadcastRequest, EvmRpcErc20BalanceRequest, EvmRpcNonceRequest, Fido2RegisterRequest,
-    Fido2RemoveRequest, Fido2SetupRequest, Fido2UnlockRequest, GenerateStoreRequest,
-    KeyOnlyRequest, KeyValueRequest, MaintenanceRunRequest, PassphraseRequest,
-    RiskCatalogDeleteRequest, RiskCatalogUpsertRequest, RunAuditRequest, SecretResolveBatchRequest,
-    SnapshotRestoreRequest, StealthPaymentRef, TransitDecryptRequest, TransitEncryptRequest,
-    TransitHmacRequest,
+    EthStealthSignTransferRequest, EthXpubDeriveRequest, EthXpubExportRequest,
+    EvmFeeEstimateRequest, EvmRpcBalanceRequest, EvmRpcBroadcastRequest, EvmRpcErc20BalanceRequest,
+    EvmRpcNonceRequest, Fido2RegisterRequest, Fido2RemoveRequest, Fido2SetupRequest,
+    Fido2UnlockRequest, GenerateStoreRequest, KeyOnlyRequest, KeyValueRequest,
+    MaintenanceRunRequest, PassphraseRequest, RiskCatalogDeleteRequest, RiskCatalogUpsertRequest,
+    RunAuditRequest, SecretResolveBatchRequest, SnapshotRestoreRequest, StealthPaymentRef,
+    TransitDecryptRequest, TransitEncryptRequest, TransitHmacRequest,
 };
 pub use sigillum_api::response::Fido2StatusResponse as DaemonFido2Status;
 pub use sigillum_api::response::{
@@ -98,9 +93,11 @@ use thiserror::Error;
 
 pub use sigillum_core::{SecretStore, VaultError};
 
+mod deposits;
 mod inventory;
 mod list_queries;
 mod plans;
+mod profiles;
 mod queue;
 mod receiving;
 mod selfcheck;
@@ -777,142 +774,6 @@ impl SigillumClient {
         self.send(builder).await
     }
 
-    // ── Profiles ────────────────────────────────────────────────
-
-    pub async fn list_evm_provider_profiles(&self) -> Result<Vec<EvmProviderProfile>, ClientError> {
-        let builder = self.request(Method::GET, "/api/profiles/evm");
-        Ok(self
-            .send::<EvmProviderProfileListResponse>(builder)
-            .await?
-            .profiles)
-    }
-
-    pub async fn upsert_evm_provider_profile(
-        &self,
-        request: EvmProviderProfileUpsertRequest,
-    ) -> Result<EvmProviderProfileMutationResponse, ClientError> {
-        let builder = self
-            .request(Method::POST, "/api/profiles/evm/upsert")
-            .json(&request);
-        self.send(builder).await
-    }
-
-    pub async fn delete_evm_provider_profile(
-        &self,
-        request: EvmProfileDeleteRequest,
-    ) -> Result<EvmProviderProfileMutationResponse, ClientError> {
-        let builder = self
-            .request(Method::POST, "/api/profiles/evm/delete")
-            .json(&request);
-        self.send(builder).await
-    }
-
-    pub async fn list_eth_stealth_wallet_profiles(
-        &self,
-    ) -> Result<Vec<EthStealthWalletProfile>, ClientError> {
-        let builder = self.request(Method::GET, "/api/profiles/eth-stealth");
-        Ok(self
-            .send::<EthStealthWalletProfileListResponse>(builder)
-            .await?
-            .profiles)
-    }
-
-    pub async fn list_eth_xpub_wallet_profiles(
-        &self,
-    ) -> Result<Vec<EthXpubWalletProfile>, ClientError> {
-        let builder = self.request(Method::GET, "/api/profiles/eth-xpub");
-        Ok(self
-            .send::<EthXpubWalletProfileListResponse>(builder)
-            .await?
-            .profiles)
-    }
-
-    pub async fn list_eth_seed_wallet_profiles(
-        &self,
-    ) -> Result<Vec<EthSeedWalletProfile>, ClientError> {
-        let builder = self.request(Method::GET, "/api/profiles/eth-seed");
-        Ok(self
-            .send::<EthSeedWalletProfileListResponse>(builder)
-            .await?
-            .profiles)
-    }
-
-    pub async fn upsert_eth_stealth_wallet_profile(
-        &self,
-        request: EthStealthWalletProfileUpsertRequest,
-    ) -> Result<EthStealthWalletProfileMutationResponse, ClientError> {
-        let builder = self
-            .request(Method::POST, "/api/profiles/eth-stealth/upsert")
-            .json(&request);
-        self.send(builder).await
-    }
-
-    pub async fn delete_eth_stealth_wallet_profile(
-        &self,
-        request: EvmProfileDeleteRequest,
-    ) -> Result<EthStealthWalletProfileMutationResponse, ClientError> {
-        let builder = self
-            .request(Method::POST, "/api/profiles/eth-stealth/delete")
-            .json(&request);
-        self.send(builder).await
-    }
-
-    pub async fn upsert_eth_xpub_wallet_profile(
-        &self,
-        request: EthXpubWalletProfileUpsertRequest,
-    ) -> Result<EthXpubWalletProfileMutationResponse, ClientError> {
-        let builder = self
-            .request(Method::POST, "/api/profiles/eth-xpub/upsert")
-            .json(&request);
-        self.send(builder).await
-    }
-
-    pub async fn delete_eth_xpub_wallet_profile(
-        &self,
-        request: EvmProfileDeleteRequest,
-    ) -> Result<EthXpubWalletProfileMutationResponse, ClientError> {
-        let builder = self
-            .request(Method::POST, "/api/profiles/eth-xpub/delete")
-            .json(&request);
-        self.send(builder).await
-    }
-
-    pub async fn upsert_eth_seed_wallet_profile(
-        &self,
-        request: EthSeedWalletProfileUpsertRequest,
-    ) -> Result<EthSeedWalletProfileMutationResponse, ClientError> {
-        let builder = self
-            .request(Method::POST, "/api/profiles/eth-seed/upsert")
-            .json(&request);
-        self.send(builder).await
-    }
-
-    /// Create a brand-new seed wallet profile from a daemon-generated BIP-39
-    /// mnemonic.
-    ///
-    /// The returned [`EthSeedWalletCreateResponse::mnemonic`] is delivered
-    /// exactly once for operator backup; the daemon keeps it only as an
-    /// encrypted vault secret and never audits it.
-    pub async fn create_eth_seed_wallet_profile(
-        &self,
-        request: EthSeedWalletCreateRequest,
-    ) -> Result<EthSeedWalletCreateResponse, ClientError> {
-        let builder = self
-            .request(Method::POST, "/api/profiles/eth-seed/create")
-            .json(&request);
-        self.send(builder).await
-    }
-
-    pub async fn delete_eth_seed_wallet_profile(
-        &self,
-        request: EvmProfileDeleteRequest,
-    ) -> Result<EthSeedWalletProfileMutationResponse, ClientError> {
-        let builder = self
-            .request(Method::POST, "/api/profiles/eth-seed/delete")
-            .json(&request);
-        self.send(builder).await
-    }
-
     pub async fn send_eth_stealth_with_profile(
         &self,
         request: EthStealthSendWithProfileRequest,
@@ -1014,76 +875,6 @@ impl SigillumClient {
     ) -> Result<RiskCatalogMutationResponse, ClientError> {
         let builder = self
             .request(Method::POST, "/api/risk/catalog/delete")
-            .json(&request);
-        self.send(builder).await
-    }
-
-    // ── Deposits ────────────────────────────────────────────────
-
-    pub async fn list_eth_stealth_deposits(&self) -> Result<Vec<EthStealthDeposit>, ClientError> {
-        let builder = self.request(Method::GET, "/api/deposits/eth-stealth");
-        Ok(self
-            .send::<EthStealthDepositListResponse>(builder)
-            .await?
-            .deposits)
-    }
-
-    pub async fn create_eth_stealth_native_deposit(
-        &self,
-        request: EthStealthDepositCreateNativeRequest,
-    ) -> Result<EthStealthDepositMutationResponse, ClientError> {
-        let builder = self
-            .request(Method::POST, "/api/deposits/eth-stealth/create-native")
-            .json(&request);
-        self.send(builder).await
-    }
-
-    pub async fn create_eth_stealth_erc20_deposit(
-        &self,
-        request: EthStealthDepositCreateErc20Request,
-    ) -> Result<EthStealthDepositMutationResponse, ClientError> {
-        let builder = self
-            .request(Method::POST, "/api/deposits/eth-stealth/create-erc20")
-            .json(&request);
-        self.send(builder).await
-    }
-
-    pub async fn scan_eth_stealth_announcements(
-        &self,
-        request: EthStealthAnnouncementScanRequest,
-    ) -> Result<EthStealthAnnouncementScanResponse, ClientError> {
-        let builder = self
-            .request(Method::POST, "/api/deposits/eth-stealth/scan-announcements")
-            .json(&request);
-        self.send(builder).await
-    }
-
-    pub async fn delete_eth_stealth_deposit(
-        &self,
-        request: EthStealthDepositDeleteRequest,
-    ) -> Result<EthStealthDepositMutationResponse, ClientError> {
-        let builder = self
-            .request(Method::POST, "/api/deposits/eth-stealth/delete")
-            .json(&request);
-        self.send(builder).await
-    }
-
-    pub async fn refresh_eth_stealth_deposits(
-        &self,
-        request: EthStealthDepositRefreshRequest,
-    ) -> Result<EthStealthDepositRefreshResponse, ClientError> {
-        let builder = self
-            .request(Method::POST, "/api/deposits/eth-stealth/refresh")
-            .json(&request);
-        self.send(builder).await
-    }
-
-    pub async fn enqueue_eth_stealth_deposit_sweep(
-        &self,
-        request: EthStealthDepositEnqueueSweepRequest,
-    ) -> Result<EthStealthDepositEnqueueSweepResponse, ClientError> {
-        let builder = self
-            .request(Method::POST, "/api/deposits/eth-stealth/enqueue-sweep")
             .json(&request);
         self.send(builder).await
     }

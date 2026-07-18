@@ -6,6 +6,12 @@
 //! rejection. Value-domain checks (unknown `state`/`status`/`severity`
 //! values) happen in the service layer, which owns those domains.
 
+// These parsing helpers intentionally return the route's final Axum response
+// so every malformed query preserves the structured validation envelope.
+// Boxing that boundary solely to reduce the `Result` enum size would add
+// allocation and unboxing at every list handler without reducing live data.
+#![allow(clippy::result_large_err)]
+
 use axum::response::Response;
 use serde::Deserialize;
 use sigillum_api::response::FieldError;

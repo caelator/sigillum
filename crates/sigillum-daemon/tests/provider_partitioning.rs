@@ -367,12 +367,10 @@ fn derived_addresses(count: u32) -> Vec<String> {
 
 /// Per-chain scan view collapsed over provider identity: address →
 /// (activity, balance) plus the detected-holdings multiset.
-fn per_chain_view(
-    scan: &Value,
-) -> (
-    BTreeMap<String, (String, String)>,
-    BTreeSet<(String, String, String)>,
-) {
+type AddressScanView = BTreeMap<String, (String, String)>;
+type HoldingScanView = BTreeSet<(String, String, String)>;
+
+fn per_chain_view(scan: &Value) -> (AddressScanView, HoldingScanView) {
     let addresses = scan["addresses"]
         .as_array()
         .unwrap()
@@ -758,23 +756,25 @@ async fn partitioned_async_scan_cancel_and_resume_preserves_disjoint_coverage() 
         10,
         "providers must see no re-scanned indices"
     );
-    let logs = rig.rpc.observed.lock().unwrap();
-    let mut union = BTreeSet::new();
-    for (name, addresses) in logs.iter() {
-        let unique: BTreeSet<_> = addresses.iter().collect();
-        assert_eq!(
-            unique.len(),
-            addresses.len(),
-            "provider {name} re-observed an address"
-        );
-        for address in addresses {
-            assert!(
-                union.insert(address.clone()),
-                "address {address} observed by two providers"
+    {
+        let logs = rig.rpc.observed.lock().unwrap();
+        let mut union = BTreeSet::new();
+        for (name, addresses) in logs.iter() {
+            let unique: BTreeSet<_> = addresses.iter().collect();
+            assert_eq!(
+                unique.len(),
+                addresses.len(),
+                "provider {name} re-observed an address"
             );
+            for address in addresses {
+                assert!(
+                    union.insert(address.clone()),
+                    "address {address} observed by two providers"
+                );
+            }
         }
+        assert_eq!(union, expected);
     }
-    assert_eq!(union, expected);
 
     // Persisted inventory holds exactly one row per address.
     let inventory = rig.get("/api/inventory/wallets").await;

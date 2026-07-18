@@ -3,7 +3,7 @@
    plan review as a hardware-wallet-grade approval screen, the queue as an
    ops timeline, and the treasury policy as a guided editor. Token-only —
    no per-screen hex, no inline styles (DESIGN.md). Consequence grading
-   rides on [data-tier] via the v2 tier tokens (00-design-tokens.css §1b). */
+   rides on [data-tier] via the v2 tier tokens (00-design-tokens-v2.css §1b). */
 
 /* Focus mode: the plan review screen conceals the other Move cards. The
    legacy switcher toggles `hidden`/`section-hidden` every refresh, so this

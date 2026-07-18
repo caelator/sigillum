@@ -2,7 +2,7 @@
    Additive component layer for the destination rebuilds: consequence-tier
    attribute system, page headers, empty states, skeletons, data tables,
    status dots, and attention rows. Everything here consumes the v2 tokens
-   (00-design-tokens.css §1b); nothing restyles legacy components. Rules for
+   (00-design-tokens-v2.css §1b); nothing restyles legacy components. Rules for
    new code: no inline styles, no key=value meta lines, human units only —
    see DESIGN.md. */
 

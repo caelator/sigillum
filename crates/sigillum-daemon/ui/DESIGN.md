@@ -33,7 +33,7 @@ at stake.
 
 Three grades, applied via one attribute — `[data-tier="quiet|review|danger"]`
 — which re-maps the component's private custom properties (`--_tier-*`) to
-the tier tokens (`00-design-tokens.css` §1b). Components never hard-code
+the tier tokens (`00-design-tokens-v2.css` §1b). Components never hard-code
 tier colors.
 
 | Tier | Meaning | Friction (confirm-dialog tier) | Accent |
@@ -45,7 +45,7 @@ tier colors.
 A screen's default state is `quiet`. Escalate only the element that carries
 the consequence (a row, a button, a banner) — never the whole page.
 
-## Tokens (00-design-tokens.css §1b)
+## Tokens (00-design-tokens-v2.css §1b)
 
 - **Tiers**: `--tier-{quiet,review,danger}-{surface,border,text,accent,accent-text,tint}`.
 - **Numerals**: put `.nums` on amounts, stat values, balances, and figure

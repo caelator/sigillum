@@ -45,8 +45,8 @@ impl SigillumService {
                 CreatedUpdatedSort::Updated => plan.updated_at_unix,
             };
             match order {
-                SortOrder::Asc => plans.sort_by_key(|plan| key(plan)),
-                SortOrder::Desc => plans.sort_by(|a, b| key(b).cmp(&key(a))),
+                SortOrder::Asc => plans.sort_by_key(&key),
+                SortOrder::Desc => plans.sort_by_key(|plan| std::cmp::Reverse(key(plan))),
             }
         }
         let (plans, pagination) = paginate(plans, query.page);

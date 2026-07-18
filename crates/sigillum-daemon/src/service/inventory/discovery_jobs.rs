@@ -63,8 +63,8 @@ impl SigillumService {
                 CreatedUpdatedSort::Updated => job.completed_at_unix.unwrap_or(job.started_at_unix),
             };
             match order {
-                SortOrder::Asc => jobs.sort_by_key(|job| key(job)),
-                SortOrder::Desc => jobs.sort_by(|a, b| key(b).cmp(&key(a))),
+                SortOrder::Asc => jobs.sort_by_key(&key),
+                SortOrder::Desc => jobs.sort_by_key(|job| std::cmp::Reverse(key(job))),
             }
         }
         let (jobs, pagination) = paginate(jobs, query.page);
