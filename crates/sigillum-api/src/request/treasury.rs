@@ -130,7 +130,8 @@ pub struct CounterpartyCreateRequest {
     pub sweep_destination_address: Option<String>,
 }
 
-/// Rename or re-note an existing counterparty.
+/// Update an existing counterparty. Omitting `sweep_destination_address`
+/// retains the stored destination; an explicit blank string clears it.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct CounterpartyUpdateRequest {
     pub id: String,

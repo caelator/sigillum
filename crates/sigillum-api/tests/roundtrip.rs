@@ -661,6 +661,7 @@ fn receiving_response_roundtrip() {
                 linkage_warning: Some("shares configured sweep destination".to_string()),
                 balance_native_wei_hex: Some("0xde0b6b3a7640000".to_string()),
                 balance_known: true,
+                balance_last_checked_at_unix: Some(1_783_046_000),
                 status: "active".to_string(),
                 created_at_unix: 1_782_960_000,
             }],
@@ -677,6 +678,19 @@ fn receiving_response_roundtrip() {
             note: "all active receiving addresses refreshed".to_string(),
         },
     });
+
+    let legacy: ReceivingItem = serde_json::from_value(serde_json::json!({
+        "source_type": "hd_allocation",
+        "address": "0x9c9c8b8b7a7a6969585847473636252514140303",
+        "chain_id": 1,
+        "chain_id_assumed": false,
+        "balance_native_wei_hex": "0xde0b6b3a7640000",
+        "balance_known": true,
+        "status": "active",
+        "created_at_unix": 1_782_960_000
+    }))
+    .expect("legacy receiving item without balance timestamp should decode");
+    assert_eq!(legacy.balance_last_checked_at_unix, None);
 }
 
 #[test]

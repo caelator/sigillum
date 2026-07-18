@@ -611,6 +611,7 @@ export interface ReceivingItem {
   linkage_warning?: string | null;
   balance_native_wei_hex?: string | null;
   balance_known: boolean;
+  balance_last_checked_at_unix?: number | null;
   status: string;
   created_at_unix: number;
 }

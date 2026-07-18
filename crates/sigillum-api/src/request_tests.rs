@@ -1568,6 +1568,96 @@ fn test_counterparty_update_request_roundtrip() {
         note: None,
         sweep_destination_address: Some("0x6666666666666666666666666666666666666666".into()),
     });
+    roundtrip_test(CounterpartyUpdateRequest {
+        id: "cp_1".into(),
+        name: "Acme".into(),
+        note: None,
+        sweep_destination_address: Some("   ".into()),
+    });
+
+    let omitted: CounterpartyUpdateRequest =
+        serde_json::from_str(r#"{"id":"cp_1","name":"Acme"}"#).unwrap();
+    assert_eq!(omitted.sweep_destination_address, None);
+    let explicit_blank: CounterpartyUpdateRequest =
+        serde_json::from_str(r#"{"id":"cp_1","name":"Acme","sweep_destination_address":""}"#)
+            .unwrap();
+    assert_eq!(
+        explicit_blank.sweep_destination_address.as_deref(),
+        Some("")
+    );
+}
+
+#[test]
+fn test_counterparty_update_sweep_destination_accepts_blank_or_valid_only() {
+    for destination in [
+        "",
+        "   ",
+        "0x6666666666666666666666666666666666666666",
+        "  0x6666666666666666666666666666666666666666  ",
+    ] {
+        let request = CounterpartyUpdateRequest {
+            id: "cp_1".into(),
+            name: "Acme".into(),
+            note: None,
+            sweep_destination_address: Some(destination.into()),
+        };
+        assert!(
+            request.validate().is_ok(),
+            "blank or valid destination should validate: {destination:?}"
+        );
+    }
+
+    for destination in ["not-an-address", "0x123"] {
+        let request = CounterpartyUpdateRequest {
+            id: "cp_1".into(),
+            name: "Acme".into(),
+            note: None,
+            sweep_destination_address: Some(destination.into()),
+        };
+        let error = request
+            .validate()
+            .expect_err("malformed nonblank destination must fail validation");
+        assert!(error.contains("sweep_destination_address"), "{error}");
+    }
+
+    let oversized_blank = CounterpartyUpdateRequest {
+        id: "cp_1".into(),
+        name: "Acme".into(),
+        note: None,
+        sweep_destination_address: Some(" ".repeat(129)),
+    };
+    let error = oversized_blank
+        .validate()
+        .expect_err("oversized blank destination must retain the input bound");
+    assert!(error.contains("sweep_destination_address"), "{error}");
+}
+
+#[test]
+fn test_counterparty_update_fields_preserve_fail_fast_order_and_name_destination() {
+    let request = CounterpartyUpdateRequest {
+        id: "i".repeat(257),
+        name: " ".into(),
+        note: Some("n".repeat(1025)),
+        sweep_destination_address: Some("0x123".into()),
+    };
+
+    let failure = request.validate_fields().unwrap_err();
+    let paths: Vec<&str> = failure
+        .fields()
+        .iter()
+        .map(|field| field.field.as_str())
+        .collect();
+    assert_eq!(
+        paths,
+        vec!["id", "name", "note", "sweep_destination_address"]
+    );
+    assert_eq!(request.validate().unwrap_err(), failure.message());
+    assert!(failure.message().starts_with("id exceeds maximum length"));
+    assert!(
+        failure.fields()[3]
+            .message
+            .contains("must be a valid ethereum address")
+    );
 }
 
 #[test]

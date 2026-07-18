@@ -94,6 +94,10 @@ export function startServer({ port = 0 } = {}) {
   let mode = "unlocked";
   let treasuryPolicy = { ...D.treasuryPolicy };
   let operations = D.operations.map((operation) => ({ ...operation }));
+  let parties = D.parties.map((party) => ({ ...party }));
+  let receiveAllocations = D.receiveAllocations.map((allocation) => ({ ...allocation }));
+  let receivingOverview = JSON.parse(JSON.stringify(D.receivingOverview));
+  let deposits = D.deposits.map((deposit) => ({ ...deposit }));
   const unknownRequests = [];
   const sseClients = new Set();
 
@@ -103,7 +107,7 @@ export function startServer({ port = 0 } = {}) {
   const status = (value, extra = {}) => ({ status: value, ...extra });
   const firstPlan = () => D.consolidationPlans[0];
   const firstJob = () => D.queueJobs[0];
-  const firstDeposit = () => D.deposits[0];
+  const firstDeposit = () => deposits[0];
   const firstOperation = () => operations[0];
   const paginationFor = (url, total) => {
     if (!url?.searchParams.has("limit") && !url?.searchParams.has("offset")) return {};
@@ -157,13 +161,13 @@ export function startServer({ port = 0 } = {}) {
 
   get("/api/treasury/overview", () => D.treasuryOverview);
   get("/api/treasury/policy", () => ({ policy: treasuryPolicy }));
-  get("/api/treasury/receive-addresses", () => ({ allocations: D.receiveAllocations }));
-  get("/api/treasury/parties", () => ({ parties: D.parties }));
+  get("/api/treasury/receive-addresses", () => ({ allocations: receiveAllocations }));
+  get("/api/treasury/parties", () => ({ parties }));
 
-  get("/api/receiving/overview", () => D.receivingOverview);
+  get("/api/receiving/overview", () => receivingOverview);
   get("/api/deposits/eth-stealth", (_body, url) => ({
-    deposits: D.deposits,
-    ...paginationFor(url, D.deposits.length),
+    deposits,
+    ...paginationFor(url, deposits.length),
   }));
   get("/api/queue/jobs", (_body, url) => ({
     jobs: D.queueJobs,
@@ -310,7 +314,7 @@ export function startServer({ port = 0 } = {}) {
       broadcast_rejected: 0,
       receipt_timeout: 0,
     },
-    deposits: D.deposits,
+    deposits,
     jobs: [firstJob()],
     treasury_automation: { generated_steps: 0, enqueued_steps: 0, skipped_steps: 0 },
   }));
@@ -324,24 +328,77 @@ export function startServer({ port = 0 } = {}) {
     provider_status: "ok",
     errors: [],
   }));
-  post("/api/receiving/deposits/tag", () =>
-    status("updated", { deposit: firstDeposit(), warnings: [] }),
-  );
+  post("/api/receiving/deposits/tag", (body) => {
+    const index = deposits.findIndex((deposit) => deposit.id === body?.deposit_id);
+    if (index < 0) {
+      return { code: "not_found", error: "Deposit not found." };
+    }
+    deposits[index] = {
+      ...deposits[index],
+      counterparty_id: body?.counterparty_id || null,
+      updated_at_unix: D.NOW,
+    };
+    return status("updated", { deposit: deposits[index], warnings: [] });
+  });
   post("/api/treasury/receive-addresses/allocate", () =>
-    status("allocated", { allocation: D.receiveAllocations[0] }),
+    status("allocated", { allocation: receiveAllocations[0] }),
   );
   post("/api/treasury/receive-addresses/rotate", () =>
-    status("rotated", { allocation: D.receiveAllocations[0] }),
+    status("rotated", { allocation: receiveAllocations[0] }),
   );
-  post("/api/treasury/parties", (body) =>
-    status("created", {
-      party: {
-        ...D.parties[0],
-        id: "party-screenshot-new",
-        name: body?.name || "New counterparty",
-      },
-    }),
-  );
+  post("/api/treasury/parties", (body) => {
+    const party = {
+      ...D.parties[0],
+      id: "party-screenshot-new",
+      name: body?.name || "New counterparty",
+      note: body?.note || null,
+      sweep_destination_address: body?.sweep_destination_address || null,
+      created_at_unix: D.NOW,
+    };
+    parties = [...parties.filter((candidate) => candidate.id !== party.id), party];
+    return status("created", { party });
+  });
+  post("/api/treasury/parties/update", (body) => {
+    const index = parties.findIndex((party) => party.id === body?.id);
+    if (index < 0) {
+      return { code: "not_found", error: "Counterparty not found." };
+    }
+    parties[index] = {
+      ...parties[index],
+      name: body?.name ?? parties[index].name,
+      note: body?.note ?? null,
+      sweep_destination_address:
+        body?.sweep_destination_address === ""
+          ? null
+          : body?.sweep_destination_address ?? parties[index].sweep_destination_address,
+    };
+    return status("updated", { party: parties[index] });
+  });
+  post("/api/treasury/parties/delete", (body) => {
+    const deletedId = body?.id;
+    if (!parties.some((party) => party.id === deletedId)) {
+      return { code: "not_found", error: "Counterparty not found." };
+    }
+    parties = parties.filter((party) => party.id !== deletedId);
+    receiveAllocations = receiveAllocations.map((allocation) =>
+      allocation.counterparty_id === deletedId
+        ? { ...allocation, counterparty_id: null }
+        : allocation,
+    );
+    receivingOverview = {
+      ...receivingOverview,
+      groups: receivingOverview.groups.map((group) => ({
+        ...group,
+        counterparty: group.counterparty?.id === deletedId ? null : group.counterparty,
+        items: group.items.map((item) =>
+          item.source_type === "hd" && item.counterparty_id === deletedId
+            ? { ...item, counterparty_id: null }
+            : item,
+        ),
+      })),
+    };
+    return status("deleted", { party: null });
+  });
   post("/api/wallets/eth-stealth/export", () => ({
     wallet: "ops-seed",
     short_name: "OPS-S",
@@ -366,13 +423,13 @@ export function startServer({ port = 0 } = {}) {
     processed: 4,
     detected: 1,
     queued: 1,
-    deposits: D.deposits,
+    deposits,
   }));
   post("/api/deposits/eth-stealth/create-native", () =>
     status("created", { deposit: firstDeposit(), warnings: [] }),
   );
   post("/api/deposits/eth-stealth/create-erc20", () =>
-    status("created", { deposit: D.deposits[1], warnings: [] }),
+    status("created", { deposit: deposits[1], warnings: [] }),
   );
   post("/api/deposits/eth-stealth/scan-announcements", () => ({
     status: "completed",
@@ -384,7 +441,7 @@ export function startServer({ port = 0 } = {}) {
     matched: 2,
     created: 1,
     existing: 1,
-    deposits: D.deposits,
+    deposits,
   }));
 
   post("/api/inventory/scan/evm", () => ({

@@ -458,6 +458,9 @@ pub struct ReceivingItem {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub balance_native_wei_hex: Option<String>,
     pub balance_known: bool,
+    /// When the balance observation backing this item was last checked.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub balance_last_checked_at_unix: Option<u64>,
     pub status: String,
     pub created_at_unix: u64,
 }

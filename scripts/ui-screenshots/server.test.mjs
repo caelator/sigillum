@@ -195,11 +195,29 @@ test("every destination mutation route returns a meaningful envelope", async () 
       {
         method: "POST",
         path: "/api/receiving/deposits/tag",
+        body: { deposit_id: "dep-20260710-ax41", counterparty_id: "party-acme" },
         keys: ["status", "deposit", "warnings"],
       },
       { method: "POST", path: "/api/treasury/receive-addresses/allocate", keys: ["allocation"] },
       { method: "POST", path: "/api/treasury/receive-addresses/rotate", keys: ["allocation"] },
       { method: "POST", path: "/api/treasury/parties", body: { name: "Test" }, keys: ["party"] },
+      {
+        method: "POST",
+        path: "/api/treasury/parties/update",
+        body: {
+          id: "party-acme",
+          name: "Acme Ltd",
+          note: "Updated",
+          sweep_destination_address: "",
+        },
+        keys: ["status", "party"],
+      },
+      {
+        method: "POST",
+        path: "/api/treasury/parties/delete",
+        body: { id: "party-nakamoto" },
+        keys: ["status", "party"],
+      },
       {
         method: "POST",
         path: "/api/wallets/eth-stealth/export",
@@ -291,6 +309,82 @@ test("every destination mutation route returns a meaningful envelope", async () 
     ];
 
     for (const contract of contracts) await requestJson(base, contract);
+  });
+});
+
+test("counterparty mock mutations persist update and delete semantics", async () => {
+  await withServer(async (_daemon, base) => {
+    const overview = await requestJson(base, {
+      method: "GET",
+      path: "/api/receiving/overview",
+      arrays: ["groups"],
+    });
+    for (const group of overview.groups) {
+      for (const item of group.items) {
+        assert.ok(
+          Object.hasOwn(item, "balance_last_checked_at_unix"),
+          "receiving mock item omitted its own balance freshness",
+        );
+      }
+    }
+
+    const updated = await requestJson(base, {
+      method: "POST",
+      path: "/api/treasury/parties/update",
+      body: {
+        id: "party-acme",
+        name: "Acme Ltd",
+        note: "Retained note",
+        sweep_destination_address: "",
+      },
+      keys: ["status", "party"],
+    });
+    assert.equal(updated.party.sweep_destination_address, null);
+    const afterUpdate = await requestJson(base, {
+      method: "GET",
+      path: "/api/treasury/parties",
+      arrays: ["parties"],
+    });
+    assert.equal(
+      afterUpdate.parties.find((party) => party.id === "party-acme").sweep_destination_address,
+      null,
+    );
+
+    await requestJson(base, {
+      method: "POST",
+      path: "/api/treasury/parties/delete",
+      body: { id: "party-acme" },
+      keys: ["status", "party"],
+    });
+    const afterDelete = await requestJson(base, {
+      method: "GET",
+      path: "/api/treasury/parties",
+      arrays: ["parties"],
+    });
+    assert.equal(afterDelete.parties.some((party) => party.id === "party-acme"), false);
+
+    const allocations = await requestJson(base, {
+      method: "GET",
+      path: "/api/treasury/receive-addresses",
+      arrays: ["allocations"],
+    });
+    assert.equal(
+      allocations.allocations.some(
+        (allocation) => allocation.counterparty_id === "party-acme",
+      ),
+      false,
+      "delete unbinds receive allocations",
+    );
+    const deposits = await requestJson(base, {
+      method: "GET",
+      path: "/api/deposits/eth-stealth",
+      arrays: ["deposits"],
+    });
+    assert.equal(
+      deposits.deposits.some((deposit) => deposit.counterparty_id === "party-acme"),
+      true,
+      "delete intentionally retains existing stealth deposit tags",
+    );
   });
 });
 

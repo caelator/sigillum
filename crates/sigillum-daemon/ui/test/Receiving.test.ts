@@ -71,6 +71,29 @@ function buttonByText(root: FakeElement, text: string): FakeElement | null {
   return findFirst(root, (el) => el.tagName === "BUTTON" && el.textContent === text);
 }
 
+function depositTagSelect(root: FakeElement): FakeElement | null {
+  return findFirst(
+    root,
+    (el) =>
+      el.tagName === "SELECT" &&
+      (el.attributes["aria-label"] ?? "").startsWith("Counterparty for deposit"),
+  );
+}
+
+function deferred<T>(): {
+  promise: Promise<T>;
+  resolve: (value: T) => void;
+  reject: (reason: unknown) => void;
+} {
+  let resolve!: (value: T) => void;
+  let reject!: (reason: unknown) => void;
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, resolve, reject };
+}
+
 interface RecordedCall {
   method: string;
   path: string;
@@ -158,6 +181,7 @@ function sampleOverview(): ReceivingOverviewResponse {
             linkage_warning: null,
             balance_native_wei_hex: "0x6f05b59d3b20000",
             balance_known: true,
+            balance_last_checked_at_unix: 1700000050,
             status: "active",
             created_at_unix: 1700000000,
           },
@@ -286,11 +310,21 @@ test("Receiving renders address cards with humanized balance and one-time lifecy
   ok(
     byText(
       host,
-      "1 of 1 addresses have a known balance — balances last checked " +
+      "1 of 1 address has a saved balance. Overview generated " +
         new Date(1700000100 * 1000).toLocaleString() +
         ".",
     ),
-    "coverage + freshness line",
+    "overview generation is labeled separately from balance freshness",
+  );
+  ok(
+    byText(
+      host,
+      "Balance checked " +
+        new Date(1700000050 * 1000).toLocaleString() +
+        " · allocated " +
+        new Date(1700000000 * 1000).toLocaleString(),
+    ),
+    "per-address balance check time is rendered",
   );
 
   controller.unmount();
@@ -336,16 +370,222 @@ test("Receiving renders stealth deposits as a guided lifecycle with the gas expl
   );
   ok(byText(host, "Raw token amounts (base units)"), "ERC-20 amounts stay raw behind details");
   ok(byText(host, "Paid by"), "counterparty tagging control");
-  const tagSelect = findFirst(
-    host,
-    (el) =>
-      el.tagName === "SELECT" &&
-      (el.attributes["aria-label"] ?? "").startsWith("Counterparty for deposit"),
-  );
+  const tagSelect = depositTagSelect(host);
   ok(tagSelect, "tag select present");
   deepEqual(
     tagSelect.children.map((option) => option.textContent),
     ["No counterparty", "Acme"],
+  );
+
+  controller.unmount();
+});
+
+test("Receiving shows an unavailable balance with its real per-item check time", async () => {
+  const { host } = install();
+  const overview = sampleOverview();
+  overview.groups[0].items[0].balance_known = false;
+  overview.groups[0].items[0].balance_native_wei_hex = null;
+  overview.coverage.addresses_with_known_balance = 0;
+  mockRoutes(baseRoutes({ "GET /api/receiving/overview": overview }));
+  const { runtime } = makeRuntime();
+  const controller = createReceivingDestination(runtime);
+  controller.mount(RECEIVE_ROUTE);
+  await settle();
+
+  ok(
+    byText(
+      host,
+      "Balance unavailable · checked " +
+        new Date(1700000050 * 1000).toLocaleString() +
+        " · allocated " +
+        new Date(1700000000 * 1000).toLocaleString(),
+    ),
+    "a failed/unknown balance still reports when it was checked",
+  );
+
+  controller.unmount();
+});
+
+test("Receiving rebuilds deposit party options when parties load after deposits", async () => {
+  const { host } = install();
+  const partiesResponse = deferred<{ parties: Counterparty[] }>();
+  mockRoutes(
+    baseRoutes({
+      "GET /api/treasury/parties": () => partiesResponse.promise,
+      "GET /api/deposits/eth-stealth": {
+        deposits: [sampleDeposit({ counterparty_id: null })],
+        pagination: { total: 1, limit: 10, offset: 0, has_more: false },
+      },
+    }),
+  );
+  const { runtime } = makeRuntime();
+  const controller = createReceivingDestination(runtime);
+  controller.mount(RECEIVE_ROUTE);
+  await settle(2);
+
+  let select = depositTagSelect(host);
+  ok(select, "deposit renders while party request is still pending");
+  deepEqual(select.children.map((option) => option.textContent), ["No counterparty"]);
+
+  partiesResponse.resolve({ parties: [sampleParty()] });
+  await settle();
+  select = depositTagSelect(host);
+  ok(select);
+  deepEqual(
+    select.children.map((option) => option.textContent),
+    ["No counterparty", "Acme"],
+    "party completion invalidates and rebuilds the deposit select",
+  );
+
+  controller.unmount();
+});
+
+test("Receiving disables an optimistic deposit tag and rolls it back on write failure", async () => {
+  const { host } = install();
+  const write = deferred<unknown>();
+  mockRoutes(
+    baseRoutes({
+      "GET /api/deposits/eth-stealth": {
+        deposits: [sampleDeposit({ counterparty_id: null })],
+        pagination: { total: 1, limit: 10, offset: 0, has_more: false },
+      },
+      "POST /api/receiving/deposits/tag": () => write.promise,
+    }),
+  );
+  const { runtime } = makeRuntime();
+  const controller = createReceivingDestination(runtime);
+  controller.mount(RECEIVE_ROUTE);
+  await settle();
+
+  let select = depositTagSelect(host);
+  ok(select);
+  select.value = "p1";
+  select.dispatchEvent({ type: "change" });
+  await settle(2);
+
+  select = depositTagSelect(host);
+  ok(select);
+  equal(select.value, "p1", "optimistic selection is visible");
+  equal(select.disabled, true, "select is disabled while its write is pending");
+  equal(select.attributes["aria-busy"], "true");
+
+  write.resolve({ code: "internal", error: "write failed" });
+  await settle();
+  select = depositTagSelect(host);
+  ok(select);
+  equal(select.value, "", "failed write restores the committed value");
+  equal(select.disabled, false);
+  ok(
+    byText(host, "Counterparty update failed. The previous selection was restored."),
+    "rollback is explicit",
+  );
+
+  controller.unmount();
+});
+
+test("Receiving generation guards reject pre-mutation reads and overlay reads during a tag write", async () => {
+  const { host } = install();
+  const readBeforeMutation = deferred<unknown>();
+  const readDuringMutation = deferred<unknown>();
+  const write = deferred<unknown>();
+  const oldList = {
+    deposits: [sampleDeposit({ counterparty_id: null })],
+    pagination: { total: 1, limit: 10, offset: 0, has_more: false },
+  };
+  const confirmedList = {
+    deposits: [sampleDeposit({ counterparty_id: "p1", updated_at_unix: 1700000200 })],
+    pagination: { total: 1, limit: 10, offset: 0, has_more: false },
+  };
+  let reads = 0;
+  mockRoutes(
+    baseRoutes({
+      "GET /api/deposits/eth-stealth": () => {
+        reads += 1;
+        if (reads === 1) return oldList;
+        if (reads === 2) return readBeforeMutation.promise;
+        if (reads === 3) return readDuringMutation.promise;
+        return confirmedList;
+      },
+      "POST /api/receiving/deposits/tag": () => write.promise,
+    }),
+  );
+  const { runtime, store } = makeRuntime();
+  const controller = createReceivingDestination(runtime);
+  controller.mount(RECEIVE_ROUTE);
+  await settle();
+
+  store.set("queueEvents", [{ job_id: "before", state: "queued" } as never]);
+  await settle(2);
+  equal(reads, 2, "a list read began before the mutation");
+
+  let select = depositTagSelect(host);
+  ok(select);
+  select.value = "p1";
+  select.dispatchEvent({ type: "change" });
+  await settle(2);
+  store.set("queueEvents", [{ job_id: "during", state: "queued" } as never]);
+  await settle(2);
+  equal(reads, 3, "another list read began during the pending mutation");
+
+  readBeforeMutation.resolve(oldList);
+  readDuringMutation.resolve(oldList);
+  await settle();
+  select = depositTagSelect(host);
+  ok(select);
+  equal(select.value, "p1", "stale old values cannot overwrite the optimistic tag");
+  equal(select.disabled, true);
+
+  write.resolve({ deposit: confirmedList.deposits[0] });
+  await settle();
+  select = depositTagSelect(host);
+  ok(select);
+  equal(select.value, "p1");
+  equal(select.disabled, false, "confirmed state is enabled after reconciliation");
+  ok(reads >= 4, "success performs a fresh list reconciliation");
+
+  controller.unmount();
+});
+
+test("Receiving keeps a confirmed deposit tag when the post-success refresh fails", async () => {
+  const { host } = install();
+  const initial = sampleDeposit({ counterparty_id: null });
+  const confirmed = sampleDeposit({ counterparty_id: "p1", updated_at_unix: 1700000200 });
+  let reads = 0;
+  mockRoutes(
+    baseRoutes({
+      "GET /api/deposits/eth-stealth": () => {
+        reads += 1;
+        return reads === 1
+          ? {
+              deposits: [initial],
+              pagination: { total: 1, limit: 10, offset: 0, has_more: false },
+            }
+          : { code: "internal", error: "refresh failed" };
+      },
+      "POST /api/receiving/deposits/tag": { deposit: confirmed },
+    }),
+  );
+  const { runtime } = makeRuntime();
+  const controller = createReceivingDestination(runtime);
+  controller.mount(RECEIVE_ROUTE);
+  await settle();
+
+  let select = depositTagSelect(host);
+  ok(select);
+  select.value = "p1";
+  select.dispatchEvent({ type: "change" });
+  await settle();
+
+  select = depositTagSelect(host);
+  ok(select);
+  equal(select.value, "p1", "confirmed mutation remains rendered");
+  equal(select.disabled, false);
+  ok(
+    byText(
+      host,
+      "Counterparty updated, but the latest list could not be refreshed. Showing the confirmed update.",
+    ),
+    "refresh failure is separated from mutation failure",
   );
 
   controller.unmount();
@@ -418,6 +658,16 @@ test("Receiving shows a persistent stale banner when a refresh fails and recover
   ok(
     byText(host, "Balance unknown — run Refresh balances."),
     "partial data still renders (allocation card without a balance)",
+  );
+  ok(
+    findFirst(
+      host,
+      (el) =>
+        (el.textContent ?? "").startsWith(
+          "Balance unavailable · check time unavailable · allocated ",
+        ),
+    ),
+    "missing balance freshness is labeled unavailable",
   );
   ok(byText(host, "No tracked stealth deposits yet"), "empty sections settle into empty states");
 
@@ -536,6 +786,308 @@ test("Receiving allocate flow posts the one-time DTO and highlights validation f
     findFirst(host, (el) => (el.textContent ?? "").startsWith("Address allocated:")),
     "success feedback",
   );
+
+  controller.unmount();
+});
+
+test("Receiving saves and clears a party sweep destination with the complete update DTO", async () => {
+  const { host } = install();
+  const nextDestination = "0x000000000000000000000000000000000000c0Fe";
+  let party: Counterparty = { ...sampleParty(), note: "Existing note" };
+  const calls = mockRoutes(
+    baseRoutes({
+      "GET /api/treasury/parties": () => ({ parties: [party] }),
+      "POST /api/treasury/parties/update": (call) => {
+        const value = String(call.body?.sweep_destination_address ?? "");
+        party = {
+          ...party,
+          sweep_destination_address: value || null,
+        };
+        return { status: "updated", party };
+      },
+    }),
+  );
+  const { runtime } = makeRuntime();
+  const controller = createReceivingDestination(runtime);
+  controller.mount(RECEIVE_ROUTE);
+  await settle();
+
+  let row = byClass(host, "recv-party-row");
+  ok(row);
+  let destination = findFirst(
+    row,
+    (el) => el.attributes["aria-label"] === "Sweep destination for Acme",
+  );
+  ok(destination);
+  destination.value = nextDestination;
+  const save = buttonByText(row, "Save");
+  ok(save);
+  save.click();
+  await settle();
+
+  let updates = calls.filter((call) => call.path === "/api/treasury/parties/update");
+  deepEqual(updates[0].body, {
+    id: "p1",
+    name: "Acme",
+    note: "Existing note",
+    sweep_destination_address: nextDestination,
+  });
+  ok(byText(host, "Sweep destination saved."));
+
+  row = byClass(host, "recv-party-row");
+  ok(row);
+  destination = findFirst(
+    row,
+    (el) => el.attributes["aria-label"] === "Sweep destination for Acme",
+  );
+  ok(destination);
+  equal(destination.value, nextDestination, "confirmed destination is merged locally");
+  const clear = buttonByText(row, "Clear");
+  ok(clear);
+  clear.click();
+  await settle();
+
+  updates = calls.filter((call) => call.path === "/api/treasury/parties/update");
+  deepEqual(updates[1].body, {
+    id: "p1",
+    name: "Acme",
+    note: "Existing note",
+    sweep_destination_address: "",
+  });
+  ok(byText(host, "Sweep destination cleared."));
+  for (const path of [
+    "/api/treasury/parties",
+    "/api/treasury/receive-addresses",
+    "/api/receiving/overview",
+    "/api/deposits/eth-stealth",
+  ]) {
+    const reads = calls.filter(
+      (call) =>
+        call.method === "GET" &&
+        (path === "/api/deposits/eth-stealth"
+          ? call.path.startsWith(path)
+          : call.path === path),
+    );
+    ok(
+      reads.length >= 3,
+      path + " is reconciled after both mutations",
+    );
+  }
+
+  controller.unmount();
+});
+
+test("Receiving ignores out-of-order party, allocation, and overview reads after reconciliation", async () => {
+  const { host } = install();
+  const staleParties = deferred<{ parties: Counterparty[] }>();
+  const staleAllocations = deferred<{ allocations: TreasuryReceiveAllocation[] }>();
+  const staleOverview = deferred<ReceivingOverviewResponse>();
+  const freshParty = {
+    ...sampleParty(),
+    name: "Fresh payer",
+    sweep_destination_address: SWEEP_DEST,
+  };
+  const staleParty = { ...sampleParty(), name: "Stale payer" };
+  const freshAllocation = { ...sampleAllocation(), purpose: "fresh purpose" };
+  const staleAllocation = { ...sampleAllocation(), purpose: "stale purpose" };
+  const freshOverview = sampleOverview();
+  freshOverview.groups[0].items[0].balance_native_wei_hex = "0xde0b6b3a7640000";
+  freshOverview.groups[0].native_total_wei_hex = "0xde0b6b3a7640000";
+  freshOverview.totals.native_total_wei_hex = "0xde0b6b3a7640000";
+  const staleOverviewValue = sampleOverview();
+  staleOverviewValue.groups[0].items[0].balance_native_wei_hex = "0x1bc16d674ec80000";
+  staleOverviewValue.groups[0].native_total_wei_hex = "0x1bc16d674ec80000";
+  staleOverviewValue.totals.native_total_wei_hex = "0x1bc16d674ec80000";
+
+  let partyReads = 0;
+  let allocationReads = 0;
+  let overviewReads = 0;
+  mockRoutes(
+    baseRoutes({
+      "GET /api/treasury/parties": () => {
+        partyReads += 1;
+        if (partyReads === 1) return { parties: [sampleParty()] };
+        if (partyReads === 2) return staleParties.promise;
+        return { parties: [freshParty] };
+      },
+      "GET /api/treasury/receive-addresses": () => {
+        allocationReads += 1;
+        if (allocationReads === 1) return { allocations: [sampleAllocation()] };
+        if (allocationReads === 2) return staleAllocations.promise;
+        return { allocations: [freshAllocation] };
+      },
+      "GET /api/receiving/overview": () => {
+        overviewReads += 1;
+        if (overviewReads === 1) return sampleOverview();
+        if (overviewReads === 2) return staleOverview.promise;
+        return freshOverview;
+      },
+      "POST /api/treasury/parties/update": { party: freshParty },
+    }),
+  );
+  const { runtime, store } = makeRuntime();
+  const controller = createReceivingDestination(runtime);
+  controller.mount(RECEIVE_ROUTE);
+  await settle();
+
+  store.set("resync", store.get("resync") + 1);
+  await settle(2);
+  deepEqual(
+    [partyReads, allocationReads, overviewReads],
+    [2, 2, 2],
+    "an older resync is in flight on all three surfaces",
+  );
+
+  const row = byClass(host, "recv-party-row");
+  ok(row);
+  const destination = findFirst(
+    row,
+    (el) => el.attributes["aria-label"] === "Sweep destination for Acme",
+  );
+  ok(destination);
+  destination.value = SWEEP_DEST;
+  const save = buttonByText(row, "Save");
+  ok(save);
+  save.click();
+  await settle();
+
+  ok(partyReads >= 3 && allocationReads >= 3 && overviewReads >= 3);
+  ok(byText(host, "Fresh payer"), "newer party reconciliation rendered");
+  ok(byText(host, "fresh purpose · for Fresh payer"), "newer allocation rendered");
+  ok(byText(host, "1 ETH"), "newer overview rendered");
+
+  staleParties.resolve({ parties: [staleParty] });
+  staleAllocations.resolve({ allocations: [staleAllocation] });
+  staleOverview.resolve(staleOverviewValue);
+  await settle();
+
+  ok(byText(host, "Fresh payer"), "stale party response was ignored");
+  equal(byText(host, "Stale payer"), null);
+  ok(byText(host, "fresh purpose · for Fresh payer"), "stale allocation response was ignored");
+  equal(byText(host, "stale purpose · for Stale payer"), null);
+  ok(byText(host, "1 ETH"), "stale overview response was ignored");
+  equal(byText(host, "2 ETH"), null);
+
+  controller.unmount();
+});
+
+test("Receiving marks retained deleted-party tags and lets the operator clear them", async () => {
+  const { host } = install();
+  let deleted = false;
+  let retagged = false;
+  const retainedDeposit = sampleDeposit({ counterparty_id: "p1" });
+  const calls = mockRoutes(
+    baseRoutes({
+      "GET /api/treasury/parties": () => ({
+        parties: deleted ? [] : [sampleParty()],
+      }),
+      "GET /api/treasury/receive-addresses": () => ({
+        allocations: [
+          deleted
+            ? { ...sampleAllocation(), counterparty_id: null }
+            : sampleAllocation(),
+        ],
+      }),
+      "GET /api/receiving/overview": () => {
+        const next = sampleOverview();
+        if (deleted) next.groups[0].items[0].counterparty_id = null;
+        return next;
+      },
+      "GET /api/deposits/eth-stealth": () => ({
+        deposits: [
+          retagged ? { ...retainedDeposit, counterparty_id: null } : retainedDeposit,
+        ],
+        pagination: { total: 1, limit: 10, offset: 0, has_more: false },
+      }),
+      "POST /api/treasury/parties/delete": () => {
+        deleted = true;
+        return { status: "deleted", party: null };
+      },
+      "POST /api/receiving/deposits/tag": () => {
+        retagged = true;
+        return { deposit: { ...retainedDeposit, counterparty_id: null } };
+      },
+    }),
+  );
+  const { runtime } = makeRuntime();
+  const controller = createReceivingDestination(runtime);
+  controller.mount(RECEIVE_ROUTE);
+  await settle();
+
+  let select = depositTagSelect(host);
+  ok(select);
+  equal(select.value, "p1", "existing deposit starts attributed");
+  const row = byClass(host, "recv-party-row");
+  ok(row);
+  const deleteButton = buttonByText(row, "Delete");
+  ok(deleteButton);
+  ok(hasClass(deleteButton, "btn-danger"), "delete uses the danger consequence tier");
+  deleteButton.click();
+  await settle(2);
+
+  const overlay = byClass(document.body as unknown as FakeElement, "confirm-overlay");
+  ok(overlay);
+  ok(
+    byText(
+      overlay,
+      'Delete counterparty "Acme"? Existing receive allocations remain but are unbound. Existing stealth deposit records may retain this counterparty ID and stay explicitly marked deleted or unavailable until you retag them.',
+    ),
+    "confirmation states both allocation and retained-tag semantics",
+  );
+  const action = findFirst(overlay, (el) => "data-confirm-action" in el.attributes);
+  ok(action);
+  action.click();
+  await settle();
+
+  const deletion = calls.find((call) => call.path === "/api/treasury/parties/delete");
+  ok(deletion);
+  deepEqual(deletion.body, { id: "p1" });
+  equal(byClass(host, "recv-party-row"), null, "party row is removed");
+  equal(byText(host, "invoices · for Acme"), null, "allocation is no longer attributed");
+  ok(byText(host, "invoices"), "allocation remains visible after being unbound");
+  select = depositTagSelect(host);
+  ok(select);
+  equal(select.value, "p1", "retained deleted ID stays explicit and selected");
+  deepEqual(select.children.map((option) => option.textContent), [
+    "No counterparty",
+    "Deleted or unavailable counterparty — clear or retag",
+  ]);
+  ok(
+    byText(
+      host,
+      "Counterparty deleted. Receive allocations were unbound; retained deposit tags are marked deleted or unavailable until retagged.",
+    ),
+  );
+  for (const path of [
+    "/api/treasury/parties",
+    "/api/treasury/receive-addresses",
+    "/api/receiving/overview",
+    "/api/deposits/eth-stealth",
+  ]) {
+    const reads = calls.filter(
+      (call) =>
+        call.method === "GET" &&
+        (path === "/api/deposits/eth-stealth"
+          ? call.path.startsWith(path)
+          : call.path === path),
+    );
+    ok(
+      reads.length >= 2,
+      path + " is reconciled after deletion",
+    );
+  }
+
+  select.value = "";
+  select.dispatchEvent({ type: "change" });
+  await settle();
+  const clearTag = calls.find(
+    (call) => call.method === "POST" && call.path === "/api/receiving/deposits/tag",
+  );
+  ok(clearTag, "choosing No counterparty clears the retained deleted ID");
+  deepEqual(clearTag.body, { deposit_id: "d1", counterparty_id: null });
+  select = depositTagSelect(host);
+  ok(select);
+  equal(select.value, "", "confirmed clear selects No counterparty");
 
   controller.unmount();
 });

@@ -2262,6 +2262,42 @@ fn test_counterparty_responses_roundtrip() {
     });
 }
 
+#[test]
+fn test_receiving_item_balance_timestamp_defaults_and_roundtrips() {
+    let item = ReceivingItem {
+        source_type: "hd".into(),
+        address: "0x1111111111111111111111111111111111111111".into(),
+        chain_id: 1,
+        chain_id_assumed: false,
+        derivation_path: Some("m/44'/60'/0'/0/0".into()),
+        purpose: Some("invoice".into()),
+        label: None,
+        counterparty_id: None,
+        linkage_warning: None,
+        balance_native_wei_hex: Some("0x2".into()),
+        balance_known: true,
+        balance_last_checked_at_unix: Some(42),
+        status: "active".into(),
+        created_at_unix: 1,
+    };
+    roundtrip_test(item.clone());
+
+    let mut legacy_json = serde_json::to_value(item).unwrap();
+    legacy_json
+        .as_object_mut()
+        .unwrap()
+        .remove("balance_last_checked_at_unix");
+    let legacy: ReceivingItem = serde_json::from_value(legacy_json).unwrap();
+    assert_eq!(legacy.balance_last_checked_at_unix, None);
+    assert!(
+        !serde_json::to_value(legacy)
+            .unwrap()
+            .as_object()
+            .unwrap()
+            .contains_key("balance_last_checked_at_unix")
+    );
+}
+
 fn sample_treasury_policy() -> TreasuryPolicy {
     TreasuryPolicy {
         enabled: true,

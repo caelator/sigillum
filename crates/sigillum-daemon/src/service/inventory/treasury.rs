@@ -371,7 +371,7 @@ fn hd_receiving_item(
     allocation: &TreasuryReceiveAllocation,
     addresses: &[WalletInventoryAddress],
 ) -> ReceivingItem {
-    let balance = addresses
+    let selected_address = addresses
         .iter()
         .filter(|address| {
             address.wallet_family == allocation.wallet_family
@@ -384,7 +384,8 @@ fn hd_receiving_item(
                 .cmp(&right.last_checked_at_unix)
                 .then_with(|| left.provider_profile.cmp(&right.provider_profile))
                 .then_with(|| left.id.cmp(&right.id))
-        })
+        });
+    let balance = selected_address
         .and_then(|address| decode_quantity_hex(&address.native_balance_wei_hex).ok());
     let (balance_known, balance_native_wei_hex) = match balance {
         Some(balance) => (true, Some(encode_quantity_hex(&balance))),
@@ -403,6 +404,7 @@ fn hd_receiving_item(
         linkage_warning: None,
         balance_native_wei_hex,
         balance_known,
+        balance_last_checked_at_unix: selected_address.map(|address| address.last_checked_at_unix),
         status: allocation.status.clone(),
         created_at_unix: allocation.created_at_unix,
     }
@@ -423,6 +425,7 @@ fn stealth_receiving_item(deposit: &EthStealthDeposit) -> ReceivingItem {
         linkage_warning: None,
         balance_native_wei_hex,
         balance_known,
+        balance_last_checked_at_unix: deposit.last_checked_at_unix,
         status: deposit.status.clone(),
         created_at_unix: deposit.created_at_unix,
     }
@@ -2458,6 +2461,7 @@ mod tests {
 
         assert_eq!(item.chain_id, 8453);
         assert!(item.chain_id_assumed);
+        assert_eq!(item.balance_last_checked_at_unix, None);
     }
 
     #[test]
@@ -2497,6 +2501,23 @@ mod tests {
 
         assert!(item.balance_known);
         assert_eq!(item.balance_native_wei_hex.as_deref(), Some("0x2"));
+        assert_eq!(item.balance_last_checked_at_unix, Some(20));
+    }
+
+    #[test]
+    fn stealth_receiving_item_uses_deposit_balance_timestamp() {
+        let mut deposit = receiving_stealth_deposit(
+            "dep-freshness",
+            "0x1111111111111111111111111111111111111111",
+            Some("0x2"),
+            None,
+        );
+        deposit.last_checked_at_unix = Some(77);
+
+        let item = stealth_receiving_item(&deposit);
+
+        assert!(item.balance_known);
+        assert_eq!(item.balance_last_checked_at_unix, Some(77));
     }
 
     #[test]

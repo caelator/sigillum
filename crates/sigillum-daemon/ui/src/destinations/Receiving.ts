@@ -102,6 +102,10 @@ interface DepositRefreshResult {
   queued?: number;
 }
 
+interface DepositMutationResponse {
+  deposit?: EthStealthDeposit;
+}
+
 interface ScanAnnouncementsResult {
   scanned?: number;
   matched?: number;
@@ -248,6 +252,7 @@ export interface AddressCardModel {
   counterpartyName: string | null;
   balanceEth: string | null;
   balanceKnown: boolean;
+  balanceCheckedAt: number | null;
   status: string;
   createdAt: number;
   linkageWarning: string | null;
@@ -263,6 +268,13 @@ export interface AddressCardModel {
   derivationPath: string | null;
   addressIndex: number | null;
   walletProfile: string | null;
+}
+
+function balanceCheckedAt(
+  item: ReceivingOverviewResponse["groups"][number]["items"][number],
+): number | null {
+  const value = item.balance_last_checked_at_unix;
+  return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : null;
 }
 
 function sourceTypeLabel(sourceType: string): string {
@@ -293,6 +305,7 @@ export function buildAddressCards(
         : null,
       balanceEth: null,
       balanceKnown: false,
+      balanceCheckedAt: null,
       status: allocation.status,
       createdAt: allocation.created_at_unix,
       linkageWarning: null,
@@ -320,9 +333,11 @@ export function buildAddressCards(
       const balanceEth = item.balance_known
         ? formatEthAmount(item.balance_native_wei_hex ?? "0x0", null)
         : null;
+      const checkedAt = balanceCheckedAt(item);
       if (existing) {
         existing.balanceEth = balanceEth;
         existing.balanceKnown = item.balance_known;
+        existing.balanceCheckedAt = checkedAt;
         existing.linkageWarning = item.linkage_warning ?? null;
         existing.sourceLabel =
           item.source_type === "hd" || item.source_type === "stealth"
@@ -344,6 +359,7 @@ export function buildAddressCards(
           : group.counterparty?.name ?? null,
         balanceEth,
         balanceKnown: item.balance_known,
+        balanceCheckedAt: checkedAt,
         status: item.status,
         createdAt: item.created_at_unix,
         linkageWarning: item.linkage_warning ?? null,
@@ -453,6 +469,17 @@ export function createReceivingDestination(runtime: CoreRuntime): DestinationCon
   let stealthProfiles: { name: string; wallet?: string }[] = [];
   let firstLoadPending = true;
   let refreshingBalances = false;
+  let overviewLoadSequence = 0;
+  let allocationsLoadSequence = 0;
+  let partiesLoadSequence = 0;
+  let depositsLoadSequence = 0;
+  let depositTagRevision = 0;
+  let nextDepositTagGeneration = 0;
+  const depositTagGenerationById = new Map<string, number>();
+  const pendingDepositTags = new Map<
+    string,
+    { generation: number; previous: string; next: string }
+  >();
 
   let host: HTMLElement | null = null;
   let root: HTMLElement | null = null;
@@ -477,6 +504,14 @@ export function createReceivingDestination(runtime: CoreRuntime): DestinationCon
     stealthProfiles = [];
     firstLoadPending = true;
     refreshingBalances = false;
+    // Invalidate work started by a previous mount without reusing generations.
+    overviewLoadSequence += 1;
+    allocationsLoadSequence += 1;
+    partiesLoadSequence += 1;
+    depositsLoadSequence += 1;
+    depositTagRevision += 1;
+    depositTagGenerationById.clear();
+    pendingDepositTags.clear();
   }
 
   // ── Feedback surfaces ──
@@ -551,7 +586,8 @@ export function createReceivingDestination(runtime: CoreRuntime): DestinationCon
         String(known) +
         " of " +
         String(total) +
-        " addresses have a known balance — balances last checked " +
+        (total === 1 ? " address has" : " addresses have") +
+        " a saved balance. Overview generated " +
         formatTimestamp(overview.generated_at_unix) +
         ".";
     } else {
@@ -596,6 +632,7 @@ export function createReceivingDestination(runtime: CoreRuntime): DestinationCon
     return JSON.stringify([
       card.balanceEth,
       card.balanceKnown,
+      card.balanceCheckedAt,
       card.status,
       card.lifecycle,
       card.blocker,
@@ -664,10 +701,17 @@ export function createReceivingDestination(runtime: CoreRuntime): DestinationCon
     }
     lines.appendChild(balanceLine);
 
+    const balanceFreshness =
+      card.balanceCheckedAt !== null
+        ? (card.balanceKnown ? "Balance checked " : "Balance unavailable · checked ") +
+          formatTimestamp(card.balanceCheckedAt)
+        : card.balanceKnown
+          ? "Balance check time unavailable"
+          : "Balance unavailable · check time unavailable";
     lines.appendChild(
       el("p", {
         class: "recv-card-line recv-card-freshness",
-        text: "Allocated " + formatTimestamp(card.createdAt),
+        text: balanceFreshness + " · allocated " + formatTimestamp(card.createdAt),
       }),
     );
 
@@ -807,6 +851,7 @@ export function createReceivingDestination(runtime: CoreRuntime): DestinationCon
   }
 
   function depositSignature(deposit: EthStealthDeposit): string {
+    const pendingTag = pendingDepositTags.get(deposit.id);
     return JSON.stringify([
       deposit.status,
       deposit.observed_amount_hex,
@@ -817,6 +862,8 @@ export function createReceivingDestination(runtime: CoreRuntime): DestinationCon
       deposit.counterparty_id,
       deposit.note,
       deposit.updated_at_unix,
+      parties.map((party) => [party.id, party.name]),
+      pendingTag ? [pendingTag.generation, pendingTag.next] : null,
     ]);
   }
 
@@ -940,8 +987,27 @@ export function createReceivingDestination(runtime: CoreRuntime): DestinationCon
     for (const party of parties) {
       tagSelect.appendChild(makeOption(party.name, party.id));
     }
-    tagSelect.value = deposit.counterparty_id ?? "";
-    tagSelect.addEventListener("change", () => void tagDeposit(deposit.id, tagSelect.value));
+    const selectedPartyId = deposit.counterparty_id ?? "";
+    if (selectedPartyId && !parties.some((party) => party.id === selectedPartyId)) {
+      // Keep the persisted-but-dangling value explicit and selectable. If we
+      // silently display the empty option, choosing "No counterparty" does
+      // not fire a change and the operator cannot actually clear the tag.
+      tagSelect.appendChild(
+        makeOption(
+          "Deleted or unavailable counterparty — clear or retag",
+          selectedPartyId,
+        ),
+      );
+    }
+    tagSelect.value = selectedPartyId;
+    const pendingTag = pendingDepositTags.get(deposit.id);
+    if (pendingTag) {
+      tagSelect.disabled = true;
+      tagSelect.setAttribute("aria-busy", "true");
+    }
+    tagSelect.addEventListener("change", () =>
+      void tagDeposit(deposit.id, tagSelect.value),
+    );
     const tagRow = el(
       "div",
       { class: "recv-tag-row" },
@@ -1101,10 +1167,59 @@ export function createReceivingDestination(runtime: CoreRuntime): DestinationCon
         }),
       );
     }
+    const destinationInput = textInput(
+      "0x sweep destination",
+      "Sweep destination for " + party.name,
+    );
+    destinationInput.className = "mono input-wider";
+    destinationInput.value = party.sweep_destination_address ?? "";
+    const actions = el(
+      "div",
+      { class: "recv-card-actions" },
+      destinationInput,
+      el("button", {
+        class: "btn-ghost btn-small",
+        attrs: { type: "button" },
+        text: "Save",
+        on: {
+          click: (event) =>
+            void updatePartySweepDestination(
+              party.id,
+              destinationInput,
+              "save",
+              event.target as HTMLButtonElement,
+            ),
+        },
+      }),
+      el("button", {
+        class: "btn-ghost btn-small",
+        attrs: { type: "button" },
+        text: "Clear",
+        on: {
+          click: (event) =>
+            void updatePartySweepDestination(
+              party.id,
+              destinationInput,
+              "clear",
+              event.target as HTMLButtonElement,
+            ),
+        },
+      }),
+      el("button", {
+        class: "btn-danger btn-small",
+        attrs: { type: "button" },
+        text: "Delete",
+        on: {
+          click: (event) =>
+            void deleteParty(party.id, event.target as HTMLButtonElement),
+        },
+      }),
+    );
     return el(
       "div",
       { class: "recv-party-row", dataset: { signature }, attrs: { role: "listitem" } },
       ...lines,
+      actions,
     );
   }
 
@@ -1128,24 +1243,49 @@ export function createReceivingDestination(runtime: CoreRuntime): DestinationCon
   // ── Data loading ──
 
   async function loadOverview(): Promise<void> {
-    overview = await runtime.api.getReceivingOverview();
-    renderAddressSection();
+    const requestSequence = ++overviewLoadSequence;
+    try {
+      const next = await runtime.api.getReceivingOverview();
+      if (requestSequence !== overviewLoadSequence) return;
+      overview = next;
+      renderAddressSection();
+    } catch (error) {
+      if (requestSequence !== overviewLoadSequence) return;
+      throw error;
+    }
   }
 
   async function loadAllocations(): Promise<void> {
-    const r = await request<AllocationListResponse>("GET", "/api/treasury/receive-addresses");
-    allocations = r.allocations ?? [];
-    renderAddressSection();
+    const requestSequence = ++allocationsLoadSequence;
+    try {
+      const r = await request<AllocationListResponse>("GET", "/api/treasury/receive-addresses");
+      if (requestSequence !== allocationsLoadSequence) return;
+      allocations = r.allocations ?? [];
+      renderAddressSection();
+    } catch (error) {
+      if (requestSequence !== allocationsLoadSequence) return;
+      throw error;
+    }
   }
 
   async function loadParties(): Promise<void> {
-    const r = await request<PartyListResponse>("GET", "/api/treasury/parties");
-    parties = r.parties ?? [];
-    renderParties();
-    renderAddressSection(); // party names ride on the cards
+    const requestSequence = ++partiesLoadSequence;
+    try {
+      const r = await request<PartyListResponse>("GET", "/api/treasury/parties");
+      if (requestSequence !== partiesLoadSequence) return;
+      parties = r.parties ?? [];
+      renderParties();
+      renderAddressSection(); // party names ride on the cards
+      renderDeposits(); // party options ride on every deposit card
+    } catch (error) {
+      if (requestSequence !== partiesLoadSequence) return;
+      throw error;
+    }
   }
 
   async function loadDeposits(): Promise<void> {
+    const requestSequence = ++depositsLoadSequence;
+    const tagRevisionAtStart = depositTagRevision;
     const r = await runtime.api.listDeposits({
       limit: DEPOSITS_PAGE_SIZE,
       offset: depositsOffset,
@@ -1155,9 +1295,40 @@ export function createReceivingDestination(runtime: CoreRuntime): DestinationCon
         ? { status: depositsFilter as EthStealthDepositListQuery["status"] }
         : {}),
     });
-    deposits = r.deposits ?? [];
+    // A list read begun before a tag mutation must never overwrite the
+    // confirmed or rolled-back result. A newer list request also wins.
+    if (
+      requestSequence !== depositsLoadSequence ||
+      tagRevisionAtStart !== depositTagRevision
+    ) {
+      return;
+    }
+    deposits = (r.deposits ?? []).map((deposit) => {
+      const pending = pendingDepositTags.get(deposit.id);
+      return pending
+        ? { ...deposit, counterparty_id: pending.next || null }
+        : deposit;
+    });
     depositsPagination = r.pagination ?? null;
     renderDeposits();
+  }
+
+  async function reconcileReceivingMutation(context: string): Promise<void> {
+    const results = await Promise.allSettled([
+      loadParties(),
+      loadAllocations(),
+      loadOverview(),
+      loadDeposits(),
+    ]);
+    const failure = results
+      .map((result) => (result.status === "rejected" ? result.reason : null))
+      .find((reason) => reason != null);
+    if (failure) {
+      reportFailure(failure, context);
+      return;
+    }
+    hideBanner("stale");
+    hideBanner("locked");
   }
 
   async function loadStealthProfiles(): Promise<void> {
@@ -1489,15 +1660,183 @@ export function createReceivingDestination(runtime: CoreRuntime): DestinationCon
   }
 
   async function tagDeposit(depositId: string, counterpartyId: string): Promise<void> {
+    const current = deposits.find((deposit) => deposit.id === depositId);
+    if (!current) return;
+    const previous = current.counterparty_id ?? "";
+    if (previous === counterpartyId) return;
+
+    const generation = ++nextDepositTagGeneration;
+    depositTagGenerationById.set(depositId, generation);
+    pendingDepositTags.set(depositId, {
+      generation,
+      previous,
+      next: counterpartyId,
+    });
+    depositTagRevision += 1;
+    deposits = deposits.map((deposit) =>
+      deposit.id === depositId
+        ? { ...deposit, counterparty_id: counterpartyId || null }
+        : deposit,
+    );
+    renderDeposits();
+
+    let response: DepositMutationResponse;
     try {
-      await request("POST", "/api/receiving/deposits/tag", {
-        deposit_id: depositId,
-        counterparty_id: counterpartyId || null,
-      });
-      setSectionNote("depositNote", "Counterparty updated.");
+      response = await request<DepositMutationResponse>(
+        "POST",
+        "/api/receiving/deposits/tag",
+        {
+          deposit_id: depositId,
+          counterparty_id: counterpartyId || null,
+        },
+      );
+    } catch (error) {
+      if (depositTagGenerationById.get(depositId) !== generation) return;
+      pendingDepositTags.delete(depositId);
+      depositTagRevision += 1;
+      deposits = deposits.map((deposit) =>
+        deposit.id === depositId
+          ? { ...deposit, counterparty_id: previous || null }
+          : deposit,
+      );
+      renderDeposits();
+      reportFailure(error, "the counterparty tag");
+      setSectionNote(
+        "depositNote",
+        "Counterparty update failed. The previous selection was restored.",
+      );
+      return;
+    }
+
+    if (depositTagGenerationById.get(depositId) !== generation) return;
+    pendingDepositTags.delete(depositId);
+    depositTagRevision += 1;
+    deposits = deposits.map((deposit) =>
+      deposit.id === depositId
+        ? response.deposit ?? { ...deposit, counterparty_id: counterpartyId || null }
+        : deposit,
+    );
+    renderDeposits();
+    setSectionNote("depositNote", "Counterparty updated.");
+
+    // The mutation is already committed. A reconciliation failure must leave
+    // that confirmed state visible rather than looking like a failed write.
+    try {
       await loadDeposits();
     } catch (error) {
-      reportFailure(error, "the counterparty tag");
+      reportFailure(error, "the updated counterparty tag");
+      setSectionNote(
+        "depositNote",
+        "Counterparty updated, but the latest list could not be refreshed. Showing the confirmed update.",
+      );
+    }
+  }
+
+  async function updatePartySweepDestination(
+    partyId: string,
+    input: HTMLInputElement,
+    action: "save" | "clear",
+    button: HTMLButtonElement,
+  ): Promise<void> {
+    const party = parties.find((candidate) => candidate.id === partyId);
+    if (!party) return;
+    const destination = action === "clear" ? "" : input.value.trim();
+    clearFieldErrors([input]);
+    if (action === "save" && !destination) {
+      markFieldInvalid(input, true);
+      setSectionNote(
+        "partyNoteLine",
+        "Enter a sweep destination to save, or use Clear to remove it.",
+      );
+      return;
+    }
+
+    busyButton(button, true, action === "clear" ? "Clearing…" : "Saving…");
+    try {
+      const r = await request<PartyMutationResponse>(
+        "POST",
+        "/api/treasury/parties/update",
+        {
+          id: party.id,
+          name: party.name,
+          note: party.note ?? null,
+          sweep_destination_address: destination,
+        },
+      );
+      const updated =
+        r.party ?? {
+          ...party,
+          sweep_destination_address: destination || null,
+        };
+      parties = parties.map((candidate) =>
+        candidate.id === party.id ? updated : candidate,
+      );
+      renderParties();
+      renderAddressSection();
+      renderDeposits();
+      setSectionNote(
+        "partyNoteLine",
+        destination ? "Sweep destination saved." : "Sweep destination cleared.",
+      );
+      await reconcileReceivingMutation("receiving data after the counterparty update");
+    } catch (error) {
+      if (applyFieldErrors(error, { sweep_destination_address: input })) {
+        setSectionNote(
+          "partyNoteLine",
+          apiFailure(error)?.error ?? "Check the highlighted destination.",
+        );
+      } else {
+        reportFailure(error, "the counterparty update");
+      }
+    } finally {
+      busyButton(button, false);
+    }
+  }
+
+  async function deleteParty(partyId: string, button: HTMLButtonElement): Promise<void> {
+    const party = parties.find((candidate) => candidate.id === partyId);
+    if (!party) return;
+    const confirmed = await confirmDangerDialog({
+      title: "Delete counterparty",
+      body:
+        'Delete counterparty "' +
+        party.name +
+        '"? Existing receive allocations remain but are unbound. Existing stealth deposit records may retain this counterparty ID and stay explicitly marked deleted or unavailable until you retag them.',
+      actionLabel: "Delete counterparty",
+    });
+    if (!confirmed) return;
+
+    busyButton(button, true, "Deleting…");
+    try {
+      await request("POST", "/api/treasury/parties/delete", { id: party.id });
+      parties = parties.filter((candidate) => candidate.id !== party.id);
+      allocations = allocations.map((allocation) =>
+        allocation.counterparty_id === party.id
+          ? { ...allocation, counterparty_id: null }
+          : allocation,
+      );
+      if (overview) {
+        overview = {
+          ...overview,
+          groups: overview.groups.map((group) =>
+            group.counterparty?.id === party.id
+              ? { ...group, counterparty: null }
+              : group,
+          ),
+        };
+      }
+      renderParties();
+      renderAddressSection();
+      renderDeposits();
+      setSectionNote(
+        "partyNoteLine",
+        "Counterparty deleted. Receive allocations were unbound; retained deposit tags are marked deleted or unavailable until retagged.",
+      );
+      await reconcileReceivingMutation("receiving data after the counterparty deletion");
+    } catch (error) {
+      reportFailure(error, "the counterparty deletion");
+    } finally {
+      busyButton(button, false);
     }
   }
 
@@ -1515,10 +1854,17 @@ export function createReceivingDestination(runtime: CoreRuntime): DestinationCon
     if (note.value.trim()) body.note = note.value.trim();
     if (destination.value.trim()) body.sweep_destination_address = destination.value.trim();
     try {
-      await request<PartyMutationResponse>("POST", "/api/treasury/parties", body);
+      const r = await request<PartyMutationResponse>("POST", "/api/treasury/parties", body);
       clearInputs([name, note, destination]);
+      const created = r.party;
+      if (created) {
+        parties = [...parties.filter((party) => party.id !== created.id), created];
+        renderParties();
+        renderAddressSection();
+        renderDeposits();
+      }
       setSectionNote("partyNoteLine", "Counterparty added.");
-      await loadParties();
+      await reconcileReceivingMutation("receiving data after adding the counterparty");
     } catch (error) {
       if (applyFieldErrors(error, { name, sweep_destination_address: destination })) {
         setSectionNote(

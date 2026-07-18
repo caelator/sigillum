@@ -175,6 +175,21 @@ fn check_optional_eth_address(field: &str, value: &Option<String>) -> Result<(),
     Ok(())
 }
 
+/// Patch-style address field where omission retains the stored value and an
+/// explicit blank clears it. Nonblank input still has to be a valid address.
+fn check_optional_blank_or_eth_address(field: &str, value: &Option<String>) -> Result<(), String> {
+    if let Some(value) = value {
+        // Preserve the normal raw-input bound even though whitespace is
+        // semantically meaningful here as an explicit clear operation.
+        check_len(field, value, MAX_ADDRESS)?;
+        let value = value.trim();
+        if !value.is_empty() {
+            check_eth_address(field, value)?;
+        }
+    }
+    Ok(())
+}
+
 fn check_optional_bip32_path(field: &str, value: &Option<String>) -> Result<(), String> {
     check_optional_bip32_path_with_terminal_hardened(field, value, false)
 }
@@ -1486,14 +1501,38 @@ impl Validate for crate::request::CounterpartyCreateRequest {
 
 impl Validate for crate::request::CounterpartyUpdateRequest {
     fn validate(&self) -> Result<(), String> {
-        check_len("id", &self.id, MAX_ID)?;
-        if self.name.trim().is_empty() {
-            return Err("name must not be empty".into());
-        }
-        check_len("name", &self.name, MAX_LABEL)?;
-        check_optional_len("note", &self.note, MAX_NOTE)?;
-        check_optional_eth_address("sweep_destination_address", &self.sweep_destination_address)?;
-        Ok(())
+        self.validate_fields()
+            .map_err(|failure| failure.message().to_string())
+    }
+
+    fn validate_fields(&self) -> Result<(), ValidationFailure> {
+        let mut fields = Vec::new();
+        collect(&mut fields, "id", check_len("id", &self.id, MAX_ID));
+        collect_if(
+            &mut fields,
+            "name",
+            self.name.trim().is_empty(),
+            "name must not be empty".into(),
+        );
+        collect(
+            &mut fields,
+            "name",
+            check_len("name", &self.name, MAX_LABEL),
+        );
+        collect(
+            &mut fields,
+            "note",
+            check_optional_len("note", &self.note, MAX_NOTE),
+        );
+        collect(
+            &mut fields,
+            "sweep_destination_address",
+            check_optional_blank_or_eth_address(
+                "sweep_destination_address",
+                &self.sweep_destination_address,
+            ),
+        );
+        finish(fields)
     }
 }
 
