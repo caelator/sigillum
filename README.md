@@ -11,12 +11,15 @@
 > RC2–RC4 are immutable failed-contract receipts. `v1.0.0-rc.5` is a valid,
 > checksum-verified draft candidate on protected main, but it is unpublished
 > and lacks the complete F6, clean-install, UI-signoff, and evidence-bundle
-> record required for final promotion. The operator-surface feature line
-> reaches implementation checkpoint `c435611` and changes code after RC5, so
-> its next candidate is RC6 after protected-main merge. Focused gates are green,
-> but the complete release gate has not run for this feature line and must run
-> at the documentation successor commit. No final `v1.0.0` tag or published
-> GitHub Release exists.
+> record required for final promotion. The operator-surface feature line's
+> interaction/browser checkpoint is `c435611`; implementation checkpoint
+> `8ea6f8e` restores the architecture, formatting, and strict-clippy gates, and
+> `7042178` is its documentation successor. Focused gates are green, but a
+> warm-up full-gate process at `7042178` ended without a recoverable output/exit
+> receipt and is not a pass. A clean full gate remains pending at the eventual
+> documentation-truth commit. The branch changes code after RC5, so its next
+> candidate is RC6 after protected-main merge. No final `v1.0.0` tag or
+> published GitHub Release exists.
 
 Sigillum is a self-hosted, single-operator workstation for finding EVM wallets
 and assets, understanding their provenance and risk, preparing consolidation

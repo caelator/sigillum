@@ -5,6 +5,9 @@
 **Current implementation checkpoint:**
 `8ea6f8eb66c044f94ba5c1ad76ae4477ae03be63` (`8ea6f8e`)
 
+**Current documentation checkpoint:**
+`7042178803155a5ced7925468cd687b566ca023a` (`7042178`)
+
 **Historical accessibility checkpoint:** `29426df`
 (`Harden keyboard and accessibility gates`)
 
@@ -16,8 +19,9 @@
 **Master plan:** [operator-surface-and-privacy-plan.md](./operator-surface-and-privacy-plan.md)
 
 This handoff is the zero-context continuation point. Verify that `8ea6f8e` is
-the current implementation ancestor before relying on it: later implementation
-work may supersede the checkpoint without updating this file.
+the current implementation ancestor and `7042178` is the documentation ancestor
+before relying on it: later work may supersede either checkpoint without
+updating this file.
 
 **Current implementation truth:** `c435611` commits the command palette,
 regenerated bundles, real-daemon browser-smoke migration, and reviewed
@@ -26,10 +30,11 @@ formatting debt exposed by the first clean release-gate attempt, without
 relaxing any existing parent-file cap. It splits the affected Rust and authored
 CSS owners, restores strict clippy, regenerates the embedded stylesheet, and
 updates the architecture contract to the live UI core/destination layout. Grok
-4.5 reported `CONVERGED: YES` for both the plan and final implementation. This
-documentation correction is a follow-on delta. The complete release gate has
-not yet passed at `8ea6f8e`; it must run at the eventual documentation-only
-successor commit.
+4.5 reported `CONVERGED: YES` for both the plan and final implementation.
+`7042178` documents that repair. A warm-up full-gate process at `7042178` reached
+`cargo deny`, then ended without a recoverable output/exit receipt; it is not a
+pass. The complete release gate remains pending at the eventual
+documentation-truth commit.
 
 ## 1. Mission and non-negotiable boundaries
 
@@ -38,9 +43,9 @@ fail-closed authorization, execution, payment, evidence, or release contracts.
 The branch now contains the privacy/backend work and the five-destination
 operator console, including the interaction and browser-smoke work through
 `c435611` and the release-gate architecture repair through `8ea6f8e`.
-Remaining work is this documentation checkpoint commit, full-gate verification,
-operator visual sign-off, protected-main integration, and same-SHA release
-evidence.
+`7042178` records that repair in this handoff. Remaining work is the current
+documentation-truth commit, full-gate verification, operator visual sign-off,
+protected-main integration, and same-SHA release evidence.
 
 - Work only in the designated worktree and branch. Do not push, tag, publish,
   or change GitHub settings unless the operator explicitly authorizes it.
@@ -167,6 +172,9 @@ accessibility foundations.
   attempt; that attempt failed at the architecture cap and is not a pass
 - `8ea6f8e` — restored architecture/format/clippy gates, split the over-cap
   owners, regenerated the stylesheet bundle, and passed focused verification
+- `7042178` — documented the architecture repair and focused verification; its
+  warm-up full-gate process has no recoverable output/exit receipt and is not a
+  pass
 
 ## 3. Verification by checkpoint
 
@@ -209,21 +217,28 @@ Verified at implementation checkpoint `8ea6f8e`:
   final implementation review reported `CONVERGED: YES` with no stop-ship
   finding.
 
+The warm-up `./scripts/check-release.sh` process at documentation checkpoint
+`7042178` reached `cargo deny`, but its output and exit receipt were not
+recoverable. It is intentionally preserved as non-evidence and does not prove
+the complete gate passed.
+
 These checks are source-slice evidence, not a complete release result. The
 following were **not** proved at `8ea6f8e`:
 
 - the complete `./scripts/check-release.sh` gate at the eventual
-  documentation-only successor commit;
+  documentation-truth commit;
 - clean-install desktop behavior or operator visual sign-off;
 - public-testnet F6 execution receipts;
 - a same-candidate sanitized release-evidence bundle.
 
 ## 4. Exact continuation order
 
-1. Commit this converged documentation-only correction on top of `8ea6f8e`.
-2. At that eventual documentation commit, make the next local validation step
-   a clean-tree `./scripts/check-release.sh` run by itself. Preserve its output
-   and any failures; do not infer a pass from the focused constituent checks.
+1. Commit the current documentation-truth correction on top of documentation
+   checkpoint `7042178` and implementation checkpoint `8ea6f8e`.
+2. At that resulting commit, make the next local validation step a clean-tree
+   `./scripts/check-release.sh` run by itself. Preserve its output and any
+   failures; do not infer a pass from the focused constituent checks or the
+   unrecoverable `7042178` warm-up.
 3. Review the 12 screenshots manually; automated mock rendering is not
    operator visual sign-off or runtime proof.
 4. Review and merge through protected `main`, with required Ubuntu and macOS CI

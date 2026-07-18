@@ -13,16 +13,20 @@ bundle.
 
 The operator-surface feature branch now changes the product after RC5. Its
 committed keyboard/accessibility checkpoint is `29426df`, which contains
-protected `origin/main` through merge `3b647f8`; current implementation
-checkpoint `c435611` adds the green palette and has 225/225 UI tests, 15/15 axe
-scenarios, 12/12 screenshots, and a green real-daemon browser gate, plus
-focused coverage for token-aware retirement and reconnection of authenticated
-SSE streams. RC5 evidence is therefore historical baseline for this feature
-line; after protected-main integration
-the next eligible candidate is RC6 and all release evidence must bind to RC6's
-exact peeled SHA. There is no final `v1.0.0` tag and no published GitHub
-Release. Earlier RC2–RC4 tags remain immutable failed-contract receipts. The
-supported boundary remains local-first, single-host, and not internet-facing.
+protected `origin/main` through merge `3b647f8`; interaction/browser checkpoint
+`c435611` adds the green palette and has 225/225 UI tests, 15/15 axe scenarios,
+12/12 screenshots, and a green real-daemon browser gate, plus focused coverage
+for token-aware retirement and reconnection of authenticated SSE streams.
+Current implementation checkpoint `8ea6f8e` restores the architecture,
+formatting, and strict-clippy gates, and `7042178` is its documentation
+successor. A warm-up full-gate process at `7042178` ended without a recoverable
+output/exit receipt and is not a pass; a clean full gate remains pending at the
+eventual documentation-truth commit. RC5 evidence is therefore historical
+baseline for this feature line; after protected-main integration the next
+eligible candidate is RC6 and all release evidence must bind to RC6's exact
+peeled SHA. There is no final `v1.0.0` tag and no published GitHub Release.
+Earlier RC2–RC4 tags remain immutable failed-contract receipts. The supported
+boundary remains local-first, single-host, and not internet-facing.
 
 ## Summary
 
@@ -190,12 +194,11 @@ its phases 1–3 are absorbed into the 1.0 plan.
 The next work should still avoid speculative new product scope first. The right
 immediate move is:
 
-1. commit the converged documentation-only correction on top of implementation
-   checkpoint `c435611`
-2. at that eventual documentation commit, make the next local validation step
-   a clean-tree `./scripts/check-release.sh` run; focused UI, screenshot,
-   accessibility, and real-daemon browser checks are green but do not substitute
-   for the complete gate
+1. commit the current documentation-truth correction on top of documentation
+   checkpoint `7042178` and implementation checkpoint `8ea6f8e`
+2. at that resulting commit, make the next local validation step a clean-tree
+   `./scripts/check-release.sh` run; the unrecoverable `7042178` warm-up and the
+   green focused checks do not substitute for the complete gate
 3. merge through protected `main` with required Ubuntu and macOS contexts green
 4. create immutable annotated RC6 and independently verify its draft assets
 5. collect RC6-bound doctor, standard/chaos soak, public-testnet F6,

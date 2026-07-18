@@ -1,11 +1,14 @@
 # Operator Surface & Privacy Implementation Plan
 
-Status: **in execution; implementation checkpoint `c435611` on 2026-07-18** —
-started 2026-07-16 on branch `codex/operator-surface-privacy` (worktree
+Status: **in execution; implementation checkpoint `8ea6f8e` and documentation
+checkpoint `7042178` on 2026-07-18** — started 2026-07-16 on branch
+`codex/operator-surface-privacy` (worktree
 `.claude/worktrees/agent-ux-privacy-exec`). The branch includes protected
-`origin/main` at `7e04743` through merge `3b647f8`. The original 1.1 sequence
-was pulled forward before the first final 1.0 release; after protected-main
-integration the next eligible candidate is RC6.
+`origin/main` at `7e04743` through merge `3b647f8`. A warm-up full-gate process
+at `7042178` ended without a recoverable output/exit receipt and is not a pass;
+a clean full gate remains pending at the eventual documentation-truth commit.
+The original 1.1 sequence was pulled forward before the first final 1.0 release;
+after protected-main integration the next eligible candidate is RC6.
 Scope: console UI/UX overhaul, throwaway-wallet privacy, ERC-5564 stealth
 correctness and interoperability.
 
@@ -140,7 +143,7 @@ ratified), D-E (ERC-6538 deferred).
     14-scenario axe-core gate is part of the release script. At this checkpoint
     UI tests are 215/215 and accessibility is 14/14 with zero violations or
     incomplete results.
-  - **Current implementation checkpoint (`c435611`):** an exact-seven-command
+  - **Interaction/browser checkpoint (`c435611`):** an exact-seven-command
     safe palette is committed with regenerated bundles. UI tests pass 225/225;
     typecheck/build pass; the pinned axe gate passes 15/15 with zero
     violations/incomplete; 12/12 screenshots pass; and the migrated
@@ -151,8 +154,13 @@ ratified), D-E (ERC-6538 deferred).
     responses cannot revoke a replacement token; same-tab token clear locks the
     visible shell and palette policy synchronously; delayed FIDO detection is
     mode-guarded; and dynamic modal siblings remain inert and focus-contained.
-    The documentation-only successor commit, complete release gate, manual
-    visual sign-off, merge, and same-RC evidence remain.
+  - **Current implementation checkpoint (`8ea6f8e`):** the architecture,
+    formatting, and strict-clippy gates are restored without raising an existing
+    parent-file cap; focused Rust/UI verification and Grok 4.5 review are green.
+    `7042178` is the documentation successor, but its warm-up full-gate receipt
+    is unrecoverable and does not count as a pass. The documentation-truth
+    commit, clean full gate, manual visual sign-off, merge, and same-RC evidence
+    remain.
     See `docs/execution-handoff.md` for the proof boundary and order.
 
 ## Original plan
@@ -398,15 +406,19 @@ and empty-state actions are implemented through `29426df`. Checkpoint
 commands, refresh, and self-check; modal refusal, filtering, wrapped navigation,
 focus restoration, async-error handling, lock-transition fail-closed behavior,
 session races, and modal/FIDO focus guards are tested, and regenerated bundles
-are present. The documentation-only successor commit and full gate remain.
+are present. Implementation checkpoint `8ea6f8e` restores the architecture,
+formatting, and strict-clippy gates, and `7042178` documents that repair. Its
+warm-up full-gate receipt is unrecoverable, so the documentation-truth commit
+and a clean full gate remain.
 
 **4.5 Acceptance bar per destination** (gate): no raw hex/epoch/camelCase in
 default view; axe-core clean; keyboard-complete; SSE-live; smoke tests updated;
 screenshot walkthrough promoted to release evidence. The 14-scenario pinned
 axe gate was green at `29426df`; at `c435611` the gate is 15/15, the 12-shot
-walkthrough passes, and real-daemon browser smoke passes. This bar
-remains open until manual screenshot review, the full clean-tree release gate,
-merge, and operator sign-off are complete.
+walkthrough passes, and real-daemon browser smoke passes. This bar remains open
+until manual screenshot review, a trustworthy full clean-tree release gate at
+the eventual documentation-truth commit, merge, and operator sign-off are
+complete.
 
 ### Phase 5 — Evidence, docs, and pre-final 1.0 release (~1–2 weeks)
 

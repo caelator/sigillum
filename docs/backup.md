@@ -171,6 +171,6 @@ These guarantees are proven end to end by
 `crates/sigillum-daemon/tests/upgrade_path.rs` (task F7): a committed
 fixture data directory built at the oldest supported per-store schema versions
 boots on the current daemon and is asserted to migrate every store to its
-current version (queue → v5, wallet inventory → v20, and so on) with no
+current version (queue → v5, wallet inventory → v21, and so on) with no
 quarantine events, the vault canaries intact, the pending queue job preserved,
 and the 0.1-era encrypted snapshot restoring under 1.0.

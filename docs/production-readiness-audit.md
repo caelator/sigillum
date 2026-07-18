@@ -14,10 +14,14 @@ final release.
 
 The operator-surface branch changes code after RC5 and includes protected main
 through merge `3b647f8`; its committed keyboard/accessibility checkpoint is
-`29426df`. At current implementation checkpoint `c435611`, UI tests pass
+`29426df`. At historical interaction/browser checkpoint `c435611`, UI tests pass
 225/225, typecheck and build pass, axe passes 15/15, screenshots pass 12/12,
-and real-daemon browser smoke passes.
-RC5 evidence is historical baseline for that feature line. After protected-main
+and real-daemon browser smoke passes. Current implementation checkpoint
+`8ea6f8e` restores the architecture, formatting, and strict-clippy gates, and
+`7042178` is its documentation successor. A warm-up full-gate process at
+`7042178` ended without a recoverable output/exit receipt and is not a pass; a
+clean full gate remains pending at the eventual documentation-truth commit. RC5
+evidence is historical baseline for that feature line. After protected-main
 integration the next eligible candidate is RC6, and every release receipt must
 bind to RC6's peeled SHA. No final `v1.0.0` tag or published GitHub Release
 exists. RC2–RC4 remain immutable failed-contract evidence. Gateway payments
@@ -38,6 +42,11 @@ The current hardening commit is considered source-ready for the documented
 single-host boundary only when `./scripts/check-release.sh` passes without
 mutating tracked files. The gate makes the release standard executable instead
 of scattering it across README, CI, and readiness notes.
+
+The warm-up process at documentation checkpoint `7042178` reached the
+`cargo deny` stage, but its output and exit receipt were not recoverable. It is
+not positive release-gate evidence. The clean full gate remains pending at the
+eventual documentation-truth commit.
 
 The gate covers:
 
@@ -241,10 +250,10 @@ pass with empty ignore lists.
 | Requirement | Current evidence | Status |
 | --- | --- | --- |
 | Build and dependency graph resolve | `cargo metadata --locked --no-deps --format-version 1` inside `./scripts/check-release.sh` | Proven only when the current checkout's gate passes without mutating tracked files |
-| Architecture stays within professional boundaries | `./scripts/check-architecture.sh` inside the release gate | Pending rerun inside the complete clean-tree feature-line gate |
-| Daemon UI compiles and tested source matches generated assets | `npm ci`, `npm audit --audit-level=high`, `npm run typecheck`, `npm test`, `npm run build`, generated-asset freshness, and pinned 15-scenario axe-core checks | At `c435611`, UI tests are 225/225; typecheck/build pass; accessibility is 15/15 with zero violations/incomplete; full release gate still required at the documentation successor commit |
-| Rust workspace builds, tests, and lints | Locked workspace check/test/clippy plus independent no-HID FIDO2 check/test/clippy inside the release gate | Proven only when the current checkout's gate passes |
-| Security and supply-chain baseline | `cargo audit --file Cargo.lock` and `cargo deny --locked check` inside the release gate | Proven for the lockfile checked by the gate, with accepted duplicate dependency warnings |
+| Architecture stays within professional boundaries | `./scripts/check-architecture.sh` inside the release gate | Passed as focused evidence at `8ea6f8e`; confirmation inside the complete clean-tree feature-line gate remains pending |
+| Daemon UI compiles and tested source matches generated assets | `npm ci`, `npm audit --audit-level=high`, `npm run typecheck`, `npm test`, `npm run build`, generated-asset freshness, and pinned 15-scenario axe-core checks | At historical checkpoint `c435611`, UI tests are 225/225; typecheck/build pass; accessibility is 15/15 with zero violations/incomplete. The full release gate remains pending at the eventual documentation-truth commit |
+| Rust workspace builds, tests, and lints | Locked workspace check/test/clippy plus independent no-HID FIDO2 check/test/clippy inside the release gate | Focused locked workspace check/test/strict-clippy passed at `8ea6f8e`; the independent no-HID and complete-gate receipt remain pending |
+| Security and supply-chain baseline | `cargo audit --file Cargo.lock` and `cargo deny --locked check` inside the release gate | The `7042178` warm-up reached `cargo deny`, but its result is unrecoverable and is not evidence; a clean current-lockfile gate remains pending |
 | Release identity and monotonicity | Remote direct/peeled tag validation, event-SHA and cross-job tag-object binding, scratch-ref recovery, retained monotonically numbered RC tags, and draft-only release creation | Proven only when the tag workflow passes at the gated `main` SHA; branch/tag protection is a fail-closed pre-merge settings check |
 | Local daemon and gateway loopback integration behavior | Workspace integration tests pass outside the sandbox | Historical gated baseline; rerun at the final feature commit and RC6 |
 | Target-host operational readiness | RC5 standard soak, chaos soak, and doctor receipts bind to `7e04743` | Proven for RC5 only; repeat all required host evidence at RC6 because the feature line changes code |
@@ -300,9 +309,10 @@ wallet operations remain deferred.
 
 The current feature line still needs the following release-qualified evidence:
 
-1. integration through protected `main`, followed by a clean-tree
-   `./scripts/check-release.sh`, required Ubuntu/macOS CI, a successful RC6
-   draft workflow, and independently checksum-verified assets at one exact SHA
+1. a clean-tree `./scripts/check-release.sh` at the eventual documentation-truth
+   commit, then integration through protected `main`, required Ubuntu/macOS CI,
+   a successful RC6 draft workflow, and independently checksum-verified assets
+   at one exact SHA
 2. standard and chaos soak plus `sigillum doctor` receipts on every supported
    host at that RC6 SHA (F4)
 3. five public-testnet transactions for the four core execution families:
@@ -320,10 +330,11 @@ external penetration test has been performed, and this release does not claim
 one (D-4).
 
 Until those are complete, the accurate claim is narrower: the prior RC proved
-the workflow shape, while implementation checkpoint `c435611` still needs a
-documentation-only successor, a clean-tree full gate at that commit, and
-same-candidate operator receipts. These docs identify the remaining assurance
-and product-completeness work.
+the workflow shape, while implementation checkpoint `8ea6f8e` and documentation
+checkpoint `7042178` still need a trustworthy clean-tree full gate at the
+eventual documentation-truth commit and same-candidate operator receipts. The
+unrecoverable `7042178` warm-up is not a pass. These docs identify the remaining
+assurance and product-completeness work.
 
 ## Execution-path security review (F5)
 
