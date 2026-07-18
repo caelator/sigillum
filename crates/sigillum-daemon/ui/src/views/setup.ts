@@ -9,6 +9,7 @@ import {
   setTrustedHtmlById,
 } from "../render/dom";
 import { esc } from "../render/html";
+import { focusableElements } from "../render/modal";
 
 interface WizardCompartment {
   label: string;
@@ -169,8 +170,18 @@ export function createSetupWizard(deps: SetupWizardDeps) {
 
   function wizShowStep(id: string): void {
     document.querySelectorAll(".wizard-step").forEach((step) => step.classList.remove("active"));
-    document.getElementById(id)?.classList.add("active");
+    const step = document.getElementById(id) as HTMLElement | null;
+    step?.classList.add("active");
     updateWizardChrome(id);
+    if (!step) return;
+
+    const firstControl = focusableElements(step)[0];
+    if (firstControl) {
+      firstControl.focus();
+      return;
+    }
+    step.setAttribute("tabindex", "-1");
+    step.focus();
   }
 
   function wizPreset(preset: string): void {

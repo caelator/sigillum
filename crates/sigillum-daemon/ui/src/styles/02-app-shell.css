@@ -213,14 +213,16 @@ footer {
   color: var(--text-dim);
 }
 
+footer a {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
 /* Focus modes — setup / locked / first load: hide chrome, center the panel
    over a subtle radial backdrop. */
 
 body:not([data-mode="unlocked"]) {
-  background:
-    radial-gradient(1100px 540px at 50% -180px, rgba(91, 124, 250, 0.08), rgba(13, 17, 23, 0) 65%),
-    radial-gradient(900px 520px at 85% 110%, rgba(13, 17, 23, 0.16), rgba(13, 17, 23, 0) 60%),
-    var(--bg);
+  background: var(--bg);
 }
 
 body:not([data-mode="unlocked"]) .sidebar,

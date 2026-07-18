@@ -5,7 +5,11 @@
 <div class="app-shell">
   <aside class="sidebar" aria-label="Workspace navigation">
     <div class="sidebar-brand">
-      <div class="brand-mark" aria-hidden="true">S</div>
+      <div class="brand-mark" aria-hidden="true">
+        <svg viewBox="0 0 32 32" focusable="false">
+          <path d="M21.5 7.8C20 6.6 18.1 6 15.9 6 12.5 6 10 7.8 10 10.7c0 2.7 1.8 4 5.8 5 3.1.8 4.1 1.4 4.1 2.7 0 1.4-1.4 2.4-3.5 2.4-2.4 0-4.5-.8-6.2-2.4L8 21.1c2.1 1.9 4.9 2.9 8.1 2.9 4.5 0 7.4-2.3 7.4-5.9 0-3.2-2-4.8-6.5-5.9-2.7-.7-3.5-1.2-3.5-2.2 0-1.1 1.1-1.9 2.8-1.9 1.8 0 3.4.6 4.8 1.7z"/>
+        </svg>
+      </div>
       <div class="brand-text">
         <div class="logo">SIGILLUM</div>
         <div class="logo-sub">Treasury console</div>
@@ -18,7 +22,7 @@
   </aside>
 
   <div class="workspace">
-    <div class="topbar">
+    <header class="topbar">
       <div class="topbar-heading">
         <h1 id="topbarTitle">Sigillum</h1>
         <p id="topbarSummary" class="topbar-summary">Local treasury daemon</p>
@@ -30,13 +34,13 @@
       <div class="topbar-status" role="group" aria-label="Vault status">
         <div id="statusBadge" class="status-badge status-locked">checking...</div>
         <div id="compartmentBadge" class="compartment-badge hidden"></div>
-        <div id="statusStrip" class="status-strip" aria-label="Workspace health"></div>
+        <section id="statusStrip" class="status-strip" aria-label="Workspace health"></section>
         <div id="lockForm" class="session-controls hidden">
           <button class="btn-ghost btn-small" data-action="logoutSession">Log out</button>
           <button class="btn-danger btn-small" data-action="lock">Lock now</button>
         </div>
       </div>
-    </div>
+    </header>
 
     <main>
 
@@ -82,7 +86,7 @@
         <div class="wizard-header">
           <div class="wizard-intro">
             <div class="eyebrow">Setup assistant</div>
-            <h2>Create a vault that matches how you work</h2>
+            <h1>Create a vault that matches how you work</h1>
             <p class="helper-text">Choose a protection model, review what Sigillum will create, then finish with a guided hardware-key or passphrase flow.</p>
           </div>
           <div class="wizard-summary">
@@ -297,7 +301,7 @@
         <div class="section-title">Recover or start over</div>
         <p class="helper-text">Restore a previously exported snapshot, or erase this machine&rsquo;s local Sigillum data and restart first-run setup.</p>
         <div class="form-row">
-          <input type="file" id="setupRestoreFile" class="flex-1">
+          <input type="file" id="setupRestoreFile" class="flex-1" aria-label="Encrypted snapshot file to restore">
           <input type="password" id="setupRestorePass" placeholder="Restore passphrase" class="flex-1">
           <button class="btn-danger" data-action="restoreSetupSnapshot">Restore Snapshot</button>
         </div>
@@ -309,7 +313,7 @@
 
       <!-- Unlock / session card (focused panel when locked; sectionless) -->
       <div class="card focus-card" id="authCard">
-        <h2 id="authTitle">Unlock this local session</h2>
+        <h1 id="authTitle">Unlock this local session</h1>
         <p class="helper-text" id="authLead">Unlock with the passphrase or hardware-key threshold you configured during setup. The session token stays only in this browser tab.</p>
         <div id="unlockTabs" class="unlock-tabs hidden">
           <button type="button" class="unlock-tab active" data-action="switchUnlockTab" data-arg0="passphrase">Passphrase</button>
@@ -338,7 +342,7 @@
           <div class="section-title">Recover or start fresh</div>
           <p class="helper-text">Can&rsquo;t unlock? Try the hardware-key tab first if a key is detected, restore an encrypted snapshot, or archive this machine&rsquo;s data and start over with a brand-new vault.</p>
           <div class="form-row">
-            <input type="file" id="authRestoreFile" class="flex-1">
+            <input type="file" id="authRestoreFile" class="flex-1" aria-label="Encrypted snapshot file to restore">
             <input type="password" id="authRestorePass" placeholder="Restore passphrase" class="flex-1">
             <button class="btn-danger" data-action="restoreAuthSnapshot">Restore Snapshot</button>
           </div>

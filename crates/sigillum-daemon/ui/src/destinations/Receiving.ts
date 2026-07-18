@@ -786,7 +786,7 @@ export function createReceivingDestination(runtime: CoreRuntime): DestinationCon
     }
 
     return el(
-      "article",
+      "div",
       { class: "recv-address-card", dataset: { signature }, attrs: { role: "listitem" } },
       ...children,
     );
@@ -1101,7 +1101,7 @@ export function createReceivingDestination(runtime: CoreRuntime): DestinationCon
       actions,
     ];
     return el(
-      "article",
+      "div",
       {
         class: "recv-deposit-card",
         dataset: { signature, tier: lifecycle.attention ? "review" : "quiet" },

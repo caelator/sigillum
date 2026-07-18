@@ -1372,7 +1372,7 @@ export function createPortfolioDestination(
       "Balance",
       "State",
       "Scanned",
-      "",
+      "Details",
     ]) {
       headRow.appendChild(el("th", { text: title }));
     }
@@ -1444,7 +1444,9 @@ export function createPortfolioDestination(
       class: "table-scroll",
       dataset: { portfolio: "holdings-wrap" },
     });
-    const holdingsTable = el("table", { class: "table compact" });
+    const holdingsTable = el("table", {
+      class: "table compact portfolio-holdings-table",
+    });
     const holdingsThead = el("thead");
     const holdingsHeadRow = el("tr");
     for (const title of ["Asset", "Amount", "Address", "Chain", "Status", "Updated"]) {
@@ -1479,7 +1481,7 @@ export function createPortfolioDestination(
     const jobsTable = el("table", { class: "table compact" });
     const jobsThead = el("thead");
     const jobsHeadRow = el("tr");
-    for (const title of ["Status", "Scope", "Results", "Started", "Actions", ""]) {
+    for (const title of ["Status", "Scope", "Results", "Started", "Actions", "Details"]) {
       jobsHeadRow.appendChild(el("th", { text: title }));
     }
     jobsThead.appendChild(jobsHeadRow);

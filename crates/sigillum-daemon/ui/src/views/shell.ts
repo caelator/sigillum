@@ -1,7 +1,48 @@
 import type { ActiveCompartment, UnlockedCompartment } from "../contracts";
 import { clearSessionToken } from "../api/session";
+import { clearList, el, renderList } from "../core/dom";
 import { setHiddenById as setHidden, setTextById as setText } from "../render/dom";
-import { esc, escAttr } from "../render/html";
+import { focusableElements, hasActiveModal } from "../render/modal";
+
+export interface WorkspaceSectionNavItem {
+  id: string;
+  label: string;
+  summary: string;
+}
+
+/**
+ * Patch the workspace navigation by stable section id. Periodic status
+ * refreshes therefore update state without replacing the focused button.
+ */
+export function renderWorkspaceSectionNav(
+  nav: HTMLElement,
+  sections: readonly WorkspaceSectionNavItem[],
+  activeSection: string,
+): void {
+  if (sections.length <= 1) {
+    clearList(nav);
+    return;
+  }
+
+  renderList(
+    nav,
+    sections,
+    (section) => section.id,
+    (section, existing) => {
+      const button = (existing ?? el("button")) as HTMLButtonElement;
+      const isActive = section.id === activeSection;
+      button.type = "button";
+      button.className = "nav-item" + (isActive ? " active" : "");
+      if (isActive) button.setAttribute("aria-current", "page");
+      else button.removeAttribute("aria-current");
+      button.setAttribute("title", section.summary);
+      button.dataset.action = "selectWorkspaceSection";
+      button.dataset.arg0 = section.id;
+      button.textContent = section.label;
+      return button;
+    },
+  );
+}
 
 /// Shell chrome for the compartment switcher and the topbar badge. These
 /// read the daemon's wire shape directly: `active_compartment` carries
@@ -14,24 +55,27 @@ export function renderCompartmentSwitcher(
   const switcher = document.getElementById("compSwitcher");
   if (!switcher) return;
   if (unlocked.length <= 1) {
-    switcher.innerHTML = "";
+    clearList(switcher);
     setHidden("compSwitcher", true);
     return;
   }
 
-  let html = "";
-  unlocked.forEach((compartment) => {
-    const isActive = active && active.compartment_id === compartment.id;
-    html +=
-      '<button class="' +
-      (isActive ? "active" : "") +
-      '" data-action="switchCompartment" data-arg0="' +
-      escAttr(String(compartment.id)) +
-      '" data-arg0-type="number">' +
-      esc(compartment.label) +
-      "</button>";
-  });
-  switcher.innerHTML = html;
+  renderList(
+    switcher,
+    unlocked,
+    (compartment) => String(compartment.id),
+    (compartment, existing) => {
+      const button = (existing ?? el("button")) as HTMLButtonElement;
+      const isActive = active?.compartment_id === compartment.id;
+      button.type = "button";
+      button.className = isActive ? "active" : "";
+      button.dataset.action = "switchCompartment";
+      button.dataset.arg0 = String(compartment.id);
+      button.dataset.arg0Type = "number";
+      button.textContent = compartment.label;
+      return button;
+    },
+  );
   setHidden("compSwitcher", false);
 }
 
@@ -116,6 +160,8 @@ export function createShellRenderer(deps: ShellRendererDeps) {
   }
 
   function applyLockedUi(): void {
+    const enteringLocked = document.body.dataset.mode !== "locked";
+    const focusAtTransition = document.activeElement as HTMLElement | null;
     deps.setUiMode("locked");
     document.body.dataset.mode = "locked";
     clearStatusStrip();
@@ -134,14 +180,30 @@ export function createShellRenderer(deps: ShellRendererDeps) {
     );
     deps.setSecretsAccess(false);
     deps.setUnlockGuidance("passphrase");
-    // The passphrase field is the only actionable control on this screen;
-    // hand it focus once the locked layout has settled.
-    setTimeout(() => {
-      const passphrase = document.getElementById(
-        "passphrase",
-      ) as HTMLInputElement | null;
-      passphrase?.focus?.();
-    }, 0);
+    // Focus once on the transition, after the locked layout settles. Refresh
+    // re-renders must not keep pulling focus back from the operator, and the
+    // deferred callback must yield if a modal opened or focus moved meanwhile.
+    if (enteringLocked) {
+      setTimeout(() => {
+        if (document.body.dataset.mode !== "locked" || hasActiveModal()) return;
+        const passphrase = document.getElementById(
+          "passphrase",
+        ) as HTMLInputElement | null;
+        if (!passphrase?.isConnected || passphrase.disabled) return;
+
+        const active = document.activeElement as HTMLElement | null;
+        if (active === passphrase) return;
+        const focusMoved = active !== focusAtTransition;
+        if (
+          focusMoved &&
+          active &&
+          focusableElements(document.body).includes(active)
+        ) {
+          return;
+        }
+        passphrase.focus();
+      }, 0);
+    }
   }
 
   function applyUnlockedUi(

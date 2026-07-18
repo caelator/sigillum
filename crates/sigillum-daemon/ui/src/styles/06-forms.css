@@ -112,15 +112,10 @@ textarea {
 }
 
 select {
-  appearance: none;
-  -webkit-appearance: none;
-  padding-right: 28px;
-  background-image:
-    linear-gradient(45deg, transparent 50%, #a8b3c4 50%),
-    linear-gradient(135deg, #a8b3c4 50%, transparent 50%);
-  background-position: calc(100% - 15px) 15px, calc(100% - 10px) 15px;
-  background-size: 5px 5px;
-  background-repeat: no-repeat;
+  appearance: auto;
+  -webkit-appearance: menulist;
+  padding-right: 10px;
+  background-image: none;
   cursor: pointer;
 }
 

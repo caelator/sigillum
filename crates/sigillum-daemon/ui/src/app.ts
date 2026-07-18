@@ -31,12 +31,14 @@ import {
   createShellRenderer,
   renderActiveCompartment,
   renderCompartmentSwitcher,
+  renderWorkspaceSectionNav,
 } from "./views/shell";
 import { createSetupWizard } from "./views/setup";
 import { createTreasuryActions } from "./views/treasury";
 import { createWalletManagerActions } from "./views/walletManager";
 import { createWalletActions } from "./views/wallets";
 import { startCoreRuntime } from "./core/live";
+import { handleLegacyEnter } from "./core/keyboard";
 import { createOverviewDestination } from "./destinations/Overview";
 import { createMoveDestination } from "./destinations/Move";
 import { createReceivingDestination } from "./destinations/Receiving";
@@ -224,7 +226,7 @@ function syncSectionNav() {
   const sections = availableWorkspaceSections();
   if (sections.length <= 1) {
     nav.classList.add('hidden');
-    nav.innerHTML = '';
+    renderWorkspaceSectionNav(nav, sections, activeWorkspaceSection);
     if (main) main.classList.remove('has-nav');
     syncWorkspaceSections();
     syncTopbar();
@@ -232,18 +234,7 @@ function syncSectionNav() {
   }
 
   ensureActiveWorkspaceSection();
-  nav.innerHTML = sections.map(section => {
-    const isActive = section.id === activeWorkspaceSection;
-    return (
-      '<button type="button" class="nav-item' +
-        (isActive ? ' active' : '') +
-        '"' + (isActive ? ' aria-current="page"' : '') +
-        ' data-action="selectWorkspaceSection" data-arg0="' + escAttr(section.id) + '"' +
-        ' title="' + escAttr(section.summary) + '">' +
-        esc(section.label) +
-      '</button>'
-    );
-  }).join('');
+  renderWorkspaceSectionNav(nav, sections, activeWorkspaceSection);
   nav.classList.remove('hidden');
   if (main) main.classList.add('has-nav');
   syncWorkspaceSections();
@@ -1327,12 +1318,19 @@ function handleActionEvent(event) {
   });
 }
 
+const LEGACY_ENTER_ACTIONS = {
+  unlock: sessionActions.unlock,
+  fido2Unlock: fido2Actions.fido2Unlock,
+  wizInitPassphrase: setupWizard.wizInitPassphrase,
+  wizRegisterKey: setupWizard.wizRegisterKey,
+  wizRegisterAdditionalKey: setupWizard.wizRegisterAdditionalKey,
+  wizSetNewPin: setupWizard.wizSetNewPin,
+  wizSetAdditionalKeyPin: setupWizard.wizSetAdditionalKeyPin,
+  wizAddCustomComp: setupWizard.wizAddCustomComp,
+};
+
 document.addEventListener('keydown', e => {
-  if (e.key !== 'Enter') return;
-  if (e.target.id === 'passphrase') sessionActions.unlock();
-  if (e.target.id === 'fido2Pin') fido2Actions.fido2Unlock();
-  if (e.target.id === 'wizPassphraseConfirm') setupWizard.wizInitPassphrase();
-  if (e.target.id === 'wizFido2Label') setupWizard.wizRegisterKey();
+  handleLegacyEnter(e, LEGACY_ENTER_ACTIONS);
 });
 
 document.addEventListener('visibilitychange', () => {

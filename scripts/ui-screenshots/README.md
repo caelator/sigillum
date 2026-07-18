@@ -24,7 +24,23 @@ states reviewed by the operator").
   receive allocations, an enabled treasury policy, a self-check run with one
   failing domain, FIDO2 keys, audit events, and diagnostics.
 
-No npm install, no build step, no daemon binary needed.
+The screenshot harness itself needs no npm install, build step, or daemon
+binary.
+
+The same stateful mock also backs the automated accessibility release gate.
+After installing the UI dependencies, run:
+
+```sh
+./scripts/check-ui-accessibility.sh
+```
+
+The gate injects the exactly pinned `axe-core` build into the shipped UI in
+headless Chrome. It audits setup welcome and protection-model states, the
+locked unlock screen, all five unlocked destinations, and the routed Portfolio
+and Move subviews. Any axe violation or incomplete check, stale bundle, missing
+scenario, browser exception, or unknown mock route fails the command. Finding
+output includes the rule, impact, affected selectors and nodes, and the axe
+help URL.
 
 ## Prerequisites
 

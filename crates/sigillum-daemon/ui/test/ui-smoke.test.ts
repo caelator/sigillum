@@ -44,6 +44,7 @@ import {
   createShellRenderer,
   renderActiveCompartment,
   renderCompartmentSwitcher,
+  renderWorkspaceSectionNav,
 } from "../src/views/shell";
 import { createWalletActions } from "../src/views/wallets";
 import {
@@ -493,8 +494,9 @@ test("legacy FIDO removal cancellation issues no request; blank submission remai
   });
 });
 
-test("shell renderer applies setup, locked, and unlocked DOM state", () => {
+test("shell renderer applies setup, locked, and unlocked DOM state", async () => {
   const dom = installDom([
+    "passphrase",
     "compartmentBadge",
     "setupCard",
     "authCard",
@@ -561,6 +563,7 @@ test("shell renderer applies setup, locked, and unlocked DOM state", () => {
   equal(calls.filter((entry) => entry === "wizard:reset").length, 1);
 
   renderer.applyLockedUi();
+  await tick();
   equal(mode, "locked");
   equal(document.body.dataset.mode, "locked");
   equal(dom.el("lockForm").classList.contains("hidden"), true);
@@ -583,6 +586,79 @@ test("shell renderer applies setup, locked, and unlocked DOM state", () => {
   equal(dom.el("policyCard").classList.contains("hidden"), false);
   equal(dom.el("walletManagerCard").classList.contains("hidden"), false);
   ok(calls.includes("push-selectors"));
+});
+
+test("locked focus runs once and yields to mode changes, operator focus, and modals", async () => {
+  const dom = installDom();
+  const passphrase = dom.el("passphrase", "INPUT");
+  const firstAction = dom.document.createElement("button");
+  const nextAction = dom.document.createElement("button");
+  dom.document.body.appendChild(passphrase);
+  dom.document.body.appendChild(firstAction);
+  dom.document.body.appendChild(nextAction);
+
+  const renderer = createShellRenderer({
+    operatorCardIds: [],
+    setUiMode: () => undefined,
+    setCardsHidden: () => undefined,
+    setStatusBadge: () => undefined,
+    setSecretsAccess: () => undefined,
+    resetVaultCounts: () => undefined,
+    setUnlockGuidance: () => undefined,
+    updateHeroState: () => undefined,
+    updateWizardChrome: () => undefined,
+    resetSetupWizard: () => undefined,
+    renderCompartmentSwitcher: () => undefined,
+    renderActiveCompartment: () => undefined,
+    buildPushSelectors: () => undefined,
+  });
+
+  const scheduled: Array<() => void> = [];
+  const originalSetTimeout = globalThis.setTimeout;
+  (globalThis as any).setTimeout = (callback: () => void) => {
+    scheduled.push(callback);
+    return 0;
+  };
+
+  try {
+    document.body.dataset.mode = "unlocked";
+    firstAction.focus();
+    renderer.applyLockedUi();
+    equal(scheduled.length, 1);
+    scheduled.shift()?.();
+    equal(document.activeElement, passphrase);
+
+    renderer.applyLockedUi();
+    equal(scheduled.length, 0, "locked refreshes must not schedule focus again");
+
+    document.body.dataset.mode = "unlocked";
+    firstAction.focus();
+    renderer.applyLockedUi();
+    document.body.dataset.mode = "unlocked";
+    scheduled.shift()?.();
+    equal(document.activeElement, firstAction, "a stale locked callback must yield");
+
+    firstAction.focus();
+    renderer.applyLockedUi();
+    nextAction.focus();
+    scheduled.shift()?.();
+    equal(document.activeElement, nextAction, "operator focus wins after scheduling");
+
+    document.body.dataset.mode = "unlocked";
+    firstAction.focus();
+    renderer.applyLockedUi();
+    const pending = confirmDangerDialog({
+      title: "Modal owns focus",
+      body: "The deferred locked callback must not interrupt this dialog.",
+    });
+    const modalFocus = document.activeElement;
+    scheduled.shift()?.();
+    equal(document.activeElement, modalFocus);
+    (document.body.querySelector("[data-confirm-cancel]") as any).click();
+    equal(await pending, false);
+  } finally {
+    globalThis.setTimeout = originalSetTimeout;
+  }
 });
 
 test("shell renders the active compartment from the canonical status shape", () => {
@@ -632,17 +708,17 @@ test("shell renders the active compartment from the canonical status shape", () 
   equal(dom.el("apiKeyCount").textContent, "3");
   equal(dom.el("secretCount").textContent, "7");
   equal(dom.el("compartmentCount").textContent, "2");
-  const switcherHtml = dom.el("compSwitcher").innerHTML;
-  ok(switcherHtml.includes(">vault1</button>"));
-  ok(switcherHtml.includes(">vault2</button>"));
+  const switcherButtons = dom.el("compSwitcher").children;
+  equal(switcherButtons.length, 2);
+  equal(switcherButtons[0].textContent, "vault1");
+  equal(switcherButtons[1].textContent, "vault2");
   // Exactly one switcher button is active: the entry whose id matches
   // active_compartment.compartment_id.
-  equal(switcherHtml.split('class="active"').length - 1, 1);
-  ok(
-    switcherHtml.includes(
-      'class="active" data-action="switchCompartment" data-arg0="2" data-arg0-type="number"',
-    ),
-  );
+  equal(switcherButtons.filter((button) => button.className === "active").length, 1);
+  equal(switcherButtons[1].className, "active");
+  equal(switcherButtons[1].dataset.action, "switchCompartment");
+  equal(switcherButtons[1].dataset.arg0, "2");
+  equal(switcherButtons[1].dataset.arg0Type, "number");
 
   // A missing label falls back to the compartment id.
   renderActiveCompartment(
@@ -651,6 +727,77 @@ test("shell renders the active compartment from the canonical status shape", () 
   );
   equal(dom.el("compartmentBadge").textContent, "Compartment 3");
   equal(dom.el("secretCount").textContent, "(locked)");
+});
+
+test("workspace and compartment navigation preserve node identity and focus", () => {
+  const dom = installDom(["sectionNav", "compSwitcher"]);
+  const sections = [
+    { id: "overview", label: "Overview", summary: "Current status." },
+    { id: "receive", label: "Receive", summary: "Incoming funds." },
+    { id: "vault", label: "Vault", summary: "Protected material." },
+  ];
+
+  renderWorkspaceSectionNav(
+    dom.el("sectionNav") as unknown as HTMLElement,
+    sections,
+    "overview",
+  );
+  const receiveButton = dom.el("sectionNav").children[1];
+  receiveButton.focus();
+  renderWorkspaceSectionNav(
+    dom.el("sectionNav") as unknown as HTMLElement,
+    sections,
+    "receive",
+  );
+
+  equal(dom.el("sectionNav").children[1], receiveButton);
+  equal(document.activeElement, receiveButton);
+  equal(receiveButton.className, "nav-item active");
+  equal(receiveButton.getAttribute("aria-current"), "page");
+  equal(receiveButton.getAttribute("title"), "Incoming funds.");
+  equal(receiveButton.dataset.action, "selectWorkspaceSection");
+  equal(receiveButton.dataset.arg0, "receive");
+  equal(dom.el("sectionNav").children[0].getAttribute("aria-current"), null);
+
+  renderWorkspaceSectionNav(
+    dom.el("sectionNav") as unknown as HTMLElement,
+    sections.slice(0, 1),
+    "overview",
+  );
+  equal(dom.el("sectionNav").children.length, 0);
+
+  const compartments = [
+    { id: 1, label: "daily", threshold: 1 },
+    { id: 2, label: "secure", threshold: 2 },
+  ];
+  renderCompartmentSwitcher(compartments, {
+    compartment_id: 1,
+    compartment_label: "daily",
+    api_key_count: 0,
+  });
+  const dailyButton = dom.el("compSwitcher").children[0];
+  dailyButton.focus();
+  renderCompartmentSwitcher(compartments, {
+    compartment_id: 2,
+    compartment_label: "secure",
+    api_key_count: 0,
+  });
+
+  equal(dom.el("compSwitcher").children[0], dailyButton);
+  equal(document.activeElement, dailyButton);
+  equal(dailyButton.className, "");
+  equal(dom.el("compSwitcher").children[1].className, "active");
+  equal(dailyButton.dataset.action, "switchCompartment");
+  equal(dailyButton.dataset.arg0, "1");
+  equal(dailyButton.dataset.arg0Type, "number");
+
+  renderCompartmentSwitcher(compartments.slice(0, 1), {
+    compartment_id: 1,
+    compartment_label: "daily",
+    api_key_count: 0,
+  });
+  equal(dom.el("compSwitcher").children.length, 0);
+  equal(dom.el("compSwitcher").classList.contains("hidden"), true);
 });
 
 test("discovery job cancel and resume controls drive the real endpoints", async () => {
@@ -879,6 +1026,39 @@ test("session actions drive unlock, lock, and browser logout workflow", async ()
   equal(readSessionToken(), null);
   deepEqual(toasts.pop(), { message: "Session logged out", type: undefined });
   equal(refreshCount, 4);
+});
+
+test("wizard steps focus the first enabled control or the step container", () => {
+  const dom = installDom();
+  const controlStep = dom.el("wizFocusControls");
+  controlStep.classList.add("wizard-step");
+  const disabledInput = dom.document.createElement("input");
+  disabledInput.disabled = true;
+  const enabledButton = dom.document.createElement("button");
+  controlStep.appendChild(disabledInput);
+  controlStep.appendChild(enabledButton);
+  dom.document.body.appendChild(controlStep);
+
+  const emptyStep = dom.el("wizFocusContainer");
+  emptyStep.classList.add("wizard-step");
+  dom.document.body.appendChild(emptyStep);
+
+  const wizard = createSetupWizard({
+    api: async () => ({}),
+    toast: () => undefined,
+    refresh: () => undefined,
+    submitNewFido2Pin: async () => undefined,
+    friendlyFidoError: (message) => String(message),
+  });
+
+  wizard.wizShowStep("wizFocusControls");
+  equal(controlStep.classList.contains("active"), true);
+  equal(document.activeElement, enabledButton);
+
+  wizard.wizShowStep("wizFocusContainer");
+  equal(emptyStep.classList.contains("active"), true);
+  equal(emptyStep.getAttribute("tabindex"), "-1");
+  equal(document.activeElement, emptyStep);
 });
 
 test("setup wizard passphrase path validates and initializes a local vault", async () => {

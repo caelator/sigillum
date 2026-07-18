@@ -2993,7 +2993,7 @@ export function createMoveDestination(
           el(
             "div",
             null,
-            el("h3", { class: "move-card-title", text: "Execution queue" }),
+            el("h2", { class: "move-card-title", text: "Execution queue" }),
             el("p", {
               class: "move-card-summary",
               text:
@@ -3164,7 +3164,7 @@ export function createMoveDestination(
     return patchKeyedRow(existing, "move-queue-group", fingerprint, (row) => {
       row.appendChild(
         el(
-          "h4",
+          "h3",
           {
             class: "move-queue-group-title",
             dataset: { tier: queueStateTier(group.state) },
@@ -3173,7 +3173,10 @@ export function createMoveDestination(
           el("span", { class: "nums", text: "(" + group.jobs.length + ")" }),
         ),
       );
-      const jobsEl = el("ul", { class: "move-job-list" });
+      const jobsEl = el("div", {
+        class: "move-job-list",
+        attrs: { role: "list" },
+      });
       row.appendChild(jobsEl);
       renderList<QueueJob>(
         jobsEl,
@@ -3202,10 +3205,10 @@ export function createMoveDestination(
       timeline.join(">"),
       state.chains.length,
     ]);
-    return patchKeyedRow(existing, "move-job", fingerprint, (row) => {
-      row.dataset.tier = queueStateTier(job.state || "");
+    const row = patchKeyedRow(existing, "move-job", fingerprint, (jobRow) => {
+      jobRow.dataset.tier = queueStateTier(job.state || "");
       const symbol = nativeSymbol(job.chain_id);
-      row.appendChild(
+      jobRow.appendChild(
         el(
           "div",
           { class: "move-job-head" },
@@ -3216,7 +3219,7 @@ export function createMoveDestination(
           pill(job.state, queueStateLabel(job.state || "")),
         ),
       );
-      row.appendChild(
+      jobRow.appendChild(
         el(
           "p",
           { class: "move-job-meta" },
@@ -3232,7 +3235,7 @@ export function createMoveDestination(
       );
 
       if (job.last_error) {
-        row.appendChild(
+        jobRow.appendChild(
           el("p", {
             class: "move-job-error",
             text: humanizeQueueError(job.last_error),
@@ -3243,7 +3246,7 @@ export function createMoveDestination(
       // Truthful post-broadcast receipt info (W7.4): only once a receipt
       // exists; `sent` means "broadcast, awaiting confirmation".
       if (job.transaction_hash_hex || job.receipt_status) {
-        row.appendChild(
+        jobRow.appendChild(
           el(
             "p",
             { class: "move-job-receipt nums" },
@@ -3268,7 +3271,7 @@ export function createMoveDestination(
       }
 
       if (timeline.length > 1) {
-        row.appendChild(
+        jobRow.appendChild(
           el(
             "p",
             { class: "move-job-timeline" },
@@ -3303,8 +3306,10 @@ export function createMoveDestination(
           }),
         );
       }
-      if (actions.childNodes.length) row.appendChild(actions);
+      if (actions.childNodes.length) jobRow.appendChild(actions);
     });
+    row.setAttribute("role", "listitem");
+    return row;
   }
 
   // ── Background operations strip (from the operations slice) ────────
@@ -3724,7 +3729,7 @@ export function createMoveDestination(
       el(
         "div",
         { class: "move-policy-section" },
-        el("h4", { class: "move-policy-heading", text: "Gates" }),
+        el("h3", { class: "move-policy-heading", text: "Gates" }),
         enabled.row,
         allowPlanExec.row,
         allowSweepExec.row,
@@ -3737,7 +3742,7 @@ export function createMoveDestination(
       el(
         "div",
         { class: "move-policy-section" },
-        el("h4", { class: "move-policy-heading", text: "Caps and gas" }),
+        el("h3", { class: "move-policy-heading", text: "Caps and gas" }),
         el(
           "div",
           { class: "move-policy-grid" },
@@ -3753,7 +3758,7 @@ export function createMoveDestination(
         "div",
         { class: "move-policy-section" },
         el(
-          "h4",
+          "h3",
           { class: "move-policy-heading", text: "Hot-wallet refills and automation" },
         ),
         allowAutomation.row,
@@ -3773,7 +3778,7 @@ export function createMoveDestination(
       el(
         "div",
         { class: "move-policy-section" },
-        el("h4", { class: "move-policy-heading", text: "Allowed destinations" }),
+        el("h3", { class: "move-policy-heading", text: "Allowed destinations" }),
         destinations,
         el("p", {
           class: "field-hint",
@@ -3803,7 +3808,7 @@ export function createMoveDestination(
           el(
             "div",
             null,
-            el("h3", { class: "move-card-title", text: "Treasury policy" }),
+            el("h2", { class: "move-card-title", text: "Treasury policy" }),
             el("p", {
               class: "move-card-summary",
               text:
@@ -3826,7 +3831,7 @@ export function createMoveDestination(
         el(
           "div",
           { class: "move-policy-section" },
-          el("h4", { class: "move-policy-heading", text: "Start from a preset" }),
+          el("h3", { class: "move-policy-heading", text: "Start from a preset" }),
           presetsWrap,
           presetNote,
         ),
@@ -4419,7 +4424,7 @@ export function createMoveDestination(
           el(
             "div",
             null,
-            el("h3", { class: "move-card-title", text: "Maintenance" }),
+            el("h2", { class: "move-card-title", text: "Maintenance" }),
             el("p", {
               class: "move-card-summary",
               text:

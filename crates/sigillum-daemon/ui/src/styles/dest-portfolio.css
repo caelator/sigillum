@@ -134,6 +134,16 @@
   overflow-x: auto;
 }
 
+.portfolio-holdings-table {
+  table-layout: fixed;
+}
+
+.portfolio-holdings-table th,
+.portfolio-holdings-table td {
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+
 .cell-primary {
   color: var(--text-secondary);
   font-size: var(--fs-sm);

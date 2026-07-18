@@ -104,6 +104,7 @@ run_step npm --prefix crates/sigillum-daemon/ui run typecheck
 run_step npm --prefix crates/sigillum-daemon/ui test
 run_step npm --prefix crates/sigillum-daemon/ui run build
 verify_generated_assets_unchanged
+run_step ./scripts/check-ui-accessibility.sh
 run_step cargo fmt --all --check
 run_step cargo check --workspace --locked
 run_step cargo check -p sigillum-fido2 --no-default-features --locked

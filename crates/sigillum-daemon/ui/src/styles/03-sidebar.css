@@ -16,9 +16,15 @@
   font-weight: 750;
   font-size: 15px;
   color: #fff;
-  background: linear-gradient(140deg, var(--accent) 0%, #3f56c4 100%);
+  background: var(--accent);
   border-radius: 8px;
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.22), var(--shadow-1);
+}
+
+.brand-mark svg {
+  width: 18px;
+  height: 18px;
+  fill: currentColor;
 }
 
 .brand-text {
