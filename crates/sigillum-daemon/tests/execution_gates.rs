@@ -1088,6 +1088,7 @@ async fn policy_update_gate_flips_emit_audit_events() {
             "allow_exit_execution": true,
             "allow_claim_execution": true,
             "allow_gas_topups": true,
+            "max_gas_topup_wei_hex": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
         }),
         Some(&token),
     )

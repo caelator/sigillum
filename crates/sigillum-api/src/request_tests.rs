@@ -1845,6 +1845,54 @@ fn test_treasury_policy_update_fields_use_indexed_paths() {
 }
 
 #[test]
+fn test_treasury_policy_update_requires_gas_topup_cap_at_field_level() {
+    for (max_gas_topup_wei_hex, expected_message) in [
+        (
+            None,
+            "max_gas_topup_wei_hex is required when allow_gas_topups is true",
+        ),
+        (
+            Some("   ".to_string()),
+            "max_gas_topup_wei_hex is required when allow_gas_topups is true",
+        ),
+        (
+            Some("0x".to_string()),
+            "max_gas_topup_wei_hex must include at least one hexadecimal digit",
+        ),
+    ] {
+        let req = TreasuryPolicyUpdateRequest {
+            enabled: true,
+            allowed_destinations: Vec::new(),
+            max_step_native_wei_hex: None,
+            max_plan_native_wei_hex: None,
+            require_simulation: None,
+            allow_raw_digest_signing: None,
+            block_cross_party_linkage: None,
+            allow_claim_execution: None,
+            allow_gas_topups: Some(true),
+            max_gas_topup_wei_hex,
+            allow_plan_execution: None,
+            allow_sweep_execution: None,
+            allow_revoke_execution: None,
+            allow_exit_execution: None,
+            execution_paused: None,
+            max_fee_per_gas_cap_hex: None,
+            simulation_freshness_secs: None,
+            hot_floor_wei_hex: None,
+            hot_target_wei_hex: None,
+            hot_overflow_wei_hex: None,
+            allow_treasury_automation: None,
+        };
+
+        let failure = req.validate_fields().unwrap_err();
+        assert_eq!(failure.fields().len(), 1);
+        assert_eq!(failure.fields()[0].field, "max_gas_topup_wei_hex");
+        assert_eq!(failure.fields()[0].message, expected_message);
+        assert_eq!(req.validate().unwrap_err(), failure.message());
+    }
+}
+
+#[test]
 fn test_validate_fields_pass_for_valid_dtos() {
     let provider = EvmProviderProfileUpsertRequest {
         name: "mainnet".to_string(),

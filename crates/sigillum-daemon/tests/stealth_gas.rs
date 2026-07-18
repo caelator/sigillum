@@ -384,6 +384,7 @@ impl Rig {
             json!({
                 "enabled": true,
                 "allow_gas_topups": allow_gas_topups,
+                "max_gas_topup_wei_hex": EXPECTED_TOPUP_WEI_HEX,
                 "block_cross_party_linkage": block_cross_party_linkage,
                 // Plan task 2.5: stealth sweeps gate under the same Sweep
                 // family as seed sweeps — the master + sweep gates must be

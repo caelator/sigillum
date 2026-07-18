@@ -184,7 +184,15 @@ impl SigillumService {
 
 pub(in crate::service) fn gas_topup_policy_enabled(policy: Option<&TreasuryPolicy>) -> bool {
     policy
-        .map(|policy| policy.enabled && policy.allow_gas_topups)
+        .map(|policy| {
+            let cap_is_valid = policy
+                .max_gas_topup_wei_hex
+                .as_deref()
+                .map(str::trim)
+                .filter(|cap| cap.len() > 2 && (cap.starts_with("0x") || cap.starts_with("0X")))
+                .is_some_and(|cap| decode_quantity_hex(cap).is_ok());
+            policy.enabled && policy.allow_gas_topups && cap_is_valid
+        })
         .unwrap_or(false)
 }
 
@@ -324,7 +332,7 @@ mod tests {
             block_cross_party_linkage: false,
             allow_claim_execution: false,
             allow_gas_topups: true,
-            max_gas_topup_wei_hex: None,
+            max_gas_topup_wei_hex: Some("0x2f9b8".into()),
             allow_plan_execution: false,
             allow_sweep_execution: false,
             allow_revoke_execution: false,
@@ -567,6 +575,42 @@ mod tests {
             vec![inventory_address(SOURCE, "0x0")],
             input.clone(),
         );
+        assert_eq!(output, input);
+    }
+
+    #[test]
+    fn gas_topup_policy_requires_an_explicit_valid_cap() {
+        let mut policy = sample_policy();
+        assert!(gas_topup_policy_enabled(Some(&policy)));
+
+        for invalid_cap in [
+            None,
+            Some("   "),
+            Some("0x"),
+            Some("2f9b8"),
+            Some("0xnot-hex"),
+        ] {
+            policy.max_gas_topup_wei_hex = invalid_cap.map(str::to_string);
+            assert!(!gas_topup_policy_enabled(Some(&policy)));
+        }
+    }
+
+    #[test]
+    fn legacy_uncapped_policy_leaves_plan_steps_byte_identical() {
+        let mut policy = sample_policy();
+        policy.max_gas_topup_wei_hex = None;
+        let input = vec![sample_step(WalletPlanStepAction::SweepErc20, "0xf4240")];
+
+        let output = run_apply(
+            Some(&policy),
+            vec![sample_seed_profile(Some(SPONSOR))],
+            vec![
+                inventory_address(SOURCE, "0x0"),
+                inventory_address(SPONSOR, "0x100000"),
+            ],
+            input.clone(),
+        );
+
         assert_eq!(output, input);
     }
 

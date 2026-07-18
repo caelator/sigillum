@@ -578,8 +578,9 @@ async fn assert_existing_gas_blocker_after_simulation(setup: &TestDaemon, plan_j
 
 #[tokio::test]
 async fn fund_gas_emitted_for_shortfall_with_sponsor() {
-    let (setup, plan_json) = prepare_single_source(true, SPONSOR_BALANCE_HEX, None).await;
     let expected_topup = expected_topup_hex();
+    let (setup, plan_json) =
+        prepare_single_source(true, SPONSOR_BALANCE_HEX, Some(expected_topup.clone())).await;
 
     let fund = single_step_by_action(&plan_json, "fund_gas");
     let sweep = single_step_by_action(&plan_json, "sweep_native");
@@ -631,7 +632,7 @@ async fn fund_gas_cap_blocks_dependent_with_named_reason() {
 
 #[tokio::test]
 async fn no_sponsor_balance_keeps_existing_gas_blocker() {
-    let (setup, plan_json) = prepare_single_source(true, "0x0", None).await;
+    let (setup, plan_json) = prepare_single_source(true, "0x0", Some(expected_topup_hex())).await;
     assert_existing_gas_blocker_after_simulation(&setup, &plan_json).await;
 }
 
@@ -743,7 +744,7 @@ async fn cross_party_plan(block_cross_party_linkage: bool) -> Value {
         &setup,
         true,
         block_cross_party_linkage,
-        None,
+        Some(expected_topup_hex()),
         &[PARTY_A_DESTINATION, PARTY_B_DESTINATION],
     )
     .await;
@@ -772,8 +773,9 @@ async fn cross_party_plan(block_cross_party_linkage: bool) -> Value {
 
 #[tokio::test]
 async fn fund_gas_full_flow_simulates_and_exports_in_order() {
-    let (setup, plan_json) = prepare_single_source(true, SPONSOR_BALANCE_HEX, None).await;
     let expected_topup = expected_topup_hex();
+    let (setup, plan_json) =
+        prepare_single_source(true, SPONSOR_BALANCE_HEX, Some(expected_topup.clone())).await;
     let plan_id = plan_json["plan"]["id"].as_str().unwrap();
 
     approve_plan(&setup, plan_id).await;

@@ -266,6 +266,7 @@ fn gates_on_policy_body() -> Value {
         "allow_exit_execution": true,
         "allow_claim_execution": true,
         "allow_gas_topups": true,
+        "max_gas_topup_wei_hex": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
         // Explicit off: the API default flipped to ON in plan task 3.5, so a
         // body that means "linkage blocking off" must say so. Tests exercising
         // the on path override this key with `true` below.
@@ -934,6 +935,39 @@ async fn enqueue_step_refuses_fund_gas_without_gas_topup_optin() {
     assert_eq!(status, StatusCode::FORBIDDEN);
     assert!(
         body["error"].as_str().unwrap().contains("allow_gas_topups"),
+        "error: {body}"
+    );
+    env.shutdown();
+}
+
+#[tokio::test]
+async fn enqueue_step_refuses_fund_gas_for_legacy_uncapped_policy() {
+    let (env, plan_id, step_id) = approved_plan_env().await;
+    let now = now_unix();
+    add_plan_step(&env, &plan_id, &step_id, |step| {
+        step["id"] = json!("step_fund_gas");
+        step["sequence"] = json!(1);
+        step["action"] = json!("fund_gas");
+        step["amount_hex"] = json!("0x2f9b8");
+        step["destination_address"] = json!(SEED_ADDRESS);
+        step["simulation_status"] = json!("passed");
+        step["simulation_evidence"] = json!([format!("simulated_at_unix={now}")]);
+    });
+    update_policy(&env, gates_on_policy_body()).await;
+    edit_inventory(&env, |inventory| {
+        inventory["treasury_policy"]
+            .as_object_mut()
+            .expect("stored treasury policy")
+            .remove("max_gas_topup_wei_hex");
+    });
+
+    let (status, body) = enqueue_step(&env, &plan_id, "step_fund_gas", true).await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    assert!(
+        body["error"]
+            .as_str()
+            .unwrap()
+            .starts_with("gas_topup_disabled:"),
         "error: {body}"
     );
     env.shutdown();

@@ -1387,6 +1387,38 @@ impl Validate for crate::request::TreasuryPolicyUpdateRequest {
         );
         collect(
             &mut fields,
+            "max_gas_topup_wei_hex",
+            check_optional_len(
+                "max_gas_topup_wei_hex",
+                &self.max_gas_topup_wei_hex,
+                MAX_HEX,
+            ),
+        );
+        collect_if(
+            &mut fields,
+            "max_gas_topup_wei_hex",
+            self.allow_gas_topups == Some(true)
+                && self
+                    .max_gas_topup_wei_hex
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|value| !value.is_empty())
+                    .is_none(),
+            "max_gas_topup_wei_hex is required when allow_gas_topups is true".into(),
+        );
+        collect_if(
+            &mut fields,
+            "max_gas_topup_wei_hex",
+            self.allow_gas_topups == Some(true)
+                && self
+                    .max_gas_topup_wei_hex
+                    .as_deref()
+                    .map(str::trim)
+                    .is_some_and(|value| value.eq_ignore_ascii_case("0x")),
+            "max_gas_topup_wei_hex must include at least one hexadecimal digit".into(),
+        );
+        collect(
+            &mut fields,
             "hot_floor_wei_hex",
             check_optional_len("hot_floor_wei_hex", &self.hot_floor_wei_hex, MAX_HEX),
         );

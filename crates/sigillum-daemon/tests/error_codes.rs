@@ -160,3 +160,48 @@ async fn upgraded_dto_reports_field_level_validation_errors() {
             .contains("exceeds maximum length")
     );
 }
+
+#[tokio::test]
+async fn gas_topup_opt_in_without_cap_reports_the_cap_field() {
+    let (app, _state, _dir) = test_app_with_state();
+
+    let (init_status, init_body) = post_request(
+        &app,
+        "/api/compartment/init",
+        json!({
+            "id": 0,
+            "label": "default",
+            "threshold": 1,
+            "passphrase": "test-passphrase-123"
+        }),
+        None,
+    )
+    .await;
+    assert_eq!(init_status, StatusCode::OK, "init: {init_body:?}");
+    let token = init_body["session_token"].as_str().unwrap();
+
+    let (status, body) = post_request(
+        &app,
+        "/api/treasury/policy/update",
+        json!({
+            "enabled": true,
+            "allow_gas_topups": true
+        }),
+        Some(token),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(body["code"], json!("validation_failed"));
+    assert_eq!(
+        body["error"],
+        json!("max_gas_topup_wei_hex is required when allow_gas_topups is true")
+    );
+    assert_eq!(
+        body["fields"],
+        json!([{
+            "field": "max_gas_topup_wei_hex",
+            "message": "max_gas_topup_wei_hex is required when allow_gas_topups is true"
+        }])
+    );
+}

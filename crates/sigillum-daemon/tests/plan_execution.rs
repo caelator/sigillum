@@ -290,6 +290,7 @@ fn gates_on_policy_body() -> Value {
         "allow_exit_execution": true,
         "allow_claim_execution": true,
         "allow_gas_topups": true,
+        "max_gas_topup_wei_hex": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
     })
 }
 
