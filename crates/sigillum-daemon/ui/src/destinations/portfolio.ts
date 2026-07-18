@@ -42,6 +42,7 @@ import type {
   Operation,
   PaginationInfo,
   RiskCatalogEntry,
+  RiskFinding,
   StatusResponse,
   TokenRegistryList,
   WalletAssetHolding,
@@ -68,9 +69,9 @@ import {
 import { pillClass } from "../render/html";
 
 // ── Wire shapes the typed client does not cover ─────────────────────
-// These mirror sigillum-api response/request contracts exactly. The
-// contracts.ts `RiskFinding` describes a different (stale) shape, so the
-// daemon-accurate record lives here — see response/inventory.rs.
+// These mirror sigillum-api response/request contracts exactly. Shared
+// response records (including RiskFinding) live in contracts.ts so every
+// destination consumes one wire shape.
 
 export interface ProviderPartitionObservation {
   provider_profile: string;
@@ -84,28 +85,8 @@ export type DiscoveryJobRecord = WalletDiscoveryJob & {
   provider_partition_observations?: ProviderPartitionObservation[];
 };
 
-/** Risk finding as the daemon actually sends it (response/inventory.rs). */
-export interface RiskFindingRecord {
-  id: string;
-  category: string;
-  risk_level: string;
-  status: string;
-  wallet_family: string;
-  wallet_profile: string;
-  provider_profile: string;
-  chain_id: number;
-  address: string;
-  subject_type: string;
-  subject: string;
-  source: string;
-  recommendation: string;
-  evidence?: string[];
-  first_seen_at_unix: number;
-  last_checked_at_unix: number;
-}
-
 interface RiskFindingListResponseWire {
-  findings?: RiskFindingRecord[];
+  findings?: RiskFinding[];
   pagination?: PaginationInfo | null;
 }
 
@@ -762,7 +743,7 @@ interface PortfolioState {
   jobs: DiscoveryJobRecord[];
   nftCache: NftMetadataCacheEntry[];
   addressesPagination: PaginationInfo | null;
-  findings: RiskFindingRecord[];
+  findings: RiskFinding[];
   findingsPagination: PaginationInfo | null;
   catalog: RiskCatalogEntry[];
   optIns: NftMetadataCollectionOptIn[];
@@ -3280,7 +3261,7 @@ export function createPortfolioDestination(
   }
 
   function findingRow(
-    finding: RiskFindingRecord,
+    finding: RiskFinding,
     existing: HTMLElement | null,
   ): HTMLElement {
     if (existing) return existing;

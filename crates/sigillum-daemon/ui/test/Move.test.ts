@@ -13,9 +13,11 @@ import {
   parseEthToWeiHex,
   parseGweiToWeiHex,
   planNativeTotalWeiHex,
+  planOriginLabel,
   queueJobCanProcess,
   queueProcessSummary,
   relativeTime,
+  riskFindingPresentation,
   shortAddress,
   simulationBadge,
   stepExecutionEligible,
@@ -30,6 +32,7 @@ import type {
   ConsolidationPlan,
   ConsolidationPlanStep,
   QueueJob,
+  RiskFinding,
   TreasuryPolicy,
 } from "../src/contracts";
 import { installDom, FakeElement, type FakeNode } from "./dom-fixture";
@@ -96,6 +99,30 @@ function makePlan(
     steps,
     ...overrides,
   } as ConsolidationPlan;
+}
+
+function makeRiskFinding(
+  overrides: Partial<RiskFinding> = {},
+): RiskFinding {
+  return {
+    id: "common_gas_funder:1:" + ADDRESS_FROM.toLowerCase(),
+    category: "common_gas_funder",
+    risk_level: "medium",
+    status: "open",
+    wallet_family: "stealth",
+    wallet_profile: "main",
+    provider_profile: "local",
+    chain_id: 1,
+    address: ADDRESS_FROM,
+    subject_type: "gas_funder",
+    subject: ADDRESS_FROM,
+    source: "local-risk-engine",
+    recommendation: "Fund each payer from a distinct gas sponsor.",
+    evidence: ["Two payer identities share this sponsor"],
+    first_seen_at_unix: nowSecs() - 600,
+    last_checked_at_unix: nowSecs() - 60,
+    ...overrides,
+  };
 }
 
 function makePolicy(overrides: Partial<TreasuryPolicy> = {}): TreasuryPolicy {
@@ -355,6 +382,18 @@ test("Move stepExecutionEligible mirrors the daemon gates", () => {
   );
 });
 
+test("Move humanizes plan origin and shared-funder risk records", () => {
+  equal(planOriginLabel(null), "Operator request");
+  equal(planOriginLabel("treasury_automation"), "Treasury automation");
+  equal(planOriginLabel("future_scheduler"), "Future scheduler");
+
+  const presentation = riskFindingPresentation(makeRiskFinding());
+  equal(presentation.title, "Shared gas sponsor");
+  equal(presentation.tier, "review");
+  ok(presentation.summary.includes("different payer identities"));
+  ok(presentation.summary.includes("link those payers"));
+});
+
 test("Move stepPlainLanguage reads like a hardware-wallet line", () => {
   const policy = makePolicy();
   const sentence = stepPlainLanguage(makeStep(), { symbol: "ETH", policy });
@@ -594,6 +633,57 @@ test("Move mount renders plans, queue groups, and the policy summary", async () 
   controller.unmount();
 });
 
+test("Move reads configured chains from the profiles envelope", async () => {
+  const dom = installMoveDom();
+  mockFetchJson((path: string) => {
+    if (path === "/api/chains") {
+      return {
+        // A stale client reading `chains` would render this decoy. The daemon
+        // contract is `profiles`, and the assertions below prove we use it.
+        chains: [
+          {
+            name: "wrong-envelope",
+            chain_id: 77,
+            enabled: true,
+            native_symbol: "WRONG",
+          },
+        ],
+        profiles: [
+          {
+            name: "operator-testnet",
+            chain_family: "evm",
+            chain_id: 77,
+            enabled: true,
+            native_symbol: "TST",
+            native_decimals: 18,
+            finality_blocks: 12,
+            capabilities: [],
+            source: "local",
+            builtin: false,
+            updated_at_unix: nowSecs(),
+          },
+        ],
+      };
+    }
+    return {};
+  });
+  const step = makeStep({ chain_id: 77 });
+  const plan = makePlan([step], { chain_id: 77 });
+  const api = fakeApi({
+    listPlans: async () => ({ plans: [plan], pagination: null }),
+    getTreasuryPolicy: async () => ({ policy: makePolicy() }),
+  });
+  const { runtime } = makeRuntime(api);
+  const controller = createMoveDestination(runtime);
+  controller.mount(runtime.store.get("route"));
+  await flush();
+
+  const text = textOf(dom.el("plansCard"));
+  ok(text.includes("77 (operator-testnet)"), text);
+  ok(text.includes("0.42 TST"), text);
+  controller.unmount();
+});
+
 test("Move shows a persistent stale banner when a refresh fails", async () => {
   const dom = installMoveDom();
   const plan = makePlan([makeStep()]);
@@ -660,6 +750,8 @@ test("Move plan review renders step cards and conceals the aux cards", async () 
   });
   const plan = makePlan([eligible, blocked], {
     linkage_findings: ["payers A and B share a destination"],
+    origin: "treasury_automation",
+    risk_findings: [makeRiskFinding()],
   });
   const api = fakeApi({
     listPlans: async () => ({ plans: [plan], pagination: null }),
@@ -679,6 +771,14 @@ test("Move plan review renders step cards and conceals the aux cards", async () 
   ok(text.includes("2 steps · moving up to 0.84 ETH"), text);
   ok(text.includes("Blocked: No destination set"), text);
   ok(text.includes("Privacy: this plan would link payers"), text);
+  ok(text.includes("Source: Treasury automation"), text);
+  ok(text.includes("Shared gas sponsor"), text);
+  ok(text.includes("common on-chain funder can link those payers"), text);
+  ok(text.includes("advisory signals"), text);
+  ok(text.includes("blocked only when the applicable policy gate"), text);
+  ok(text.includes("Fund each payer from a distinct gas sponsor"), text);
+  ok(text.includes("Two payer identities share this sponsor"), text);
+  ok(!text.includes("common_gas_funder"), text);
   ok(text.includes("fee ≤ 0.00042 ETH · 20 gwei"), text);
   ok(findLink(plansCard, "#/move"), "back-to-plans link present");
   ok(

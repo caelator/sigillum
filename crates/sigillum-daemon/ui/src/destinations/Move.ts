@@ -43,6 +43,7 @@ import type {
   PaginationInfo,
   PartyDestination,
   QueueJob,
+  RiskFinding,
   StatusResponse,
   TreasuryAllowedDestination,
   TreasuryPolicy,
@@ -243,6 +244,67 @@ function joinEnglishList(items: string[]): string {
   if (items.length <= 1) return items.join("");
   if (items.length === 2) return items[0] + " and " + items[1];
   return items.slice(0, -1).join(", ") + ", and " + items[items.length - 1];
+}
+
+function identifierLabel(
+  value: string | null | undefined,
+  fallback: string,
+): string {
+  const words = (value || "")
+    .trim()
+    .replace(/[_-]+/g, " ")
+    .replace(/\s+/g, " ");
+  if (!words) return fallback;
+  return words.charAt(0).toUpperCase() + words.slice(1);
+}
+
+/** Human source label for a plan. Absence is the daemon's operator-created case. */
+export function planOriginLabel(origin: string | null | undefined): string {
+  const normalized = (origin || "").trim().toLowerCase();
+  if (!normalized) return "Operator request";
+  if (normalized === "treasury_automation") return "Treasury automation";
+  return identifierLabel(origin, "Unknown source");
+}
+
+export interface RiskFindingPresentation {
+  title: string;
+  summary: string;
+  recommendation: string | null;
+  tier: Tier;
+}
+
+/** Turn the inventory risk wire record into operator language without
+ * pretending an advisory finding is itself an execution block. */
+export function riskFindingPresentation(
+  finding: RiskFinding,
+): RiskFindingPresentation {
+  const level = (finding.risk_level || "").trim().toLowerCase();
+  const tier: Tier =
+    level === "critical" || level === "high"
+      ? "danger"
+      : level === "low" || level === "informational" || level === "info"
+        ? "quiet"
+        : "review";
+  if (finding.category === "common_gas_funder") {
+    return {
+      title: "Shared gas sponsor",
+      summary:
+        "One gas sponsor funds receive addresses assigned to different payer identities. That common on-chain funder can link those payers.",
+      recommendation: finding.recommendation?.trim() || null,
+      tier,
+    };
+  }
+  const title = identifierLabel(finding.category, "Risk finding");
+  const subject = identifierLabel(
+    finding.subject_type,
+    "plan subject",
+  ).toLowerCase();
+  return {
+    title,
+    summary: title + " was reported for this plan's " + subject + ".",
+    recommendation: finding.recommendation?.trim() || null,
+    tier,
+  };
 }
 
 // ── Plan-step logic (ported from views/inventory.ts — identical gates) ──
@@ -1530,7 +1592,9 @@ export function createMoveDestination(
     try {
       const payload = await moveApi.listChains();
       if (!payloadFailure(payload)) {
-        state.chains = (payload.chains as ChainProfile[]) || [];
+        state.chains = Array.isArray(payload.profiles)
+          ? (payload.profiles as ChainProfile[])
+          : [];
       }
     } catch (_) {
       /* chain labels fall back to "Chain N" */
@@ -1726,6 +1790,8 @@ export function createMoveDestination(
       JSON.stringify(plan.summary || {}),
       eligible,
       (plan.linkage_findings || []).length,
+      (plan.risk_findings || []).length,
+      plan.origin || "operator",
       state.chains.length,
       state.parties.length,
     ].join("|");
@@ -1754,12 +1820,13 @@ export function createMoveDestination(
           }),
           " · " + chainName(plan.chain_id) + " · created ",
           timeEl(plan.created_at_unix, now),
+          " · Source: " + planOriginLabel(plan.origin),
           eligible ? " · " + eligible + " ready to enqueue" : "",
         ),
-        (plan.linkage_findings || []).length
+        (plan.linkage_findings || []).length || (plan.risk_findings || []).length
           ? el("p", {
               class: "move-plan-row-warning",
-              text: "Privacy: this plan would link payers — review before approving.",
+              text: "Privacy or linkage findings need review before approval.",
             })
           : null,
       );
@@ -2171,6 +2238,7 @@ export function createMoveDestination(
           }),
           " · " + chainName(plan.chain_id) + " · created ",
           timeEl(plan.created_at_unix, now),
+          " · Source: " + planOriginLabel(plan.origin),
         ),
         el("p", {
           class: "move-detail-guide",
@@ -2213,6 +2281,56 @@ export function createMoveDestination(
               class: "field-hint",
               text:
                 "Flags payers that would sweep to the same destination. Sigillum-generated gas top-ups are checked the same way: one sponsor funding different payers warns, and is blocked when linkage protection is on. Manual gas funding, amount/timing correlation, downstream re-merging, and multi-hop flows remain operator discipline.",
+            }),
+          ),
+        ),
+      );
+    }
+    if ((plan.risk_findings || []).length) {
+      const findings = (plan.risk_findings || []).map(riskFindingPresentation);
+      const tier: Tier = findings.some((finding) => finding.tier === "danger")
+        ? "danger"
+        : "review";
+      root.appendChild(
+        el(
+          "div",
+          { class: "move-banner", dataset: { tier } },
+          el("p", {
+            class: "move-banner-text",
+            text:
+              "Plan risk findings: these are advisory signals. Execution is blocked only when the applicable policy gate or step blocker says so.",
+          }),
+          el(
+            "ul",
+            { class: "move-policy-sentences" },
+            ...findings.map((finding, index) => {
+              const wireFinding = plan.risk_findings?.[index];
+              return el(
+                "li",
+                null,
+                pill(String(wireFinding?.risk_level || "review")),
+                " " + finding.title + ": " + finding.summary,
+                finding.recommendation
+                  ? el("span", {
+                      class: "field-hint",
+                      text: " Recommended: " + finding.recommendation,
+                    })
+                  : null,
+                (wireFinding?.evidence || []).length
+                  ? el(
+                      "details",
+                      { class: "move-banner-details" },
+                      el("summary", { text: "Evidence" }),
+                      el(
+                        "ul",
+                        { class: "detail-list-plain" },
+                        ...(wireFinding?.evidence || []).map((line) =>
+                          el("li", { text: line }),
+                        ),
+                      ),
+                    )
+                  : null,
+              );
             }),
           ),
         ),

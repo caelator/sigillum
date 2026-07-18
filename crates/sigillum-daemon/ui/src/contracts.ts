@@ -188,12 +188,21 @@ export interface NftMetadataCollectionOptIn {
 
 export interface RiskFinding {
   id: string;
-  severity: string;
   category: string;
-  title: string;
-  detail: string;
+  risk_level: string;
+  status: string;
+  wallet_family: string;
+  wallet_profile: string;
+  provider_profile: string;
+  chain_id: number;
+  address: string;
+  subject_type: string;
+  subject: string;
   source: string;
-  updated_at_unix: number;
+  recommendation: string;
+  evidence?: string[];
+  first_seen_at_unix: number;
+  last_checked_at_unix: number;
 }
 
 export interface RiskCatalogEntry {
@@ -333,12 +342,15 @@ export interface ConsolidationPlan {
   status: WalletPlanStatus;
   chain_id: number;
   destination_address?: string | null;
+  /** Absent for operator-generated plans; `treasury_automation` for maintenance drafts. */
+  origin?: string | null;
   created_at_unix: number;
   updated_at_unix: number;
   summary: ConsolidationPlanSummary;
   steps: ConsolidationPlanStep[];
   policy_violations?: string[];
   linkage_findings?: string[];
+  risk_findings?: RiskFinding[];
 }
 
 export interface PartyDestination {

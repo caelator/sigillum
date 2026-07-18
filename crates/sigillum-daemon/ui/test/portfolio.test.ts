@@ -5,7 +5,7 @@ import { createDaemonApi } from "../src/core/api";
 import type { CoreRuntime } from "../src/core/live";
 import { parseHash, type Route } from "../src/core/router";
 import { createCoreStore } from "../src/core/state";
-import type { Operation } from "../src/contracts";
+import type { Operation, RiskFinding } from "../src/contracts";
 import {
   buildScanLaunchPlan,
   createPortfolioDestination,
@@ -118,6 +118,25 @@ function mountAt(path: string[] = []) {
 
 const NOW = Math.floor(Date.now() / 1000);
 const SAMPLE_ADDRESS = "0x71C7d3e1234567890abcdef1234567890aA976F";
+
+const SAMPLE_GAS_FUNDER_FINDING: RiskFinding = {
+  id: "common_gas_funder:1:0xaaa",
+  category: "common_gas_funder",
+  risk_level: "high",
+  status: "open",
+  wallet_family: "eth-stealth",
+  wallet_profile: "w",
+  provider_profile: "p",
+  chain_id: 1,
+  address: "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  subject_type: "gas_funder",
+  subject: "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  source: "local-risk-engine",
+  recommendation: "Fund each party's gas from a distinct sponsor address.",
+  evidence: ["Gas funder/sponsor: 0xaaa"],
+  first_seen_at_unix: NOW - 3600,
+  last_checked_at_unix: NOW - 60,
+};
 
 function sampleInventoryResponse() {
   return {
@@ -681,27 +700,7 @@ test("Portfolio risk view: findings render with tiers and plain language; catalo
     const method = (init as { method?: string })?.method ?? "GET";
     if (path.startsWith("/api/risk/findings")) {
       return {
-        findings: [
-          {
-            id: "common_gas_funder:1:0xaaa",
-            category: "common_gas_funder",
-            risk_level: "high",
-            status: "open",
-            wallet_family: "eth-stealth",
-            wallet_profile: "w",
-            provider_profile: "p",
-            chain_id: 1,
-            address: "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-            subject_type: "gas_funder",
-            subject: "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-            source: "local-risk-engine",
-            recommendation:
-              "Fund each party's gas from a distinct sponsor address.",
-            evidence: ["Gas funder/sponsor: 0xaaa"],
-            first_seen_at_unix: NOW - 3600,
-            last_checked_at_unix: NOW - 60,
-          },
-        ],
+        findings: [SAMPLE_GAS_FUNDER_FINDING],
         pagination: { total: 1, limit: 25, offset: 0, has_more: false },
       };
     }
@@ -736,6 +735,7 @@ test("Portfolio risk view: findings render with tiers and plain language; catalo
     `common_gas_funder in plain language: ${text}`,
   );
   ok(text.includes("distinct sponsor address"), "recommendation shown");
+  ok(text.includes("Gas funder/sponsor: 0xaaa"), "evidence shown in disclosure");
   ok(text.includes("high"), "severity pill");
 
   // Catalog add: successful submit posts the DTO.
