@@ -3,7 +3,7 @@
 **Checkpoint date:** 2026-07-18
 
 **Current implementation checkpoint:**
-`c435611fc1e4d8548a832b4bcf01f146d61ca19b` (`c435611`)
+`8ea6f8eb66c044f94ba5c1ad76ae4477ae03be63` (`8ea6f8e`)
 
 **Historical accessibility checkpoint:** `29426df`
 (`Harden keyboard and accessibility gates`)
@@ -15,17 +15,21 @@
 
 **Master plan:** [operator-surface-and-privacy-plan.md](./operator-surface-and-privacy-plan.md)
 
-This handoff is the zero-context continuation point. Verify that `c435611` is
+This handoff is the zero-context continuation point. Verify that `8ea6f8e` is
 the current implementation ancestor before relying on it: later implementation
 work may supersede the checkpoint without updating this file.
 
 **Current implementation truth:** `c435611` commits the command palette,
 regenerated bundles, real-daemon browser-smoke migration, and reviewed
-session/focus race hardening. Grok 4.5 reported `CONVERGED: YES`, and the focused
-UI unit, typecheck, build, accessibility, screenshot, and real-daemon browser
-gates pass at that implementation checkpoint. This documentation correction is
-a follow-on delta. The complete release gate has not run for `c435611`; it must
-run at the eventual documentation-only successor commit.
+session/focus race hardening. `8ea6f8e` then repairs the architecture and
+formatting debt exposed by the first clean release-gate attempt, without
+relaxing any existing parent-file cap. It splits the affected Rust and authored
+CSS owners, restores strict clippy, regenerates the embedded stylesheet, and
+updates the architecture contract to the live UI core/destination layout. Grok
+4.5 reported `CONVERGED: YES` for both the plan and final implementation. This
+documentation correction is a follow-on delta. The complete release gate has
+not yet passed at `8ea6f8e`; it must run at the eventual documentation-only
+successor commit.
 
 ## 1. Mission and non-negotiable boundaries
 
@@ -33,9 +37,10 @@ Finish the operator-surface and privacy plan without weakening Sigillum's
 fail-closed authorization, execution, payment, evidence, or release contracts.
 The branch now contains the privacy/backend work and the five-destination
 operator console, including the interaction and browser-smoke work through
-`c435611`. Remaining work is the documentation-only checkpoint commit, manual
-visual sign-off, full-gate verification, protected-main integration, and
-same-SHA release evidence.
+`c435611` and the release-gate architecture repair through `8ea6f8e`.
+Remaining work is this documentation checkpoint commit, full-gate verification,
+operator visual sign-off, protected-main integration, and same-SHA release
+evidence.
 
 - Work only in the designated worktree and branch. Do not push, tag, publish,
   or change GitHub settings unless the operator explicitly authorizes it.
@@ -124,6 +129,27 @@ accessibility foundations.
   envelopes, unknown routes fail the run, and server contract tests cover the
   mock boundary.
 
+### Release-gate architecture repair
+
+- The first clean `./scripts/check-release.sh` attempt at `2ecb3f7` preserved a
+  real failure: `check-architecture.sh` stopped on `audit_log.rs` at 1909 lines
+  against its 1800-line cap. Once that first breach was repaired, the guard
+  exposed additional feature-branch growth in daemon, API, CLI, client, and
+  authored CSS files. No existing parent cap was raised.
+- `8ea6f8e` assigns that growth to explicit child owners while keeping public
+  Rust paths and JSON contracts stable. Queue replay/gates/outcome/broadcast
+  order remains in the processing loop; only fresh payload dispatch moved.
+  Inventory cancellation/checkpoint/finalization and AppState lock semantics
+  remain byte-equivalent inherent methods in child modules.
+- The architecture script now requires and budgets every new Rust/CSS owner,
+  enforces the complete authored stylesheet import order, and points at the
+  live `ui/src/core` and destination controllers instead of three dead files
+  removed by `cd4cf72`.
+- Workspace formatting drift and strict-clippy findings were repaired rather
+  than excluded from the release gate. The only lint allowance is scoped to
+  the Axum list-query boundary and documents why returning the final structured
+  `Response` is intentional.
+
 ### Commit sequence after the earlier console checkpoint
 
 - `a83302d` — hardened screenshot-harness contracts
@@ -137,6 +163,10 @@ accessibility foundations.
 - `c435611` — completed command palette, browser-smoke migration, session/SSE
   race corrections, modal/FIDO focus guards, and regenerated bundles; focused
   verification is green
+- `2ecb3f7` — refreshed this execution handoff before the first clean full-gate
+  attempt; that attempt failed at the architecture cap and is not a pass
+- `8ea6f8e` — restored architecture/format/clippy gates, split the over-cap
+  owners, regenerated the stylesheet bundle, and passed focused verification
 
 ## 3. Verification by checkpoint
 
@@ -160,8 +190,27 @@ Verified at implementation checkpoint `c435611`:
   real daemon. Its cold-build startup timeout now defaults to 120 seconds and
   is configurable.
 
+Verified at implementation checkpoint `8ea6f8e`:
+
+- `./scripts/check-architecture.sh`, `git diff --check`, and
+  `cargo fmt --all -- --check`: passed.
+- `cargo check --workspace --all-targets --locked`: passed.
+- `cargo clippy --workspace --all-targets --locked -- -D warnings`: passed.
+- `cargo test -p sigillum-api -p sigillum-client -p sigillum-cli
+  -p sigillum-daemon --all-targets --locked`: passed, including API/client/CLI
+  contracts, **495 daemon unit tests**, and every daemon integration target.
+- UI tests: **225/225 passed**; TypeScript typecheck and Vite build passed; the
+  checked-in `styles.css` bundle was regenerated.
+- Screenshot-server contracts: **5/5 passed**; accessibility: **15/15** with
+  axe-core `4.12.1`, **0 violations and 0 incomplete results**; screenshot
+  walkthrough: **12/12**; isolated real-daemon browser smoke: passed.
+- GitNexus impact review covered the CRITICAL AppState callers and HIGH scan/
+  queue surfaces; the index was refreshed at `8ea6f8e`. Cursor CLI Grok 4.5
+  final implementation review reported `CONVERGED: YES` with no stop-ship
+  finding.
+
 These checks are source-slice evidence, not a complete release result. The
-following were **not** proved at `c435611`:
+following were **not** proved at `8ea6f8e`:
 
 - the complete `./scripts/check-release.sh` gate at the eventual
   documentation-only successor commit;
@@ -171,7 +220,7 @@ following were **not** proved at `c435611`:
 
 ## 4. Exact continuation order
 
-1. Commit the converged documentation-only correction on top of `c435611`.
+1. Commit this converged documentation-only correction on top of `8ea6f8e`.
 2. At that eventual documentation commit, make the next local validation step
    a clean-tree `./scripts/check-release.sh` run by itself. Preserve its output
    and any failures; do not infer a pass from the focused constituent checks.
@@ -179,7 +228,7 @@ following were **not** proved at `c435611`:
    operator visual sign-off or runtime proof.
 4. Review and merge through protected `main`, with required Ubuntu and macOS CI
    contexts green. Re-index GitNexus if implementation changes after
-   `c435611`.
+   `8ea6f8e`.
 5. Create the next immutable annotated candidate, `v1.0.0-rc.6`, only from the
    protected-main commit. Verify the six-job draft release and asset checksums.
 6. Bind F4 standard/chaos, F6 public-testnet receipts, desktop clean-install,
