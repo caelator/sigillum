@@ -200,17 +200,28 @@ class CdpClient {
   }
 }
 
-async function openPage(browserWebSocketUrl, targetUrl) {
+async function openPage(browserWebSocketUrl) {
   const debugUrl = new URL(browserWebSocketUrl);
-  const endpoint = `http://${debugUrl.hostname}:${debugUrl.port}/json/new?${encodeURIComponent(targetUrl)}`;
-  let response = await fetch(endpoint, { method: "PUT" });
+  const endpoint = `http://${debugUrl.hostname}:${debugUrl.port}/json/list`;
+  const response = await fetch(endpoint);
   if (!response.ok) {
-    response = await fetch(endpoint);
+    fail(`could not list browser targets: HTTP ${response.status}`);
   }
-  if (!response.ok) {
-    fail(`could not open browser target: HTTP ${response.status}`);
+  const targets = await response.json();
+  const pageTargets = Array.isArray(targets)
+    ? targets.filter((target) => target.type === "page")
+    : [];
+  if (pageTargets.length !== 1) {
+    const summary = pageTargets.map((target) => ({
+      id: target.id || "",
+      url: target.url || "",
+    }));
+    fail(
+      `expected exactly one initial browser page target; found ${pageTargets.length}: ` +
+        JSON.stringify(summary),
+    );
   }
-  const target = await response.json();
+  const [target] = pageTargets;
   if (!target.webSocketDebuggerUrl) {
     fail("browser target did not include a DevTools websocket URL");
   }
@@ -453,7 +464,13 @@ async function waitForRefreshCycle(cdp, description) {
           "timed out waiting for refresh busy -> live; state=" +
           (indicator.dataset.state || "missing") +
           "; visibility=" +
-          document.visibilityState
+          document.visibilityState +
+          "; hidden=" +
+          document.hidden +
+          "; hasFocus=" +
+          document.hasFocus() +
+          "; visibilityHistory=" +
+          JSON.stringify(globalThis.__sigillumSmokeVisibilityHistory || [])
         ));
       }, ${REFRESH_CYCLE_TIMEOUT_MS});
       inspect();
@@ -683,14 +700,29 @@ async function runBrowserSmoke(cdp) {
   });
 
   await cdp.send("Page.enable");
-  // `/json/new` creates a second tab alongside Chrome's initial about:blank
-  // target. macOS headless Chrome does not consistently make that new target
-  // foreground, and the shipped UI correctly pauses refresh while hidden.
-  // Activate the smoke target before navigation so refresh-liveness assertions
-  // exercise a visible operator console on every CI platform.
+  // Reuse Chrome's sole initial about:blank target instead of creating a
+  // competing second tab through `/json/new`. With two page targets, hosted
+  // macOS later reports the app target as hidden, which correctly pauses the
+  // shipped visibility-aware refresh controller. Keep one page target and
+  // activate it before navigation so refresh-liveness checks exercise a
+  // genuinely visible operator console on every CI platform.
   await cdp.send("Page.bringToFront");
   await cdp.send("Runtime.enable");
   await cdp.send("Network.enable");
+  await cdp.send("Page.addScriptToEvaluateOnNewDocument", {
+    source: `(() => {
+      const history = [];
+      globalThis.__sigillumSmokeVisibilityHistory = history;
+      const record = () => history.push({
+        state: document.visibilityState,
+        hidden: document.hidden,
+        hasFocus: document.hasFocus(),
+        at: Date.now(),
+      });
+      record();
+      document.addEventListener("visibilitychange", record);
+    })();`,
+  });
   await cdp.send("Page.setViewport", { width: 1440, height: 1100, deviceScaleFactor: 1, mobile: false }).catch(() => {});
   await cdp.send("Page.navigate", { url: TARGET_URL });
 
@@ -976,7 +1008,7 @@ let cdp;
 try {
   chrome = launchChrome();
   const browserWebSocketUrl = await chrome.ready;
-  cdp = await openPage(browserWebSocketUrl, TARGET_URL);
+  cdp = await openPage(browserWebSocketUrl);
   await runBrowserSmoke(cdp);
   console.log("browser smoke checks passed");
 } catch (error) {
