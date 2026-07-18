@@ -154,16 +154,6 @@ fn build_receiving_overview(
     deposits: &DepositState,
     now: u64,
 ) -> ReceivingOverviewResponse {
-    let mut balances_by_address: BTreeMap<String, [u8; 32]> = BTreeMap::new();
-    for address in &state.addresses {
-        let balance = decode_quantity_hex(&address.native_balance_wei_hex).unwrap_or([0u8; 32]);
-        let total = balances_by_address
-            .entry(address.address.to_ascii_lowercase())
-            .or_insert([0u8; 32]);
-        let current = *total;
-        *total = add_u256(&current, &balance);
-    }
-
     let known_party_ids: BTreeSet<String> =
         state.parties.iter().map(|party| party.id.clone()).collect();
     let mut items_by_party_id: BTreeMap<String, Vec<ReceivingItem>> = BTreeMap::new();
@@ -176,7 +166,7 @@ fn build_receiving_overview(
         .filter(|allocation| allocation.status == RECEIVE_STATUS_ACTIVE)
     {
         hd_count += 1;
-        let item = hd_receiving_item(allocation, &balances_by_address);
+        let item = hd_receiving_item(allocation, &state.addresses);
         let resolved_counterparty_id = item
             .counterparty_id
             .as_ref()
@@ -331,11 +321,25 @@ fn trimmed_str(value: Option<&str>) -> Option<&str> {
 
 fn hd_receiving_item(
     allocation: &TreasuryReceiveAllocation,
-    balances_by_address: &BTreeMap<String, [u8; 32]>,
+    addresses: &[WalletInventoryAddress],
 ) -> ReceivingItem {
-    let balance = balances_by_address.get(&allocation.address.to_ascii_lowercase());
+    let balance = addresses
+        .iter()
+        .filter(|address| {
+            address.wallet_family == allocation.wallet_family
+                && address.wallet_profile == allocation.wallet_profile
+                && address.chain_id == allocation.chain_id
+                && address.address.eq_ignore_ascii_case(&allocation.address)
+        })
+        .max_by(|left, right| {
+            left.last_checked_at_unix
+                .cmp(&right.last_checked_at_unix)
+                .then_with(|| left.provider_profile.cmp(&right.provider_profile))
+                .then_with(|| left.id.cmp(&right.id))
+        })
+        .and_then(|address| decode_quantity_hex(&address.native_balance_wei_hex).ok());
     let (balance_known, balance_native_wei_hex) = match balance {
-        Some(balance) => (true, Some(encode_quantity_hex(balance))),
+        Some(balance) => (true, Some(encode_quantity_hex(&balance))),
         None => (false, None),
     };
 
@@ -357,6 +361,8 @@ fn hd_receiving_item(
 }
 
 fn stealth_receiving_item(deposit: &EthStealthDeposit) -> ReceivingItem {
+    let balance_native_wei_hex = deposit.observed_native_balance_wei_hex.clone();
+    let balance_known = balance_native_wei_hex.is_some();
     ReceivingItem {
         source_type: "stealth".into(),
         address: deposit.stealth_address.clone(),
@@ -367,13 +373,8 @@ fn stealth_receiving_item(deposit: &EthStealthDeposit) -> ReceivingItem {
         label: deposit.note.clone(),
         counterparty_id: deposit.counterparty_id.clone(),
         linkage_warning: None,
-        balance_native_wei_hex: Some(
-            deposit
-                .observed_native_balance_wei_hex
-                .clone()
-                .unwrap_or_else(|| "0x0".to_string()),
-        ),
-        balance_known: true,
+        balance_native_wei_hex,
+        balance_known,
         status: deposit.status.clone(),
         created_at_unix: deposit.created_at_unix,
     }
@@ -1781,12 +1782,15 @@ mod tests {
         let untagged_stealth_address = "0xcccccccccccccccccccccccccccccccccccccccc";
         let retired_address = "0xdddddddddddddddddddddddddddddddddddddddd";
         let tagged_stealth_address = "0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee";
+        let mut older_named_balance = receiving_inventory_address("named_a", named_address, "0x1");
+        older_named_balance.last_checked_at_unix = 1;
+        let mut latest_named_balance =
+            receiving_inventory_address("named_b", &named_address.to_ascii_uppercase(), "0x2");
+        latest_named_balance.provider_profile = "backup-mainnet".into();
+        latest_named_balance.last_checked_at_unix = 2;
         let state = WalletInventoryState {
             parties: vec![party],
-            addresses: vec![
-                receiving_inventory_address("named_a", named_address, "0x1"),
-                receiving_inventory_address("named_b", &named_address.to_ascii_uppercase(), "0x2"),
-            ],
+            addresses: vec![older_named_balance, latest_named_balance],
             receive_allocations: vec![
                 receiving_allocation(
                     "alloc_named",
@@ -1834,13 +1838,13 @@ mod tests {
         let named = &overview.groups[0];
         assert_eq!(named.counterparty.as_ref().unwrap().id, "party_1");
         assert_eq!(named.item_count, 2);
-        assert_eq!(named.native_total_wei_hex, "0x8");
+        assert_eq!(named.native_total_wei_hex, "0x7");
         assert_eq!(named.items[0].source_type, "hd");
         assert_eq!(named.items[0].counterparty_id.as_deref(), Some("party_1"));
         assert!(named.items[0].balance_known);
         assert_eq!(
             named.items[0].balance_native_wei_hex.as_deref(),
-            Some("0x3")
+            Some("0x2")
         );
         let tagged_stealth = named
             .items
@@ -1891,7 +1895,7 @@ mod tests {
         assert_eq!(overview.totals.item_count, 4);
         assert_eq!(overview.totals.hd_count, 2);
         assert_eq!(overview.totals.stealth_count, 2);
-        assert_eq!(overview.totals.native_total_wei_hex, "0xc");
+        assert_eq!(overview.totals.native_total_wei_hex, "0xb");
         assert_eq!(overview.coverage.addresses_total, 4);
         assert_eq!(overview.coverage.addresses_with_known_balance, 3);
     }
@@ -2389,10 +2393,49 @@ mod tests {
         allocation.chain_id = 8453;
         allocation.chain_id_assumed = true;
 
-        let item = hd_receiving_item(&allocation, &BTreeMap::new());
+        let item = hd_receiving_item(&allocation, &[]);
 
         assert_eq!(item.chain_id, 8453);
         assert!(item.chain_id_assumed);
+    }
+
+    #[test]
+    fn hd_receiving_item_uses_freshest_matching_wallet_chain_observation() {
+        let address = "0x1111111111111111111111111111111111111111";
+        let allocation =
+            receiving_allocation("alloc-base", address, RECEIVE_STATUS_ACTIVE, None, 1);
+
+        let mut matching_older = receiving_inventory_address("matching-older", address, "0x1");
+        matching_older.provider_profile = "mainnet-primary".into();
+        matching_older.last_checked_at_unix = 10;
+        let mut matching_latest =
+            receiving_inventory_address("matching-latest", &address.to_ascii_uppercase(), "0x2");
+        matching_latest.provider_profile = "mainnet-backup".into();
+        matching_latest.last_checked_at_unix = 20;
+
+        let mut wrong_family = receiving_inventory_address("wrong-family", address, "0x10");
+        wrong_family.wallet_family = "eth-seed".into();
+        wrong_family.last_checked_at_unix = 30;
+        let mut wrong_profile = receiving_inventory_address("wrong-profile", address, "0x20");
+        wrong_profile.wallet_profile = "other-profile".into();
+        wrong_profile.last_checked_at_unix = 40;
+        let mut wrong_chain = receiving_inventory_address("wrong-chain", address, "0x40");
+        wrong_chain.chain_id = 8453;
+        wrong_chain.last_checked_at_unix = 50;
+
+        let item = hd_receiving_item(
+            &allocation,
+            &[
+                matching_older,
+                matching_latest,
+                wrong_family,
+                wrong_profile,
+                wrong_chain,
+            ],
+        );
+
+        assert!(item.balance_known);
+        assert_eq!(item.balance_native_wei_hex.as_deref(), Some("0x2"));
     }
 
     #[test]
@@ -2410,5 +2453,20 @@ mod tests {
 
         assert_eq!(item.chain_id, 8453);
         assert!(item.chain_id_assumed);
+    }
+
+    #[test]
+    fn stealth_receiving_item_keeps_unobserved_balance_unknown() {
+        let deposit = receiving_stealth_deposit(
+            "dep-unobserved",
+            "0x3333333333333333333333333333333333333333",
+            None,
+            None,
+        );
+
+        let item = stealth_receiving_item(&deposit);
+
+        assert!(!item.balance_known);
+        assert!(item.balance_native_wei_hex.is_none());
     }
 }
