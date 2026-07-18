@@ -5,8 +5,8 @@
 **Current implementation checkpoint:**
 `8ea6f8eb66c044f94ba5c1ad76ae4477ae03be63` (`8ea6f8e`)
 
-**Current documentation checkpoint:**
-`7042178803155a5ced7925468cd687b566ca023a` (`7042178`)
+**Audited documentation/release-gate checkpoint:**
+`fc1e93b1aa2cf9524b2b99fd04342863ba6b2b1d` (`fc1e93b`)
 
 **Historical accessibility checkpoint:** `29426df`
 (`Harden keyboard and accessibility gates`)
@@ -19,7 +19,7 @@
 **Master plan:** [operator-surface-and-privacy-plan.md](./operator-surface-and-privacy-plan.md)
 
 This handoff is the zero-context continuation point. Verify that `8ea6f8e` is
-the current implementation ancestor and `7042178` is the documentation ancestor
+the implementation ancestor and `fc1e93b` is the audited release-gate ancestor
 before relying on it: later work may supersede either checkpoint without
 updating this file.
 
@@ -31,10 +31,11 @@ relaxing any existing parent-file cap. It splits the affected Rust and authored
 CSS owners, restores strict clippy, regenerates the embedded stylesheet, and
 updates the architecture contract to the live UI core/destination layout. Grok
 4.5 reported `CONVERGED: YES` for both the plan and final implementation.
-`7042178` documents that repair. A warm-up full-gate process at `7042178` reached
-`cargo deny`, then ended without a recoverable output/exit receipt; it is not a
-pass. The complete release gate remains pending at the eventual
-documentation-truth commit.
+`fc1e93b` synchronizes the current documentation and passes the complete
+clean-tree release gate in 919 seconds with every recorded return code zero.
+That receipt proves `fc1e93b` only; a documentation-only successor may carry it
+as predecessor evidence but requires an external exact-HEAD clean-gate receipt
+before protected-main integration and RC6.
 
 ## 1. Mission and non-negotiable boundaries
 
@@ -43,9 +44,9 @@ fail-closed authorization, execution, payment, evidence, or release contracts.
 The branch now contains the privacy/backend work and the five-destination
 operator console, including the interaction and browser-smoke work through
 `c435611` and the release-gate architecture repair through `8ea6f8e`.
-`7042178` records that repair in this handoff. Remaining work is the current
-documentation-truth commit, full-gate verification, operator visual sign-off,
-protected-main integration, and same-SHA release evidence.
+`fc1e93b` records that repair and passes the complete local source gate.
+Remaining work is any successor's external exact-HEAD gate receipt, operator
+visual sign-off, protected-main integration/CI, and same-SHA RC6 evidence.
 
 - Work only in the designated worktree and branch. Do not push, tag, publish,
   or change GitHub settings unless the operator explicitly authorizes it.
@@ -172,9 +173,9 @@ accessibility foundations.
   attempt; that attempt failed at the architecture cap and is not a pass
 - `8ea6f8e` — restored architecture/format/clippy gates, split the over-cap
   owners, regenerated the stylesheet bundle, and passed focused verification
-- `7042178` — documented the architecture repair and focused verification; its
-  warm-up full-gate process has no recoverable output/exit receipt and is not a
-  pass
+- `7042178` — documented the architecture repair and focused verification
+- `fc1e93b` — synchronized release checkpoint documentation and passed the
+  complete clean-tree release gate with an auditable external receipt
 
 ## 3. Verification by checkpoint
 
@@ -222,34 +223,38 @@ The warm-up `./scripts/check-release.sh` process at documentation checkpoint
 recoverable. It is intentionally preserved as non-evidence and does not prove
 the complete gate passed.
 
-These checks are source-slice evidence, not a complete release result. The
-following were **not** proved at `8ea6f8e`:
+The auditable clean gate at exact SHA
+`fc1e93b1aa2cf9524b2b99fd04342863ba6b2b1d` started at
+`2026-07-18T17:15:16Z`, ended at `2026-07-18T17:30:35Z`, and ran for 919 seconds.
+`gate_rc=0`, `tee_rc=0`, `filter_rc=0`, and `overall_rc=0`. The operator-local
+external receipt ID is `20260718T171516Z-fc1e93b1aa2c`; the log SHA-256 is
+`efb8e2240949d32f0f53ff8ee028d1016724df849e038b361b9fed78f23dab94`.
 
-- the complete `./scripts/check-release.sh` gate at the eventual
-  documentation-truth commit;
+The focused checks at `8ea6f8e` are source-slice evidence; the auditable
+`fc1e93b` run proves the complete local source gate. Neither proves the external
+operator/release receipts below:
+
 - clean-install desktop behavior or operator visual sign-off;
 - public-testnet F6 execution receipts;
 - a same-candidate sanitized release-evidence bundle.
 
 ## 4. Exact continuation order
 
-1. Commit the current documentation-truth correction on top of documentation
-   checkpoint `7042178` and implementation checkpoint `8ea6f8e`.
-2. At that resulting commit, make the next local validation step a clean-tree
-   `./scripts/check-release.sh` run by itself. Preserve its output and any
-   failures; do not infer a pass from the focused constituent checks or the
-   unrecoverable `7042178` warm-up.
-3. Review the 12 screenshots manually; automated mock rendering is not
+1. Preserve the `fc1e93b` receipt as SHA-bound predecessor evidence. If this
+   receipt-recording documentation creates a successor, run the clean gate at
+   that exact HEAD and retain the external receipt before protected-main
+   integration; do not edit the commit solely to embed its own receipt.
+2. Review the 12 screenshots manually; automated mock rendering is not
    operator visual sign-off or runtime proof.
-4. Review and merge through protected `main`, with required Ubuntu and macOS CI
+3. Review and merge through protected `main`, with required Ubuntu and macOS CI
    contexts green. Re-index GitNexus if implementation changes after
    `8ea6f8e`.
-5. Create the next immutable annotated candidate, `v1.0.0-rc.6`, only from the
+4. Create the next immutable annotated candidate, `v1.0.0-rc.6`, only from the
    protected-main commit. Verify the six-job draft release and asset checksums.
-6. Bind F4 standard/chaos, F6 public-testnet receipts, desktop clean-install,
+5. Bind F4 standard/chaos, F6 public-testnet receipts, desktop clean-install,
    doctor, and UI sign-off to the exact RC6 peeled SHA. Build and validate the
    external sanitized evidence archive.
-7. Only after every H1 receipt agrees may the operator make the explicit H2
+6. Only after every H1 receipt agrees may the operator make the explicit H2
    final-tag/publish decision. No final `v1.0.0` tag or published release exists
    at this handoff.
 

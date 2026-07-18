@@ -1,14 +1,17 @@
 # Operator Surface & Privacy Implementation Plan
 
-Status: **in execution; implementation checkpoint `8ea6f8e` and documentation
-checkpoint `7042178` on 2026-07-18** — started 2026-07-16 on branch
+Status: **in execution; implementation checkpoint `8ea6f8e` and audited
+documentation/release-gate checkpoint `fc1e93b` on 2026-07-18** — started
+2026-07-16 on branch
 `codex/operator-surface-privacy` (worktree
 `.claude/worktrees/agent-ux-privacy-exec`). The branch includes protected
-`origin/main` at `7e04743` through merge `3b647f8`. A warm-up full-gate process
-at `7042178` ended without a recoverable output/exit receipt and is not a pass;
-a clean full gate remains pending at the eventual documentation-truth commit.
-The original 1.1 sequence was pulled forward before the first final 1.0 release;
-after protected-main integration the next eligible candidate is RC6.
+`origin/main` at `7e04743` through merge `3b647f8`. The complete clean-tree
+release gate passed at exact SHA `fc1e93b` in 919 seconds with every recorded
+return code zero. A later documentation-only successor may carry that receipt as
+predecessor evidence, but its exact HEAD needs an external clean-gate receipt
+before protected-main integration. The original 1.1 sequence was pulled forward
+before the first final 1.0 release; after protected-main integration the next
+eligible candidate is RC6.
 Scope: console UI/UX overhaul, throwaway-wallet privacy, ERC-5564 stealth
 correctness and interoperability.
 
@@ -157,10 +160,9 @@ ratified), D-E (ERC-6538 deferred).
   - **Current implementation checkpoint (`8ea6f8e`):** the architecture,
     formatting, and strict-clippy gates are restored without raising an existing
     parent-file cap; focused Rust/UI verification and Grok 4.5 review are green.
-    `7042178` is the documentation successor, but its warm-up full-gate receipt
-    is unrecoverable and does not count as a pass. The documentation-truth
-    commit, clean full gate, manual visual sign-off, merge, and same-RC evidence
-    remain.
+    Audited documentation/release-gate checkpoint `fc1e93b` passes the complete
+    clean source gate. Manual visual sign-off, protected-main integration, exact
+    successor-HEAD gating when applicable, and same-RC external evidence remain.
     See `docs/execution-handoff.md` for the proof boundary and order.
 
 ## Original plan
@@ -407,18 +409,19 @@ commands, refresh, and self-check; modal refusal, filtering, wrapped navigation,
 focus restoration, async-error handling, lock-transition fail-closed behavior,
 session races, and modal/FIDO focus guards are tested, and regenerated bundles
 are present. Implementation checkpoint `8ea6f8e` restores the architecture,
-formatting, and strict-clippy gates, and `7042178` documents that repair. Its
-warm-up full-gate receipt is unrecoverable, so the documentation-truth commit
-and a clean full gate remain.
+formatting, and strict-clippy gates. Audited checkpoint `fc1e93b` records that
+repair and passes the complete clean-tree release gate; any later
+documentation-only successor still needs an external exact-HEAD receipt before
+protected-main integration.
 
 **4.5 Acceptance bar per destination** (gate): no raw hex/epoch/camelCase in
 default view; axe-core clean; keyboard-complete; SSE-live; smoke tests updated;
 screenshot walkthrough promoted to release evidence. The 14-scenario pinned
 axe gate was green at `29426df`; at `c435611` the gate is 15/15, the 12-shot
-walkthrough passes, and real-daemon browser smoke passes. This bar remains open
-until manual screenshot review, a trustworthy full clean-tree release gate at
-the eventual documentation-truth commit, merge, and operator sign-off are
-complete.
+walkthrough passes, and real-daemon browser smoke passes. The complete source
+gate passes at `fc1e93b`. This bar remains open until manual screenshot review,
+any successor's exact-HEAD external gate, protected-main merge/CI, and operator
+sign-off are complete.
 
 ### Phase 5 — Evidence, docs, and pre-final 1.0 release (~1–2 weeks)
 

@@ -18,22 +18,26 @@ protected `origin/main` through merge `3b647f8`; interaction/browser checkpoint
 12/12 screenshots, and a green real-daemon browser gate, plus focused coverage
 for token-aware retirement and reconnection of authenticated SSE streams.
 Current implementation checkpoint `8ea6f8e` restores the architecture,
-formatting, and strict-clippy gates, and `7042178` is its documentation
-successor. A warm-up full-gate process at `7042178` ended without a recoverable
-output/exit receipt and is not a pass; a clean full gate remains pending at the
-eventual documentation-truth commit. RC5 evidence is therefore historical
-baseline for this feature line; after protected-main integration the next
-eligible candidate is RC6 and all release evidence must bind to RC6's exact
-peeled SHA. There is no final `v1.0.0` tag and no published GitHub Release.
-Earlier RC2–RC4 tags remain immutable failed-contract receipts. The supported
-boundary remains local-first, single-host, and not internet-facing.
+formatting, and strict-clippy gates. Audited documentation/release-gate
+checkpoint `fc1e93b1aa2cf9524b2b99fd04342863ba6b2b1d` passed the complete
+clean-tree release gate in 919 seconds with every recorded return code zero;
+the receipt log SHA-256 is
+`efb8e2240949d32f0f53ff8ee028d1016724df849e038b361b9fed78f23dab94`.
+That receipt proves `fc1e93b` only. A later documentation-only successor may
+carry this record as predecessor evidence, but its exact HEAD still requires an
+external clean-gate receipt before protected-main integration and RC6. RC5
+evidence is therefore historical baseline for this feature line; after that
+integration the next eligible candidate is RC6 and all release evidence must
+bind to RC6's exact peeled SHA. There is no final `v1.0.0` tag and no published
+GitHub Release. Earlier RC2–RC4 tags remain immutable failed-contract receipts.
+The supported boundary remains local-first, single-host, and not
+internet-facing.
 
 ## Summary
 
-Sigillum's earlier RC met the full-workspace baseline for the documented
-local-first scope. The current hardening checkout must re-prove that baseline
-for the local daemon, client, core, CLI, the `sigillum-gateway` sidecar, and the
-shipped EVM wallet-management product:
+The clean source gate at `fc1e93b` re-proved the full-workspace baseline for the
+documented local-first scope across the local daemon, client, core, CLI, the
+`sigillum-gateway` sidecar, and the shipped EVM wallet-management product:
 
 - the workspace needs to stay green on the executable `./scripts/check-release.sh`
   gate, including metadata, architecture guardrails, daemon UI checks, tests,
@@ -194,11 +198,11 @@ its phases 1–3 are absorbed into the 1.0 plan.
 The next work should still avoid speculative new product scope first. The right
 immediate move is:
 
-1. commit the current documentation-truth correction on top of documentation
-   checkpoint `7042178` and implementation checkpoint `8ea6f8e`
-2. at that resulting commit, make the next local validation step a clean-tree
-   `./scripts/check-release.sh` run; the unrecoverable `7042178` warm-up and the
-   green focused checks do not substitute for the complete gate
+1. retain the exact `fc1e93b` gate receipt as predecessor evidence; if a later
+   documentation-only commit succeeds it, capture a clean external gate receipt
+   at that exact HEAD before protected-main integration without editing the
+   commit merely to embed its own receipt
+2. review the 12 screenshots manually and preserve any negative finding
 3. merge through protected `main` with required Ubuntu and macOS contexts green
 4. create immutable annotated RC6 and independently verify its draft assets
 5. collect RC6-bound doctor, standard/chaos soak, public-testnet F6,

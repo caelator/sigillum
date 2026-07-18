@@ -8,10 +8,15 @@ draft release. The historical operator-surface accessibility checkpoint is
 `29426df` and contains protected main through merge `3b647f8`; historical
 interaction/browser checkpoint `c435611` has green focused evidence. Current
 implementation checkpoint `8ea6f8e` restores the architecture, formatting, and
-strict-clippy gates, and `7042178` is its documentation successor. A warm-up
-full-gate process at `7042178` ended without a recoverable output/exit receipt
-and is not a pass. A clean full gate remains pending at the eventual
-documentation-truth commit.
+strict-clippy gates. Audited documentation/release-gate checkpoint
+`fc1e93b1aa2cf9524b2b99fd04342863ba6b2b1d` passed the complete clean-tree
+release gate from `2026-07-18T17:15:16Z` through `2026-07-18T17:30:35Z` (919
+seconds), with `gate_rc=0`, `tee_rc=0`, `filter_rc=0`, and `overall_rc=0`. The
+receipt log SHA-256 is
+`efb8e2240949d32f0f53ff8ee028d1016724df849e038b361b9fed78f23dab94`.
+This receipt is exact to `fc1e93b`; a later documentation-only successor may
+carry the record, but its exact HEAD needs an external clean-gate receipt before
+protected-main integration and RC6.
 
 **Plan authority:** [release-1.0-plan.md](./release-1.0-plan.md)
 
@@ -72,22 +77,19 @@ a commit that contains later hardening changes.
 
 ## 2. Execution order
 
-1. Commit the current documentation-truth correction on top of documentation
-   checkpoint `7042178` and implementation checkpoint `8ea6f8e`.
-2. At that resulting commit, make the next local validation step a clean-tree
-   `./scripts/check-release.sh` run by itself. Never run a full gate while
-   another agent or build is modifying the same checkout. The unrecoverable
-   `7042178` warm-up, the green focused architecture/Rust evidence at `8ea6f8e`,
-   and the 225/225 UI tests, typecheck/build, 15/15 accessibility, 12/12
-   screenshots, and isolated-daemon browser evidence at `c435611` do not
-   substitute for this gate or manual visual sign-off.
-3. Review the 12 screenshots manually. Preserve any negative finding; automated
+1. Preserve the `fc1e93b` receipt as SHA-bound predecessor evidence. If a later
+   documentation-only commit succeeds it, run `./scripts/check-release.sh` from
+   a clean checkout at that exact HEAD and retain the external receipt before
+   protected-main integration. Do not edit the commit solely to embed its own
+   receipt. Never overlap a full gate with another agent or build modifying the
+   checkout.
+2. Review the 12 screenshots manually. Preserve any negative finding; automated
    mock rendering is not operator sign-off or runtime proof.
-4. Before merge, verify that `main` protection requires both fixed-runner CI
+3. Before merge, verify that `main` protection requires both fixed-runner CI
    legs, blocks force-pushes, and that release-tag governance prevents updates
    and deletion. Remediate missing settings before landing through a pull
    request, then require both CI legs to pass.
-5. Only then create annotated `v1.0.0-rc.6`, verify the successful draft and
+4. Only then create annotated `v1.0.0-rc.6`, verify the successful draft and
    live asset checksums, and complete every operator gate in section 5 at the
    RC6 peeled SHA.
 

@@ -14,12 +14,14 @@
 > record required for final promotion. The operator-surface feature line's
 > interaction/browser checkpoint is `c435611`; implementation checkpoint
 > `8ea6f8e` restores the architecture, formatting, and strict-clippy gates, and
-> `7042178` is its documentation successor. Focused gates are green, but a
-> warm-up full-gate process at `7042178` ended without a recoverable output/exit
-> receipt and is not a pass. A clean full gate remains pending at the eventual
-> documentation-truth commit. The branch changes code after RC5, so its next
-> candidate is RC6 after protected-main merge. No final `v1.0.0` tag or
-> published GitHub Release exists.
+> audited documentation/release-gate checkpoint `fc1e93b` passed the complete
+> clean-tree release gate in 919 seconds with every recorded return code zero.
+> The receipt log has SHA-256
+> `efb8e2240949d32f0f53ff8ee028d1016724df849e038b361b9fed78f23dab94`.
+> That receipt proves `fc1e93b` only; any later documentation-only successor
+> must have its exact HEAD gated externally before protected-main integration.
+> The branch changes code after RC5, so its next candidate is RC6 after that
+> merge. No final `v1.0.0` tag or published GitHub Release exists.
 
 Sigillum is a self-hosted, single-operator workstation for finding EVM wallets
 and assets, understanding their provenance and risk, preparing consolidation
