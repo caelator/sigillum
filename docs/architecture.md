@@ -140,16 +140,9 @@ Current daemon behavior:
 - persists non-vault operator state behind schema-versioned JSON documents so storage evolution can add explicit migrations instead of implicit file-shape drift
 - composes the HTTP route surface from domain routers so endpoint wiring stays aligned with lifecycle, storage, wallet, deposit, queue, and FIDO2 service boundaries
 - renders the embedded operator UI from checked-in frontend assets under
-  `crates/sigillum-daemon/ui/src`; the Rust host only assembles HTML/CSS/script
-  assets and injects the CSP nonce, while `app.ts` imports TypeScript API,
-  session, render, status, refresh, action, shell, and domain-view modules and
-  Vite writes the checked-in `app.js` runtime and generated `styles.css` that
-  the daemon embeds; authored CSS now lives under `ui/src/styles/*` in ordered
-  token, layout, form, component, workspace, responsive, and polish modules,
-  while the UI domain modules own setup shell states, FIDO2 controls,
-  wallet/profile operations, inventory/risk/plans, and
-  deposit/queue/maintenance rendering with lightweight DOM smoke tests covering
-  those seams
+  `crates/sigillum-daemon/ui/src`; the Rust host assembles HTML/CSS/script
+  assets and injects the CSP nonce, while Vite writes the checked-in `app.js`
+  runtime and generated `styles.css` that the daemon embeds
 - exposes transit-style encrypt/decrypt/HMAC operations derived from the active compartment master key
 - centralizes daemon business rules behind an application-service layer instead of spreading them across route handlers
 - keeps wallet inventory discovery, risk derivation, and consolidation planning
@@ -364,6 +357,17 @@ Current daemon behavior:
   `GET /api/operations`, and `GET /api/operations/{id}` — so an always-open
   console cannot defeat the vault auto-lock either; routes that perform work
   must stay on the active verify
+- reconciles that stream in `ui/src/core/events.ts`: snapshots are
+  authoritative for live operation state, while bounded list requests enrich
+  terminal history; connection generations and slice revisions reject stale
+  completions; history retries do not degrade a healthy SSE connection; after
+  repeated stream failure the client enters passive polling fallback. Session
+  token revoke or rotation first retires the currently authenticated stream
+  generation, then permits reconnection only with current authorization; a
+  revoked token cannot leave an older open `EventSource` subscribed. Overview,
+  Move, Receiving, Portfolio, and Vault consume the relevant status,
+  operation, queue, sync, or resync slices. Residual legacy cards keep their
+  existing refresh loop, but destination controllers do not add new pollers
 - runs EVM discovery scans either synchronously inside the request (default,
   unchanged for existing clients) or as a background operation
   (`inventory/scan/evm` with `run_async: true`, or a discovery-job resume).
@@ -403,6 +407,87 @@ Current daemon behavior:
   stage's effects durably persisted. The drain stage inside a maintenance
   cycle registers no nested operation and is not canceled mid-run
 - keeps the gateway surface local-sidecar-only rather than treating it as an internet-facing service boundary
+
+### Operator console architecture
+
+The embedded console is a checked-in, zero-runtime-dependency frontend rather
+than a separate hosted application. `ui/src/app.ts` is the composition shell.
+`ui/src/core/live.ts` starts the runtime from the observable store, hash router,
+legacy adapter, SSE client, API client, DOM helpers, and keyboard layer. The
+five routed destination controllers are:
+
+- `Overview.ts`: lock/status summary, attention queue, treasury/inventory/queue
+  aggregates, self-check, and recent audit activity;
+- `Move.ts`: plan review, simulation/approval/enqueue, queue processing and
+  pause/resume, treasury policy, and maintenance;
+- `Receiving.ts`: receiving overview, parties, receive allocations, deposits,
+  tags, refresh, payer instructions, and sweep actions;
+- `portfolio.ts`: inventory, chains/profiles, discovery, risk, token registry,
+  and privacy-sensitive NFT metadata controls;
+- `Vault.ts`: session/compartment controls, secrets/API keys, FIDO2, snapshots,
+  reset, diagnostics, self-check, and security audit views.
+
+The hash router preserves deep links and mounts exactly one destination. The
+legacy adapter stashes every controller-owned host and sibling, prevents legacy
+writers from mutating a taken-over host, and restores the stashed DOM on
+unmount. Keyed `renderList` updates preserve nodes when identity is stable, so
+focused controls and in-progress operator input are not replaced by refreshes.
+
+`core/api.ts` is the shared typed client for promoted methods. It is not yet the
+only request path: controllers keep small session-aware wrappers for endpoints
+not present in the core client. Those wrappers use the same structured
+`ApiFailure` envelope and are an explicit migration boundary, not a second
+wire contract. The underlying `requestWithSession` captures the token placed on
+each request; a `401` clears browser authorization only when that token still
+matches the current token. A late response from a pre-reauthentication request
+therefore cannot revoke the replacement session.
+
+The interaction layer has one shared modal coordinator. Only one modal may be
+active; focusable elements are recomputed in DOM order, focus is trapped,
+Escape and backdrop clicks cancel, and focus restores only to a still-connected
+element. All background body siblings are inert while the modal is active; a
+mutation observer isolates siblings appended later, while a focus guard closes
+the observer-microtask gap for programmatic focus. Original inert state is
+restored on close. Cancellation is a distinct result from an explicitly
+submitted blank value, so destructive handlers can prove that
+cancel/Escape/backdrop emit zero mutation requests. Dangerous signing,
+broadcast, delete, reset, and key actions are never optimistic. Safe optimistic
+updates, currently deposit tags, retain a rollback snapshot and restore it on
+write failure. Async controller refreshes use generation/revision guards so
+stale completions cannot overwrite newer state.
+
+Focus has explicit ownership. Setup and reauthentication forms map Enter only
+to the visible intended action. Locked-state autofocus occurs once per
+transition and yields to an active modal or operator-selected control. Keyed
+workspace and compartment navigation retains focus across refreshes. Semantic
+landmarks, headings, labels, lists, tables, and file inputs are enforced by the
+pinned accessibility gate. Delayed FIDO-device detection mutates unlock guidance
+only while the shell is still in locked mode, preventing an old detection
+response from reintroducing locked controls after authentication.
+
+Session-token observers make the visible authorization boundary immediate.
+When same-tab code clears the token while the console is unlocked, the shell
+synchronously enters locked mode and palette eligibility disappears; the
+five-second refresh remains reconciliation, not the enforcement boundary.
+
+The command palette is a deliberately narrow read/navigation surface, not an
+alternate action dispatcher. Its frozen registry contains exactly seven
+commands: navigate to each of the five destinations, refresh the workspace,
+and run self-check. Exactly one platform modifier plus `K` opens it only while
+the workspace is unlocked. It refuses to replace an active modal, uses the
+shared modal lifecycle, closes before dispatch/error reporting, and rechecks
+unlock state at execution so a lock transition fails closed. It exposes native
+dialog/combobox/listbox semantics with filter, wrapped arrow navigation, Enter,
+Escape/backdrop dismissal, and focus restoration. Value-moving, policy,
+delete, reveal, reset, and other broad legacy actions can never enter its
+registry.
+
+There are three distinct UI proof layers: fake-DOM unit/smoke tests, strict
+mock-envelope screenshot and axe runs, and real-daemon browser smoke. Mock
+screenshots prove the shipped HTML/CSS/JavaScript renders representative
+states; they do not prove daemon authentication, provider RPC, signing,
+broadcast, persistence, or desktop packaging. Release claims require the real
+browser smoke and the complete release gate in addition to the mock layer.
 
 What it intentionally does not do today:
 
@@ -553,10 +638,14 @@ no longer passes `--token-address` for standards-following payers. Refresh
 notices native gas arriving on a `funded_needs_gas` deposit and flips it to
 `funded`/sweep-ready on the next pass.
 
-*Sponsor top-ups (`fund_gas` for stealth deposits).* When the treasury policy
-allows sponsor gas top-ups (`allow_gas_topups`, the same flag the seed-plan
-path uses), enqueueing a sweep for an ERC-20 deposit whose last observed
-native balance is short of the sweep's estimated gas plans an
+*Sponsor top-ups (`fund_gas` for stealth deposits).* Gas top-ups require two
+independent policy facts: `allow_gas_topups: true` and a nonblank, valid
+`max_gas_topup_wei_hex`. A policy update that attempts to enable top-ups
+without that explicit cap fails validation. Runtime policy evaluation also
+requires the stored cap to parse, so missing, blank, malformed, or corrupt cap
+state disables top-ups rather than implying an unlimited or default allowance.
+When both facts are valid, enqueueing a sweep for an ERC-20 deposit whose last
+observed native balance is short of the sweep's estimated gas plans an
 `eth_stealth_gas_topup` queue job ahead of the sweep: 1.5x the sweep's
 estimated gas (the seed-path formula, still capped by
 `max_gas_topup_wei_hex`), sponsor solvency re-verified at execution (balance ≥
@@ -575,9 +664,9 @@ alone; the operator funds the sponsor address out-of-band. Execution
 re-derives the key, checks it against the recorded sponsor address
 (defense-in-depth, like the seed signer), and treats a locked compartment as a
 retryable `blocked`, never a signature. If any planning precondition fails
-(policy off, cap exceeded, sponsor unavailable or insolvent, gas already
-sufficient, or a live top-up already tracked) no top-up is emitted and the
-deposit keeps its historical behavior: the sweep blocks on gas until the
+(policy off, cap missing/invalid/exceeded, sponsor unavailable or insolvent,
+gas already sufficient, or a live top-up already tracked) no top-up is emitted
+and the deposit keeps its historical behavior: the sweep blocks on gas until the
 operator funds the address manually. The top-up job keeps a deliberate
 carve-out from the plan gates: it is not treasury-plan execution, its enqueue
 is already policy-gated on `allow_gas_topups`, and the drain-level pause
@@ -587,6 +676,23 @@ carve-out — since plan task 2.5, stealth transfers and sweeps gate under the
 at enqueue and drain, exactly like the `EthSeed*` equivalents.
 
 ## Privacy & Linkage Model
+
+Receiving balance ownership is wallet-scoped. Refresh keys and overview
+matching use `(wallet_family, wallet_profile, chain_id,
+case-insensitive-address)`, so two wallets that observe the same address cannot
+steal or misattribute one another's balance. A refresh fans one allocation out
+to every configured provider for its chain, deduplicates allocation counts,
+and stores each observation under that full identity. HD overview selects the
+freshest matching observation; deterministic provider/id ordering breaks equal
+timestamp ties. `ReceivingItem.balance_last_checked_at_unix` exposes that
+per-item freshness additively. Stealth items take their freshness from their
+deposit record.
+
+Counterparty destination editing is a patch contract rather than a lossy
+whole-form replacement: omitting `sweep_destination_address` retains the
+stored destination, while explicitly submitting a blank value clears it. This
+distinction lets the Receiving controller edit unrelated party fields without
+silently erasing a sweep destination.
 
 The receiving/treasury model centers on keeping payers unlinkable. Receive
 allocations and stealth deposits attribute to a first-class `Counterparty`, and
@@ -872,3 +978,8 @@ The next clean architecture step is not adding more crates. It is tightening inv
    monoliths, embedded UI asset placement, daemon UI TypeScript type-checks,
    required typed UI and authored CSS modules, externalized API/client tests,
    and the module ownership rules in [Refactor Notes](refactor-notes.md).
+7. Finish promoting the remaining thin controller request wrappers into the
+   shared typed client without changing their wire semantics.
+8. Keep the command palette, real-daemon browser smoke, pinned accessibility
+   scenarios, and controller takeover/focus contracts aligned whenever the
+   operator surface changes.

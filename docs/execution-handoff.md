@@ -1,306 +1,248 @@
 # Execution Handoff — Operator Surface & Privacy Plan
 
-**Checkpoint date:** 2026-07-17
-**For:** the next engineer (human or AI) continuing this work. Zero prior
-context assumed — this document is self-contained.
-**Master plan:** `docs/operator-surface-and-privacy-plan.md` (task numbers
-0.1–5 used below refer to it; its "Progress ledger" section tracks landed
-work and is updated at each phase boundary).
+**Checkpoint date:** 2026-07-18
 
----
+**Current implementation checkpoint:**
+`c435611fc1e4d8548a832b4bcf01f146d61ca19b` (`c435611`)
 
-## 1. Mission and hard constraints
+**Historical accessibility checkpoint:** `29426df`
+(`Harden keyboard and accessibility gates`)
 
-Execute the operator-surface & privacy plan end-to-end: Phase 0 rc-hardening,
-Phase 1 backend enablers, Phase 2 stealth ERC-5564 interop, Phase 3 HD
-privacy, Phase 4 console redesign, Phase 5 evidence/docs.
+**Branch:** `codex/operator-surface-privacy`
 
-Completion bar (verbatim from the goal): all code tasks in Phases 0–5
-implemented on the branch with `cargo test --workspace --locked` and the UI
-smoke suite green, docs (parity matrix, stability, architecture, changelog)
-updated to match, and operator-owned gates (publishing, merge to main,
-real-host evidence) explicitly documented as hand-back items.
+**Protected-main baseline:** `7e047438f6305ef1cedecdf4790e1b0e1d7e1e6e`
+(`origin/main`, merged into this branch by `3b647f8`)
 
-Hard rules — never violated so far, keep it that way:
+**Master plan:** [operator-surface-and-privacy-plan.md](./operator-surface-and-privacy-plan.md)
 
-- **Work only in the worktree:** `/Users/xx/Documents/Workspaces/Sigillum/.claude/worktrees/agent-ux-privacy-exec`
-- **Branch:** `codex/operator-surface-privacy` (based on `main` @ `815d262`).
-  Never push. Never touch `main` or other worktrees/branches. The user's main
-  checkout at `/Users/xx/Documents/Workspaces/Sigillum` is off-limits except
-  read-only reference.
-- **Commits:** `git commit --no-verify`, explicit `git add <paths>` per task
-  (never `git add -A`/`git add .`). Git identity is the machine's configured
-  `Codex <codex@openai.local>` — fine, use as-is.
-- **UI bundle discipline:** `crates/sigillum-daemon/ui/src/app.js` and
-  `src/styles.css` are CHECKED-IN build artifacts. After ANY UI source edit:
-  `cd crates/sigillum-daemon/ui && npm run build` and commit the regenerated
-  bundles with the change. The screenshot harness refuses to run on stale
-  bundles (mtime guard) — that's intentional.
-- **Cargo etiquette:** builds/tests serialize on the target-dir lock. With
-  parallel agents: wait, never kill another cargo process. Full gates run in
-  the background (`cargo test --workspace --locked > target/<name>.log 2>&1; echo EXIT:$?`).
-- **Subagent rules that emerged:** one agent per disjoint file set; shared
-  files (app.ts, contracts.ts, CHANGELOG, stability.md, routes/mod.rs) get
-  edited by exactly one agent or the orchestrator; agents report, orchestrator
-  reviews + commits. Subagent timeout is 30 min — resume the same agent id on
-  timeout. A spawn failing with `404 ... model k3` is a transient provider
-  error — just retry.
+This handoff is the zero-context continuation point. Verify that `c435611` is
+the current implementation ancestor before relying on it: later implementation
+work may supersede the checkpoint without updating this file.
 
----
+**Current implementation truth:** `c435611` commits the command palette,
+regenerated bundles, real-daemon browser-smoke migration, and reviewed
+session/focus race hardening. Grok 4.5 reported `CONVERGED: YES`, and the focused
+UI unit, typecheck, build, accessibility, screenshot, and real-daemon browser
+gates pass at that implementation checkpoint. This documentation correction is
+a follow-on delta. The complete release gate has not run for `c435611`; it must
+run at the eventual documentation-only successor commit.
 
-## 2. State of play (what's DONE — do not redo)
+## 1. Mission and non-negotiable boundaries
 
-~90 commits. Phases 0–3 are complete and gate-green; Phase 4 is ~80% done.
+Finish the operator-surface and privacy plan without weakening Sigillum's
+fail-closed authorization, execution, payment, evidence, or release contracts.
+The branch now contains the privacy/backend work and the five-destination
+operator console, including the interaction and browser-smoke work through
+`c435611`. Remaining work is the documentation-only checkpoint commit, manual
+visual sign-off, full-gate verification, protected-main integration, and
+same-SHA release evidence.
 
-- **Phase 0 (rc hardening):** C7 redesign ported onto main (4 cherry-picks);
-  compact topbar; journey card collapses; dead code removed; shared confirm
-  dialog with consequence tiers and every dangerous action guarded; humanized
-  displays (shared `render/format.ts`); labeled policy form + plain-English
-  summary; stealth guardrail warnings end-to-end; CLI mnemonic redaction +
-  `eth-seed upsert`; screenshot harness `scripts/ui-screenshots/`; planner
-  unwraps fixed; status-contract alignment.
-- **Phase 1 (backend enablers):** structured error codes + field validation
-  (`sigillum-api/src/error_codes.rs` catalog); async operations framework
-  (`GET /api/operations*`, real cancel/resume for scans/drains/maintenance,
-  adversarial-tested); SSE `GET /api/events` (snapshot/operation/queue/status,
-  `v:1`); pagination/filter/sort on six list endpoints; background scheduler
-  (retries/receipts/refresh advance with no client; honors lock/gates/kill
-  switch); passive reads for status/operations/events (idle-lock can no longer
-  be defeated by an open console); `/api/chains*` canonical.
-- **Phase 2 (stealth interop):** hash-convention switch to
-  `keccak256(compressed33)` (ScopeLift-compatible, verified against the actual
-  SDK source) with dual-decode of legacy `x32` records and store migration v3;
-  external fixed test vectors (no more self-roundtrip-only); watch-only
-  detection (`EthereumStealthWatchView` — spending secret never enters
-  detection); EIP-5564 metadata SHOULD layouts (produce+parse); per-wallet gas
-  sponsor + `EthStealthGasTopup` queue payload with sweep prerequisites and
-  linkage accounting; stealth sweeps gated under the Sweep execution family
-  (carve-out closed); persisted announcement-scan cursors; single-key 66-byte
-  meta-addresses.
-- **Phase 3 (HD privacy):** provider partitioning for same-chain scans
-  (`partition_providers`, consistent per-address assignment + jitter); full
-  forget/prune (`/api/inventory/addresses/delete`,
-  `/api/treasury/receive-addresses/purge`, profile-delete cascade); xpub
-  exposure warnings + first-copy gate; `block_cross_party_linkage` default ON;
-  `common_gas_funder` advisory risk findings; one-time-address lifecycle
-  (allocate → auto-watch → auto-sweep → retire → purge, scheduler-driven,
-  e2e-tested).
-- **Phase 4 (console redesign) — what's landed:**
-  - 4.1 core (`ui/src/core/`): `store.ts` (observable slices), `dom.ts`
-    (`el()` + keyed `renderList`), `router.ts` (hash router + legacy adapter),
-    `events.ts` (SSE client with poll fallback), `api.ts` (typed client,
-    `ApiFailure` union by error code), `state.ts`, `live.ts`
-    (`startCoreRuntime` composition root). All strict-typed, tested.
-  - 4.2 design system v2: consequence-tier tokens, `[data-tier]`, `.table`,
-    `.skeleton`, `.page-header`, `.section-empty`, `.status-dot`,
-    `.attention-item`, `.nums` (tabular numerals), `ui/DESIGN.md` rules.
-  - 4.3 all five destinations rebuilt as controllers:
-    `ui/src/destinations/{Overview,Move,Receiving,portfolio,Vault}.ts`
-    (note casing: portfolio is lowercase), styles in
-    `ui/src/styles/dest-*.css`, tests in `ui/test/{Overview,Move,Receiving,portfolio,Vault}.test.ts`.
-    Wired into `app.ts` (factories registered via `adapter.register(factory(runtime))`),
-    CSS imported in `styles/app.css`. **183/183 UI tests green; tsc clean;
-    committed as `a866c78`.** A kept-key zombie-row bug in `renderList` was
-    fixed during wiring (has a regression test in `test/core-dom.test.ts`).
+- Work only in the designated worktree and branch. Do not push, tag, publish,
+  or change GitHub settings unless the operator explicitly authorizes it.
+- `crates/sigillum-daemon/ui/src/app.js` and `src/styles.css` are checked-in
+  build artifacts. Any UI source change requires `npm run build` and a review
+  of the regenerated bundles.
+- Never convert mock, local, historical, or different-SHA evidence into a
+  release claim. Preserve failed receipts.
+- Run release gates only from a clean checkout and do not overlap them with
+  another agent changing or building the same tree.
+- RC5 is historical evidence for protected `main` at `7e04743`; this feature
+  branch changes the product after that SHA. Its next eligible candidate is
+  RC6 after protected-main merge.
 
-Latest commits: `e545627` (hero null-safety, below), `a866c78` (five
-destinations), `550b69f` (maintenance summary emission rule).
+## 2. Implemented state — do not redo
 
-## 3. EXACTLY where work stopped (resume here)
+Phases 0–3 are complete. Phase 4 has the five-controller console, hardened
+state reconciliation, receiving parity, modal semantics, and keyboard and
+accessibility foundations.
 
-I was visually verifying the rebuilt console with the screenshot harness and
-hit two failures. One is fixed; one is diagnosed-but-unfixed.
+### Backend and privacy
 
-1. ✅ FIXED (`e545627`): legacy `updateHeroState` wrote to hero elements the
-   Overview controller had detached → crashed the refresh loop (sidebar never
-   rendered → harness failed with "workspace overview nav item did not become
-   true"). Now null-safe.
-2. ⛔ OPEN: periodic `TypeError: Cannot read properties of undefined (reading
-   'filter')` in the bundled app when running against the MOCK server.
-   **Prime suspect: the mock returns `{}` for `GET /api/operations`**
-   (confirmed via curl) while the new typed client/destination controllers
-   expect `{operations: []}` — every `{}` answer from the mock for endpoints
-   the new destinations call will crash a controller doing
-   `data.<collection>.filter/.map`. This is a mock-data gap, not a product bug
-   (the real daemon always returns proper envelopes).
+- Structured error codes and field validation; real asynchronous operations
+  with cooperative discovery cancellation/resume; passive SSE and status reads;
+  pagination/filter/sort; a guarded background scheduler; canonical
+  `/api/chains*` routes.
+- Standards-compatible ERC-5564 compressed-point hashing with dual decode for
+  pre-switch records, external vectors, watch-only detection, persisted scan
+  cursors, single-key meta-addresses, and payer-gas metadata.
+- Provider-partitioned HD scanning, forget/prune cascades, xpub exposure gates,
+  default-on cross-party linkage blocking, common-funder findings, and the
+  scheduler-driven one-time receive lifecycle.
+- Explicit gas-top-up caps. Enabling gas top-ups without a nonblank valid
+  `max_gas_topup_wei_hex` fails validation; missing or corrupt stored caps keep
+  runtime gas-topup policy disabled.
+- Receiving balance identity is `(wallet_family, wallet_profile, chain_id,
+  address)`, not address alone. Overview selects the freshest matching
+  observation deterministically. `ReceivingItem` exposes additive optional
+  `balance_last_checked_at_unix`.
+- Counterparty destination updates use patch semantics: omitted retains the
+  stored destination; explicit blank clears it.
 
-**Next actions, in order:**
+### Operator console
 
-1. Extend `scripts/ui-screenshots/mock-data.mjs` (+ the route table in
-   `server.mjs` if needed) so EVERY endpoint the new destinations call returns
-   a realistic envelope. Destination endpoint lists are in each controller's
-   header/imports; the union includes (verify by grepping `runtime.api.` and
-   `requestWithSession(` in `ui/src/destinations/`): `/api/operations`
-   (list+cancel), `/api/profiles/evm`, `/api/chains`, `/api/treasury/parties`,
-   `/api/treasury/receive-addresses`, `/api/profiles/eth-stealth`,
-   `/api/wallets/eth-stealth/export`, `/api/plans/consolidation` (+
-   generate/approve/simulate/export, enqueue-step/plan), `/api/queue/jobs`
-   (+ process/pause/resume), `/api/deposits/eth-stealth` (+ all verbs),
-   `/api/receiving/overview`, `/api/receiving/refresh-balances`,
-   `/api/receiving/deposits/tag`, `/api/inventory/scan/evm`,
-   `/api/discovery/jobs` (+cancel/resume), `/api/risk/findings`,
-   `/api/risk/catalog` (+upsert/delete), `/api/inventory/token-registry*`,
-   `/api/inventory/nft-metadata/*`, `/api/secrets`, `/api/api-keys`,
-   `/api/compartment/list` (+switch/add), `/api/fido2/{status,detect,list}`,
-   `/api/backup/*`, `/api/setup/reset`, `/api/lock`, `/api/session/revoke`,
-   `/api/maintenance/run`, `/api/selfcheck/run`, `/api/diagnostics`,
-   `/api/audit`. Also add `GET /api/events` SSE stub (or accept the client's
-   designed 3-error poll fallback — it works, just slower).
-2. Re-run `node scripts/ui-screenshots/drive.mjs` from the worktree root.
-   Debug tooling: `target/ui-screenshots-debug.mjs` (a CDP inspector that
-   prints body mode, nav counts, console errors/exceptions — edit ports as
-   needed). Repeat until all 12 shots render populated (the harness's own
-   README documents the shot list).
-3. **Visually review the shots** (ReadMediaFile) for the 4.5 acceptance bar:
-   no raw hex/epoch/camelCase in default view, tables used, skeletons, empty
-   states, human units everywhere, no `key=value` lines.
-4. Fix what the review finds (expect small controller bugs — each controller
-   was written by an isolated agent against the mock, never run against real
-   data end-to-end).
-5. Commit mock fixes and any controller fixes separately
-   (`git add` explicit paths; rebuild bundles if controllers changed).
+- Core composition in `ui/src/core/`: observable store, keyed DOM rendering,
+  hash router and legacy adapter, typed API methods plus temporary thin local
+  request wrappers, SSE reconciliation, keyboard helpers, and live runtime.
+- Five destination controllers in `ui/src/destinations/`: Overview, Move,
+  Receiving, Portfolio, and Vault. Controllers take over designated legacy
+  hosts, subscribe to live state, and restore stashed content on unmount.
+- All five destinations consume relevant SSE-backed status, operation, queue,
+  sync, or resync state. Snapshot data is authoritative for live operations;
+  bounded list requests enrich terminal history. Generation/revision guards
+  reject stale completions, and passive polling is the fallback.
+- Session-token revoke/rotation retires the authenticated SSE generation and
+  reconnects only with the current authorization. A revoked browser token
+  cannot leave its previously opened event stream alive.
+- Each session-aware request captures the bearer token it actually sent. A
+  late `401` clears browser authorization only if that token is still current,
+  so an older response cannot revoke a newly reauthenticated session. Same-tab
+  token clear applies the locked shell and disables palette eligibility
+  synchronously instead of waiting for the five-second refresh loop.
+- Receiving owns four-source reconciliation, party edit/delete, allocations,
+  deposits, balance refresh, and safe optimistic tag updates. Failed writes
+  roll back; a successful write followed by failed refresh retains the committed
+  value and reports degraded freshness.
+- The shared modal coordinator enforces one active modal, DOM-order focus
+  trapping, Escape/backdrop cancellation, and connected-only focus restore.
+  Existing and dynamically appended background siblings are inert while a
+  modal is active, and escaped programmatic focus is redirected into the
+  dialog. FIDO removal distinguishes cancellation from an explicitly submitted
+  blank value; cancel/Escape/backdrop issue zero mutation requests.
+- Keyed workspace and compartment navigation preserves focused nodes. Locked
+  autofocus occurs once per transition and yields to modal/operator focus.
+  Delayed FIDO detection is mode-guarded so a response started in locked mode
+  cannot re-show unlock controls after authentication. Setup and
+  reauthentication Enter behavior, semantic landmarks, headings, file labels,
+  lists, and tables are covered by tests.
+- At `c435611`, the command palette has an exact seven-command allowlist:
+  navigation to the five destinations, workspace refresh, and self-check. It
+  is unlocked-only, refuses to replace another modal, closes before command
+  execution/error reporting, and fails closed if the workspace locks while it
+  is open. Its dialog/combobox/listbox semantics, filtering, wrapped keyboard
+  navigation, dismissal, and focus restoration have focused tests.
+- The screenshot harness is strict and stateful: allowlisted routes return real
+  envelopes, unknown routes fail the run, and server contract tests cover the
+  mock boundary.
 
-## 4. Remaining work after the checkpoint
+### Commit sequence after the earlier console checkpoint
 
-### 4.4 Interaction layer (plan §4.4)
+- `a83302d` — hardened screenshot-harness contracts
+- `7195818`, `9244e12` — receiving observation and refresh identity
+- `0a4e88d` — explicit gas-top-up cap requirement
+- `07d074b`, `a9a3c5e` — operator state, policy, and risk-contract safety
+- `1f685c7` — receiving operator parity and per-item freshness
+- `3b647f8` — merged protected `origin/main` at `7e04743`
+- `8034eb6` — modal and FIDO cancellation hardening
+- `29426df` — keyboard, focus, semantic accessibility, and pinned axe gate
+- `c435611` — completed command palette, browser-smoke migration, session/SSE
+  race corrections, modal/FIDO focus guards, and regenerated bundles; focused
+  verification is green
 
-Partly built into the destinations already (keyboard forms, field
-highlighting from `validation_failed` `fields`, busy states). What's left,
-per the plan: **⌘K command palette** (actions across destinations — register
-in `app.ts` or a new `core/palette.ts`; keep zero-dep), **full keyboard audit**
-(Escape dismisses dialogs/menus everywhere, focus traps in modals — the
-shared `render/confirm.ts` already traps), **optimistic UI with rollback
-toasts** for safe mutations (tag deposit, rename labels — judge where safe;
-never for anything signing/broadcasting). Keep it proportionate — this is
-polish, not a seventh destination.
+## 3. Verification by checkpoint
 
-### 4.5 Acceptance sweep (per destination)
+Verified from the clean `29426df` tree:
 
-Run the bar from the plan §4.5 for each of the five destinations: no raw
-hex/epoch/camelCase in default view; keyboard-complete; SSE-live (no new
-pollers); smoke tests updated; screenshot walkthrough produced (harness).
-Record results in the plan ledger. Known gaps already logged by the
-destination agents (fix or document as accepted):
+- `cd crates/sigillum-daemon/ui && npm test`: **215/215 passed**.
+- `./scripts/check-ui-accessibility.sh`: **14/14 scenarios passed** with
+  axe-core `4.12.1`, **0 violations and 0 incomplete results**.
+- Twelve populated mock-data screenshots exist across the standard and
+  1024-pixel walkthrough sets.
+- Route inventory: **142 route registrations and 143 method endpoints**;
+  `/api/treasury/parties` is the sole GET+POST registration.
 
-- `contracts.ts` `RiskFinding` doesn't match the daemon wire (Portfolio
-  defined a local type) — align `ui/src/contracts.ts` with
-  `sigillum-api` and delete the local duplicate.
-- Receiving: counterparty edit/delete (party sweep-destination management)
-  unavailable while the new controller is mounted — port from the hidden
-  legacy `receiveBookCard` or accept + document in the parity matrix.
-- Move: `POLICY_PRESETS` values were invented by the agent (documented
-  inline) — sanity-check them against `docs/architecture.md` policy guidance.
-- Per-address balance freshness not exposed by the receiving overview API
-  (section-level freshness only) — document as an accepted API gap or add the
-  field additively (`sigillum-api` + daemon + controller).
-- No per-job queue cancel endpoint exists (only operation-level cancel) —
-  documented; adding it is optional.
-- Vault: idle countdown is a "this tab's estimate" (daemon exposes no
-  last-activity timestamp) — honest label already; optional: expose
-  additively in `StatusResponse`.
-- Snapshot restore file-read flow is untested (fake-DOM has no `File`) —
-  cover in the browser smoke instead.
+Verified at implementation checkpoint `c435611`:
 
-### Phase 4 gate + docs
+- UI tests: **225/225 passed**; TypeScript typecheck and Vite build passed.
+- `./scripts/check-ui-accessibility.sh`: **15/15 scenarios passed** with
+  axe-core `4.12.1`, **0 violations and 0 incomplete results**.
+- Screenshot walkthrough: **12/12 passed**.
+- `./scripts/check-browser-smoke.sh`: passed end to end against an isolated
+  real daemon. Its cold-build startup timeout now defaults to 120 seconds and
+  is configurable.
 
-- Full gate: `cargo test --workspace --locked` (background; the daemon suite
-  alone is ~10+ min under load) AND `cd crates/sigillum-daemon/ui && npm test
-  && npm run typecheck && npm run build` AND the screenshot walkthrough.
-- Docs lockstep (project rule): `docs/operator-surface-parity.md` (migrated
-  destinations replace legacy card rows; note gaps accepted above),
-  `docs/architecture.md` (console architecture section: core modules, adapter
-  contract, SSE consumption), `docs/stability.md` (any wire changes since the
-  last entry), `CHANGELOG.md` (Unreleased), plan ledger.
-- `ui/DESIGN.md` — add the destination-controller authoring contract if not
-  already there (mount/unmount rules, takeover-safety rule below).
+These checks are source-slice evidence, not a complete release result. The
+following were **not** proved at `c435611`:
 
-### Takeover-safety rule (new, from the checkpoint bug)
+- the complete `./scripts/check-release.sh` gate at the eventual
+  documentation-only successor commit;
+- clean-install desktop behavior or operator visual sign-off;
+- public-testnet F6 execution receipts;
+- a same-candidate sanitized release-evidence bundle.
 
-When a migrated controller takes over a legacy card, every legacy writer to
-that card's DOM must no-op. The legacy refresh loop is mostly null-safe, but
-verify per card (the Overview/#statusCard crash is the pattern: direct
-`element.textContent` writes without null checks). The `renderList` kept-key
-contract: renderers may either patch `existing` or return a fresh node (old
-node is now removed) — documented in `core/dom.ts`.
+## 4. Exact continuation order
 
-### Phase 5 (evidence, docs, hand-back)
+1. Commit the converged documentation-only correction on top of `c435611`.
+2. At that eventual documentation commit, make the next local validation step
+   a clean-tree `./scripts/check-release.sh` run by itself. Preserve its output
+   and any failures; do not infer a pass from the focused constituent checks.
+3. Review the 12 screenshots manually; automated mock rendering is not
+   operator visual sign-off or runtime proof.
+4. Review and merge through protected `main`, with required Ubuntu and macOS CI
+   contexts green. Re-index GitNexus if implementation changes after
+   `c435611`.
+5. Create the next immutable annotated candidate, `v1.0.0-rc.6`, only from the
+   protected-main commit. Verify the six-job draft release and asset checksums.
+6. Bind F4 standard/chaos, F6 public-testnet receipts, desktop clean-install,
+   doctor, and UI sign-off to the exact RC6 peeled SHA. Build and validate the
+   external sanitized evidence archive.
+7. Only after every H1 receipt agrees may the operator make the explicit H2
+   final-tag/publish decision. No final `v1.0.0` tag or published release exists
+   at this handoff.
 
-- Promote the screenshot walkthrough into release evidence. The user's
-  evidence store is OUTSIDE the repo: `/Users/xx/Documents/ReleaseEvidence/Sigillum/`
-  (see its `v1.0.0-rc.5/` layout for the expected shape). Copy the final shot
-  set + a walkthrough note there; do NOT commit binary shots to the repo.
-- Run `scripts/browser-smoke.mjs` against a REAL daemon (it needs a live
-  daemon + Chrome; see `scripts/check-browser-smoke.sh`) — the Phase 0 port
-  updated selectors but it was never executed. Also `scripts/check-runtime-smoke.sh`
-  if applicable.
-- Consider hardening the three known timing-sensitive tests (do NOT do this
-  before the final gate — note for the operator):
-  `tests/events_idle.rs` (load-sensitive), `daemon_service`
-  `successful_restore_clears_session...` (15s client timeout too tight under
-  load), `tests/scheduler.rs` (`scheduler_skips_everything...` takes 60-160s
-  under load).
-- Docs refresh + hand-back report: list the operator-owned gates explicitly —
-  (1) review + merge `codex/operator-surface-privacy` → `main` (PR; note the
-  user's docs-refresh branch `codex/public-docs-refresh` adds `docs/README.md`
-  — my plan-doc link edit there must be re-applied after it merges, see §6);
-  (2) C7 sign-off (superseded — this branch went far beyond C7); (3) H2
-  publish decision per `docs/execution-runbook-1.0.md`; (4) real-host evidence
-  (F4 soak, F6 testnet receipts, doctor on every host) — not automatable from
-  here; (5) rc.6 build + SHA256SUMS + evidence bundle.
-- Optional deferred items (recorded in the plan): ERC-6538 registry (D-E),
-  per-address freshness API, per-job queue cancel, `/api/audit` cursor
-  pagination, test-hardening above, pre-existing fmt/clippy drift (leave it —
-  don't mix into feature commits).
+## 5. Known product and proof gaps
 
-## 5. Verification playbook (how this project proves things)
+- Compartment add is available in Vault; compartment remove remains API-only
+  pending a destructive typed-confirm UI.
+- No per-job queue-cancel endpoint exists; operation-level cancellation is the
+  current control.
+- Vault idle countdown is explicitly a browser-tab estimate because the daemon
+  does not expose last-activity time.
+- Snapshot restore file handling belongs in the real browser smoke because the
+  fake DOM does not implement browser `File` behavior.
+- The core API is not yet literally the only request path: controllers retain
+  thin, session-aware wrappers for methods not yet promoted into `core/api.ts`.
+- Mock screenshots and axe runs prove the checked-in frontend renders against
+  strict mock envelopes. They do not prove daemon authentication, RPC/provider
+  behavior, signing, broadcast, persistence, or release packaging.
 
-- Rust: `cargo test --workspace --locked` (full gate, run in background,
-  check `grep -cE "test result: ok"` + no `FAILED`). Targeted:
-  `cargo test --locked -p sigillum-{api,daemon,client,cli} [--test <suite>]`.
-- UI: `cd crates/sigillum-daemon/ui && npm test` (fake-DOM smoke, node:test;
-  currently 183), `npm run typecheck`, `npm run build` (rebuild bundles!).
-- Visual: `node scripts/ui-screenshots/drive.mjs` (needs Chrome at
-  `/Applications/Google Chrome.app`; mock server requires fresh bundles).
-- Rust integration suites of note: `crash_recovery`, `adversarial_execution`,
-  `execution_gates`, `gas_topup`, `plan_enqueue`, `stealth_*`,
-  `discovery_operations`, `queue_operations`, `scheduler*`, `events*`,
-  `list_queries`, `forget_prune`, `one_time_receive`, `provider_partitioning`.
-- Repo AGENTS.md asks for GitNexus re-index after meaningful changes:
-  `gitnexus-analyze-safe <worktree path>` (safe to run; output gitignored).
+## 6. Release truth and operator gates
 
-## 6. Repository topography you must not trip over
+Remote `v1.0.0-rc.5` is an annotated tag object
+`c726ba913ace7f5ca64987454b1352ffdd9c8f77`, peeled to protected-main commit
+`7e047438f6305ef1cedecdf4790e1b0e1d7e1e6e`. GitHub Actions run
+`29248938476` passed all six jobs. Its GitHub Release is still an unpublished
+draft with six assets; the five payload assets independently match
+`SHA256SUMS`.
 
-- Main checkout (`/Users/xx/Documents/Workspaces/Sigillum`) is on branch
-  `codex/public-docs-refresh` (one docs commit ahead of main: adds
-  `docs/README.md` index + the plan doc at `docs/operator-surface-and-privacy-plan.md`
-  and an index link to it — both UNCOMMITTED there; the committed copy of the
-  plan doc lives on OUR branch). When our branch merges to main, re-apply the
-  docs-index link on that side.
-- Many `.claude/worktrees/agent-*` exist (other agents' work). Ignore them.
-- `docs/README.md` does NOT exist on our branch (only on docs-refresh) — our
-  plan doc is linked from the ledger, not the index.
-- The UI's legacy app (`ui/src/app.ts`) is `// @ts-nocheck` by history; all
-  NEW code (`core/`, `destinations/`) is fully typed and must keep
-  `npx tsc --noEmit` clean. Don't add `@ts-nocheck` anywhere new.
-- `cargo fmt --check` and `cargo clippy -D warnings` are NOT clean at base
-  (toolchain drift + pre-existing lints). Format only files you touch; don't
-  "fix" unrelated drift inside feature commits.
-- Filename casing is inconsistent: `destinations/portfolio.ts` +
-  `test/portfolio.test.ts` + `styles/dest-portfolio.css` are lowercase, the
-  other four destinations are Capitalized. Imports must match exact case
-  (fine on macOS; be careful on case-sensitive systems — normalize if you
-  touch them anyway).
+RC5 standard F4, chaos F4, and doctor receipts bind correctly to `7e04743`.
+They remain useful historical evidence, but they cannot certify code added on
+this branch. RC5 has no qualifying F6 receipt set, desktop clean-install
+receipt, UI sign-off, or complete external evidence bundle. There is no final
+`v1.0.0` tag and no published GitHub Release.
 
-## 7. Goal/session bookkeeping (for an AI successor)
+Branch protection was observed on 2026-07-18 with strict required contexts
+`rust (ubuntu-24.04)` and `rust (macos-15)`, admin enforcement, and force-push
+and deletion disabled. Final and RC tag rulesets were also observed active.
+Those settings are mutable external state and must be rechecked before release.
 
-- There is an active goal tracking this work (objective = execute the plan;
-  completion criterion in §1). If you are continuing it in this session,
-  resume goal work normally; the runtime tracks it. `TodoList` should mirror
-  §4 above.
-- The plan ledger (`docs/operator-surface-and-privacy-plan.md` → "Progress
-  ledger") is the durable record — update it at every phase boundary and
-  commit. It currently runs through Phase 2 + 3.3; add the missing Phase 3
-  (3.1, 3.2, 3.4, 3.5) and Phase 4 (4.1–4.3) entries — they landed as commits
-  `adab7a0`..`af450c3` (Phase 3) and `2bfa7f3`..`e545627` (Phase 4).
-- If context compacts: this handoff + the ledger + `git log --oneline` are
-  sufficient to reconstruct everything. Do not re-audit finished phases.
+## 7. Verification commands
+
+```bash
+cd crates/sigillum-daemon/ui
+npm ci --ignore-scripts
+npm test
+npm run typecheck
+npm run build
+
+cd ../../..
+node scripts/ui-screenshots/server.test.mjs
+node scripts/ui-screenshots/drive.mjs
+./scripts/check-ui-accessibility.sh
+./scripts/check-browser-smoke.sh
+./scripts/check-release.sh
+```
+
+Run the full release gate only from a clean, stable checkout. The evidence store
+is outside the repository at
+`/Users/xx/Documents/ReleaseEvidence/Sigillum/`; never commit its binary or
+sensitive contents.

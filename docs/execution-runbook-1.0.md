@@ -2,9 +2,13 @@
 
 **Status:** Active hardening and release handbook
 
-**State recorded:** 2026-07-12, protected `main` at `f73b861`; failed RCs
-`v1.0.0-rc.2` at `815d262`, `v1.0.0-rc.3` at `0a97c18`, and
-`v1.0.0-rc.4` at `f73b861`
+**State recorded:** 2026-07-18, protected `main` at `7e04743`; RC5 annotated
+tag object `c726ba9` peels to that commit and has a successful but unpublished
+draft release. The historical operator-surface accessibility checkpoint is
+`29426df` and contains protected main through merge `3b647f8`; current
+implementation checkpoint `c435611` commits the completed interaction/browser
+hardening and has green focused evidence. The complete release gate has not run
+for this feature line.
 
 **Plan authority:** [release-1.0-plan.md](./release-1.0-plan.md)
 
@@ -43,46 +47,45 @@ a commit that contains later hardening changes.
   represented the two-transaction `fund_gas` → sweep chain with one hash. Its
   queue treated `sent` (broadcast, unconfirmed) as prerequisite success instead
   of requiring `confirmed`. No RC4 operator receipt can certify a final
-  release. The next retained candidate is `v1.0.0-rc.5` after the runtime and
-  F6 schema-v2 fixes pass protected-main gates.
+  release.
   Historical release run `29230844456` completed all six jobs and uploaded the
   checksum, CLI, app, dmg, and notices assets to an unpublished draft; that
   proves the signing remediation, not the invalidated F6/runtime contract.
+- `v1.0.0-rc.5` is a valid retained draft candidate. Remote tag object
+  `c726ba913ace7f5ca64987454b1352ffdd9c8f77` peels to protected-main commit
+  `7e047438f6305ef1cedecdf4790e1b0e1d7e1e6e`. Release workflow
+  `29248938476` passed all six jobs; its five payload assets independently
+  match `SHA256SUMS`. Standard/chaos F4 and doctor receipts bind to the same
+  SHA. The GitHub Release remains draft/unpublished.
+- RC5 is incomplete: no qualifying F6 public-testnet receipt set, desktop
+  clean-install receipt, UI sign-off, or complete external evidence bundle
+  exists. The operator-surface branch changes code after RC5, so its evidence
+  is historical baseline for that feature line. After protected-main merge,
+  the next retained candidate is `v1.0.0-rc.6`; rerun every H1 gate at its
+  exact peeled SHA.
 - Gateway payments are preview-only and disabled by default. Opt-in balance
   observations are not finality proof and must not be represented as supported
   1.0 payment confirmations.
 
 ## 2. Execution order
 
-1. Re-anchor on a clean, current `main`; confirm the GitNexus index matches the
-   checked-out commit.
-2. Treat the authorization, payment-truth, queue, tag, and signing remediations
-   through `f73b861` as a landed baseline. Complete the RC5 stop-ship
-   remediation in this order:
-   - require the exact `sepolia` and `l2` role set;
-   - accept only integer chain IDs for Sepolia (`11155111`) and Base Sepolia
-     (`84532`), Arbitrum Sepolia (`421614`), or OP Sepolia (`11155420`);
-   - require each plan-step prerequisite to reach `confirmed`, never merely
-     `sent`, before a dependent can sign or broadcast;
-   - use F6 schema v2 to prove four families with five transactions, including
-     two ordered, receipt-confirmed `fund_gas` and dependent-sweep legs bound by
-     plan, job, step, chain, address, and prerequisite identities;
-   - prove all supported IDs pass and mainnet, arbitrary, and non-integer IDs
-     fail, and prove malformed or single-hash gas chains fail, with internally
-     consistent receipt and audit fixtures;
-   - synchronize the runbook, readiness audit, changelog, and plan so RC4 is
-     failed evidence and RC5 is the next candidate.
-3. Run focused tests for every changed boundary, then run
-   `./scripts/check-release.sh` alone. Never run a full gate while another agent
-   or build is modifying the same checkout.
-4. Review the complete diff, rerun GitNexus impact checks for materially changed
-   symbols, and re-index the repository.
-5. Before merge, verify that `main` protection requires both fixed-runner CI
+1. Commit the converged documentation-only correction on top of implementation
+   checkpoint `c435611`.
+2. At that eventual documentation commit, make the next local validation step
+   a clean-tree `./scripts/check-release.sh` run by itself. Never run a full
+   gate while another agent or build is modifying the same checkout. The green
+   225/225 UI tests, typecheck/build, 15/15 accessibility, 12/12 screenshots,
+   and isolated-daemon browser evidence at `c435611` does not substitute for
+   this gate or manual visual sign-off.
+3. Review the 12 screenshots manually. Preserve any negative finding; automated
+   mock rendering is not operator sign-off or runtime proof.
+4. Before merge, verify that `main` protection requires both fixed-runner CI
    legs, blocks force-pushes, and that release-tag governance prevents updates
    and deletion. Remediate missing settings before landing through a pull
    request, then require both CI legs to pass.
-6. Only then create a new annotated RC tag and complete the operator gates in
-   section 5.
+5. Only then create annotated `v1.0.0-rc.6`, verify the successful draft and
+   live asset checksums, and complete every operator gate in section 5 at the
+   RC6 peeled SHA.
 
 ## 3. Executable release contract
 
@@ -91,6 +94,8 @@ a commit that contains later hardening changes.
 - resolves dependency-aware Cargo commands with the committed `Cargo.lock`;
 - checks default and no-HID FIDO2 configurations;
 - verifies UI lock metadata and generated assets;
+- runs the pinned 15-scenario axe-core accessibility gate; mock accessibility
+  and screenshots do not replace real-daemon browser smoke;
 - runs workspace, adversarial, runtime, browser, desktop, audit, and deny gates;
 - on macOS, builds app/dmg bundles through the project signing wrapper, rejects
   incomplete or mixed Apple credentials, refuses Developer ID without one
@@ -162,11 +167,11 @@ and the operator decision are required before publication.
 
 | Gate | Required evidence |
 | --- | --- |
-| F4 | Standard and chaos soak receipts on each supported host at the new RC SHA |
-| F6 | Five funded testnet transactions for four families, including both confirmed legs of `fund_gas` → dependent sweep, with any mock-only family labeled honestly |
-| Desktop | Checksum-verified RC `.dmg` installs and reaches unlock on a clean machine without a dev toolchain |
-| Doctor | `sigillum doctor` passes on every supported host at the new RC |
-| UI | Operator walkthrough/sign-off for the remaining C7 console acceptance surface |
+| F4 | Standard and chaos soak receipts on each supported host at the RC6 SHA; RC5 receipts are historical for the changed feature line |
+| F6 | Five funded public-testnet transactions at RC6 for four families, including both confirmed legs of `fund_gas` → dependent sweep; mock evidence cannot satisfy this gate |
+| Desktop | Checksum-verified RC6 `.dmg` installs and reaches unlock on a clean machine without a dev toolchain |
+| Doctor | `sigillum doctor` passes on every supported host at RC6 |
+| UI | Real-daemon browser smoke plus operator walkthrough/sign-off for all five destinations, palette, keyboard/focus, modal, and accessibility behavior |
 | H2 | Explicit operator decision to tag and publish `v1.0.0` |
 
 Work may continue on any independent item while one of these gates is waiting.

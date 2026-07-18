@@ -1,22 +1,28 @@
 # Sigillum — Production Readiness
 
-**Date:** June 4, 2026 (updated July 12, 2026)
-**Current Verdict:** there is no valid release candidate. `v1.0.0-rc.2` is an
-immutable annotated-tag-contract failure. `v1.0.0-rc.3` passed the legacy
-source and release workflows and produced checksum-valid assets, but its
-macOS app had only a linker signature: strict bundle verification failed,
-`Info.plist` was unbound, resources were unsealed, and `CodeResources` was
-absent. RC3 and every same-SHA operator receipt are historical failure evidence
-only. `v1.0.0-rc.4` proved the bundle-signing remediation on protected `main`,
-but its release-evidence validator could accept a mainnet or arbitrary chain as
-the required L2 testnet and represented the two-transaction gas-top-up chain
-with one hash. Its queue also treated a broadcast-but-unconfirmed prerequisite
-as successful. RC4 and every same-SHA operator receipt are therefore historical
-failure evidence too. The next candidate is the monotonically required
-`v1.0.0-rc.5`, after the runtime and F6 schema-v2 remediations pass
-protected-main gates. Every pushed RC tag remains an immutable receipt anchor.
-The supported boundary remains local-first, single-host, and not
-internet-facing; remote-platform scope is explicitly unsupported.
+**Date:** June 4, 2026 (updated July 18, 2026)
+
+**Current Verdict:** RC5 is a valid, checksum-verified draft candidate for
+protected-main commit `7e047438f6305ef1cedecdf4790e1b0e1d7e1e6e`, not a
+published or final release. Remote annotated tag object `c726ba9` peels to that
+commit; release workflow `29248938476` passed all six jobs and produced the
+draft's checksum plus five payload assets. Standard/chaos F4 and doctor
+receipts bind to the same SHA. RC5 still lacks F6 public-testnet receipts,
+clean-install desktop evidence, UI sign-off, and a complete sanitized evidence
+bundle.
+
+The operator-surface feature branch now changes the product after RC5. Its
+committed keyboard/accessibility checkpoint is `29426df`, which contains
+protected `origin/main` through merge `3b647f8`; current implementation
+checkpoint `c435611` adds the green palette and has 225/225 UI tests, 15/15 axe
+scenarios, 12/12 screenshots, and a green real-daemon browser gate, plus
+focused coverage for token-aware retirement and reconnection of authenticated
+SSE streams. RC5 evidence is therefore historical baseline for this feature
+line; after protected-main integration
+the next eligible candidate is RC6 and all release evidence must bind to RC6's
+exact peeled SHA. There is no final `v1.0.0` tag and no published GitHub
+Release. Earlier RC2–RC4 tags remain immutable failed-contract receipts. The
+supported boundary remains local-first, single-host, and not internet-facing.
 
 ## Summary
 
@@ -108,18 +114,22 @@ not the shipped local-first wallet-management baseline:
   gate. No external penetration test has been performed, and the release does
   not claim one. Automated local adversarial/fuzz coverage through
   `scripts/check-adversarial.sh` is not an independent security audit.
-- The remaining RC-time evidence is:
-  - a successful draft release workflow and checksum-verified asset set at the
-    fresh `v1.0.0-rc.5` SHA, including strict verification of the source app
-    and the app mounted from its dmg; `v1.0.0-rc.2`, `v1.0.0-rc.3`, and
-    `v1.0.0-rc.4` are historical failure evidence only
-  - standard and chaos doctor/soak receipts on every supported host at the new
-    RC SHA; the earlier `mac-server` receipt is historical baseline evidence,
-    not evidence for the current hardening candidate (F4)
+- RC5 historical evidence is internally consistent: workflow
+  `29248938476` passed, its five payload assets match `SHA256SUMS`, and
+  standard/chaos F4 plus doctor receipts name `7e04743`. It does not certify
+  product changes after that SHA.
+- The remaining same-candidate evidence for RC6 is:
+  - a clean-tree `./scripts/check-release.sh`, protected-main CI, successful
+    draft release workflow, and independently checksum-verified assets at the
+    exact RC6 SHA
+  - standard and chaos soak receipts plus doctor on every supported host at
+    the exact RC6 SHA (F4)
   - five public-testnet transactions for the four core execution families:
     native sweep, ERC-20 sweep, revoke, plus both the `fund_gas` and dependent
     sweep legs of gas top-up on Ethereum Sepolia (`11155111`) and Base Sepolia
     (`84532`), Arbitrum Sepolia (`421614`), or OP Sepolia (`11155420`) (F6)
+  - a checksum-verified `.dmg` clean install reaching unlock without a
+    developer toolchain, plus operator UI walkthrough/sign-off
   - one sanitized external evidence bundle containing the same-RC operator
     receipts; H2 binds its filename and SHA-256 digest into the immutable final
     tag, verifies the uploaded copy before publication, and H3 records the
@@ -152,7 +162,9 @@ these are true:
 1. `./scripts/check-release.sh` passes from a clean checkout with the pinned
    Rust toolchain, committed daemon UI assets, locked dependency resolution,
    default and no-HID FIDO2 coverage, adversarial/fuzz checks, local daemon
-   runtime smoke, and no tracked-tree mutation.
+   runtime smoke, pinned 15-scenario axe-core accessibility coverage, and no
+   tracked-tree mutation. Mock accessibility/screenshot evidence does not
+   replace the real-daemon browser smoke.
 2. The API, daemon route, client surface, and docs all match.
 3. The feature has an operator surface or an explicit API-only decision.
 4. Persistence and restart behavior are explicit and tested.
@@ -166,7 +178,10 @@ route-by-route in
 
 The active execution plan for the 1.0 release lives in
 [docs/release-1.0-plan.md](./docs/release-1.0-plan.md). Its phases (A-H, W1-W8,
-F, G, H) are the plan of record. The earlier structural roadmap in
+F, G, H) are the plan of record. The active feature companion and exact
+continuation state are
+[docs/operator-surface-and-privacy-plan.md](./docs/operator-surface-and-privacy-plan.md)
+and [docs/execution-handoff.md](./docs/execution-handoff.md). The earlier structural roadmap in
 [docs/catchup-plan.md](./docs/catchup-plan.md) remains a background reference;
 its phases 1–3 are absorbed into the 1.0 plan.
 
@@ -175,13 +190,17 @@ its phases 1–3 are absorbed into the 1.0 plan.
 The next work should still avoid speculative new product scope first. The right
 immediate move is:
 
-1. keep `./scripts/check-release.sh` enforced in CI across Ubuntu and macOS
-2. keep `./scripts/check-adversarial.sh` green and expand it when new API,
-   gateway, or UI boundary surfaces are added
-3. collect fresh doctor plus standard and chaos soak receipts on the currently
-   supported `mac-server` at the exact new RC SHA (F4)
-4. collect public-testnet execution receipts for native sweep, ERC-20 sweep,
-   revoke, and gas top-up (F6)
-5. keep documentation and audits anchored to the local-on-your-computer boundary
-6. keep non-EVM chains, swap execution, fiat/NFT valuation, and remote or hosted
+1. commit the converged documentation-only correction on top of implementation
+   checkpoint `c435611`
+2. at that eventual documentation commit, make the next local validation step
+   a clean-tree `./scripts/check-release.sh` run; focused UI, screenshot,
+   accessibility, and real-daemon browser checks are green but do not substitute
+   for the complete gate
+3. merge through protected `main` with required Ubuntu and macOS contexts green
+4. create immutable annotated RC6 and independently verify its draft assets
+5. collect RC6-bound doctor, standard/chaos soak, public-testnet F6,
+   clean-install desktop, and UI sign-off evidence
+6. build and validate the external evidence bundle; only then request the H2
+   final-tag/publish decision
+7. keep non-EVM chains, swap execution, fiat/NFT valuation, and remote or hosted
    modes in their documented post-1.0 scope

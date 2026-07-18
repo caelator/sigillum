@@ -1,6 +1,7 @@
 # Sigillum 1.0 Release Plan
 
-**Status:** Active plan of record for the 1.0 release (rev 4 — wallet management IN scope; 2026-07-10 stop-ship hardening semantics reconciled)
+**Status:** Active plan of record for the 1.0 release (rev 5 — wallet management
+and operator-surface feature line in scope; release truth reconciled 2026-07-18)
 **Baseline verified:** 2026-07-01, branch `feat/private-receiving-desktop` (commits `70a087b`, `1cda1f2` ahead of `main`)
 **Supersedes:** [catchup-plan.md](./catchup-plan.md) Phases 1–3 are absorbed into Phases D–E and W1–W8 below. The
 [wallet-management-roadmap.md](./wallet-management-roadmap.md) product target is **part of 1.0** (EVM scope — see D-9);
@@ -9,6 +10,9 @@ catchup Phase 4 (remote/platform) stays out.
 **Operational companion:** [execution-runbook-1.0.md](./execution-runbook-1.0.md)
 records current hardening truth, release sequencing, operator gates, and
 failure-recovery procedures. Read it before executing anything here.
+The feature implementation ledger and exact continuation point are
+[operator-surface-and-privacy-plan.md](./operator-surface-and-privacy-plan.md)
+and [execution-handoff.md](./execution-handoff.md).
 
 This document is written to be executed by an autonomous coding agent with no
 additional context. Every task has an ID, explicit file paths, steps,
@@ -533,6 +537,16 @@ A → (B ∥ C ∥ D) → E → (W1 ∥ W2) → (W3 ∥ W4 ∥ W5 ∥ W6) → W7
 
 #### C7 — Operator console UX redesign (user-directed, 2026-07-03)
 
+- **Implementation checkpoint (2026-07-18):** five destination controllers,
+  shared core/SSE runtime, strict stateful mock, receiving parity, modal
+  coordinator, keyboard/focus behavior, and pinned accessibility gate are on
+  the feature line through historical checkpoint `29426df`. Current
+  implementation checkpoint `c435611` commits the exact-seven-command safe
+  palette, regenerated bundles, real-daemon browser-smoke migration,
+  session/SSE race corrections, and modal/FIDO focus guards. UI tests,
+  typecheck/build, the pinned accessibility gate, screenshots, and browser
+  smoke are green there. The documentation-only successor commit, complete
+  clean-tree release gate, merge, and operator sign-off remain.
 - **Goal:** the embedded console gets a ground-up UX redesign. Previous
   incremental passes were judged insufficient by the operator; this is an
   information-architecture restructure, not a polish pass.
@@ -562,17 +576,22 @@ A → (B ∥ C ∥ D) → E → (W1 ∥ W2) → (W3 ∥ W4 ∥ W5 ∥ W6) → W7
   `crates/sigillum-daemon/ui/test/ui-smoke.test.ts`; the nonce-based CSP
   and Rust-side asset assembly; the checked-in generated `app.js` +
   `styles.css` (regenerate and commit — the gate checks freshness).
-  Prefer keeping element IDs / `data-action` contracts stable and
-  restructuring layout, navigation, hierarchy, and styles around them.
+  Controller takeovers intentionally replace some legacy selectors; update
+  every real-browser consumer to visible/interactable controller selectors
+  rather than preserving hidden compatibility nodes.
 - **Accept:** all five destinations navigable with consolidated content;
   no feature loses its surface (cross-check against
   `docs/operator-surface-parity.md`); UI tests, typecheck, build, daemon
-  HTML tests, runtime smoke, and browser smoke all green; screenshots of
-  setup, locked, and unlocked states reviewed by the operator.
+  HTML tests, strict mock contract tests, pinned axe scenarios, runtime smoke,
+  and migrated browser smoke all green; command palette and keyboard/modal
+  contracts covered; screenshots of setup, locked, and unlocked states
+  reviewed by the operator.
 - **Verify:** `npm --prefix crates/sigillum-daemon/ui run typecheck && npm
   --prefix crates/sigillum-daemon/ui test && npm --prefix
   crates/sigillum-daemon/ui run build`; `cargo test -p sigillum-daemon`;
   `./scripts/check-runtime-smoke.sh`; `./scripts/check-browser-smoke.sh`.
+  Also `node scripts/ui-screenshots/server.test.mjs` and
+  `./scripts/check-ui-accessibility.sh`.
   **Size:** XL.
 
 #### C6 — Desktop documentation
@@ -1005,8 +1024,11 @@ PR chain. Update `docs/wallet-management-roadmap.md` status text and
   action enum, `TreasuryPolicy` (new `max_gas_topup_wei_hex` cap +
   `allow_gas_topups` opt-in, default false), export manifests, UI, CLI.
 - **Steps:**
-  1. Amount = estimated gas cost of the dependent step × 1.5, capped by
-     policy; emitted only when the wallet has a sponsor address with
+  1. Enabling `allow_gas_topups` requires a nonblank valid
+     `max_gas_topup_wei_hex`; validation rejects missing/malformed caps and
+     runtime evaluation treats missing/corrupt stored caps as policy OFF.
+     There is no implicit unlimited/default allowance. Amount = estimated gas
+     cost of the dependent step × 1.5, capped by policy; emitted only when the wallet has a sponsor address with
      sufficient balance; otherwise the dependent step keeps its existing
      gas blocker.
   2. **Linkage rule (critical):** funding two different counterparties'
@@ -1019,7 +1041,8 @@ PR chain. Update `docs/wallet-management-roadmap.md` status text and
      operator discipline" caveat — update that text to say Sigillum-generated
      top-ups are checked, manual funding remains operator discipline).
   3. `fund_gas` is ordered before its dependent step (W6.4).
-- **Accept:** shortfall + sponsor → `fund_gas` emitted with cap enforced;
+- **Accept:** opt-in without a valid explicit cap fails closed; shortfall +
+  sponsor → `fund_gas` emitted with cap enforced;
   cross-party case warns/blocks per policy; no sponsor → old blocker
   preserved; README updated.
 - **Verify:** `cargo test -p sigillum-daemon planner`; full gate. **Size:** L.
@@ -1489,24 +1512,35 @@ below; the remaining items are operator human-gates.
 > as the L2 and represented the two-transaction gas-top-up chain with one hash.
 > Its queue also treated `sent` (broadcast, unconfirmed) as prerequisite
 > success. Preserve RC4 as immutable failed-contract evidence; no RC4 operator
-> receipt can promote a final tag. The next candidate is RC5 after the runtime,
-> L2 allowlist, and F6 schema-v2 fixes pass protected-main gates.
+> receipt can promote a final tag. RC5 was the next retained candidate after
+> the runtime, L2 allowlist, and F6 schema-v2 fixes passed protected-main gates.
 
-- [ ] Fresh clone of `main` at RC5; `./scripts/check-release.sh` passes there.
-      (No RC5 workflow exists yet.)
-- [ ] CI green on the RC5 commit, both legs. (No qualifying RC5 run yet.)
-- [ ] F4 soak receipts (standard + chaos) reference the RC5 SHA. (No
-      qualifying RC5 receipt yet.)
+> **RC5 snapshot:** remote annotated tag object
+> `c726ba913ace7f5ca64987454b1352ffdd9c8f77` peels to protected-main commit
+> `7e047438f6305ef1cedecdf4790e1b0e1d7e1e6e`. Release workflow
+> `29248938476` passed all six jobs, and the five payload assets independently
+> match `SHA256SUMS`. Standard/chaos F4 and doctor receipts bind to that SHA.
+> The GitHub Release remains draft/unpublished. RC5 lacks F6, desktop
+> clean-install, UI sign-off, and the complete evidence bundle. The
+> operator-surface feature line changes code after RC5, so those receipts are
+> historical baseline for it; the next eligible candidate is RC6 after
+> protected-main merge.
+
+- [ ] Fresh clone of `main` at RC6; `./scripts/check-release.sh` passes there.
+- [ ] CI and the six-job draft release workflow are green at the RC6 commit;
+      the five payload assets independently match `SHA256SUMS`.
+- [ ] F4 soak receipts (standard + chaos) reference the RC6 SHA.
 - [ ] F6 testnet receipts record five transactions for the four core execution
-      families, including both confirmed gas-chain legs. (No qualifying RC5
-      receipt yet; funded testnet access is required.)
+      families, including both confirmed gas-chain legs, at RC6. Funded
+      public-testnet access is required.
 - [ ] F7 upgrade-path tests green: 0.1-era fixture dir boots and migrates on
-      the RC5 build; 0.1-era snapshot restores. (The tests remain in the source
-      gate but must rerun at the RC5 SHA.)
-- [ ] Desktop `.dmg` from RC5 strictly verifies, installs, and reaches the unlock
-      screen on a machine without a dev toolchain. (No RC5 artifact exists yet.)
-- [ ] `sigillum doctor` passes on each supported host at the RC5 SHA. (No
-      qualifying RC5 receipt yet.)
+      the RC6 build; 0.1-era snapshot restores.
+- [ ] Desktop `.dmg` from RC6 strictly verifies, installs, and reaches the unlock
+      screen on a machine without a dev toolchain.
+- [ ] `sigillum doctor` passes on each supported host at the RC6 SHA.
+- [ ] Five-destination UI walkthrough, command palette, keyboard/focus/modal
+      behavior, pinned accessibility scenarios, and migrated real-daemon
+      browser smoke are signed off at RC6.
 - [~] A full local walkthrough of the completion bar: import a seed →
       multi-chain scan → review inventory/risk → generate plan → approve →
       execute against a local mock provider → audit trail complete. (execute→audit
@@ -1514,9 +1548,8 @@ below; the remaining items are operator human-gates.
       enqueue_step_happy_path_persists_job_marker_evidence_hash_and_audit,
       eth_seed_jobs_are_gate_driven_and_execute_once_gates_pass via spawn_mock_evm_provider,
       chaos_kill_in_flight_plan_step_resumes_terminal_without_duplication; UI click-through = operator acceptance)
-- [~] CHANGELOG date filled for the next candidate; G5 docs merged. (G5 merged
-      PR #33; the new hardening candidate carries the numeric date required by
-      the release workflow, but still needs merge and fresh-RC evidence)
+- [~] CHANGELOG date filled for the next candidate; G5 and feature-line docs
+      converged. The branch still needs merge and fresh RC6 evidence.
 
 #### H2 — Tag and release
 
@@ -1766,15 +1799,17 @@ Phase B — Workspace hygiene
 Phase C — Desktop productization
 - [x] C1 real icon set
 - [x] C2 bundling enabled (.app/.dmg)
-- [~] C3 fail-closed env-gated signing and explicit full-bundle ad-hoc default
-      (landed and source-gate proven on protected `main`; the complete claim
-      needs fresh RC5 release-workflow proof)
-- [~] C4 strict source + mounted-dmg verification and negative regressions in
-      the release gate (landed and source-gate proven on protected `main`; the
-      complete claim needs fresh RC5 release-workflow proof)
+- [x] C3 fail-closed env-gated signing and explicit full-bundle ad-hoc default
+      (source and RC5 release-workflow proven)
+- [x] C4 strict source + mounted-dmg verification and negative regressions in
+      the release gate (source and RC5 release-workflow proven)
 - [x] C5 boot helpers extracted + tested
 - [x] C6 desktop docs
-- [ ] C7 operator console UX redesign (user-directed)
+- [~] C7 operator console UX redesign (five controllers, modal, receiving,
+      keyboard/focus, accessibility, exact-seven-command safe palette, and
+      session-token/SSE lifecycle handling implemented; focused UI,
+      accessibility, screenshot, and real-daemon browser gates are green;
+      documentation commit, full gate, merge, and operator sign-off remain)
 
 Phase D — Operator-surface parity
 - [x] D1 CLI: transit, evm read-only, wallets read/derive, compartment list
@@ -1824,16 +1859,16 @@ Phase G — Release engineering
 - [x] G1 CHANGELOG.md
 - [x] G2 docs/stability.md
 - [x] G3 version bump to 1.0.0
-- [~] G4 release workflow (historical dry run validated on a22a98a; RC3 exposed
+- [x] G4 release workflow (historical dry run validated on a22a98a; RC3 exposed
       a signature false positive; RC4 exposed an evidence-contract false
-      positive and unconfirmed-dependency execution; RC5 must prove all
-      remediations)
+      positive and unconfirmed-dependency execution; RC5 run `29248938476`
+      proved all workflow remediations and checksum-valid draft assets)
 - [x] G5 readiness + product docs final sync
 
 Phase H — Ship
-- [~] H1 RC verification checklist (RC3 void after bundle-signature failure;
-      RC4 void after the F6 schema and dependency-finality failures; all source,
-      release, F4/F6, clean-machine, and doctor evidence must bind RC5)
+- [~] H1 RC verification checklist (RC5 workflow/F4/doctor are historical for
+      the changed feature line; source, release, F4/F6, clean-machine, doctor,
+      browser, and UI evidence must bind RC6)
 - [ ] H2 v1.0.0 tagged, artifacts published (human gate — operator go)
 - [ ] H3 post-release bump + planning issue
 
@@ -2196,3 +2231,27 @@ Phase H — Ship
   transactions, and re-run every same-SHA gate. Historical release run
   `29230844456` completed all six jobs and its six-asset unpublished draft,
   proving the signing fix but not curing the assurance/runtime failures.
+- 2026-07-18 RC5 DRAFT SUCCESS (`7e04743`, annotated tag object `c726ba9`,
+  release run `29248938476`): all six workflow jobs passed and all five payload
+  assets independently matched `SHA256SUMS`. Standard 3600-second F4, chaos
+  600-second F4, and installed-RC doctor receipts bind to the same SHA. The
+  draft remains unpublished and lacks F6 public-testnet receipts, desktop
+  clean-install evidence, UI sign-off, and the complete external evidence
+  bundle; no final release claim follows.
+- 2026-07-18 C7 accessibility checkpoint (`29426df`): protected main `7e04743` is
+  merged through `3b647f8`; five destination controllers, receiving identity
+  and parity, explicit gas caps, modal cancellation, keyboard/focus semantics,
+  strict mock contracts, and the pinned 14-scenario accessibility gate are
+  implemented. At that exact checkpoint, UI tests passed 215/215 and axe
+  passed 14/14 with zero violations or incomplete results.
+- 2026-07-18 C7 implementation checkpoint (`c435611`): the
+  exact-seven-command safe palette, token-aware SSE retirement/reconnection,
+  token-bound stale-401 handling, immediate locked-shell policy, mode-guarded
+  FIDO detection, dynamic-modal focus containment, browser-smoke migration,
+  and regenerated bundles are committed. At that exact checkpoint, UI tests
+  pass 225/225, typecheck/build pass, axe passes 15/15 with zero violations or
+  incomplete results, the 12-shot walkthrough passes, and browser smoke passes
+  end to end against an isolated daemon. The feature line changes code after
+  RC5, so the next eligible candidate is RC6 after protected-main merge. The
+  documentation-only successor commit, complete release gate, manual visual
+  sign-off, and same-RC operator evidence remain.

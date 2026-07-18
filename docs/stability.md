@@ -23,7 +23,9 @@ surfaces are explicitly unstable, and how versions evolve. It applies from the
 No valid `v1.0.0` tag or GitHub Release has published yet, so the stability
 promises above are not yet in force. Until the first valid tag, release
 candidates may adjust stable-candidate surfaces with the change recorded in
-`CHANGELOG.md`. Current adjustments since `1.0.0-rc.5`:
+`CHANGELOG.md`. The following feature-line adjustments were made after RC5's
+protected-main commit and therefore require a new RC6 candidate before they can
+be release evidence. Current adjustments since `1.0.0-rc.5`:
 
 - `sigillum api profiles eth-seed create` redacts the mnemonic from stdout by
   default (new `--reveal-mnemonic` and `--mnemonic-out PATH` flags control
@@ -238,6 +240,45 @@ candidates may adjust stable-candidate surfaces with the change recorded in
   CLI: `treasury receive-allocate` gained `--one-time`/`--no-one-time`,
   `--sweep-destination`, `--min-sweep-wei-hex`,
   `--purge-after-sweep`/`--no-purge-after-sweep`, and `--counterparty-id`.
+- **Receiving freshness and observation identity**:
+  `ReceivingItem` gained additive optional
+  `balance_last_checked_at_unix`. HD receiving overview now matches observations
+  by wallet family, wallet profile, chain id, and case-insensitive address,
+  selects the freshest match, and breaks equal-timestamp ties deterministically
+  by provider/id. Receiving refresh persists and reads the same full identity,
+  fans an allocation to every provider on its chain, and deduplicates allocation
+  counts. This corrects cross-wallet/same-address balance misattribution without
+  removing or repurposing a field.
+- **Counterparty destination patch semantics**:
+  `CounterpartyUpdateRequest.sweep_destination_address` now distinguishes
+  omission from an explicit blank. Omission retains the stored destination;
+  blank clears it. Existing callers that send a concrete destination are
+  unchanged.
+- **Explicit gas-top-up cap requirement**: a
+  `TreasuryPolicyUpdateRequest` with `allow_gas_topups: true` must also provide
+  a nonblank, valid `max_gas_topup_wei_hex`; otherwise validation fails. Runtime
+  policy evaluation requires the persisted cap to parse, so absent, blank,
+  malformed, or corrupt cap state disables gas top-ups. There is no implicit
+  unlimited or default cap, and the planner continues to block amounts above
+  the explicit cap.
+- **Operator-console assurance**: the release gate now runs a pinned
+  axe-core `4.12.1` scan across 15 strict-mock scenarios in addition to UI
+  unit/type/build checks. This is assurance coverage, not a stable DOM
+  promise: selectors, markup, CSS, controller boundaries, focus choreography,
+  and modal internals remain unstable implementation details. Mock
+  accessibility and screenshots do not replace the real-daemon browser smoke
+  or the complete clean-tree release gate.
+- **SSE authorization lifecycle hardening**: the console now retires the
+  active authenticated event-stream generation when its session token is
+  revoked or rotated and reconnects only with current authorization. This is a
+  client-side enforcement correction; the stable `GET /api/events` route and
+  event payload contract are unchanged.
+- **Browser authorization-race hardening**: session-aware requests clear a
+  token on `401` only when it is still the token sent by that request. Same-tab
+  token clear synchronously applies locked-shell and palette policy rather than
+  waiting for periodic refresh. Delayed FIDO detection is mode-guarded, and
+  dynamic modal siblings are inert/focus-contained. These are client-side
+  enforcement corrections; session API and wire contracts are unchanged.
 
 ## Stable at 1.0
 

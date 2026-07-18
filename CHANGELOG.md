@@ -153,12 +153,29 @@ from 1.0.0 onward, per the stability policy in `docs/stability.md`.
   around operator goals: Overview, Receive, Portfolio, Move, and Vault, with a
   compact single-row topbar status strip, the unlocked hero shown once on
   Overview, and a treasury-setup journey card that collapses when complete.
+  Each destination is an active controller over the shared store/router/SSE
+  runtime, with deep links, explicit legacy-host takeover/restore, guarded
+  async reconciliation, and relevant live status/operation/queue state.
 - **Shared confirmation dialog** — One modal component with inform / confirm /
   typed-phrase tiers replaces native `confirm()`/`prompt()` and bespoke
   two-click arms. Queue processing, deposit sweep enqueue, receive-address
   rotation, and party deletion — previously unguarded — now require
   confirmation; bulk plan enqueue and local data reset keep their typed
-  phrases; all destructive deletes share the same confirm tier.
+  phrases; all destructive deletes share the same confirm tier. The modal
+  coordinator permits one active modal, traps and restores focus, handles
+  Escape/backdrop cancellation, and distinguishes cancellation from an
+  explicitly submitted blank value.
+- **Keyboard and accessibility gate** — Keyed workspace/compartment navigation
+  preserves focus, setup and reauthentication have tested Enter behavior,
+  locked autofocus yields to modal/operator focus, and the console uses
+  semantic landmarks, headings, labels, lists, tables, and file inputs. The
+  release script runs pinned axe-core `4.12.1` across 15 strict-mock scenarios.
+- **Safe command palette** — ⌘K/Ctrl-K opens an unlocked-only accessible
+  palette with exactly seven allowlisted commands: navigate to five
+  destinations, refresh workspace, and run self-check. It refuses to replace
+  an active modal, fails closed across lock transitions, restores focus, closes
+  before execution/error reporting, and deliberately excludes mutations,
+  reveal, policy, signing, broadcast, and delete actions.
 - **Stealth-generation guardrail warnings** — `wallets/eth-stealth/generate`
   returns cautionary `warnings` when a meta-address cannot be matched to the
   vault's known stealth wallets, and when a supplied ephemeral key was already
@@ -204,7 +221,10 @@ from 1.0.0 onward, per the stability policy in `docs/stability.md`.
   `--mnemonic-out PATH` (owner-only 0600, never overwrites).
 - **UI screenshot harness** — `scripts/ui-screenshots/` captures a
   deterministic, mock-driven shot set of the console (setup, unlock, all five
-  destinations) via headless Chromium for release-evidence walkthroughs.
+  destinations) via headless Chromium for release-evidence walkthroughs. Its
+  stateful allowlisted server returns real API envelopes, records requests,
+  fails on unknown routes, and has contract tests so frontend drift cannot be
+  hidden behind permissive `{}` responses.
 - **Structured error codes and field-level validation** — Every daemon error
   response now carries a stable machine-readable `code`
   (`sigillum_api::error_codes`, cataloged in `docs/stability.md`) that
@@ -325,6 +345,23 @@ from 1.0.0 onward, per the stability policy in `docs/stability.md`.
 
 ### Changed
 
+- **Gas top-ups require an explicit cap** — enabling `allow_gas_topups`
+  without a nonblank valid `max_gas_topup_wei_hex` now fails validation.
+  Missing, blank, malformed, or corrupt persisted caps disable runtime gas
+  top-ups; there is no implicit unlimited/default cap, and amounts above the
+  explicit cap remain blocked.
+- **Receiving ownership and reconciliation** — the Receiving destination now
+  owns party create/edit/delete, receive allocations, deposit lifecycle,
+  balance refresh, payer instructions, and safe optimistic tagging. Party
+  destination updates preserve the stored value when omitted and clear it only
+  when explicitly blank. All async sources use generation guards; tag writes
+  roll back on failure and retain a committed value if only the follow-up
+  refresh fails.
+- **Live console reconciliation** — Overview, Move, Receiving, Portfolio, and
+  Vault consume relevant SSE-backed store slices. Snapshots are authoritative
+  for live operations, bounded list requests enrich terminal history, stale
+  generations/revisions are ignored, and history retries do not degrade a
+  healthy stream; passive polling remains the fallback.
 - **`block_cross_party_linkage` now defaults to ON (plan task 3.5)** —
   BEHAVIOR CHANGE: a treasury policy update that omits
   `block_cross_party_linkage` previously resolved it to `false`; it now
@@ -410,7 +447,8 @@ from 1.0.0 onward, per the stability policy in `docs/stability.md`.
   expected amount, so `--token-address` is no longer needed for
   standards-following announcements; refresh flips a `funded_needs_gas`
   deposit to `funded` once native gas arrives. (c) When the treasury policy
-  allows gas top-ups, enqueueing a sweep for a gas-starved ERC-20 deposit
+  allows gas top-ups with a valid explicit `max_gas_topup_wei_hex`, enqueueing
+  a sweep for a gas-starved ERC-20 deposit
   plans an `eth_stealth_gas_topup` queue job ahead of the sweep: 1.5x the
   sweep's estimated gas (seed-path formula, `max_gas_topup_wei_hex` cap
   honored), paid by the stealth wallet's gas sponsor — a key derived
@@ -448,6 +486,34 @@ from 1.0.0 onward, per the stability policy in `docs/stability.md`.
 
 ### Fixed
 
+- **Revoked-session SSE lifetime** — browser session revoke or token rotation
+  now retires the authenticated event-stream generation and reconnects only
+  with current authorization, so a revoked browser token cannot leave an older
+  `EventSource` subscribed.
+- **Stale `401` session race** — session-aware requests remember the bearer
+  token they sent and clear it on `401` only if it remains current, preventing
+  an old response from revoking a newly reauthenticated browser session.
+- **Immediate browser authorization shell** — same-tab token clear now applies
+  locked-shell and command-palette policy synchronously instead of leaving
+  unlocked chrome eligible until the periodic refresh.
+- **Delayed FIDO and dynamic-modal races** — FIDO detection responses are
+  mode-guarded so locked controls cannot reappear after authentication; modal
+  isolation now makes late-added body siblings inert and redirects escaped
+  programmatic focus into the dialog.
+- **Receiving balance misattribution** — observations and refresh results are
+  keyed by wallet family, wallet profile, chain, and case-insensitive address,
+  preventing same-address observations from another wallet/profile from
+  supplying the displayed balance. Receiving items now expose additive
+  per-item freshness and select the freshest match deterministically.
+- **Stale controller completions and optimistic rollback** — older async
+  responses can no longer overwrite newer destination state; failed deposit
+  tag writes restore the previous value instead of leaving success-shaped UI.
+- **FIDO removal cancellation** — Cancel, Escape, and backdrop dismissal send
+  zero remove requests, while an explicitly submitted blank remains a distinct
+  valid input where the endpoint permits it.
+- **Mock-envelope controller crashes** — screenshot routes now return the same
+  collection envelopes as the daemon and unknown routes fail closed instead of
+  silently returning `{}`.
 - **Treasury planner panics** — Malformed hot/treasury address pairs and
   undecodable policy floor values now fail closed to the default destination
   with a warning instead of unwrapping.

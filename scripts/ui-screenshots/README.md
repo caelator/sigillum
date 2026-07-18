@@ -9,15 +9,20 @@ states reviewed by the operator").
 
 ## How it works
 
-- `server.mjs` — a mock daemon. It assembles the page exactly like
+- `server.mjs` — a strict stateful mock daemon. It assembles the page exactly like
   `crates/sigillum-daemon/src/ui.rs` `render_index_html` (HTML fragments from
   `crates/sigillum-daemon/ui/src` plus the checked-in vite bundles
   `src/app.js` / `src/styles.css`; the per-request CSP nonce is dropped —
   irrelevant for local shots) and answers every `/api/*` route the UI calls
-  with the canned, populated state from `mock-data.mjs`.
+  with populated state from `mock-data.mjs`. Routes are explicitly allowlisted,
+  mutations update mock state, responses use the daemon's real envelopes, and
+  unknown routes are recorded and fail the run rather than returning a
+  permissive `{}`.
 - `drive.mjs` — starts the mock daemon in-process, drives headless Chrome
   over the raw DevTools protocol (same approach as
-  `scripts/browser-smoke.mjs`), walks the shot list, and writes PNGs.
+  `scripts/browser-smoke.mjs`), walks the shot list, and writes PNGs. Browser
+  exceptions, contract-breaking console errors, and unknown mock requests fail
+  the run.
 - `mock-data.mjs` — the populated vault state: two compartments, providers,
   seed/xpub/stealth wallets, inventory with balances, a consolidation plan
   with six steps, queue jobs in mixed states, stealth deposits, parties and
@@ -27,6 +32,12 @@ states reviewed by the operator").
 The screenshot harness itself needs no npm install, build step, or daemon
 binary.
 
+Before relying on a mock change, run its contract tests:
+
+```sh
+node scripts/ui-screenshots/server.test.mjs
+```
+
 The same stateful mock also backs the automated accessibility release gate.
 After installing the UI dependencies, run:
 
@@ -35,9 +46,10 @@ After installing the UI dependencies, run:
 ```
 
 The gate injects the exactly pinned `axe-core` build into the shipped UI in
-headless Chrome. It audits setup welcome and protection-model states, the
-locked unlock screen, all five unlocked destinations, and the routed Portfolio
-and Move subviews. Any axe violation or incomplete check, stale bundle, missing
+headless Chrome. Its 15 scenarios audit setup welcome and protection-model
+states, the locked unlock screen, all five unlocked destinations, routed
+Portfolio and Move subviews, and the open command palette. Any axe violation
+or incomplete check, stale bundle, missing
 scenario, browser exception, or unknown mock route fails the command. Finding
 output includes the rule, impact, affected selectors and nodes, and the axe
 help URL.
@@ -110,9 +122,17 @@ shapes show up as empty cards in the shots.
 ## Release evidence
 
 Run the harness on the release commit and attach the PNG set to the release
-notes / PR as the operator-reviewed record of the setup, locked, and unlocked
-surfaces. Because the page is assembled from the checked-in bundles and
-fragments, the shots capture exactly what the shipped daemon embeds; the
-bundle-staleness guard guarantees the shots cannot silently lag the authored
-UI source. For UI-affecting PRs, run before and after the change
-(`--out=target/ui-screenshots/before|after`) and diff the sets.
+notes / PR as a mock-data walkthrough of setup, locked, and unlocked surfaces.
+Because the page is assembled from the checked-in bundles and fragments, the
+shots capture what the shipped daemon embeds; the bundle-staleness guard keeps
+them aligned with authored UI source. For UI-affecting PRs, run before and
+after the change (`--out=target/ui-screenshots/before|after`) and diff the sets.
+
+This proof boundary is strict: screenshots and axe results prove the shipped
+HTML/CSS/JavaScript renders representative, contract-shaped mock data. They do
+not prove daemon authentication, session expiry, provider RPC, signing,
+broadcast, persistence/restart, desktop installation, or live execution. The
+real-daemon `scripts/check-browser-smoke.sh`, the complete clean-tree release
+gate, and operator review remain separate requirements. Only the final
+operator-reviewed set should be copied to the external release-evidence bundle;
+generated PNGs stay untracked.

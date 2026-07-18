@@ -1,7 +1,11 @@
 # Operator Surface & Privacy Implementation Plan
 
-Status: **in execution** — started 2026-07-16 on branch
-`codex/operator-surface-privacy` (worktree `.claude/worktrees/agent-ux-privacy-exec`).
+Status: **in execution; implementation checkpoint `c435611` on 2026-07-18** —
+started 2026-07-16 on branch `codex/operator-surface-privacy` (worktree
+`.claude/worktrees/agent-ux-privacy-exec`). The branch includes protected
+`origin/main` at `7e04743` through merge `3b647f8`. The original 1.1 sequence
+was pulled forward before the first final 1.0 release; after protected-main
+integration the next eligible candidate is RC6.
 Scope: console UI/UX overhaul, throwaway-wallet privacy, ERC-5564 stealth
 correctness and interoperability.
 
@@ -120,10 +124,36 @@ ratified), D-E (ERC-6538 deferred).
     Portfolio tables + scan stepper, Vault security story. `renderList`
     kept-key zombie fix with regression test; legacy hero null-safety
     (`e545627`).
-  - **Checkpoint:** harness verification in progress — see
-    `docs/execution-handoff.md` §3 for the exact resume point (mock-data
-    `/api/operations` gap diagnosed) and §4 for remaining work (4.4, 4.5,
-    Phase 5).
+  - Harness contract hardening (`a83302d`): the stateful mock returns real
+    envelopes, rejects unknown routes, and has fail-closed server tests.
+  - Receiving and policy safety (`7195818`, `9244e12`, `0a4e88d`, `07d074b`,
+    `a9a3c5e`, `1f685c7`): wallet-scoped observation identity, per-item
+    freshness, explicit fail-closed gas caps, guarded async reconciliation,
+    safe optimistic tag rollback, and complete party/allocation/deposit
+    management in the Receiving controller.
+  - Shared interaction semantics (`8034eb6`): one modal coordinator, focus
+    trap and restore, and cancellation distinct from explicit blank input;
+    FIDO remove cancellation emits no request.
+  - Keyboard and accessibility (`29426df`): keyed navigation preserves focus,
+    locked/setup autofocus yields correctly, Enter behavior is tested,
+    landmarks/headings/forms/lists/tables are semantic, and a pinned
+    14-scenario axe-core gate is part of the release script. At this checkpoint
+    UI tests are 215/215 and accessibility is 14/14 with zero violations or
+    incomplete results.
+  - **Current implementation checkpoint (`c435611`):** an exact-seven-command
+    safe palette is committed with regenerated bundles. UI tests pass 225/225;
+    typecheck/build pass; the pinned axe gate passes 15/15 with zero
+    violations/incomplete; 12/12 screenshots pass; and the migrated
+    real-daemon browser smoke passes across visible setup, all five
+    controllers, modal/palette safety, focus, Vault persistence, logout, and
+    reauthentication. Session revoke/rotation now retires stale authenticated
+    SSE streams before reconnecting with current authorization. Stale `401`
+    responses cannot revoke a replacement token; same-tab token clear locks the
+    visible shell and palette policy synchronously; delayed FIDO detection is
+    mode-guarded; and dynamic modal siblings remain inert and focus-contained.
+    The documentation-only successor commit, complete release gate, manual
+    visual sign-off, merge, and same-RC evidence remain.
+    See `docs/execution-handoff.md` for the proof boundary and order.
 
 ## Original plan
 
@@ -360,17 +390,25 @@ CSS partials' drift; inline styles banned by lint.
    security story: lock state always visible, session countdown, capability
    tokens explained, backup nudges.
 
-**4.4 Interaction layer (weeks 8–10).** ⌘K command palette; full keyboard
-flows (Enter submits, Escape dismisses, focus traps in modals); optimistic UI
-with rollback toasts; persistent banners for stale data (replacing silent
-`catch{}` staleness); error rendering driven by 1.4 codes with field
-highlighting; empty states with next-action buttons everywhere.
+**4.4 Interaction layer (weeks 8–10).** The shared modal, Escape/backdrop
+cancellation, focus trap/restore, Enter flows, keyed-focus preservation,
+safe optimistic tag rollback, stale-data banners, structured field errors,
+and empty-state actions are implemented through `29426df`. Checkpoint
+`c435611` commits the unlocked-only ⌘K/Ctrl-K palette with five navigation
+commands, refresh, and self-check; modal refusal, filtering, wrapped navigation,
+focus restoration, async-error handling, lock-transition fail-closed behavior,
+session races, and modal/FIDO focus guards are tested, and regenerated bundles
+are present. The documentation-only successor commit and full gate remain.
 
 **4.5 Acceptance bar per destination** (gate): no raw hex/epoch/camelCase in
 default view; axe-core clean; keyboard-complete; SSE-live; smoke tests updated;
-screenshot walkthrough committed to release evidence.
+screenshot walkthrough promoted to release evidence. The 14-scenario pinned
+axe gate was green at `29426df`; at `c435611` the gate is 15/15, the 12-shot
+walkthrough passes, and real-daemon browser smoke passes. This bar
+remains open until manual screenshot review, the full clean-tree release gate,
+merge, and operator sign-off are complete.
 
-### Phase 5 — Evidence, docs, and release 1.1 (~1–2 weeks)
+### Phase 5 — Evidence, docs, and pre-final 1.0 release (~1–2 weeks)
 
 - Screenshot/UX walkthrough evidence promoted from scratch to `scripts/` +
   `ReleaseEvidence/`; C7-era `target/ux-eval` harness generalized.
@@ -378,8 +416,10 @@ screenshot walkthrough committed to release evidence.
   model (provider partitioning residuals), stealth convention + migration
   note, parity matrix, stability policy (error-code catalog, SSE surface),
   roadmap update.
-- Release mechanics per `execution-runbook-1.0.md` pattern: soak receipts,
-  doctor on all hosts, publish decision.
+- Release mechanics per `execution-runbook-1.0.md`: merge through protected
+  main, create RC6, then collect same-SHA soak, F6 testnet, clean-install,
+  doctor, UI sign-off, and evidence-bundle receipts before any final publish
+  decision. RC5 evidence remains historical for `7e04743`.
 
 ---
 
@@ -434,10 +474,12 @@ Windows (D-2); crates.io publishing (D-1).
 Phase 0 (rc.6 hardening) ──┬──> Phase 1 (backend enablers) ──> Phase 3 (HD privacy) ──┐
                            └──> Phase 2 (stealth interop)  ──────────────────────────┤
                                                                                      ▼
-                                                          Phase 4 (console redesign) ──> Phase 5 (1.1)
+                                                          Phase 4 (console redesign) ──> Phase 5 (RC6 evidence)
 ```
 
 Phases 1 and 2 are independent and parallelizable. Phase 3 needs 1.6
 (scheduler) and 2.4 (gas). Phase 4 needs 1.1–1.5 (it *is* the consumer of
 those enablers) and starts with D-B/D-C ratified. Total critical path to a
-redesigned 1.1: roughly 14–18 engineer-weeks.
+redesigned console was originally estimated at roughly 14–18 engineer-weeks;
+that estimate is historical because the work was pulled into the pre-final 1.0
+line.

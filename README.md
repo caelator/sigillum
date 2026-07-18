@@ -8,12 +8,15 @@
 > [!IMPORTANT]
 > Sigillum has not published a supported stable release. Build and evaluate the
 > current source on a non-production machine with test wallets first.
-> `v1.0.0-rc.2` failed the annotated-tag contract, and `v1.0.0-rc.3` later
-> exposed an invalid macOS bundle signature despite a green legacy check.
-> `v1.0.0-rc.4` fixed signing but exposed an F6 contract that could accept a
-> mainnet as the L2 testnet, reduce a two-transaction gas-top-up chain to one
-> hash, and let a dependent run before its prerequisite confirmed. All three
-> tags are immutable failure receipts; the next candidate is `v1.0.0-rc.5`.
+> RC2–RC4 are immutable failed-contract receipts. `v1.0.0-rc.5` is a valid,
+> checksum-verified draft candidate on protected main, but it is unpublished
+> and lacks the complete F6, clean-install, UI-signoff, and evidence-bundle
+> record required for final promotion. The operator-surface feature line
+> reaches implementation checkpoint `c435611` and changes code after RC5, so
+> its next candidate is RC6 after protected-main merge. Focused gates are green,
+> but the complete release gate has not run for this feature line and must run
+> at the documentation successor commit. No final `v1.0.0` tag or published
+> GitHub Release exists.
 
 Sigillum is a self-hosted, single-operator workstation for finding EVM wallets
 and assets, understanding their provenance and risk, preparing consolidation
@@ -154,13 +157,17 @@ Start with the [documentation map](docs/README.md). Key references include:
 - [FIDO2 model and constraints](docs/fido2.md)
 - [Privacy and linkage model](docs/architecture.md#privacy--linkage-model)
 - [Current readiness evidence](docs/production-readiness-audit.md)
+- [Current execution handoff](docs/execution-handoff.md)
+- [Operator-surface and privacy plan](docs/operator-surface-and-privacy-plan.md)
+- [1.0 execution runbook](docs/execution-runbook-1.0.md)
 - [Wallet-management roadmap](docs/wallet-management-roadmap.md)
 
 ## Development
 
 The full gate checks formatting, architecture constraints, UI build freshness,
-Rust builds/tests/lints, runtime and browser smoke flows, dependency advisories,
-licenses, and repository cleanliness:
+the pinned 15-scenario accessibility suite, Rust builds/tests/lints, runtime and
+real-daemon browser smoke flows, dependency advisories, licenses, and repository
+cleanliness:
 
 ```bash
 ./scripts/check-release.sh
@@ -175,6 +182,7 @@ public issues.
 - Workspace version: `1.0.0`
 - Supported stable release: none
 - Published GitHub Release: none
+- Unpublished draft candidate: `v1.0.0-rc.5` at protected-main `7e04743`
 - Current supported boundary: source evaluation only
 
 The workspace version describes the intended 1.0 contract; it does not by itself

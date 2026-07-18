@@ -1,6 +1,7 @@
 # Sigillum Console Design System v2
 
-Rules and vocabulary for the destination rebuilds (plan tasks 4.1–4.3).
+Rules and vocabulary for the destination rebuilds and interaction layer (plan
+tasks 4.1–4.4).
 The legacy partials keep working untouched; **new code uses the core
 (`src/core/`) and this system**. When anything here is ambiguous, the
 governing principle is: visual weight and friction proportional to money
@@ -77,9 +78,72 @@ the consequence (a row, a button, a banner) — never the whole page.
 
 `store` holds per-resource slices (reference equality, microtask-batched);
 `events` feeds `status`/`operations`/`queueEvents` over SSE with a passive
-polling fallback; `api` is the single typed client (failures are a
-discriminated union on daemon error codes — branch on them, e.g.
-`vault_locked` → unlock); `router` owns `#/destination[/sub-path]` and the
+polling fallback and retires the authenticated stream generation whenever the
+session token is revoked or rotated; `api` is the preferred shared typed client
+(some destination endpoints still use thin session-aware wrappers with the
+same `ApiFailure` contract). Every session request binds its `401` handling to
+the token it sent, and same-tab token clear applies the locked shell immediately;
+`palette` exposes only five navigation commands, refresh, and self-check behind
+unlocked/modal-safe policy; `router` owns
+`#/destination[/sub-path]` and the
 legacy-section adapter is the migration seam (see the contract in
 `core/router.ts` — it is binding for destination agents); `dom` is `el()` +
 `renderList()`.
+
+## Binding destination-controller contract
+
+1. A controller declares the exact host and legacy siblings it owns. Mount
+   stashes them and prevents legacy writers from mutating taken-over DOM;
+   unmount unsubscribes listeners and restores the stashed nodes.
+2. Store subscriptions and browser listeners are paired with cleanup. Async
+   loads carry a generation or slice-revision guard so a stale completion can
+   never replace newer state after navigation, refresh, or mutation.
+3. Preserve the last good rendering when a refresh fails and show an honest
+   stale/error banner. Do not clear useful data into a success-shaped empty
+   state.
+4. Use `core/api.ts` when it exposes the endpoint. A temporary local wrapper
+   must remain thin, session-aware, typed, and conform to `ApiFailure`; it must
+   not invent a second response envelope.
+5. Keyed lists preserve stable nodes and operator input. Patch `existing` when
+   practical. A renderer may return a fresh node only when replacement is
+   intentional; `renderList` removes the old node in that case.
+6. Use the shared modal coordinator exclusively. Only one modal may be active;
+   it traps focus, closes on Escape/backdrop where allowed, and restores focus
+   only to a connected element. Existing and dynamically appended background
+   siblings stay inert, and escaped programmatic focus returns to the dialog.
+   Cancellation is distinct from explicit blank input and must cause zero
+   mutation requests.
+7. Signing, broadcast, delete, reset, restore, key removal, and policy changes
+   are never optimistic. A safe optimistic mutation must retain a rollback
+   snapshot, restore it on write failure, and distinguish a failed write from a
+   successful write followed by failed refresh.
+8. Focus has an owner. Do not autofocus on every render. Locked/setup focus may
+   run once on a state transition but yields to an active modal and to operator
+   focus. Enter activates only the intended visible form action; Escape never
+   triggers a mutation. Delayed locked-mode FIDO detection must recheck the
+   current mode before mutating unlock guidance.
+9. Default views use semantic landmarks, heading order, labels, lists, and
+   tables. Native file inputs keep a programmatic label. Do not encode meaning
+   only in color, motion, placeholder text, or visual placement.
+10. The command palette is an allowlist, never a reflection of the broad action
+    map. Keep it navigation/read-refresh only. It must refuse locked state and
+    active modals, recheck lock state before dispatch, and close before an async
+    command or error handler runs.
+
+## Required verification
+
+For every controller or shared-interaction change:
+
+```sh
+npm test
+npm run typecheck
+npm run build
+node ../../../scripts/ui-screenshots/server.test.mjs
+../../../scripts/check-ui-accessibility.sh
+../../../scripts/check-browser-smoke.sh
+```
+
+The unit/fake-DOM, strict-mock screenshot/axe, and real-daemon browser layers
+prove different things. Mock rendering is not evidence of daemon auth, RPC,
+signing, broadcast, persistence, or packaging. The release claim comes only
+from the complete clean-tree release gate.
