@@ -707,6 +707,11 @@ async function runBrowserSmoke(cdp) {
   // activate it before navigation so refresh-liveness checks exercise a
   // genuinely visible operator console on every CI platform.
   await cdp.send("Page.bringToFront");
+  // Hosted macOS headless Chrome otherwise transitions even its sole page to
+  // hidden at the first five-second timer boundary while document.hasFocus()
+  // remains true. Model the active operator window that this smoke exercises;
+  // hidden-document pause behavior remains a separate, direct unit contract.
+  await cdp.send("Emulation.setFocusEmulationEnabled", { enabled: true });
   await cdp.send("Runtime.enable");
   await cdp.send("Network.enable");
   await cdp.send("Page.addScriptToEvaluateOnNewDocument", {

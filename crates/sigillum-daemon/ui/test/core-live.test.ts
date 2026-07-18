@@ -3,7 +3,10 @@ import { test } from "node:test";
 
 import { startCoreRuntime } from "../src/core/live";
 import {
+  clearRefreshTimer,
   markRefreshCompleted,
+  scheduleRefresh,
+  shouldAutoRefresh,
   updateRefreshMeta,
 } from "../src/state/refresh";
 import { installDom } from "./dom-fixture";
@@ -65,4 +68,49 @@ test("proof-of-life: refresh-meta renders store sync state incl. SSE transport",
   updateRefreshMeta("error");
   equal(meta.textContent, "Connection issue");
   equal(meta.dataset.state, "error");
+});
+
+test("refresh scheduling pauses hidden documents without arming a timer", () => {
+  const dom = installDom(["refreshMeta"]);
+  const meta = dom.el("refreshMeta");
+  const originalSetTimeout = globalThis.setTimeout;
+  const originalClearTimeout = globalThis.clearTimeout;
+  let scheduledTimers = 0;
+  let clearedTimers = 0;
+
+  globalThis.setTimeout = ((..._args: Parameters<typeof setTimeout>) => {
+    scheduledTimers += 1;
+    return 1 as unknown as ReturnType<typeof setTimeout>;
+  }) as typeof setTimeout;
+  globalThis.clearTimeout = ((..._args: Parameters<typeof clearTimeout>) => {
+    clearedTimers += 1;
+  }) as typeof clearTimeout;
+
+  try {
+    (dom.document as unknown as { visibilityState: string }).visibilityState =
+      "hidden";
+    scheduleRefresh(() => {});
+    equal(shouldAutoRefresh(), false);
+    equal(scheduledTimers, 0);
+    equal(meta.dataset.state, "paused");
+
+    (dom.document as unknown as { visibilityState: string }).visibilityState =
+      "visible";
+    scheduleRefresh(() => {});
+    equal(shouldAutoRefresh(), true);
+    equal(scheduledTimers, 1);
+    equal(meta.dataset.state, "live");
+
+    (dom.document as unknown as { visibilityState: string }).visibilityState =
+      "hidden";
+    scheduleRefresh(() => {});
+    equal(shouldAutoRefresh(), false);
+    equal(scheduledTimers, 1);
+    equal(clearedTimers, 1);
+    equal(meta.dataset.state, "paused");
+  } finally {
+    clearRefreshTimer();
+    globalThis.setTimeout = originalSetTimeout;
+    globalThis.clearTimeout = originalClearTimeout;
+  }
 });
