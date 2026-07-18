@@ -15,6 +15,8 @@ import {
   confirmTypedDialog,
   informDialog,
 } from "../src/render/confirm";
+import { focusableElements, hasActiveModal } from "../src/render/modal";
+import { promptSecret } from "../src/render/secret-prompt";
 import {
   amountWithRawHtml,
   chainLabel,
@@ -36,6 +38,7 @@ import { pillClass } from "../src/render/html";
 import { createReceivingActions } from "../src/views/receiving";
 import { createSelfCheckActions, formatClockTime } from "../src/views/selfcheck";
 import { createSessionActions } from "../src/views/session";
+import { createFido2Actions } from "../src/views/fido2";
 import { createSetupWizard } from "../src/views/setup";
 import {
   createShellRenderer,
@@ -170,6 +173,10 @@ function confirmOverlay(): any {
 function confirmPart(selector: string): any {
   const overlay = confirmOverlay();
   return overlay ? overlay.querySelector(selector) : null;
+}
+
+function secretPromptPart(selector: string): any {
+  return document.body.querySelector(selector);
 }
 
 function typeConfirmPhrase(phrase: string): void {
@@ -320,6 +327,170 @@ test("confirm dialog checkbox rides along with the decision", async () => {
   equal(confirmPart("[data-confirm-checkbox]"), null);
   confirmPart("[data-confirm-action]").click();
   deepEqual(await decision, { confirmed: true, checked: false });
+});
+
+test("shared modal lifecycle traps current focusables, coordinates, and restores focus", async () => {
+  const dom = installDom();
+  const invoker = dom.document.createElement("button");
+  dom.document.body.appendChild(invoker);
+  invoker.focus();
+
+  let first = confirmDangerDialog({
+    title: "First",
+    body: "First consequence.",
+    checkbox: { label: "Also remove history" },
+    valueDisplay: "read-only value",
+  });
+  equal(hasActiveModal(), true);
+  const firstCheckbox = confirmPart("[data-confirm-checkbox]");
+  const firstValue = confirmPart("[data-confirm-value]");
+  const firstCancel = confirmPart("[data-confirm-cancel]");
+  const firstAction = confirmPart("[data-confirm-action]");
+  const firstDialog = confirmOverlay().children[0];
+  deepEqual(focusableElements(firstDialog), [
+    firstCheckbox,
+    firstValue,
+    firstCancel,
+    firstAction,
+  ]);
+
+  // Focusables are recomputed on every Tab; a disabled control is skipped.
+  firstAction.disabled = true;
+  deepEqual(focusableElements(firstDialog), [firstCheckbox, firstValue, firstCancel]);
+  firstValue.remove();
+  deepEqual(
+    focusableElements(firstDialog),
+    [firstCheckbox, firstCancel],
+    "a disconnected control drops out immediately",
+  );
+  firstCancel.focus();
+  (document as any).dispatchEvent({
+    type: "keydown",
+    key: "Tab",
+    target: firstCancel,
+    preventDefault: () => undefined,
+  });
+  equal(document.activeElement, firstCheckbox);
+  firstAction.disabled = false;
+
+  // Opening another modal dismisses the old one, rather than stacking gates.
+  const second = confirmDangerDialog({ title: "Second", body: "Second consequence." });
+  equal(await first, false);
+  equal(confirmPart("[data-confirm-title]").textContent, "Second");
+  confirmPart("[data-confirm-cancel]").click();
+  equal(await second, false);
+  equal(hasActiveModal(), false);
+  equal(document.activeElement, invoker, "focus returns to the connected invoker");
+
+  // A removed invoker is never focused after the modal closes.
+  const removedInvoker = dom.document.createElement("button");
+  dom.document.body.appendChild(removedInvoker);
+  removedInvoker.focus();
+  const third = confirmDangerDialog({ title: "Third", body: "Third consequence." });
+  removedInvoker.remove();
+  confirmPart("[data-confirm-cancel]").click();
+  equal(await third, false);
+  ok((document.activeElement as any) !== removedInvoker);
+});
+
+test("secret prompt distinguishes dismissal from explicit blank submission", async () => {
+  installDom();
+  const options = {
+    title: "Optional PIN",
+    inputLabel: "Current FIDO2 PIN",
+    placeholder: "Leave blank for touch-only",
+  };
+
+  let pending = promptSecret(options);
+  equal(hasActiveModal(), true);
+  (document as any).dispatchEvent({
+    type: "keydown",
+    key: "Escape",
+    preventDefault: () => undefined,
+    stopPropagation: () => undefined,
+  });
+  deepEqual(await pending, { submitted: false, value: "" });
+
+  pending = promptSecret(options);
+  secretPromptPart("[data-secret-prompt-cancel]").click();
+  deepEqual(await pending, { submitted: false, value: "" });
+
+  pending = promptSecret(options);
+  secretPromptPart("[data-secret-prompt-overlay]").click();
+  deepEqual(await pending, { submitted: false, value: "" });
+
+  pending = promptSecret(options);
+  const blankForm = secretPromptPart("[data-secret-prompt-form]");
+  blankForm.dispatchEvent({
+    type: "submit",
+    target: blankForm,
+    preventDefault: () => undefined,
+  });
+  deepEqual(await pending, { submitted: true, value: "" });
+
+  pending = promptSecret(options);
+  const input = secretPromptPart("[data-secret-prompt-input]");
+  input.value = "1234";
+  const form = secretPromptPart("[data-secret-prompt-form]");
+  form.dispatchEvent({
+    type: "submit",
+    target: form,
+    preventDefault: () => undefined,
+  });
+  deepEqual(await pending, { submitted: true, value: "1234" });
+});
+
+test("legacy FIDO removal cancellation issues no request; blank submission remains valid", async () => {
+  installDom();
+  const calls: Array<{ method: string; path: string; body?: any }> = [];
+  const actions = createFido2Actions({
+    api: async (method, path, body) => {
+      calls.push({ method, path, body });
+      return {};
+    },
+    toast: () => undefined,
+    refresh: () => undefined,
+    currentStatus: () => ({ initialized: true, locked: false }),
+  });
+
+  let removal = actions.fido2RemoveKey("backup");
+  confirmPart("[data-confirm-action]").click();
+  await tick();
+  secretPromptPart("[data-secret-prompt-cancel]").click();
+  await removal;
+  equal(calls.length, 0);
+
+  removal = actions.fido2RemoveKey("backup");
+  confirmPart("[data-confirm-action]").click();
+  await tick();
+  const form = secretPromptPart("[data-secret-prompt-form]");
+  form.dispatchEvent({
+    type: "submit",
+    target: form,
+    preventDefault: () => undefined,
+  });
+  await removal;
+  deepEqual(calls, [
+    { method: "POST", path: "/api/fido2/remove", body: { label: "backup" } },
+  ]);
+
+  removal = actions.fido2RemoveKey("backup");
+  confirmPart("[data-confirm-action]").click();
+  await tick();
+  const input = secretPromptPart("[data-secret-prompt-input]");
+  input.value = "5678";
+  const pinForm = secretPromptPart("[data-secret-prompt-form]");
+  pinForm.dispatchEvent({
+    type: "submit",
+    target: pinForm,
+    preventDefault: () => undefined,
+  });
+  await removal;
+  deepEqual(calls[1], {
+    method: "POST",
+    path: "/api/fido2/remove",
+    body: { label: "backup", pin: "5678" },
+  });
 });
 
 test("shell renderer applies setup, locked, and unlocked DOM state", () => {

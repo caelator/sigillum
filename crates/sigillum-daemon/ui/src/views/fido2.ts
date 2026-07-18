@@ -2,6 +2,7 @@ import { confirmDangerDialog } from "../render/confirm";
 import { clearFields } from "../render/forms";
 import { setInlineInfoById, setTextById } from "../render/dom";
 import { esc, escAttr } from "../render/html";
+import { promptSecret } from "../render/secret-prompt";
 
 export interface Fido2State {
   detect: any | null;
@@ -102,41 +103,6 @@ export function friendlyFidoError(message: unknown): string {
 
 function isAlreadyUnlockedConflict(message: unknown): boolean {
   return String(message || "").toLowerCase().includes("already unlocked");
-}
-
-function promptPin(msg: string): Promise<string | null> {
-  return new Promise((resolve) => {
-    const overlay = document.createElement("div");
-    overlay.style.cssText =
-      "position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:200;display:flex;align-items:center;justify-content:center;";
-    overlay.innerHTML =
-      '<div class="card pin-modal"><h2>' +
-      esc(msg) +
-      '</h2><div class="form-row"><input type="password" id="pinModalInput" placeholder="Current PIN (leave blank if not required)">' +
-      '<button class="btn-primary" id="pinModalOk">OK</button></div></div>';
-    document.body.appendChild(overlay);
-    const inp = input("pinModalInput");
-    inp.focus();
-    const done = () => {
-      const value = inp.value;
-      overlay.remove();
-      resolve(value || null);
-    };
-    document.getElementById("pinModalOk")?.addEventListener("click", done);
-    inp.addEventListener("keydown", (event) => {
-      if (event.key === "Enter") done();
-      if (event.key === "Escape") {
-        overlay.remove();
-        resolve(null);
-      }
-    });
-    overlay.addEventListener("click", (event) => {
-      if (event.target === overlay) {
-        overlay.remove();
-        resolve(null);
-      }
-    });
-  });
 }
 
 export function createFido2Actions(deps: Fido2Deps) {
@@ -381,9 +347,14 @@ export function createFido2Actions(deps: Fido2Deps) {
       actionLabel: "Remove key",
     });
     if (!confirmed) return;
-    const pin = await promptPin("Enter the current FIDO2 PIN only if the remaining keys require one:");
+    const pinDecision = await promptSecret({
+      title: "Enter the current FIDO2 PIN only if the remaining keys require one:",
+      inputLabel: "Current FIDO2 PIN",
+      placeholder: "Current PIN (leave blank if not required)",
+    });
+    if (!pinDecision.submitted) return;
     const body: any = { label };
-    if (pin) body.pin = pin;
+    if (pinDecision.value) body.pin = pinDecision.value;
     const r = await deps.api("POST", "/api/fido2/remove", body);
     if (r.error) {
       const message = friendlyFidoError(r.error);

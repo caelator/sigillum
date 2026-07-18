@@ -22,6 +22,8 @@
 // deletes = confirm; typed phrase is reserved for bulk/irreversible
 // vault-level operations.
 
+import { openModal, type ModalHandle } from "./modal";
+
 export type ConfirmTier = "inform" | "confirm" | "typed";
 
 export interface ConfirmDialogOptions {
@@ -50,10 +52,6 @@ export interface ConfirmDecision {
   confirmed: boolean;
   checked: boolean;
 }
-
-// Only one dialog may be open at a time; a new dialog cancels the previous
-// one (resolves false) so a stale modal can never gate the wrong action.
-let activeCancel: (() => void) | null = null;
 
 let dialogSerial = 0;
 
@@ -84,11 +82,8 @@ export function confirmDialogDecision(
   options: ConfirmDialogOptions,
 ): Promise<ConfirmDecision> {
   return new Promise((resolve) => {
-    if (activeCancel) activeCancel();
-
     dialogSerial += 1;
     const titleId = "confirmDialogTitle" + String(dialogSerial);
-    const previousFocus = document.activeElement as HTMLElement | null;
 
     const overlay = document.createElement("div");
     overlay.className = "confirm-overlay";
@@ -184,25 +179,14 @@ export function confirmDialogDecision(
 
     dialog.appendChild(actions);
     overlay.appendChild(dialog);
-    document.body.appendChild(overlay);
-
-    const focusables: HTMLElement[] = [];
-    if (valueInput) focusables.push(valueInput);
-    if (phraseInput) focusables.push(phraseInput);
-    if (checkboxInput) focusables.push(checkboxInput);
-    if (cancelButton) focusables.push(cancelButton);
-    focusables.push(actionButton);
 
     let settled = false;
+    let lifecycle: ModalHandle | null = null;
     const settle = (confirmed: boolean): void => {
       if (settled) return;
       settled = true;
-      activeCancel = null;
-      document.removeEventListener("keydown", onKeydown, true);
-      overlay.remove();
-      if (previousFocus && typeof previousFocus.focus === "function") {
-        previousFocus.focus();
-      }
+      document.removeEventListener("keydown", onConfirmKeydown, true);
+      lifecycle?.close();
       resolve({
         confirmed,
         checked: confirmed && checkboxInput != null && checkboxInput.checked,
@@ -214,24 +198,7 @@ export function confirmDialogDecision(
       options.phrase != null &&
       phraseInput.value.trim() === options.phrase;
 
-    const onKeydown = (event: KeyboardEvent): void => {
-      if (event.key === "Escape") {
-        if (typeof event.preventDefault === "function") event.preventDefault();
-        settle(false);
-        return;
-      }
-      if (event.key === "Tab" && focusables.length > 0) {
-        if (typeof event.preventDefault === "function") event.preventDefault();
-        const active = document.activeElement as HTMLElement | null;
-        const index = active ? focusables.indexOf(active) : -1;
-        const direction = event.shiftKey ? -1 : 1;
-        const next =
-          index === -1
-            ? 0
-            : (index + direction + focusables.length) % focusables.length;
-        focusables[next].focus();
-        return;
-      }
+    const onConfirmKeydown = (event: KeyboardEvent): void => {
       // Enter never triggers the danger action on the typed tier: it only
       // submits when the phrase input itself has focus and already matches.
       if (
@@ -246,12 +213,7 @@ export function confirmDialogDecision(
       }
     };
 
-    activeCancel = () => settle(false);
-    document.addEventListener("keydown", onKeydown, true);
-
-    overlay.addEventListener("click", (event) => {
-      if (event.target === overlay) settle(false);
-    });
+    document.addEventListener("keydown", onConfirmKeydown, true);
     cancelButton?.addEventListener("click", () => settle(false));
     actionButton.addEventListener("click", () => {
       if (tier === "typed" && !phraseMatches()) return;
@@ -265,7 +227,12 @@ export function confirmDialogDecision(
     // be filled before anything can fire) or Cancel. Inform has one button.
     const initialFocus =
       tier === "inform" ? actionButton : phraseInput || cancelButton || actionButton;
-    initialFocus.focus();
+    lifecycle = openModal({
+      overlay,
+      dialog,
+      initialFocus,
+      onDismiss: () => settle(false),
+    });
   });
 }
 

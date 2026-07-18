@@ -1,19 +1,6 @@
-/* ── 18. Pin modal (created at runtime by fido2.ts) ───────────────────────── */
+/* ── 18. Shared modal shell ───────────────────────────────────────────────── */
 
-.pin-modal {
-  width: min(420px, calc(100vw - 48px));
-  box-shadow: var(--shadow-3);
-}
-
-.pin-modal h2 {
-  font-size: var(--fs-base);
-  font-weight: 600;
-  line-height: 1.5;
-  margin-bottom: var(--space-3);
-}
-
-/* ── 18b. Confirmation dialog (created at runtime by render/confirm.ts) ───── */
-
+.modal-overlay,
 .confirm-overlay {
   position: fixed;
   inset: 0;
@@ -24,17 +11,34 @@
   justify-content: center;
 }
 
+.modal-dialog,
 .confirm-dialog {
   width: min(460px, calc(100vw - 48px));
   box-shadow: var(--shadow-3);
 }
 
+.modal-dialog h2,
 .confirm-dialog h2 {
   font-size: var(--fs-base);
   font-weight: 600;
   line-height: 1.5;
   margin-bottom: var(--space-3);
 }
+
+.modal-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-2);
+  margin-top: var(--space-3);
+}
+
+.secret-prompt-form,
+.secret-prompt-input {
+  width: 100%;
+}
+
+/* ── 18b. Confirmation dialog (created at runtime by render/confirm.ts) ───── */
 
 .confirm-body {
   color: var(--text-secondary);

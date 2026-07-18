@@ -642,7 +642,7 @@ test("hardware keys: detect line, keyed list, poison register, remove with PIN",
     );
     ok(pinInput, "PIN prompt shown");
     pinInput.value = "1234";
-    const pinForm = dom.document.body.querySelector('[data-vault="pin-form"]');
+    const pinForm = dom.document.body.querySelector('[data-secret-prompt-form]');
     ok(pinForm);
     submit(pinForm);
     await flush();
@@ -650,6 +650,57 @@ test("hardware keys: detect line, keyed list, poison register, remove with PIN",
     equal(removes.length, 1);
     equal(removes[0].body?.label, "backup");
     equal(removes[0].body?.pin, "1234");
+  } finally {
+    controller.unmount();
+  }
+});
+
+test("hardware-key removal distinguishes cancel from an explicit blank PIN", async () => {
+  const { dom, controller, fetchCalls } = setup({ status: unlockedStatus() });
+  controller.mount(VAULT_ROUTE);
+  await flush();
+  try {
+    const beginRemoval = async (): Promise<void> => {
+      findButton(collectByVault(dom, "fido2-row")[0], "Remove")?.click();
+      await flush();
+      confirmPart(dom, "action")?.click();
+      await flush();
+      ok(
+        dom.document.body.querySelector('[data-secret-prompt-input]'),
+        "PIN prompt shown after danger confirmation",
+      );
+    };
+
+    // Every dismissal path is cancellation: none may be reinterpreted as a
+    // touch-only key and sent to the destructive endpoint.
+    const dismissals = [
+      () => dom.document.body.querySelector('[data-secret-prompt-cancel]')?.click(),
+      () =>
+        (dom.document as any).dispatchEvent({
+          type: "keydown",
+          key: "Escape",
+          preventDefault: () => undefined,
+          stopPropagation: () => undefined,
+        }),
+      () => dom.document.body.querySelector('[data-secret-prompt-overlay]')?.click(),
+    ];
+    for (const dismiss of dismissals) {
+      await beginRemoval();
+      dismiss();
+      await flush();
+      equal(findCalls(fetchCalls, "POST", "/api/fido2/remove").length, 0);
+    }
+
+    // An explicit blank submission is the valid touch-only path.
+    await beginRemoval();
+    const blankForm = dom.document.body.querySelector('[data-secret-prompt-form]');
+    ok(blankForm);
+    submit(blankForm);
+    await flush();
+    const removes = findCalls(fetchCalls, "POST", "/api/fido2/remove");
+    equal(removes.length, 1);
+    equal(removes[0].body?.label, "backup");
+    equal("pin" in (removes[0].body || {}), false);
   } finally {
     controller.unmount();
   }

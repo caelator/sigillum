@@ -321,20 +321,3 @@
 .vault-check-group[open] summary {
   margin-bottom: var(--space-2);
 }
-
-/* ── PIN-prompt modal (replaces the legacy inline-styled promptPin) ───── */
-
-.vault-modal-overlay {
-  position: fixed;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.7);
-  z-index: 200;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.vault-modal {
-  max-width: 420px;
-  width: 100%;
-}

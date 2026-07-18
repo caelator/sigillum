@@ -37,6 +37,7 @@ import {
   confirmTypedDialog,
 } from "../render/confirm";
 import { formatTimestamp } from "../render/format";
+import { promptSecret } from "../render/secret-prompt";
 import { friendlyFidoError } from "../views/fido2";
 
 // ── Constants (server contracts kept verbatim) ───────────────────────
@@ -1332,69 +1333,6 @@ export function createVaultDestination(runtime: CoreRuntime): DestinationControl
     renderFido2();
   }
 
-  /** PIN prompt styled by dest-Vault.css (legacy promptPin used inline styles). */
-  function promptPin(message: string): Promise<string | null> {
-    return new Promise((resolve) => {
-      const input = el("input", {
-        class: "input-wide",
-        attrs: {
-          type: "password",
-          placeholder: "Current PIN (leave blank if not required)",
-          "aria-label": "Current FIDO2 PIN",
-        },
-      }) as HTMLInputElement;
-      const done = (value: string | null): void => {
-        overlay.remove();
-        resolve(value);
-      };
-      const form = el(
-        "form",
-        {
-          class: "form-row",
-          attrs: { "data-vault": "pin-form" },
-          on: {
-            submit: (event) => {
-              event.preventDefault?.();
-              done(input.value || null);
-            },
-          },
-        },
-        input,
-        el("button", {
-          class: "btn-primary",
-          text: "OK",
-          attrs: { type: "submit" },
-        }),
-      );
-      const dialog = el(
-        "div",
-        { class: "card vault-modal", attrs: { role: "dialog", "aria-modal": "true" } },
-        el("h2", { text: message }),
-        form,
-        el(
-          "div",
-          { class: "form-row" },
-          el("button", {
-            class: "btn-ghost",
-            text: "Cancel",
-            attrs: { type: "button" },
-            on: { click: () => done(null) },
-          }),
-        ),
-      );
-      const overlay = el(
-        "div",
-        { class: "vault-modal-overlay" },
-        dialog,
-      );
-      overlay.addEventListener("click", (event) => {
-        if (event.target === overlay) done(null);
-      });
-      document.body.appendChild(overlay);
-      input.focus();
-    });
-  }
-
   async function setFido2Pin(
     pinInput: HTMLInputElement,
     confirmInput: HTMLInputElement,
@@ -1492,12 +1430,15 @@ export function createVaultDestination(runtime: CoreRuntime): DestinationControl
       actionLabel: "Remove key",
     });
     if (!confirmed) return;
-    const pin = await promptPin(
-      "Enter the current FIDO2 PIN only if the remaining keys require one:",
-    );
+    const pinDecision = await promptSecret({
+      title: "Enter the current FIDO2 PIN only if the remaining keys require one:",
+      inputLabel: "Current FIDO2 PIN",
+      placeholder: "Current PIN (leave blank if not required)",
+    });
+    if (!pinDecision.submitted) return;
     try {
       const body: Record<string, unknown> = { label };
-      if (pin) body.pin = pin;
+      if (pinDecision.value) body.pin = pinDecision.value;
       await call("POST", "/api/fido2/remove", body);
       flash('Key "' + label + '" removed.');
       await loadFido2();
