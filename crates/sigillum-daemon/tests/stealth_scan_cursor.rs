@@ -53,12 +53,24 @@ async fn spawn_daemon(base_dir: PathBuf) -> (SocketAddr, tokio::task::JoinHandle
     (addr, handle)
 }
 
-#[derive(Default)]
 struct RpcState {
     /// Announcement logs served for ERC-5564 announcer `eth_getLogs` filters.
     announcement_logs: std::sync::RwLock<Vec<Value>>,
     /// Every `(fromBlock, toBlock)` filter range the daemon scanned, in order.
     get_logs_ranges: std::sync::RwLock<Vec<(String, String)>>,
+    /// Mutable head lets migration tests model a legacy cursor below the live
+    /// chain head without changing the other cursor fixtures.
+    head_block: std::sync::RwLock<String>,
+}
+
+impl Default for RpcState {
+    fn default() -> Self {
+        Self {
+            announcement_logs: std::sync::RwLock::new(Vec::new()),
+            get_logs_ranges: std::sync::RwLock::new(Vec::new()),
+            head_block: std::sync::RwLock::new(HEAD.to_string()),
+        }
+    }
 }
 
 fn announcement_topic() -> String {
@@ -124,7 +136,7 @@ async fn spawn_mock_evm_provider() -> (SocketAddr, tokio::task::JoinHandle<()>, 
         let method = request["method"].as_str().unwrap_or_default();
         let result = match method {
             "eth_chainId" => json!("0x1"),
-            "eth_blockNumber" => json!(HEAD),
+            "eth_blockNumber" => json!(state.head_block.read().unwrap().clone()),
             "eth_getLogs" => {
                 let filter = &request["params"][0];
                 state.get_logs_ranges.write().unwrap().push((
@@ -463,10 +475,50 @@ async fn v1_same_block_limit_resumes_without_skip_or_livelock() {
     rig.abort();
 }
 
+/// Conflicting canonical positions are not a valid provider result. The
+/// scanner must fail closed before it can persist a deposit or cursor because
+/// no total ordering can distinguish the two logs for safe pagination.
+#[tokio::test]
+async fn duplicate_log_positions_fail_without_mutating_the_store() {
+    let dir = TempDir::new().unwrap();
+    let rig = spawn_rig(&dir).await;
+    serve_two_payment_logs_same_block(&rig, &rig.token, "0x20").await;
+    {
+        let mut logs = rig.rpc_state.announcement_logs.write().unwrap();
+        logs[0]["logIndex"] = json!("0x0");
+        assert_eq!(logs[1]["logIndex"], "0x0");
+    }
+
+    let store_path = dir.path().join("deposits.json");
+    let store_before = std::fs::read(&store_path).ok();
+    let response = reqwest::Client::new()
+        .post(format!(
+            "http://{}/api/deposits/eth-stealth/scan-announcements",
+            rig.addr
+        ))
+        .bearer_auth(&rig.token)
+        .json(&json!({ "wallet_profile": "payments-mainnet" }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+    let body: Value = response.json().await.unwrap();
+    assert_eq!(body["code"], "internal", "scan body: {body}");
+    assert_eq!(
+        body["error"],
+        "Provider returned duplicate ERC-5564 announcement log positions"
+    );
+    assert_eq!(std::fs::read(&store_path).ok(), store_before);
+
+    rig.abort();
+}
+
 /// A legacy block-only cursor may have advanced beyond an earlier page
-/// boundary that skipped a same-block tail. Replay the entire ambiguous
-/// history, allow the v1 cursor to re-anchor below the v0 block, then consume
-/// the remaining log and mark the range complete.
+/// boundary that skipped a same-block tail. A manual scan that starts after
+/// genesis is rejected without retiring that ambiguity. The next implicit
+/// scan still replays the entire history, allows the v1 cursor to re-anchor
+/// below the v0 block, then consumes the remaining log and marks the range
+/// complete.
 #[tokio::test]
 async fn legacy_cursor_replays_full_history_and_upgrades_without_skip() {
     let dir = TempDir::new().unwrap();
@@ -514,11 +566,43 @@ async fn legacy_cursor_replays_full_history_and_upgrades_without_skip() {
         rpc_handle: rig.rpc_handle,
     };
     let token = restarted.unlock().await;
+    *restarted.rpc_state.head_block.write().unwrap() = "0x30".to_string();
     assert_eq!(
         restarted.rpc_state.announcement_logs.read().unwrap().len(),
         2,
         "legacy replay fixture must retain both provider logs"
     );
+
+    // A bounded manual scan cannot prove that the legacy implementation did
+    // not skip a capped tail before its lower bound. Reject it before the RPC
+    // call or any store mutation, with an actionable migration path.
+    let store_path = dir.path().join("deposits.json");
+    let store_before = std::fs::read(&store_path).expect("legacy cursor store should exist");
+    let response = reqwest::Client::new()
+        .post(format!(
+            "http://{}/api/deposits/eth-stealth/scan-announcements",
+            restarted.addr
+        ))
+        .bearer_auth(&token)
+        .json(&json!({
+            "wallet_profile": "payments-mainnet",
+            "from_block": "0x10",
+            "limit": 1,
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::CONFLICT);
+    let body: Value = response.json().await.unwrap();
+    assert_eq!(body["code"], "conflict", "scan body: {body}");
+    assert!(
+        body["error"]
+            .as_str()
+            .is_some_and(|error| error.contains("full-history replay")),
+        "scan body: {body}"
+    );
+    assert_eq!(std::fs::read(&store_path).unwrap(), store_before);
+    assert_eq!(restarted.scanned_ranges().len(), 1);
 
     let second = restarted.scan(&token, json!({ "limit": 1 })).await;
     assert_eq!(second["from_block"], "earliest");
@@ -538,6 +622,30 @@ async fn legacy_cursor_replays_full_history_and_upgrades_without_skip() {
     assert_eq!(cursor["position_version"], 1);
     assert_eq!(cursor["last_scanned_block"], 32);
     assert_eq!(cursor["last_scanned_log_index"], 0);
+    assert_eq!(cursor["legacy_replay_through_block"], 48);
+
+    // The first exact page does not settle the old boundary. A bounded scan
+    // inserted between replay pages is still rejected without RPC or store
+    // mutation, so it cannot jump over the second log in block 32.
+    let store_before = std::fs::read(&store_path).unwrap();
+    let range_count_before = restarted.scanned_ranges().len();
+    let response = reqwest::Client::new()
+        .post(format!(
+            "http://{}/api/deposits/eth-stealth/scan-announcements",
+            restarted.addr
+        ))
+        .bearer_auth(&token)
+        .json(&json!({
+            "wallet_profile": "payments-mainnet",
+            "from_block": "0x40",
+            "limit": 1,
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::CONFLICT);
+    assert_eq!(std::fs::read(&store_path).unwrap(), store_before);
+    assert_eq!(restarted.scanned_ranges().len(), range_count_before);
 
     let third = restarted.scan(&token, json!({ "limit": 1 })).await;
     assert_eq!(third["from_block"], "0x20");
@@ -545,8 +653,18 @@ async fn legacy_cursor_replays_full_history_and_upgrades_without_skip() {
     assert_eq!(third["created"], 1);
     assert_eq!(third["deposits"][0]["stealth_address"], expected[1]);
 
+    let completed: Value = serde_json::from_slice(
+        &std::fs::read(&store_path).expect("cursor store should exist after replay"),
+    )
+    .expect("completed cursor store should be valid JSON");
+    let cursor = &completed["data"]["announcement_scan_cursors"][0];
+    assert_eq!(cursor["position_version"], 1);
+    assert_eq!(cursor["last_scanned_block"], 48);
+    assert!(cursor.get("last_scanned_log_index").is_none());
+    assert!(cursor.get("legacy_replay_through_block").is_none());
+
     let fourth = restarted.scan(&token, json!({ "limit": 1 })).await;
-    assert_eq!(fourth["from_block"], "0x21");
+    assert_eq!(fourth["from_block"], "0x31");
     assert_eq!(fourth["scanned"], 0);
     assert_eq!(fourth["created"], 0);
     assert_eq!(
@@ -555,7 +673,7 @@ async fn legacy_cursor_replays_full_history_and_upgrades_without_skip() {
             ("earliest".to_string(), "latest".to_string()),
             ("earliest".to_string(), "latest".to_string()),
             ("0x20".to_string(), "latest".to_string()),
-            ("0x21".to_string(), "latest".to_string()),
+            ("0x31".to_string(), "latest".to_string()),
         ]
     );
 
@@ -673,6 +791,53 @@ async fn reset_cursor_reanchors_the_scan_range() {
             ("0x21".to_string(), "latest".to_string()),
             ("earliest".to_string(), "latest".to_string()),
             ("0x21".to_string(), "latest".to_string()),
+        ]
+    );
+
+    rig.abort();
+}
+
+/// A successful reset with no numeric completion anchor still drops the old
+/// cursor. The next implicit scan must start from full history, not resume the
+/// position that the caller explicitly reset.
+#[tokio::test]
+async fn reset_cursor_clears_when_an_empty_named_range_has_no_anchor() {
+    let dir = TempDir::new().unwrap();
+    let rig = spawn_rig(&dir).await;
+    serve_payment_log(&rig, &rig.token, [0x48u8; 32], "0x20").await;
+
+    let first = rig.scan(&rig.token, json!({})).await;
+    assert_eq!(first["from_block"], "earliest");
+    rig.rpc_state.announcement_logs.write().unwrap().clear();
+
+    let reset = rig
+        .scan(
+            &rig.token,
+            json!({ "reset_cursor": true, "to_block": "safe" }),
+        )
+        .await;
+    assert_eq!(reset["from_block"], "earliest");
+    assert_eq!(reset["to_block"], "safe");
+    assert_eq!(reset["scanned"], 0);
+
+    let persisted: Value = serde_json::from_slice(
+        &std::fs::read(dir.path().join("deposits.json")).expect("deposit store should exist"),
+    )
+    .expect("deposit store should be valid JSON");
+    assert_eq!(
+        persisted["data"]["announcement_scan_cursors"],
+        json!([]),
+        "an unanchored successful reset must leave no stale cursor"
+    );
+
+    let after = rig.scan(&rig.token, json!({})).await;
+    assert_eq!(after["from_block"], "earliest");
+    assert_eq!(
+        rig.scanned_ranges(),
+        vec![
+            ("earliest".to_string(), "latest".to_string()),
+            ("earliest".to_string(), "safe".to_string()),
+            ("earliest".to_string(), "latest".to_string()),
         ]
     );
 

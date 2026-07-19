@@ -205,6 +205,7 @@ fn announcement_log(
     stealth_address: &str,
     ephemeral_public_key_hex: &str,
     metadata: &[u8],
+    log_index_hex: &str,
 ) -> Value {
     let ephemeral_public_key = hex::decode(ephemeral_public_key_hex).unwrap();
     let first_tail = abi_dynamic_bytes(&ephemeral_public_key);
@@ -227,7 +228,7 @@ fn announcement_log(
         "data": data,
         "blockNumber": "0x20",
         "transactionHash": format!("0x{}", "55".repeat(32)),
-        "logIndex": "0x0",
+        "logIndex": log_index_hex,
     })
 }
 
@@ -686,16 +687,19 @@ async fn announcement_scan_finds_both_conventions_in_one_pass() {
             &standard_payment.stealth_address,
             &standard_payment.ephemeral_public_key_hex,
             &hex::decode(&standard_payment.view_tag_hex).unwrap(),
+            "0x0",
         ),
         announcement_log(
             &legacy_payment.stealth_address,
             &legacy_payment.ephemeral_public_key_hex,
             &hex::decode(&legacy_payment.view_tag_hex).unwrap(),
+            "0x1",
         ),
         announcement_log(
             "0x000000000000000000000000000000000000dead",
             &legacy_payment.ephemeral_public_key_hex,
             &[noise_tag],
+            "0x2",
         ),
     ];
 
@@ -786,6 +790,7 @@ async fn watch_only_detection_requires_unlocked_compartment() {
         &payment.stealth_address,
         &payment.ephemeral_public_key_hex,
         &hex::decode(&payment.view_tag_hex).unwrap(),
+        "0x0",
     )];
 
     // Unlocked: the watch-only scan detects the payment.

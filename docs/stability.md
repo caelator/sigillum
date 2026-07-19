@@ -162,7 +162,13 @@ be release evidence. Current adjustments since `1.0.0-rc.5`:
   provider) cursor instead of failing validation) and the request gained an
   optional `reset_cursor`. The deposits store gained the additive
   serde-defaulted `announcement_scan_cursors` list (schema stays v3) with the
-  new `EthStealthAnnouncementScanCursor` DTO.
+  new `EthStealthAnnouncementScanCursor` DTO. Cursor positions are now
+  versioned with an optional `last_scanned_log_index` so capped scans can
+  resume inside a block. Legacy block-only cursors require one full-history
+  replay, with additive `legacy_replay_through_block` retaining that debt
+  across capped pages. An explicit non-genesis range returns 409 until the
+  replay covers the old boundary, unless the caller deliberately supplies
+  `reset_cursor: true`.
 - **Stealth execution-gate carve-out closed (plan task 2.5)**: the stealth
   transfer/sweep queue jobs (`EthStealthTransfer`, `EthStealthErc20Transfer`,
   `EthStealthNativeSweep`, `EthStealthErc20Sweep`) no longer bypass the

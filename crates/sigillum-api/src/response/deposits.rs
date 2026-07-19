@@ -114,7 +114,9 @@ pub struct EthStealthDepositRefreshResponse {
 /// field and deserialize with `position_version = 0`. Their entire historical
 /// range is ambiguous: an old limit-capped scan may have skipped a same-block
 /// tail and then advanced through later blocks. The daemon therefore replays
-/// history once from `earliest` before upgrading the cursor to v1.
+/// history once from `earliest` before upgrading the cursor to v1. When that
+/// replay spans multiple capped pages, `legacy_replay_through_block` retains
+/// the old block boundary until the exact v1 cursor has covered it.
 ///
 /// Stored in the deposits store; mirrored here so responses and clients can
 /// share the shape.
@@ -129,6 +131,8 @@ pub struct EthStealthAnnouncementScanCursor {
     pub last_scanned_block: u64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_scanned_log_index: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub legacy_replay_through_block: Option<u64>,
     pub updated_at_unix: u64,
 }
 

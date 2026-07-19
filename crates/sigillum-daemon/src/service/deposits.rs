@@ -121,6 +121,7 @@ mod tests {
             position_version: ANNOUNCEMENT_SCAN_CURSOR_POSITION_VERSION,
             last_scanned_block: block,
             last_scanned_log_index: log_index,
+            legacy_replay_through_block: None,
             updated_at_unix: updated,
         }
     }
@@ -207,6 +208,82 @@ mod tests {
         assert_eq!(parse_block_quantity("latest"), None);
         assert_eq!(parse_block_quantity("0X0A"), Some(10));
         assert_eq!(encode_block_quantity(31), "0x1f");
+    }
+
+    #[test]
+    fn legacy_cursor_replay_conflict_requires_a_proven_origin_or_reset() {
+        let mut legacy = scan_cursor("w", "p", 48, 10);
+        legacy.position_version = 0;
+        let current = scan_cursor("w", "p", 48, 10);
+        let mut replay_pending = current.clone();
+        replay_pending.legacy_replay_through_block = Some(48);
+
+        assert!(!legacy_cursor_conflicts_with_explicit_origin(
+            Some(&legacy),
+            None,
+            false
+        ));
+        assert!(!legacy_cursor_conflicts_with_explicit_origin(
+            Some(&legacy),
+            Some("earliest"),
+            false
+        ));
+        assert!(!legacy_cursor_conflicts_with_explicit_origin(
+            Some(&legacy),
+            Some("0x0000"),
+            false
+        ));
+        assert!(legacy_cursor_conflicts_with_explicit_origin(
+            Some(&legacy),
+            Some("0x1"),
+            false
+        ));
+        assert!(legacy_cursor_conflicts_with_explicit_origin(
+            Some(&legacy),
+            Some("latest"),
+            false
+        ));
+        assert!(!legacy_cursor_conflicts_with_explicit_origin(
+            Some(&legacy),
+            Some("0x10"),
+            true
+        ));
+        assert!(!legacy_cursor_conflicts_with_explicit_origin(
+            Some(&current),
+            Some("0x10"),
+            false
+        ));
+        assert!(legacy_cursor_conflicts_with_explicit_origin(
+            Some(&replay_pending),
+            Some("0x10"),
+            false
+        ));
+    }
+
+    #[test]
+    fn legacy_replay_target_clears_only_after_covered_block_is_complete() {
+        assert_eq!(remaining_legacy_replay_target(None, None), None);
+        assert_eq!(remaining_legacy_replay_target(Some(48), None), Some(48));
+        assert_eq!(
+            remaining_legacy_replay_target(Some(48), Some((32, Some(0)))),
+            Some(48)
+        );
+        assert_eq!(
+            remaining_legacy_replay_target(Some(48), Some((48, Some(9)))),
+            Some(48)
+        );
+        assert_eq!(
+            remaining_legacy_replay_target(Some(48), Some((49, Some(0)))),
+            None
+        );
+        assert_eq!(
+            remaining_legacy_replay_target(Some(48), Some((47, None))),
+            Some(48)
+        );
+        assert_eq!(
+            remaining_legacy_replay_target(Some(48), Some((48, None))),
+            None
+        );
     }
 
     fn abi_dynamic_bytes(bytes: &[u8]) -> String {
@@ -952,32 +1029,58 @@ impl SigillumService {
         validate_optional_quantity(body.min_sweep_amount_hex.as_deref(), "min_sweep_amount")?;
         let (provider, wallet) = self.resolve_wallet_profile(&body.wallet_profile)?;
 
-        // Plan task 2.6: an explicit `from_block` always wins (manual
-        // rescan); when omitted, resume from the persisted per-(wallet,
+        // Plan task 2.6: after migration, an explicit `from_block` wins for a
+        // manual rescan; when omitted, resume from the persisted per-(wallet,
         // provider) announcement cursor, or scan from `earliest` when no
         // cursor is stored (first scan, or after `reset_cursor`). A v1 partial
         // cursor resumes inside its block, while a v1 completed cursor resumes
         // at the following block. A legacy v0 cursor replays from `earliest`:
         // the old block-only format cannot prove that an earlier capped scan
         // did not skip a same-block tail before later scans advanced the
-        // cursor. The cursor read is a cheap store load; the authoritative
-        // mutation copy loads under the operation guard below.
+        // cursor, so bounded manual origins conflict until a full replay or an
+        // explicit reset. The cursor read is a cheap store load; the
+        // authoritative mutation copy loads under the operation guard below.
         let reset_cursor = body.reset_cursor.unwrap_or(false);
-        let resume_cursor = if body.from_block.is_none() && !reset_cursor {
-            let stored = crate::deposits::load_deposits(&self.state.base_dir).map_err(|error| {
-                ServiceError::internal(format!("Failed to load deposits: {error}"))
-            })?;
-            latest_announcement_scan_cursor(
-                &stored.announcement_scan_cursors,
-                &wallet.name,
-                &provider.name,
-            )
-            .cloned()
+        let explicit_from_block = body
+            .from_block
+            .as_deref()
+            .map(|value| normalize_log_block_tag(value, "from_block"))
+            .transpose()?;
+        let stored = crate::deposits::load_deposits(&self.state.base_dir)
+            .map_err(|error| ServiceError::internal(format!("Failed to load deposits: {error}")))?;
+        let stored_cursor = latest_announcement_scan_cursor(
+            &stored.announcement_scan_cursors,
+            &wallet.name,
+            &provider.name,
+        )
+        .cloned();
+        let legacy_replay_target = if reset_cursor {
+            None
+        } else {
+            stored_cursor.as_ref().and_then(|cursor| {
+                if cursor.position_version == 0 {
+                    Some(cursor.last_scanned_block)
+                } else {
+                    cursor.legacy_replay_through_block
+                }
+            })
+        };
+        if legacy_cursor_conflicts_with_explicit_origin(
+            stored_cursor.as_ref(),
+            explicit_from_block.as_deref(),
+            reset_cursor,
+        ) {
+            return Err(ServiceError::conflict(
+                "This wallet has a legacy ERC-5564 scan cursor that requires a full-history replay. Omit from_block, use earliest or 0x0, or set reset_cursor=true to deliberately replace the stored cursor.",
+            ));
+        }
+        let resume_cursor = if explicit_from_block.is_none() && !reset_cursor {
+            stored_cursor
         } else {
             None
         };
-        let from_block = match body.from_block.as_deref() {
-            Some(value) => normalize_log_block_tag(value, "from_block")?,
+        let from_block = match explicit_from_block {
+            Some(value) => value,
             None => match resume_cursor.as_ref() {
                 Some(cursor) if cursor.position_version == 0 => "earliest".into(),
                 Some(cursor)
@@ -1185,6 +1288,17 @@ impl SigillumService {
             deposits.eth_stealth.push(deposit);
         }
 
+        // `reset_cursor` is an atomic remove-then-optional-reanchor. Remove
+        // the authoritative stored position even when this successful scan
+        // cannot derive a numeric anchor (for example, an empty `safe`
+        // range); otherwise the advertised reset would silently leave legacy
+        // replay debt behind.
+        if reset_cursor {
+            deposits.announcement_scan_cursors.retain(|cursor| {
+                cursor.wallet_profile != wallet.name || cursor.provider_profile != provider.name
+            });
+        }
+
         // A limit-capped result records the exact last processed log and
         // resumes inside that block next time. Once every eligible result was
         // consumed, the whole completed block/range is safe to mark covered:
@@ -1202,6 +1316,8 @@ impl SigillumService {
                 (None, None) => None,
             }
         };
+        let legacy_replay_through_block =
+            remaining_legacy_replay_target(legacy_replay_target, cursor_position);
         if let Some((last_scanned_block, last_scanned_log_index)) = cursor_position {
             upsert_announcement_scan_cursor(
                 &mut deposits.announcement_scan_cursors,
@@ -1212,6 +1328,7 @@ impl SigillumService {
                     position_version: ANNOUNCEMENT_SCAN_CURSOR_POSITION_VERSION,
                     last_scanned_block,
                     last_scanned_log_index,
+                    legacy_replay_through_block,
                     updated_at_unix: now,
                 },
                 reset_cursor,
@@ -2608,6 +2725,40 @@ fn encode_block_quantity(value: u64) -> String {
     format!("0x{value:x}")
 }
 
+/// A legacy block-only cursor cannot prove that a capped historical scan did
+/// not skip a same-block tail. An explicit bounded scan may retire that debt
+/// only when it starts at full history, or when the caller deliberately resets
+/// the cursor. Rejecting other origins prevents a successful manual scan from
+/// silently converting the ambiguous v0 position into an exact v1 boundary.
+fn legacy_cursor_conflicts_with_explicit_origin(
+    cursor: Option<&EthStealthAnnouncementScanCursor>,
+    explicit_from_block: Option<&str>,
+    reset: bool,
+) -> bool {
+    !reset
+        && cursor.is_some_and(|cursor| {
+            cursor.position_version == 0 || cursor.legacy_replay_through_block.is_some()
+        })
+        && explicit_from_block.is_some_and(|from_block| {
+            from_block != "earliest" && parse_block_quantity(from_block) != Some(0)
+        })
+}
+
+/// Keep the legacy boundary while an exact cursor has covered only a partial
+/// position at or before that block, or a completed range ending before it.
+/// A partial position in a later block proves every earlier block was drained
+/// because provider logs were sorted before pagination.
+fn remaining_legacy_replay_target(
+    target: Option<u64>,
+    cursor_position: Option<(u64, Option<u64>)>,
+) -> Option<u64> {
+    target.filter(|target| match cursor_position {
+        Some((block, Some(_))) => block <= *target,
+        Some((block, None)) => block < *target,
+        None => true,
+    })
+}
+
 /// Canonical `(block number, log index)` for an announcement log. Both
 /// fields are required for limit pagination; accepting an unpositioned log
 /// could either skip it or keep replaying the same page forever.
@@ -2711,6 +2862,7 @@ fn upsert_announcement_scan_cursor(
             existing.position_version = next.position_version;
             existing.last_scanned_block = next.last_scanned_block;
             existing.last_scanned_log_index = next.last_scanned_log_index;
+            existing.legacy_replay_through_block = next.legacy_replay_through_block;
         }
     } else {
         cursors.push(next);

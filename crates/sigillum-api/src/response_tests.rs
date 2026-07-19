@@ -2553,6 +2553,35 @@ fn test_token_registry_entry_accepts_chain_id_alias() {
     assert_eq!(entry.chain_id, 1);
 }
 
+#[test]
+fn test_eth_stealth_announcement_cursor_legacy_and_pending_replay_shapes() {
+    let legacy: EthStealthAnnouncementScanCursor = serde_json::from_value(serde_json::json!({
+        "wallet_profile": "payments-mainnet",
+        "provider_profile": "mainnet",
+        "chain_id": 1,
+        "last_scanned_block": 48,
+        "updated_at_unix": 10
+    }))
+    .unwrap();
+    assert_eq!(legacy.position_version, 0);
+    assert_eq!(legacy.last_scanned_log_index, None);
+    assert_eq!(legacy.legacy_replay_through_block, None);
+
+    let pending = EthStealthAnnouncementScanCursor {
+        wallet_profile: "payments-mainnet".to_string(),
+        provider_profile: "mainnet".to_string(),
+        chain_id: 1,
+        position_version: 1,
+        last_scanned_block: 32,
+        last_scanned_log_index: Some(0),
+        legacy_replay_through_block: Some(48),
+        updated_at_unix: 11,
+    };
+    let json = serde_json::to_value(&pending).unwrap();
+    assert_eq!(json["legacy_replay_through_block"], 48);
+    roundtrip_test(pending);
+}
+
 // ── List pagination / filtering / sorting ──────────────────────────
 
 #[test]

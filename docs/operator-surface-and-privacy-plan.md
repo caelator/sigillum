@@ -81,10 +81,12 @@ ratified), D-E (ERC-6538 deferred).
     states the coverage; pre-tag adjustment recorded.
   - 2.6 stealth ergonomics (`5d705cc`, single-key meta-addresses in the
     follow-up commit): persisted per-(wallet, provider) announcement-scan
-    cursors — `from_block`-less scans resume incrementally, explicit
-    `from_block` still wins, `reset_cursor` re-anchors — and single-key
-    (66-hex) meta-addresses per the EIP single-key rule, pinned by fixed
-    vectors under both hash conventions.
+    cursors — `from_block`-less scans resume incrementally, exact v1 positions
+    preserve same-block tails, explicit ranges still support manual rescans,
+    and `reset_cursor` re-anchors. Legacy block-only positions must first
+    replay from full history (bounded explicit ranges fail 409 unless reset).
+    Single-key (66-hex) meta-addresses follow the EIP single-key rule, pinned
+    by fixed vectors under both hash conventions.
 - **Phase 3**:
   - 3.3 one-time-address mode (`1cbc3f4`, tests `ee51a41`, CLI `e8e98cd`,
     console `42530d7`): receive allocations gain `one_time` with a required

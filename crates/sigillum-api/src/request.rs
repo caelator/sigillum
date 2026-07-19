@@ -675,8 +675,13 @@ pub struct EthStealthDepositRefreshRequest {
 /// scan); when supplied it wins over the cursor for manual rescans. A
 /// successful scan advances the cursor. `reset_cursor` first drops the
 /// stored cursor, so the scan re-anchors from the given `from_block` (or
-/// `earliest`). `token_address` turns matches into ERC-20 deposit candidates
-/// instead of native deposit candidates.
+/// `earliest`); if a successful scan has no trustworthy numeric anchor, the
+/// cursor remains absent. A legacy block-only cursor must replay full history
+/// before it can become an exact-position cursor; while that migration is
+/// pending, an explicit non-genesis `from_block` without `reset_cursor`
+/// returns 409.
+/// `token_address` turns matches into ERC-20 deposit candidates instead of
+/// native deposit candidates.
 ///
 /// Detection is watch-only: matching uses the viewing private key + spending
 /// PUBLIC key only; the spending private key is never loaded for scanning

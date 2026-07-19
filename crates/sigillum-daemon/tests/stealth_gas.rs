@@ -234,6 +234,7 @@ fn announcement_log(
     stealth_address: &str,
     ephemeral_public_key_hex: &str,
     metadata: &[u8],
+    log_index_hex: &str,
 ) -> Value {
     let ephemeral_public_key = hex::decode(ephemeral_public_key_hex).unwrap();
     let first_tail = abi_dynamic_bytes(&ephemeral_public_key);
@@ -256,7 +257,7 @@ fn announcement_log(
         "data": data,
         "blockNumber": "0x20",
         "transactionHash": format!("0x{}", "55".repeat(32)),
-        "logIndex": "0x0",
+        "logIndex": log_index_hex,
     })
 }
 
@@ -631,16 +632,19 @@ async fn scan_autopopulates_deposit_from_metadata_hints() {
             &token_payment.stealth_address,
             &token_payment.ephemeral_public_key_hex,
             &hex::decode(&token_metadata).unwrap(),
+            "0x0",
         ),
         announcement_log(
             &native_payment.stealth_address,
             &native_payment.ephemeral_public_key_hex,
             &hex::decode(&native_metadata).unwrap(),
+            "0x1",
         ),
         announcement_log(
             &bare_payment.stealth_address,
             &bare_payment.ephemeral_public_key_hex,
             &[hex::decode(&bare_payment.view_tag_hex).unwrap()[0]],
+            "0x2",
         ),
     ]);
 

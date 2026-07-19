@@ -595,17 +595,28 @@ reuse.
 **Announcement-scan cursors.** The announcer scan persists a per-(wallet
 profile, provider profile) cursor (`announcement_scan_cursors` in the
 deposits store — additive with a serde default, so the schema stays v3)
-holding the highest announcement block scanned. Calling
-`deposits/eth-stealth/scan-announcements` without `from_block` resumes at
-cursor+1; the first scan (or one with `reset_cursor: true`) starts at
-`earliest`, and an explicit `from_block` always wins for manual rescans and
-never drags the cursor backward. After a successful scan the cursor advances
-to the highest PROCESSED log block — the same conservative semantics as the
-ERC-20 transfer-log cursors, so a `limit`-capped scan re-reads the tail on
-the next call — or, when the range held no logs at all, to the concrete
-upper bound (a numeric `to_block`, or the chain head for the default
-`latest`; other block tags leave the cursor untouched). The response's
-`from_block`/`to_block` always report the effective range scanned.
+holding a versioned exact position. A v1 partial cursor records the highest
+processed `(blockNumber, logIndex)` and resumes inside that block; a completed
+v1 cursor resumes at the following block. Provider logs are sorted by that
+canonical position before applying `limit`, and missing or conflicting
+positions fail closed rather than creating an ambiguous pagination boundary.
+
+Calling `deposits/eth-stealth/scan-announcements` without `from_block` resumes
+from the persisted position; the first scan starts at `earliest`. Legacy v0
+block-only cursors replay from `earliest`, because the old format cannot prove
+that a capped scan did not skip a same-block tail. While that replay is owed,
+an explicit non-genesis `from_block` returns 409 before querying the provider;
+the caller must omit it, use `earliest`/`0x0`, or deliberately re-anchor with
+`reset_cursor: true`. Capped replay pages carry the original boundary in
+`legacy_replay_through_block`, so this gate remains active until exact progress
+has covered the whole legacy range, not merely the first page. Once that debt
+is cleared, explicit ranges remain available for manual rescans and never drag
+the cursor backward. Reset is an atomic remove-then-optional-reanchor: if a
+successful empty named range has no trustworthy numeric anchor, the old cursor
+stays removed. A fully consumed range anchors at its concrete numeric upper
+bound (or the captured head for `latest`); a capped range anchors at its last
+processed exact position. The response's `from_block`/`to_block` always report
+the effective range scanned.
 
 **The gas story.** An ERC-20 stealth deposit cannot sweep itself: the sweep's
 token transfer needs native gas on a fresh stealth address that, by design,
