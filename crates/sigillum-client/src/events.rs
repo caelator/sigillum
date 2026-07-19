@@ -119,8 +119,8 @@ impl EventSubscription {
     /// event when one is ready, skipping heartbeats and unknown event names.
     fn take_parsed_event(&mut self) -> Option<Result<DaemonEvent, ClientError>> {
         loop {
-            let frame = match self.buffer.windows(2).position(|w| w == b"\n\n") {
-                Some(end) => self.buffer.drain(..end + 2).collect::<Vec<u8>>(),
+            let frame = match complete_frame_end(&self.buffer) {
+                Some(end) => self.buffer.drain(..end).collect::<Vec<u8>>(),
                 None if self.byte_stream_done && !self.buffer.is_empty() => {
                     // Connection closed mid-frame: flush the remainder as one
                     // final frame (SSE allows EOF to terminate a frame).
@@ -160,6 +160,28 @@ impl EventSubscription {
                 Err(error) => return Some(Err(ClientError::Json(error))),
             }
         }
+    }
+}
+
+/// Return the exclusive end of the earliest complete SSE frame.
+///
+/// HTTP peers may use either LF or CRLF line endings. Searching the retained
+/// byte buffer keeps both delimiters correct even when either one is split
+/// across network chunks.
+fn complete_frame_end(buffer: &[u8]) -> Option<usize> {
+    let lf_end = buffer
+        .windows(2)
+        .position(|window| window == b"\n\n")
+        .map(|start| start + 2);
+    let crlf_end = buffer
+        .windows(4)
+        .position(|window| window == b"\r\n\r\n")
+        .map(|start| start + 4);
+
+    match (lf_end, crlf_end) {
+        (Some(lf), Some(crlf)) => Some(lf.min(crlf)),
+        (Some(end), None) | (None, Some(end)) => Some(end),
+        (None, None) => None,
     }
 }
 
@@ -247,6 +269,36 @@ mod tests {
         addr
     }
 
+    struct ByteStream {
+        bytes: std::vec::IntoIter<u8>,
+    }
+
+    impl Stream for ByteStream {
+        type Item = Result<Bytes, reqwest::Error>;
+
+        fn poll_next(mut self: Pin<&mut Self>, _: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+            Poll::Ready(self.bytes.next().map(|byte| Ok(Bytes::from(vec![byte]))))
+        }
+    }
+
+    fn parse_bytewise(body: impl AsRef<[u8]>) -> Vec<DaemonEvent> {
+        let mut subscription = EventSubscription::new(ByteStream {
+            bytes: body.as_ref().to_vec().into_iter(),
+        });
+
+        let waker = std::task::Waker::noop();
+        let mut cx = Context::from_waker(waker);
+        let mut events = Vec::new();
+        loop {
+            match Pin::new(&mut subscription).poll_next(&mut cx) {
+                Poll::Ready(Some(Ok(event))) => events.push(event),
+                Poll::Ready(None) => break,
+                other => panic!("unexpected poll result: {other:?}"),
+            }
+        }
+        events
+    }
+
     #[tokio::test]
     async fn subscription_parses_events_and_skips_unknown_kinds() {
         let addr = spawn_events_server().await;
@@ -303,33 +355,7 @@ mod tests {
     /// boundaries exactly as they are on the network path.
     #[test]
     fn parser_splits_frames_across_chunk_boundaries() {
-        struct ByteStream {
-            bytes: std::vec::IntoIter<u8>,
-        }
-        impl Stream for ByteStream {
-            type Item = Result<Bytes, reqwest::Error>;
-            fn poll_next(
-                mut self: Pin<&mut Self>,
-                _: &mut Context<'_>,
-            ) -> Poll<Option<Self::Item>> {
-                Poll::Ready(self.bytes.next().map(|byte| Ok(Bytes::from(vec![byte]))))
-            }
-        }
-
-        let mut subscription = EventSubscription::new(ByteStream {
-            bytes: CANNED_SSE.as_bytes().to_vec().into_iter(),
-        });
-
-        let waker = std::task::Waker::noop();
-        let mut cx = Context::from_waker(waker);
-        let mut events = Vec::new();
-        loop {
-            match Pin::new(&mut subscription).poll_next(&mut cx) {
-                Poll::Ready(Some(Ok(event))) => events.push(event),
-                Poll::Ready(None) => break,
-                other => panic!("unexpected poll result: {other:?}"),
-            }
-        }
+        let events = parse_bytewise(CANNED_SSE);
         assert_eq!(events.len(), 3);
         assert!(matches!(events[0], DaemonEvent::Snapshot(_)));
         assert!(matches!(events[1], DaemonEvent::Status(_)));
@@ -337,5 +363,14 @@ mod tests {
         assert_eq!(events[0].event_name(), EVENT_NAME_SNAPSHOT);
         assert_eq!(events[1].event_name(), EVENT_NAME_STATUS);
         assert_eq!(events[2].event_name(), EVENT_NAME_OPERATION);
+    }
+
+    #[test]
+    fn parser_accepts_crlf_frames_across_chunk_boundaries() {
+        let events = parse_bytewise(CANNED_SSE.replace('\n', "\r\n"));
+        assert_eq!(events.len(), 3);
+        assert!(matches!(events[0], DaemonEvent::Snapshot(_)));
+        assert!(matches!(events[1], DaemonEvent::Status(_)));
+        assert!(matches!(events[2], DaemonEvent::Operation(_)));
     }
 }
