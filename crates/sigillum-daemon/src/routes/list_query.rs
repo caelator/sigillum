@@ -69,7 +69,7 @@ fn parse_bool(param: &str, raw: Option<String>) -> Result<Option<bool>, Response
 fn parse_page(limit: Option<String>, offset: Option<String>) -> Result<PageParams, Response> {
     Ok(PageParams {
         limit: parse_u32("limit", limit)?,
-        offset: parse_u32("offset", offset)?.unwrap_or(0),
+        offset: parse_u32("offset", offset)?,
     })
 }
 

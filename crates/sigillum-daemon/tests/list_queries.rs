@@ -451,6 +451,15 @@ async fn queue_jobs_pagination_windows_and_boundaries() {
     assert_eq!(ids(&body, "jobs"), ["job_4", "job_5"]);
     assert_pagination(&body, 5, 2, 3, false);
 
+    // Explicit zero remains a pagination request; only an omitted offset
+    // preserves the legacy response shape.
+    let body = rig.get_ok("/api/queue/jobs?offset=0").await;
+    assert_eq!(
+        ids(&body, "jobs"),
+        ["job_1", "job_2", "job_3", "job_4", "job_5"]
+    );
+    assert_pagination(&body, 5, 5, 0, false);
+
     rig.shutdown();
 }
 

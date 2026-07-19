@@ -134,6 +134,21 @@ mod tests {
     }
 
     #[test]
+    fn explicit_zero_offset_is_serialized() {
+        let options = QueueJobListOptions {
+            page: PaginationQuery {
+                limit: None,
+                offset: Some(0),
+            },
+            ..Default::default()
+        };
+        assert_eq!(
+            options_query("/api/queue/jobs", &options),
+            "/api/queue/jobs?offset=0"
+        );
+    }
+
+    #[test]
     fn options_serialize_to_query_pairs() {
         let options = QueueJobListOptions {
             page: PaginationQuery {

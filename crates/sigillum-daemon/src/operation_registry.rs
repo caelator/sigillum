@@ -274,14 +274,18 @@ impl OperationRegistry {
 
     /// Evict terminal records oldest-first beyond the retention bound.
     fn prune(&mut self) {
-        while self.records.len() > MAX_TRACKED_OPERATIONS
-            && self
-                .records
-                .front()
-                .is_some_and(|record| is_terminal_state(&record.operation.state))
-        {
-            self.records.pop_front();
+        let mut excess = self.records.len().saturating_sub(MAX_TRACKED_OPERATIONS);
+        if excess == 0 {
+            return;
         }
+        self.records.retain(|record| {
+            if excess > 0 && is_terminal_state(&record.operation.state) {
+                excess -= 1;
+                false
+            } else {
+                true
+            }
+        });
     }
 }
 
@@ -406,5 +410,29 @@ mod tests {
         assert_eq!(listed[0].id, running_id);
         assert!(listed.iter().any(|op| op.id == running_id));
         assert!(listed.iter().all(|op| op.id != finished_ids[0]));
+    }
+
+    #[test]
+    fn prune_skips_live_front_and_evicts_oldest_terminal_record() {
+        let mut registry = OperationRegistry::new();
+        let oldest_running = registry.start("inventory_scan_evm", vec![]);
+        let oldest_running_id = oldest_running.id().to_string();
+        let mut finished_ids = Vec::new();
+
+        for _ in 0..(MAX_TRACKED_OPERATIONS + 5) {
+            let handle = registry.start("inventory_scan_evm", vec![]);
+            finished_ids.push(handle.id().to_string());
+            registry.finish(handle.id(), OPERATION_STATE_COMPLETED, None);
+        }
+
+        let listed = registry.list(MAX_TRACKED_OPERATIONS + 10);
+        assert_eq!(listed.len(), MAX_TRACKED_OPERATIONS);
+        assert!(listed.iter().any(|op| op.id == oldest_running_id));
+        for id in &finished_ids[..6] {
+            assert!(registry.get(id).is_none(), "old terminal {id} was retained");
+        }
+        for id in &finished_ids[6..] {
+            assert!(registry.get(id).is_some(), "new terminal {id} was evicted");
+        }
     }
 }

@@ -141,14 +141,15 @@ pub(crate) fn severity_rank(risk_level: &str) -> u8 {
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(crate) struct PageParams {
     pub limit: Option<u32>,
-    pub offset: u32,
+    pub offset: Option<u32>,
 }
 
 impl PageParams {
-    /// True when the request supplied `limit` and/or a non-zero `offset` —
-    /// only then does the response carry the `pagination` envelope.
+    /// True when the request supplied `limit` and/or `offset` — only then
+    /// does the response carry the `pagination` envelope. Offset presence is
+    /// retained so an explicit zero remains distinct from an omitted field.
     pub(crate) fn requested(&self) -> bool {
-        self.limit.is_some() || self.offset > 0
+        self.limit.is_some() || self.offset.is_some()
     }
 }
 
@@ -161,7 +162,8 @@ pub(crate) fn paginate<T>(items: Vec<T>, page: PageParams) -> (Vec<T>, Option<Pa
         return (items, None);
     }
     let total = items.len() as u64;
-    let offset = u64::from(page.offset);
+    let offset_value = page.offset.unwrap_or(0);
+    let offset = u64::from(offset_value);
     let remaining = total.saturating_sub(offset);
     // With only `offset` supplied, the window is the whole remainder and
     // `limit` reports its size so `offset + window < total` stays the
@@ -172,7 +174,7 @@ pub(crate) fn paginate<T>(items: Vec<T>, page: PageParams) -> (Vec<T>, Option<Pa
     let info = PaginationInfo {
         total,
         limit: u32::try_from(limit).unwrap_or(u32::MAX),
-        offset: page.offset,
+        offset: offset_value,
         has_more: offset + (window.len() as u64) < total,
     };
     (window, Some(info))
@@ -342,7 +344,10 @@ mod tests {
     #[test]
     fn paginate_boundaries() {
         let items = vec![1, 2, 3, 4, 5];
-        let page = |limit, offset| PageParams { limit, offset };
+        let page = |limit, offset| PageParams {
+            limit,
+            offset: Some(offset),
+        };
 
         // Exact page: has_more flips false when the window reaches the end.
         let (window, info) = paginate(items.clone(), page(Some(5), 0));
@@ -380,8 +385,18 @@ mod tests {
             (5, 2, 3, false)
         );
 
+        // Explicit offset=0 is still a pagination request. The full list is
+        // returned, but with the additive envelope promised by the API.
+        let (window, info) = paginate(items.clone(), page(None, 0));
+        let info = info.unwrap();
+        assert_eq!(window, items);
+        assert_eq!(
+            (info.total, info.limit, info.offset, info.has_more),
+            (5, 5, 0, false)
+        );
+
         // limit=0 is a valid empty page; more items exist beyond it.
-        let (window, info) = paginate(items, page(Some(0), 0));
+        let (window, info) = paginate(vec![1, 2, 3, 4, 5], page(Some(0), 0));
         let info = info.unwrap();
         assert!(window.is_empty());
         assert_eq!(
