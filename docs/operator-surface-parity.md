@@ -5,10 +5,10 @@ assembled in `api_router()` and the API surface in `api_routes()`. All route
 registrations live in that one file (submodules under `src/routes/` contain
 handlers only, no registrations).
 
-**Counts (cross-checked against the router):** 134 route registrations
-(`grep -c '\.route(' crates/sigillum-daemon/src/routes/mod.rs` -> 134), which
-is 135 method endpoints because `/api/treasury/parties` registers both GET
-and POST. The 33 family rows below cover 134/134 registrations; each route
+**Counts (cross-checked against the router):** 136 route registrations
+(`grep -c '\.route(' crates/sigillum-daemon/src/routes/mod.rs` -> 136), which
+is 137 method endpoints because `/api/treasury/parties` registers both GET
+and POST. The 33 family rows below cover 136/136 registrations; each route
 appears in exactly one row.
 
 **Maintenance rule (release-1.0 plan §0.1.5 / D2):** every W-task that adds
@@ -71,10 +71,10 @@ commands.
 
 ## Verification
 
-- Route registrations in `crates/sigillum-daemon/src/routes/mod.rs`: **134**
-  (`grep -c '\.route('`). Method endpoints: **135** (`/api/treasury/parties`
+- Route registrations in `crates/sigillum-daemon/src/routes/mod.rs`: **136**
+  (`grep -c '\.route('`). Method endpoints: **137** (`/api/treasury/parties`
   is GET+POST on one registration).
-- Sum of routes across the 33 rows above: **134** — every registration
+- Sum of routes across the 33 rows above: **136** — every registration
   appears in exactly one row.
 - No row is UI=no and CLI=no without an explicit decision (rows 4, 12, 19,
   22, 31 carry D2 decisions; rows 2, 15 are machine-plumbing decisions; row

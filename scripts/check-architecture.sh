@@ -195,4 +195,23 @@ check_not_contains "crates/sigillum-cli/src/daemon_api.rs" '^fn cmd_api_plans\('
 check_contains "docs/architecture.md" 'refactor-notes\.md' "architecture docs must link the module ownership notes"
 check_contains "docs/refactor-notes.md" 'Queue Domain Checkpoint' "refactor notes must record the queue domain checkpoint"
 
+# Lockstep: parity doc Verification route count must match live router registrations.
+live_route_count="$(grep -c '\.route(' "${ROOT}/crates/sigillum-daemon/src/routes/mod.rs")"
+doc_route_counts="$(
+  grep -E 'Route registrations in `crates/sigillum-daemon/src/routes/mod\.rs`: \*\*[0-9]+\*\*' \
+    "${ROOT}/docs/operator-surface-parity.md" \
+    | grep -oE '\*\*[0-9]+\*\*' \
+    | tr -d '*'
+)"
+doc_route_count_matches="$(printf '%s\n' "${doc_route_counts}" | sed '/^$/d' | wc -l | tr -d ' ')"
+if [[ "${doc_route_count_matches}" != "1" ]]; then
+  echo "architecture check failed: expected exactly one Verification route-registration count in docs/operator-surface-parity.md; found ${doc_route_count_matches}" >&2
+  exit 1
+fi
+doc_route_count="$(printf '%s\n' "${doc_route_counts}" | sed '/^$/d' | head -n 1)"
+if [[ "${live_route_count}" != "${doc_route_count}" ]]; then
+  echo "architecture check failed: route registration count drift — live router has ${live_route_count}, docs/operator-surface-parity.md Verification declares ${doc_route_count}. Update the parity doc in the same PR." >&2
+  exit 1
+fi
+
 echo "architecture checks passed"
