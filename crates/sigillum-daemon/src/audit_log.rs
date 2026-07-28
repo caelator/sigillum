@@ -2,13 +2,14 @@
 //!
 //! ## Audit Trail Design
 //!
-//! Every security-relevant operation is recorded to an immutable audit log in
-//! `~/.sigillum/.audit`. Events are:
+//! Every security-relevant operation is recorded to an immutable audit log under
+//! `~/.sigillum/.audit`. Live storage is SQLite (`audit.db`) with a per-scope
+//! HMAC MAC-chain (`prev_mac` / `mac`) so appends are tamper-evident. Events are:
 //! - **Append-only**: New events are appended; old events are never modified or deleted.
 //! - **Typed**: Each event is a typed variant (ApiKeySet, SecretDelete, Fido2Register, etc.)
 //!   enabling structured queries and validation.
-//! - **Durable**: Stored as JSONL (one JSON object per line) for streaming reads and
-//!   resilience to partial writes.
+//! - **Durable**: Persisted in SQLite via `audit_db`; writes go through
+//!   `append_event_chained` / `insert_event_chained`.
 //!
 //! The audit log is the system of record for compliance and forensics: if you need to
 //! explain "what happened in this vault?", the audit log provides definitive answers
@@ -27,8 +28,10 @@
 //!
 //! ## Legacy Migration
 //!
-//! Old events (before versioning) are automatically converted by `StoredAuditEvent::from_legacy_json()`.
-//! This ensures that old audit trails don't become unreadable after upgrades.
+//! Pre-SQLite installs may still have a JSONL `audit.log`. On startup,
+//! `audit/migration.rs` imports those lines into `audit.db` (and
+//! `StoredAuditEvent::from_legacy_json()` converts pre-versioned shapes).
+//! JSONL is migration input only; it is not the live store.
 
 #[cfg(test)]
 use std::io::{BufRead, BufReader, Write};
