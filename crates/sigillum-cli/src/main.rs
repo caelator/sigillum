@@ -125,7 +125,7 @@ COMMANDS:
       remove --label <L>     Remove a hardware key
              --skip <L,..>   Skip these keys during re-split
       status                 Show FIDO2 status
-      unlock --taps <N>      Unlock via FIDO2 (cascading)
+      unlock                 Unlock via FIDO2 (cascading; prompts for tap count)
 
     daemon [--port N] [--force-daemon-lock]
                       Start HTTP daemon (default: localhost:9743)

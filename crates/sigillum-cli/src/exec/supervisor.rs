@@ -1,8 +1,8 @@
-//! Signal forwarding and child process supervision.
+//! Child process supervision for `sigillum run`.
 //!
 //! Spawns a child process and waits for it to exit, returning its exit status.
-//! Signal forwarding (SIGINT/SIGTERM → child) is implemented via a background
-//! thread that monitors for signals and forwards them to the child.
+//! There is no explicit SIGINT/SIGTERM forwarding: Ctrl+C reaches the child only
+//! when the terminal delivers the signal to the process group.
 
 use std::os::unix::process::ExitStatusExt;
 use std::process::{Child, Command, Stdio};

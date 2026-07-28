@@ -146,11 +146,11 @@ fn cmd_api_compartment(args: &[String]) {
     }
 }
 
-/// Dispatch `sigillum api profiles <evm|stealth|eth-xpub|eth-seed> <list|upsert|create|delete>`.
+/// Dispatch `sigillum api profiles` for the per-type verb inventory below.
 fn cmd_api_profiles(args: &[String]) {
     if args.len() < 3 {
         eprintln!(
-            "Usage: sigillum api profiles <evm|stealth|eth-xpub|eth-seed> <list|upsert|create|delete> [...]"
+            "Usage: sigillum api profiles evm|stealth|eth-xpub <list|upsert|delete> | eth-seed <list|create|delete> [...]"
         );
         process::exit(1);
     }
@@ -309,7 +309,7 @@ fn cmd_api_profiles(args: &[String]) {
         }
         _ => {
             eprintln!(
-                "Usage: sigillum api profiles <evm|stealth|eth-xpub|eth-seed> <list|upsert|create|delete> [...]"
+                "Usage: sigillum api profiles evm|stealth|eth-xpub <list|upsert|delete> | eth-seed <list|create|delete> [...]"
             );
             process::exit(1);
         }

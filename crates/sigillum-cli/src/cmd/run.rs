@@ -2,7 +2,6 @@
 //!
 //! Usage:
 //!     sigillum run --env NAME=ref [--env NAME=ref ...] [--] -- command [args...]
-//!     sigillum run --env-file .env [--] -- command [args...]
 //!     sigillum run --clear-env --env DB_PASS=prod:db.password -- npm start
 //!
 //! Secret refs: compartment:key or compartment:key.field
@@ -219,7 +218,7 @@ pub fn cmd_run(args: &[String]) {
         .stderr(Stdio::inherit())
         .stdin(Stdio::inherit());
 
-    // Set up signal forwarding
+    // Spawn + wait (no explicit signal forwarding; see ChildSupervisor docs).
     let mut supervisor = match ChildSupervisor::spawn(&mut cmd) {
         Ok(s) => s,
         Err(e) => {
