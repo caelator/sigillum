@@ -28,10 +28,10 @@ use std::time::{Duration, Instant};
 
 use serde::Serialize;
 use sigillum_api::request::{
-    EthSeedWalletCreateRequest, EthStealthWalletProfileUpsertRequest,
-    EthXpubWalletProfileUpsertRequest, EvmProviderProfileUpsertRequest, EvmProviderRef,
-    Fido2UnlockRequest, MaintenanceRunRequest, RiskCatalogDeleteRequest, RiskCatalogUpsertRequest,
-    SelfCheckRunRequest,
+    EthSeedWalletCreateRequest, EthSeedWalletProfileUpsertRequest,
+    EthStealthWalletProfileUpsertRequest, EthXpubWalletProfileUpsertRequest,
+    EvmProviderProfileUpsertRequest, EvmProviderRef, Fido2UnlockRequest, MaintenanceRunRequest,
+    RiskCatalogDeleteRequest, RiskCatalogUpsertRequest, SelfCheckRunRequest,
 };
 use sigillum_client::{ClientError, SigillumClient};
 use url::Url;
@@ -150,7 +150,7 @@ fn cmd_api_compartment(args: &[String]) {
 fn cmd_api_profiles(args: &[String]) {
     if args.len() < 3 {
         eprintln!(
-            "Usage: sigillum api profiles evm|stealth|eth-xpub <list|upsert|delete> | eth-seed <list|create|delete> [...]"
+            "Usage: sigillum api profiles evm|stealth|eth-xpub <list|upsert|delete> | eth-seed <list|upsert|create|delete> [...]"
         );
         process::exit(1);
     }
@@ -279,6 +279,28 @@ fn cmd_api_profiles(args: &[String]) {
         ("eth-seed", "list") => run_api_command(args, true, |client| async move {
             client.list_eth_seed_wallet_profiles().await
         }),
+        ("eth-seed", "upsert") => {
+            const UPSERT_USAGE: &str = "sigillum api profiles eth-seed upsert --name <NAME> --provider-profile <PROFILE> [--mnemonic-env VAR|--mnemonic-stdin] [--mnemonic-passphrase-env VAR|--mnemonic-passphrase-stdin] [--label <LABEL>] [--project-account <N>] [--compartment-id <N>] [--chain-id <N>] [--default-destination-address <ADDR>] [--execution-enabled|--execution-disabled] (prompts securely for the required mnemonic when its source flag is omitted)";
+            let name = require_flag(args, "--name", UPSERT_USAGE);
+            let provider_profile = require_flag(args, "--provider-profile", UPSERT_USAGE);
+            let mnemonic =
+                read_sensitive_input(args, "--mnemonic-env", "--mnemonic-stdin", "Mnemonic: ");
+            let request = EthSeedWalletProfileUpsertRequest {
+                name,
+                label: parse_flag(args, "--label"),
+                mnemonic,
+                mnemonic_passphrase: read_optional_mnemonic_passphrase(args),
+                project_account: parse_u32_flag(args, "--project-account").unwrap_or(0),
+                provider_profile,
+                compartment_id: parse_usize_flag(args, "--compartment-id"),
+                chain_id: parse_u64_flag(args, "--chain-id"),
+                default_destination_address: parse_flag(args, "--default-destination-address"),
+                execution_enabled: bool_switch(args, "--execution-enabled", "--execution-disabled"),
+            };
+            run_api_command(args, true, move |client| async move {
+                client.upsert_eth_seed_wallet_profile(request).await
+            });
+        }
         ("eth-seed", "create") => {
             const CREATE_USAGE: &str = "sigillum api profiles eth-seed create --name <NAME> --provider-profile <PROFILE> [--word-count 12|24] [--label <LABEL>] [--project-account <N>] [--compartment-id <N>] [--chain-id <N>] [--default-destination-address <ADDR>] [--mnemonic-passphrase-env VAR|--mnemonic-passphrase-stdin]";
             let request = EthSeedWalletCreateRequest {
@@ -309,7 +331,7 @@ fn cmd_api_profiles(args: &[String]) {
         }
         _ => {
             eprintln!(
-                "Usage: sigillum api profiles evm|stealth|eth-xpub <list|upsert|delete> | eth-seed <list|create|delete> [...]"
+                "Usage: sigillum api profiles evm|stealth|eth-xpub <list|upsert|delete> | eth-seed <list|upsert|create|delete> [...]"
             );
             process::exit(1);
         }
@@ -595,7 +617,7 @@ COMMANDS:
   profiles evm <list|upsert|delete> [...]
   profiles stealth <list|upsert|delete> [...]
   profiles eth-xpub <list|upsert|delete> [...]
-  profiles eth-seed <list|create|delete> [...]  (create generates a new BIP-39 mnemonic and prints it exactly once)
+  profiles eth-seed <list|upsert|create|delete> [...]  (upsert imports via secure mnemonic input; create generates and prints a new mnemonic exactly once)
   deposits <list|create-native|create-erc20|scan-announcements|refresh|enqueue-sweep|delete> [...]
   evm <nonce|balance|erc20-balance|fees> [...]  (read-only; no broadcast)
   chains <list|upsert|delete> [...]

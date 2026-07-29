@@ -127,7 +127,7 @@ COMMANDS:
       remove --label <L>     Remove a hardware key
              --skip <L,..>   Skip these keys during re-split
       status                 Show FIDO2 status
-      unlock                 Unlock via FIDO2 (cascading; prompts for tap count)
+      unlock [--taps <N>]    Unlock via FIDO2 (cascading; prompts when omitted)
 
     daemon [--port N] [--force-daemon-lock]
                       Start HTTP daemon (default: localhost:9743)
@@ -608,14 +608,14 @@ fn cmd_unlock(args: &[String]) {
             if choice.trim() == "2" {
                 unlock_passphrase();
             } else {
-                unlock_fido2();
+                unlock_fido2(&[]);
             }
         } else {
             println!("No FIDO2 device detected. Using passphrase.");
             unlock_passphrase();
         }
     } else if has_fido {
-        unlock_fido2();
+        unlock_fido2(&[]);
     } else if has_passphrase {
         unlock_passphrase();
     } else {
@@ -668,19 +668,21 @@ fn unlock_passphrase() {
     }
 }
 
-fn unlock_fido2() {
+fn unlock_fido2(args: &[String]) {
+    let taps = daemon_api::parse_usize_flag(args, "--taps").unwrap_or_else(|| {
+        // DENIABILITY: no compartment hints, just ask for tap count
+        eprint!("Keys to tap: ");
+        io::stderr().flush().unwrap();
+        let mut taps_str = String::new();
+        io::stdin().read_line(&mut taps_str).unwrap();
+        taps_str.trim().parse().unwrap_or_else(|_| {
+            eprintln!("Invalid tap count");
+            process::exit(1);
+        })
+    });
+
     let base = base_dir();
     let mgr = fido2_manager();
-
-    // DENIABILITY: no compartment hints, just ask for tap count
-    eprint!("Keys to tap: ");
-    io::stderr().flush().unwrap();
-    let mut taps_str = String::new();
-    io::stdin().read_line(&mut taps_str).unwrap();
-    let taps: usize = taps_str.trim().parse().unwrap_or_else(|_| {
-        eprintln!("Invalid tap count");
-        process::exit(1);
-    });
 
     let pin = prompt_optional_pin();
     println!("Touch your FIDO2 key now...");
@@ -1122,7 +1124,7 @@ fn cmd_fido2(args: &[String]) {
         "list" => fido2_list(&mgr),
         "remove" => fido2_remove(&mgr, &args[1..]),
         "status" => fido2_status(&mgr),
-        "unlock" => unlock_fido2(),
+        "unlock" => unlock_fido2(&args[1..]),
         other => {
             eprintln!("Unknown fido2 command: {other}");
             process::exit(1);
