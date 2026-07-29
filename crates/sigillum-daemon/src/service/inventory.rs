@@ -42,24 +42,29 @@ use sigillum_core::derive_ethereum_address_from_control_xpub;
 
 use crate::audit_log::AuditEventSpec;
 
-use allowance_discovery::erc20_allowance_discovery_config;
+use allowance_discovery::{Erc20AllowanceDiscoveryConfig, erc20_allowance_discovery_config};
 use checkpoints::{
     ScanCheckpointProgress, latest_block_scan_cursors, latest_resume_checkpoint,
     sync_inventory_job, update_scan_checkpoint,
 };
-use claim_discovery::claim_candidate_discovery_config;
-use defi_discovery::defi_token_position_discovery_config;
-use nft_approval_discovery::nft_operator_approval_discovery_config;
-use nft_discovery::{erc721_transfer_discovery_config, erc1155_transfer_discovery_config};
+use claim_discovery::{ClaimCandidateDiscoveryConfig, claim_candidate_discovery_config};
+use defi_discovery::{DefiTokenPositionDiscoveryConfig, defi_token_position_discovery_config};
+use nft_approval_discovery::{
+    NftOperatorApprovalDiscoveryConfig, nft_operator_approval_discovery_config,
+};
+use nft_discovery::{
+    Erc721TransferDiscoveryConfig, Erc1155TransferDiscoveryConfig,
+    erc721_transfer_discovery_config, erc1155_transfer_discovery_config,
+};
 use observation::AddressActivityContext;
-use permit2_discovery::permit2_allowance_discovery_config;
+use permit2_discovery::{Permit2AllowanceDiscoveryConfig, permit2_allowance_discovery_config};
 use risk::derive_inventory_risk_findings;
 use support::{
     announcement_activity_blocks, load_inventory_state, normalized_wallet_family,
     record_inventory_observation, save_inventory_state, select_providers, unique_strings,
     unique_u64s, validated_gap_limit, validated_max_index,
 };
-use token_discovery::erc20_transfer_discovery_config;
+use token_discovery::{Erc20TransferDiscoveryConfig, erc20_transfer_discovery_config};
 use token_registry::{TokenRegistryProbeConfig, token_registry_probe_config};
 use wallet_selection::{
     DERIVATION_PATTERN_PROJECT, DiscoveryWallet, SeedDerivationPattern,
@@ -97,6 +102,32 @@ struct TokenRegistryObservationProbe<'a> {
     block_tag: &'a str,
     config: Option<&'a TokenRegistryProbeConfig>,
     now: u64,
+}
+
+#[derive(Clone, Copy)]
+pub(crate) struct DiscoveryConfigs<'a> {
+    block_tag: &'a str,
+    token_addresses: &'a [String],
+    token_discovery: Option<&'a Erc20TransferDiscoveryConfig>,
+    allowance_discovery: Option<&'a Erc20AllowanceDiscoveryConfig>,
+    permit2_allowance_discovery: Option<&'a Permit2AllowanceDiscoveryConfig>,
+    nft_discovery: Option<&'a Erc721TransferDiscoveryConfig>,
+    erc1155_discovery: Option<&'a Erc1155TransferDiscoveryConfig>,
+    nft_operator_approval_discovery: Option<&'a NftOperatorApprovalDiscoveryConfig>,
+    defi_position_discovery: Option<&'a DefiTokenPositionDiscoveryConfig>,
+    claim_candidate_discovery: Option<&'a ClaimCandidateDiscoveryConfig>,
+    discover_permit2_allowances: Option<bool>,
+    permit2_contract_addresses: &'a [String],
+    permit2_spender_addresses: &'a [String],
+    permit2_allowance_limit: Option<usize>,
+    token_registry_probe: Option<&'a TokenRegistryProbeConfig>,
+    started_at_unix: u64,
+}
+
+struct ScanLookups<'a> {
+    chain_profiles: &'a [ChainProfile],
+    announcement_activity: &'a BTreeMap<(u64, String), u64>,
+    chain_tip_blocks: &'a BTreeMap<String, Option<u64>>,
 }
 
 impl SigillumService {
@@ -155,6 +186,68 @@ impl SigillumService {
             .await?;
         observation.holdings.extend(holdings);
         Ok(())
+    }
+
+    async fn scan_address_on_provider(
+        &self,
+        wallet: &DiscoveryWallet,
+        provider: &EvmProviderProfile,
+        address: &str,
+        derivation_path: &str,
+        index: u32,
+        configs: &DiscoveryConfigs<'_>,
+        lookups: &ScanLookups<'_>,
+        job: &mut WalletDiscoveryJob,
+        inventory: &mut crate::inventory::WalletInventoryState,
+        detected_holdings: &mut Vec<sigillum_api::WalletAssetHolding>,
+        scanned_addresses: &mut Vec<sigillum_api::WalletInventoryAddress>,
+    ) -> ServiceResult<bool> {
+        let permit2_allowance_discovery = permit2_allowance_discovery_config(
+            configs.discover_permit2_allowances,
+            configs.permit2_contract_addresses,
+            configs.permit2_spender_addresses,
+            configs.permit2_allowance_limit,
+            chain_profile_for_id(lookups.chain_profiles, provider.chain_id)
+                .and_then(|profile| profile.permit2_address.as_deref()),
+        )?;
+        let provider_configs = DiscoveryConfigs {
+            permit2_allowance_discovery: permit2_allowance_discovery.as_ref(),
+            ..*configs
+        };
+        let mut observation = self
+            .observe_inventory_address(
+                wallet,
+                provider,
+                address,
+                derivation_path,
+                index,
+                &provider_configs,
+                activity_context_for_observation(inventory, lookups, wallet, provider, address),
+                &mut job.block_cursors,
+            )
+            .await?;
+        self.apply_token_registry_probe(
+            TokenRegistryObservationProbe {
+                wallet,
+                provider,
+                derivation_path,
+                block_tag: configs.block_tag,
+                config: configs.token_registry_probe,
+                now: configs.started_at_unix,
+            },
+            &mut observation,
+        )
+        .await?;
+        let has_activity =
+            observation.address.activity_state != sigillum_api::WalletAddressActivityState::Empty;
+        record_inventory_observation(
+            job,
+            inventory,
+            observation,
+            detected_holdings,
+            scanned_addresses,
+        );
+        Ok(has_activity)
     }
 
     pub(crate) async fn scan_wallet_inventory_evm(
@@ -283,17 +376,6 @@ impl SigillumService {
             };
             chain_tip_blocks.insert(provider.name.clone(), tip);
         }
-        let permit2_allowance_discovery_for_provider =
-            |provider: &sigillum_api::EvmProviderProfile| {
-                permit2_allowance_discovery_config(
-                    body.discover_permit2_allowances,
-                    &body.permit2_contract_addresses,
-                    &body.permit2_spender_addresses,
-                    body.permit2_allowance_limit,
-                    chain_profile_for_id(&chain_profiles, provider.chain_id)
-                        .and_then(|profile| profile.permit2_address.as_deref()),
-                )
-            };
         let mut watch_probes = body.watch_addresses.clone();
         if body.include_watch_book.unwrap_or(false) {
             watch_probes.extend(
@@ -317,6 +399,29 @@ impl SigillumService {
         }
 
         let started_at_unix = now_unix();
+        let configs = DiscoveryConfigs {
+            block_tag: &block_tag,
+            token_addresses: &token_addresses,
+            token_discovery: token_discovery.as_ref(),
+            allowance_discovery: allowance_discovery.as_ref(),
+            permit2_allowance_discovery: None,
+            nft_discovery: nft_discovery.as_ref(),
+            erc1155_discovery: erc1155_discovery.as_ref(),
+            nft_operator_approval_discovery: nft_operator_approval_discovery.as_ref(),
+            defi_position_discovery: defi_position_discovery.as_ref(),
+            claim_candidate_discovery: claim_candidate_discovery.as_ref(),
+            discover_permit2_allowances: body.discover_permit2_allowances,
+            permit2_contract_addresses: &body.permit2_contract_addresses,
+            permit2_spender_addresses: &body.permit2_spender_addresses,
+            permit2_allowance_limit: body.permit2_allowance_limit,
+            token_registry_probe: token_registry_probe.as_ref(),
+            started_at_unix,
+        };
+        let lookups = ScanLookups {
+            chain_profiles: &chain_profiles,
+            announcement_activity: &announcement_activity,
+            chain_tip_blocks: &chain_tip_blocks,
+        };
         let mut job = WalletDiscoveryJob {
             id: random_id(),
             status: "running".into(),
@@ -373,62 +478,24 @@ impl SigillumService {
                 let mut index_has_activity = false;
 
                 for provider in &providers {
-                    let permit2_allowance_discovery =
-                        permit2_allowance_discovery_for_provider(provider)?;
-                    let mut observation = self
-                        .observe_inventory_address(
+                    if self
+                        .scan_address_on_provider(
                             wallet,
                             provider,
                             &derived.address,
                             &derivation_path,
                             index,
-                            &block_tag,
-                            &token_addresses,
-                            token_discovery.as_ref(),
-                            allowance_discovery.as_ref(),
-                            permit2_allowance_discovery.as_ref(),
-                            nft_discovery.as_ref(),
-                            erc1155_discovery.as_ref(),
-                            nft_operator_approval_discovery.as_ref(),
-                            defi_position_discovery.as_ref(),
-                            claim_candidate_discovery.as_ref(),
-                            activity_context_for_observation(
-                                &inventory,
-                                &chain_profiles,
-                                &announcement_activity,
-                                &chain_tip_blocks,
-                                wallet,
-                                provider,
-                                &derived.address,
-                            ),
-                            &mut job.block_cursors,
-                            started_at_unix,
+                            &configs,
+                            &lookups,
+                            &mut job,
+                            &mut inventory,
+                            &mut detected_holdings,
+                            &mut scanned_addresses,
                         )
-                        .await?;
-                    self.apply_token_registry_probe(
-                        TokenRegistryObservationProbe {
-                            wallet,
-                            provider,
-                            derivation_path: &derivation_path,
-                            block_tag: &block_tag,
-                            config: token_registry_probe.as_ref(),
-                            now: started_at_unix,
-                        },
-                        &mut observation,
-                    )
-                    .await?;
-                    if observation.address.activity_state
-                        != sigillum_api::WalletAddressActivityState::Empty
+                        .await?
                     {
                         index_has_activity = true;
                     }
-                    record_inventory_observation(
-                        &mut job,
-                        &mut inventory,
-                        observation,
-                        &mut detected_holdings,
-                        &mut scanned_addresses,
-                    );
                 }
 
                 if index_has_activity {
@@ -489,57 +556,21 @@ impl SigillumService {
                             .map_err(map_xpub_error)?;
                             let derivation_path = format!("{control_path}/{control_index}");
                             for provider in &providers {
-                                let permit2_allowance_discovery =
-                                    permit2_allowance_discovery_for_provider(provider)?;
-                                let mut observation = self
-                                    .observe_inventory_address(
+                                let _ = self
+                                    .scan_address_on_provider(
                                         wallet,
                                         provider,
                                         &derived.address,
                                         &derivation_path,
                                         control_index,
-                                        &block_tag,
-                                        &token_addresses,
-                                        token_discovery.as_ref(),
-                                        allowance_discovery.as_ref(),
-                                        permit2_allowance_discovery.as_ref(),
-                                        nft_discovery.as_ref(),
-                                        erc1155_discovery.as_ref(),
-                                        nft_operator_approval_discovery.as_ref(),
-                                        defi_position_discovery.as_ref(),
-                                        claim_candidate_discovery.as_ref(),
-                                        activity_context_for_observation(
-                                            &inventory,
-                                            &chain_profiles,
-                                            &announcement_activity,
-                                            &chain_tip_blocks,
-                                            wallet,
-                                            provider,
-                                            &derived.address,
-                                        ),
-                                        &mut job.block_cursors,
-                                        started_at_unix,
+                                        &configs,
+                                        &lookups,
+                                        &mut job,
+                                        &mut inventory,
+                                        &mut detected_holdings,
+                                        &mut scanned_addresses,
                                     )
                                     .await?;
-                                self.apply_token_registry_probe(
-                                    TokenRegistryObservationProbe {
-                                        wallet,
-                                        provider,
-                                        derivation_path: &derivation_path,
-                                        block_tag: &block_tag,
-                                        config: token_registry_probe.as_ref(),
-                                        now: started_at_unix,
-                                    },
-                                    &mut observation,
-                                )
-                                .await?;
-                                record_inventory_observation(
-                                    &mut job,
-                                    &mut inventory,
-                                    observation,
-                                    &mut detected_holdings,
-                                    &mut scanned_addresses,
-                                );
                                 sync_inventory_job(&mut inventory, &job);
                                 save_inventory_state(&self.state.base_dir, &inventory)?;
                             }
@@ -552,57 +583,21 @@ impl SigillumService {
         for watch in &watch_addresses {
             let derivation_path = format!("{}/{}", watch.wallet.receive_path, watch.address_index);
             for provider in &providers {
-                let permit2_allowance_discovery =
-                    permit2_allowance_discovery_for_provider(provider)?;
-                let mut observation = self
-                    .observe_inventory_address(
+                let _ = self
+                    .scan_address_on_provider(
                         &watch.wallet,
                         provider,
                         &watch.address,
                         &derivation_path,
                         watch.address_index,
-                        &block_tag,
-                        &token_addresses,
-                        token_discovery.as_ref(),
-                        allowance_discovery.as_ref(),
-                        permit2_allowance_discovery.as_ref(),
-                        nft_discovery.as_ref(),
-                        erc1155_discovery.as_ref(),
-                        nft_operator_approval_discovery.as_ref(),
-                        defi_position_discovery.as_ref(),
-                        claim_candidate_discovery.as_ref(),
-                        activity_context_for_observation(
-                            &inventory,
-                            &chain_profiles,
-                            &announcement_activity,
-                            &chain_tip_blocks,
-                            &watch.wallet,
-                            provider,
-                            &watch.address,
-                        ),
-                        &mut job.block_cursors,
-                        started_at_unix,
+                        &configs,
+                        &lookups,
+                        &mut job,
+                        &mut inventory,
+                        &mut detected_holdings,
+                        &mut scanned_addresses,
                     )
                     .await?;
-                self.apply_token_registry_probe(
-                    TokenRegistryObservationProbe {
-                        wallet: &watch.wallet,
-                        provider,
-                        derivation_path: &derivation_path,
-                        block_tag: &block_tag,
-                        config: token_registry_probe.as_ref(),
-                        now: started_at_unix,
-                    },
-                    &mut observation,
-                )
-                .await?;
-                record_inventory_observation(
-                    &mut job,
-                    &mut inventory,
-                    observation,
-                    &mut detected_holdings,
-                    &mut scanned_addresses,
-                );
                 sync_inventory_job(&mut inventory, &job);
                 save_inventory_state(&self.state.base_dir, &inventory)?;
             }
@@ -634,9 +629,7 @@ impl SigillumService {
 
 fn activity_context_for_observation(
     inventory: &crate::inventory::WalletInventoryState,
-    chain_profiles: &[ChainProfile],
-    announcement_activity: &BTreeMap<(u64, String), u64>,
-    chain_tip_blocks: &BTreeMap<String, Option<u64>>,
+    lookups: &ScanLookups<'_>,
     wallet: &DiscoveryWallet,
     provider: &sigillum_api::EvmProviderProfile,
     address: &str,
@@ -652,11 +645,16 @@ fn activity_context_for_observation(
                 && existing.address.eq_ignore_ascii_case(address)
         })
         .and_then(|existing| existing.last_activity_block);
-    let announcement_activity_block = announcement_activity
+    let announcement_activity_block = lookups
+        .announcement_activity
         .get(&(provider.chain_id, address.to_ascii_lowercase()))
         .copied();
-    let chain_tip_block = chain_tip_blocks.get(&provider.name).copied().flatten();
-    let dormancy_block_window = chain_profile_for_id(chain_profiles, provider.chain_id)
+    let chain_tip_block = lookups
+        .chain_tip_blocks
+        .get(&provider.name)
+        .copied()
+        .flatten();
+    let dormancy_block_window = chain_profile_for_id(lookups.chain_profiles, provider.chain_id)
         .map(|profile| profile.dormancy_block_window)
         .filter(|window| *window > 0)
         .unwrap_or(DEFAULT_DORMANCY_BLOCK_WINDOW);
