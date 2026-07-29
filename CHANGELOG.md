@@ -17,6 +17,13 @@ from 1.0.0 onward, per the stability policy in `docs/stability.md`.
 - `sigillum biometric enroll --passphrase-stdin` now trims surrounding
   whitespace and rejects empty input, matching other sensitive stdin handling.
 
+### Fixed
+
+- Approval findings in `[2^128, 2^255)`, including Permit2-max allowances, now
+  move from medium to high advisory risk, and
+  `TreasuryRiskSummary.high_findings` counts increase accordingly. Wire shapes
+  remain unchanged.
+
 ### Documentation
 
 - Reframed the public project landing page around Sigillum's local-first EVM

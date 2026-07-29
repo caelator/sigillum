@@ -16,7 +16,7 @@ use super::claim_discovery::CLAIM_ADAPTER_MERKLE_DISTRIBUTOR_V1;
 use super::defi_adapters::supported_defi_exit_adapter;
 use super::nft_approval_discovery::DISCOVERY_SOURCE_NFT_OPERATOR_APPROVAL_PROBE;
 use super::permit2_discovery::DISCOVERY_SOURCE_PERMIT2_ALLOWANCE_PROBE;
-use super::support::quantity_hex_is_nonzero;
+use super::support::{is_very_large_approval, quantity_hex_is_nonzero};
 use super::treasury::{add_u256, policy_blockers_for_step};
 use super::{WALLET_FAMILY_ETH_SEED, WALLET_FAMILY_ETH_WATCH, WALLET_FAMILY_ETH_XPUB};
 
@@ -231,12 +231,6 @@ fn risk_level_for_holding(holding: &WalletAssetHolding) -> &'static str {
     } else {
         "low"
     }
-}
-
-fn is_very_large_approval(amount_hex: &str) -> bool {
-    decode_quantity_hex(amount_hex)
-        .map(|bytes| bytes[..16].iter().any(|byte| *byte != 0))
-        .unwrap_or(false)
 }
 
 pub(in crate::service) fn summarize_plan_steps(
