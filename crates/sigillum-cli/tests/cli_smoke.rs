@@ -6,6 +6,21 @@
 
 use std::process::Command;
 
+#[cfg(unix)]
+use std::io::{self, Read, Write};
+#[cfg(unix)]
+use std::net::{TcpListener, TcpStream};
+#[cfg(unix)]
+use std::path::{Path, PathBuf};
+#[cfg(unix)]
+use std::process::{Child, ExitStatus, Stdio};
+#[cfg(unix)]
+use std::sync::mpsc::{self, Receiver, Sender};
+#[cfg(unix)]
+use std::thread;
+#[cfg(unix)]
+use std::time::{Duration, Instant};
+
 /// Build the path to the debug binary.
 fn sigillum_bin() -> String {
     env!("CARGO_BIN_EXE_sigillum").to_string()
@@ -27,7 +42,356 @@ fn run_with_env(args: &[&str], envs: &[(&str, &std::path::Path)]) -> std::proces
     command.output().expect("Failed to execute sigillum binary")
 }
 
+#[cfg(unix)]
+fn read_http_request(stream: &mut TcpStream) -> io::Result<(String, String, Vec<u8>)> {
+    stream.set_read_timeout(Some(Duration::from_secs(1)))?;
+
+    let mut request = Vec::new();
+    let mut chunk = [0_u8; 4096];
+    let header_end = loop {
+        if request.len() > 64 * 1024 {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "mock HTTP request headers are too large",
+            ));
+        }
+
+        let read = stream.read(&mut chunk)?;
+        if read == 0 {
+            return Err(io::Error::new(
+                io::ErrorKind::UnexpectedEof,
+                "mock HTTP request ended before its headers",
+            ));
+        }
+        request.extend_from_slice(&chunk[..read]);
+        if let Some(position) = request.windows(4).position(|window| window == b"\r\n\r\n") {
+            break position + 4;
+        }
+    };
+
+    let headers = std::str::from_utf8(&request[..header_end])
+        .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
+    let request_line = headers
+        .lines()
+        .next()
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "missing request line"))?;
+    let mut request_parts = request_line.split_whitespace();
+    let method = request_parts
+        .next()
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "missing request method"))?
+        .to_string();
+    let path = request_parts
+        .next()
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "missing request path"))?
+        .to_string();
+    let content_length = headers
+        .lines()
+        .skip(1)
+        .filter_map(|line| line.split_once(':'))
+        .find(|(name, _)| name.eq_ignore_ascii_case("content-length"))
+        .map(|(_, value)| value.trim().parse::<usize>())
+        .transpose()
+        .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?
+        .unwrap_or(0);
+
+    let request_length = header_end + content_length;
+    while request.len() < request_length {
+        let read = stream.read(&mut chunk)?;
+        if read == 0 {
+            return Err(io::Error::new(
+                io::ErrorKind::UnexpectedEof,
+                "mock HTTP request ended before its body",
+            ));
+        }
+        request.extend_from_slice(&chunk[..read]);
+    }
+
+    Ok((method, path, request[header_end..request_length].to_vec()))
+}
+
+#[cfg(unix)]
+fn write_http_response(stream: &mut TcpStream, status: &str, body: &str) -> io::Result<()> {
+    let response = format!(
+        "HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+        body.len()
+    );
+    stream.set_write_timeout(Some(Duration::from_secs(1)))?;
+    stream.write_all(response.as_bytes())?;
+    stream.flush()
+}
+
+#[cfg(unix)]
+fn handle_mock_request(
+    mut stream: TcpStream,
+    audit_sender: &Sender<Result<Vec<u8>, String>>,
+) -> io::Result<bool> {
+    let (method, path, body) = read_http_request(&mut stream)?;
+    let (status, response_body, received_audit) = match (method.as_str(), path.as_str()) {
+        ("GET", "/api/status") => (
+            "200 OK",
+            r#"{"locked":false,"initialized":true,"active_compartment":null,"unlocked_compartments":[],"fido2":null}"#,
+            false,
+        ),
+        ("POST", "/api/secrets/resolve-batch") => ("200 OK", r#"{"values":[]}"#, false),
+        ("POST", "/api/audit/run") => {
+            let _ = audit_sender.send(Ok(body));
+            ("200 OK", r#"{"status":"ok"}"#, true)
+        }
+        _ => ("404 Not Found", r#"{"error":"not found"}"#, false),
+    };
+
+    write_http_response(&mut stream, status, response_body)?;
+    Ok(received_audit)
+}
+
+#[cfg(unix)]
+struct MockRunServer {
+    stop_sender: Sender<()>,
+    thread: Option<thread::JoinHandle<()>>,
+}
+
+#[cfg(unix)]
+impl MockRunServer {
+    fn start() -> (String, Receiver<Result<Vec<u8>, String>>, Self) {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind mock run server");
+        listener
+            .set_nonblocking(true)
+            .expect("make mock run server nonblocking");
+        let address = listener.local_addr().expect("read mock server address");
+        let (audit_sender, audit_receiver) = mpsc::channel();
+        let (stop_sender, stop_receiver) = mpsc::channel();
+
+        let server_thread = thread::spawn(move || {
+            let deadline = Instant::now() + Duration::from_secs(20);
+            loop {
+                if stop_receiver.try_recv().is_ok() {
+                    return;
+                }
+                if Instant::now() >= deadline {
+                    let _ = audit_sender.send(Err("mock run server deadline exceeded".to_string()));
+                    return;
+                }
+
+                match listener.accept() {
+                    Ok((stream, _)) => match handle_mock_request(stream, &audit_sender) {
+                        Ok(true) => return,
+                        Ok(false) => {}
+                        Err(error) => {
+                            let _ = audit_sender.send(Err(format!(
+                                "mock run server failed to handle request: {error}"
+                            )));
+                            return;
+                        }
+                    },
+                    Err(error) if error.kind() == io::ErrorKind::WouldBlock => {
+                        thread::sleep(Duration::from_millis(10));
+                    }
+                    Err(error) => {
+                        let _ = audit_sender
+                            .send(Err(format!("mock run server accept failed: {error}")));
+                        return;
+                    }
+                }
+            }
+        });
+
+        (
+            format!("http://{address}"),
+            audit_receiver,
+            Self {
+                stop_sender,
+                thread: Some(server_thread),
+            },
+        )
+    }
+}
+
+#[cfg(unix)]
+impl Drop for MockRunServer {
+    fn drop(&mut self) {
+        let _ = self.stop_sender.send(());
+        if let Some(server_thread) = self.thread.take() {
+            let _ = server_thread.join();
+        }
+    }
+}
+
+#[cfg(unix)]
+fn read_child_pid(path: &Path) -> Option<libc::pid_t> {
+    std::fs::read_to_string(path)
+        .ok()?
+        .trim()
+        .parse::<libc::pid_t>()
+        .ok()
+        .filter(|pid| *pid > 0)
+}
+
+#[cfg(unix)]
+fn process_is_gone(pid: libc::pid_t) -> io::Result<bool> {
+    // SAFETY: Signal zero only probes the positive PID and does not send a
+    // signal to the process.
+    if unsafe { libc::kill(pid, 0) } == 0 {
+        return Ok(false);
+    }
+
+    match io::Error::last_os_error().raw_os_error() {
+        Some(libc::ESRCH) => Ok(true),
+        Some(libc::EPERM) => Ok(false),
+        _ => Err(io::Error::last_os_error()),
+    }
+}
+
+#[cfg(unix)]
+struct SupervisedProcessCleanup {
+    sigillum: Child,
+    child_pid_file: PathBuf,
+    child_is_confirmed_gone: bool,
+}
+
+#[cfg(unix)]
+impl SupervisedProcessCleanup {
+    fn wait_until(&mut self, deadline: Instant) -> io::Result<ExitStatus> {
+        loop {
+            if let Some(status) = self.sigillum.try_wait()? {
+                return Ok(status);
+            }
+            if Instant::now() >= deadline {
+                return Err(io::Error::new(
+                    io::ErrorKind::TimedOut,
+                    "sigillum did not exit before the test deadline",
+                ));
+            }
+            thread::sleep(Duration::from_millis(10));
+        }
+    }
+}
+
+#[cfg(unix)]
+impl Drop for SupervisedProcessCleanup {
+    fn drop(&mut self) {
+        let child_pid = (!self.child_is_confirmed_gone)
+            .then(|| read_child_pid(&self.child_pid_file))
+            .flatten();
+        if let Some(pid) = child_pid {
+            // SAFETY: The PID came from the isolated test child's PID file.
+            unsafe {
+                libc::kill(pid, libc::SIGKILL);
+            }
+        }
+
+        let reap_deadline = Instant::now() + Duration::from_secs(1);
+        let mut sigillum_reaped = false;
+        loop {
+            match self.sigillum.try_wait() {
+                Ok(Some(_)) => {
+                    sigillum_reaped = true;
+                    break;
+                }
+                Ok(None) if Instant::now() < reap_deadline => {
+                    thread::sleep(Duration::from_millis(10));
+                }
+                _ => break,
+            }
+        }
+        if !sigillum_reaped {
+            let _ = self.sigillum.kill();
+            let _ = self.sigillum.wait();
+        }
+
+        if let Some(pid) = child_pid {
+            // SAFETY: The PID came from the isolated test child's PID file.
+            unsafe {
+                libc::kill(pid, libc::SIGKILL);
+            }
+            let gone_deadline = Instant::now() + Duration::from_secs(1);
+            while Instant::now() < gone_deadline {
+                if process_is_gone(pid).unwrap_or(false) {
+                    break;
+                }
+                thread::sleep(Duration::from_millis(10));
+            }
+        }
+    }
+}
+
 // ── Happy Paths ────────────────────────────────────────────────────
+
+#[cfg(unix)]
+#[test]
+fn sigterm_is_forwarded_and_run_audit_is_recorded() {
+    let temp_dir = tempfile::tempdir().expect("create isolated PID directory");
+    let child_pid_file = temp_dir.path().join("child.pid");
+    let (base_url, audit_receiver, _mock_server) = MockRunServer::start();
+
+    let sigillum = Command::new(sigillum_bin())
+        .args([
+            "run",
+            "--",
+            "/bin/sh",
+            "-c",
+            r#"echo $$ > "$SIGILLUM_TEST_CHILD_PID"; exec sleep 30"#,
+        ])
+        .env("SIGILLUM_BASE_URL", base_url)
+        .env("SIGILLUM_SESSION_TOKEN", "test-session-token")
+        .env("SIGILLUM_TEST_CHILD_PID", &child_pid_file)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("launch sigillum run");
+    let mut cleanup = SupervisedProcessCleanup {
+        sigillum,
+        child_pid_file: child_pid_file.clone(),
+        child_is_confirmed_gone: false,
+    };
+
+    let pid_deadline = Instant::now() + Duration::from_secs(10);
+    let child_pid = loop {
+        if let Some(pid) = read_child_pid(&child_pid_file) {
+            break pid;
+        }
+        assert!(
+            Instant::now() < pid_deadline,
+            "timed out waiting for the supervised child PID file"
+        );
+        thread::sleep(Duration::from_millis(10));
+    };
+
+    // SAFETY: `cleanup.sigillum.id()` is the live process spawned by this test.
+    let signal_result = unsafe { libc::kill(cleanup.sigillum.id() as libc::pid_t, libc::SIGTERM) };
+    assert_eq!(
+        signal_result,
+        0,
+        "failed to signal sigillum: {}",
+        io::Error::last_os_error()
+    );
+
+    cleanup
+        .wait_until(Instant::now() + Duration::from_secs(10))
+        .expect("sigillum should exit after forwarding SIGTERM");
+
+    let audit_body = audit_receiver
+        .recv_timeout(Duration::from_secs(2))
+        .expect("mock server did not receive a run audit")
+        .expect("mock server failed");
+    let audit: serde_json::Value =
+        serde_json::from_slice(&audit_body).expect("run audit should contain valid JSON");
+    assert_eq!(audit["signal"], libc::SIGTERM);
+    assert_eq!(audit["success"], false);
+
+    let child_gone_deadline = Instant::now() + Duration::from_secs(2);
+    loop {
+        if process_is_gone(child_pid).expect("probe supervised child PID") {
+            break;
+        }
+        assert!(
+            Instant::now() < child_gone_deadline,
+            "supervised child PID {child_pid} is still alive"
+        );
+        thread::sleep(Duration::from_millis(10));
+    }
+    cleanup.child_is_confirmed_gone = true;
+}
 
 #[test]
 fn help_exits_zero_with_usage_text() {

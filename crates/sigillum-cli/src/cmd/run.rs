@@ -218,7 +218,7 @@ pub fn cmd_run(args: &[String]) {
         .stderr(Stdio::inherit())
         .stdin(Stdio::inherit());
 
-    // Spawn + wait (no explicit signal forwarding; see ChildSupervisor docs).
+    // Spawn with SIGINT/SIGTERM forwarding, then wait for the child to be reaped.
     let mut supervisor = match ChildSupervisor::spawn(&mut cmd) {
         Ok(s) => s,
         Err(e) => {
