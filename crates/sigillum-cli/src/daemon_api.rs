@@ -567,6 +567,13 @@ pub(super) fn print_json<T: Serialize>(value: &T) {
 
 pub(super) fn report_client_error(error: ClientError) -> ! {
     eprintln!("{error}");
+    if let ClientError::Api {
+        action: Some(action),
+        ..
+    } = error
+    {
+        eprintln!("next step: {action}");
+    }
     process::exit(1);
 }
 
