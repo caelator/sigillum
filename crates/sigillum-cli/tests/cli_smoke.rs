@@ -8,13 +8,7 @@ use std::process::Command;
 
 /// Build the path to the debug binary.
 fn sigillum_bin() -> String {
-    let mut path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    path.pop(); // crates/
-    path.pop(); // root
-    path.push("target");
-    path.push("debug");
-    path.push("sigillum");
-    path.to_string_lossy().into_owned()
+    env!("CARGO_BIN_EXE_sigillum").to_string()
 }
 
 fn run(args: &[&str]) -> std::process::Output {
@@ -193,6 +187,37 @@ fn api_profiles_eth_xpub_upsert_missing_flags_exits_nonzero() {
         stderr.contains("--name") || stderr.contains("Usage"),
         "should mention required flags"
     );
+}
+
+#[test]
+fn api_profiles_eth_seed_upsert_usage_only_advertises_secure_mnemonic_sources() {
+    let output = run(&["api", "profiles", "eth-seed", "upsert"]);
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("profiles eth-seed upsert"));
+    assert!(stderr.contains("--mnemonic-env VAR"));
+    assert!(stderr.contains("--mnemonic-stdin"));
+    assert!(!stderr.contains("--mnemonic <"));
+    assert!(!stderr.contains("--mnemonic="));
+}
+
+#[test]
+fn fido2_unlock_invalid_taps_fails_before_hardware_access() {
+    let output = run(&["fido2", "unlock", "--taps", "not-a-number"]);
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("Invalid value for --taps: not-a-number"));
+    assert!(!stderr.contains("Keys to tap:"));
+    assert!(!stderr.contains("Touch your FIDO2 key now"));
+}
+
+#[test]
+fn help_advertises_optional_fido2_unlock_taps() {
+    let output = run(&["help"]);
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("unlock [--taps <N>]"));
+    assert!(stdout.contains("prompts when omitted"));
 }
 
 #[test]
