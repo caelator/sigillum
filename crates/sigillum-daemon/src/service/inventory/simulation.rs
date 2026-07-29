@@ -1,7 +1,7 @@
 use sigillum_api::{
     ConsolidationPlanMutationResponse, ConsolidationPlanSimulateRequest, ConsolidationPlanStep,
-    ConsolidationPlanSummary, EvmProviderProfile, WalletInventoryAddress, WalletPlanStatus,
-    WalletPlanStepAction, WalletPlanStepStatus, WalletSimulationStatus,
+    EvmProviderProfile, WalletInventoryAddress, WalletPlanStepAction, WalletPlanStepStatus,
+    WalletSimulationStatus,
 };
 use sigillum_core::decode_quantity_hex;
 
@@ -17,7 +17,7 @@ use super::defi_adapters::{
     DEFI_EXIT_ADAPTER_AAVE_V3_WITHDRAW, DEFI_EXIT_ADAPTER_ERC4626_REDEEM,
     DEFI_EXIT_ADAPTER_LIDO_WSTETH_UNWRAP, DEFI_EXIT_ADAPTER_UNISWAP_V2_REMOVE_LIQUIDITY,
 };
-use super::planner::summarize_plan_steps;
+use super::planner::{plan_status, summarize_plan_steps};
 use super::preflight::{PlanStepPreflight, PlanStepPreflightCall, prepare_plan_step_preflight};
 use super::support::{load_inventory_state, save_inventory_state};
 use super::treasury::add_u256;
@@ -103,7 +103,7 @@ impl SigillumService {
         let plan = &mut state.consolidation_plans[plan_index];
         plan.updated_at_unix = now_unix();
         plan.summary = summarize_plan_steps(&plan.steps);
-        plan.status = plan_status_for_summary(&plan.summary);
+        plan.status = plan_status(&plan.summary, &plan.policy_violations);
         let plan = plan.clone();
         save_inventory_state(&self.state.base_dir, &state)?;
 
@@ -834,18 +834,6 @@ fn is_simulation_blocker(blocker: &str) -> bool {
         blocker,
         "simulation_failed" | "simulation_unsupported" | "simulation_blocked"
     )
-}
-
-fn plan_status_for_summary(summary: &ConsolidationPlanSummary) -> WalletPlanStatus {
-    if summary.total_steps == 0 {
-        WalletPlanStatus::Empty
-    } else if summary.blocked_steps > 0 {
-        WalletPlanStatus::Blocked
-    } else if summary.review_required_steps > 0 {
-        WalletPlanStatus::ReviewRequired
-    } else {
-        WalletPlanStatus::Approved
-    }
 }
 
 #[cfg(test)]

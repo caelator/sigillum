@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 
 use sigillum_api::{
     ConsolidationPlanGenerateRequest, ConsolidationPlanStep, ConsolidationPlanSummary,
-    TreasuryPolicy, WalletAssetHolding, WalletAssetKind, WalletPlanStepAction,
+    TreasuryPolicy, WalletAssetHolding, WalletAssetKind, WalletPlanStatus, WalletPlanStepAction,
     WalletPlanStepStatus, WalletSignerStatus, WalletSimulationStatus,
 };
 use sigillum_core::decode_quantity_hex;
@@ -265,6 +265,21 @@ pub(in crate::service) fn summarize_plan_steps(
             .iter()
             .filter(|step| quantity_hex_is_nonzero(&step.amount_hex))
             .count(),
+    }
+}
+
+pub(in crate::service) fn plan_status(
+    summary: &ConsolidationPlanSummary,
+    policy_violations: &[String],
+) -> WalletPlanStatus {
+    if summary.total_steps == 0 {
+        WalletPlanStatus::Empty
+    } else if summary.blocked_steps > 0 || !policy_violations.is_empty() {
+        WalletPlanStatus::Blocked
+    } else if summary.review_required_steps > 0 {
+        WalletPlanStatus::ReviewRequired
+    } else {
+        WalletPlanStatus::Approved
     }
 }
 

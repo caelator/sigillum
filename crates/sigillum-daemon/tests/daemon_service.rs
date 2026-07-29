@@ -5257,6 +5257,109 @@ async fn plan_simulation_keeps_static_fee_basis_when_estimation_disabled() {
 }
 
 #[tokio::test]
+async fn plan_simulation_preserves_plan_level_policy_blocked_status() {
+    let (dir, addr, handle, rpc_handle, client, token) =
+        setup_seed_inventory_for_consolidation(None).await;
+    let destination = "0x9999999999999999999999999999999999999999";
+
+    let policy = post_json(
+        &client,
+        addr,
+        "/api/treasury/policy/update",
+        json!({
+            "enabled": true,
+            "allowed_destinations": [{ "address": destination }],
+            "max_plan_native_wei_hex": "0x1",
+        }),
+        Some(&token),
+    )
+    .await;
+    assert_eq!(policy.status(), StatusCode::OK);
+
+    let generate = post_json(
+        &client,
+        addr,
+        "/api/plans/consolidation/generate",
+        json!({ "destination_address": destination }),
+        Some(&token),
+    )
+    .await;
+    let generate_status = generate.status();
+    let generate_json: serde_json::Value = generate.json().await.unwrap();
+    assert_eq!(
+        generate_status,
+        StatusCode::OK,
+        "generate response: {generate_json}"
+    );
+    let generated_plan = &generate_json["plan"];
+    let plan_id = generated_plan["id"].as_str().unwrap().to_string();
+    assert_eq!(generated_plan["status"], "blocked");
+    assert!(
+        generated_plan["policy_violations"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|violation| violation == "exceeds_policy_plan_cap")
+    );
+    assert_eq!(generated_plan["summary"]["blocked_steps"], json!(0));
+    let generated_steps = generated_plan["steps"].as_array().unwrap();
+    assert!(!generated_steps.is_empty());
+    assert!(generated_steps.iter().all(|step| {
+        step["status"] == "review_required"
+            && step["blockers"]
+                .as_array()
+                .is_none_or(|blockers| blockers.is_empty())
+    }));
+
+    let simulate = post_json(
+        &client,
+        addr,
+        "/api/plans/consolidation/simulate",
+        json!({ "plan_id": plan_id }),
+        Some(&token),
+    )
+    .await;
+    let simulate_status = simulate.status();
+    let simulate_json: serde_json::Value = simulate.json().await.unwrap();
+    assert_eq!(
+        simulate_status,
+        StatusCode::OK,
+        "simulate response: {simulate_json}"
+    );
+    assert_eq!(simulate_json["status"], "simulated");
+    assert_eq!(simulate_json["plan"]["status"], "blocked");
+    assert_eq!(simulate_json["plan"]["summary"]["blocked_steps"], json!(0));
+    assert!(
+        simulate_json["plan"]["steps"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|step| step["simulation_status"] == "passed")
+    );
+
+    let envelope: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(dir.path().join("wallet_inventory.json")).unwrap())
+            .unwrap();
+    let persisted_plan = envelope["data"]["consolidation_plans"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|plan| plan["id"] == plan_id)
+        .unwrap();
+    assert_eq!(persisted_plan["status"], "blocked");
+    assert!(
+        persisted_plan["steps"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|step| step["simulation_status"] == "passed")
+    );
+
+    handle.abort();
+    rpc_handle.abort();
+}
+
+#[tokio::test]
 async fn plan_approval_downgrades_stale_simulation_to_required() {
     let (dir, addr, handle, rpc_handle, client, token) =
         setup_seed_inventory_for_consolidation(None).await;
