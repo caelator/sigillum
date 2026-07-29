@@ -9,7 +9,7 @@ use sigillum_core::decode_quantity_hex;
 
 use crate::inventory::WalletInventoryState;
 use crate::profiles::ProfileRegistry;
-use crate::service::helpers::{compare_u256, random_id};
+use crate::service::helpers::{add_u256, compare_u256, random_id};
 
 use super::allowance_discovery::DISCOVERY_SOURCE_ERC20_ALLOWANCE_PROBE;
 use super::claim_discovery::CLAIM_ADAPTER_MERKLE_DISTRIBUTOR_V1;
@@ -17,7 +17,7 @@ use super::defi_adapters::supported_defi_exit_adapter;
 use super::nft_approval_discovery::DISCOVERY_SOURCE_NFT_OPERATOR_APPROVAL_PROBE;
 use super::permit2_discovery::DISCOVERY_SOURCE_PERMIT2_ALLOWANCE_PROBE;
 use super::support::{is_very_large_approval, quantity_hex_is_nonzero};
-use super::treasury::{add_u256, policy_blockers_for_step};
+use super::treasury::policy_blockers_for_step;
 use super::{WALLET_FAMILY_ETH_SEED, WALLET_FAMILY_ETH_WATCH, WALLET_FAMILY_ETH_XPUB};
 
 const DEFAULT_HOT_FLOOR_WEI_HEX: &str = "0xde0b6b3a7640000";
