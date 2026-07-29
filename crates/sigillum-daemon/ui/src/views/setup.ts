@@ -36,7 +36,7 @@ export function setupRequirements(status: StatusResponse | null): SetupRequireme
 }
 
 export function compartmentLabel(compartment: ActiveCompartment | null | undefined): string {
-  return compartment?.label ?? "No active compartment";
+  return compartment?.compartment_label ?? "No active compartment";
 }
 
 interface WizardCompartment {
