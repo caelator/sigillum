@@ -1473,7 +1473,7 @@ export function createInventoryActions(deps: InventoryActionsDeps) {
         "Enqueue plan step " +
           stepId +
           " as an execution queue job? The daemon re-validates every gate; " +
-          "queued plan-step jobs stay blocked until execution is enabled (W7.3).",
+          "queued plan-step jobs stay blocked until execution is enabled.",
       )
     ) {
       return;
