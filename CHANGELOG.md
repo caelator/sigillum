@@ -7,6 +7,12 @@ from 1.0.0 onward, per the stability policy in `docs/stability.md`.
 
 ## [Unreleased]
 
+### Changed
+
+- **Breaking:** `sigillum api deposits create-native` and `create-erc20` no
+  longer accept raw `--ephemeral-private-key-hex`; operators must migrate to
+  `--ephemeral-key-env VAR` or `--ephemeral-key-stdin`.
+
 ### Documentation
 
 - Reframed the public project landing page around Sigillum's local-first EVM

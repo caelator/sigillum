@@ -90,6 +90,36 @@ pub(crate) fn read_stdin_secret(name: &str) -> String {
     value
 }
 
+pub(crate) fn reject_raw_ephemeral_key_flags(args: &[String]) {
+    for flag in [
+        "--ephemeral-key",
+        "--ephemeral-private-key",
+        "--ephemeral-private-key-hex",
+    ] {
+        if args.iter().any(|arg| arg == flag) {
+            eprintln!(
+                "Do not pass ephemeral private keys as CLI arguments; use --ephemeral-key-env VAR or --ephemeral-key-stdin."
+            );
+            process::exit(1);
+        }
+    }
+}
+
+pub(crate) fn decode_32_byte_hex(name: &str, value: &str) -> [u8; 32] {
+    let bytes = hex::decode(value).unwrap_or_else(|error| {
+        eprintln!("Invalid hex for {name}: {error}");
+        process::exit(1);
+    });
+    if bytes.len() != 32 {
+        eprintln!(
+            "Invalid value for {name}: expected exactly 32 bytes, got {}.",
+            bytes.len()
+        );
+        process::exit(1);
+    }
+    bytes.try_into().expect("length checked")
+}
+
 // ── Flag parsing ────────────────────────────────────────────────
 
 /// Find a `--flag <value>` pair in `args`, returning the value if present.

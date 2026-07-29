@@ -202,6 +202,23 @@ fn api_deposits_missing_subcommand_exits_nonzero() {
 }
 
 #[test]
+fn api_deposits_create_native_rejects_raw_ephemeral_private_key_before_usage() {
+    let output = run(&[
+        "api",
+        "deposits",
+        "create-native",
+        "--ephemeral-private-key-hex",
+        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    ]);
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains(
+        "Do not pass ephemeral private keys as CLI arguments; use --ephemeral-key-env VAR or --ephemeral-key-stdin."
+    ));
+    assert!(!stderr.contains("Usage:"));
+}
+
+#[test]
 fn api_queue_missing_subcommand_exits_nonzero() {
     let output = run(&["api", "queue"]);
     assert!(!output.status.success());
