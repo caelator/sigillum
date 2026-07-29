@@ -2,7 +2,6 @@
 
 use std::sync::Arc;
 
-use axum::Json;
 use axum::extract::{Query, State};
 use axum::http::HeaderMap;
 use axum::response::Response;
@@ -12,7 +11,7 @@ use sigillum_api::request::RunAuditRequest;
 use crate::AppState;
 use crate::service::SigillumService;
 
-use super::{bearer_token, service_response, validated};
+use super::{ValidatedJson, bearer_token, service_response};
 
 #[derive(Deserialize)]
 pub(crate) struct AuditQuery {
@@ -54,12 +53,8 @@ pub(crate) async fn audit_recent(
 pub(crate) async fn audit_run(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
-    Json(body): Json<RunAuditRequest>,
+    ValidatedJson(body): ValidatedJson<RunAuditRequest>,
 ) -> Response {
-    let body = match validated(Json(body)) {
-        Ok(body) => body,
-        Err(resp) => return resp,
-    };
     let service = SigillumService::new(state);
     service_response(service.record_run_audit(bearer_token(&headers).as_deref(), body))
 }

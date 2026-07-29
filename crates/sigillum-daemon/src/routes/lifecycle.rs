@@ -2,7 +2,6 @@
 
 use std::sync::Arc;
 
-use axum::Json;
 use axum::extract::State;
 use axum::http::HeaderMap;
 use axum::response::Response;
@@ -11,7 +10,7 @@ use sigillum_api::request::{CapabilitySessionRequest, PassphraseRequest};
 use crate::AppState;
 use crate::service::SigillumService;
 
-use super::{bearer_token, service_response, validated};
+use super::{ValidatedJson, bearer_token, service_response};
 
 pub(crate) async fn get_status(State(state): State<Arc<AppState>>, headers: HeaderMap) -> Response {
     let service = SigillumService::new(state);
@@ -31,12 +30,8 @@ pub(crate) async fn get_health(State(state): State<Arc<AppState>>) -> Response {
 pub(crate) async fn post_unlock(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
-    Json(body): Json<PassphraseRequest>,
+    ValidatedJson(body): ValidatedJson<PassphraseRequest>,
 ) -> Response {
-    let body = match validated(Json(body)) {
-        Ok(b) => b,
-        Err(resp) => return resp,
-    };
     let service = SigillumService::new(state);
     service_response(
         service
@@ -65,12 +60,8 @@ pub(crate) async fn post_revoke_session(
 pub(crate) async fn post_capability_session(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
-    Json(body): Json<CapabilitySessionRequest>,
+    ValidatedJson(body): ValidatedJson<CapabilitySessionRequest>,
 ) -> Response {
-    let body = match validated(Json(body)) {
-        Ok(b) => b,
-        Err(resp) => return resp,
-    };
     let service = SigillumService::new(state);
     service_response(service.mint_capability_session(bearer_token(&headers).as_deref(), body))
 }

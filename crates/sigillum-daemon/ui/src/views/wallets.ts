@@ -1,3 +1,4 @@
+import { ROUTE_PATHS } from "../routePaths";
 import {
   clearFields,
   optionalNumberValue,
@@ -261,10 +262,10 @@ export function createWalletActions(deps: WalletActionsDeps) {
   async function loadProfiles(): Promise<void> {
     try {
       const [providerResp, walletResp, xpubResp, seedResp] = await Promise.all([
-        deps.api("GET", "/api/profiles/evm"),
-        deps.api("GET", "/api/profiles/eth-stealth"),
-        deps.api("GET", "/api/profiles/eth-xpub"),
-        deps.api("GET", "/api/profiles/eth-seed"),
+        deps.api("GET", ROUTE_PATHS.API_PROFILES_EVM),
+        deps.api("GET", ROUTE_PATHS.API_PROFILES_ETH_STEALTH),
+        deps.api("GET", ROUTE_PATHS.API_PROFILES_ETH_XPUB),
+        deps.api("GET", ROUTE_PATHS.API_PROFILES_ETH_SEED),
       ]);
       if (providerResp.error || walletResp.error || xpubResp.error || seedResp.error) return;
 
@@ -346,7 +347,7 @@ export function createWalletActions(deps: WalletActionsDeps) {
       return;
     }
 
-    const r = await deps.api("POST", "/api/profiles/evm/upsert", {
+    const r = await deps.api("POST", ROUTE_PATHS.API_PROFILES_EVM_UPSERT, {
       name,
       rpc_url: rpcUrl,
       auth_token_key: optionalTextValue("providerAuthTokenKey"),
@@ -381,7 +382,7 @@ export function createWalletActions(deps: WalletActionsDeps) {
 
   async function deleteProviderProfile(name: string): Promise<void> {
     if (!confirm('Delete provider profile "' + name + '"?')) return;
-    const r = await deps.api("POST", "/api/profiles/evm/delete", { name });
+    const r = await deps.api("POST", ROUTE_PATHS.API_PROFILES_EVM_DELETE, { name });
     if (r.error) {
       deps.toast(r.error, "error");
       return;
@@ -399,7 +400,7 @@ export function createWalletActions(deps: WalletActionsDeps) {
       return;
     }
 
-    const r = await deps.api("POST", "/api/profiles/eth-stealth/upsert", {
+    const r = await deps.api("POST", ROUTE_PATHS.API_PROFILES_ETH_STEALTH_UPSERT, {
       name,
       wallet,
       short_name: optionalTextValue("walletShortName"),
@@ -427,7 +428,7 @@ export function createWalletActions(deps: WalletActionsDeps) {
 
   async function deleteWalletProfile(name: string): Promise<void> {
     if (!confirm('Delete wallet profile "' + name + '"?')) return;
-    const r = await deps.api("POST", "/api/profiles/eth-stealth/delete", { name });
+    const r = await deps.api("POST", ROUTE_PATHS.API_PROFILES_ETH_STEALTH_DELETE, { name });
     if (r.error) {
       deps.toast(r.error, "error");
       return;
@@ -445,7 +446,7 @@ export function createWalletActions(deps: WalletActionsDeps) {
       return;
     }
 
-    const r = await deps.api("POST", "/api/profiles/eth-xpub/upsert", {
+    const r = await deps.api("POST", ROUTE_PATHS.API_PROFILES_ETH_XPUB_UPSERT, {
       name,
       project_account: projectAccount,
       provider_profile: providerProfile,
@@ -479,7 +480,7 @@ export function createWalletActions(deps: WalletActionsDeps) {
 
   async function deleteXpubWalletProfile(name: string): Promise<void> {
     if (!confirm('Delete xpub wallet profile "' + name + '"?')) return;
-    const r = await deps.api("POST", "/api/profiles/eth-xpub/delete", { name });
+    const r = await deps.api("POST", ROUTE_PATHS.API_PROFILES_ETH_XPUB_DELETE, { name });
     if (r.error) {
       deps.toast(r.error, "error");
       return;
@@ -503,7 +504,7 @@ export function createWalletActions(deps: WalletActionsDeps) {
       return;
     }
 
-    const r = await deps.api("POST", "/api/profiles/eth-seed/upsert", {
+    const r = await deps.api("POST", ROUTE_PATHS.API_PROFILES_ETH_SEED_UPSERT, {
       name,
       label: optionalTextValue("seedProfileLabel"),
       mnemonic,
@@ -535,7 +536,7 @@ export function createWalletActions(deps: WalletActionsDeps) {
 
   async function deleteSeedWalletProfile(name: string): Promise<void> {
     if (!confirm('Delete seed wallet profile "' + name + '"?')) return;
-    const r = await deps.api("POST", "/api/profiles/eth-seed/delete", { name });
+    const r = await deps.api("POST", ROUTE_PATHS.API_PROFILES_ETH_SEED_DELETE, { name });
     if (r.error) {
       deps.toast(r.error, "error");
       return;
@@ -554,7 +555,7 @@ export function createWalletActions(deps: WalletActionsDeps) {
   }
 
   async function exportXpubWalletProfile(walletProfile: string): Promise<void> {
-    const r = await deps.api("POST", "/api/wallets/eth-xpub/export", {
+    const r = await deps.api("POST", ROUTE_PATHS.API_WALLETS_ETH_XPUB_EXPORT, {
       wallet_profile: walletProfile,
     });
     if (r.error) {
@@ -602,7 +603,7 @@ export function createWalletActions(deps: WalletActionsDeps) {
       return;
     }
 
-    const r = await deps.api("POST", "/api/wallets/eth-xpub/derive", { xpub, index });
+    const r = await deps.api("POST", ROUTE_PATHS.API_WALLETS_ETH_XPUB_DERIVE, { xpub, index });
     if (r.error) {
       deps.toast(r.error, "error");
       return;
@@ -628,7 +629,7 @@ export function createWalletActions(deps: WalletActionsDeps) {
   }
 
   async function exportWalletMeta(wallet: string, shortName?: string): Promise<void> {
-    const r = await deps.api("POST", "/api/wallets/eth-stealth/export", {
+    const r = await deps.api("POST", ROUTE_PATHS.API_WALLETS_ETH_STEALTH_EXPORT, {
       wallet,
       short_name: shortName || null,
     });

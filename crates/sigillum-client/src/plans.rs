@@ -8,6 +8,7 @@ use sigillum_api::response::{
     ConsolidationPlanExportResponse, ConsolidationPlanListResponse,
     ConsolidationPlanMutationResponse, PlanEnqueuePlanResponse, PlanEnqueueStepResponse,
 };
+use sigillum_api::route_paths as p;
 
 use crate::{ClientError, SigillumClient};
 
@@ -15,7 +16,7 @@ impl SigillumClient {
     pub async fn list_consolidation_plans(
         &self,
     ) -> Result<ConsolidationPlanListResponse, ClientError> {
-        let builder = self.request(Method::GET, "/api/plans/consolidation");
+        let builder = self.request(Method::GET, p::API_PLANS_CONSOLIDATION);
         self.send(builder).await
     }
 
@@ -24,7 +25,7 @@ impl SigillumClient {
         request: ConsolidationPlanGenerateRequest,
     ) -> Result<ConsolidationPlanMutationResponse, ClientError> {
         let builder = self
-            .request(Method::POST, "/api/plans/consolidation/generate")
+            .request(Method::POST, p::API_PLANS_CONSOLIDATION_GENERATE)
             .json(&request);
         self.send(builder).await
     }
@@ -34,7 +35,7 @@ impl SigillumClient {
         request: ConsolidationPlanApproveRequest,
     ) -> Result<ConsolidationPlanMutationResponse, ClientError> {
         let builder = self
-            .request(Method::POST, "/api/plans/consolidation/approve")
+            .request(Method::POST, p::API_PLANS_CONSOLIDATION_APPROVE)
             .json(&request);
         self.send(builder).await
     }
@@ -44,7 +45,7 @@ impl SigillumClient {
         request: ConsolidationPlanSimulateRequest,
     ) -> Result<ConsolidationPlanMutationResponse, ClientError> {
         let builder = self
-            .request(Method::POST, "/api/plans/consolidation/simulate")
+            .request(Method::POST, p::API_PLANS_CONSOLIDATION_SIMULATE)
             .json(&request);
         self.send(builder).await
     }
@@ -54,7 +55,7 @@ impl SigillumClient {
         request: ConsolidationPlanExportRequest,
     ) -> Result<ConsolidationPlanExportResponse, ClientError> {
         let builder = self
-            .request(Method::POST, "/api/plans/consolidation/export")
+            .request(Method::POST, p::API_PLANS_CONSOLIDATION_EXPORT)
             .json(&request);
         self.send(builder).await
     }
@@ -64,7 +65,7 @@ impl SigillumClient {
         request: PlanEnqueueStepRequest,
     ) -> Result<PlanEnqueueStepResponse, ClientError> {
         let builder = self
-            .request(Method::POST, "/api/plans/enqueue-step")
+            .request(Method::POST, p::API_PLANS_ENQUEUE_STEP)
             .json(&request);
         self.send(builder).await
     }
@@ -74,7 +75,7 @@ impl SigillumClient {
         request: PlanEnqueuePlanRequest,
     ) -> Result<PlanEnqueuePlanResponse, ClientError> {
         let builder = self
-            .request(Method::POST, "/api/plans/enqueue-plan")
+            .request(Method::POST, p::API_PLANS_ENQUEUE_PLAN)
             .json(&request);
         self.send(builder).await
     }

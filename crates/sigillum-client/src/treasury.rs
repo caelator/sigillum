@@ -8,17 +8,18 @@ use sigillum_api::response::{
     TreasuryPolicyMutationResponse, TreasuryPolicyResponse, TreasuryReceiveAllocationListResponse,
     TreasuryReceiveAllocationMutationResponse,
 };
+use sigillum_api::route_paths as p;
 
 use crate::{ClientError, SigillumClient};
 
 impl SigillumClient {
     pub async fn treasury_overview(&self) -> Result<TreasuryOverviewResponse, ClientError> {
-        let builder = self.request(Method::GET, "/api/treasury/overview");
+        let builder = self.request(Method::GET, p::API_TREASURY_OVERVIEW);
         self.send(builder).await
     }
 
     pub async fn get_treasury_policy(&self) -> Result<TreasuryPolicyResponse, ClientError> {
-        let builder = self.request(Method::GET, "/api/treasury/policy");
+        let builder = self.request(Method::GET, p::API_TREASURY_POLICY);
         self.send(builder).await
     }
 
@@ -27,7 +28,7 @@ impl SigillumClient {
         request: TreasuryPolicyUpdateRequest,
     ) -> Result<TreasuryPolicyMutationResponse, ClientError> {
         let builder = self
-            .request(Method::POST, "/api/treasury/policy/update")
+            .request(Method::POST, p::API_TREASURY_POLICY_UPDATE)
             .json(&request);
         self.send(builder).await
     }
@@ -35,7 +36,7 @@ impl SigillumClient {
     pub async fn list_treasury_receive_allocations(
         &self,
     ) -> Result<TreasuryReceiveAllocationListResponse, ClientError> {
-        let builder = self.request(Method::GET, "/api/treasury/receive-addresses");
+        let builder = self.request(Method::GET, p::API_TREASURY_RECEIVE_ADDRESSES);
         self.send(builder).await
     }
 
@@ -44,7 +45,7 @@ impl SigillumClient {
         request: TreasuryReceiveAllocateRequest,
     ) -> Result<TreasuryReceiveAllocationMutationResponse, ClientError> {
         let builder = self
-            .request(Method::POST, "/api/treasury/receive-addresses/allocate")
+            .request(Method::POST, p::API_TREASURY_RECEIVE_ADDRESSES_ALLOCATE)
             .json(&request);
         self.send(builder).await
     }
@@ -54,13 +55,13 @@ impl SigillumClient {
         request: TreasuryReceiveRotateRequest,
     ) -> Result<TreasuryReceiveAllocationMutationResponse, ClientError> {
         let builder = self
-            .request(Method::POST, "/api/treasury/receive-addresses/rotate")
+            .request(Method::POST, p::API_TREASURY_RECEIVE_ADDRESSES_ROTATE)
             .json(&request);
         self.send(builder).await
     }
 
     pub async fn list_parties(&self) -> Result<CounterpartyListResponse, ClientError> {
-        let builder = self.request(Method::GET, "/api/treasury/parties");
+        let builder = self.request(Method::GET, p::API_TREASURY_PARTIES);
         self.send(builder).await
     }
 
@@ -69,7 +70,7 @@ impl SigillumClient {
         request: CounterpartyCreateRequest,
     ) -> Result<CounterpartyMutationResponse, ClientError> {
         let builder = self
-            .request(Method::POST, "/api/treasury/parties")
+            .request(Method::POST, p::API_TREASURY_PARTIES)
             .json(&request);
         self.send(builder).await
     }
@@ -79,7 +80,7 @@ impl SigillumClient {
         request: CounterpartyUpdateRequest,
     ) -> Result<CounterpartyMutationResponse, ClientError> {
         let builder = self
-            .request(Method::POST, "/api/treasury/parties/update")
+            .request(Method::POST, p::API_TREASURY_PARTIES_UPDATE)
             .json(&request);
         self.send(builder).await
     }
@@ -89,7 +90,7 @@ impl SigillumClient {
         request: CounterpartyDeleteRequest,
     ) -> Result<CounterpartyMutationResponse, ClientError> {
         let builder = self
-            .request(Method::POST, "/api/treasury/parties/delete")
+            .request(Method::POST, p::API_TREASURY_PARTIES_DELETE)
             .json(&request);
         self.send(builder).await
     }

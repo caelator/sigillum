@@ -1,3 +1,4 @@
+import { ROUTE_PATHS } from "../routePaths";
 import { requestJson } from "../api";
 import type {
   LockResponse,
@@ -20,7 +21,7 @@ export async function unlockWithPassphrase(
 ): Promise<UnlockResponse> {
   const status = await requestJson<UnlockResponse, PassphraseUnlockInput>({
     method: "POST",
-    path: "/api/unlock",
+    path: ROUTE_PATHS.API_UNLOCK,
     body: input,
   });
   writeSessionToken(status.session_token);
@@ -30,7 +31,7 @@ export async function unlockWithPassphrase(
 export async function lockAll(): Promise<LockResponse> {
   const status = await requestJson<LockResponse>({
     method: "POST",
-    path: "/api/lock",
+    path: ROUTE_PATHS.API_LOCK,
     sessionToken: readSessionToken(),
   });
   clearSessionToken();
@@ -44,7 +45,7 @@ export function logoutLocalSession(): void {
 export async function revokeSession(): Promise<SessionRevokeResponse> {
   const response = await requestJson<SessionRevokeResponse>({
     method: "POST",
-    path: "/api/session/revoke",
+    path: ROUTE_PATHS.API_SESSION_REVOKE,
     sessionToken: readSessionToken(),
   });
   clearSessionToken();

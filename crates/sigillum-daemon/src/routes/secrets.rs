@@ -2,7 +2,6 @@
 
 use std::sync::Arc;
 
-use axum::Json;
 use axum::extract::State;
 use axum::http::HeaderMap;
 use axum::response::Response;
@@ -13,7 +12,7 @@ use sigillum_api::request::{
 use crate::AppState;
 use crate::service::SigillumService;
 
-use super::{bearer_token, service_response, validated};
+use super::{ValidatedJson, bearer_token, service_response};
 
 pub(crate) async fn list_api_keys(
     State(state): State<Arc<AppState>>,
@@ -26,12 +25,8 @@ pub(crate) async fn list_api_keys(
 pub(crate) async fn get_api_key(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
-    Json(body): Json<KeyOnlyRequest>,
+    ValidatedJson(body): ValidatedJson<KeyOnlyRequest>,
 ) -> Response {
-    let body = match validated(Json(body)) {
-        Ok(b) => b,
-        Err(resp) => return resp,
-    };
     let service = SigillumService::new(state);
     service_response(service.get_api_key(bearer_token(&headers).as_deref(), body))
 }
@@ -39,12 +34,8 @@ pub(crate) async fn get_api_key(
 pub(crate) async fn set_api_key(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
-    Json(body): Json<KeyValueRequest>,
+    ValidatedJson(body): ValidatedJson<KeyValueRequest>,
 ) -> Response {
-    let body = match validated(Json(body)) {
-        Ok(b) => b,
-        Err(resp) => return resp,
-    };
     let service = SigillumService::new(state);
     service_response(
         service
@@ -56,12 +47,8 @@ pub(crate) async fn set_api_key(
 pub(crate) async fn delete_api_key(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
-    Json(body): Json<KeyOnlyRequest>,
+    ValidatedJson(body): ValidatedJson<KeyOnlyRequest>,
 ) -> Response {
-    let body = match validated(Json(body)) {
-        Ok(b) => b,
-        Err(resp) => return resp,
-    };
     let service = SigillumService::new(state);
     service_response(
         service
@@ -81,12 +68,8 @@ pub(crate) async fn list_secrets(
 pub(crate) async fn get_secret(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
-    Json(body): Json<KeyOnlyRequest>,
+    ValidatedJson(body): ValidatedJson<KeyOnlyRequest>,
 ) -> Response {
-    let body = match validated(Json(body)) {
-        Ok(b) => b,
-        Err(resp) => return resp,
-    };
     let service = SigillumService::new(state);
     service_response(service.get_secret(bearer_token(&headers).as_deref(), body))
 }
@@ -94,12 +77,8 @@ pub(crate) async fn get_secret(
 pub(crate) async fn set_secret(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
-    Json(body): Json<KeyValueRequest>,
+    ValidatedJson(body): ValidatedJson<KeyValueRequest>,
 ) -> Response {
-    let body = match validated(Json(body)) {
-        Ok(b) => b,
-        Err(resp) => return resp,
-    };
     let service = SigillumService::new(state);
     service_response(
         service
@@ -111,12 +90,8 @@ pub(crate) async fn set_secret(
 pub(crate) async fn delete_secret(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
-    Json(body): Json<KeyOnlyRequest>,
+    ValidatedJson(body): ValidatedJson<KeyOnlyRequest>,
 ) -> Response {
-    let body = match validated(Json(body)) {
-        Ok(b) => b,
-        Err(resp) => return resp,
-    };
     let service = SigillumService::new(state);
     service_response(
         service
@@ -128,12 +103,8 @@ pub(crate) async fn delete_secret(
 pub(crate) async fn secrets_push(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
-    Json(body): Json<SecretsPushRequest>,
+    ValidatedJson(body): ValidatedJson<SecretsPushRequest>,
 ) -> Response {
-    let body = match validated(Json(body)) {
-        Ok(b) => b,
-        Err(resp) => return resp,
-    };
     let service = SigillumService::new(state);
     service_response(
         service
@@ -145,12 +116,8 @@ pub(crate) async fn secrets_push(
 pub(crate) async fn resolve_batch(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
-    Json(body): Json<SecretResolveBatchRequest>,
+    ValidatedJson(body): ValidatedJson<SecretResolveBatchRequest>,
 ) -> Response {
-    let body = match validated(Json(body)) {
-        Ok(b) => b,
-        Err(resp) => return resp,
-    };
     let service = SigillumService::new(state);
     service_response(service.resolve_secret_batch(bearer_token(&headers).as_deref(), body))
 }
