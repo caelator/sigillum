@@ -2,7 +2,6 @@
 
 use std::sync::Arc;
 
-use axum::Json;
 use axum::extract::State;
 use axum::http::HeaderMap;
 use axum::response::Response;
@@ -11,17 +10,13 @@ use sigillum_api::request::{PassphraseRequest, SetupResetRequest, SnapshotRestor
 use crate::AppState;
 use crate::service::SigillumService;
 
-use super::{bearer_token, service_response, validated};
+use super::{ValidatedJson, bearer_token, service_response};
 
 pub(crate) async fn backup_export(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
-    Json(body): Json<PassphraseRequest>,
+    ValidatedJson(body): ValidatedJson<PassphraseRequest>,
 ) -> Response {
-    let body = match validated(Json(body)) {
-        Ok(b) => b,
-        Err(resp) => return resp,
-    };
     let service = SigillumService::new(state);
     service_response(
         service
@@ -33,12 +28,8 @@ pub(crate) async fn backup_export(
 pub(crate) async fn backup_restore(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
-    Json(body): Json<SnapshotRestoreRequest>,
+    ValidatedJson(body): ValidatedJson<SnapshotRestoreRequest>,
 ) -> Response {
-    let body = match validated(Json(body)) {
-        Ok(b) => b,
-        Err(resp) => return resp,
-    };
     let service = SigillumService::new(state);
     service_response(
         service
@@ -49,12 +40,8 @@ pub(crate) async fn backup_restore(
 
 pub(crate) async fn setup_reset(
     State(state): State<Arc<AppState>>,
-    Json(body): Json<SetupResetRequest>,
+    ValidatedJson(body): ValidatedJson<SetupResetRequest>,
 ) -> Response {
-    let body = match validated(Json(body)) {
-        Ok(b) => b,
-        Err(resp) => return resp,
-    };
     let service = SigillumService::new(state);
     service_response(service.setup_reset(body).await)
 }

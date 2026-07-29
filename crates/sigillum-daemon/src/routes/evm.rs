@@ -2,7 +2,6 @@
 
 use std::sync::Arc;
 
-use axum::Json;
 use axum::extract::State;
 use axum::http::HeaderMap;
 use axum::response::Response;
@@ -14,17 +13,13 @@ use sigillum_api::{
 use crate::AppState;
 use crate::service::SigillumService;
 
-use super::{bearer_token, service_response, validated};
+use super::{ValidatedJson, bearer_token, service_response};
 
 pub(crate) async fn evm_nonce(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
-    Json(body): Json<EvmRpcNonceRequest>,
+    ValidatedJson(body): ValidatedJson<EvmRpcNonceRequest>,
 ) -> Response {
-    let body = match validated(Json(body)) {
-        Ok(b) => b,
-        Err(resp) => return resp,
-    };
     let service = SigillumService::new(state);
     service_response(
         service
@@ -36,12 +31,8 @@ pub(crate) async fn evm_nonce(
 pub(crate) async fn evm_balance(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
-    Json(body): Json<EvmRpcBalanceRequest>,
+    ValidatedJson(body): ValidatedJson<EvmRpcBalanceRequest>,
 ) -> Response {
-    let body = match validated(Json(body)) {
-        Ok(b) => b,
-        Err(resp) => return resp,
-    };
     let service = SigillumService::new(state);
     service_response(
         service
@@ -53,12 +44,8 @@ pub(crate) async fn evm_balance(
 pub(crate) async fn evm_erc20_balance(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
-    Json(body): Json<EvmRpcErc20BalanceRequest>,
+    ValidatedJson(body): ValidatedJson<EvmRpcErc20BalanceRequest>,
 ) -> Response {
-    let body = match validated(Json(body)) {
-        Ok(b) => b,
-        Err(resp) => return resp,
-    };
     let service = SigillumService::new(state);
     service_response(
         service
@@ -70,12 +57,8 @@ pub(crate) async fn evm_erc20_balance(
 pub(crate) async fn evm_broadcast(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
-    Json(body): Json<EvmRpcBroadcastRequest>,
+    ValidatedJson(body): ValidatedJson<EvmRpcBroadcastRequest>,
 ) -> Response {
-    let body = match validated(Json(body)) {
-        Ok(b) => b,
-        Err(resp) => return resp,
-    };
     let service = SigillumService::new(state);
     service_response(
         service
@@ -87,12 +70,8 @@ pub(crate) async fn evm_broadcast(
 pub(crate) async fn evm_estimate_fees(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
-    Json(body): Json<EvmFeeEstimateRequest>,
+    ValidatedJson(body): ValidatedJson<EvmFeeEstimateRequest>,
 ) -> Response {
-    let body = match validated(Json(body)) {
-        Ok(b) => b,
-        Err(resp) => return resp,
-    };
     let service = SigillumService::new(state);
     service_response(
         service
@@ -104,12 +83,8 @@ pub(crate) async fn evm_estimate_fees(
 pub(crate) async fn eth_stealth_send_transfer(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
-    Json(body): Json<EthStealthSendTransferRequest>,
+    ValidatedJson(body): ValidatedJson<EthStealthSendTransferRequest>,
 ) -> Response {
-    let body = match validated(Json(body)) {
-        Ok(b) => b,
-        Err(resp) => return resp,
-    };
     let service = SigillumService::new(state);
     service_response(
         service
@@ -121,12 +96,8 @@ pub(crate) async fn eth_stealth_send_transfer(
 pub(crate) async fn eth_stealth_send_erc20_transfer(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
-    Json(body): Json<EthStealthSendErc20TransferRequest>,
+    ValidatedJson(body): ValidatedJson<EthStealthSendErc20TransferRequest>,
 ) -> Response {
-    let body = match validated(Json(body)) {
-        Ok(b) => b,
-        Err(resp) => return resp,
-    };
     let service = SigillumService::new(state);
     service_response(
         service

@@ -1,3 +1,4 @@
+import { ROUTE_PATHS } from "../routePaths";
 import { setHiddenById } from "../render/dom";
 import {
   clearFields,
@@ -251,7 +252,7 @@ export function createOperationsActions(deps: OperationsDeps) {
 
   async function loadDepositRegistry(): Promise<void> {
     try {
-      const r = await deps.api("GET", "/api/deposits/eth-stealth");
+      const r = await deps.api("GET", ROUTE_PATHS.API_DEPOSITS_ETH_STEALTH);
       if (r.error) return;
       lastDeposits = r.deposits || [];
       renderDeposits(lastDeposits);
@@ -264,7 +265,7 @@ export function createOperationsActions(deps: OperationsDeps) {
       deps.toast("Select a wallet profile first", "error");
       return;
     }
-    const r = await deps.api("POST", "/api/deposits/eth-stealth/create-native", {
+    const r = await deps.api("POST", ROUTE_PATHS.API_DEPOSITS_ETH_STEALTH_CREATE_NATIVE, {
       wallet_profile: walletProfile,
       expected_value_wei_hex: optionalTextValue("depositNativeExpected"),
       auto_queue_sweep: input("depositNativeAutoQueue").checked,
@@ -293,7 +294,7 @@ export function createOperationsActions(deps: OperationsDeps) {
       deps.toast("Wallet profile and token address are required", "error");
       return;
     }
-    const r = await deps.api("POST", "/api/deposits/eth-stealth/create-erc20", {
+    const r = await deps.api("POST", ROUTE_PATHS.API_DEPOSITS_ETH_STEALTH_CREATE_ERC20, {
       wallet_profile: walletProfile,
       token_address: tokenAddress,
       expected_amount_hex: optionalTextValue("depositErc20Expected"),
@@ -324,7 +325,7 @@ export function createOperationsActions(deps: OperationsDeps) {
       deps.toast("Wallet profile and from block are required", "error");
       return;
     }
-    const r = await deps.api("POST", "/api/deposits/eth-stealth/scan-announcements", {
+    const r = await deps.api("POST", ROUTE_PATHS.API_DEPOSITS_ETH_STEALTH_SCAN_ANNOUNCEMENTS, {
       wallet_profile: walletProfile,
       from_block: fromBlock,
       to_block: optionalTextValue("depositScanToBlock"),
@@ -363,7 +364,7 @@ export function createOperationsActions(deps: OperationsDeps) {
   }
 
   async function refreshDepositRegistry(): Promise<void> {
-    const r = await deps.api("POST", "/api/deposits/eth-stealth/refresh", {
+    const r = await deps.api("POST", ROUTE_PATHS.API_DEPOSITS_ETH_STEALTH_REFRESH, {
       id: null,
       limit: optionalNumberValue("depositRefreshLimit"),
       auto_enqueue: input("depositRefreshAutoEnqueue").checked,
@@ -389,7 +390,7 @@ export function createOperationsActions(deps: OperationsDeps) {
   }
 
   async function refreshSingleDeposit(id: string): Promise<void> {
-    const r = await deps.api("POST", "/api/deposits/eth-stealth/refresh", {
+    const r = await deps.api("POST", ROUTE_PATHS.API_DEPOSITS_ETH_STEALTH_REFRESH, {
       id,
       limit: 1,
       auto_enqueue: input("depositRefreshAutoEnqueue").checked,
@@ -416,7 +417,7 @@ export function createOperationsActions(deps: OperationsDeps) {
   }
 
   async function enqueueDepositSweep(id: string): Promise<void> {
-    const r = await deps.api("POST", "/api/deposits/eth-stealth/enqueue-sweep", { id });
+    const r = await deps.api("POST", ROUTE_PATHS.API_DEPOSITS_ETH_STEALTH_ENQUEUE_SWEEP, { id });
     if (r.error) {
       deps.toast(r.error, "error");
       return;
@@ -431,7 +432,7 @@ export function createOperationsActions(deps: OperationsDeps) {
 
   async function deleteDeposit(id: string): Promise<void> {
     if (!confirm('Delete deposit "' + id + '"?')) return;
-    const r = await deps.api("POST", "/api/deposits/eth-stealth/delete", { id });
+    const r = await deps.api("POST", ROUTE_PATHS.API_DEPOSITS_ETH_STEALTH_DELETE, { id });
     if (r.error) {
       deps.toast(r.error, "error");
       return;
@@ -488,13 +489,13 @@ export function createOperationsActions(deps: OperationsDeps) {
 
   async function loadQueueJobs(): Promise<void> {
     try {
-      const r = await deps.api("GET", "/api/queue/jobs");
+      const r = await deps.api("GET", ROUTE_PATHS.API_QUEUE_JOBS);
       if (r.error) return;
       lastQueueJobs = r.jobs || [];
       renderQueueJobs(lastQueueJobs);
     } catch (_) {}
     try {
-      const policyResp = await deps.api("GET", "/api/treasury/policy");
+      const policyResp = await deps.api("GET", ROUTE_PATHS.API_TREASURY_POLICY);
       const paused = Boolean(policyResp?.policy?.execution_paused);
       setHiddenById("queuePausedBanner", !paused);
       setHiddenById("queuePauseBtn", paused);
@@ -503,7 +504,7 @@ export function createOperationsActions(deps: OperationsDeps) {
   }
 
   async function pauseQueueExecution(): Promise<void> {
-    const r = await deps.api("POST", "/api/queue/pause");
+    const r = await deps.api("POST", ROUTE_PATHS.API_QUEUE_PAUSE);
     if (r.error) {
       deps.toast(r.error, "error");
       return;
@@ -513,7 +514,7 @@ export function createOperationsActions(deps: OperationsDeps) {
   }
 
   async function resumeQueueExecution(): Promise<void> {
-    const r = await deps.api("POST", "/api/queue/resume");
+    const r = await deps.api("POST", ROUTE_PATHS.API_QUEUE_RESUME);
     if (r.error) {
       deps.toast(r.error, "error");
       return;
@@ -523,7 +524,7 @@ export function createOperationsActions(deps: OperationsDeps) {
   }
 
   async function processQueueBatch(): Promise<void> {
-    const r = await deps.api("POST", "/api/queue/process", {
+    const r = await deps.api("POST", ROUTE_PATHS.API_QUEUE_PROCESS, {
       id: null,
       limit: optionalNumberValue("queueProcessLimit"),
     });
@@ -556,7 +557,7 @@ export function createOperationsActions(deps: OperationsDeps) {
   }
 
   async function processQueueJob(id: string): Promise<void> {
-    const r = await deps.api("POST", "/api/queue/process", { id, limit: 1 });
+    const r = await deps.api("POST", ROUTE_PATHS.API_QUEUE_PROCESS, { id, limit: 1 });
     if (r.error) {
       deps.toast(r.error, "error");
       return;
@@ -586,7 +587,7 @@ export function createOperationsActions(deps: OperationsDeps) {
   }
 
   async function runMaintenanceCycle(): Promise<void> {
-    const r = await deps.api("POST", "/api/maintenance/run", {
+    const r = await deps.api("POST", ROUTE_PATHS.API_MAINTENANCE_RUN, {
       deposit_refresh_limit: optionalNumberValue("maintenanceDepositLimit"),
       queue_process_limit: optionalNumberValue("maintenanceQueueLimit"),
       auto_enqueue: input("maintenanceAutoEnqueue").checked,

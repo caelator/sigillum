@@ -2,7 +2,6 @@
 
 use std::sync::Arc;
 
-use axum::Json;
 use axum::extract::State;
 use axum::http::HeaderMap;
 use axum::response::Response;
@@ -21,7 +20,7 @@ use sigillum_api::{
 use crate::AppState;
 use crate::service::SigillumService;
 
-use super::{bearer_token, service_response, validated};
+use super::{ValidatedJson, bearer_token, service_response};
 
 pub(crate) async fn list_wallet_inventory(
     State(state): State<Arc<AppState>>,
@@ -34,12 +33,8 @@ pub(crate) async fn list_wallet_inventory(
 pub(crate) async fn scan_wallet_inventory_evm(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
-    Json(body): Json<WalletInventoryScanRequest>,
+    ValidatedJson(body): ValidatedJson<WalletInventoryScanRequest>,
 ) -> Response {
-    let body = match validated(Json(body)) {
-        Ok(b) => b,
-        Err(resp) => return resp,
-    };
     let service = SigillumService::new(state);
     service_response(
         service
@@ -59,12 +54,8 @@ pub(crate) async fn list_nft_metadata_optins(
 pub(crate) async fn upsert_nft_metadata_optin(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
-    Json(body): Json<NftMetadataOptInUpsertRequest>,
+    ValidatedJson(body): ValidatedJson<NftMetadataOptInUpsertRequest>,
 ) -> Response {
-    let body = match validated(Json(body)) {
-        Ok(b) => b,
-        Err(resp) => return resp,
-    };
     let service = SigillumService::new(state);
     service_response(
         service
@@ -76,12 +67,8 @@ pub(crate) async fn upsert_nft_metadata_optin(
 pub(crate) async fn delete_nft_metadata_optin(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
-    Json(body): Json<NftMetadataOptInDeleteRequest>,
+    ValidatedJson(body): ValidatedJson<NftMetadataOptInDeleteRequest>,
 ) -> Response {
-    let body = match validated(Json(body)) {
-        Ok(b) => b,
-        Err(resp) => return resp,
-    };
     let service = SigillumService::new(state);
     service_response(
         service
@@ -93,12 +80,8 @@ pub(crate) async fn delete_nft_metadata_optin(
 pub(crate) async fn update_nft_metadata_settings(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
-    Json(body): Json<NftMetadataSettingsUpdateRequest>,
+    ValidatedJson(body): ValidatedJson<NftMetadataSettingsUpdateRequest>,
 ) -> Response {
-    let body = match validated(Json(body)) {
-        Ok(b) => b,
-        Err(resp) => return resp,
-    };
     let service = SigillumService::new(state);
     service_response(
         service
@@ -110,12 +93,8 @@ pub(crate) async fn update_nft_metadata_settings(
 pub(crate) async fn fetch_nft_metadata(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
-    Json(body): Json<NftMetadataFetchRequest>,
+    ValidatedJson(body): ValidatedJson<NftMetadataFetchRequest>,
 ) -> Response {
-    let body = match validated(Json(body)) {
-        Ok(b) => b,
-        Err(resp) => return resp,
-    };
     let service = SigillumService::new(state);
     service_response(
         service
@@ -135,12 +114,8 @@ pub(crate) async fn list_watch_address_book(
 pub(crate) async fn upsert_watch_address_book_entry(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
-    Json(body): Json<WatchAddressBookUpsertRequest>,
+    ValidatedJson(body): ValidatedJson<WatchAddressBookUpsertRequest>,
 ) -> Response {
-    let body = match validated(Json(body)) {
-        Ok(b) => b,
-        Err(resp) => return resp,
-    };
     let service = SigillumService::new(state);
     service_response(
         service
@@ -152,12 +127,8 @@ pub(crate) async fn upsert_watch_address_book_entry(
 pub(crate) async fn delete_watch_address_book_entry(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
-    Json(body): Json<WatchAddressBookDeleteRequest>,
+    ValidatedJson(body): ValidatedJson<WatchAddressBookDeleteRequest>,
 ) -> Response {
-    let body = match validated(Json(body)) {
-        Ok(b) => b,
-        Err(resp) => return resp,
-    };
     let service = SigillumService::new(state);
     service_response(
         service
@@ -177,12 +148,8 @@ pub(crate) async fn list_token_registry(
 pub(crate) async fn import_token_registry(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
-    Json(body): Json<TokenRegistryImportRequest>,
+    ValidatedJson(body): ValidatedJson<TokenRegistryImportRequest>,
 ) -> Response {
-    let body = match validated(Json(body)) {
-        Ok(b) => b,
-        Err(resp) => return resp,
-    };
     let service = SigillumService::new(state);
     service_response(
         service
@@ -194,12 +161,8 @@ pub(crate) async fn import_token_registry(
 pub(crate) async fn delete_token_registry_list(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
-    Json(body): Json<TokenRegistryDeleteRequest>,
+    ValidatedJson(body): ValidatedJson<TokenRegistryDeleteRequest>,
 ) -> Response {
-    let body = match validated(Json(body)) {
-        Ok(b) => b,
-        Err(resp) => return resp,
-    };
     let service = SigillumService::new(state);
     service_response(
         service
@@ -219,12 +182,8 @@ pub(crate) async fn list_chain_profiles(
 pub(crate) async fn upsert_chain_profile(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
-    Json(body): Json<ChainProfileUpsertRequest>,
+    ValidatedJson(body): ValidatedJson<ChainProfileUpsertRequest>,
 ) -> Response {
-    let body = match validated(Json(body)) {
-        Ok(b) => b,
-        Err(resp) => return resp,
-    };
     let service = SigillumService::new(state);
     service_response(
         service
@@ -236,12 +195,8 @@ pub(crate) async fn upsert_chain_profile(
 pub(crate) async fn delete_chain_profile(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
-    Json(body): Json<ChainProfileDeleteRequest>,
+    ValidatedJson(body): ValidatedJson<ChainProfileDeleteRequest>,
 ) -> Response {
-    let body = match validated(Json(body)) {
-        Ok(b) => b,
-        Err(resp) => return resp,
-    };
     let service = SigillumService::new(state);
     service_response(
         service
@@ -261,12 +216,8 @@ pub(crate) async fn list_discovery_jobs(
 pub(crate) async fn cancel_discovery_job(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
-    Json(body): Json<DiscoveryJobMutationRequest>,
+    ValidatedJson(body): ValidatedJson<DiscoveryJobMutationRequest>,
 ) -> Response {
-    let body = match validated(Json(body)) {
-        Ok(b) => b,
-        Err(resp) => return resp,
-    };
     let service = SigillumService::new(state);
     service_response(
         service
@@ -278,12 +229,8 @@ pub(crate) async fn cancel_discovery_job(
 pub(crate) async fn resume_discovery_job(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
-    Json(body): Json<DiscoveryJobMutationRequest>,
+    ValidatedJson(body): ValidatedJson<DiscoveryJobMutationRequest>,
 ) -> Response {
-    let body = match validated(Json(body)) {
-        Ok(b) => b,
-        Err(resp) => return resp,
-    };
     let service = SigillumService::new(state);
     service_response(
         service
@@ -311,12 +258,8 @@ pub(crate) async fn list_risk_catalog(
 pub(crate) async fn upsert_risk_catalog_entry(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
-    Json(body): Json<RiskCatalogUpsertRequest>,
+    ValidatedJson(body): ValidatedJson<RiskCatalogUpsertRequest>,
 ) -> Response {
-    let body = match validated(Json(body)) {
-        Ok(b) => b,
-        Err(resp) => return resp,
-    };
     let service = SigillumService::new(state);
     service_response(
         service
@@ -328,12 +271,8 @@ pub(crate) async fn upsert_risk_catalog_entry(
 pub(crate) async fn delete_risk_catalog_entry(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
-    Json(body): Json<RiskCatalogDeleteRequest>,
+    ValidatedJson(body): ValidatedJson<RiskCatalogDeleteRequest>,
 ) -> Response {
-    let body = match validated(Json(body)) {
-        Ok(b) => b,
-        Err(resp) => return resp,
-    };
     let service = SigillumService::new(state);
     service_response(
         service
@@ -389,12 +328,8 @@ pub(crate) async fn get_treasury_policy(
 pub(crate) async fn update_treasury_policy(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
-    Json(body): Json<TreasuryPolicyUpdateRequest>,
+    ValidatedJson(body): ValidatedJson<TreasuryPolicyUpdateRequest>,
 ) -> Response {
-    let body = match validated(Json(body)) {
-        Ok(b) => b,
-        Err(resp) => return resp,
-    };
     let service = SigillumService::new(state);
     service_response(
         service
@@ -414,12 +349,8 @@ pub(crate) async fn list_treasury_receive_allocations(
 pub(crate) async fn allocate_treasury_receive_address(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
-    Json(body): Json<TreasuryReceiveAllocateRequest>,
+    ValidatedJson(body): ValidatedJson<TreasuryReceiveAllocateRequest>,
 ) -> Response {
-    let body = match validated(Json(body)) {
-        Ok(b) => b,
-        Err(resp) => return resp,
-    };
     let service = SigillumService::new(state);
     service_response(
         service
@@ -431,12 +362,8 @@ pub(crate) async fn allocate_treasury_receive_address(
 pub(crate) async fn rotate_treasury_receive_address(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
-    Json(body): Json<TreasuryReceiveRotateRequest>,
+    ValidatedJson(body): ValidatedJson<TreasuryReceiveRotateRequest>,
 ) -> Response {
-    let body = match validated(Json(body)) {
-        Ok(b) => b,
-        Err(resp) => return resp,
-    };
     let service = SigillumService::new(state);
     service_response(
         service
@@ -456,12 +383,8 @@ pub(crate) async fn list_treasury_parties(
 pub(crate) async fn create_treasury_party(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
-    Json(body): Json<CounterpartyCreateRequest>,
+    ValidatedJson(body): ValidatedJson<CounterpartyCreateRequest>,
 ) -> Response {
-    let body = match validated(Json(body)) {
-        Ok(b) => b,
-        Err(resp) => return resp,
-    };
     let service = SigillumService::new(state);
     service_response(
         service
@@ -473,12 +396,8 @@ pub(crate) async fn create_treasury_party(
 pub(crate) async fn update_treasury_party(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
-    Json(body): Json<CounterpartyUpdateRequest>,
+    ValidatedJson(body): ValidatedJson<CounterpartyUpdateRequest>,
 ) -> Response {
-    let body = match validated(Json(body)) {
-        Ok(b) => b,
-        Err(resp) => return resp,
-    };
     let service = SigillumService::new(state);
     service_response(
         service
@@ -490,12 +409,8 @@ pub(crate) async fn update_treasury_party(
 pub(crate) async fn delete_treasury_party(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
-    Json(body): Json<CounterpartyDeleteRequest>,
+    ValidatedJson(body): ValidatedJson<CounterpartyDeleteRequest>,
 ) -> Response {
-    let body = match validated(Json(body)) {
-        Ok(b) => b,
-        Err(resp) => return resp,
-    };
     let service = SigillumService::new(state);
     service_response(
         service
@@ -507,12 +422,8 @@ pub(crate) async fn delete_treasury_party(
 pub(crate) async fn generate_consolidation_plan(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
-    Json(body): Json<ConsolidationPlanGenerateRequest>,
+    ValidatedJson(body): ValidatedJson<ConsolidationPlanGenerateRequest>,
 ) -> Response {
-    let body = match validated(Json(body)) {
-        Ok(b) => b,
-        Err(resp) => return resp,
-    };
     let service = SigillumService::new(state);
     service_response(
         service
@@ -524,12 +435,8 @@ pub(crate) async fn generate_consolidation_plan(
 pub(crate) async fn approve_consolidation_plan(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
-    Json(body): Json<ConsolidationPlanApproveRequest>,
+    ValidatedJson(body): ValidatedJson<ConsolidationPlanApproveRequest>,
 ) -> Response {
-    let body = match validated(Json(body)) {
-        Ok(b) => b,
-        Err(resp) => return resp,
-    };
     let service = SigillumService::new(state);
     service_response(
         service
@@ -541,12 +448,8 @@ pub(crate) async fn approve_consolidation_plan(
 pub(crate) async fn simulate_consolidation_plan(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
-    Json(body): Json<ConsolidationPlanSimulateRequest>,
+    ValidatedJson(body): ValidatedJson<ConsolidationPlanSimulateRequest>,
 ) -> Response {
-    let body = match validated(Json(body)) {
-        Ok(b) => b,
-        Err(resp) => return resp,
-    };
     let service = SigillumService::new(state);
     service_response(
         service
@@ -558,12 +461,8 @@ pub(crate) async fn simulate_consolidation_plan(
 pub(crate) async fn export_consolidation_plan(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
-    Json(body): Json<ConsolidationPlanExportRequest>,
+    ValidatedJson(body): ValidatedJson<ConsolidationPlanExportRequest>,
 ) -> Response {
-    let body = match validated(Json(body)) {
-        Ok(b) => b,
-        Err(resp) => return resp,
-    };
     let service = SigillumService::new(state);
     service_response(service.export_consolidation_plan(bearer_token(&headers).as_deref(), body))
 }
@@ -571,12 +470,8 @@ pub(crate) async fn export_consolidation_plan(
 pub(crate) async fn enqueue_consolidation_plan_step(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
-    Json(body): Json<PlanEnqueueStepRequest>,
+    ValidatedJson(body): ValidatedJson<PlanEnqueueStepRequest>,
 ) -> Response {
-    let body = match validated(Json(body)) {
-        Ok(b) => b,
-        Err(resp) => return resp,
-    };
     let service = SigillumService::new(state);
     service_response(
         service
@@ -588,12 +483,8 @@ pub(crate) async fn enqueue_consolidation_plan_step(
 pub(crate) async fn enqueue_consolidation_plan(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
-    Json(body): Json<PlanEnqueuePlanRequest>,
+    ValidatedJson(body): ValidatedJson<PlanEnqueuePlanRequest>,
 ) -> Response {
-    let body = match validated(Json(body)) {
-        Ok(b) => b,
-        Err(resp) => return resp,
-    };
     let service = SigillumService::new(state);
     service_response(
         service
