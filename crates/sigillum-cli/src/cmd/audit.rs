@@ -3,7 +3,9 @@ use std::process;
 use chrono::{DateTime, Utc};
 use sigillum_client::{AuditEventQuery, SigillumClient};
 
-use crate::daemon_api::{daemon_base_url, ensure_daemon_ready, require_session_token};
+use crate::daemon_api::{
+    daemon_base_url, ensure_daemon_ready, parse_flag, parse_usize_flag, require_session_token,
+};
 
 pub fn cmd_audit(args: &[String]) {
     let base_url = daemon_base_url(args);
@@ -97,23 +99,4 @@ fn parse_since_flag(args: &[String], flag: &str) -> Option<u64> {
             eprintln!("invalid value for {flag}: expected unix seconds or RFC3339 timestamp");
             process::exit(1);
         })
-}
-
-fn parse_flag(args: &[String], flag: &str) -> Option<String> {
-    args.windows(2).find_map(|window| {
-        if window[0] == flag {
-            Some(window[1].clone())
-        } else {
-            None
-        }
-    })
-}
-
-fn parse_usize_flag(args: &[String], flag: &str) -> Option<usize> {
-    parse_flag(args, flag).map(|raw| {
-        raw.parse::<usize>().unwrap_or_else(|_| {
-            eprintln!("invalid value for {flag}: {raw}");
-            process::exit(1);
-        })
-    })
 }

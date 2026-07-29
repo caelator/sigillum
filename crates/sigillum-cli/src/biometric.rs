@@ -1,14 +1,16 @@
-use std::io::{self, Read, Write};
+use std::io::Write;
 use std::path::PathBuf;
 use std::process::{self, Command, Stdio};
 
-use serde::Serialize;
 use sigillum_api::request::BiometricEnrollRequest;
 use sigillum_client::SigillumClient;
 use sigillum_core::payload::biometric::BiometricHelperOutput;
 use zeroize::Zeroize;
 
-use crate::daemon_api::{daemon_base_url, ensure_daemon_ready, require_session_token};
+use crate::daemon_api::{
+    daemon_base_url, ensure_daemon_ready, parse_flag, print_json, read_sensitive_input,
+    require_session_token,
+};
 
 const HELPER_BINARY_NAME: &str = "sigillum-auth";
 
@@ -178,49 +180,4 @@ fn decode_fixed_hex<const N: usize>(value: &str, label: &str) -> Result<[u8; N],
     let mut out = [0u8; N];
     out.copy_from_slice(&bytes);
     Ok(out)
-}
-
-fn read_sensitive_input(args: &[String], env_flag: &str, stdin_flag: &str, prompt: &str) -> String {
-    if let Some(var_name) = parse_flag(args, env_flag) {
-        return std::env::var(&var_name).unwrap_or_else(|_| {
-            eprintln!("Environment variable {var_name} is not set.");
-            process::exit(1);
-        });
-    }
-    if has_flag(args, stdin_flag) {
-        let mut value = String::new();
-        io::stdin()
-            .read_to_string(&mut value)
-            .unwrap_or_else(|error| {
-                eprintln!("Failed to read from stdin: {error}");
-                process::exit(1);
-            });
-        return value.trim_end_matches(['\r', '\n']).to_string();
-    }
-    rpassword::prompt_password(prompt).unwrap_or_else(|error| {
-        eprintln!("Failed to read secret input: {error}");
-        process::exit(1);
-    })
-}
-
-fn parse_flag(args: &[String], flag: &str) -> Option<String> {
-    args.windows(2).find_map(|window| {
-        if window[0] == flag {
-            Some(window[1].clone())
-        } else {
-            None
-        }
-    })
-}
-
-fn has_flag(args: &[String], flag: &str) -> bool {
-    args.iter().any(|arg| arg == flag)
-}
-
-fn print_json<T: Serialize>(value: &T) {
-    let encoded = serde_json::to_string_pretty(value).unwrap_or_else(|error| {
-        eprintln!("Failed to encode JSON response: {error}");
-        process::exit(1);
-    });
-    println!("{encoded}");
 }

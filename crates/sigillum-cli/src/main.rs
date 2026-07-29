@@ -20,6 +20,8 @@ mod cmd;
 mod daemon_api;
 mod exec;
 
+use crate::daemon_api::{has_flag, parse_flag};
+
 use std::io::{self, Write};
 use std::path::PathBuf;
 use std::process;
@@ -1360,21 +1362,6 @@ fn parse_label_arg(args: &[String], cmd: &str) -> String {
         eprintln!("Usage: sigillum fido2 {cmd} --label <LABEL>");
         process::exit(1);
     })
-}
-
-fn has_flag(args: &[String], flag: &str) -> bool {
-    args.iter().any(|a| a == flag)
-}
-
-fn parse_flag(args: &[String], flag: &str) -> Option<String> {
-    let mut i = 0;
-    while i < args.len() {
-        if args[i] == flag && i + 1 < args.len() {
-            return Some(args[i + 1].clone());
-        }
-        i += 1;
-    }
-    None
 }
 
 fn require_arg(args: &[String], cmd: &str, placeholder: &str) -> String {
