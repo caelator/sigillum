@@ -25,6 +25,11 @@
 //! handle hex encoding/decoding internally so callers work with `&[u8]` /
 //! `Vec<u8>` directly.
 //!
+//! ## Full API surface
+//!
+//! The `sigillum-sdk` crate is the full-surface crate and already glob
+//! re-exports `sigillum-api`.
+//!
 //! ## Thread safety
 //!
 //! `SigillumClient` is `Send + Sync`.  The session token is protected by a
@@ -57,7 +62,6 @@ use sigillum_api::request::{
     SnapshotRestoreRequest, StealthPaymentRef, TransitDecryptRequest, TransitEncryptRequest,
     TransitHmacRequest,
 };
-pub use sigillum_api::response::Fido2StatusResponse as DaemonFido2Status;
 pub use sigillum_api::response::{
     ActiveCompartment, AuditEvent as DaemonAuditEvent, AuditVerifyReport,
     BiometricChallengeResponse, BiometricEnrollResponse, ChainProfile, ChainProfileListResponse,
@@ -65,11 +69,11 @@ pub use sigillum_api::response::{
     ConsolidationPlanExportBundle, ConsolidationPlanExportCall, ConsolidationPlanExportResponse,
     ConsolidationPlanExportSkippedStep, ConsolidationPlanListResponse,
     ConsolidationPlanMutationResponse, ConsolidationPlanStep, ConsolidationPlanSummary,
-    DiagnosticsResponse, DiscoveryJobListResponse, DiscoveryJobMutationResponse, ErrorResponse,
-    EthSeedWalletCreateResponse, EthSeedWalletProfile, EthSeedWalletProfileListResponse,
-    EthSeedWalletProfileMutationResponse, EthSignedTransactionResponse,
-    EthStealthAnnouncementScanResponse, EthStealthCheckResponse, EthStealthDeposit,
-    EthStealthDepositEnqueueSweepResponse, EthStealthDepositListResponse,
+    DaemonFido2Status, DiagnosticsResponse, DiscoveryJobListResponse, DiscoveryJobMutationResponse,
+    ErrorResponse, EthSeedWalletCreateResponse, EthSeedWalletProfile,
+    EthSeedWalletProfileListResponse, EthSeedWalletProfileMutationResponse,
+    EthSignedTransactionResponse, EthStealthAnnouncementScanResponse, EthStealthCheckResponse,
+    EthStealthDeposit, EthStealthDepositEnqueueSweepResponse, EthStealthDepositListResponse,
     EthStealthDepositMutationResponse, EthStealthDepositRefreshResponse,
     EthStealthGenerateResponse, EthStealthMetaAddressResponse, EthStealthSendResponse,
     EthStealthSignResponse, EthStealthWalletProfile, EthStealthWalletProfileListResponse,
@@ -80,16 +84,16 @@ pub use sigillum_api::response::{
     EvmRpcErc20BalanceResponse, EvmRpcNonceResponse, Fido2DetectResponse, Fido2KeyInfo,
     Fido2ListResponse, Fido2RegisterResponse, Fido2RemoveResponse, Fido2SetupResponse,
     Fido2StatusResponse, GenerateStoreResponse, GenericStatusResponse, KeyListResponse,
-    KeyValueResponse, MaintenanceRunResponse, QueueEnqueueResponse, QueueExecutionPauseResponse,
-    QueueJob, QueueJobListResponse, QueueProcessResponse, RiskCatalogEntry,
-    RiskCatalogListResponse, RiskCatalogMutationResponse, RiskFinding, RiskFindingListResponse,
-    SafeTransactionBuilderBatch, SafeTransactionBuilderMeta, SafeTransactionBuilderTransaction,
-    SecretResolveBatchResponse, SecretResolveValue, SelfCheckResult, SelfCheckRunResponse,
-    SessionRevokeResponse, SnapshotExportResponse, SnapshotRestoreResponse, StatusResponse,
-    SwitchCompartmentResponse, TransitDecryptResponse, TransitEncryptResponse, TransitHmacResponse,
-    UnlockResponse, UnlockedCompartment, WalletAssetHolding, WalletDiscoveryJob,
-    WalletInventoryAddress, WalletInventoryListResponse, WalletInventoryScanResponse,
-    WatchAddressBookListResponse, WatchAddressBookMutationResponse,
+    KeyValueResponse, LockResponse, MaintenanceRunResponse, QueueEnqueueResponse,
+    QueueExecutionPauseResponse, QueueJob, QueueJobListResponse, QueueProcessResponse,
+    RiskCatalogEntry, RiskCatalogListResponse, RiskCatalogMutationResponse, RiskFinding,
+    RiskFindingListResponse, SafeTransactionBuilderBatch, SafeTransactionBuilderMeta,
+    SafeTransactionBuilderTransaction, SecretResolveBatchResponse, SecretResolveValue,
+    SelfCheckResult, SelfCheckRunResponse, SessionRevokeResponse, SnapshotExportResponse,
+    SnapshotRestoreResponse, StatusResponse, SwitchCompartmentResponse, TransitDecryptResponse,
+    TransitEncryptResponse, TransitHmacResponse, UnlockResponse, UnlockedCompartment,
+    WalletAssetHolding, WalletDiscoveryJob, WalletInventoryAddress, WalletInventoryListResponse,
+    WalletInventoryScanResponse, WatchAddressBookListResponse, WatchAddressBookMutationResponse,
 };
 use sigillum_core::SnapshotSummary;
 use thiserror::Error;
@@ -118,6 +122,7 @@ pub enum ClientError {
     Api {
         status: reqwest::StatusCode,
         message: String,
+        action: Option<String>,
     },
 
     #[error("invalid snapshot encoding: {0}")]
@@ -253,7 +258,7 @@ impl SigillumClient {
         self.send(builder).await
     }
 
-    pub async fn lock(&self) -> Result<GenericStatusResponse, ClientError> {
+    pub async fn lock(&self) -> Result<LockResponse, ClientError> {
         let builder = self.request(Method::POST, "/api/lock");
         let response = self.send(builder).await?;
         self.clear_session_token();
@@ -1120,16 +1125,22 @@ impl SigillumClient {
         }
 
         if !status.is_success() {
-            let message = serde_json::from_value::<ErrorResponse>(value.clone())
-                .map(|error| error.error)
-                .unwrap_or_else(|_| {
-                    if text.is_empty() {
+            let (message, action) = match serde_json::from_value::<ErrorResponse>(value) {
+                Ok(error) => (error.error, error.action),
+                Err(_) => {
+                    let message = if text.is_empty() {
                         format!("request failed with status {status}")
                     } else {
-                        text.clone()
-                    }
-                });
-            return Err(ClientError::Api { status, message });
+                        text
+                    };
+                    (message, None)
+                }
+            };
+            return Err(ClientError::Api {
+                status,
+                message,
+                action,
+            });
         }
 
         Ok(serde_json::from_value(value)?)
