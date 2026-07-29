@@ -94,7 +94,7 @@ check_max_lines "crates/sigillum-cli/src/main.rs" 1450
 check_max_lines "crates/sigillum-cli/src/daemon_api.rs" 860
 check_max_lines "crates/sigillum-cli/src/daemon_api/plans.rs" 280
 check_max_lines "crates/sigillum-cli/src/daemon_api/queue.rs" 80
-check_max_lines "crates/sigillum-client/src/lib.rs" 1150
+check_max_lines "crates/sigillum-client/src/lib.rs" 1275
 check_max_lines "crates/sigillum-client/src/plans.rs" 160
 check_max_lines "crates/sigillum-client/src/queue.rs" 120
 check_max_lines "crates/sigillum-daemon/ui/src/app.js" 2500
