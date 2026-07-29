@@ -72,6 +72,10 @@ check_max_lines "crates/sigillum-daemon/src/service/profiles.rs" 640
 check_max_lines "crates/sigillum-daemon/src/service/profiles/resolution.rs" 120
 check_max_lines "crates/sigillum-daemon/src/service/profiles/sends.rs" 160
 check_max_lines "crates/sigillum-daemon/src/state.rs" 920
+check_max_lines "crates/sigillum-daemon/tests/registry_restore_sessions.rs" 1260
+check_max_lines "crates/sigillum-daemon/tests/profiles_and_wallets.rs" 1030
+check_max_lines "crates/sigillum-daemon/tests/inventory_scan.rs" 2060
+check_max_lines "crates/sigillum-daemon/tests/treasury_and_deposits.rs" 1950
 check_max_lines "crates/sigillum-api/src/request.rs" 820
 check_max_lines "crates/sigillum-api/src/request/queue.rs" 120
 check_max_lines "crates/sigillum-api/src/response.rs" 920
