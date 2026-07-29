@@ -287,15 +287,20 @@ fn check_env(report: &mut DoctorReport) {
         "SIGILLUM_SESSION_TOKEN",
         "SIGILLUM_DAEMON_SESSION_TOKEN",
     ] {
+        let label = if name == "SIGILLUM_DAEMON_SESSION_TOKEN" {
+            "SIGILLUM_DAEMON_SESSION_TOKEN (gateway only)"
+        } else {
+            name
+        };
         match std::env::var(name) {
             Ok(value) if name.contains("TOKEN") && !value.trim().is_empty() => {
-                report.check(CheckLevel::Info, name, "set");
+                report.check(CheckLevel::Info, label, "set");
             }
             Ok(value) if value.trim().is_empty() => {
-                report.check(CheckLevel::Warn, name, "set but empty");
+                report.check(CheckLevel::Warn, label, "set but empty");
             }
-            Ok(value) => report.check(CheckLevel::Info, name, value),
-            Err(_) => report.check(CheckLevel::Info, name, "not set"),
+            Ok(value) => report.check(CheckLevel::Info, label, value),
+            Err(_) => report.check(CheckLevel::Info, label, "not set"),
         }
     }
 }

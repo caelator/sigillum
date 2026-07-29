@@ -4,10 +4,12 @@ use chrono::{DateTime, Utc};
 use sigillum_client::{AuditEventQuery, SigillumClient};
 
 use crate::daemon_api::{
-    daemon_base_url, ensure_daemon_ready, parse_flag, parse_usize_flag, require_session_token,
+    daemon_base_url, ensure_daemon_ready, has_flag, parse_flag, parse_usize_flag, print_json,
+    require_session_token,
 };
 
 pub fn cmd_audit(args: &[String]) {
+    let json = has_flag(args, "--json");
     let base_url = daemon_base_url(args);
     if let Err(error) = ensure_daemon_ready(&base_url) {
         eprintln!("failed to reach daemon: {error}");
@@ -38,6 +40,10 @@ pub fn cmd_audit(args: &[String]) {
                 eprintln!("failed to verify audit chain: {error}");
                 process::exit(1);
             });
+        if json {
+            print_json(&report);
+            return;
+        }
         println!(
             "scope={} status={} verified={} broken={} legacy={}",
             report.scope, report.status, report.verified, report.broken, report.legacy
@@ -51,6 +57,11 @@ pub fn cmd_audit(args: &[String]) {
             eprintln!("failed to query audit events: {error}");
             process::exit(1);
         });
+
+    if json {
+        print_json(&events);
+        return;
+    }
 
     if events.is_empty() {
         println!("No audit events matched.");

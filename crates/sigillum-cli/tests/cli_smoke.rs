@@ -403,6 +403,8 @@ fn help_exits_zero_with_usage_text() {
         combined.contains("sigillum") || combined.contains("Usage") || combined.contains("usage"),
         "help output should mention sigillum or usage"
     );
+    assert!(combined.contains("audit [--tail N]"));
+    assert!(combined.contains("verify [scope] [--json]"));
 }
 
 #[test]
@@ -442,10 +444,13 @@ fn status_on_nonexistent_daemon_exits_cleanly() {
 #[test]
 fn doctor_reports_local_readiness_checks() {
     let tmp = tempfile::tempdir().unwrap();
-    let output = run_with_env(
-        &["doctor", "--url", "http://127.0.0.1:1"],
-        &[("SIGILLUM_BASE_DIR", tmp.path())],
-    );
+    let output = Command::new(sigillum_bin())
+        .args(["doctor", "--url", "http://127.0.0.1:1"])
+        .env("SIGILLUM_BASE_DIR", tmp.path())
+        .env("SIGILLUM_SESSION_TOKEN", "cli-token-secret")
+        .env("SIGILLUM_DAEMON_SESSION_TOKEN", "gateway-token-secret")
+        .output()
+        .expect("Failed to execute sigillum binary");
     assert!(
         output.status.code().is_some(),
         "doctor should exit cleanly, not crash"
@@ -455,6 +460,20 @@ fn doctor_reports_local_readiness_checks() {
     assert!(combined.contains("data dir"));
     assert!(combined.contains("daemon reachability"));
     assert!(combined.contains("Production boundary"));
+    assert!(combined.contains("[info] SIGILLUM_SESSION_TOKEN: set"));
+    assert!(combined.contains("[info] SIGILLUM_DAEMON_SESSION_TOKEN (gateway only): set"));
+    assert!(!combined.contains("SIGILLUM_SESSION_TOKEN (gateway only)"));
+    assert!(!combined.contains("cli-token-secret"));
+    assert!(!combined.contains("gateway-token-secret"));
+}
+
+#[test]
+fn lock_recommends_authenticated_cli_api() {
+    let output = run(&["lock"]);
+    assert!(output.status.success(), "sigillum lock should exit 0");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("authenticated CLI command: sigillum api lock"));
+    assert!(!stderr.contains("curl"));
 }
 
 // ── Adversarial Paths ──────────────────────────────────────────────
