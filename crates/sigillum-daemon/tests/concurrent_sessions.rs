@@ -3,47 +3,11 @@
 //! Tests multiple concurrent writes, session revocation, lock behavior,
 //! and token rejection under concurrent load.
 
+mod common;
+
+use common::{get, post_json, spawn_daemon};
 use std::net::SocketAddr;
-use std::path::PathBuf;
 use tempfile::TempDir;
-
-async fn spawn_daemon(base_dir: PathBuf) -> (SocketAddr, tokio::task::JoinHandle<()>) {
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let addr = listener.local_addr().unwrap();
-    let (app, _state) =
-        sigillum_daemon::build_router(base_dir, addr.port()).expect("router should initialize");
-    let handle = tokio::spawn(async move {
-        axum::serve(listener, app).await.unwrap();
-    });
-    (addr, handle)
-}
-
-async fn post_json(
-    client: &reqwest::Client,
-    addr: SocketAddr,
-    path: &str,
-    body: serde_json::Value,
-    token: Option<&str>,
-) -> reqwest::Response {
-    let mut req = client.post(format!("http://{addr}{path}")).json(&body);
-    if let Some(token) = token {
-        req = req.bearer_auth(token);
-    }
-    req.send().await.unwrap()
-}
-
-async fn get(
-    client: &reqwest::Client,
-    addr: SocketAddr,
-    path: &str,
-    token: Option<&str>,
-) -> reqwest::Response {
-    let mut req = client.get(format!("http://{addr}{path}"));
-    if let Some(token) = token {
-        req = req.bearer_auth(token);
-    }
-    req.send().await.unwrap()
-}
 
 /// Setup: initialize a compartment and return (addr, session_token, tmp_dir).
 async fn setup_daemon() -> (SocketAddr, String, TempDir) {

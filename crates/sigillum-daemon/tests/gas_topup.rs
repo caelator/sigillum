@@ -1,6 +1,8 @@
+mod common;
+
+use common::{post_json, spawn_daemon};
 use std::collections::BTreeMap;
 use std::net::SocketAddr;
-use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
 
 use axum::extract::State;
@@ -53,17 +55,6 @@ impl Drop for TestDaemon {
         self.daemon_handle.abort();
         self.rpc_handle.abort();
     }
-}
-
-async fn spawn_daemon(base_dir: PathBuf) -> (SocketAddr, tokio::task::JoinHandle<()>) {
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let addr = listener.local_addr().unwrap();
-    let (app, _state) =
-        sigillum_daemon::build_router(base_dir, addr.port()).expect("router should initialize");
-    let handle = tokio::spawn(async move {
-        axum::serve(listener, app).await.unwrap();
-    });
-    (addr, handle)
 }
 
 async fn spawn_mock_evm_provider(config: RpcConfig) -> (SocketAddr, tokio::task::JoinHandle<()>) {
@@ -148,20 +139,6 @@ fn json_rpc_result(request: &Value, result: Value) -> Value {
         "id": request.get("id").cloned().unwrap_or_else(|| json!(1)),
         "result": result,
     })
-}
-
-async fn post_json(
-    client: &reqwest::Client,
-    addr: SocketAddr,
-    path: &str,
-    body: Value,
-    token: Option<&str>,
-) -> reqwest::Response {
-    let mut request = client.post(format!("http://{addr}{path}")).json(&body);
-    if let Some(token) = token {
-        request = request.bearer_auth(token);
-    }
-    request.send().await.unwrap()
 }
 
 async fn setup_daemon() -> TestDaemon {

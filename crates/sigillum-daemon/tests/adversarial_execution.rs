@@ -1,6 +1,9 @@
 //! F1 adversarial suite for the execution path: transport abuse, stale/foreign
 //! ids, enqueue replay, and approve-vs-enqueue policy TOCTOU.
 
+mod common;
+
+use common::{get, post_json, spawn_daemon, submitted_raw_transaction_hash};
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 
@@ -10,32 +13,11 @@ use axum::routing::post;
 use axum::{Json, Router};
 use reqwest::StatusCode;
 use serde_json::{Value, json};
-use sha3::{Digest, Keccak256};
 use tempfile::TempDir;
 
 const DESTINATION: &str = "0x9999999999999999999999999999999999999999";
 const SEED_ADDRESS: &str = "0x9858effd232b4033e47d90003d41ec34ecaeda94";
 const ONE_ETH_HEX: &str = "0xde0b6b3a7640000";
-
-fn submitted_raw_transaction_hash(request: &Value) -> Value {
-    let raw = request["params"][0]
-        .as_str()
-        .expect("eth_sendRawTransaction carries raw transaction hex");
-    let bytes = hex::decode(raw.strip_prefix("0x").unwrap_or(raw))
-        .expect("submitted raw transaction is valid hex");
-    json!(format!("0x{}", hex::encode(Keccak256::digest(bytes))))
-}
-
-async fn spawn_daemon(base_dir: PathBuf) -> (SocketAddr, tokio::task::JoinHandle<()>) {
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let addr = listener.local_addr().unwrap();
-    let (app, _state) =
-        sigillum_daemon::build_router(base_dir, addr.port()).expect("router should initialize");
-    let handle = tokio::spawn(async move {
-        axum::serve(listener, app).await.unwrap();
-    });
-    (addr, handle)
-}
 
 #[derive(Clone)]
 struct RpcState;
@@ -105,33 +87,6 @@ async fn spawn_mock_evm_provider() -> (SocketAddr, tokio::task::JoinHandle<()>) 
         axum::serve(listener, app).await.unwrap();
     });
     (addr, handle)
-}
-
-async fn post_json(
-    client: &reqwest::Client,
-    addr: SocketAddr,
-    path: &str,
-    body: Value,
-    token: Option<&str>,
-) -> reqwest::Response {
-    let mut request = client.post(format!("http://{addr}{path}")).json(&body);
-    if let Some(token) = token {
-        request = request.bearer_auth(token);
-    }
-    request.send().await.unwrap()
-}
-
-async fn get(
-    client: &reqwest::Client,
-    addr: SocketAddr,
-    path: &str,
-    token: Option<&str>,
-) -> reqwest::Response {
-    let mut request = client.get(format!("http://{addr}{path}"));
-    if let Some(token) = token {
-        request = request.bearer_auth(token);
-    }
-    request.send().await.unwrap()
 }
 
 struct PlanEnv {

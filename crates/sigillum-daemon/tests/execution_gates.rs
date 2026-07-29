@@ -1,3 +1,6 @@
+mod common;
+
+use common::{get, post_json, spawn_daemon, submitted_raw_transaction_hash};
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -10,7 +13,6 @@ use axum::routing::post;
 use axum::{Json, Router};
 use reqwest::StatusCode;
 use serde_json::{Value, json};
-use sha3::{Digest, Keccak256};
 use tempfile::TempDir;
 use tokio::sync::Notify;
 
@@ -19,20 +21,6 @@ const RPC_TOKEN: &str = "rpc-test-token";
 const RPC_AUTH: &str = "Bearer rpc-test-token";
 const EXECUTION_PAUSED_REASON: &str =
     "execution_paused: queue execution is paused by the operator kill switch";
-
-fn submitted_raw_transaction_hash(request: &Value) -> Value {
-    let raw = request["params"][0]
-        .as_str()
-        .expect("eth_sendRawTransaction carries raw transaction hex");
-    let bytes = hex::decode(raw.strip_prefix("0x").unwrap_or(raw))
-        .expect("submitted raw transaction is valid hex");
-    json!(format!("0x{}", hex::encode(Keccak256::digest(bytes))))
-}
-
-async fn spawn_daemon(base_dir: PathBuf) -> (SocketAddr, tokio::task::JoinHandle<()>) {
-    let (addr, _state, handle) = spawn_daemon_with_state(base_dir).await;
-    (addr, handle)
-}
 
 async fn spawn_daemon_with_state(
     base_dir: PathBuf,
@@ -272,33 +260,6 @@ async fn rpc_response(state: &RpcState, request: &Value) -> Value {
         "id": request.get("id").cloned().unwrap_or(json!(1)),
         "result": result,
     })
-}
-
-async fn post_json(
-    client: &reqwest::Client,
-    addr: SocketAddr,
-    path: &str,
-    body: Value,
-    token: Option<&str>,
-) -> reqwest::Response {
-    let mut req = client.post(format!("http://{addr}{path}")).json(&body);
-    if let Some(token) = token {
-        req = req.bearer_auth(token);
-    }
-    req.send().await.unwrap()
-}
-
-async fn get(
-    client: &reqwest::Client,
-    addr: SocketAddr,
-    path: &str,
-    token: Option<&str>,
-) -> reqwest::Response {
-    let mut req = client.get(format!("http://{addr}{path}"));
-    if let Some(token) = token {
-        req = req.bearer_auth(token);
-    }
-    req.send().await.unwrap()
 }
 
 struct StealthSetup {
