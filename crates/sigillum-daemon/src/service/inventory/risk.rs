@@ -2,11 +2,10 @@ use sigillum_api::{
     ChainProfile, DEFAULT_DORMANCY_BLOCK_WINDOW, RiskCatalogEntry, RiskFinding,
     WalletAddressClassification, WalletAssetHolding, WalletAssetKind, WalletInventoryAddress,
 };
-use sigillum_core::decode_quantity_hex;
 
 use super::nft_approval_discovery::DISCOVERY_SOURCE_NFT_OPERATOR_APPROVAL_PROBE;
 use super::permit2_discovery::DISCOVERY_SOURCE_PERMIT2_ALLOWANCE_PROBE;
-use super::support::quantity_hex_is_nonzero;
+use super::support::{is_very_large_approval, quantity_hex_is_nonzero};
 
 pub(super) fn derive_inventory_risk_findings(
     addresses: &[WalletInventoryAddress],
@@ -472,12 +471,6 @@ fn stable_claim_finding_id(holding: &WalletAssetHolding, claim_contract: &str) -
         claim_contract,
         holding.source
     )
-}
-
-fn is_very_large_approval(amount_hex: &str) -> bool {
-    decode_quantity_hex(amount_hex)
-        .map(|amount| amount[0] >= 0x80)
-        .unwrap_or(false)
 }
 
 #[cfg(test)]
