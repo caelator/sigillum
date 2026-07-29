@@ -99,7 +99,10 @@ COMMANDS:
     get <KEY>         Retrieve a Tier 2 secret
     delete <KEY>      Delete a Tier 2 secret
     list              List all keys (both tiers)
-    audit             Query audit events; use `audit verify [scope]` for MAC chains
+    audit [--tail N] [--kind K] [--since TIME] [--key K] [--json]
+                      Query audit events; JSON output is an array
+      verify [scope] [--json]
+                      Verify audit MAC chains; JSON output is a report
     doctor            Check local daemon, data dir, session, audit DB, and env
     generate          Generate passwords, passphrases, or TOTPs
     run               Inject resolved secrets into a child process
@@ -715,10 +718,11 @@ fn unlock_fido2() {
 /// Lock all compartments (daemon only).
 ///
 /// The CLI is stateless and does not maintain unlock state between commands.
-/// To lock compartments, use the daemon's web UI or HTTP API.
+/// To lock compartments, use the daemon's web UI or authenticated
+/// `sigillum api lock` command.
 fn cmd_lock() {
     eprintln!("CLI is stateless — keys are not held in memory between commands.");
-    eprintln!("To lock the daemon, use the web UI or: curl -X POST http://localhost:9743/api/lock");
+    eprintln!("To lock the daemon, run the authenticated CLI command: sigillum api lock");
 }
 
 // ── Snapshot backup ─────────────────────────────────────────────
