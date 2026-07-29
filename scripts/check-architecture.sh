@@ -56,6 +56,14 @@ check_max_lines "crates/sigillum-daemon/src/service/evm.rs" 900
 check_max_lines "crates/sigillum-daemon/src/service/evm/rpc.rs" 340
 check_max_lines "crates/sigillum-daemon/src/service/evm/rpc/receipt.rs" 120
 check_max_lines "crates/sigillum-daemon/src/service/inventory.rs" 750
+check_max_lines "crates/sigillum-daemon/src/service/inventory/treasury/mod.rs" 14
+check_max_lines "crates/sigillum-daemon/src/service/inventory/treasury/overview.rs" 373
+check_max_lines "crates/sigillum-daemon/src/service/inventory/treasury/receiving.rs" 525
+check_max_lines "crates/sigillum-daemon/src/service/inventory/treasury/policy.rs" 357
+check_max_lines "crates/sigillum-daemon/src/service/inventory/treasury/parties.rs" 162
+check_max_lines "crates/sigillum-daemon/src/service/inventory/treasury/allocations.rs" 315
+check_max_lines "crates/sigillum-daemon/src/service/inventory/treasury/tests.rs" 564
+check_max_lines "crates/sigillum-daemon/src/service/inventory/treasury/policy/tests.rs" 159
 check_max_lines "crates/sigillum-daemon/src/service/inventory/plan_execution_enqueue.rs" 1400
 check_max_lines "crates/sigillum-daemon/src/service/queue.rs" 220
 check_max_lines "crates/sigillum-daemon/src/service/queue/outcomes.rs" 180
@@ -131,6 +139,14 @@ check_required_file "crates/sigillum-daemon/src/service/queue/serialization.rs"
 check_required_file "crates/sigillum-daemon/src/service/queue/state.rs"
 check_required_file "crates/sigillum-daemon/src/service/queue/sweeps.rs"
 check_required_file "crates/sigillum-daemon/src/service/inventory/plan_execution_enqueue.rs"
+check_required_file "crates/sigillum-daemon/src/service/inventory/treasury/mod.rs"
+check_required_file "crates/sigillum-daemon/src/service/inventory/treasury/overview.rs"
+check_required_file "crates/sigillum-daemon/src/service/inventory/treasury/receiving.rs"
+check_required_file "crates/sigillum-daemon/src/service/inventory/treasury/policy.rs"
+check_required_file "crates/sigillum-daemon/src/service/inventory/treasury/parties.rs"
+check_required_file "crates/sigillum-daemon/src/service/inventory/treasury/allocations.rs"
+check_required_file "crates/sigillum-daemon/src/service/inventory/treasury/tests.rs"
+check_required_file "crates/sigillum-daemon/src/service/inventory/treasury/policy/tests.rs"
 check_required_file "crates/sigillum-api/src/request/queue.rs"
 check_required_file "crates/sigillum-api/src/response/queue.rs"
 check_required_file "crates/sigillum-api/src/response/queue/plan_step.rs"
@@ -181,7 +197,14 @@ check_no_inline_tests "crates/sigillum-api/src/response/queue/receipt.rs"
 check_no_inline_tests "crates/sigillum-client/src/lib.rs"
 check_no_inline_tests "crates/sigillum-client/src/queue.rs"
 check_no_inline_tests "crates/sigillum-client/src/plans.rs"
+check_no_inline_tests "crates/sigillum-daemon/src/service/inventory/treasury/mod.rs"
+check_no_inline_tests "crates/sigillum-daemon/src/service/inventory/treasury/overview.rs"
+check_no_inline_tests "crates/sigillum-daemon/src/service/inventory/treasury/receiving.rs"
+check_no_inline_tests "crates/sigillum-daemon/src/service/inventory/treasury/policy.rs"
+check_no_inline_tests "crates/sigillum-daemon/src/service/inventory/treasury/parties.rs"
+check_no_inline_tests "crates/sigillum-daemon/src/service/inventory/treasury/allocations.rs"
 
+check_not_contains "crates/sigillum-daemon/src/service/inventory/treasury/mod.rs" '^(pub struct|pub enum|fn )' "treasury/mod.rs must remain a facade only"
 check_contains "crates/sigillum-api/src/request.rs" '^mod queue;$' "queue request contracts must stay in crates/sigillum-api/src/request/queue.rs"
 check_contains "crates/sigillum-api/src/request.rs" '^pub use queue::\*;$' "queue request contract names must remain re-exported from request.rs"
 check_not_contains "crates/sigillum-api/src/request.rs" '^(pub struct|pub type) Queue' "queue request DTOs must not move back into request.rs"

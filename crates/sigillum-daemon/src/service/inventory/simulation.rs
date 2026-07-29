@@ -8,7 +8,7 @@ use sigillum_core::decode_quantity_hex;
 use crate::audit_log::AuditEventSpec;
 use crate::service::evm::{EvmContractCallPreflight, encode_quantity_u256};
 use crate::service::helpers::{
-    compare_u256, map_wallet_error, multiply_u256_u64, now_unix, subtract_u256,
+    add_u256, compare_u256, map_wallet_error, multiply_u256_u64, now_unix, subtract_u256,
 };
 use crate::service::{ServiceError, ServiceResult, SigillumService};
 
@@ -20,7 +20,6 @@ use super::defi_adapters::{
 use super::planner::{plan_status, summarize_plan_steps};
 use super::preflight::{PlanStepPreflight, PlanStepPreflightCall, prepare_plan_step_preflight};
 use super::support::{load_inventory_state, save_inventory_state};
-use super::treasury::add_u256;
 
 const DEFAULT_TOKEN_TRANSACTION_GAS_LIMIT: u64 = 65_000;
 const DEFAULT_NFT_SWEEP_GAS_LIMIT: u64 = 100_000;

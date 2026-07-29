@@ -96,6 +96,44 @@ pub(crate) fn map_xpub_error(error: EthereumXpubError) -> ServiceError {
 
 // ── u256 arithmetic ──────────────────────────────────────────────
 
+/// Saturating big-endian addition of two 256-bit quantities.
+pub(crate) fn add_u256(left: &[u8; 32], right: &[u8; 32]) -> [u8; 32] {
+    let mut out = [0u8; 32];
+    let mut carry = 0u16;
+    for index in (0..32).rev() {
+        let sum = left[index] as u16 + right[index] as u16 + carry;
+        out[index] = (sum & 0xff) as u8;
+        carry = sum >> 8;
+    }
+    if carry > 0 {
+        // Saturate rather than wrap: an overflowing treasury total is already
+        // far outside plausible balances, and wrapping would understate value.
+        return [0xff; 32];
+    }
+    out
+}
+
+pub(crate) fn encode_quantity_hex(value: &[u8; 32]) -> String {
+    let first_nonzero = value.iter().position(|byte| *byte != 0);
+    match first_nonzero {
+        None => "0x0".to_string(),
+        Some(start) => {
+            let mut encoded = String::with_capacity(2 + (32 - start) * 2);
+            encoded.push_str("0x");
+            let mut rendered = false;
+            for byte in &value[start..] {
+                if rendered {
+                    encoded.push_str(&format!("{byte:02x}"));
+                } else {
+                    encoded.push_str(&format!("{byte:x}"));
+                    rendered = true;
+                }
+            }
+            encoded
+        }
+    }
+}
+
 /// Compare two big-endian 256-bit unsigned integers.
 pub(crate) fn compare_u256(left: &[u8; 32], right: &[u8; 32]) -> std::cmp::Ordering {
     left.as_slice().cmp(right.as_slice())

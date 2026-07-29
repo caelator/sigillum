@@ -10,13 +10,14 @@ use sigillum_core::decode_quantity_hex;
 use crate::inventory::WalletInventoryState;
 use crate::profiles::ProfileRegistry;
 use crate::service::SigillumService;
-use crate::service::helpers::{compare_u256, multiply_u256_u64, random_id};
+use crate::service::helpers::{
+    add_u256, compare_u256, encode_quantity_hex, multiply_u256_u64, random_id,
+};
 
 use super::WALLET_FAMILY_ETH_SEED;
 use super::simulation::{
     FeeBasisResolution, inventory_native_balance_hex_for_step, zero_value_transaction_gas_limit,
 };
-use super::treasury::{add_u256, encode_quantity_hex};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) struct ResolvedGasFees {

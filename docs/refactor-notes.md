@@ -29,6 +29,8 @@ not an aspirational end state.
 - `sigillum-daemon/src/service/profiles/resolution.rs` and
   `sigillum-daemon/src/service/profiles/sends.rs` own profile-backed lookup and
   send construction. `profiles.rs` remains the profile CRUD facade.
+- `sigillum-daemon/src/service/inventory/treasury/*` owns treasury overview,
+  receiving, policy, party, and allocation behavior behind a narrow facade.
 - `sigillum-daemon/ui/src/app.ts` is the runtime entry. It should stay focused
   on boot flow and composition.
 - `sigillum-daemon/ui/src/views/*`, `actions/*`, `render/*`, `state/*`, and
