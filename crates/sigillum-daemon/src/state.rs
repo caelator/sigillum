@@ -30,7 +30,6 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use rand::RngCore;
 use rand::rngs::OsRng;
 use serde::Serialize;
-use sigillum_api::AuditEvent;
 use sigillum_core::{FileVault, VaultConfig, VaultLifecycle, recover_snapshot_restore};
 use sigillum_fido2::Fido2Manager;
 use sigillum_fido2::config::CompartmentMeta;
@@ -42,14 +41,14 @@ mod audit_keys;
 mod recovery_files;
 mod runtime;
 #[cfg(test)]
+mod test_support;
+#[cfg(test)]
 mod tests;
 
 pub(crate) use recovery_files::recover_compartment_replacements;
 use recovery_files::{restore_stashed_ops_dir, stash_snapshot_placeholder_ops};
 
 use crate::DaemonInitError;
-use crate::audit_db::AuditQuery;
-use crate::audit_log::{AuditEventSpec, StoredAuditEvent};
 use crate::events::EventBus;
 use crate::operation_registry::OperationRegistry;
 use crate::operations::{OperationGuard, PendingOperationSpec, list_pending_operations};
@@ -336,10 +335,8 @@ impl AppState {
     pub fn active_compartment_id_for(&self, token: &str) -> Option<usize> {
         let active = {
             let sessions = self.sessions.lock();
-            sessions
-                .iter()
-                .find(|(stored, _)| Self::token_matches(stored, token))
-                .and_then(|(_, session)| session.active_compartment_id)
+            let session_key = Self::session_key_for(&sessions, token)?;
+            sessions.get(&session_key)?.active_compartment_id
         };
         active.or_else(|| self.default_active_compartment_id())
     }
@@ -667,8 +664,7 @@ impl AppState {
         }
     }
 
-    /// Lock all compartments and clear state.
-    pub fn lock_all(&self) {
+    fn zeroize_all_unlocked_state(&self) {
         let mut vaults = self.vaults.lock();
         for vault in vaults.values() {
             vault.zeroize_master_key();
@@ -677,32 +673,44 @@ impl AppState {
         drop(vaults);
         self.unlocked.lock().clear();
         self.sessions.lock().clear();
+    }
+
+    /// Zeroize immediately after the force deadline while preserving `Locking`
+    /// until the in-flight operation drains and the idle task owns its mutex.
+    pub(crate) fn force_zeroize_all_while_locking(&self) {
+        *self.lock_state.lock() = LockState::Locking;
+        self.zeroize_all_unlocked_state();
+    }
+
+    /// Lock all compartments and clear state.
+    pub fn lock_all(&self) {
+        self.zeroize_all_unlocked_state();
         self.finish_locking();
         self.publish_status_event(sigillum_api::STATUS_EVENT_LOCKED);
     }
 
-    /// Verify a candidate token against the stored session token.
+    /// Verify a candidate token without recording operator activity.
     ///
-    /// This is the ACTIVE verify: a successful call refreshes the session's
-    /// `last_activity`, deferring the idle auto-lock. Reads that must not
-    /// extend session life (today: `GET /api/events`; later the console's
-    /// status polling) use [`Self::verify_token_passive`] instead — mark a
-    /// route passive at its verify call site.
+    /// Authentication and activity accounting are deliberately separate:
+    /// the HTTP middleware calls [`Self::touch_session_activity`] only after
+    /// a successful, non-background request. Failed requests, passive polls,
+    /// internal scheduler work, and operations revalidating after a mutex
+    /// wait therefore cannot defer the idle auto-lock merely by presenting a
+    /// valid bearer.
     pub fn verify_token(&self, candidate: &str) -> bool {
-        self.verify_token_inner(candidate, true)
+        self.verify_token_inner(candidate)
     }
 
-    /// Verify a candidate token WITHOUT counting the request as activity.
+    /// Explicit validation-only alias for passive observation call sites.
     ///
-    /// PASSIVE verify: expiry and idle eviction apply exactly as in
-    /// [`Self::verify_token`], but a successful call leaves `last_activity`
-    /// untouched, so a permanently connected or polling observer cannot
-    /// defeat the vault idle auto-lock.
+    /// This has the same security semantics as [`Self::verify_token`]; the
+    /// separate name documents that an observer must never be changed to an
+    /// activity-producing operation accidentally.
     pub fn verify_token_passive(&self, candidate: &str) -> bool {
-        self.verify_token_inner(candidate, false)
+        self.verify_token_inner(candidate)
     }
 
-    fn verify_token_inner(&self, candidate: &str, touch_activity: bool) -> bool {
+    fn verify_token_inner(&self, candidate: &str) -> bool {
         if self.is_locking() {
             return false;
         }
@@ -713,17 +721,39 @@ impl AppState {
         let Some(session_key) = Self::session_key_for(&sessions, candidate) else {
             return false;
         };
-        let Some(session) = sessions.get_mut(&session_key) else {
+        let Some(session) = sessions.get(&session_key) else {
             return false;
         };
         if session.last_activity.elapsed() >= Duration::from_secs(idle_lock_secs) {
             sessions.remove(&session_key);
             return false;
         }
-        if touch_activity {
-            session.last_activity = Instant::now();
-        }
         true
+    }
+
+    /// Record successful user-initiated activity for a live session.
+    ///
+    /// Validation is intentionally separate: background console polling must
+    /// authenticate without preventing the configured idle auto-lock.
+    pub fn touch_session_activity(&self, candidate: &str) {
+        if self.is_locking() {
+            return;
+        }
+        let idle_lock_secs = self.runtime_policy.idle_lock_secs;
+        let mut sessions = self.sessions.lock();
+        let now = Instant::now();
+        sessions.retain(|_, state| now < state.expires_at);
+        let Some(session_key) = Self::session_key_for(&sessions, candidate) else {
+            return;
+        };
+        let Some(session) = sessions.get_mut(&session_key) else {
+            return;
+        };
+        if session.last_activity.elapsed() >= Duration::from_secs(idle_lock_secs) {
+            sessions.remove(&session_key);
+            return;
+        }
+        session.last_activity = now;
     }
 
     #[must_use]
@@ -857,46 +887,5 @@ impl AppState {
                     .and_then(|vault| vault.extract_master_key().map(|mk| (meta.clone(), mk)))
             })
             .collect()
-    }
-
-    pub(crate) fn record_audit_event(
-        &self,
-        compartment_id: Option<usize>,
-        spec: AuditEventSpec,
-    ) -> Result<(), std::io::Error> {
-        let created_at_unix = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_secs();
-        let event = StoredAuditEvent {
-            created_at_unix,
-            compartment_id,
-            spec,
-        };
-        let path = self.audit_db_path();
-        let (scope, key) = self.audit_chain_scope_and_key(compartment_id)?;
-        crate::audit_db::append_event_chained(&path, &event, &scope, &key)
-    }
-
-    pub(crate) fn read_audit_events(
-        &self,
-        query: AuditQuery,
-    ) -> Result<Vec<AuditEvent>, std::io::Error> {
-        let path = self.audit_db_path();
-        crate::audit_db::query_events(
-            &path,
-            &AuditQuery {
-                tail: self.runtime_policy().audit_limit(Some(query.tail.max(1))),
-                ..query
-            },
-        )
-    }
-
-    pub(crate) fn verify_audit_chain(
-        &self,
-        scope: &str,
-    ) -> Result<sigillum_api::AuditVerifyReport, std::io::Error> {
-        let key = self.audit_key_for_scope(scope)?;
-        crate::audit_db::verify_chain(&self.audit_db_path(), scope, &key)
     }
 }

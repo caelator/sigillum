@@ -2,7 +2,6 @@
 
 use std::sync::Arc;
 
-use axum::Json;
 use axum::extract::{Query, State};
 use axum::http::HeaderMap;
 use axum::response::Response;
@@ -17,7 +16,7 @@ use crate::AppState;
 use crate::service::SigillumService;
 
 use super::list_query::EthStealthDepositsRawQuery;
-use super::{bearer_token, service_response, validated};
+use super::{ValidatedJson, bearer_token, service_response};
 
 pub(crate) async fn list_eth_stealth_deposits(
     State(state): State<Arc<AppState>>,
@@ -35,12 +34,8 @@ pub(crate) async fn list_eth_stealth_deposits(
 pub(crate) async fn create_eth_stealth_native_deposit(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
-    Json(body): Json<EthStealthDepositCreateNativeRequest>,
+    ValidatedJson(body): ValidatedJson<EthStealthDepositCreateNativeRequest>,
 ) -> Response {
-    let body = match validated(Json(body)) {
-        Ok(b) => b,
-        Err(resp) => return resp,
-    };
     let service = SigillumService::new(state);
     service_response(
         service
@@ -52,12 +47,8 @@ pub(crate) async fn create_eth_stealth_native_deposit(
 pub(crate) async fn create_eth_stealth_erc20_deposit(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
-    Json(body): Json<EthStealthDepositCreateErc20Request>,
+    ValidatedJson(body): ValidatedJson<EthStealthDepositCreateErc20Request>,
 ) -> Response {
-    let body = match validated(Json(body)) {
-        Ok(b) => b,
-        Err(resp) => return resp,
-    };
     let service = SigillumService::new(state);
     service_response(
         service
@@ -69,12 +60,8 @@ pub(crate) async fn create_eth_stealth_erc20_deposit(
 pub(crate) async fn scan_eth_stealth_announcements(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
-    Json(body): Json<EthStealthAnnouncementScanRequest>,
+    ValidatedJson(body): ValidatedJson<EthStealthAnnouncementScanRequest>,
 ) -> Response {
-    let body = match validated(Json(body)) {
-        Ok(b) => b,
-        Err(resp) => return resp,
-    };
     let service = SigillumService::new(state);
     service_response(
         service
@@ -86,12 +73,8 @@ pub(crate) async fn scan_eth_stealth_announcements(
 pub(crate) async fn delete_eth_stealth_deposit(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
-    Json(body): Json<EthStealthDepositDeleteRequest>,
+    ValidatedJson(body): ValidatedJson<EthStealthDepositDeleteRequest>,
 ) -> Response {
-    let body = match validated(Json(body)) {
-        Ok(b) => b,
-        Err(resp) => return resp,
-    };
     let service = SigillumService::new(state);
     service_response(
         service
@@ -103,12 +86,8 @@ pub(crate) async fn delete_eth_stealth_deposit(
 pub(crate) async fn tag_eth_stealth_deposit(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
-    Json(body): Json<ReceivingDepositTagRequest>,
+    ValidatedJson(body): ValidatedJson<ReceivingDepositTagRequest>,
 ) -> Response {
-    let body = match validated(Json(body)) {
-        Ok(b) => b,
-        Err(resp) => return resp,
-    };
     let service = SigillumService::new(state);
     service_response(
         service
@@ -120,12 +99,8 @@ pub(crate) async fn tag_eth_stealth_deposit(
 pub(crate) async fn refresh_eth_stealth_deposits(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
-    Json(body): Json<EthStealthDepositRefreshRequest>,
+    ValidatedJson(body): ValidatedJson<EthStealthDepositRefreshRequest>,
 ) -> Response {
-    let body = match validated(Json(body)) {
-        Ok(b) => b,
-        Err(resp) => return resp,
-    };
     let service = SigillumService::new(state);
     service_response(
         service
@@ -137,12 +112,8 @@ pub(crate) async fn refresh_eth_stealth_deposits(
 pub(crate) async fn enqueue_eth_stealth_deposit_sweep(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
-    Json(body): Json<EthStealthDepositEnqueueSweepRequest>,
+    ValidatedJson(body): ValidatedJson<EthStealthDepositEnqueueSweepRequest>,
 ) -> Response {
-    let body = match validated(Json(body)) {
-        Ok(b) => b,
-        Err(resp) => return resp,
-    };
     let service = SigillumService::new(state);
     service_response(
         service

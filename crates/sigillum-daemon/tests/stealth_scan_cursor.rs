@@ -21,10 +21,14 @@
 //! * `empty_range_anchors_the_cursor_at_the_scanned_head` — a range with no
 //!   announcement logs still advances the cursor (numeric `to_block`, or the
 //!   chain head for the default `latest`), so empty history is not re-read.
+//! * `lock_during_provider_wait_aborts_before_scan_mutation` — provider waits
+//!   never hold the operation guard; a concurrent lock completes, and the
+//!   scan then fails session revalidation without changing deposits/cursors.
 
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use axum::extract::State;
 use axum::http::{HeaderMap, header};
@@ -34,6 +38,7 @@ use reqwest::StatusCode;
 use serde_json::{Value, json};
 use sigillum_core::StealthHashConvention;
 use tempfile::TempDir;
+use tokio::sync::Notify;
 
 const DESTINATION: &str = "0x1111111111111111111111111111111111111111";
 const CALLER: &str = "0x2222222222222222222222222222222222222222";
@@ -61,6 +66,11 @@ struct RpcState {
     /// Mutable head lets migration tests model a legacy cursor below the live
     /// chain head without changing the other cursor fixtures.
     head_block: std::sync::RwLock<String>,
+    /// Deterministic race gate used to hold an announcement scan inside the
+    /// public provider phase, before any session operation is admitted.
+    hold_get_logs: AtomicBool,
+    get_logs_started: Notify,
+    release_get_logs: Notify,
 }
 
 impl Default for RpcState {
@@ -69,6 +79,9 @@ impl Default for RpcState {
             announcement_logs: std::sync::RwLock::new(Vec::new()),
             get_logs_ranges: std::sync::RwLock::new(Vec::new()),
             head_block: std::sync::RwLock::new(HEAD.to_string()),
+            hold_get_logs: AtomicBool::new(false),
+            get_logs_started: Notify::new(),
+            release_get_logs: Notify::new(),
         }
     }
 }
@@ -168,6 +181,18 @@ async fn spawn_mock_evm_provider() -> (SocketAddr, tokio::task::JoinHandle<()>, 
                 StatusCode::UNAUTHORIZED,
                 Json(json!({ "error": "missing provider auth" })),
             );
+        }
+        let contains_get_logs = body
+            .as_array()
+            .map(|requests| {
+                requests
+                    .iter()
+                    .any(|request| request["method"] == "eth_getLogs")
+            })
+            .unwrap_or_else(|| body["method"] == "eth_getLogs");
+        if contains_get_logs && state.hold_get_logs.load(Ordering::Acquire) {
+            state.get_logs_started.notify_one();
+            state.release_get_logs.notified().await;
         }
         let payload = if let Some(requests) = body.as_array() {
             Value::Array(
@@ -707,6 +732,78 @@ async fn explicit_from_block_wins_and_never_drags_the_cursor_backward() {
             ("0x1".to_string(), "latest".to_string()),
             ("0x21".to_string(), "latest".to_string()),
         ]
+    );
+
+    rig.abort();
+}
+
+/// Public provider I/O happens before the authenticated operation boundary.
+/// If a lock lands while `eth_getLogs` is pending, locking must complete
+/// without waiting on the provider; after the response arrives, the scan must
+/// fail session revalidation before deriving or persisting private-state
+/// results. The architecture gate separately pins the derive-after-guard
+/// source ordering that makes the private-key half of this race observable.
+#[tokio::test]
+async fn lock_during_provider_wait_aborts_before_scan_mutation() {
+    let dir = TempDir::new().unwrap();
+    let rig = spawn_rig(&dir).await;
+    serve_payment_log(&rig, &rig.token, [0x5au8; 32], "0x20").await;
+    let deposits_path = dir.path().join("deposits.json");
+    let deposits_before = std::fs::read(&deposits_path).ok();
+
+    rig.rpc_state.hold_get_logs.store(true, Ordering::Release);
+    let scan_task = {
+        let client = reqwest::Client::new();
+        let token = rig.token.clone();
+        let addr = rig.addr;
+        tokio::spawn(async move {
+            client
+                .post(format!(
+                    "http://{addr}/api/deposits/eth-stealth/scan-announcements"
+                ))
+                .bearer_auth(token)
+                .json(&json!({ "wallet_profile": "payments-mainnet" }))
+                .send()
+                .await
+                .expect("scan request should complete")
+        })
+    };
+    tokio::time::timeout(
+        std::time::Duration::from_secs(5),
+        rig.rpc_state.get_logs_started.notified(),
+    )
+    .await
+    .expect("scan should reach the held eth_getLogs request");
+
+    let client = reqwest::Client::new();
+    let lock = tokio::time::timeout(
+        std::time::Duration::from_secs(5),
+        client
+            .post(format!("http://{}/api/lock", rig.addr))
+            .bearer_auth(&rig.token)
+            .json(&json!({}))
+            .send(),
+    )
+    .await
+    .expect("lock must not wait on provider I/O")
+    .expect("lock request should complete");
+    assert_eq!(lock.status(), StatusCode::OK);
+    assert_eq!(lock.json::<Value>().await.unwrap()["status"], "locked");
+
+    rig.rpc_state.release_get_logs.notify_one();
+    let scan = tokio::time::timeout(std::time::Duration::from_secs(5), scan_task)
+        .await
+        .expect("scan should finish after provider release")
+        .expect("scan task should join");
+    assert_eq!(
+        scan.status(),
+        StatusCode::UNAUTHORIZED,
+        "the now-revoked admission session must fail closed"
+    );
+    assert_eq!(
+        std::fs::read(&deposits_path).ok(),
+        deposits_before,
+        "a scan preempted by lock must not add a deposit or advance its cursor"
     );
 
     rig.abort();

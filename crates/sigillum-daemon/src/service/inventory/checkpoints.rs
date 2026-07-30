@@ -24,28 +24,6 @@ pub(super) struct BlockCursorProgress<'a> {
     pub(super) updated_at_unix: u64,
 }
 
-pub(super) fn latest_resume_checkpoint(
-    jobs: &[WalletDiscoveryJob],
-    wallet: &DiscoveryWallet,
-    providers: &[sigillum_api::EvmProviderProfile],
-) -> Option<(u32, u32)> {
-    jobs.iter()
-        .rev()
-        .filter(|job| job.status != "completed")
-        .flat_map(|job| job.checkpoints.iter())
-        .filter(|checkpoint| {
-            checkpoint.wallet_family == wallet.family
-                && checkpoint.wallet_profile == wallet.profile
-                && checkpoint_matches_derivation(checkpoint, wallet)
-                && !checkpoint.completed
-                && providers
-                    .iter()
-                    .any(|provider| provider.name == checkpoint.provider_profile)
-        })
-        .min_by_key(|checkpoint| checkpoint.next_index)
-        .map(|checkpoint| (checkpoint.next_index, checkpoint.consecutive_empty))
-}
-
 pub(super) fn latest_block_scan_cursors(
     jobs: &[WalletDiscoveryJob],
     chain_ids: impl IntoIterator<Item = u64>,
@@ -174,25 +152,6 @@ pub(super) fn parse_block_quantity(value: &str) -> Option<u64> {
 
 pub(super) fn encode_block_quantity(value: u64) -> String {
     format!("0x{value:x}")
-}
-
-fn checkpoint_matches_derivation(
-    checkpoint: &WalletDiscoveryCheckpoint,
-    wallet: &DiscoveryWallet,
-) -> bool {
-    let pattern = checkpoint
-        .derivation_pattern
-        .as_deref()
-        .unwrap_or(DERIVATION_PATTERN_PROJECT);
-    if pattern != wallet.derivation_pattern {
-        return false;
-    }
-    let legacy_account_index = if pattern == DERIVATION_PATTERN_PROJECT {
-        wallet.account_index
-    } else {
-        0
-    };
-    checkpoint.account_index.unwrap_or(legacy_account_index) == wallet.account_index
 }
 
 pub(super) fn sync_inventory_job(

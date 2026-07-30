@@ -31,7 +31,8 @@ impl SigillumService {
         body: RiskCatalogUpsertRequest,
     ) -> ServiceResult<RiskCatalogMutationResponse> {
         let token = self.require_session(token)?;
-        let _guard = self.state.operation_guard().await;
+        let session_context = self.capture_session_operation_context(Some(token))?;
+        let _guard = self.acquire_session_operation(&session_context).await?;
         let mut state = load_inventory_state(&self.state.base_dir)?;
         let now = now_unix();
         let address = normalize_address(&body.address)?;
@@ -82,7 +83,8 @@ impl SigillumService {
         body: RiskCatalogDeleteRequest,
     ) -> ServiceResult<RiskCatalogMutationResponse> {
         let token = self.require_session(token)?;
-        let _guard = self.state.operation_guard().await;
+        let session_context = self.capture_session_operation_context(Some(token))?;
+        let _guard = self.acquire_session_operation(&session_context).await?;
         let mut state = load_inventory_state(&self.state.base_dir)?;
         let address = normalize_address(&body.address)?;
         let position = state

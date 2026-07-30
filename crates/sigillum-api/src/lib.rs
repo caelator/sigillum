@@ -18,6 +18,7 @@
 pub mod error_codes;
 pub mod request;
 pub mod response;
+pub mod route_paths;
 pub mod validation;
 
 pub use request::*;

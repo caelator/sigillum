@@ -15,6 +15,7 @@ impl SigillumService {
         paused: bool,
     ) -> ServiceResult<QueueExecutionPauseResponse> {
         let token = self.require_session(token)?;
+        let session_context = self.capture_session_operation_context(Some(token))?;
 
         // Pause must be able to preempt a drain that currently owns the
         // operation mutex. Set the in-memory latch before waiting for that
@@ -22,7 +23,7 @@ impl SigillumService {
         if paused {
             self.state.set_queue_execution_pause_latch(true);
         }
-        let _guard = self.state.operation_guard().await;
+        let _guard = self.acquire_session_operation(&session_context).await?;
         let mut state =
             crate::inventory::load_wallet_inventory(&self.state.base_dir).map_err(|error| {
                 ServiceError::internal(format!("Failed to load wallet inventory: {error}"))

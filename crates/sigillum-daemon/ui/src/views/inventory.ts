@@ -1,3 +1,4 @@
+import { ROUTE_PATHS } from "../routePaths";
 import type {
   ChainProfile,
   ConsolidationPlan,
@@ -160,7 +161,7 @@ export function createInventoryActions(deps: InventoryActionsDeps) {
     }
 
     try {
-      const r = await deps.api("GET", "/api/treasury/parties");
+      const r = await deps.api("GET", ROUTE_PATHS.API_TREASURY_PARTIES);
       if (r.error) {
         planPartyDestinationInputIds = [];
         container.innerHTML = "";
@@ -963,15 +964,15 @@ export function createInventoryActions(deps: InventoryActionsDeps) {
         nftOptIns,
         treasuryPolicy,
       ] = await Promise.all([
-        deps.api("GET", "/api/chains"),
-        deps.api("GET", "/api/inventory/watch-addresses"),
-        deps.api("GET", "/api/inventory/wallets"),
-        deps.api("GET", "/api/inventory/token-registry"),
-        deps.api("GET", "/api/risk/catalog"),
-        deps.api("GET", "/api/risk/findings"),
-        deps.api("GET", "/api/plans/consolidation"),
-        deps.api("GET", "/api/inventory/nft-metadata/opt-ins"),
-        deps.api("GET", "/api/treasury/policy"),
+        deps.api("GET", ROUTE_PATHS.API_CHAINS),
+        deps.api("GET", ROUTE_PATHS.API_INVENTORY_WATCH_ADDRESSES),
+        deps.api("GET", ROUTE_PATHS.API_INVENTORY_WALLETS),
+        deps.api("GET", ROUTE_PATHS.API_INVENTORY_TOKEN_REGISTRY),
+        deps.api("GET", ROUTE_PATHS.API_RISK_CATALOG),
+        deps.api("GET", ROUTE_PATHS.API_RISK_FINDINGS),
+        deps.api("GET", ROUTE_PATHS.API_PLANS_CONSOLIDATION),
+        deps.api("GET", ROUTE_PATHS.API_INVENTORY_NFT_METADATA_OPT_INS),
+        deps.api("GET", ROUTE_PATHS.API_TREASURY_POLICY),
       ]);
       if (!chains.error) {
         latestChainProfiles = chains.profiles || [];
@@ -1002,7 +1003,7 @@ export function createInventoryActions(deps: InventoryActionsDeps) {
       deps.toast("Chain profile name and family are required", "error");
       return;
     }
-    const r = await deps.api("POST", "/api/chains/upsert", {
+    const r = await deps.api("POST", ROUTE_PATHS.API_CHAINS_UPSERT, {
       name,
       chain_family: family,
       chain_id: optionalNumberValue("chainProfileId"),
@@ -1162,7 +1163,7 @@ export function createInventoryActions(deps: InventoryActionsDeps) {
       deps.toast("Watch address is required", "error");
       return;
     }
-    const r = await deps.api("POST", "/api/inventory/watch-addresses/upsert", {
+    const r = await deps.api("POST", ROUTE_PATHS.API_INVENTORY_WATCH_ADDRESSES_UPSERT, {
       address,
       label: optionalTextValue("watchBookLabel"),
       tags: parseTagList(optionalTextValue("watchBookTags")),
@@ -1190,7 +1191,7 @@ export function createInventoryActions(deps: InventoryActionsDeps) {
     }
     const tags = parseTagList(optionalTextValue("watchBookTags"));
     for (const probe of probes) {
-      const r = await deps.api("POST", "/api/inventory/watch-addresses/upsert", {
+      const r = await deps.api("POST", ROUTE_PATHS.API_INVENTORY_WATCH_ADDRESSES_UPSERT, {
         address: probe.address,
         label: probe.label || null,
         tags,
@@ -1211,7 +1212,7 @@ export function createInventoryActions(deps: InventoryActionsDeps) {
     tagsCsv: string,
     enabled: string,
   ): Promise<void> {
-    const r = await deps.api("POST", "/api/inventory/watch-addresses/upsert", {
+    const r = await deps.api("POST", ROUTE_PATHS.API_INVENTORY_WATCH_ADDRESSES_UPSERT, {
       address,
       label: label || null,
       tags: parseTagList(tagsCsv),
@@ -1251,7 +1252,7 @@ export function createInventoryActions(deps: InventoryActionsDeps) {
       deps.toast("Chain id and collection contract address are required", "error");
       return;
     }
-    const r = await deps.api("POST", "/api/inventory/nft-metadata/opt-ins/upsert", {
+    const r = await deps.api("POST", ROUTE_PATHS.API_INVENTORY_NFT_METADATA_OPT_INS_UPSERT, {
       chain_id: chainId,
       contract_address: contractAddress,
       enabled: true,
@@ -1276,7 +1277,7 @@ export function createInventoryActions(deps: InventoryActionsDeps) {
       return;
     }
     const nextEnabled = enabled === "true";
-    const r = await deps.api("POST", "/api/inventory/nft-metadata/opt-ins/upsert", {
+    const r = await deps.api("POST", ROUTE_PATHS.API_INVENTORY_NFT_METADATA_OPT_INS_UPSERT, {
       chain_id: numericChainId,
       contract_address: contractAddress,
       enabled: nextEnabled,
@@ -1320,7 +1321,7 @@ export function createInventoryActions(deps: InventoryActionsDeps) {
   }
 
   async function saveNftMetadataSettings(): Promise<void> {
-    const r = await deps.api("POST", "/api/inventory/nft-metadata/settings", {
+    const r = await deps.api("POST", ROUTE_PATHS.API_INVENTORY_NFT_METADATA_SETTINGS, {
       ipfs_gateway_url: textValue("nftMetaGatewayUrl"),
     });
     if (r.error) {
@@ -1348,7 +1349,7 @@ export function createInventoryActions(deps: InventoryActionsDeps) {
     const fetchButton = document.querySelector('[data-action="fetchNftMetadata"]');
     if (fetchButton) fetchButton.classList.add("btn-busy");
     try {
-      const r = await deps.api("POST", "/api/inventory/nft-metadata/fetch", {});
+      const r = await deps.api("POST", ROUTE_PATHS.API_INVENTORY_NFT_METADATA_FETCH, {});
       if (r.error) {
         deps.toast(r.error, "error");
         return;
@@ -1392,7 +1393,7 @@ export function createInventoryActions(deps: InventoryActionsDeps) {
   }
 
   async function resumeDiscoveryJob(id: string): Promise<void> {
-    const r = await deps.api("POST", "/api/discovery/jobs/resume", { id });
+    const r = await deps.api("POST", ROUTE_PATHS.API_DISCOVERY_JOBS_RESUME, { id });
     if (r.error) {
       deps.toast(r.error, "error");
       return;
@@ -1413,7 +1414,7 @@ export function createInventoryActions(deps: InventoryActionsDeps) {
       deps.toast("Provide pasted JSON entries or a local file path (not both)", "error");
       return;
     }
-    const r = await deps.api("POST", "/api/inventory/token-registry/import", {
+    const r = await deps.api("POST", ROUTE_PATHS.API_INVENTORY_TOKEN_REGISTRY_IMPORT, {
       name,
       entries_json: entriesJson || undefined,
       file_path: filePath || undefined,
@@ -1448,8 +1449,8 @@ export function createInventoryActions(deps: InventoryActionsDeps) {
 
   async function loadRiskFindings(): Promise<void> {
     const [catalog, risks] = await Promise.all([
-      deps.api("GET", "/api/risk/catalog"),
-      deps.api("GET", "/api/risk/findings"),
+      deps.api("GET", ROUTE_PATHS.API_RISK_CATALOG),
+      deps.api("GET", ROUTE_PATHS.API_RISK_FINDINGS),
     ]);
     if (catalog.error || risks.error) {
       deps.toast(catalog.error || risks.error, "error");
@@ -1468,7 +1469,7 @@ export function createInventoryActions(deps: InventoryActionsDeps) {
       return;
     }
     const note = optionalTextValue("riskCatalogNote");
-    const r = await deps.api("POST", "/api/risk/catalog/upsert", {
+    const r = await deps.api("POST", ROUTE_PATHS.API_RISK_CATALOG_UPSERT, {
       address,
       label: optionalTextValue("riskCatalogLabel"),
       risk_level: riskLevel,
@@ -1519,7 +1520,7 @@ export function createInventoryActions(deps: InventoryActionsDeps) {
     if (chainId !== null) body.chain_id = chainId;
     if (routingStrategy === "per_party") body.party_destinations = partyDestinations;
 
-    const r = await deps.api("POST", "/api/plans/consolidation/generate", body);
+    const r = await deps.api("POST", ROUTE_PATHS.API_PLANS_CONSOLIDATION_GENERATE, body);
     if (r.error) {
       deps.toast(r.error, "error");
       return;
@@ -1529,7 +1530,7 @@ export function createInventoryActions(deps: InventoryActionsDeps) {
   }
 
   async function approveConsolidationPlan(planId: string): Promise<void> {
-    const r = await deps.api("POST", "/api/plans/consolidation/approve", {
+    const r = await deps.api("POST", ROUTE_PATHS.API_PLANS_CONSOLIDATION_APPROVE, {
       plan_id: planId,
       step_ids: [],
     });
@@ -1542,7 +1543,7 @@ export function createInventoryActions(deps: InventoryActionsDeps) {
   }
 
   async function simulateConsolidationPlan(planId: string): Promise<void> {
-    const r = await deps.api("POST", "/api/plans/consolidation/simulate", {
+    const r = await deps.api("POST", ROUTE_PATHS.API_PLANS_CONSOLIDATION_SIMULATE, {
       plan_id: planId,
       step_ids: [],
     });
@@ -1566,7 +1567,7 @@ export function createInventoryActions(deps: InventoryActionsDeps) {
       return;
     }
 
-    const r = (await deps.api("POST", "/api/plans/consolidation/export", {
+    const r = (await deps.api("POST", ROUTE_PATHS.API_PLANS_CONSOLIDATION_EXPORT, {
       plan_id: planId,
       step_ids: [],
       format,
@@ -1599,7 +1600,7 @@ export function createInventoryActions(deps: InventoryActionsDeps) {
     if (!confirmed) {
       return;
     }
-    const r = await deps.api("POST", "/api/plans/enqueue-step", {
+    const r = await deps.api("POST", ROUTE_PATHS.API_PLANS_ENQUEUE_STEP, {
       plan_id: planId,
       step_id: stepId,
       confirm: true,
@@ -1616,7 +1617,7 @@ export function createInventoryActions(deps: InventoryActionsDeps) {
     // Probe with an empty confirmation: the daemon computes the exact
     // expected phrase from the CURRENTLY eligible steps and returns it in
     // the machine-readable `action` field (nothing is enqueued).
-    const probe = await deps.api("POST", "/api/plans/enqueue-plan", {
+    const probe = await deps.api("POST", ROUTE_PATHS.API_PLANS_ENQUEUE_PLAN, {
       plan_id: planId,
       confirmation: "",
     });
@@ -1654,10 +1655,10 @@ export function createInventoryActions(deps: InventoryActionsDeps) {
 
   async function exportInventoryReport(): Promise<void> {
     const [watchBook, inventory, risks, plans] = await Promise.all([
-      deps.api("GET", "/api/inventory/watch-addresses"),
-      deps.api("GET", "/api/inventory/wallets"),
-      deps.api("GET", "/api/risk/findings"),
-      deps.api("GET", "/api/plans/consolidation"),
+      deps.api("GET", ROUTE_PATHS.API_INVENTORY_WATCH_ADDRESSES),
+      deps.api("GET", ROUTE_PATHS.API_INVENTORY_WALLETS),
+      deps.api("GET", ROUTE_PATHS.API_RISK_FINDINGS),
+      deps.api("GET", ROUTE_PATHS.API_PLANS_CONSOLIDATION),
     ]);
     if (watchBook.error || inventory.error || risks.error || plans.error) {
       deps.toast(watchBook.error || inventory.error || risks.error || plans.error, "error");

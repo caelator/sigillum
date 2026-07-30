@@ -14,13 +14,16 @@ surfaces are explicitly unstable, and how versions evolve. It applies from the
   plus GitHub Release artifacts (macOS desktop bundle, macOS/Linux CLI binaries),
   and library consumers use git or path dependencies. The version promises attach
   to the tagged releases.
-- macOS is the supported desktop platform at 1.0; the daemon and CLI are
-  supported on macOS and Linux; the Linux desktop build is compile-only; Windows
-  is unsupported.
+- The intended 1.0 supported target is macOS 15.x on Apple Silicon
+  (`aarch64`) for the desktop app and CLI. Linux CLI artifacts are built and
+  source-gated but are not a supported target-host claim without equivalent
+  RC-bound operational receipts. The Linux desktop build is compile-only;
+  Windows and macOS on Intel are unsupported.
 
 ### Pre-tag adjustments
 
-No valid `v1.0.0` tag or GitHub Release has published yet, so the stability
+No valid `v1.0.0` tag or GitHub Release has published yet, and no RC6 exists,
+so the stability
 promises above are not yet in force. Until the first valid tag, release
 candidates may adjust stable-candidate surfaces with the change recorded in
 `CHANGELOG.md`. The following feature-line adjustments were made after RC5's

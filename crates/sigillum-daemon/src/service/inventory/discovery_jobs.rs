@@ -77,20 +77,26 @@ impl SigillumService {
         body: DiscoveryJobMutationRequest,
     ) -> ServiceResult<DiscoveryJobMutationResponse> {
         let token = self.require_session(token)?;
-        // Signal the live operation first: this must never block on the
-        // operation mutex while a scan holds it.
-        let signaled = self.state.request_operation_cancel_for_related(&body.id);
+        let session_context = self.capture_session_operation_context(Some(token))?;
+        self.cancel_discovery_job_with_context(session_context, body)
+            .await
+    }
+
+    async fn cancel_discovery_job_with_context(
+        &self,
+        session_context: super::super::SessionOperationContext,
+        body: DiscoveryJobMutationRequest,
+    ) -> ServiceResult<DiscoveryJobMutationResponse> {
+        let token = session_context.token.as_str();
         let inventory = load_inventory_state(&self.state.base_dir)?;
         let job = inventory.jobs.iter().find(|job| job.id == body.id).cloned();
 
         let Some(job) = job else {
             // The job may not be persisted yet: an accepted async scan only
             // persists its job record once the runner acquires the operation
-            // guard. The signal is already latched on the operation, and the
-            // runner will persist the job as `canceled` before any provider
-            // call; the returned job is a wire-level acknowledgment of that
-            // pending cancel, never a persisted record.
-            if let Some(operation) = signaled {
+            // guard. Signal only in this missing-record case; when a durable
+            // record exists, terminal-state validation must happen first.
+            if let Some(operation) = self.state.request_operation_cancel_for_related(&body.id) {
                 self.record_audit(
                     self.state.active_compartment_id_for(token),
                     AuditEventSpec::WalletInventoryDiscoveryJobUpdate {
@@ -108,7 +114,7 @@ impl SigillumService {
         };
 
         match job.status.as_str() {
-            "completed" | "canceled" | "failed" => {
+            "completed" | "canceled" | "failed" | "interrupted" => {
                 return Err(ServiceError::conflict(format!(
                     "Discovery job is already {} and cannot be canceled.",
                     job.status
@@ -117,7 +123,10 @@ impl SigillumService {
             _ => {}
         }
 
-        if let Some(operation) = signaled {
+        // The durable record is non-terminal, so a live operation can now be
+        // signaled without turning a terminal job into a misleading
+        // cancel-requested operation.
+        if let Some(operation) = self.state.request_operation_cancel_for_related(&body.id) {
             // The running scan persists the durable `canceled` status itself
             // when it honors the signal; writing it here would be clobbered
             // by the scan's next per-index save.
@@ -138,13 +147,19 @@ impl SigillumService {
         // No live operation: orphaned `running` job (the daemon restarted
         // mid-scan) or a record written before operations existed. Mark it
         // canceled durably so a future resume treats it as interrupted.
-        let _guard = self.state.operation_guard().await;
+        let _guard = self.acquire_session_operation(&session_context).await?;
         let mut inventory = load_inventory_state(&self.state.base_dir)?;
         let job = inventory
             .jobs
             .iter_mut()
             .find(|job| job.id == body.id)
             .ok_or_else(|| ServiceError::not_found("Discovery job not found."))?;
+        if is_terminal_discovery_status(&job.status) {
+            return Err(ServiceError::conflict(format!(
+                "Discovery job is already {} and cannot be canceled.",
+                job.status
+            )));
+        }
         job.status = STATUS_CANCELED.into();
         job.completed_at_unix = Some(now_unix());
         let job = job.clone();
@@ -171,22 +186,56 @@ impl SigillumService {
         body: DiscoveryJobMutationRequest,
     ) -> ServiceResult<DiscoveryJobMutationResponse> {
         let token = self.require_session(token)?;
+        let session_context = self.capture_session_operation_context(Some(token))?;
+        self.resume_discovery_job_with_context(session_context, body)
+            .await
+    }
+
+    async fn resume_discovery_job_with_context(
+        &self,
+        session_context: super::super::SessionOperationContext,
+        body: DiscoveryJobMutationRequest,
+    ) -> ServiceResult<DiscoveryJobMutationResponse> {
+        let token = session_context.token.as_str();
+        // Fast conflict path for a currently active scan. Recheck under the
+        // mutation guard below to close the admission race with a new runner.
         if self.state.running_operation_for_related(&body.id).is_some() {
             return Err(ServiceError::conflict(
                 "Discovery job is still running and cannot be resumed.",
             ));
         }
-        let inventory = load_inventory_state(&self.state.base_dir)?;
+        let _guard = self.acquire_session_operation(&session_context).await?;
+        if self.state.running_operation_for_related(&body.id).is_some() {
+            return Err(ServiceError::conflict(
+                "Discovery job is still running and cannot be resumed.",
+            ));
+        }
+        let mut inventory = load_inventory_state(&self.state.base_dir)?;
+        let job = inventory
+            .jobs
+            .iter_mut()
+            .find(|job| job.id == body.id)
+            .ok_or_else(|| ServiceError::not_found("Discovery job not found."))?;
+        // A legacy store can still contain an orphaned `running` record even
+        // after startup recovery was introduced. Normalize it durably under
+        // the same guard that admits the replacement scan.
+        if job.status == "running" {
+            job.status = "interrupted".into();
+            job.completed_at_unix = Some(now_unix());
+            job.last_error = Some("No live operation owned this running discovery job.".into());
+            save_inventory_state(&self.state.base_dir, &inventory)?;
+        }
         let job = inventory
             .jobs
             .iter()
             .find(|job| job.id == body.id)
             .cloned()
-            .ok_or_else(|| ServiceError::not_found("Discovery job not found."))?;
+            .expect("job was resolved above");
         match job.status.as_str() {
-            // `resume_requested` records predate real resume; a `running`
-            // job with no live operation was interrupted by a restart.
-            "canceled" | "failed" | "resume_requested" | "running" => {}
+            // `resume_requested` records predate real resume. Startup
+            // recovery and the guarded normalization above turn every
+            // orphaned `running` record into `interrupted`.
+            "canceled" | "failed" | "interrupted" | "resume_requested" => {}
             _ => {
                 return Err(ServiceError::conflict(format!(
                     "Discovery job is {} and cannot be resumed.",
@@ -214,8 +263,8 @@ impl SigillumService {
             partition_providers: job.partition_providers,
             ..Default::default()
         };
-        let prepared = self.prepare_evm_scan(token, request)?;
-        let (resumed_job, operation) = self.spawn_async_evm_scan(token, prepared);
+        let prepared = self.prepare_evm_scan(&session_context, request)?;
+        let (resumed_job, operation) = self.spawn_async_evm_scan(session_context.clone(), prepared);
 
         self.record_audit(
             self.state.active_compartment_id_for(token),
@@ -233,12 +282,35 @@ impl SigillumService {
     }
 }
 
+/// Startup recovery must never expose a stale `running` discovery job when no
+/// request or background operation can still own it. Preserve its durable
+/// checkpoints and make the record explicitly resumable.
+pub(in crate::service) fn recover_interrupted_discovery_jobs(
+    inventory: &mut crate::inventory::WalletInventoryState,
+) -> usize {
+    let mut recovered = 0usize;
+    for job in &mut inventory.jobs {
+        if job.status == "running" {
+            job.status = "interrupted".into();
+            job.completed_at_unix = Some(now_unix());
+            job.last_error =
+                Some("Daemon restarted before the scan reached a terminal state.".into());
+            recovered += 1;
+        }
+    }
+    recovered
+}
+
 fn single_value(values: &[String]) -> Option<String> {
     if values.len() == 1 {
         values.first().cloned()
     } else {
         None
     }
+}
+
+fn is_terminal_discovery_status(status: &str) -> bool {
+    matches!(status, "completed" | "canceled" | "failed" | "interrupted")
 }
 
 /// Wire-level acknowledgment returned when a cancel lands before the scan
@@ -265,5 +337,151 @@ fn pending_cancel_acknowledgment(id: &str) -> WalletDiscoveryJob {
         last_error: None,
         partition_providers: None,
         provider_partition_observations: Vec::new(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use sigillum_api::{DiscoveryJobMutationRequest, WalletDiscoveryJob};
+    use sigillum_fido2::config::CompartmentMeta;
+    use tempfile::TempDir;
+
+    use super::{
+        SigillumService, load_inventory_state, recover_interrupted_discovery_jobs,
+        save_inventory_state,
+    };
+
+    fn compartment(id: usize, label: &str) -> CompartmentMeta {
+        CompartmentMeta {
+            id,
+            label: label.into(),
+            threshold: 1,
+            passphrase_mode: None,
+        }
+    }
+
+    #[test]
+    fn startup_recovery_terminalizes_only_running_discovery_jobs() {
+        let mut inventory = crate::inventory::WalletInventoryState {
+            jobs: vec![sample_job("running"), sample_job("completed")],
+            ..Default::default()
+        };
+
+        assert_eq!(recover_interrupted_discovery_jobs(&mut inventory), 1);
+        assert_eq!(inventory.jobs[0].status, "interrupted");
+        assert!(inventory.jobs[0].completed_at_unix.is_some());
+        assert!(inventory.jobs[0].last_error.is_some());
+        assert_eq!(inventory.jobs[1].status, "completed");
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn orphan_cancel_wait_rejects_revoked_session_without_mutation() {
+        let dir = TempDir::new().unwrap();
+        let app_state = Arc::new(
+            crate::AppState::new(dir.path().to_path_buf()).expect("app state should initialize"),
+        );
+        app_state.unlock_compartment(0, [1u8; 32], compartment(0, "daily"));
+        let session = app_state.create_session(Some(0));
+        let service = SigillumService::new(app_state.clone());
+        let inventory = crate::inventory::WalletInventoryState {
+            jobs: vec![sample_job("running")],
+            ..Default::default()
+        };
+        save_inventory_state(&app_state.base_dir, &inventory).unwrap();
+        let session_context = service
+            .capture_session_operation_context(Some(&session))
+            .unwrap();
+
+        let held_operation = app_state.operation_guard().await;
+        let queued_service = service.clone();
+        let queued = tokio::spawn(async move {
+            queued_service
+                .cancel_discovery_job_with_context(
+                    session_context,
+                    DiscoveryJobMutationRequest {
+                        id: "job-running".into(),
+                    },
+                )
+                .await
+        });
+        tokio::task::yield_now().await;
+        app_state.revoke_session(&session);
+        drop(held_operation);
+
+        let error = queued.await.unwrap().unwrap_err();
+        assert_eq!(error.status(), axum::http::StatusCode::UNAUTHORIZED);
+        let unchanged = load_inventory_state(&app_state.base_dir).unwrap();
+        assert_eq!(unchanged.jobs.len(), 1);
+        assert_eq!(unchanged.jobs[0].status, "running");
+        assert!(unchanged.jobs[0].completed_at_unix.is_none());
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn resume_wait_rejects_lock_latch_without_starting_replacement() {
+        let dir = TempDir::new().unwrap();
+        let app_state = Arc::new(
+            crate::AppState::new(dir.path().to_path_buf()).expect("app state should initialize"),
+        );
+        app_state.unlock_compartment(0, [1u8; 32], compartment(0, "daily"));
+        let session = app_state.create_session(Some(0));
+        let service = SigillumService::new(app_state.clone());
+        let inventory = crate::inventory::WalletInventoryState {
+            jobs: vec![sample_job("canceled")],
+            ..Default::default()
+        };
+        save_inventory_state(&app_state.base_dir, &inventory).unwrap();
+        let session_context = service
+            .capture_session_operation_context(Some(&session))
+            .unwrap();
+
+        let held_operation = app_state.operation_guard().await;
+        let queued_service = service.clone();
+        let queued = tokio::spawn(async move {
+            queued_service
+                .resume_discovery_job_with_context(
+                    session_context,
+                    DiscoveryJobMutationRequest {
+                        id: "job-canceled".into(),
+                    },
+                )
+                .await
+        });
+        tokio::task::yield_now().await;
+        assert!(app_state.begin_locking());
+        drop(held_operation);
+
+        let error = queued.await.unwrap().unwrap_err();
+        assert_eq!(error.status(), axum::http::StatusCode::LOCKED);
+        let unchanged = load_inventory_state(&app_state.base_dir).unwrap();
+        assert_eq!(unchanged.jobs.len(), 1);
+        assert_eq!(unchanged.jobs[0].status, "canceled");
+        assert!(app_state.list_operations(10).is_empty());
+        app_state.lock_all();
+    }
+
+    fn sample_job(status: &str) -> WalletDiscoveryJob {
+        WalletDiscoveryJob {
+            id: format!("job-{status}"),
+            status: status.into(),
+            source: "local-rpc".into(),
+            wallet_families: Vec::new(),
+            wallet_profiles: Vec::new(),
+            provider_profiles: Vec::new(),
+            chain_ids: Vec::new(),
+            gap_limit: 20,
+            max_index: 100,
+            addresses_scanned: 0,
+            active_addresses: 0,
+            holdings_detected: 0,
+            checkpoints: Vec::new(),
+            block_cursors: Vec::new(),
+            started_at_unix: 1,
+            completed_at_unix: None,
+            last_error: None,
+            partition_providers: None,
+            provider_partition_observations: Vec::new(),
+        }
     }
 }

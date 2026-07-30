@@ -1,6 +1,9 @@
+mod common;
+
+use common::{get_json, post_json, spawn_daemon};
 use std::collections::HashMap;
 use std::net::SocketAddr;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::{Arc, Mutex};
 
 use axum::extract::{Request, State};
@@ -16,17 +19,6 @@ const CONTRACT_OPTED: &str = "0xaaaa000000000000000000000000000000000aaa";
 const CONTRACT_OTHER: &str = "0xbbbb000000000000000000000000000000000bbb";
 const CONTRACT_IPFS: &str = "0xcccc000000000000000000000000000000000ccc";
 const TOKEN_ID_HEX: &str = "0x000000000000000000000000000000000000000000000000000000000000007b";
-
-async fn spawn_daemon(base_dir: PathBuf) -> (SocketAddr, JoinHandle<()>) {
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let addr = listener.local_addr().unwrap();
-    let (app, _state) =
-        sigillum_daemon::build_router(base_dir, addr.port()).expect("router should initialize");
-    let handle = tokio::spawn(async move {
-        axum::serve(listener, app).await.unwrap();
-    });
-    (addr, handle)
-}
 
 #[derive(Clone)]
 struct RpcState {
@@ -212,33 +204,6 @@ async fn metadata_handler(
         _ => "SHOULD NOT BE FETCHED",
     };
     (StatusCode::OK, Json(json!({ "name": name })))
-}
-
-async fn post_json(
-    client: &reqwest::Client,
-    addr: SocketAddr,
-    path: &str,
-    body: Value,
-    token: Option<&str>,
-) -> reqwest::Response {
-    let mut req = client.post(format!("http://{addr}{path}")).json(&body);
-    if let Some(token) = token {
-        req = req.bearer_auth(token);
-    }
-    req.send().await.unwrap()
-}
-
-async fn get_json(
-    client: &reqwest::Client,
-    addr: SocketAddr,
-    path: &str,
-    token: Option<&str>,
-) -> reqwest::Response {
-    let mut req = client.get(format!("http://{addr}{path}"));
-    if let Some(token) = token {
-        req = req.bearer_auth(token);
-    }
-    req.send().await.unwrap()
 }
 
 async fn response_json(response: reqwest::Response, expected: StatusCode) -> Value {

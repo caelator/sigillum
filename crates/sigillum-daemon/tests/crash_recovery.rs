@@ -3,49 +3,14 @@
 //! Verifies snapshot export/restore roundtrip, wrong passphrase rejection,
 //! truncated/invalid snapshot handling, and fresh directory startup.
 
+mod common;
+
+use common::{get, post_json, spawn_daemon};
 use serde_json::{Value, json};
 use std::fs;
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use tempfile::TempDir;
-
-async fn spawn_daemon(base_dir: PathBuf) -> (SocketAddr, tokio::task::JoinHandle<()>) {
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let addr = listener.local_addr().unwrap();
-    let (app, _state) =
-        sigillum_daemon::build_router(base_dir, addr.port()).expect("router should initialize");
-    let handle = tokio::spawn(async move {
-        axum::serve(listener, app).await.unwrap();
-    });
-    (addr, handle)
-}
-
-async fn post_json(
-    client: &reqwest::Client,
-    addr: SocketAddr,
-    path: &str,
-    body: serde_json::Value,
-    token: Option<&str>,
-) -> reqwest::Response {
-    let mut req = client.post(format!("http://{addr}{path}")).json(&body);
-    if let Some(token) = token {
-        req = req.bearer_auth(token);
-    }
-    req.send().await.unwrap()
-}
-
-async fn get(
-    client: &reqwest::Client,
-    addr: SocketAddr,
-    path: &str,
-    token: Option<&str>,
-) -> reqwest::Response {
-    let mut req = client.get(format!("http://{addr}{path}"));
-    if let Some(token) = token {
-        req = req.bearer_auth(token);
-    }
-    req.send().await.unwrap()
-}
 
 #[derive(Clone, Copy)]
 enum StoreKind {

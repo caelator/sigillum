@@ -25,15 +25,21 @@ const TEST_MNEMONIC: &str =
 
 // ── Daemon + gated provider fixtures ─────────────────────────────
 
-async fn spawn_daemon(base_dir: PathBuf) -> (SocketAddr, tokio::task::JoinHandle<()>) {
+async fn spawn_daemon(
+    base_dir: PathBuf,
+) -> (
+    SocketAddr,
+    Arc<sigillum_daemon::AppState>,
+    tokio::task::JoinHandle<()>,
+) {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
-    let (app, _state) =
+    let (app, state) =
         sigillum_daemon::build_router(base_dir, addr.port()).expect("router should initialize");
     let handle = tokio::spawn(async move {
         axum::serve(listener, app).await.unwrap();
     });
-    (addr, handle)
+    (addr, state, handle)
 }
 
 /// Stub EVM provider with deterministic mid-run control: it can park the
@@ -149,6 +155,7 @@ struct Rig {
     client: reqwest::Client,
     addr: SocketAddr,
     token: String,
+    state: Arc<sigillum_daemon::AppState>,
     rpc: Arc<GatedRpcState>,
     handle: tokio::task::JoinHandle<()>,
     rpc_handle: tokio::task::JoinHandle<()>,
@@ -246,7 +253,7 @@ impl Rig {
 
 async fn spawn_rig() -> Rig {
     let dir = TempDir::new().unwrap();
-    let (addr, handle) = spawn_daemon(dir.path().to_path_buf()).await;
+    let (addr, state, handle) = spawn_daemon(dir.path().to_path_buf()).await;
     let (rpc_addr, rpc_handle, rpc) = spawn_gated_evm_provider().await;
     let client = reqwest::Client::new();
 
@@ -268,6 +275,7 @@ async fn spawn_rig() -> Rig {
         client,
         addr,
         token,
+        state,
         rpc,
         handle,
         rpc_handle,
@@ -339,7 +347,75 @@ fn first_seen_by_address(inventory: &Value) -> BTreeMap<String, u64> {
         .collect()
 }
 
+async fn wait_for_failed_operation(
+    state: &sigillum_daemon::AppState,
+    operation_id: &str,
+) -> sigillum_api::Operation {
+    for _ in 0..100 {
+        let operation = state
+            .get_operation(operation_id)
+            .expect("operation remains registered");
+        if operation.state == "failed" {
+            return operation;
+        }
+        tokio::task::yield_now().await;
+    }
+    panic!(
+        "operation never failed: {:?}",
+        state.get_operation(operation_id)
+    );
+}
+
 // ── Tests ────────────────────────────────────────────────────────
+
+#[tokio::test(flavor = "current_thread")]
+async fn async_scan_wait_rejects_lock_latch_without_persisting_job() {
+    let rig = spawn_rig().await;
+    let inventory_path = rig._dir.path().join("wallet_inventory.json");
+    let inventory_before = std::fs::read(&inventory_path).ok();
+
+    let held_operation = rig.state.operation_guard().await;
+    let (status, scan) = rig
+        .post(
+            "/api/inventory/scan/evm",
+            json!({
+                "wallet_family": "eth-xpub",
+                "wallet_profile": "account-xpub",
+                "provider_profile": "mainnet",
+                "max_index": 1,
+                "gap_limit": 5,
+                "run_async": true,
+            }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "scan response: {scan}");
+    let operation_id = scan["operation"]["id"].as_str().unwrap().to_string();
+    assert!(rig.state.begin_locking());
+    drop(held_operation);
+
+    let operation = wait_for_failed_operation(&rig.state, &operation_id).await;
+    assert!(
+        operation
+            .error
+            .as_deref()
+            .is_some_and(|error| error.contains("locking")),
+        "operation must report the lock latch: {operation:?}"
+    );
+    assert_eq!(
+        std::fs::read(&inventory_path).ok(),
+        inventory_before,
+        "rejected scan must leave the durable inventory byte-identical"
+    );
+    assert_eq!(
+        rig.balance_calls(),
+        0,
+        "rejected scan must not reach the provider"
+    );
+
+    rig.state.lock_all();
+    rig.handle.abort();
+    rig.rpc_handle.abort();
+}
 
 /// The headline adversarial scenario: cancel an async scan mid-run, verify
 /// the persisted partial state, resume, and verify zero duplicate
@@ -397,18 +473,19 @@ async fn async_scan_cancel_mid_run_and_resume_completes_without_duplicates() {
     assert_eq!(cancel["status"], "cancel_requested");
     assert_eq!(cancel["operation"]["state"], "cancel_requested");
 
-    // Release the gate: the in-flight index completes and persists, then
-    // the loop honors the cancel before the next index.
+    // Release the gate: the provider response returns, then the prompt
+    // post-await checkpoint honors the cancel before persisting that
+    // in-flight index.
     rig.release_gate();
     let operation = rig.wait_for_operation(&operation_id, "canceled").await;
-    assert_eq!(operation["operation"]["progress"]["processed"], json!(3));
+    assert_eq!(operation["operation"]["progress"]["processed"], json!(2));
     assert!(operation["operation"]["completed_at_unix"].is_number());
 
     // (a) The job is durably canceled, its checkpoint parked at the next
     // unprocessed index.
     let job = rig.discovery_job(&job_id).await;
     assert_eq!(job["status"], "canceled");
-    assert_eq!(job["addresses_scanned"], json!(3));
+    assert_eq!(job["addresses_scanned"], json!(2));
     assert!(job["completed_at_unix"].is_number());
     let checkpoint = job["checkpoints"]
         .as_array()
@@ -416,19 +493,17 @@ async fn async_scan_cancel_mid_run_and_resume_completes_without_duplicates() {
         .iter()
         .find(|entry| entry["provider_profile"] == "mainnet")
         .expect("mainnet checkpoint present");
-    assert_eq!(checkpoint["next_index"], json!(3));
+    assert_eq!(checkpoint["next_index"], json!(2));
     assert_eq!(checkpoint["completed"], json!(false));
 
     // (b) Persisted inventory contains exactly the processed indices.
     let inventory = rig.get("/api/inventory/wallets").await;
-    assert_eq!(address_indices(&inventory), vec![0, 1, 2]);
+    assert_eq!(address_indices(&inventory), vec![0, 1]);
     let holdings = inventory["holdings"].as_array().unwrap();
-    assert_eq!(
-        holdings.len(),
-        1,
-        "funded index 2 yields exactly one holding: {inventory}"
+    assert!(
+        holdings.is_empty(),
+        "canceled in-flight index must not leak a holding: {inventory}"
     );
-    assert_eq!(holdings[0]["asset_kind"], "native");
     let provenance = first_seen_by_address(&inventory);
     assert_eq!(rig.balance_calls(), 3);
 
@@ -445,6 +520,11 @@ async fn async_scan_cancel_mid_run_and_resume_completes_without_duplicates() {
     assert_eq!(status, StatusCode::CONFLICT, "re-cancel: {recancel}");
     assert_eq!(recancel["code"], "conflict");
 
+    // The mock keys funding to call number rather than address. Move the
+    // funded response to the retry call so index 2 remains deterministically
+    // funded after its canceled first attempt.
+    rig.rpc.funded_balance_call.store(4, Ordering::SeqCst);
+
     // Resume: a new operation and job continue from the checkpoint.
     let (status, resume) = rig
         .post("/api/discovery/jobs/resume", json!({ "id": job_id }))
@@ -459,20 +539,20 @@ async fn async_scan_cancel_mid_run_and_resume_completes_without_duplicates() {
     rig.wait_for_operation(&resume_operation_id, "completed")
         .await;
 
-    // (c) The remainder completed with ZERO re-observation: the resumed
-    // job observed exactly the two missing indices, and the provider saw
-    // exactly two more balance calls in total.
+    // (c) The remainder completed with zero duplicate durable observations.
+    // The canceled in-flight index is retried because its provider response
+    // was deliberately discarded before the checkpoint.
     let resumed = rig.discovery_job(&resume_job_id).await;
     assert_eq!(resumed["status"], "completed");
     assert_eq!(
         resumed["addresses_scanned"],
-        json!(2),
+        json!(3),
         "resumed job must only scan the missing indices: {resumed}"
     );
     assert_eq!(
         rig.balance_calls(),
-        5,
-        "provider must see no re-scanned indices"
+        6,
+        "only the canceled in-flight index may be retried"
     );
 
     let inventory = rig.get("/api/inventory/wallets").await;
@@ -483,7 +563,7 @@ async fn async_scan_cancel_mid_run_and_resume_completes_without_duplicates() {
     // their original first_seen timestamps (never re-observed).
     for address in addresses {
         let key = address["address"].as_str().unwrap().to_ascii_lowercase();
-        if address["address_index"].as_u64().unwrap() <= 2 {
+        if address["address_index"].as_u64().unwrap() <= 1 {
             assert_eq!(
                 address["first_seen_at_unix"].as_u64().unwrap(),
                 provenance[&key],

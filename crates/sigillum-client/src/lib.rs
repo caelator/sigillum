@@ -25,6 +25,11 @@
 //! handle hex encoding/decoding internally so callers work with `&[u8]` /
 //! `Vec<u8>` directly.
 //!
+//! ## Full API surface
+//!
+//! The `sigillum-sdk` crate is the full-surface crate and already glob
+//! re-exports `sigillum-api`.
+//!
 //! ## Thread safety
 //!
 //! `SigillumClient` is `Send + Sync`.  The session token is protected by a
@@ -52,7 +57,6 @@ use sigillum_api::request::{
     RunAuditRequest, SecretResolveBatchRequest, SnapshotRestoreRequest, StealthPaymentRef,
     TransitDecryptRequest, TransitEncryptRequest, TransitHmacRequest,
 };
-pub use sigillum_api::response::Fido2StatusResponse as DaemonFido2Status;
 pub use sigillum_api::response::{
     ActiveCompartment, AuditEvent as DaemonAuditEvent, AuditVerifyReport,
     BiometricChallengeResponse, BiometricEnrollResponse, ChainProfile, ChainProfileListResponse,
@@ -75,9 +79,9 @@ pub use sigillum_api::response::{
     EvmRpcErc20BalanceResponse, EvmRpcNonceResponse, Fido2DetectResponse, Fido2KeyInfo,
     Fido2ListResponse, Fido2RegisterResponse, Fido2RemoveResponse, Fido2SetupResponse,
     Fido2StatusResponse, FieldError, GenerateStoreResponse, GenericStatusResponse, KeyListResponse,
-    KeyValueResponse, MaintenanceRunResponse, Operation, OperationEvent, OperationListResponse,
-    OperationMutationResponse, OperationProgress, OperationResponse, PaginationInfo,
-    QueueEnqueueResponse, QueueExecutionPauseResponse, QueueJob, QueueJobEvent,
+    KeyValueResponse, LockResponse, MaintenanceRunResponse, Operation, OperationEvent,
+    OperationListResponse, OperationMutationResponse, OperationProgress, OperationResponse,
+    PaginationInfo, QueueEnqueueResponse, QueueExecutionPauseResponse, QueueJob, QueueJobEvent,
     QueueJobListResponse, QueueProcessResponse, RiskCatalogEntry, RiskCatalogListResponse,
     RiskCatalogMutationResponse, RiskFinding, RiskFindingListResponse, SafeTransactionBuilderBatch,
     SafeTransactionBuilderMeta, SafeTransactionBuilderTransaction, SecretResolveBatchResponse,
@@ -88,6 +92,7 @@ pub use sigillum_api::response::{
     WalletInventoryAddress, WalletInventoryListResponse, WalletInventoryScanResponse,
     WatchAddressBookListResponse, WatchAddressBookMutationResponse,
 };
+use sigillum_api::route_paths as p;
 use sigillum_core::SnapshotSummary;
 use thiserror::Error;
 
@@ -255,7 +260,7 @@ impl SigillumClient {
 
     /// Query daemon status (locked / unlocked, active compartment, etc.).
     pub async fn status(&self) -> Result<StatusResponse, ClientError> {
-        let builder = self.request(Method::GET, "/api/status");
+        let builder = self.request(Method::GET, p::API_STATUS);
         self.send(builder).await
     }
 
@@ -264,7 +269,7 @@ impl SigillumClient {
         passphrase: &str,
     ) -> Result<UnlockResponse, ClientError> {
         let builder = self
-            .request(Method::POST, "/api/unlock")
+            .request(Method::POST, p::API_UNLOCK)
             .json(&PassphraseRequest {
                 passphrase: passphrase.to_string(),
             });
@@ -272,7 +277,7 @@ impl SigillumClient {
     }
 
     pub async fn biometric_challenge(&self) -> Result<BiometricChallengeResponse, ClientError> {
-        let builder = self.request(Method::POST, "/api/biometric/challenge");
+        let builder = self.request(Method::POST, p::API_BIOMETRIC_CHALLENGE);
         self.send(builder).await
     }
 
@@ -281,7 +286,7 @@ impl SigillumClient {
         payload_hex: String,
     ) -> Result<UnlockResponse, ClientError> {
         let builder = self
-            .request(Method::POST, "/api/biometric/unlock")
+            .request(Method::POST, p::API_BIOMETRIC_UNLOCK)
             .json(&BiometricUnlockRequest { payload_hex });
         self.send(builder).await
     }
@@ -291,20 +296,20 @@ impl SigillumClient {
         request: BiometricEnrollRequest,
     ) -> Result<BiometricEnrollResponse, ClientError> {
         let builder = self
-            .request(Method::POST, "/api/biometric/enroll")
+            .request(Method::POST, p::API_BIOMETRIC_ENROLL)
             .json(&request);
         self.send(builder).await
     }
 
-    pub async fn lock(&self) -> Result<GenericStatusResponse, ClientError> {
-        let builder = self.request(Method::POST, "/api/lock");
+    pub async fn lock(&self) -> Result<LockResponse, ClientError> {
+        let builder = self.request(Method::POST, p::API_LOCK);
         let response = self.send(builder).await?;
         self.clear_session_token();
         Ok(response)
     }
 
     pub async fn revoke_session(&self) -> Result<SessionRevokeResponse, ClientError> {
-        let builder = self.request(Method::POST, "/api/session/revoke");
+        let builder = self.request(Method::POST, p::API_SESSION_REVOKE);
         let response: SessionRevokeResponse = self.send(builder).await?;
         if response.requires_reauth {
             self.clear_session_token();
@@ -315,7 +320,7 @@ impl SigillumClient {
     // ── Compartments ────────────────────────────────────────────
 
     pub async fn list_compartments(&self) -> Result<Vec<CompartmentInfo>, ClientError> {
-        let builder = self.request(Method::GET, "/api/compartment/list");
+        let builder = self.request(Method::GET, p::API_COMPARTMENT_LIST);
         Ok(self
             .send::<CompartmentListResponse>(builder)
             .await?
@@ -327,7 +332,7 @@ impl SigillumClient {
         id: usize,
     ) -> Result<SwitchCompartmentResponse, ClientError> {
         let builder = self
-            .request(Method::POST, "/api/compartment/switch")
+            .request(Method::POST, p::API_COMPARTMENT_SWITCH)
             .json(&CompartmentSwitchRequest { id });
         self.send(builder).await
     }
@@ -335,13 +340,13 @@ impl SigillumClient {
     // ── Secrets & API keys ──────────────────────────────────────
 
     pub async fn list_api_keys(&self) -> Result<Vec<String>, ClientError> {
-        let builder = self.request(Method::GET, "/api/api-keys");
+        let builder = self.request(Method::GET, p::API_API_KEYS);
         Ok(self.send::<KeyListResponse>(builder).await?.keys)
     }
 
     pub async fn get_api_key(&self, key: &str) -> Result<SecretString, ClientError> {
         let builder = self
-            .request(Method::POST, "/api/api-keys/get")
+            .request(Method::POST, p::API_API_KEYS_GET)
             .json(&KeyOnlyRequest {
                 key: key.to_string(),
             });
@@ -351,7 +356,7 @@ impl SigillumClient {
 
     pub async fn set_api_key(&self, key: &str, value: &str) -> Result<(), ClientError> {
         let builder = self
-            .request(Method::POST, "/api/api-keys/set")
+            .request(Method::POST, p::API_API_KEYS_SET)
             .json(&KeyValueRequest {
                 key: key.to_string(),
                 value: Some(value.to_string()),
@@ -362,7 +367,7 @@ impl SigillumClient {
 
     pub async fn delete_api_key(&self, key: &str) -> Result<(), ClientError> {
         let builder = self
-            .request(Method::POST, "/api/api-keys/delete")
+            .request(Method::POST, p::API_API_KEYS_DELETE)
             .json(&KeyOnlyRequest {
                 key: key.to_string(),
             });
@@ -371,13 +376,13 @@ impl SigillumClient {
     }
 
     pub async fn list_secrets(&self) -> Result<Vec<String>, ClientError> {
-        let builder = self.request(Method::GET, "/api/secrets");
+        let builder = self.request(Method::GET, p::API_SECRETS);
         Ok(self.send::<KeyListResponse>(builder).await?.keys)
     }
 
     pub async fn get_secret(&self, key: &str) -> Result<SecretString, ClientError> {
         let builder = self
-            .request(Method::POST, "/api/secrets/get")
+            .request(Method::POST, p::API_SECRETS_GET)
             .json(&KeyOnlyRequest {
                 key: key.to_string(),
             });
@@ -387,7 +392,7 @@ impl SigillumClient {
 
     pub async fn set_secret(&self, key: &str, value: &str) -> Result<(), ClientError> {
         let builder = self
-            .request(Method::POST, "/api/secrets/set")
+            .request(Method::POST, p::API_SECRETS_SET)
             .json(&KeyValueRequest {
                 key: key.to_string(),
                 value: Some(value.to_string()),
@@ -398,7 +403,7 @@ impl SigillumClient {
 
     pub async fn delete_secret(&self, key: &str) -> Result<(), ClientError> {
         let builder = self
-            .request(Method::POST, "/api/secrets/delete")
+            .request(Method::POST, p::API_SECRETS_DELETE)
             .json(&KeyOnlyRequest {
                 key: key.to_string(),
             });
@@ -411,7 +416,7 @@ impl SigillumClient {
         request: SecretResolveBatchRequest,
     ) -> Result<Vec<SecretResolveValue>, ClientError> {
         let builder = self
-            .request(Method::POST, "/api/secrets/resolve-batch")
+            .request(Method::POST, p::API_SECRETS_RESOLVE_BATCH)
             .json(&request);
         Ok(self
             .send::<SecretResolveBatchResponse>(builder)
@@ -423,7 +428,7 @@ impl SigillumClient {
         &self,
         request: RunAuditRequest,
     ) -> Result<GenericStatusResponse, ClientError> {
-        let builder = self.request(Method::POST, "/api/audit/run").json(&request);
+        let builder = self.request(Method::POST, p::API_AUDIT_RUN).json(&request);
         self.send(builder).await
     }
 
@@ -432,7 +437,7 @@ impl SigillumClient {
         request: GenerateStoreRequest,
     ) -> Result<GenerateStoreResponse, ClientError> {
         let builder = self
-            .request(Method::POST, "/api/generate/store")
+            .request(Method::POST, p::API_GENERATE_STORE)
             .json(&request);
         self.send(builder).await
     }
@@ -445,7 +450,7 @@ impl SigillumClient {
         passphrase: &str,
     ) -> Result<(Vec<u8>, SnapshotSummary), ClientError> {
         let builder = self
-            .request(Method::POST, "/api/backup/export")
+            .request(Method::POST, p::API_BACKUP_EXPORT)
             .json(&PassphraseRequest {
                 passphrase: passphrase.to_string(),
             });
@@ -461,7 +466,7 @@ impl SigillumClient {
         snapshot: &[u8],
     ) -> Result<SnapshotRestoreResponse, ClientError> {
         let builder =
-            self.request(Method::POST, "/api/backup/restore")
+            self.request(Method::POST, p::API_BACKUP_RESTORE)
                 .json(&SnapshotRestoreRequest {
                     passphrase: passphrase.to_string(),
                     snapshot_hex: hex::encode(snapshot),
@@ -487,7 +492,7 @@ impl SigillumClient {
         &self,
         query: AuditEventQuery,
     ) -> Result<Vec<DaemonAuditEvent>, ClientError> {
-        let mut path = format!("/api/audit?tail={}", query.tail.unwrap_or(25).max(1));
+        let mut path = format!("{}?tail={}", p::API_AUDIT, query.tail.unwrap_or(25).max(1));
         if let Some(kind) = query.kind {
             path.push_str("&kind=");
             path.push_str(&urlencoding::encode(&kind));
@@ -512,7 +517,7 @@ impl SigillumClient {
         &self,
         scope: Option<&str>,
     ) -> Result<AuditVerifyReport, ClientError> {
-        let mut path = "/api/audit/verify".to_string();
+        let mut path = p::API_AUDIT_VERIFY.to_string();
         if let Some(scope) = scope {
             path.push_str("?scope=");
             path.push_str(&urlencoding::encode(scope));
@@ -522,7 +527,7 @@ impl SigillumClient {
     }
 
     pub async fn diagnostics(&self) -> Result<DiagnosticsResponse, ClientError> {
-        let builder = self.request(Method::GET, "/api/diagnostics");
+        let builder = self.request(Method::GET, p::API_DIAGNOSTICS);
         self.send(builder).await
     }
 
@@ -536,7 +541,7 @@ impl SigillumClient {
         aad: Option<&[u8]>,
     ) -> Result<(Vec<u8>, Vec<u8>), ClientError> {
         let builder =
-            self.request(Method::POST, "/api/transit/encrypt")
+            self.request(Method::POST, p::API_TRANSIT_ENCRYPT)
                 .json(&TransitEncryptRequest {
                     key: key.to_string(),
                     plaintext_hex: hex::encode(plaintext),
@@ -556,7 +561,7 @@ impl SigillumClient {
         aad: Option<&[u8]>,
     ) -> Result<Vec<u8>, ClientError> {
         let builder =
-            self.request(Method::POST, "/api/transit/decrypt")
+            self.request(Method::POST, p::API_TRANSIT_DECRYPT)
                 .json(&TransitDecryptRequest {
                     key: key.to_string(),
                     nonce_hex: hex::encode(nonce),
@@ -569,7 +574,7 @@ impl SigillumClient {
 
     pub async fn transit_hmac(&self, key: &str, input: &[u8]) -> Result<Vec<u8>, ClientError> {
         let builder = self
-            .request(Method::POST, "/api/transit/hmac")
+            .request(Method::POST, p::API_TRANSIT_HMAC)
             .json(&TransitHmacRequest {
                 key: key.to_string(),
                 input_hex: hex::encode(input),
@@ -586,7 +591,7 @@ impl SigillumClient {
         short_name: Option<&str>,
     ) -> Result<EthStealthMetaAddressResponse, ClientError> {
         let builder = self
-            .request(Method::POST, "/api/wallets/eth-stealth/export")
+            .request(Method::POST, p::API_WALLETS_ETH_STEALTH_EXPORT)
             .json(&EthStealthExportRequest {
                 wallet: wallet.to_string(),
                 short_name: short_name.map(str::to_owned),
@@ -600,7 +605,7 @@ impl SigillumClient {
         ephemeral_private_key: Option<&[u8; 32]>,
     ) -> Result<EthStealthGenerateResponse, ClientError> {
         let builder = self
-            .request(Method::POST, "/api/wallets/eth-stealth/generate")
+            .request(Method::POST, p::API_WALLETS_ETH_STEALTH_GENERATE)
             .json(&EthStealthGenerateRequest {
                 stealth_meta_address: stealth_meta_address.to_string(),
                 ephemeral_private_key_hex: ephemeral_private_key.map(hex::encode),
@@ -613,7 +618,7 @@ impl SigillumClient {
         wallet_profile: &str,
     ) -> Result<EthXpubExportResponse, ClientError> {
         let builder = self
-            .request(Method::POST, "/api/wallets/eth-xpub/export")
+            .request(Method::POST, p::API_WALLETS_ETH_XPUB_EXPORT)
             .json(&EthXpubExportRequest {
                 wallet_profile: wallet_profile.to_string(),
             });
@@ -626,7 +631,7 @@ impl SigillumClient {
         index: u32,
     ) -> Result<EthXpubAddressResponse, ClientError> {
         let builder = self
-            .request(Method::POST, "/api/wallets/eth-xpub/derive")
+            .request(Method::POST, p::API_WALLETS_ETH_XPUB_DERIVE)
             .json(&EthXpubDeriveRequest {
                 xpub: xpub.to_string(),
                 index,
@@ -642,7 +647,7 @@ impl SigillumClient {
         view_tag: Option<u8>,
     ) -> Result<EthStealthCheckResponse, ClientError> {
         let builder = self
-            .request(Method::POST, "/api/wallets/eth-stealth/check")
+            .request(Method::POST, p::API_WALLETS_ETH_STEALTH_CHECK)
             .json(&EthStealthCheckRequest {
                 wallet: wallet.to_string(),
                 stealth: StealthPaymentRef {
@@ -666,7 +671,7 @@ impl SigillumClient {
         view_tag: Option<u8>,
     ) -> Result<EthStealthSignResponse, ClientError> {
         let builder = self
-            .request(Method::POST, "/api/wallets/eth-stealth/sign")
+            .request(Method::POST, p::API_WALLETS_ETH_STEALTH_SIGN)
             .json(&EthStealthSignRequest {
                 wallet: wallet.to_string(),
                 stealth: StealthPaymentRef {
@@ -687,7 +692,7 @@ impl SigillumClient {
         request: EthStealthSignTransferRequest,
     ) -> Result<EthSignedTransactionResponse, ClientError> {
         let builder = self
-            .request(Method::POST, "/api/wallets/eth-stealth/sign-transfer")
+            .request(Method::POST, p::API_WALLETS_ETH_STEALTH_SIGN_TRANSFER)
             .json(&request);
         self.send(builder).await
     }
@@ -697,7 +702,7 @@ impl SigillumClient {
         request: EthStealthSignErc20TransferRequest,
     ) -> Result<EthSignedTransactionResponse, ClientError> {
         let builder = self
-            .request(Method::POST, "/api/wallets/eth-stealth/sign-erc20-transfer")
+            .request(Method::POST, p::API_WALLETS_ETH_STEALTH_SIGN_ERC20_TRANSFER)
             .json(&request);
         self.send(builder).await
     }
@@ -708,7 +713,7 @@ impl SigillumClient {
         &self,
         request: EvmRpcNonceRequest,
     ) -> Result<EvmRpcNonceResponse, ClientError> {
-        let builder = self.request(Method::POST, "/api/evm/nonce").json(&request);
+        let builder = self.request(Method::POST, p::API_EVM_NONCE).json(&request);
         self.send(builder).await
     }
 
@@ -717,7 +722,7 @@ impl SigillumClient {
         request: EvmRpcBalanceRequest,
     ) -> Result<EvmRpcBalanceResponse, ClientError> {
         let builder = self
-            .request(Method::POST, "/api/evm/balance")
+            .request(Method::POST, p::API_EVM_BALANCE)
             .json(&request);
         self.send(builder).await
     }
@@ -727,7 +732,7 @@ impl SigillumClient {
         request: EvmRpcErc20BalanceRequest,
     ) -> Result<EvmRpcErc20BalanceResponse, ClientError> {
         let builder = self
-            .request(Method::POST, "/api/evm/erc20-balance")
+            .request(Method::POST, p::API_EVM_ERC20_BALANCE)
             .json(&request);
         self.send(builder).await
     }
@@ -737,7 +742,7 @@ impl SigillumClient {
         request: EvmFeeEstimateRequest,
     ) -> Result<EvmFeeEstimateResponse, ClientError> {
         let builder = self
-            .request(Method::POST, "/api/evm/fees/estimate")
+            .request(Method::POST, p::API_EVM_FEES_ESTIMATE)
             .json(&request);
         self.send(builder).await
     }
@@ -747,7 +752,7 @@ impl SigillumClient {
         request: EvmRpcBroadcastRequest,
     ) -> Result<EvmRpcBroadcastResponse, ClientError> {
         let builder = self
-            .request(Method::POST, "/api/evm/broadcast")
+            .request(Method::POST, p::API_EVM_BROADCAST)
             .json(&request);
         self.send(builder).await
     }
@@ -759,7 +764,7 @@ impl SigillumClient {
         request: EthStealthSendTransferRequest,
     ) -> Result<EthStealthSendResponse, ClientError> {
         let builder = self
-            .request(Method::POST, "/api/wallets/eth-stealth/send-transfer")
+            .request(Method::POST, p::API_WALLETS_ETH_STEALTH_SEND_TRANSFER)
             .json(&request);
         self.send(builder).await
     }
@@ -769,7 +774,7 @@ impl SigillumClient {
         request: EthStealthSendErc20TransferRequest,
     ) -> Result<EthStealthSendResponse, ClientError> {
         let builder = self
-            .request(Method::POST, "/api/wallets/eth-stealth/send-erc20-transfer")
+            .request(Method::POST, p::API_WALLETS_ETH_STEALTH_SEND_ERC20_TRANSFER)
             .json(&request);
         self.send(builder).await
     }
@@ -779,7 +784,7 @@ impl SigillumClient {
         request: EthStealthSendWithProfileRequest,
     ) -> Result<EthStealthSendResponse, ClientError> {
         let builder = self
-            .request(Method::POST, "/api/wallets/eth-stealth/send-with-profile")
+            .request(Method::POST, p::API_WALLETS_ETH_STEALTH_SEND_WITH_PROFILE)
             .json(&request);
         self.send(builder).await
     }
@@ -791,14 +796,14 @@ impl SigillumClient {
         let builder = self
             .request(
                 Method::POST,
-                "/api/wallets/eth-stealth/send-erc20-with-profile",
+                p::API_WALLETS_ETH_STEALTH_SEND_ERC20_WITH_PROFILE,
             )
             .json(&request);
         self.send(builder).await
     }
 
     pub async fn list_discovery_jobs(&self) -> Result<DiscoveryJobListResponse, ClientError> {
-        let builder = self.request(Method::GET, "/api/discovery/jobs");
+        let builder = self.request(Method::GET, p::API_DISCOVERY_JOBS);
         self.send(builder).await
     }
 
@@ -807,7 +812,7 @@ impl SigillumClient {
         id: &str,
     ) -> Result<DiscoveryJobMutationResponse, ClientError> {
         let builder = self
-            .request(Method::POST, "/api/discovery/jobs/cancel")
+            .request(Method::POST, p::API_DISCOVERY_JOBS_CANCEL)
             .json(&DiscoveryJobMutationRequest { id: id.into() });
         self.send(builder).await
     }
@@ -817,7 +822,7 @@ impl SigillumClient {
         id: &str,
     ) -> Result<DiscoveryJobMutationResponse, ClientError> {
         let builder = self
-            .request(Method::POST, "/api/discovery/jobs/resume")
+            .request(Method::POST, p::API_DISCOVERY_JOBS_RESUME)
             .json(&DiscoveryJobMutationRequest { id: id.into() });
         self.send(builder).await
     }
@@ -850,12 +855,12 @@ impl SigillumClient {
     }
 
     pub async fn list_risk_findings(&self) -> Result<RiskFindingListResponse, ClientError> {
-        let builder = self.request(Method::GET, "/api/risk/findings");
+        let builder = self.request(Method::GET, p::API_RISK_FINDINGS);
         self.send(builder).await
     }
 
     pub async fn list_risk_catalog(&self) -> Result<RiskCatalogListResponse, ClientError> {
-        let builder = self.request(Method::GET, "/api/risk/catalog");
+        let builder = self.request(Method::GET, p::API_RISK_CATALOG);
         self.send(builder).await
     }
 
@@ -864,7 +869,7 @@ impl SigillumClient {
         request: RiskCatalogUpsertRequest,
     ) -> Result<RiskCatalogMutationResponse, ClientError> {
         let builder = self
-            .request(Method::POST, "/api/risk/catalog/upsert")
+            .request(Method::POST, p::API_RISK_CATALOG_UPSERT)
             .json(&request);
         self.send(builder).await
     }
@@ -874,7 +879,7 @@ impl SigillumClient {
         request: RiskCatalogDeleteRequest,
     ) -> Result<RiskCatalogMutationResponse, ClientError> {
         let builder = self
-            .request(Method::POST, "/api/risk/catalog/delete")
+            .request(Method::POST, p::API_RISK_CATALOG_DELETE)
             .json(&request);
         self.send(builder).await
     }
@@ -886,7 +891,7 @@ impl SigillumClient {
         request: MaintenanceRunRequest,
     ) -> Result<MaintenanceRunResponse, ClientError> {
         let builder = self
-            .request(Method::POST, "/api/maintenance/run")
+            .request(Method::POST, p::API_MAINTENANCE_RUN)
             .json(&request);
         self.send(builder).await
     }
@@ -894,17 +899,17 @@ impl SigillumClient {
     // ── FIDO2 ───────────────────────────────────────────────────────
 
     pub async fn fido2_status(&self) -> Result<Fido2StatusResponse, ClientError> {
-        let builder = self.request(Method::GET, "/api/fido2/status");
+        let builder = self.request(Method::GET, p::API_FIDO2_STATUS);
         self.send(builder).await
     }
 
     pub async fn fido2_detect(&self) -> Result<Fido2DetectResponse, ClientError> {
-        let builder = self.request(Method::GET, "/api/fido2/detect");
+        let builder = self.request(Method::GET, p::API_FIDO2_DETECT);
         self.send(builder).await
     }
 
     pub async fn fido2_list_keys(&self) -> Result<Fido2ListResponse, ClientError> {
-        let builder = self.request(Method::GET, "/api/fido2/list");
+        let builder = self.request(Method::GET, p::API_FIDO2_LIST);
         self.send(builder).await
     }
 
@@ -913,7 +918,7 @@ impl SigillumClient {
         request: Fido2SetupRequest,
     ) -> Result<Fido2SetupResponse, ClientError> {
         let builder = self
-            .request(Method::POST, "/api/fido2/setup")
+            .request(Method::POST, p::API_FIDO2_SETUP)
             .json(&request);
         self.send(builder).await
     }
@@ -923,7 +928,7 @@ impl SigillumClient {
         request: Fido2RegisterRequest,
     ) -> Result<Fido2RegisterResponse, ClientError> {
         let builder = self
-            .request(Method::POST, "/api/fido2/register")
+            .request(Method::POST, p::API_FIDO2_REGISTER)
             .json(&request);
         self.send(builder).await
     }
@@ -933,7 +938,7 @@ impl SigillumClient {
         request: Fido2UnlockRequest,
     ) -> Result<UnlockResponse, ClientError> {
         let builder = self
-            .request(Method::POST, "/api/fido2/unlock")
+            .request(Method::POST, p::API_FIDO2_UNLOCK)
             .json(&request);
         self.send(builder).await
     }
@@ -943,7 +948,7 @@ impl SigillumClient {
         request: Fido2RemoveRequest,
     ) -> Result<Fido2RemoveResponse, ClientError> {
         let builder = self
-            .request(Method::POST, "/api/fido2/remove")
+            .request(Method::POST, p::API_FIDO2_REMOVE)
             .json(&request);
         self.send(builder).await
     }

@@ -48,11 +48,13 @@ pub mod types;
 
 #[cfg(feature = "hid")]
 use std::collections::HashMap;
+use std::fs::{File, OpenOptions};
+#[cfg(unix)]
+use std::os::fd::AsRawFd;
 use std::path::{Path, PathBuf};
+use std::time::{SystemTime, UNIX_EPOCH};
 
-#[cfg(any(feature = "hid", test))]
 use rand::RngCore;
-#[cfg(any(feature = "hid", test))]
 use rand::rngs::OsRng;
 use zeroize::Zeroizing;
 
@@ -63,6 +65,43 @@ use error::Fido2Error;
 #[cfg(feature = "hid")]
 use types::QuorumEvent;
 use types::{Fido2Status, KeyInfo};
+
+/// Identity of a daemon-journaled FIDO2 config mutation.
+///
+/// The manager embeds this identity in the same atomic write as the resulting
+/// config, allowing startup recovery to clear only the exact matching journal.
+#[derive(Clone, Copy, Debug)]
+pub struct Fido2MutationContext<'a> {
+    pub operation_id: &'a str,
+    pub kind: &'a str,
+    pub subject: Option<&'a str>,
+}
+
+#[cfg(unix)]
+struct Fido2WriterLease {
+    file: File,
+}
+
+#[cfg(unix)]
+impl Drop for Fido2WriterLease {
+    fn drop(&mut self) {
+        // SAFETY: `file` remains open for the lifetime of the lease.
+        let _ = unsafe { libc::flock(self.file.as_raw_fd(), libc::LOCK_UN) };
+    }
+}
+
+#[cfg(not(unix))]
+struct Fido2WriterLease {
+    path: PathBuf,
+    _file: File,
+}
+
+#[cfg(not(unix))]
+impl Drop for Fido2WriterLease {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.path);
+    }
+}
 
 /// RAII guard that zeroizes HMAC secrets on drop.
 #[cfg(feature = "hid")]
@@ -166,6 +205,104 @@ impl Fido2Manager {
         save_config(&self.config_path, config)
     }
 
+    fn writer_lock_path(&self) -> PathBuf {
+        self.config_path.with_extension("lock")
+    }
+
+    fn acquire_writer_lease(&self) -> Result<Fido2WriterLease, Fido2Error> {
+        let path = self.writer_lock_path();
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)
+                .map_err(|error| Fido2Error::Config(format!("create writer lock dir: {error}")))?;
+        }
+
+        #[cfg(unix)]
+        {
+            let file = OpenOptions::new()
+                .read(true)
+                .write(true)
+                .create(true)
+                .truncate(false)
+                .open(&path)
+                .map_err(|error| {
+                    Fido2Error::Config(format!(
+                        "open FIDO2 writer lock {}: {error}",
+                        path.display()
+                    ))
+                })?;
+            // SAFETY: `file` is a valid open descriptor and remains owned by the lease.
+            let result = unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) };
+            if result != 0 {
+                let error = std::io::Error::last_os_error();
+                if error
+                    .raw_os_error()
+                    .is_some_and(|code| code == libc::EWOULDBLOCK || code == libc::EAGAIN)
+                {
+                    return Err(Fido2Error::WriterBusy {
+                        path: path.display().to_string(),
+                    });
+                }
+                return Err(Fido2Error::Config(format!(
+                    "lock FIDO2 writer lease {}: {error}",
+                    path.display()
+                )));
+            }
+            Ok(Fido2WriterLease { file })
+        }
+
+        #[cfg(not(unix))]
+        {
+            let file = OpenOptions::new()
+                .read(true)
+                .write(true)
+                .create_new(true)
+                .open(&path)
+                .map_err(|error| {
+                    if error.kind() == std::io::ErrorKind::AlreadyExists {
+                        Fido2Error::WriterBusy {
+                            path: path.display().to_string(),
+                        }
+                    } else {
+                        Fido2Error::Config(format!(
+                            "create FIDO2 writer lease {}: {error}",
+                            path.display()
+                        ))
+                    }
+                })?;
+            Ok(Fido2WriterLease { path, _file: file })
+        }
+    }
+
+    fn persist_mutation(
+        &self,
+        config: &mut Fido2Config,
+        context: Option<Fido2MutationContext<'_>>,
+        default_kind: &str,
+        default_subject: Option<&str>,
+    ) -> Result<(), Fido2Error> {
+        let (operation_id, kind, subject) = if let Some(context) = context {
+            (
+                context.operation_id.to_owned(),
+                context.kind.to_owned(),
+                context.subject.map(str::to_owned),
+            )
+        } else {
+            let now = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos();
+            let mut random = [0u8; 6];
+            OsRng.fill_bytes(&mut random);
+            (
+                format!("standalone-{now:032x}-{}", hex::encode(random)),
+                default_kind.to_owned(),
+                default_subject.map(str::to_owned),
+            )
+        };
+        config.record_mutation(operation_id, kind, subject)?;
+        self.save(config)
+    }
+
     #[cfg(feature = "hid")]
     fn normalize_pin(pin: Option<&str>) -> Option<&str> {
         pin.filter(|pin| !pin.is_empty())
@@ -196,7 +333,11 @@ impl Fido2Manager {
     /// See [`load_config_raw`](Self::load_config_raw) for the naming convention.
     #[must_use = "check the Result to ensure config was persisted"]
     pub fn save_config_raw(&self, config: &Fido2Config) -> Result<(), Fido2Error> {
-        self.save(config)
+        let _lease = self.acquire_writer_lease()?;
+        let current = self.load()?;
+        let mut next = config.clone();
+        next.generation = next.generation.max(current.generation);
+        self.persist_mutation(&mut next, None, "fido2.raw-save", None)
     }
 
     // ── Query ────────────────────────────────────────────────────
@@ -377,6 +518,32 @@ impl Fido2Manager {
         compartment_metas: &[(CompartmentMeta, &[u8; 32])],
         skip_labels: &[String],
     ) -> Result<RegisterResult, Fido2Error> {
+        self.register_key_inner(pin, label, compartment_metas, skip_labels, None)
+    }
+
+    /// Register a key and bind the resulting config write to a daemon operation journal.
+    #[cfg(feature = "hid")]
+    pub fn register_key_for_operation(
+        &self,
+        pin: Option<&str>,
+        label: &str,
+        compartment_metas: &[(CompartmentMeta, &[u8; 32])],
+        skip_labels: &[String],
+        context: Fido2MutationContext<'_>,
+    ) -> Result<RegisterResult, Fido2Error> {
+        self.register_key_inner(pin, label, compartment_metas, skip_labels, Some(context))
+    }
+
+    #[cfg(feature = "hid")]
+    fn register_key_inner(
+        &self,
+        pin: Option<&str>,
+        label: &str,
+        compartment_metas: &[(CompartmentMeta, &[u8; 32])],
+        skip_labels: &[String],
+        context: Option<Fido2MutationContext<'_>>,
+    ) -> Result<RegisterResult, Fido2Error> {
+        let _lease = self.acquire_writer_lease()?;
         let mut config = self.load()?;
         let pin = Self::normalize_pin(pin);
 
@@ -506,7 +673,7 @@ impl Fido2Manager {
         });
 
         config.total_shares = config.keys.len();
-        self.save(&config)?;
+        self.persist_mutation(&mut config, context, "fido2.register", Some(label))?;
 
         Ok(RegisterResult {
             compartment_keys: result_keys,
@@ -529,6 +696,32 @@ impl Fido2Manager {
         pin: Option<&str>,
         skip_labels: &[String],
     ) -> Result<(), Fido2Error> {
+        self.remove_key_inner(label, compartment_metas, pin, skip_labels, None)
+    }
+
+    /// Remove a key and bind the resulting config write to a daemon operation journal.
+    #[cfg(feature = "hid")]
+    pub fn remove_key_for_operation(
+        &self,
+        label: &str,
+        compartment_metas: &[(CompartmentMeta, &[u8; 32])],
+        pin: Option<&str>,
+        skip_labels: &[String],
+        context: Fido2MutationContext<'_>,
+    ) -> Result<(), Fido2Error> {
+        self.remove_key_inner(label, compartment_metas, pin, skip_labels, Some(context))
+    }
+
+    #[cfg(feature = "hid")]
+    fn remove_key_inner(
+        &self,
+        label: &str,
+        compartment_metas: &[(CompartmentMeta, &[u8; 32])],
+        pin: Option<&str>,
+        skip_labels: &[String],
+        context: Option<Fido2MutationContext<'_>>,
+    ) -> Result<(), Fido2Error> {
+        let _lease = self.acquire_writer_lease()?;
         let mut config = self.load()?;
         let pin = Self::normalize_pin(pin);
 
@@ -544,7 +737,7 @@ impl Fido2Manager {
 
         if config.keys.is_empty() {
             config.total_shares = 0;
-            self.save(&config)?;
+            self.persist_mutation(&mut config, context, "fido2.remove", Some(label))?;
             return Ok(());
         }
 
@@ -601,7 +794,7 @@ impl Fido2Manager {
         }
 
         config.total_shares = config.keys.len();
-        self.save(&config)?;
+        self.persist_mutation(&mut config, context, "fido2.remove", Some(label))?;
         Ok(())
     }
 
@@ -628,6 +821,30 @@ impl Fido2Manager {
         label: &str,
         compartment_metas: &[CompartmentMeta],
     ) -> Result<usize, Fido2Error> {
+        self.register_key_poison_inner(pin, label, compartment_metas, None)
+    }
+
+    /// Register a poison key and bind the config write to a daemon operation journal.
+    #[cfg(feature = "hid")]
+    pub fn register_key_poison_for_operation(
+        &self,
+        pin: Option<&str>,
+        label: &str,
+        compartment_metas: &[CompartmentMeta],
+        context: Fido2MutationContext<'_>,
+    ) -> Result<usize, Fido2Error> {
+        self.register_key_poison_inner(pin, label, compartment_metas, Some(context))
+    }
+
+    #[cfg(feature = "hid")]
+    fn register_key_poison_inner(
+        &self,
+        pin: Option<&str>,
+        label: &str,
+        compartment_metas: &[CompartmentMeta],
+        context: Option<Fido2MutationContext<'_>>,
+    ) -> Result<usize, Fido2Error> {
+        let _lease = self.acquire_writer_lease()?;
         let mut config = self.load()?;
         let pin = Self::normalize_pin(pin);
 
@@ -691,7 +908,7 @@ impl Fido2Manager {
         });
 
         config.total_shares = config.keys.len();
-        self.save(&config)?;
+        self.persist_mutation(&mut config, context, "fido2.register", Some(label))?;
 
         Ok(config.keys.len())
     }
@@ -976,6 +1193,7 @@ mod tests {
                 shards: vec!["ff".into(); SHARD_SLOTS],
                 registered_at: "2026-01-01".into(),
             }],
+            ..Default::default()
         };
         mgr.save_config_raw(&config).unwrap();
 
@@ -991,6 +1209,39 @@ mod tests {
 
         assert!(matches!(mgr.status(), Err(Fido2Error::Config(_))));
         assert!(matches!(mgr.list_keys(), Err(Fido2Error::Config(_))));
+    }
+
+    #[test]
+    fn writer_lease_rejects_a_second_manager_and_releases_on_drop() {
+        let (first, dir) = test_manager();
+        let second = Fido2Manager::new(dir.path().join("fido2_keys.json"));
+        let lease = first.acquire_writer_lease().unwrap();
+
+        assert!(matches!(
+            second.save_config_raw(&Fido2Config::default()),
+            Err(Fido2Error::WriterBusy { .. })
+        ));
+
+        drop(lease);
+        second.save_config_raw(&Fido2Config::default()).unwrap();
+    }
+
+    #[test]
+    fn raw_manager_writes_advance_generation() {
+        let (mgr, _dir) = test_manager();
+
+        mgr.save_config_raw(&Fido2Config::default()).unwrap();
+        mgr.save_config_raw(&Fido2Config::default()).unwrap();
+
+        let config = mgr.load_config_raw().unwrap();
+        assert_eq!(config.generation, 2);
+        assert_eq!(
+            config
+                .last_mutation
+                .as_ref()
+                .map(|receipt| receipt.kind.as_str()),
+            Some("fido2.raw-save")
+        );
     }
 
     #[cfg(not(feature = "hid"))]

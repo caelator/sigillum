@@ -11,9 +11,9 @@ use sigillum_api::{
 };
 use sigillum_core::VaultLifecycle;
 use sigillum_core::utils::{derive_key_from_passphrase, save_salt, save_wrapped_master_key};
-use sigillum_fido2::Fido2Manager;
 use sigillum_fido2::config::CompartmentMeta;
 use sigillum_fido2::error::Fido2Error;
+use sigillum_fido2::{Fido2Manager, Fido2MutationContext};
 
 use crate::audit_log::AuditEventSpec;
 use crate::operations::PendingOperationSpec;
@@ -123,6 +123,9 @@ fn map_fido2_service_error(action: &str, error: Fido2Error) -> ServiceError {
             "{action} failed: removing this key would leave {remaining} active keys below threshold {threshold}."
         )),
         Fido2Error::Config(error) => ServiceError::bad_request(format!("{action} failed: {error}")),
+        Fido2Error::WriterBusy { .. } => ServiceError::conflict(format!(
+            "{action} could not start because another FIDO2 configuration change is in progress. Wait for it to finish, then retry."
+        )),
         Fido2Error::ShamirFailed(error)
         | Fido2Error::ShardEncryption(error)
         | Fido2Error::ShardDecryption(error) => {
@@ -247,9 +250,14 @@ impl SigillumService {
         }
 
         let _guard = self.state.operation_guard().await;
+        if self.state.is_initialized() {
+            return Err(ServiceError::conflict(
+                "Already initialized. Use /api/fido2/register to add keys.",
+            ));
+        }
         let journal = self.begin_operation(
             PendingOperationSpec::fido2_setup(body.label.clone(), body.compartments.len()),
-            Some("fido2".into()),
+            Some(body.label.clone()),
         )?;
         let meta_refs: Vec<(CompartmentMeta, &[u8; 32])> = metas
             .iter()
@@ -259,11 +267,16 @@ impl SigillumService {
         let result = self
             .state
             .fido2
-            .register_key(
+            .register_key_for_operation(
                 optional_pin(body.pin.as_ref()),
                 &body.label,
                 &meta_refs,
                 &[],
+                Fido2MutationContext {
+                    operation_id: journal.operation_id(),
+                    kind: "fido2.setup",
+                    subject: Some(&body.label),
+                },
             )
             .map_err(|error| map_fido2_service_error("FIDO2 setup", error))?;
 
@@ -377,7 +390,7 @@ impl SigillumService {
         token: Option<&str>,
         body: Fido2RegisterRequest,
     ) -> ServiceResult<Fido2RegisterResponse> {
-        let _ = self.require_session(token)?;
+        let token = self.require_session(token)?;
         if !self.state.is_initialized() {
             return Err(ServiceError::not_initialized(
                 "Not initialized. Use /api/fido2/setup first.",
@@ -385,7 +398,8 @@ impl SigillumService {
         }
 
         let skip = body.skip_keys.clone().unwrap_or_default();
-        let _guard = self.state.operation_guard().await;
+        let session_context = self.capture_session_operation_context(Some(token))?;
+        let _guard = self.acquire_session_operation(&session_context).await?;
         let journal = self.begin_operation(
             PendingOperationSpec::fido2_register(body.poison),
             Some(body.label.clone()),
@@ -402,7 +416,16 @@ impl SigillumService {
             let total_keys = self
                 .state
                 .fido2
-                .register_key_poison(optional_pin(body.pin.as_ref()), &body.label, &unlocked)
+                .register_key_poison_for_operation(
+                    optional_pin(body.pin.as_ref()),
+                    &body.label,
+                    &unlocked,
+                    Fido2MutationContext {
+                        operation_id: journal.operation_id(),
+                        kind: "fido2.register",
+                        subject: Some(&body.label),
+                    },
+                )
                 .map_err(|error| map_fido2_service_error("FIDO2 registration", error))?;
             journal.complete().map_err(|error| {
                 ServiceError::internal(format!("Failed to finalize operation: {error}"))
@@ -436,11 +459,16 @@ impl SigillumService {
         let result = self
             .state
             .fido2
-            .register_key(
+            .register_key_for_operation(
                 optional_pin(body.pin.as_ref()),
                 &body.label,
                 &master_key_refs,
                 &skip,
+                Fido2MutationContext {
+                    operation_id: journal.operation_id(),
+                    kind: "fido2.register",
+                    subject: Some(&body.label),
+                },
             )
             .map_err(|error| map_fido2_service_error("FIDO2 registration", error))?;
         journal.complete().map_err(|error| {
@@ -560,8 +588,9 @@ impl SigillumService {
         token: Option<&str>,
         body: Fido2RemoveRequest,
     ) -> ServiceResult<Fido2RemoveResponse> {
-        let _ = self.require_session(token)?;
-        let _guard = self.state.operation_guard().await;
+        let token = self.require_session(token)?;
+        let session_context = self.capture_session_operation_context(Some(token))?;
+        let _guard = self.acquire_session_operation(&session_context).await?;
         let journal = self.begin_operation(
             PendingOperationSpec::fido2_remove(body.skip_keys.clone().unwrap_or_default()),
             Some(body.label.clone()),
@@ -579,11 +608,16 @@ impl SigillumService {
 
         self.state
             .fido2
-            .remove_key(
+            .remove_key_for_operation(
                 &body.label,
                 &master_key_refs,
                 optional_pin(body.pin.as_ref()),
                 &skip,
+                Fido2MutationContext {
+                    operation_id: journal.operation_id(),
+                    kind: "fido2.remove",
+                    subject: Some(&body.label),
+                },
             )
             .map_err(|error| map_fido2_service_error("FIDO2 removal", error))?;
 
@@ -610,10 +644,56 @@ impl SigillumService {
 
 #[cfg(test)]
 mod tests {
-    use axum::http::StatusCode;
-    use sigillum_fido2::error::Fido2Error;
+    use std::future::{Future, poll_fn};
+    use std::sync::Arc;
+    use std::task::Poll;
 
-    use super::map_fido2_service_error;
+    use axum::http::StatusCode;
+    use sigillum_api::{CompartmentDefinition, Fido2SetupRequest};
+    use sigillum_fido2::error::Fido2Error;
+    use tempfile::TempDir;
+
+    use super::{SigillumService, map_fido2_service_error};
+    use crate::AppState;
+
+    #[tokio::test]
+    async fn queued_first_run_setup_rejects_initialization_without_mutating() {
+        let dir = TempDir::new().unwrap();
+        let state =
+            Arc::new(AppState::new(dir.path().to_path_buf()).expect("app state should initialize"));
+        let service = SigillumService::new(state.clone());
+        let held_operation = state.operation_guard().await;
+        let mut queued = Box::pin(service.fido2_setup(Fido2SetupRequest {
+            pin: None,
+            label: "queued-key".into(),
+            compartments: vec![CompartmentDefinition {
+                label: "daily".into(),
+                threshold: 1,
+                passphrase_mode: None,
+            }],
+            passphrase: None,
+        }));
+
+        poll_fn(|context| match queued.as_mut().poll(context) {
+            Poll::Pending => Poll::Ready(()),
+            Poll::Ready(_) => panic!("setup bypassed the serialized initialization boundary"),
+        })
+        .await;
+        std::fs::write(dir.path().join(".initialized"), b"1").unwrap();
+        drop(held_operation);
+
+        let error = queued.await.unwrap_err();
+        assert_eq!(error.status(), StatusCode::CONFLICT);
+        assert_eq!(
+            error.message(),
+            "Already initialized. Use /api/fido2/register to add keys."
+        );
+        assert_eq!(state.pending_operation_count(), 0);
+        assert_eq!(state.session_count(), 0);
+        assert!(!state.is_unlocked());
+        assert!(!dir.path().join("fido2_keys.json").exists());
+        assert!(!dir.path().join("compartments").exists());
+    }
 
     #[test]
     fn pin_not_set_error_is_actionable() {

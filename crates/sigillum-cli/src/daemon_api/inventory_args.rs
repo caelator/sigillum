@@ -2,6 +2,8 @@ use std::{fs, process};
 
 use sigillum_api::request::{ClaimCandidateProbe, DefiTokenProbe, WatchAddressProbe};
 
+use crate::daemon_api::parse_multi_flag;
+
 pub(super) fn parse_defi_token_probes(args: &[String]) -> Vec<DefiTokenProbe> {
     parse_multi_flag(args, "--defi-token-probe")
         .into_iter()
@@ -140,19 +142,6 @@ fn push_unique_watch_probe(probes: &mut Vec<WatchAddressProbe>, probe: WatchAddr
     } else {
         probes.push(probe);
     }
-}
-
-fn parse_multi_flag(args: &[String], flag: &str) -> Vec<String> {
-    let mut values = Vec::new();
-    let mut i = 0;
-    while i < args.len() {
-        if args[i] == flag && i + 1 < args.len() {
-            values.push(args[i + 1].clone());
-            i += 1;
-        }
-        i += 1;
-    }
-    values
 }
 
 #[cfg(test)]

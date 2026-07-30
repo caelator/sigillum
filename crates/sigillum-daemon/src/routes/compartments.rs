@@ -2,7 +2,6 @@
 
 use std::sync::Arc;
 
-use axum::Json;
 use axum::extract::State;
 use axum::http::HeaderMap;
 use axum::response::Response;
@@ -14,7 +13,7 @@ use sigillum_api::request::{
 use crate::AppState;
 use crate::service::SigillumService;
 
-use super::{bearer_token, service_response, validated};
+use super::{ValidatedJson, bearer_token, service_response};
 
 pub(crate) async fn compartment_list(
     State(state): State<Arc<AppState>>,
@@ -27,12 +26,8 @@ pub(crate) async fn compartment_list(
 pub(crate) async fn compartment_add(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
-    Json(body): Json<CompartmentAddRequest>,
+    ValidatedJson(body): ValidatedJson<CompartmentAddRequest>,
 ) -> Response {
-    let body = match validated(Json(body)) {
-        Ok(b) => b,
-        Err(resp) => return resp,
-    };
     let service = SigillumService::new(state);
     service_response(
         service
@@ -44,12 +39,8 @@ pub(crate) async fn compartment_add(
 pub(crate) async fn compartment_remove(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
-    Json(body): Json<CompartmentRemoveRequest>,
+    ValidatedJson(body): ValidatedJson<CompartmentRemoveRequest>,
 ) -> Response {
-    let body = match validated(Json(body)) {
-        Ok(b) => b,
-        Err(resp) => return resp,
-    };
     let service = SigillumService::new(state);
     service_response(
         service
@@ -61,12 +52,8 @@ pub(crate) async fn compartment_remove(
 pub(crate) async fn compartment_init(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
-    Json(body): Json<CompartmentInitRequest>,
+    ValidatedJson(body): ValidatedJson<CompartmentInitRequest>,
 ) -> Response {
-    let body = match validated(Json(body)) {
-        Ok(b) => b,
-        Err(resp) => return resp,
-    };
     let service = SigillumService::new(state);
     service_response(
         service
@@ -78,12 +65,8 @@ pub(crate) async fn compartment_init(
 pub(crate) async fn compartment_switch(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
-    Json(body): Json<CompartmentSwitchRequest>,
+    ValidatedJson(body): ValidatedJson<CompartmentSwitchRequest>,
 ) -> Response {
-    let body = match validated(Json(body)) {
-        Ok(b) => b,
-        Err(resp) => return resp,
-    };
     let service = SigillumService::new(state);
     service_response(
         service

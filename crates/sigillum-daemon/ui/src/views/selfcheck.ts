@@ -1,3 +1,4 @@
+import { ROUTE_PATHS } from "../routePaths";
 import type { SelfCheckResult, SelfCheckRunResponse } from "../contracts";
 import { renderEmptyState } from "../render/forms";
 import { esc, pillClass, statusPill } from "../render/html";
@@ -201,7 +202,7 @@ export function createSelfCheckActions(deps: SelfCheckDeps) {
     buttons.forEach((button) => button.classList.add("btn-busy"));
     try {
       // Empty body = verify every configured domain.
-      const r = await deps.api("POST", "/api/selfcheck/run", {});
+      const r = await deps.api("POST", ROUTE_PATHS.API_SELFCHECK_RUN, {});
       if (r.error) {
         deps.toast(r.error, "error");
         return;
@@ -252,7 +253,7 @@ export function createSelfCheckActions(deps: SelfCheckDeps) {
     if (inFlight) return inFlight;
     inFlight = (async () => {
       try {
-        const r = await deps.api("POST", "/api/selfcheck/run", {});
+        const r = await deps.api("POST", ROUTE_PATHS.API_SELFCHECK_RUN, {});
         if (r.error) return lastSelfCheckSummary();
         lastResponse = r as SelfCheckRunResponse;
         lastRunAtMs = Date.now();

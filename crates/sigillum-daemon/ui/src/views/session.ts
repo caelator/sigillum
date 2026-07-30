@@ -1,3 +1,4 @@
+import { ROUTE_PATHS } from "../routePaths";
 import { clearSessionToken } from "../api/session";
 import { confirmDangerDialog } from "../render/confirm";
 
@@ -50,7 +51,7 @@ export function createSessionActions(deps: SessionActionDeps) {
     }
     setUnlockError(null);
     try {
-      const response = await deps.api("POST", "/api/unlock", { passphrase });
+      const response = await deps.api("POST", ROUTE_PATHS.API_UNLOCK, { passphrase });
       if (response.error) {
         if (isAlreadyUnlockedConflict(response.error)) {
           deps.toast("Session already active. Refreshing workspace...");
@@ -90,7 +91,7 @@ export function createSessionActions(deps: SessionActionDeps) {
     if (!confirmed) {
       return;
     }
-    const response = await deps.api("POST", "/api/lock");
+    const response = await deps.api("POST", ROUTE_PATHS.API_LOCK);
     if (response.error) {
       deps.toast(response.error, "error");
       return;
@@ -101,7 +102,7 @@ export function createSessionActions(deps: SessionActionDeps) {
   }
 
   async function logoutSession(): Promise<void> {
-    const response = await deps.api("POST", "/api/session/revoke");
+    const response = await deps.api("POST", ROUTE_PATHS.API_SESSION_REVOKE);
     if (response.error) {
       deps.toast(response.error, "error");
       return;

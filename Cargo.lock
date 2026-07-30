@@ -4384,6 +4384,9 @@ name = "sigillum-desktop"
 version = "1.0.0"
 dependencies = [
  "dirs 5.0.1",
+ "objc2",
+ "objc2-app-kit",
+ "objc2-foundation",
  "sigillum-daemon",
  "tauri",
  "tauri-build",
@@ -4401,6 +4404,7 @@ dependencies = [
  "chrono",
  "ctap-hid-fido2",
  "hex",
+ "libc",
  "rand 0.8.6",
  "serde",
  "serde_json",

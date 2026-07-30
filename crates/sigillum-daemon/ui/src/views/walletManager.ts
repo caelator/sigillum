@@ -1,3 +1,4 @@
+import { ROUTE_PATHS } from "../routePaths";
 import type {
   EthSeedWalletProfile,
   EthXpubWalletProfile,
@@ -285,7 +286,7 @@ export function createWalletManagerActions(deps: WalletManagerDeps) {
       deps.toast("Chain ID must be a positive number", "error");
       return;
     }
-    const r = await deps.api("POST", "/api/profiles/evm/upsert", {
+    const r = await deps.api("POST", ROUTE_PATHS.API_PROFILES_EVM_UPSERT, {
       name,
       rpc_url: rpcUrl,
       chain_id: chainId,
@@ -329,11 +330,11 @@ export function createWalletManagerActions(deps: WalletManagerDeps) {
     try {
       const [seedResp, xpubResp, providerResp, overviewResp, receiveResp] =
         await Promise.all([
-          deps.api("GET", "/api/profiles/eth-seed"),
-          deps.api("GET", "/api/profiles/eth-xpub"),
-          deps.api("GET", "/api/profiles/evm"),
-          deps.api("GET", "/api/treasury/overview"),
-          deps.api("GET", "/api/treasury/receive-addresses"),
+          deps.api("GET", ROUTE_PATHS.API_PROFILES_ETH_SEED),
+          deps.api("GET", ROUTE_PATHS.API_PROFILES_ETH_XPUB),
+          deps.api("GET", ROUTE_PATHS.API_PROFILES_EVM),
+          deps.api("GET", ROUTE_PATHS.API_TREASURY_OVERVIEW),
+          deps.api("GET", ROUTE_PATHS.API_TREASURY_RECEIVE_ADDRESSES),
         ]);
       if (!seedResp.error) lastSeedProfiles = seedResp.profiles || [];
       if (!xpubResp.error) lastXpubProfiles = xpubResp.profiles || [];
@@ -440,7 +441,7 @@ export function createWalletManagerActions(deps: WalletManagerDeps) {
     const destination = optionalTextValue("walletCreateDestination");
     if (destination) body.default_destination_address = destination;
 
-    const r = await deps.api("POST", "/api/profiles/eth-seed/create", body);
+    const r = await deps.api("POST", ROUTE_PATHS.API_PROFILES_ETH_SEED_CREATE, body);
     if (r.error) {
       deps.toast(r.error, "error");
       return;
@@ -609,7 +610,7 @@ export function createWalletManagerActions(deps: WalletManagerDeps) {
     };
     const label = optionalTextValue("walletReceiveLabel");
     if (label) body.label = label;
-    const r = await deps.api("POST", "/api/treasury/receive-addresses/allocate", body);
+    const r = await deps.api("POST", ROUTE_PATHS.API_TREASURY_RECEIVE_ADDRESSES_ALLOCATE, body);
     if (r.error) {
       deps.toast(r.error, "error");
       return;
@@ -682,7 +683,7 @@ export function createWalletManagerActions(deps: WalletManagerDeps) {
     const destination = optionalTextValue("walletImportSeedDestination");
     if (destination) body.default_destination_address = destination;
 
-    const r = await deps.api("POST", "/api/profiles/eth-seed/upsert", body);
+    const r = await deps.api("POST", ROUTE_PATHS.API_PROFILES_ETH_SEED_UPSERT, body);
     if (r.error) {
       deps.toast(r.error, "error");
       return;
@@ -739,7 +740,7 @@ export function createWalletManagerActions(deps: WalletManagerDeps) {
     const externalAccountPath = optionalTextValue("walletImportExternalAccountPath");
     if (externalAccountPath) body.external_account_path = externalAccountPath;
 
-    const r = await deps.api("POST", "/api/profiles/eth-xpub/upsert", body);
+    const r = await deps.api("POST", ROUTE_PATHS.API_PROFILES_ETH_XPUB_UPSERT, body);
     if (r.error) {
       deps.toast(r.error, "error");
       return;
@@ -766,7 +767,7 @@ export function createWalletManagerActions(deps: WalletManagerDeps) {
       deps.toast("Watch address is required", "error");
       return;
     }
-    const r = await deps.api("POST", "/api/inventory/watch-addresses/upsert", {
+    const r = await deps.api("POST", ROUTE_PATHS.API_INVENTORY_WATCH_ADDRESSES_UPSERT, {
       address,
       label: optionalTextValue("walletImportWatchLabel"),
       tags: [],

@@ -237,11 +237,12 @@ pub(crate) const RISK_SEVERITIES: [&str; 5] = ["critical", "high", "medium", "lo
 
 /// Discovery job states accepted by the `state` filter; `resume_requested`
 /// is a legacy value that pre-real-resume stores may still hold.
-pub(crate) const DISCOVERY_JOB_STATES: [&str; 5] = [
+pub(crate) const DISCOVERY_JOB_STATES: [&str; 6] = [
     "running",
     "completed",
     "canceled",
     "failed",
+    "interrupted",
     "resume_requested",
 ];
 

@@ -220,6 +220,7 @@ async fn run_loop(state: Arc<AppState>, config: SchedulerConfig) {
     }
 }
 
+#[derive(Debug)]
 struct CycleReport {
     outcome: &'static str,
     refresh_ran: bool,
@@ -243,11 +244,15 @@ async fn run_cycle(
     // Ephemeral full session, revoked on every exit path (including a
     // budget-timeout drop) so the idle auto-lock is never defeated.
     let session = InternalSession::create(state);
+    // Capture the scheduler's authorization identity before its first await.
+    // Every later mutating boundary revalidates this exact session +
+    // compartment instead of adopting whatever is active after a wait.
+    let session_context = service.capture_session_operation_context(Some(session.token()))?;
 
     // Stage 1 — treasury automation (mirrors the maintenance cycle: before
     // the guard, self-gated on `enabled && allow_treasury_automation`,
     // both default off).
-    let automation = service.run_treasury_automation(session.token()).await?;
+    let automation = service.run_treasury_automation(&session_context).await?;
 
     // Read-only due-work pre-check, before touching the guard.
     let paused = service.queue_execution_paused()?;
@@ -283,8 +288,26 @@ async fn run_cycle(
     // A cycle that cannot start promptly SKIPS rather than queueing up
     // behind operator-driven work; per-(source, chain) serialization stays
     // intact because all processing goes through the single guard.
-    let _guard = match tokio::time::timeout(GUARD_WAIT, state.operation_guard()).await {
-        Ok(guard) => guard,
+    let operation_guard = match tokio::time::timeout(
+        GUARD_WAIT,
+        service.acquire_session_operation(&session_context),
+    )
+    .await
+    {
+        Ok(Ok(guard)) => guard,
+        Ok(Err(_error)) if state.is_locking() || !state.is_unlocked() => {
+            return Ok(CycleReport {
+                outcome: OUTCOME_SKIPPED_LOCKED,
+                refresh_ran: false,
+            });
+        }
+        Ok(Err(error)) => return Err(error),
+        Err(_) if state.is_locking() || !state.is_unlocked() => {
+            return Ok(CycleReport {
+                outcome: OUTCOME_SKIPPED_LOCKED,
+                refresh_ran: false,
+            });
+        }
         Err(_) => {
             return Ok(CycleReport {
                 outcome: OUTCOME_SKIPPED_GUARD_BUSY,
@@ -292,6 +315,13 @@ async fn run_cycle(
             });
         }
     };
+    if state.is_locking() {
+        return Ok(CycleReport {
+            outcome: OUTCOME_SKIPPED_LOCKED,
+            refresh_ran: false,
+        });
+    }
+    let token = session_context.token.as_str();
 
     // Authoritative reload under the guard, exactly like the maintenance
     // path.
@@ -314,7 +344,7 @@ async fn run_cycle(
     if refresh_wanted {
         let refresh = service
             .refresh_eth_stealth_deposits_state(
-                session.token(),
+                token,
                 &mut deposits,
                 &mut queue,
                 EthStealthDepositRefreshRequest {
@@ -335,7 +365,7 @@ async fn run_cycle(
     // refresh cadence (auto-watch), enqueue due sweeps. Everything it
     // enqueues drains under the same gates and barriers in stage 3.
     let one_time = service
-        .advance_one_time_receive_allocations_state(session.token(), &mut queue, refresh_due)
+        .advance_one_time_receive_allocations_state(token, &mut queue, refresh_due)
         .await?;
     if one_time.tracked {
         stages.push("stage:one_time_receive".to_string());
@@ -348,13 +378,14 @@ async fn run_cycle(
     if !service.queue_execution_paused()? {
         let processed = service
             .process_queue_state(
-                session.token(),
+                token,
                 &mut queue,
                 QueueProcessRequest {
                     id: None,
                     limit: Some(DRAIN_JOB_LIMIT),
                     run_async: None,
                 },
+                &operation_guard,
                 None,
             )
             .await?;
@@ -437,6 +468,8 @@ impl Drop for InternalSession<'_> {
 
 #[cfg(test)]
 mod tests {
+    use sigillum_api::QueueJobPayload;
+
     use super::*;
 
     #[test]
@@ -518,5 +551,70 @@ mod tests {
         }
 
         assert!(!state.verify_token_passive(&token));
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn lock_latch_while_scheduler_waits_skips_without_mutation() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let state =
+            Arc::new(AppState::new(dir.path().to_path_buf()).expect("app state should initialize"));
+        state.unlock_compartment(
+            0,
+            [1u8; 32],
+            sigillum_fido2::config::CompartmentMeta {
+                id: 0,
+                label: "daily".into(),
+                threshold: 1,
+                passphrase_mode: None,
+            },
+        );
+        let queued = super::super::queue::queued_job(
+            "scheduler-queued-before-lock".into(),
+            1,
+            QueueJobPayload::EthStealthNativeSweep {
+                wallet_profile: "missing-profile".into(),
+                stealth_address: "0x0000000000000000000000000000000000000001".into(),
+                ephemeral_public_key_hex: "0x02".into(),
+                destination_address: Some("0x0000000000000000000000000000000000000002".into()),
+                min_value_wei_hex: None,
+                gas_limit: None,
+                view_tag_hex: None,
+                stealth_hash_convention: None,
+            },
+        );
+        crate::queue_store::save_queue(
+            &state.base_dir,
+            &crate::queue_store::QueueState { jobs: vec![queued] },
+        )
+        .unwrap();
+        let service = SigillumService::new(state.clone());
+
+        let held_operation = state.operation_guard().await;
+        let mut cycle = Box::pin(run_cycle(&service, &state, false));
+        tokio::select! {
+            biased;
+            result = &mut cycle => panic!("cycle completed before reaching the held guard: {result:?}"),
+            () = tokio::task::yield_now() => {}
+        }
+        assert!(
+            state.begin_locking(),
+            "the test must latch locking after cycle admission"
+        );
+        drop(held_operation);
+
+        let report = cycle.await.expect("lock contention is a scheduler skip");
+        assert_eq!(report.outcome, OUTCOME_SKIPPED_LOCKED);
+        assert!(!report.refresh_ran);
+        let queue = crate::queue_store::load_queue(&state.base_dir).unwrap();
+        let job = &queue.jobs[0];
+        assert_eq!(job.state, "queued");
+        assert_eq!(job.attempts, 0);
+        assert!(job.receipt.signed_raw_transaction_hex.is_none());
+        assert!(job.broadcast_transaction_hash_hex.is_none());
+        assert!(
+            state.list_operations(10).is_empty(),
+            "a skipped cycle must not register a summary operation"
+        );
+        state.lock_all();
     }
 }

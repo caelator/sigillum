@@ -6,7 +6,9 @@
 //! ## Cryptographic Building Blocks
 //!
 //! - **ECDH Shared Secrets**: Uses secp256k1 elliptic curve Diffie-Hellman to derive ephemeral
-//!   shared secrets between payers and recipients.
+//!   shared points between payers and recipients. New scheme-1 payments hash the compressed
+//!   SEC1 point used by ScopeLift's `stealth-address-sdk`; recipient paths also recognize
+//!   Sigillum's legacy x-coordinate-only hash so existing payments remain recoverable.
 //! - **Keccak256 Hashing**: Hashes shared secrets for key derivation and address computation.
 //! - **View Tags**: Compact filtering mechanism (single byte) allowing recipients to quickly identify
 //!   stealth payments without full cryptographic verification on every block.
@@ -1810,6 +1812,206 @@ pub struct UnsignedEip1559Transaction {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // External ERC-5564 scheme-1 known-answer vectors.
+    //
+    // Generated on 2026-07-30 by executing the official ScopeLift
+    // `stealth-address-sdk` v1.0.0-beta.5 source at commit
+    // 88bcc27c3b6163080ee18f330dfd6336dc8bd2e2:
+    // https://github.com/ScopeLift/stealth-address-sdk/tree/v1.0.0-beta.5
+    //
+    // `generateStealthAddress` supplied the ephemeral public key, view tag, and
+    // stealth address; `computeStealthKey` independently supplied the recovered
+    // private key; and `checkStealthAddress` returned true for each vector. The
+    // legacy values were separately derived with the SDK's pinned noble/viem
+    // primitive stack by hashing only bytes 1..33 of the compressed shared point,
+    // reproducing Sigillum's pre-fix x-coordinate convention. None of these
+    // expected values came from a Sigillum generation/detection roundtrip.
+    struct StealthInteropVector {
+        spending_private_key_hex: &'static str,
+        viewing_private_key_hex: &'static str,
+        ephemeral_private_key_hex: &'static str,
+        stealth_meta_address: &'static str,
+        ephemeral_public_key_hex: &'static str,
+        scope_lift_view_tag_hex: &'static str,
+        scope_lift_stealth_address: &'static str,
+        scope_lift_stealth_private_key_hex: &'static str,
+        legacy_view_tag_hex: &'static str,
+        legacy_stealth_address: &'static str,
+        legacy_stealth_private_key_hex: &'static str,
+    }
+
+    const STEALTH_INTEROP_VECTORS: [StealthInteropVector; 2] = [
+        StealthInteropVector {
+            spending_private_key_hex: "1111111111111111111111111111111111111111111111111111111111111111",
+            viewing_private_key_hex: "2222222222222222222222222222222222222222222222222222222222222222",
+            ephemeral_private_key_hex: "3333333333333333333333333333333333333333333333333333333333333333",
+            stealth_meta_address: "st:eth:0x034f355bdcb7cc0af728ef3cceb9615d90684bb5b2ca5f859ab0f0b704075871aa02466d7fcae563e5cb09a0d1870bb580344804617879a14949cf22285f1bae3f27",
+            ephemeral_public_key_hex: "023c72addb4fdf09af94f0c94d7fe92a386a7e70cf8a1d85916386bb2535c7b1b1",
+            scope_lift_view_tag_hex: "20",
+            scope_lift_stealth_address: "0xd8606ed2ecdb71fdcb8cca8fa1925ff84238f2a9",
+            scope_lift_stealth_private_key_hex: "32074def70f9689560d0eb1b86aa895b735ed5852c9ce187ff0dcd968e8a19d3",
+            legacy_view_tag_hex: "83",
+            legacy_stealth_address: "0x35cfea8cf9c3e33bc210a65793840aa5a86f51a8",
+            legacy_stealth_private_key_hex: "949f681db53715b3d5509806f2bc71df8276fc8c983a4af809e2c8218fff225f",
+        },
+        StealthInteropVector {
+            spending_private_key_hex: "0000000000000000000000000000000000000000000000000000000000000002",
+            viewing_private_key_hex: "0000000000000000000000000000000000000000000000000000000000000003",
+            ephemeral_private_key_hex: "0000000000000000000000000000000000000000000000000000000000000005",
+            stealth_meta_address: "st:eth:0x02c6047f9441ed7d6d3045406e95c07cd85c778e4b8cef3ca7abac09b95c709ee502f9308a019258c31049344f85f89d5229b531c845836f99b08601f113bce036f9",
+            ephemeral_public_key_hex: "022f8bde4d1a07209355b4a7250a5c5128e88b84bddc619ab7cba8d569b240efe4",
+            scope_lift_view_tag_hex: "05",
+            scope_lift_stealth_address: "0x058d1eae9a219a0a1dc1da37462f4e12ae369c7d",
+            scope_lift_stealth_private_key_hex: "05043fd4ff06a9e61df614f47987d6325c6a0c77cb9f40ccf00ad2e8e60e1809",
+            legacy_view_tag_hex: "b4",
+            legacy_stealth_address: "0x82a80277c84afbb61ad48dd65c4c890324d4be8f",
+            legacy_stealth_private_key_hex: "b4bfb09a7507847db47c7ea325081971dbec889ea95cf9d1f17b47b590737e2f",
+        },
+    ];
+
+    fn decode_secret_key(value: &str) -> SecretKey {
+        let bytes = hex::decode(value).unwrap();
+        SecretKey::from_slice(&bytes).unwrap()
+    }
+
+    fn decode_private_key_bytes(value: &str) -> [u8; 32] {
+        hex::decode(value).unwrap().try_into().unwrap()
+    }
+
+    fn wallet_from_interop_vector(vector: &StealthInteropVector) -> EthereumStealthWallet {
+        let spending_private_key = decode_secret_key(vector.spending_private_key_hex);
+        let viewing_private_key = decode_secret_key(vector.viewing_private_key_hex);
+        let parsed_meta_address = parse_meta_address(vector.stealth_meta_address).unwrap();
+
+        assert_eq!(
+            parsed_meta_address.spending_public_key,
+            spending_private_key.public_key()
+        );
+        assert_eq!(
+            parsed_meta_address.viewing_public_key,
+            viewing_private_key.public_key()
+        );
+
+        EthereumStealthWallet {
+            meta_address: EthereumStealthMetaAddress {
+                wallet: "interop-vector".to_string(),
+                short_name: parsed_meta_address.short_name,
+                scheme_id: ETHEREUM_STEALTH_SCHEME_ID,
+                stealth_meta_address: vector.stealth_meta_address.to_string(),
+                spending_public_key_hex: encode_public_key(&spending_private_key.public_key()),
+                viewing_public_key_hex: encode_public_key(&viewing_private_key.public_key()),
+            },
+            spending_private_key,
+            viewing_private_key,
+        }
+    }
+
+    #[test]
+    fn generated_payments_match_scope_lift_scheme_1_vectors() {
+        for vector in &STEALTH_INTEROP_VECTORS {
+            let wallet = wallet_from_interop_vector(vector);
+            let payment = generate_ethereum_stealth_address(
+                vector.stealth_meta_address,
+                Some(decode_private_key_bytes(vector.ephemeral_private_key_hex)),
+                StealthHashConvention::Compressed33,
+            )
+            .unwrap();
+
+            assert_eq!(
+                payment.ephemeral_public_key_hex,
+                vector.ephemeral_public_key_hex
+            );
+            assert_eq!(payment.view_tag_hex, vector.scope_lift_view_tag_hex);
+            assert_eq!(payment.stealth_address, vector.scope_lift_stealth_address);
+
+            let check = check_ethereum_stealth_address(
+                &wallet,
+                vector.scope_lift_stealth_address,
+                vector.ephemeral_public_key_hex,
+                Some(u8::from_str_radix(vector.scope_lift_view_tag_hex, 16).unwrap()),
+                StealthHashConvention::Compressed33,
+            )
+            .unwrap();
+            assert!(check.matches);
+            assert_eq!(
+                check.derived_stealth_address,
+                vector.scope_lift_stealth_address
+            );
+
+            let (stealth_private_key, hashed_shared_secret) = derive_verified_stealth_key(
+                &wallet,
+                vector.scope_lift_stealth_address,
+                vector.ephemeral_public_key_hex,
+                Some(u8::from_str_radix(vector.scope_lift_view_tag_hex, 16).unwrap()),
+                StealthHashConvention::Compressed33,
+            )
+            .unwrap();
+            assert_eq!(
+                hex::encode(stealth_private_key.to_bytes()),
+                vector.scope_lift_stealth_private_key_hex
+            );
+            assert_eq!(
+                derive_view_tag(&hashed_shared_secret),
+                u8::from_str_radix(vector.scope_lift_view_tag_hex, 16).unwrap()
+            );
+        }
+    }
+
+    #[test]
+    fn legacy_sigillum_x_only_payments_remain_detectable_and_spendable() {
+        for vector in &STEALTH_INTEROP_VECTORS {
+            let wallet = wallet_from_interop_vector(vector);
+            let legacy_view_tag = u8::from_str_radix(vector.legacy_view_tag_hex, 16).unwrap();
+
+            let check = check_ethereum_stealth_address(
+                &wallet,
+                vector.legacy_stealth_address,
+                vector.ephemeral_public_key_hex,
+                Some(legacy_view_tag),
+                StealthHashConvention::XOnly32,
+            )
+            .unwrap();
+            assert!(check.matches);
+            assert_eq!(check.derived_stealth_address, vector.legacy_stealth_address);
+
+            let (stealth_private_key, hashed_shared_secret) = derive_verified_stealth_key(
+                &wallet,
+                vector.legacy_stealth_address,
+                vector.ephemeral_public_key_hex,
+                Some(legacy_view_tag),
+                StealthHashConvention::XOnly32,
+            )
+            .unwrap();
+            assert_eq!(
+                hex::encode(stealth_private_key.to_bytes()),
+                vector.legacy_stealth_private_key_hex
+            );
+            assert_eq!(derive_view_tag(&hashed_shared_secret), legacy_view_tag);
+
+            let signature = sign_ethereum_stealth_digest(
+                &wallet,
+                vector.legacy_stealth_address,
+                vector.ephemeral_public_key_hex,
+                Some(legacy_view_tag),
+                &[7u8; 32],
+                StealthHashConvention::XOnly32,
+            )
+            .unwrap();
+            assert_eq!(signature.stealth_address, vector.legacy_stealth_address);
+            assert_eq!(signature.view_tag_hex, vector.legacy_view_tag_hex);
+
+            let error = derive_verified_stealth_key(
+                &wallet,
+                vector.legacy_stealth_address,
+                vector.ephemeral_public_key_hex,
+                Some(u8::from_str_radix(vector.scope_lift_view_tag_hex, 16).unwrap()),
+                StealthHashConvention::XOnly32,
+            )
+            .unwrap_err();
+            assert_eq!(error, EthereumStealthError::ViewTagMismatch);
+        }
+    }
 
     #[test]
     fn derived_wallet_exports_stable_meta_address() {

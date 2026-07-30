@@ -3,8 +3,8 @@
 use std::process;
 
 use super::{
-    parse_flag, read_optional_sensitive_input, require_flag, require_u32_flag, run_api_command,
-    run_api_command_with,
+    decode_32_byte_hex, parse_flag, read_optional_sensitive_input, reject_raw_ephemeral_key_flags,
+    require_flag, require_u32_flag, run_api_command, run_api_command_with,
 };
 
 const USAGE: &str = "Usage: sigillum api wallets <xpub-export|xpub-derive|stealth-export|stealth-generate|stealth-check> [...]";
@@ -108,21 +108,6 @@ fn read_optional_ephemeral_private_key(args: &[String]) -> Option<[u8; 32]> {
         .map(|value| decode_32_byte_hex("ephemeral private key", &value))
 }
 
-fn reject_raw_ephemeral_key_flags(args: &[String]) {
-    for flag in [
-        "--ephemeral-key",
-        "--ephemeral-private-key",
-        "--ephemeral-private-key-hex",
-    ] {
-        if args.iter().any(|arg| arg == flag) {
-            eprintln!(
-                "Do not pass ephemeral private keys as CLI arguments; use --ephemeral-key-env VAR or --ephemeral-key-stdin."
-            );
-            process::exit(1);
-        }
-    }
-}
-
 fn parse_view_tag(args: &[String]) -> Option<u8> {
     parse_flag(args, "--view-tag-hex").map(|value| {
         let bytes = decode_hex_flag("--view-tag-hex", &value);
@@ -140,21 +125,6 @@ fn parse_view_tag(args: &[String]) -> Option<u8> {
 fn require_hex_flag(args: &[String], flag: &str, usage: &str) -> Vec<u8> {
     let value = require_flag(args, flag, usage);
     decode_hex_flag(flag, &value)
-}
-
-fn decode_32_byte_hex(name: &str, value: &str) -> [u8; 32] {
-    let bytes = hex::decode(value).unwrap_or_else(|error| {
-        eprintln!("Invalid hex for {name}: {error}");
-        process::exit(1);
-    });
-    if bytes.len() != 32 {
-        eprintln!(
-            "Invalid value for {name}: expected exactly 32 bytes, got {}.",
-            bytes.len()
-        );
-        process::exit(1);
-    }
-    bytes.try_into().expect("length checked")
 }
 
 fn decode_hex_flag(flag: &str, value: &str) -> Vec<u8> {

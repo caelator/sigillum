@@ -1,3 +1,4 @@
+import { ROUTE_PATHS } from "../routePaths";
 import type {
   Counterparty,
   TreasuryAutomationStatus,
@@ -804,7 +805,7 @@ export function createTreasuryActions(deps: TreasuryActionsDeps) {
 
   async function loadTreasuryParties(): Promise<void> {
     try {
-      const r = await deps.api("GET", "/api/treasury/parties");
+      const r = await deps.api("GET", ROUTE_PATHS.API_TREASURY_PARTIES);
       if (r.error) return;
       treasuryParties = (r.parties || []) as Counterparty[];
       renderTreasuryParties(treasuryParties);
@@ -833,7 +834,7 @@ export function createTreasuryActions(deps: TreasuryActionsDeps) {
 
   async function loadTreasuryOverviewOnly(): Promise<void> {
     try {
-      const r = await deps.api("GET", "/api/treasury/overview");
+      const r = await deps.api("GET", ROUTE_PATHS.API_TREASURY_OVERVIEW);
       if (r.error) return;
       renderTreasuryOverview(r as TreasuryOverviewResponse);
     } catch (_) {}
@@ -841,7 +842,7 @@ export function createTreasuryActions(deps: TreasuryActionsDeps) {
 
   async function loadTreasuryPolicy(): Promise<void> {
     try {
-      const r = await deps.api("GET", "/api/treasury/policy");
+      const r = await deps.api("GET", ROUTE_PATHS.API_TREASURY_POLICY);
       if (r.error) return;
       const policy = (r.policy || null) as TreasuryPolicy | null;
       renderTreasuryPolicy(policy);
@@ -851,7 +852,7 @@ export function createTreasuryActions(deps: TreasuryActionsDeps) {
 
   async function loadTreasuryReceiveAddresses(): Promise<void> {
     try {
-      const r = await deps.api("GET", "/api/treasury/receive-addresses");
+      const r = await deps.api("GET", ROUTE_PATHS.API_TREASURY_RECEIVE_ADDRESSES);
       if (r.error) return;
       renderTreasuryReceiveAllocations(
         (r.allocations || []) as TreasuryReceiveAllocation[],
@@ -869,7 +870,7 @@ export function createTreasuryActions(deps: TreasuryActionsDeps) {
   }
 
   async function refreshTreasuryOverview(): Promise<void> {
-    const r = await deps.api("GET", "/api/treasury/overview");
+    const r = await deps.api("GET", ROUTE_PATHS.API_TREASURY_OVERVIEW);
     if (r.error) {
       deps.toast(r.error, "error");
       return;
@@ -1018,7 +1019,7 @@ export function createTreasuryActions(deps: TreasuryActionsDeps) {
     );
     if (saveButton) saveButton.classList.add("btn-busy");
     try {
-      const r = await deps.api("POST", "/api/treasury/policy/update", body);
+      const r = await deps.api("POST", ROUTE_PATHS.API_TREASURY_POLICY_UPDATE, body);
       if (r.error) {
         deps.toast(r.error, "error");
         return;
@@ -1153,7 +1154,7 @@ export function createTreasuryActions(deps: TreasuryActionsDeps) {
     const body: { name: string; note?: string; sweep_destination_address?: string } = { name };
     if (note) body.note = note;
     if (sweepDestination) body.sweep_destination_address = sweepDestination;
-    const r = await deps.api("POST", "/api/treasury/parties", body);
+    const r = await deps.api("POST", ROUTE_PATHS.API_TREASURY_PARTIES, body);
     if (r.error) {
       deps.toast(r.error, "error");
       return;
@@ -1211,7 +1212,7 @@ export function createTreasuryActions(deps: TreasuryActionsDeps) {
     }
     const r = await deps.api(
       "POST",
-      "/api/treasury/parties/update",
+      ROUTE_PATHS.API_TREASURY_PARTIES_UPDATE,
       partyUpdateBody(party, sweepDestination),
     );
     if (r.error) {
@@ -1230,7 +1231,7 @@ export function createTreasuryActions(deps: TreasuryActionsDeps) {
     }
     const r = await deps.api(
       "POST",
-      "/api/treasury/parties/update",
+      ROUTE_PATHS.API_TREASURY_PARTIES_UPDATE,
       partyUpdateBody(party, ""),
     );
     if (r.error) {

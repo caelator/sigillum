@@ -18,6 +18,7 @@ use axum::{Json, Router};
 use reqwest::StatusCode;
 use serde_json::{Value, json};
 use sha3::{Digest, Keccak256};
+use sigillum_fido2::config::CompartmentMeta;
 use tempfile::TempDir;
 
 const ONE_ETH_HEX: &str = "0xde0b6b3a7640000";
@@ -25,15 +26,21 @@ const DESTINATION: &str = "0x1111111111111111111111111111111111111111";
 
 // ── Daemon + gated provider fixtures ─────────────────────────────
 
-async fn spawn_daemon(base_dir: PathBuf) -> (SocketAddr, tokio::task::JoinHandle<()>) {
+async fn spawn_daemon(
+    base_dir: PathBuf,
+) -> (
+    SocketAddr,
+    Arc<sigillum_daemon::AppState>,
+    tokio::task::JoinHandle<()>,
+) {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
-    let (app, _state) =
+    let (app, state) =
         sigillum_daemon::build_router(base_dir, addr.port()).expect("router should initialize");
     let handle = tokio::spawn(async move {
         axum::serve(listener, app).await.unwrap();
     });
-    (addr, handle)
+    (addr, state, handle)
 }
 
 fn submitted_raw_transaction_hash(request: &Value) -> Value {
@@ -161,6 +168,7 @@ struct Rig {
     client: reqwest::Client,
     addr: SocketAddr,
     token: String,
+    state: Arc<sigillum_daemon::AppState>,
     rpc: Arc<GatedRpcState>,
     handle: tokio::task::JoinHandle<()>,
     rpc_handle: tokio::task::JoinHandle<()>,
@@ -257,7 +265,7 @@ impl Rig {
 
 async fn spawn_rig() -> Rig {
     let dir = TempDir::new().unwrap();
-    let (addr, handle) = spawn_daemon(dir.path().to_path_buf()).await;
+    let (addr, state, handle) = spawn_daemon(dir.path().to_path_buf()).await;
     let (rpc_addr, rpc_handle, rpc) = spawn_gated_evm_provider().await;
     let client = reqwest::Client::new();
 
@@ -279,6 +287,7 @@ async fn spawn_rig() -> Rig {
         client,
         addr,
         token,
+        state,
         rpc,
         handle,
         rpc_handle,
@@ -380,7 +389,118 @@ fn job_by_id(jobs: &[Value], id: &str) -> Value {
         .unwrap_or_else(|| panic!("job {id} missing: {jobs:?}"))
 }
 
+fn compartment(id: usize, label: &str) -> CompartmentMeta {
+    CompartmentMeta {
+        id,
+        label: label.into(),
+        threshold: 1,
+        passphrase_mode: None,
+    }
+}
+
+async fn wait_for_failed_operation(
+    state: &sigillum_daemon::AppState,
+    operation_id: &str,
+) -> sigillum_api::Operation {
+    for _ in 0..100 {
+        let operation = state
+            .get_operation(operation_id)
+            .expect("operation remains registered");
+        if operation.state == "failed" {
+            return operation;
+        }
+        tokio::task::yield_now().await;
+    }
+    panic!(
+        "operation never failed: {:?}",
+        state.get_operation(operation_id)
+    );
+}
+
 // ── Tests ────────────────────────────────────────────────────────
+
+#[tokio::test(flavor = "current_thread")]
+async fn async_queue_drain_rejects_compartment_adoption_while_waiting() {
+    let rig = spawn_rig().await;
+    let job_id = rig.enqueue_transfer().await;
+    rig.state
+        .unlock_compartment(1, [2u8; 32], compartment(1, "later"));
+
+    let held_operation = rig.state.operation_guard().await;
+    let (status, drain) = rig
+        .post("/api/queue/process", json!({ "run_async": true }))
+        .await;
+    assert_eq!(status, StatusCode::OK, "drain response: {drain}");
+    let operation_id = drain["operation"]["id"].as_str().unwrap().to_string();
+
+    rig.state
+        .switch_active_for(&rig.token, 1)
+        .expect("test compartment switch succeeds");
+    drop(held_operation);
+
+    let operation = wait_for_failed_operation(&rig.state, &operation_id).await;
+    assert!(
+        operation
+            .error
+            .as_deref()
+            .is_some_and(|error| error.contains("compartment changed")),
+        "operation must reject the admission-context change: {operation:?}"
+    );
+    let job = job_by_id(&rig.queue_jobs().await, &job_id);
+    assert_eq!(job["state"], "queued");
+    assert_eq!(job["attempts"], json!(0));
+    assert!(job["receipt"]["signed_raw_transaction_hex"].is_null());
+    assert!(job["broadcast_transaction_hash_hex"].is_null());
+    assert_eq!(
+        rig.rpc.send_raw_calls.load(Ordering::SeqCst),
+        0,
+        "the rejected drain must not broadcast"
+    );
+
+    rig.shutdown();
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn async_maintenance_rejects_compartment_adoption_across_stage_waits() {
+    let rig = spawn_rig().await;
+    let job_id = rig.enqueue_transfer().await;
+    rig.state
+        .unlock_compartment(1, [2u8; 32], compartment(1, "later"));
+
+    let held_operation = rig.state.operation_guard().await;
+    let (status, run) = rig
+        .post("/api/maintenance/run", json!({ "run_async": true }))
+        .await;
+    assert_eq!(status, StatusCode::OK, "maintenance response: {run}");
+    let operation_id = run["operation"]["id"].as_str().unwrap().to_string();
+
+    rig.state
+        .switch_active_for(&rig.token, 1)
+        .expect("test compartment switch succeeds");
+    drop(held_operation);
+
+    let operation = wait_for_failed_operation(&rig.state, &operation_id).await;
+    assert!(
+        operation
+            .error
+            .as_deref()
+            .is_some_and(|error| error.contains("compartment changed")),
+        "operation must reject the admission-context change: {operation:?}"
+    );
+    assert_eq!(operation.progress.processed, 1);
+    let job = job_by_id(&rig.queue_jobs().await, &job_id);
+    assert_eq!(job["state"], "queued");
+    assert_eq!(job["attempts"], json!(0));
+    assert!(job["receipt"]["signed_raw_transaction_hex"].is_null());
+    assert!(job["broadcast_transaction_hash_hex"].is_null());
+    assert_eq!(
+        rig.rpc.send_raw_calls.load(Ordering::SeqCst),
+        0,
+        "the rejected maintenance run must not broadcast"
+    );
+
+    rig.shutdown();
+}
 
 /// An async drain processes every selected job to completion and reports
 /// exact progress counts (jobs attempted vs jobs selected).

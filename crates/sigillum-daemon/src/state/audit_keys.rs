@@ -1,14 +1,60 @@
 use std::io;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use hkdf::Hkdf;
 use rand::RngCore;
 use rand::rngs::OsRng;
 use sha2::Sha256;
+use sigillum_api::AuditEvent;
 use sigillum_core::VaultLifecycle;
+
+use crate::audit_db::AuditQuery;
+use crate::audit_log::{AuditEventSpec, StoredAuditEvent};
 
 use super::AppState;
 
 impl AppState {
+    pub(crate) fn record_audit_event(
+        &self,
+        compartment_id: Option<usize>,
+        spec: AuditEventSpec,
+    ) -> Result<(), std::io::Error> {
+        let created_at_unix = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+        let event = StoredAuditEvent {
+            created_at_unix,
+            compartment_id,
+            spec,
+        };
+        let path = self.audit_db_path();
+        let (scope, key) = self.audit_chain_scope_and_key(compartment_id)?;
+        crate::audit_db::append_event_chained(&path, &event, &scope, &key)
+    }
+
+    pub(crate) fn read_audit_events(
+        &self,
+        query: AuditQuery,
+    ) -> Result<Vec<AuditEvent>, std::io::Error> {
+        let path = self.audit_db_path();
+        crate::audit_db::query_events(
+            &path,
+            &AuditQuery {
+                tail: self.runtime_policy().audit_limit(Some(query.tail.max(1))),
+                ..query
+            },
+        )
+    }
+
+    pub(crate) fn verify_audit_chain(
+        &self,
+        scope: &str,
+    ) -> Result<sigillum_api::AuditVerifyReport, std::io::Error> {
+        let key = self.audit_key_for_scope(scope)?;
+        crate::audit_db::verify_chain(&self.audit_db_path(), scope, &key)
+    }
+
     pub(super) fn audit_chain_scope_and_key(
         &self,
         compartment_id: Option<usize>,

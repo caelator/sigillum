@@ -8,20 +8,13 @@
 > [!IMPORTANT]
 > Sigillum has not published a supported stable release. Build and evaluate the
 > current source on a non-production machine with test wallets first.
-> RC2–RC4 are immutable failed-contract receipts. `v1.0.0-rc.5` is a valid,
-> checksum-verified draft candidate on protected main, but it is unpublished
-> and lacks the complete F6, clean-install, UI-signoff, and evidence-bundle
-> record required for final promotion. The operator-surface feature line's
-> interaction/browser checkpoint is `c435611`; implementation checkpoint
-> `8ea6f8e` restores the architecture, formatting, and strict-clippy gates, and
-> audited documentation/release-gate checkpoint `fc1e93b` passed the complete
-> clean-tree release gate in 919 seconds with every recorded return code zero.
-> The receipt log has SHA-256
-> `efb8e2240949d32f0f53ff8ee028d1016724df849e038b361b9fed78f23dab94`.
-> That receipt proves `fc1e93b` only; any later documentation-only successor
-> must have its exact HEAD gated externally before protected-main integration.
-> The branch changes code after RC5, so its next candidate is RC6 after that
-> merge. No final `v1.0.0` tag or published GitHub Release exists.
+> `v1.0.0-rc.2` through `v1.0.0-rc.4` are immutable failure receipts.
+> `v1.0.0-rc.5` at `7e04743` is an unpublished historical draft only; it
+> cannot certify the integrated hardening changes. No RC6 exists. The next
+> eligible candidate is RC6 only after the exact integrated HEAD passes the
+> clean release gate and independent review, lands through protected `main`,
+> and passes required CI. No final `v1.0.0` tag or published GitHub Release
+> exists.
 
 Sigillum is a self-hosted, single-operator workstation for finding EVM wallets
 and assets, understanding their provenance and risk, preparing consolidation
@@ -162,8 +155,7 @@ Start with the [documentation map](docs/README.md). Key references include:
 - [FIDO2 model and constraints](docs/fido2.md)
 - [Privacy and linkage model](docs/architecture.md#privacy--linkage-model)
 - [Current readiness evidence](docs/production-readiness-audit.md)
-- [Current execution handoff](docs/execution-handoff.md)
-- [Operator-surface and privacy plan](docs/operator-surface-and-privacy-plan.md)
+- [1.0 release plan](docs/release-1.0-plan.md)
 - [1.0 execution runbook](docs/execution-runbook-1.0.md)
 - [Wallet-management roadmap](docs/wallet-management-roadmap.md)
 
@@ -187,13 +179,16 @@ public issues.
 - Workspace version: `1.0.0`
 - Supported stable release: none
 - Published GitHub Release: none
-- Unpublished draft candidate: `v1.0.0-rc.5` at protected-main `7e04743`
+- Historical unpublished draft: `v1.0.0-rc.5` at protected-main `7e04743`
+- Current RC6: none
+- Release-evidence target: macOS 15.x on Apple Silicon (`aarch64`) only
 - Current supported boundary: source evaluation only
 
 The workspace version describes the intended 1.0 contract; it does not by itself
 mean a release was published. Final release status is authoritative only when an
 annotated `v1.0.0` tag and its GitHub Release both exist and the release workflow
-passes.
+passes. RC releases must remain draft, unpublished, and marked as prereleases;
+the final draft and published release must not be marked as prereleases.
 
 ## License
 

@@ -165,6 +165,17 @@ pub(crate) struct SigillumService {
     state: Arc<AppState>,
 }
 
+/// Immutable authorization state captured before an authenticated operation
+/// waits for the daemon-wide mutation boundary.
+///
+/// A queued request must not silently inherit a compartment switch, removal,
+/// session revocation, or lock that happened while it was waiting.
+#[derive(Clone)]
+struct SessionOperationContext {
+    token: String,
+    active_compartment_id: Option<usize>,
+}
+
 impl SigillumService {
     pub(crate) fn new(state: Arc<AppState>) -> Self {
         Self { state }
@@ -211,6 +222,48 @@ impl SigillumService {
             Err(ServiceError::capability_scope_denied(format!(
                 "Missing daemon capability scope: {scope}"
             )))
+        }
+    }
+
+    /// Capture the authenticated identity and compartment selected at request
+    /// admission. Callers retain their endpoint-specific full-session or scope
+    /// check before using this helper.
+    fn capture_session_operation_context(
+        &self,
+        token: Option<&str>,
+    ) -> ServiceResult<SessionOperationContext> {
+        let token = self.require_authenticated_session(token)?.to_owned();
+        let active_compartment_id = self.state.active_compartment_id_for(&token);
+        Ok(SessionOperationContext {
+            token,
+            active_compartment_id,
+        })
+    }
+
+    /// Enter the serialized operation boundary, then revalidate the original
+    /// bearer and compartment while holding it.
+    async fn acquire_session_operation<'a>(
+        &'a self,
+        context: &SessionOperationContext,
+    ) -> ServiceResult<tokio::sync::MutexGuard<'a, ()>> {
+        let guard = self.state.operation_guard().await;
+        self.require_authenticated_session(Some(&context.token))?;
+        if self.state.active_compartment_id_for(&context.token) != context.active_compartment_id {
+            return Err(ServiceError::conflict(
+                "Session compartment changed while the operation was waiting.",
+            ));
+        }
+        Ok(guard)
+    }
+
+    /// Final funds-moving admission point, ordered against the lock latch.
+    fn admit_broadcast(&self) -> ServiceResult<()> {
+        if self.state.admit_broadcast_if_ready() {
+            Ok(())
+        } else {
+            Err(ServiceError::locked(
+                "Daemon is locking; transaction broadcast was not admitted.",
+            ))
         }
     }
 
@@ -410,6 +463,90 @@ mod tests {
         assert!(!state.verify_token(&session_a));
         assert!(state.verify_token(&session_b));
         assert!(state.is_unlocked());
+    }
+
+    #[tokio::test]
+    async fn queued_session_operation_rejects_compartment_change() {
+        let dir = TempDir::new().unwrap();
+        let state =
+            Arc::new(AppState::new(dir.path().to_path_buf()).expect("app state should initialize"));
+        state.unlock_compartment(0, [1u8; 32], meta(0, 1, "daily"));
+        state.unlock_compartment(1, [2u8; 32], meta(1, 2, "secure"));
+        let session = state.create_session(Some(0));
+        let service = SigillumService::new(state.clone());
+        let context = service
+            .capture_session_operation_context(Some(&session))
+            .unwrap();
+
+        let held_operation = state.operation_guard().await;
+        let queued = tokio::spawn(async move {
+            service
+                .acquire_session_operation(&context)
+                .await
+                .map(|_| ())
+        });
+        tokio::task::yield_now().await;
+        state.switch_active_for(&session, 1).unwrap();
+        drop(held_operation);
+
+        let error = queued.await.unwrap().unwrap_err();
+        assert_eq!(error.status(), axum::http::StatusCode::CONFLICT);
+    }
+
+    #[tokio::test]
+    async fn queued_session_operation_rejects_revoked_session() {
+        let dir = TempDir::new().unwrap();
+        let state =
+            Arc::new(AppState::new(dir.path().to_path_buf()).expect("app state should initialize"));
+        state.unlock_compartment(0, [1u8; 32], meta(0, 1, "daily"));
+        let session = state.create_session(Some(0));
+        let service = SigillumService::new(state.clone());
+        let context = service
+            .capture_session_operation_context(Some(&session))
+            .unwrap();
+
+        let held_operation = state.operation_guard().await;
+        let queued = tokio::spawn(async move {
+            service
+                .acquire_session_operation(&context)
+                .await
+                .map(|_| ())
+        });
+        tokio::task::yield_now().await;
+        state.revoke_session(&session);
+        drop(held_operation);
+
+        let error = queued.await.unwrap().unwrap_err();
+        assert_eq!(error.status(), axum::http::StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn lock_latch_preempts_operation_waiting_for_mutex() {
+        let dir = TempDir::new().unwrap();
+        let state =
+            Arc::new(AppState::new(dir.path().to_path_buf()).expect("app state should initialize"));
+        state.unlock_compartment(0, [1u8; 32], meta(0, 1, "daily"));
+        let session = state.create_session(Some(0));
+        let service = SigillumService::new(state.clone());
+        let context = service
+            .capture_session_operation_context(Some(&session))
+            .unwrap();
+
+        let held_operation = state.operation_guard().await;
+        let queued = tokio::spawn(async move {
+            service
+                .acquire_session_operation(&context)
+                .await
+                .map(|_| ())
+        });
+        tokio::task::yield_now().await;
+        assert!(state.begin_locking());
+        drop(held_operation);
+
+        let error = queued.await.unwrap().unwrap_err();
+        assert_eq!(error.status(), axum::http::StatusCode::LOCKED);
+        assert!(!state.admit_broadcast_if_ready());
+        state.lock_all();
     }
 
     #[test]

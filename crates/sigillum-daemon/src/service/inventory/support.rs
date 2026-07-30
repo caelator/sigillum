@@ -5,6 +5,7 @@ use sigillum_api::{
     WalletAddressActivityState, WalletAssetHolding, WalletAssetKind, WalletDiscoveryJob,
     WalletInventoryAddress,
 };
+use sigillum_core::decode_quantity_hex;
 
 use crate::service::helpers::random_id;
 use crate::service::{ServiceError, ServiceResult};
@@ -623,6 +624,14 @@ fn protocol_address_key_matches(left: &WalletAssetHolding, right: &WalletAssetHo
         && (left.protocol_address.is_none() || right.protocol_address.is_none())
 }
 
+/// Flags effectively unlimited approvals, including uint160-max Permit2 allowances, not only
+/// uint256-max approvals.
+pub(super) fn is_very_large_approval(amount_hex: &str) -> bool {
+    decode_quantity_hex(amount_hex)
+        .map(|bytes| bytes[..16].iter().any(|byte| *byte != 0))
+        .unwrap_or(false)
+}
+
 pub(super) fn quantity_hex_is_nonzero(value: &str) -> bool {
     value
         .strip_prefix("0x")
@@ -698,6 +707,37 @@ mod tests {
     const OWNER: &str = "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
     const CONTRACT: &str = "0x1111111111111111111111111111111111111111";
     const TRUSTED: &str = "0xdead000000000000000000000000000000000000";
+
+    #[test]
+    fn very_large_approval_threshold_is_inclusive_at_two_to_the_128() {
+        let cases = [
+            ("2^128 - 1", "0xffffffffffffffffffffffffffffffff", false),
+            ("2^128", "0x100000000000000000000000000000000", true),
+            (
+                "Permit2 maximum allowance (2^160 - 1)",
+                "0xffffffffffffffffffffffffffffffffffffffff",
+                true,
+            ),
+            (
+                "2^255",
+                "0x8000000000000000000000000000000000000000000000000000000000000000",
+                true,
+            ),
+            (
+                "2^256 - 1",
+                "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+                true,
+            ),
+        ];
+
+        for (label, amount_hex, expected) in cases {
+            assert_eq!(
+                is_very_large_approval(amount_hex),
+                expected,
+                "{label} classification"
+            );
+        }
+    }
 
     #[test]
     fn airdropped_mock_collection_is_flagged_with_both_reasons() {

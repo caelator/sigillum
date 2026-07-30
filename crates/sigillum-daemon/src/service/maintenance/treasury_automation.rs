@@ -4,8 +4,8 @@ use axum::http::StatusCode;
 use sigillum_api::{
     ConsolidationPlan, ConsolidationPlanApproveRequest, ConsolidationPlanSimulateRequest,
     ConsolidationPlanStep, MaintenanceFailureBreakdown, PlanEnqueueStepRequest,
-    TreasuryAutomationRunSummary, WalletAssetKind, WalletInventoryAddress, WalletPlanStatus,
-    WalletPlanStepAction, WalletPlanStepStatus, WalletSignerStatus, WalletSimulationStatus,
+    TreasuryAutomationRunSummary, WalletAssetKind, WalletInventoryAddress, WalletPlanStepAction,
+    WalletPlanStepStatus, WalletSignerStatus, WalletSimulationStatus,
 };
 use sigillum_core::decode_quantity_hex;
 
@@ -17,13 +17,37 @@ use super::super::helpers::{compare_u256, now_unix, random_id, subtract_u256};
 use super::super::inventory::WALLET_FAMILY_ETH_SEED;
 use super::super::inventory::planner::{
     analyze_plan_linkage, apply_linkage_blockers, apply_policy_blockers_to_step,
-    assign_step_ordering, plan_policy_violations, summarize_plan_steps,
+    assign_step_ordering, plan_policy_violations, plan_status, summarize_plan_steps,
 };
 use super::super::queue::{ExecutionFamily, execution_gate_denial, is_active_queue_state};
-use super::super::{ServiceError, ServiceResult, SigillumService};
+use super::super::{ServiceError, ServiceResult, SessionOperationContext, SigillumService};
 
 const AUTOMATION_ORIGIN: &str = "treasury_automation";
 const MAX_SKIPPED_REASONS: usize = 8;
+
+#[cfg(test)]
+#[derive(Default)]
+struct AutomationAfterPersistHook {
+    reached: tokio::sync::Notify,
+    resume: tokio::sync::Notify,
+}
+
+#[cfg(test)]
+static AUTOMATION_AFTER_PERSIST_HOOK: std::sync::Mutex<
+    Option<std::sync::Arc<AutomationAfterPersistHook>>,
+> = std::sync::Mutex::new(None);
+
+#[cfg(test)]
+async fn pause_after_persist_for_test() {
+    let hook = AUTOMATION_AFTER_PERSIST_HOOK
+        .lock()
+        .expect("automation test hook mutex")
+        .clone();
+    if let Some(hook) = hook {
+        hook.reached.notify_one();
+        hook.resume.notified().await;
+    }
+}
 
 pub(in crate::service) struct TreasuryAutomationOutcome {
     pub summary: TreasuryAutomationRunSummary,
@@ -45,8 +69,9 @@ struct CandidateSelection {
 impl SigillumService {
     pub(in crate::service) async fn run_treasury_automation(
         &self,
-        token: &str,
+        session_context: &SessionOperationContext,
     ) -> ServiceResult<Option<TreasuryAutomationOutcome>> {
+        let token = session_context.token.as_str();
         let state = load_inventory(&self.state.base_dir)?;
         let Some(policy) = state.treasury_policy.clone() else {
             return Ok(None);
@@ -66,7 +91,7 @@ impl SigillumService {
         }
 
         let generated_plans = {
-            let _guard = self.state.operation_guard().await;
+            let _guard = self.acquire_session_operation(session_context).await?;
             let mut current = load_inventory(&self.state.base_dir)?;
             let candidates = std::mem::take(&mut selection.candidates);
             let plans = persist_generated_plans(&mut current, candidates, now_unix());
@@ -85,13 +110,15 @@ impl SigillumService {
                 },
             )?;
         }
+        #[cfg(test)]
+        pause_after_persist_for_test().await;
 
         let mut failures = MaintenanceFailureBreakdown::default();
         let mut simulation_failed_plan_ids = Vec::new();
         for plan in &generated_plans {
             if let Err(error) = self
-                .simulate_consolidation_plan(
-                    Some(token),
+                .simulate_consolidation_plan_with_context(
+                    session_context,
                     ConsolidationPlanSimulateRequest {
                         plan_id: plan.id.clone(),
                         step_ids: Vec::new(),
@@ -115,7 +142,7 @@ impl SigillumService {
             .map(|plan| plan.id.clone())
             .collect::<Vec<_>>();
         let eligible = {
-            let _guard = self.state.operation_guard().await;
+            let _guard = self.acquire_session_operation(session_context).await?;
             let mut current = load_inventory(&self.state.base_dir)?;
             let eligible = mark_auto_eligible_steps(
                 &mut current,
@@ -131,8 +158,8 @@ impl SigillumService {
         let mut enqueued_steps = 0usize;
         for (plan_id, step_id) in eligible {
             match self
-                .approve_consolidation_plan(
-                    Some(token),
+                .approve_consolidation_plan_with_context(
+                    session_context,
                     ConsolidationPlanApproveRequest {
                         plan_id: plan_id.clone(),
                         step_ids: vec![step_id.clone()],
@@ -149,8 +176,8 @@ impl SigillumService {
                 }
             }
             match self
-                .enqueue_consolidation_plan_step(
-                    Some(token),
+                .enqueue_consolidation_plan_step_with_context(
+                    session_context,
                     PlanEnqueueStepRequest {
                         plan_id,
                         step_id,
@@ -429,13 +456,7 @@ fn persist_generated_plans(
             apply_linkage_blockers(&mut steps);
         }
         let summary = summarize_plan_steps(&steps);
-        let status = if summary.total_steps == 0 {
-            WalletPlanStatus::Empty
-        } else if summary.blocked_steps > 0 || !policy_violations.is_empty() {
-            WalletPlanStatus::Blocked
-        } else {
-            WalletPlanStatus::ReviewRequired
-        };
+        let status = plan_status(&summary, &policy_violations);
         generated.push(ConsolidationPlan {
             id: random_id(),
             status,
@@ -584,12 +605,17 @@ fn encode_quantity_hex(value: &[u8; 32]) -> String {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
     use sigillum_api::{
         EthSeedWalletProfile, QueueJob, QueueJobPayload, QueueJobReceipt, TreasuryPolicy,
-        WalletAddressActivityState,
+        WalletAddressActivityState, WalletPlanStatus,
     };
+    use sigillum_fido2::config::CompartmentMeta;
+    use tempfile::TempDir;
 
     use super::*;
+    use crate::AppState;
 
     fn policy(enabled: bool, automation: bool) -> TreasuryPolicy {
         TreasuryPolicy {
@@ -919,6 +945,82 @@ mod tests {
                 broadcast_rejected: 77,
                 receipt_timeout: 88,
             }
+        );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn enabled_automation_rejects_compartment_adoption_after_plan_persist() {
+        let dir = TempDir::new().unwrap();
+        let state =
+            Arc::new(AppState::new(dir.path().to_path_buf()).expect("state should initialize"));
+        for (id, key, label) in [(0, [1u8; 32], "admitted"), (1, [2u8; 32], "later")] {
+            state.unlock_compartment(
+                id,
+                key,
+                CompartmentMeta {
+                    id,
+                    label: label.into(),
+                    threshold: 1,
+                    passphrase_mode: None,
+                },
+            );
+        }
+        let session = state.create_session(Some(0));
+        let service = SigillumService::new(state.clone());
+        let session_context = service
+            .capture_session_operation_context(Some(&session))
+            .expect("admission context");
+
+        let mut inventory = state_with_policy(policy(true, true));
+        inventory.addresses = vec![address(
+            "seed-a",
+            1,
+            "0x1111111111111111111111111111111111111111",
+            "0x20",
+            100,
+        )];
+        save_inventory(&state.base_dir, &inventory).unwrap();
+        crate::profiles::save_profiles(&state.base_dir, &registry("seed-a")).unwrap();
+
+        let hook = Arc::new(AutomationAfterPersistHook::default());
+        *AUTOMATION_AFTER_PERSIST_HOOK
+            .lock()
+            .expect("automation test hook mutex") = Some(hook.clone());
+        let automation =
+            tokio::spawn(async move { service.run_treasury_automation(&session_context).await });
+        tokio::time::timeout(std::time::Duration::from_secs(2), hook.reached.notified())
+            .await
+            .expect("automation reached post-persist gap");
+
+        let persisted = load_inventory(&state.base_dir).unwrap();
+        assert_eq!(persisted.consolidation_plans.len(), 1);
+        assert_eq!(
+            persisted.consolidation_plans[0].origin.as_deref(),
+            Some(AUTOMATION_ORIGIN)
+        );
+        state
+            .switch_active_for(&session, 1)
+            .expect("test compartment switch succeeds");
+        hook.resume.notify_one();
+
+        let error = match automation.await.expect("automation task joins") {
+            Ok(_) => panic!("automation must reject the later compartment"),
+            Err(error) => error,
+        };
+        *AUTOMATION_AFTER_PERSIST_HOOK
+            .lock()
+            .expect("automation test hook mutex") = None;
+        assert_eq!(error.status(), StatusCode::CONFLICT);
+        assert!(error.message().contains("compartment changed"));
+
+        let persisted = load_inventory(&state.base_dir).unwrap();
+        let step = &persisted.consolidation_plans[0].steps[0];
+        assert!(!step.auto_eligible);
+        assert!(!step.approved);
+        assert!(step.queued_job_id.is_none());
+        assert!(
+            load_queue(&state.base_dir).unwrap().jobs.is_empty(),
+            "no adopted-compartment enqueue may occur"
         );
     }
 }

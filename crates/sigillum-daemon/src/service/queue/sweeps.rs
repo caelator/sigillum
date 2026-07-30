@@ -26,6 +26,7 @@ impl SigillumService {
         gas_limit_override: Option<u64>,
         view_tag_hex: Option<String>,
         stealth_hash_convention: Option<StealthHashConvention>,
+        operation_guard: &tokio::sync::MutexGuard<'_, ()>,
     ) -> ServiceResult<QueueExecution> {
         let (provider, wallet) = self.resolve_wallet_profile(wallet_profile)?;
         let destination_address = destination_address
@@ -84,8 +85,8 @@ impl SigillumService {
             }
         }
         let sent = self
-            .eth_stealth_send_with_profile(
-                Some(token),
+            .eth_stealth_send_with_profile_under_operation_guard(
+                token,
                 EthStealthSendWithProfileRequest {
                     wallet_profile: wallet_profile.into(),
                     stealth: StealthPaymentRef {
@@ -103,6 +104,7 @@ impl SigillumService {
                     estimate_fees: None,
                     broadcast: Some(false),
                 },
+                operation_guard,
             )
             .await?;
         Ok(QueueExecution::prepared_from_send(sent))
@@ -121,6 +123,7 @@ impl SigillumService {
         gas_limit_override: Option<u64>,
         view_tag_hex: Option<String>,
         stealth_hash_convention: Option<StealthHashConvention>,
+        operation_guard: &tokio::sync::MutexGuard<'_, ()>,
     ) -> ServiceResult<QueueExecution> {
         let (provider, wallet) = self.resolve_wallet_profile(wallet_profile)?;
         let recipient_address = recipient_address
@@ -172,8 +175,8 @@ impl SigillumService {
         }
 
         let sent = self
-            .eth_stealth_send_erc20_with_profile(
-                Some(token),
+            .eth_stealth_send_erc20_with_profile_under_operation_guard(
+                token,
                 EthStealthSendErc20WithProfileRequest {
                     wallet_profile: wallet_profile.into(),
                     stealth: StealthPaymentRef {
@@ -192,6 +195,7 @@ impl SigillumService {
                     estimate_fees: None,
                     broadcast: Some(false),
                 },
+                operation_guard,
             )
             .await?;
         Ok(QueueExecution::prepared_from_send(sent))

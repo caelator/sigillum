@@ -3,7 +3,6 @@
 
 use std::sync::Arc;
 
-use axum::Json;
 use axum::extract::State;
 use axum::http::HeaderMap;
 use axum::response::Response;
@@ -12,7 +11,7 @@ use sigillum_api::SelfCheckRunRequest;
 use crate::AppState;
 use crate::service::SigillumService;
 
-use super::{bearer_token, service_response, validated};
+use super::{ValidatedJson, bearer_token, service_response};
 
 pub(crate) async fn diagnostics(
     State(state): State<Arc<AppState>>,
@@ -25,12 +24,8 @@ pub(crate) async fn diagnostics(
 pub(crate) async fn selfcheck_run(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
-    Json(body): Json<SelfCheckRunRequest>,
+    ValidatedJson(body): ValidatedJson<SelfCheckRunRequest>,
 ) -> Response {
-    let body = match validated(Json(body)) {
-        Ok(b) => b,
-        Err(resp) => return resp,
-    };
     let service = SigillumService::new(state);
     service_response(
         service

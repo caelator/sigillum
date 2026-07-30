@@ -7,6 +7,7 @@ import {
   readSessionToken,
   requestWithSession,
   subscribeSessionToken,
+  withBackgroundRequests,
   writeSessionToken,
 } from "../src/api/session";
 import { dispatchDataAction } from "../src/actions/dispatcher";
@@ -48,6 +49,7 @@ import {
   renderWorkspaceSectionNav,
 } from "../src/views/shell";
 import { createWalletActions } from "../src/views/wallets";
+import { WALLET_WIRE_LITERALS } from "../src/contracts";
 import {
   createTreasuryActions,
   formatWeiHexAsEth,
@@ -965,8 +967,18 @@ test("session requests persist fresh tokens and clear stale tokens on 401", asyn
 
   await requestWithSession("POST", "/api/example", { ok: true });
   equal(captured.headers.Authorization, "Bearer old-token");
+  equal(captured.headers["X-Sigillum-Background"], undefined);
   equal(captured.body, '{"ok":true}');
   equal(readSessionToken(), "new-token");
+
+  await requestWithSession("GET", "/api/background", undefined, {
+    background: true,
+  });
+  equal(captured.headers["X-Sigillum-Background"], "1");
+  await withBackgroundRequests(() =>
+    requestWithSession("GET", "/api/refresh-cycle"),
+  );
+  equal(captured.headers["X-Sigillum-Background"], "1");
 
   (globalThis as any).fetch = async () => ({
     status: 401,
@@ -1177,6 +1189,26 @@ test("setup wizard passphrase path validates and initializes a local vault", asy
     "wizDoneDetail",
     "wizLinkageChoiceStatus",
   ]);
+  const wizardSteps = [
+    dom.el("wizStepWelcome"),
+    dom.el("wizStep0"),
+    dom.el("wizStepPassphrase"),
+    dom.el("wizStepDone"),
+  ];
+  wizardSteps.forEach((step) => step.classList.add("wizard-step"));
+  dom.el("wizStep0").classList.add("active");
+  (document as any).querySelectorAll = (selector: string) =>
+    selector === ".wizard-step" ? wizardSteps : [];
+  let focused = "";
+  (dom.el("wizStageTitle") as any).focus = () => {
+    focused = "wizStageTitle";
+  };
+  (dom.el("wizPassphrase") as any).focus = () => {
+    focused = "wizPassphrase";
+  };
+  (dom.el("wizPassphraseConfirm") as any).focus = () => {
+    focused = "wizPassphraseConfirm";
+  };
   const calls: Array<{ method: string; path: string; body?: any }> = [];
   const toasts: Array<{ message: string; type?: string }> = [];
   let refreshed = false;
@@ -1206,6 +1238,13 @@ test("setup wizard passphrase path validates and initializes a local vault", asy
 
     wizard.wizPreset("passphrase");
     equal(dom.el("wizStepPassphrase").classList.contains("active"), true);
+    equal(dom.el("wizStep0").getAttribute("aria-hidden"), "true");
+    equal(dom.el("wizStepPassphrase").getAttribute("aria-hidden"), "false");
+    equal((dom.el("wizStep0") as any).inert, true);
+    equal((dom.el("wizStepPassphrase") as any).inert, false);
+    equal(dom.el("wizStageTitle").getAttribute("role"), "heading");
+    equal(dom.el("wizPassphrase").getAttribute("aria-label"), "New vault passphrase");
+    equal(focused, "wizStageTitle");
     equal(dom.el("wizStageTitle").textContent, "Create your first local compartment");
 
     dom.el("wizPLabel").value = "browser-smoke";
@@ -1214,12 +1253,16 @@ test("setup wizard passphrase path validates and initializes a local vault", asy
     await wizard.wizInitPassphrase();
     equal(calls.length, 0);
     deepEqual(toasts.pop(), { message: "Min 8 characters", type: "error" });
+    equal(dom.el("wizPassphrase").getAttribute("aria-invalid"), "true");
+    equal(focused, "wizPassphrase");
 
     dom.el("wizPassphrase").value = "browser-smoke-passphrase-123";
     dom.el("wizPassphraseConfirm").value = "browser-smoke-passphrase-456";
     await wizard.wizInitPassphrase();
     equal(calls.length, 0);
     deepEqual(toasts.pop(), { message: "Passphrases do not match", type: "error" });
+    equal(dom.el("wizPassphraseConfirm").getAttribute("aria-invalid"), "true");
+    equal(focused, "wizPassphraseConfirm");
 
     dom.el("wizPassphraseConfirm").value = "browser-smoke-passphrase-123";
     await wizard.wizInitPassphrase();
@@ -1243,6 +1286,11 @@ test("setup wizard passphrase path validates and initializes a local vault", asy
     );
     equal(dom.el("wizStepDone").classList.contains("active"), true);
     equal(refreshed, true);
+
+    wizard.reset();
+    equal(dom.el("wizStepWelcome").classList.contains("active"), true);
+    equal(dom.el("wizStepDone").getAttribute("aria-hidden"), "true");
+    equal(dom.el("wizStageTitle").textContent, "Before you create a vault");
   } finally {
     globalThis.setTimeout = originalSetTimeout;
   }

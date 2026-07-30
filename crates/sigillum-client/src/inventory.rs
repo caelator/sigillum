@@ -12,12 +12,13 @@ use sigillum_api::response::{
     WalletInventoryListResponse, WalletInventoryScanResponse, WatchAddressBookListResponse,
     WatchAddressBookMutationResponse,
 };
+use sigillum_api::route_paths as p;
 
 use crate::{ClientError, SigillumClient};
 
 impl SigillumClient {
     pub async fn list_wallet_inventory(&self) -> Result<WalletInventoryListResponse, ClientError> {
-        let builder = self.request(Method::GET, "/api/inventory/wallets");
+        let builder = self.request(Method::GET, p::API_INVENTORY_WALLETS);
         self.send(builder).await
     }
 
@@ -26,7 +27,7 @@ impl SigillumClient {
         request: WalletInventoryScanRequest,
     ) -> Result<WalletInventoryScanResponse, ClientError> {
         let builder = self
-            .request(Method::POST, "/api/inventory/scan/evm")
+            .request(Method::POST, p::API_INVENTORY_SCAN_EVM)
             .json(&request);
         self.send(builder).await
     }
@@ -44,7 +45,7 @@ impl SigillumClient {
     pub async fn list_nft_metadata_optins(
         &self,
     ) -> Result<NftMetadataOptInListResponse, ClientError> {
-        let builder = self.request(Method::GET, "/api/inventory/nft-metadata/opt-ins");
+        let builder = self.request(Method::GET, p::API_INVENTORY_NFT_METADATA_OPT_INS);
         self.send(builder).await
     }
 
@@ -53,7 +54,7 @@ impl SigillumClient {
         request: NftMetadataOptInUpsertRequest,
     ) -> Result<NftMetadataOptInMutationResponse, ClientError> {
         let builder = self
-            .request(Method::POST, "/api/inventory/nft-metadata/opt-ins/upsert")
+            .request(Method::POST, p::API_INVENTORY_NFT_METADATA_OPT_INS_UPSERT)
             .json(&request);
         self.send(builder).await
     }
@@ -63,7 +64,7 @@ impl SigillumClient {
         request: NftMetadataOptInDeleteRequest,
     ) -> Result<NftMetadataOptInMutationResponse, ClientError> {
         let builder = self
-            .request(Method::POST, "/api/inventory/nft-metadata/opt-ins/delete")
+            .request(Method::POST, p::API_INVENTORY_NFT_METADATA_OPT_INS_DELETE)
             .json(&request);
         self.send(builder).await
     }
@@ -73,7 +74,7 @@ impl SigillumClient {
         request: NftMetadataSettingsUpdateRequest,
     ) -> Result<NftMetadataSettingsResponse, ClientError> {
         let builder = self
-            .request(Method::POST, "/api/inventory/nft-metadata/settings")
+            .request(Method::POST, p::API_INVENTORY_NFT_METADATA_SETTINGS)
             .json(&request);
         self.send(builder).await
     }
@@ -83,7 +84,7 @@ impl SigillumClient {
         request: NftMetadataFetchRequest,
     ) -> Result<NftMetadataFetchResponse, ClientError> {
         let builder = self
-            .request(Method::POST, "/api/inventory/nft-metadata/fetch")
+            .request(Method::POST, p::API_INVENTORY_NFT_METADATA_FETCH)
             .json(&request);
         self.send(builder).await
     }
@@ -91,7 +92,7 @@ impl SigillumClient {
     pub async fn list_watch_address_book(
         &self,
     ) -> Result<WatchAddressBookListResponse, ClientError> {
-        let builder = self.request(Method::GET, "/api/inventory/watch-addresses");
+        let builder = self.request(Method::GET, p::API_INVENTORY_WATCH_ADDRESSES);
         self.send(builder).await
     }
 
@@ -100,7 +101,7 @@ impl SigillumClient {
         request: WatchAddressBookUpsertRequest,
     ) -> Result<WatchAddressBookMutationResponse, ClientError> {
         let builder = self
-            .request(Method::POST, "/api/inventory/watch-addresses/upsert")
+            .request(Method::POST, p::API_INVENTORY_WATCH_ADDRESSES_UPSERT)
             .json(&request);
         self.send(builder).await
     }
@@ -113,13 +114,13 @@ impl SigillumClient {
             address: address.to_string(),
         };
         let builder = self
-            .request(Method::POST, "/api/inventory/watch-addresses/delete")
+            .request(Method::POST, p::API_INVENTORY_WATCH_ADDRESSES_DELETE)
             .json(&request);
         self.send(builder).await
     }
 
     pub async fn list_token_registry(&self) -> Result<TokenRegistryListResponse, ClientError> {
-        let builder = self.request(Method::GET, "/api/inventory/token-registry");
+        let builder = self.request(Method::GET, p::API_INVENTORY_TOKEN_REGISTRY);
         self.send(builder).await
     }
 
@@ -128,7 +129,7 @@ impl SigillumClient {
         request: TokenRegistryImportRequest,
     ) -> Result<TokenRegistryMutationResponse, ClientError> {
         let builder = self
-            .request(Method::POST, "/api/inventory/token-registry/import")
+            .request(Method::POST, p::API_INVENTORY_TOKEN_REGISTRY_IMPORT)
             .json(&request);
         self.send(builder).await
     }
@@ -141,13 +142,13 @@ impl SigillumClient {
             name: name.to_string(),
         };
         let builder = self
-            .request(Method::POST, "/api/inventory/token-registry/delete")
+            .request(Method::POST, p::API_INVENTORY_TOKEN_REGISTRY_DELETE)
             .json(&request);
         self.send(builder).await
     }
 
     pub async fn list_chain_profiles(&self) -> Result<ChainProfileListResponse, ClientError> {
-        let builder = self.request(Method::GET, "/api/chains");
+        let builder = self.request(Method::GET, p::API_CHAINS);
         self.send(builder).await
     }
 
@@ -156,7 +157,7 @@ impl SigillumClient {
         request: ChainProfileUpsertRequest,
     ) -> Result<ChainProfileMutationResponse, ClientError> {
         let builder = self
-            .request(Method::POST, "/api/chains/upsert")
+            .request(Method::POST, p::API_CHAINS_UPSERT)
             .json(&request);
         self.send(builder).await
     }
@@ -166,7 +167,7 @@ impl SigillumClient {
         name: &str,
     ) -> Result<ChainProfileMutationResponse, ClientError> {
         let builder = self
-            .request(Method::POST, "/api/chains/delete")
+            .request(Method::POST, p::API_CHAINS_DELETE)
             .json(&ChainProfileDeleteRequest { name: name.into() });
         self.send(builder).await
     }

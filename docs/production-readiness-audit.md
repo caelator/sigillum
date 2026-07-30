@@ -1,31 +1,24 @@
 # Production Readiness Audit
 
-**Date:** June 4, 2026 (updated July 18, 2026)
+**Date:** June 4, 2026 (updated July 30, 2026)
 **Scope:** local-first, single-host Sigillum source checkout and local-sidecar
 gateway boundary
-**Verdict:** RC5 is a valid but incomplete draft candidate for protected-main
-commit `7e047438f6305ef1cedecdf4790e1b0e1d7e1e6e`. Remote annotated tag object
-`c726ba9` peels to that commit; release workflow `29248938476` passed all six
-jobs, and the five payload assets independently match the draft's
-`SHA256SUMS`. Standard/chaos F4 and doctor receipts bind to the same SHA. RC5
-still lacks F6 public-testnet receipts, desktop clean-install evidence, UI
-sign-off, and a complete sanitized evidence bundle, so it cannot promote a
-final release.
+**Verdict:** there is no production-ready or published stable release.
+`v1.0.0-rc.2` through `v1.0.0-rc.4` are immutable failure receipts for the tag,
+packaging, and F6/runtime contracts. `v1.0.0-rc.5` at `7e04743` completed its
+workflow and has checksum-verified assets in an unpublished historical draft,
+but it cannot certify the later integrated hardening changes. No RC6 exists.
 
-The operator-surface branch changes code after RC5 and includes protected main
-through merge `3b647f8`; its committed keyboard/accessibility checkpoint is
-`29426df`. At historical interaction/browser checkpoint `c435611`, UI tests pass
-225/225, typecheck and build pass, axe passes 15/15, screenshots pass 12/12,
-and real-daemon browser smoke passes. Current implementation checkpoint
-`8ea6f8e` restores the architecture, formatting, and strict-clippy gates.
-Audited documentation/release-gate checkpoint
-`fc1e93b1aa2cf9524b2b99fd04342863ba6b2b1d` passed the complete clean-tree
-release gate. RC5 evidence is historical baseline for that feature line. After
-protected-main integration the next eligible candidate is RC6, and every
-release receipt must bind to RC6's peeled SHA. No final `v1.0.0` tag or published
-GitHub Release exists. RC2–RC4 remain immutable failed-contract evidence.
-Gateway payments remain disabled-by-default experimental observations, not
-supported 1.0 confirmation semantics.
+The next eligible evidence anchor is `v1.0.0-rc.6` only after the exact
+integrated HEAD passes the clean release gate and independent review, lands
+through protected `main`, and passes required CI. Every automated and operator
+receipt must bind to that RC6 peeled SHA. C7 is partial: the five-destination
+operator console is implemented, but its RC6 walkthrough and operator sign-off
+remain open. The target-host evidence boundary is macOS 15.x on Apple Silicon
+(`aarch64`) only. The current macOS 26.5.2/arm64 host is ineligible for F4,
+doctor, clean-install, or C7 release receipts. No final `v1.0.0` tag or
+published GitHub Release exists. Gateway payments remain disabled-by-default
+experimental observations, not supported 1.0 confirmation semantics.
 
 RC4 release run `29230844456` nevertheless completed all six jobs, including
 strict source and mounted-dmg verification, and produced its six expected draft
@@ -35,19 +28,20 @@ contract. RC5 run `29248938476` is the first succeeding candidate under the
 remediated tag, packaging, runtime, and F6 schema-v2 contracts, but operator
 evidence remains incomplete as described above.
 
+RC5 release run `29248938476` completed the corrected six-job workflow and left
+its six expected assets in an unpublished draft. That is positive evidence for
+the RC5 code and release contracts at `7e04743`, not for later commits. RC5
+receipts cannot be carried forward.
+
 ## Evidence Snapshot
 
-Audited checkpoint `fc1e93b` is source-ready for the documented single-host
-boundary: `./scripts/check-release.sh` ran from `2026-07-18T17:15:16Z` through
-`2026-07-18T17:30:35Z` (919 seconds), did not mutate tracked files, and recorded
-`gate_rc=0`, `tee_rc=0`, `filter_rc=0`, and `overall_rc=0`. The operator-local
-external receipt ID is `20260718T171516Z-fc1e93b1aa2c`, and its log SHA-256 is
-`efb8e2240949d32f0f53ff8ee028d1016724df849e038b361b9fed78f23dab94`.
-The gate makes the release standard executable instead of scattering it across
-README, CI, and readiness notes. This local receipt proves `fc1e93b` only; any
-later documentation-only successor requires an external exact-HEAD clean-gate
-receipt before protected-main integration, without another documentation edit
-solely to record that receipt.
+Historical checkpoint `fc1e93b` passed its then-current clean-tree release gate
+in 919 seconds, but that SHA is predecessor evidence only. It does not establish
+the current integrated tree as source-ready. The exact integrated HEAD must run
+`./scripts/check-release.sh` from a clean tree without tracked-file mutation,
+then complete independent review, protected merge, and required CI before RC6
+may be created. The gate makes the release standard executable instead of
+scattering it across README, CI, and readiness notes.
 
 The gate covers:
 
@@ -99,12 +93,22 @@ The release-tag contract reads the authoritative remote annotated tag object
 and peeled commit, binds both to the triggering SHA, fetches a missing tag
 object only into a non-tag scratch ref, requires RC numbers to advance the
 retained remote sequence by exactly one, and pins the initial tag-object ID into
-the final draft-release job. Pushed RC tags are permanent receipt anchors, and
-the RC draft/assets remain available through final-draft verification. A final
+the final draft-release job. RC releases must remain draft, unpublished, and
+`prerelease=true`; the final draft and published release must be
+`prerelease=false`. Pushed RC tags are permanent receipt anchors, and the RC
+draft/assets remain available through final-draft verification. A final
 `v1.0.0` tag must peel to the identical commit as the RC receipts, or those
-receipts are void and a new RC is required. Final assets receive their own
-checksum verification before publication; only then may the older RC draft be
-removed.
+receipts are void and a new RC is required.
+
+The intended final-promotion contract reruns the source-verification legs but
+skips artifact rebuilds. It copies the exact five qualified RC payload bytes
+under final names, verifies byte identity and tag-normalized digest equality,
+regenerates `SHA256SUMS`, attaches the validated release-evidence bundle as the
+seventh asset, and re-verifies the live final draft before the H2-authorized
+conditional publication. That path is not yet executable in the
+merge-in-progress checkout: the promotion script, final-tag workflow branches,
+and release-state enforcement are an integration prerequisite. Fresh final-tag
+payload builds cannot substitute for the qualified RC bytes.
 
 The historical `v1.0.0-rc.1` rehearsal tag was deleted under the superseded
 cleanup procedure. That number remains burned and is not recreated. It is the
@@ -117,9 +121,9 @@ draft assets contained an app for which `codesign -dv` misleadingly printed
 bundle had no resource seal. The new verifier rejects that exact linker-only
 shape, mounts the dmg read-only without executing its binary, and requires the
 mounted app to match the already verified source app. RC5 is the retained
-successor to the separate RC4 evidence-contract failure. Because the current
-feature line changes code after RC5, its next permitted candidate is
-`v1.0.0-rc.6` after protected-main integration.
+historical successor to the separate RC4 evidence-contract failure. Because
+the current feature line changes code after RC5, its next permitted candidate
+is `v1.0.0-rc.6` only after exact-HEAD gating, review, protected merge, and CI.
 
 The first sandboxed run failed when loopback integration tests could not bind
 local sockets under the execution sandbox. The same release gate passed outside
@@ -187,10 +191,10 @@ macOS bundle portion can be skipped with `SIGILLUM_SKIP_DESKTOP_BUNDLE=1` only
 outside CI when the host cannot build Tauri bundles; non-macOS hosts print an
 explicit bundle-skip line after the compile check.
 
-The configurable reliability harness is `scripts/check-local-soak.sh`. A bounded
-local validation run passed with `SIGILLUM_SOAK_SECONDS=300`,
+The configurable reliability harness is `scripts/check-local-soak.sh`. A
+historical bounded local validation run passed with `SIGILLUM_SOAK_SECONDS=300`,
 `SIGILLUM_SOAK_INTERVAL_SECONDS=10`, and 28 full iterations. A longer
-target-host run also passed on `mac-server` with
+historical run also passed on `mac-server` with
 `SIGILLUM_SOAK_SECONDS=3600`, `SIGILLUM_SOAK_INTERVAL_SECONDS=30`, and
 `SIGILLUM_SOAK_RECEIPT=target/readiness/local-soak-3600-d1fd325.json`.
 The receipt records a clean `main` checkout at
@@ -198,6 +202,9 @@ The receipt records a clean `main` checkout at
 117 `sigillum doctor` runs, the daemon and gateway loopback URLs, and the
 checked surfaces: daemon status, vault API-key write/read canary, gateway
 health, and `sigillum doctor`.
+Darwin `25.5.0` corresponds to macOS 26.5.2 and is outside the macOS 15.x
+release-evidence boundary. This receipt is non-qualifying historical harness
+evidence only; it cannot satisfy RC6 F4, doctor, clean-install, or C7 gates.
 
 Chaos mode is enabled with `SIGILLUM_SOAK_CHAOS=1`; it `kill -9`s the
 harness's own daemon every `SIGILLUM_SOAK_CHAOS_EVERY` iterations, defaulting
@@ -250,20 +257,20 @@ pass with empty ignore lists.
 
 | Requirement | Current evidence | Status |
 | --- | --- | --- |
-| Build and dependency graph resolve | `cargo metadata --locked --no-deps --format-version 1` inside `./scripts/check-release.sh` | Passed without tracked-tree mutation at `fc1e93b`; an exact-HEAD external receipt is required for any successor |
-| Architecture stays within professional boundaries | `./scripts/check-architecture.sh` inside the release gate | Passed inside the complete clean-tree gate at `fc1e93b` |
-| Daemon UI compiles and tested source matches generated assets | `npm ci`, `npm audit --audit-level=high`, `npm run typecheck`, `npm test`, `npm run build`, generated-asset freshness, and pinned 15-scenario axe-core checks | Historical focused evidence is green at `c435611`; the complete UI source gate passed at `fc1e93b` |
-| Rust workspace builds, tests, and lints | Locked workspace check/test/clippy plus independent no-HID FIDO2 check/test/clippy inside the release gate | Passed inside the complete clean-tree gate at `fc1e93b`, including independent no-HID coverage |
-| Security and supply-chain baseline | `cargo audit --file Cargo.lock` and `cargo deny --locked check` inside the release gate | Passed for the `fc1e93b` lockfile, with accepted duplicate dependency warnings |
+| Build and dependency graph resolve | `cargo metadata --locked --no-deps --format-version 1` inside `./scripts/check-release.sh` | Historical predecessor evidence exists; exact integrated-HEAD release gate pending |
+| Architecture stays within professional boundaries | `./scripts/check-architecture.sh` inside the release gate | Focused integration checks exist; exact integrated-HEAD release gate and review pending |
+| Daemon UI compiles and tested source matches generated assets | `npm ci`, `npm audit --audit-level=high`, `npm run typecheck`, `npm test`, `npm run build`, generated-asset freshness, and pinned accessibility checks | Five-destination implementation is integrated; exact integrated-HEAD gate and RC6 operator sign-off pending |
+| Rust workspace builds, tests, and lints | Locked workspace check/test/clippy plus independent no-HID FIDO2 check/test/clippy inside the release gate | Focused integration checks exist; exact integrated-HEAD release gate pending |
+| Security and supply-chain baseline | `cargo audit --file Cargo.lock` and `cargo deny --locked check` inside the release gate | Must be re-established for the exact integrated lockfile |
 | Release identity and monotonicity | Remote direct/peeled tag validation, event-SHA and cross-job tag-object binding, scratch-ref recovery, retained monotonically numbered RC tags, and draft-only release creation | Proven only when the tag workflow passes at the gated `main` SHA; branch/tag protection is a fail-closed pre-merge settings check |
-| Local daemon and gateway loopback integration behavior | Workspace integration tests pass outside the sandbox | Passed inside the complete local gate at `fc1e93b`; protected-main CI and RC6 evidence remain |
+| Local daemon and gateway loopback integration behavior | Workspace integration tests pass outside the sandbox | Focused integration tests pass; exact integrated-HEAD gate, protected-main CI, and RC6 evidence remain |
 | Target-host operational readiness | RC5 standard soak, chaos soak, and doctor receipts bind to `7e04743` | Proven for RC5 only; repeat all required host evidence at RC6 because the feature line changes code |
-| Runtime daemon lifecycle behavior | `scripts/check-runtime-smoke.sh` starts the daemon, verifies status, initializes a passphrase compartment, writes and reads vault canaries, locks, unlocks, lists compartments, and runs doctor | Passed inside the complete local gate at `fc1e93b`; supported-host doctor and RC6 receipts remain |
-| Queue submission durability, dependency finality, and pause | Queue schema v5 persists `prepared` raw bytes/hash and a pre-RPC `submitted_unknown` marker; recovery checks receipts or resubmits exact bytes without re-signing; dependent plan steps remain unsigned until every prerequisite reaches receipt-confirmed finality; the real HTTP pause regression latches before the active drain mutex and blocks later broadcasts | Passed inside the complete local gate at `fc1e93b`; protected-main CI and RC6 receipts remain |
-| Runtime browser/UI visual behavior | DOM tests, the strict 15-scenario mock accessibility gate, 12-shot walkthrough, and migrated real-daemon browser smoke pass across visible setup, all five controllers, Vault persistence, modal/palette safety, focus, logout, and reauthentication | Passed inside the complete local gate at `fc1e93b`; manual screenshot/operator sign-off remains |
-| Desktop app bundle readiness | Source/mounted-dmg verification runs inside `./scripts/check-release.sh`; RC5 workflow `29248938476` produced checksum-valid draft assets | The local source bundle gate passed at `fc1e93b`, but clean-machine installation and fresh RC6 workflow/assets remain unproved |
+| Runtime daemon lifecycle behavior | `scripts/check-runtime-smoke.sh` starts the daemon, verifies status, initializes a passphrase compartment, writes and reads vault canaries, locks, unlocks, lists compartments, and runs doctor | Exact integrated-HEAD runtime gate plus eligible-host RC6 doctor receipt pending |
+| Queue submission durability, dependency finality, and pause | Queue schema v5 persists `prepared` raw bytes/hash and a pre-RPC `submitted_unknown` marker; recovery checks receipts or resubmits exact bytes without re-signing; dependent plan steps remain unsigned until every prerequisite reaches receipt-confirmed finality; the real HTTP pause regression latches before the active drain mutex and blocks later broadcasts | Focused integration tests pass; exact integrated-HEAD gate, protected-main CI, and RC6 evidence remain |
+| Runtime browser/UI visual behavior | DOM tests, mock accessibility, screenshots, and migrated real-daemon browser smoke cover visible setup and all five destinations | Implementation evidence exists; exact integrated-HEAD gate and RC6 operator walkthrough/sign-off remain |
+| Desktop app bundle readiness | Source/mounted-dmg verification runs inside `./scripts/check-release.sh`; RC5 workflow `29248938476` produced checksum-valid historical draft assets | Exact integrated-HEAD source gate, fresh RC6 workflow/assets, and clean-machine install/unlock remain unproved |
 | Long-duration reliability | Recovery/crash tests plus RC5 standard 3600-second and chaos 600-second receipts passed at `7e04743` | Historical for the feature line; standard plus chaos receipts on each supported host must bind to RC6 |
-| External security assurance | Code gates, audit, deny, local adversarial/fuzz gate, SSRF/local-boundary tests, and UI boundary tests are part of the release contract | The local source contract passed at `fc1e93b`; no independent external penetration test has been performed |
+| External security assurance | Code gates, audit, deny, local adversarial/fuzz gate, SSRF/local-boundary tests, and UI boundary tests are part of the release contract | Exact integrated-HEAD source contract and independent review pending; no independent external penetration test has been performed |
 | Full wallet-management product roadmap | EVM roadmap phases 1-9 shipped and tested: discovery, inventory, risk, planning, policy-gated fail-closed execution (default off), DeFi exit adapters, and treasury automation | EVM scope is complete except swap execution, which is deferred per D-13; only non-EVM chains (phase 10), swap execution (D-13), and fiat/NFT valuation (D-16) remain deferred |
 
 ## Release Boundary
@@ -308,40 +315,45 @@ wallet operations remain deferred.
 
 ## Remaining Work Before A Broader Completion Claim
 
-The current feature line still needs the following release-qualified evidence:
+The integrated feature line still needs the following release-qualified
+evidence:
 
-1. for any documentation-only successor to `fc1e93b`, an external clean-gate
-   receipt at that exact HEAD before integration through protected `main`; then
-   required Ubuntu/macOS CI, a successful RC6 draft workflow, and independently
-   checksum-verified assets at one exact SHA
-2. standard and chaos soak plus `sigillum doctor` receipts on every supported
-   host at that RC6 SHA (F4)
-3. five public-testnet transactions for the four core execution families:
+1. an exact-integrated-HEAD clean `./scripts/check-release.sh`, independent
+   review, protected merge, and required CI
+2. an immutable RC6 tag plus one draft, unpublished, `prerelease=true` GitHub
+   Release whose six assets independently verify at that exact SHA
+3. F7 upgrade verification at RC6 and schema-v2 standard 3600-second and chaos
+   600-second F4 receipts plus `sigillum doctor` on the same eligible macOS
+   15.x/aarch64 host
+4. five funded public-testnet transactions for the four core execution families:
    native sweep, ERC-20 sweep, revoke, and both legs of `fund_gas` → dependent
    sweep on Ethereum Sepolia (`11155111`) plus one supported L2 testnet: Base
    Sepolia (`84532`), Arbitrum Sepolia (`421614`), or OP Sepolia (`11155420`)
    (F6)
-4. a checksum-verified clean desktop install reaching unlock without a
-   developer toolchain, manual UI walkthrough/sign-off, and a complete
-   sanitized external evidence bundle bound to the same RC6 SHA
+5. a checksum-verified RC6 dmg clean install reaching unlock without a
+   developer toolchain and RC6 operator walkthrough/sign-off across all five
+   destinations (C7)
+6. schema-v2 evidence-bundle validation, exact-byte final-draft verification
+   with the bundle as the seventh asset and `prerelease=false`, and explicit
+   H2 approval recorded before invoking the final-tag ceremony
 
 An independent external penetration test is additionally required only if the
 assurance claim expands beyond the source-verified local-first boundary. No
 external penetration test has been performed, and this release does not claim
 one (D-4).
 
-Until those are complete, the accurate claim is narrower: implementation
-checkpoint `8ea6f8e` and audited documentation/release-gate checkpoint
-`fc1e93b` pass the local source contract, while protected-main/RC6 CI, host,
-testnet, clean-install, operator-sign-off, and same-candidate evidence receipts
-remain. These docs identify the remaining assurance and product-completeness
-work.
+Until those are complete, the accurate claim is narrower: the integrated source
+implements the intended local-first product and has focused verification, while
+the exact-HEAD release gate, review, protected-main CI, RC6, eligible-host,
+testnet, clean-install, operator-sign-off, exact-byte promotion, and explicit
+H2 receipts remain.
 
 ## Execution-path security review (F5)
 
 A focused adversarial review of the W7 queue-execution surface
 (`service/queue/{gates,pause,processing,broadcast,plan_steps,plan_steps/signing}.rs`,
-`service/inventory/plan_execution_enqueue.rs`, `service/inventory/treasury.rs`,
+`service/inventory/plan_execution_enqueue.rs`,
+`service/inventory/treasury/{mod.rs,allocations.rs,policy.rs,receiving.rs}`,
 `service/inventory/planner.rs`) performed before this surface is enabled in any
 receipt. Every execution capability defaults OFF and is opt-in per
 `TreasuryPolicy` (§0.1.8). The trust boundary under review is a single local
@@ -505,7 +517,8 @@ accepts prefix-less digit strings and interprets them as hex (`"1000"` ->
 is a fund-controlling foot-gun: an operator typing a decimal-looking cap silently
 gets a different, larger cap. **Decision.** FIX with strict `0x`-prefix
 validation at the policy DTO boundary ONLY — `validated_cap_hex` and
-`validated_required_quantity_hex` in `service/inventory/treasury.rs`, which back
+`validated_required_quantity_hex` in
+`service/inventory/treasury/policy.rs`, which back
 `max_step_native_wei_hex`, `max_plan_native_wei_hex`, `max_gas_topup_wei_hex`,
 `max_fee_per_gas_cap_hex`, `hot_floor_wei_hex`, and `hot_target_wei_hex`. A
 prefix-less value now fails closed with HTTP 400

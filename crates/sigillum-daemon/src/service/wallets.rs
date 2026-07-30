@@ -426,12 +426,14 @@ impl SigillumService {
         }
     }
 
-    pub(crate) fn eth_stealth_sign(
+    pub(crate) async fn eth_stealth_sign(
         &self,
         token: Option<&str>,
         body: EthStealthSignRequest,
     ) -> ServiceResult<EthStealthSignResponse> {
         let token = self.require_session(token)?;
+        let session_context = self.capture_session_operation_context(Some(token))?;
+        let _guard = self.acquire_session_operation(&session_context).await?;
         self.authorize_transaction_policy(TransactionPolicyCheck {
             kind: TransactionPolicyKind::RawDigest,
             destination_address: None,
@@ -484,12 +486,14 @@ impl SigillumService {
         })
     }
 
-    pub(crate) fn eth_stealth_sign_transfer(
+    pub(crate) async fn eth_stealth_sign_transfer(
         &self,
         token: Option<&str>,
         body: EthStealthSignTransferRequest,
     ) -> ServiceResult<EthSignedTransactionResponse> {
         let token = self.require_session(token)?;
+        let session_context = self.capture_session_operation_context(Some(token))?;
+        let _guard = self.acquire_session_operation(&session_context).await?;
         self.authorize_transaction_policy(TransactionPolicyCheck {
             kind: TransactionPolicyKind::RoutedTransfer,
             destination_address: Some(&body.destination_address),
@@ -558,12 +562,14 @@ impl SigillumService {
         })
     }
 
-    pub(crate) fn eth_stealth_sign_erc20_transfer(
+    pub(crate) async fn eth_stealth_sign_erc20_transfer(
         &self,
         token: Option<&str>,
         body: EthStealthSignErc20TransferRequest,
     ) -> ServiceResult<EthSignedTransactionResponse> {
         let token = self.require_session(token)?;
+        let session_context = self.capture_session_operation_context(Some(token))?;
+        let _guard = self.acquire_session_operation(&session_context).await?;
         self.authorize_transaction_policy(TransactionPolicyCheck {
             kind: TransactionPolicyKind::RoutedTransfer,
             destination_address: Some(&body.recipient_address),
@@ -715,8 +721,8 @@ mod tests {
         }
     }
 
-    #[test]
-    fn export_generate_check_and_sign_roundtrip() {
+    #[tokio::test]
+    async fn export_generate_check_and_sign_roundtrip() {
         let dir = TempDir::new().unwrap();
         let state =
             Arc::new(AppState::new(dir.path().to_path_buf()).expect("app state should initialize"));
@@ -771,6 +777,7 @@ mod tests {
                     digest_hex: hex::encode([9u8; 32]),
                 },
             )
+            .await
             .unwrap();
         assert_eq!(signature.stealth_address, payment.stealth_address);
         assert_eq!(hex::decode(signature.signature_hex).unwrap().len(), 65);
@@ -797,6 +804,7 @@ mod tests {
                     value_wei_hex: "0xde0b6b3a7640000".into(),
                 },
             )
+            .await
             .unwrap();
         assert_eq!(signed_transfer.kind, "eth-transfer");
         assert!(signed_transfer.raw_transaction_hex.starts_with("02"));
@@ -824,6 +832,7 @@ mod tests {
                     amount_hex: "0x0f4240".into(),
                 },
             )
+            .await
             .unwrap();
         assert_eq!(signed_erc20.kind, "erc20-transfer");
         assert!(signed_erc20.data_hex.starts_with("a9059cbb"));
@@ -947,8 +956,8 @@ mod tests {
         assert_eq!(error.code(), "vault_locked");
     }
 
-    #[test]
-    fn enabled_policy_rejects_raw_digest_signing_by_default() {
+    #[tokio::test]
+    async fn enabled_policy_rejects_raw_digest_signing_by_default() {
         let dir = TempDir::new().unwrap();
         let state =
             Arc::new(AppState::new(dir.path().to_path_buf()).expect("app state should initialize"));
@@ -1014,6 +1023,7 @@ mod tests {
                     digest_hex: hex::encode([9u8; 32]),
                 },
             )
+            .await
             .unwrap_err();
 
         assert_eq!(error.message(), "policy_violation");

@@ -19,7 +19,7 @@ description: "Skill for the Tests area of sigillum. 159 symbols across 15 files.
 |------|---------|
 | `crates/sigillum-daemon/tests/integration.rs` | test_generate_dummy_shards, test_app, get_request, test_get_status_locked_no_token, test_get_status_invalid_token (+31) |
 | `crates/sigillum-cli/tests/cli_smoke.rs` | sigillum_bin, run, help_exits_zero_with_usage_text, help_flag_exits_zero, version_shows_version_info (+12) |
-| `crates/sigillum-daemon/tests/daemon_service.rs` | spawn_daemon, spawn_mock_evm_provider, rpc_response, rpc_handler, post_json (+11) |
+| `crates/sigillum-daemon/tests/common/mock_evm.rs` | spawn_mock_evm_provider, spawn_slow_mock_evm_provider, spawn_failing_mock_evm_provider, spawn_erc1155_batch_mock_evm_provider, spawn_cursor_mock_evm_provider (+2) |
 | `crates/sigillum-gateway/tests/gateway_integration.rs` | project_request, payment_request, create_project, create_payment, default_stub_config (+9) |
 | `crates/sigillum-fido2/src/crypto.rs` | split_master_key, reconstruct_master_key, shamir_split_reconstruct_1_of_1, shamir_split_reconstruct_2_of_3, shamir_split_reconstruct_3_of_5 (+8) |
 | `crates/sigillum-fido2/src/lib.rs` | load, save, normalize_pin, pin_for_round, save_config_raw (+7) |

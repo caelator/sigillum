@@ -634,7 +634,7 @@ subscribeSessionToken(token => {
 
 async function runRefreshCycle() {
   const sessionTokenAtStart = readSessionToken();
-  const s = await api('GET', '/api/status');
+  const s = await api('GET', ROUTE_PATHS.API_STATUS);
   const sessionTokenAfterStatus = readSessionToken();
   currentStatus = s;
   const active = s.active_compartment;
@@ -692,7 +692,7 @@ async function refresh() {
   updateRefreshMeta('busy');
   refreshPromise = (async () => {
     try {
-      await runRefreshCycle();
+      await withBackgroundRequests(() => runRefreshCycle());
       markRefreshCompleted();
     } catch (e) {
       console.error('refresh failed', e);
@@ -732,7 +732,7 @@ function buildPushSelectors(unlocked) {
 }
 
 async function switchCompartment(id) {
-  const r = await api('POST', '/api/compartment/switch', { id });
+  const r = await api('POST', ROUTE_PATHS.API_COMPARTMENT_SWITCH, { id });
   if (r.error) { toast(r.error, 'error'); return; }
   toast('Switched to compartment #' + id);
   refresh();
@@ -746,7 +746,7 @@ async function pushSecret() {
   const tier = parseInt(document.getElementById('pushTier').value);
   if (!key) { toast('Key name required', 'error'); return; }
   if (from === to) { toast('Source and target must differ', 'error'); return; }
-  const r = await api('POST', '/api/secrets/push', {
+  const r = await api('POST', ROUTE_PATHS.API_SECRETS_PUSH, {
     from_compartment: from, to_compartment: to, key, new_key: newKey, tier,
   });
   if (r.error) { toast(r.error, 'error'); return; }
@@ -758,7 +758,7 @@ async function pushSecret() {
 
 async function loadCompartments() {
   try {
-    const r = await api('GET', '/api/compartment/list');
+    const r = await api('GET', ROUTE_PATHS.API_COMPARTMENT_LIST);
     const el = document.getElementById('compartmentList');
     const comps = r.compartments || [];
     if (comps.length === 0) {
@@ -795,7 +795,7 @@ async function copyText(value, label) {
 
 async function loadApiKeys() {
   try {
-    const r = await api('GET', '/api/api-keys');
+    const r = await api('GET', ROUTE_PATHS.API_API_KEYS);
     if (r.error) return;
     const list = document.getElementById('apiKeyList');
     lastApiKeys = r.keys || [];
@@ -817,7 +817,7 @@ async function loadApiKeys() {
 
 async function loadSecrets() {
   try {
-    const r = await api('GET', '/api/secrets');
+    const r = await api('GET', ROUTE_PATHS.API_SECRETS);
     if (r.error) return;
     const list = document.getElementById('secretList');
     lastSecretKeys = r.keys || [];
@@ -841,7 +841,7 @@ async function setApiKey() {
   const key = document.getElementById('apiKeyName').value;
   const value = document.getElementById('apiKeyValue').value;
   if (!key || !value) { toast('Key and value required', 'error'); return; }
-  const r = await api('POST', '/api/api-keys/set', { key, value });
+  const r = await api('POST', ROUTE_PATHS.API_API_KEYS_SET, { key, value });
   if (r.error) { toast(r.error, 'error'); return; }
   clearFields(['apiKeyName', 'apiKeyValue']);
   toast('API key stored');
@@ -852,7 +852,7 @@ async function setSecret() {
   const key = document.getElementById('secretName').value;
   const value = document.getElementById('secretValue').value;
   if (!key || !value) { toast('Key and value required', 'error'); return; }
-  const r = await api('POST', '/api/secrets/set', { key, value });
+  const r = await api('POST', ROUTE_PATHS.API_SECRETS_SET, { key, value });
   if (r.error) { toast(r.error, 'error'); return; }
   clearFields(['secretName', 'secretValue']);
   toast('Secret stored');
@@ -874,13 +874,13 @@ function showRevealedValue(li, btn, value) {
 }
 
 async function revealApiKey(key, btn) {
-  const r = await api('POST', '/api/api-keys/get', { key });
+  const r = await api('POST', ROUTE_PATHS.API_API_KEYS_GET, { key });
   if (r.error) { toast(r.error, 'error'); return; }
   showRevealedValue(btn.closest('li'), btn, r.value);
 }
 
 async function revealSecret(key, btn) {
-  const r = await api('POST', '/api/secrets/get', { key });
+  const r = await api('POST', ROUTE_PATHS.API_SECRETS_GET, { key });
   if (r.error) { toast(r.error, 'error'); return; }
   showRevealedValue(btn.closest('li'), btn, r.value);
 }
@@ -939,7 +939,7 @@ async function exportSnapshot() {
     return;
   }
 
-  const r = await api('POST', '/api/backup/export', { passphrase });
+  const r = await api('POST', ROUTE_PATHS.API_BACKUP_EXPORT, { passphrase });
   if (r.error) { toast(r.error, 'error'); return; }
 
   try {
@@ -994,7 +994,7 @@ async function restoreSnapshot(
     return;
   }
 
-  const r = await api('POST', '/api/backup/restore', {
+  const r = await api('POST', ROUTE_PATHS.API_BACKUP_RESTORE, {
     passphrase,
     snapshot_hex: snapshotHex,
   });
@@ -1095,7 +1095,7 @@ function formatAuditEvent(event) {
 
 async function loadAudit() {
   try {
-    const r = await api('GET', '/api/audit?limit=20');
+    const r = await api('GET', `${ROUTE_PATHS.API_AUDIT}?limit=20`);
     if (r.error) return;
     const list = document.getElementById('auditList');
     const events = r.events || [];
@@ -1120,7 +1120,7 @@ async function loadAudit() {
 
 async function loadDiagnostics() {
   try {
-    const r = await api('GET', '/api/diagnostics');
+    const r = await api('GET', ROUTE_PATHS.API_DIAGNOSTICS);
     const el = document.getElementById('diagGrid');
     if (r.error) {
       el.innerHTML = '<div style="color:var(--danger);font-size:13px;">' + esc(r.error) + '</div>';

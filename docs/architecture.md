@@ -131,10 +131,12 @@ Current daemon behavior:
 - supports per-session logout without forcing a global lock
 - keeps unlocked master keys in daemon memory until locked
 - can export and restore passphrase-encrypted whole-tree snapshots
-- keeps a local append-only audit log for state-changing operations
+- keeps a local append-only audit log for state-changing operations in SQLite
+  (`~/.sigillum/.audit/audit.db`) with a per-scope HMAC MAC-chain; legacy
+  JSONL (`audit.log`) is migration input only
 - journals destructive operations so pending work is visible after interruption
 - records those pending operations as typed, schema-versioned journal documents rather than free-form JSON payloads
-- records audit history as typed, schema-versioned line documents while keeping the public audit API stable for clients and the embedded UI
+- records audit history as typed, schema-versioned SQLite rows while keeping the public audit API stable for clients and the embedded UI
 - exposes authenticated daemon diagnostics for operational visibility
 - loads a startup-time runtime policy so queue limits, refresh limits, retry timing, and provider observation concurrency live behind one explicit seam instead of scattered literals
 - persists non-vault operator state behind schema-versioned JSON documents so storage evolution can add explicit migrations instead of implicit file-shape drift
@@ -495,8 +497,8 @@ What it intentionally does not do today:
 - remote or hosted operating modes, including a polished multi-host
   client/server story
 - multi-host coordination
-- ~~SSE streams~~ — amended 2026-07-17 per decision D-D
-  (`docs/operator-surface-and-privacy-plan.md`): a minimal, loopback-only SSE
+- ~~SSE streams~~ — amended 2026-07-17 per decision D-D in the 1.0 release
+  plan: a minimal, loopback-only SSE
   channel (`GET /api/events`; status/queue/operation/snapshot, `v: 1`
   payloads) is ratified as a 1.x addition so clients stop polling — polling
   with the session token reset idle activity and silently defeated the

@@ -50,6 +50,18 @@ impl AppState {
         self.operations.lock().finish(id, state, error);
     }
 
+    /// Mark an operation completed only if no cancel request won the
+    /// registry-mutex race. Returns false when cancellation must be honored.
+    pub fn complete_operation_if_not_canceled<E>(
+        &self,
+        id: &str,
+        persist_completion: impl FnOnce() -> Result<(), E>,
+    ) -> Result<bool, E> {
+        self.operations
+            .lock()
+            .complete_if_not_canceled(id, persist_completion)
+    }
+
     /// Request cancellation of a single operation by id.
     pub fn request_operation_cancel(&self, id: &str) -> OperationCancelRequest {
         self.operations.lock().request_cancel(id)
@@ -191,6 +203,14 @@ impl AppState {
         }
         *state = LockState::Locking;
         true
+    }
+
+    /// Linearize provider submission against [`Self::begin_locking`].
+    /// The caller retains `operation_lock` through dispatch, so the lock
+    /// latch and the submission admission point have one stable ordering.
+    #[must_use]
+    pub(crate) fn admit_broadcast_if_ready(&self) -> bool {
+        *self.lock_state.lock() == LockState::Ready
     }
 
     pub fn finish_locking(&self) {

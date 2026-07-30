@@ -2,21 +2,12 @@
 
 **Status:** Active hardening and release handbook
 
-**State recorded:** 2026-07-18, protected `main` at `7e04743`; RC5 annotated
-tag object `c726ba9` peels to that commit and has a successful but unpublished
-draft release. The historical operator-surface accessibility checkpoint is
-`29426df` and contains protected main through merge `3b647f8`; historical
-interaction/browser checkpoint `c435611` has green focused evidence. Current
-implementation checkpoint `8ea6f8e` restores the architecture, formatting, and
-strict-clippy gates. Audited documentation/release-gate checkpoint
-`fc1e93b1aa2cf9524b2b99fd04342863ba6b2b1d` passed the complete clean-tree
-release gate from `2026-07-18T17:15:16Z` through `2026-07-18T17:30:35Z` (919
-seconds), with `gate_rc=0`, `tee_rc=0`, `filter_rc=0`, and `overall_rc=0`. The
-receipt log SHA-256 is
-`efb8e2240949d32f0f53ff8ee028d1016724df849e038b361b9fed78f23dab94`.
-This receipt is exact to `fc1e93b`; any later successor may carry the record,
-but its exact HEAD needs an external clean-gate receipt before protected-main
-integration and RC6.
+**State recorded:** 2026-07-30. `v1.0.0-rc.5` peels to protected-main
+commit `7e04743` and has an unpublished historical draft. It does not certify
+the integrated hardening line. RC2–RC4 remain immutable failure receipts. No
+RC6, final `v1.0.0` tag, or published stable release exists. The exact
+integrated HEAD still needs the clean release gate, independent review,
+protected merge, and required CI before RC6 is eligible.
 
 **Plan authority:** [release-1.0-plan.md](./release-1.0-plan.md)
 
@@ -59,38 +50,34 @@ a commit that contains later hardening changes.
   Historical release run `29230844456` completed all six jobs and uploaded the
   checksum, CLI, app, dmg, and notices assets to an unpublished draft; that
   proves the signing remediation, not the invalidated F6/runtime contract.
-- `v1.0.0-rc.5` is a valid retained draft candidate. Remote tag object
+- `v1.0.0-rc.5` is a retained historical draft. Remote tag object
   `c726ba913ace7f5ca64987454b1352ffdd9c8f77` peels to protected-main commit
   `7e047438f6305ef1cedecdf4790e1b0e1d7e1e6e`. Release workflow
   `29248938476` passed all six jobs; its five payload assets independently
   match `SHA256SUMS`. Standard/chaos F4 and doctor receipts bind to the same
   SHA. The GitHub Release remains draft/unpublished.
-- RC5 is incomplete: no qualifying F6 public-testnet receipt set, desktop
-  clean-install receipt, UI sign-off, or complete external evidence bundle
-  exists. The operator-surface branch changes code after RC5, so its evidence
-  is historical baseline for that feature line. After protected-main merge,
-  the next retained candidate is `v1.0.0-rc.6`; rerun every H1 gate at its
-  exact peeled SHA.
+- RC5 is incomplete and cannot certify the integrated hardening line. No
+  qualifying F6 public-testnet receipt set, clean-install receipt, C7 sign-off,
+  or complete external evidence bundle exists for the current line. The next
+  eligible candidate is `v1.0.0-rc.6` only after exact-HEAD gating, review,
+  protected merge, and CI; rerun every H1 gate at its exact peeled SHA.
 - Gateway payments are preview-only and disabled by default. Opt-in balance
   observations are not finality proof and must not be represented as supported
   1.0 payment confirmations.
 
 ## 2. Execution order
 
-1. Preserve the passing `fc1e93b` and failed `8c654fc` receipts as SHA-bound
-   evidence. Run `./scripts/check-release.sh` from a clean checkout at the exact
-   current successor and retain the external receipt before protected-main
-   integration. Do not edit the commit solely to embed its own receipt. Never
-   overlap a full gate with another agent or build modifying the checkout.
-2. Review the 12 screenshots manually. Preserve any negative finding; automated
-   mock rendering is not operator sign-off or runtime proof.
-3. Before merge, verify that `main` protection requires both fixed-runner CI
+1. Run `./scripts/check-release.sh` from a clean checkout at the exact
+   integrated HEAD and complete the required independent review. Never overlap
+   a full gate with another agent or build modifying the checkout.
+2. Before merge, verify that `main` protection requires both fixed-runner CI
    legs, blocks force-pushes, and that release-tag governance prevents updates
    and deletion. Remediate missing settings before landing through a pull
    request, then require both CI legs to pass.
-4. Only then create annotated `v1.0.0-rc.6`, verify the successful draft and
-   live asset checksums, and complete every operator gate in section 5 at the
-   RC6 peeled SHA.
+3. Only then create annotated `v1.0.0-rc.6`. Require its unique GitHub Release
+   to remain draft, unpublished, and `prerelease=true`; verify its live asset
+   checksums and complete every operator gate in section 5 at the RC6 peeled
+   SHA.
 
 ## 3. Executable release contract
 
@@ -142,8 +129,26 @@ lightweight, wrong-SHA, off-main, skipped-number, malformed,
 changelog-invalid, and missing or malformed final-evidence tags fail closed.
 The normal source release gate runs this regression test before tag time.
 
-The release workflow always creates a draft. Asset checksums, release notes,
-and the operator decision are required before publication.
+> [!IMPORTANT]
+> The source gate above is executable now; the exact-byte final-tag path below
+> is not. This merge-in-progress checkout still lacks the promotion script,
+> final-tag workflow branches, and release-state enforcement. Do not invoke H2
+> until that evidence-hardening implementation lands and the exact integrated
+> HEAD repeats the clean gate and independent review.
+
+The release workflow always creates a draft. RC releases must remain
+unpublished drafts with `prerelease=true`; the final draft and published
+release must have `prerelease=false`. RC tags build and checksum the candidate
+payloads once. The final tag reruns the source-verification legs, but its
+artifact jobs are intentionally skipped. The release job selects the qualified
+RC, requires its exact unpublished-prerelease six-asset shape, downloads and
+verifies its five payloads, copies those exact bytes under final names,
+regenerates `SHA256SUMS`, and verifies byte-for-byte plus tag-normalized digest
+equality. A final release must never substitute fresh rebuilds for the
+qualified RC bytes. Release notes, verified assets, and the evidence bundle
+must be complete before the operator records H2 approval and invokes the
+final-tag ceremony. That approval authorizes conditional publication only if
+all post-tag verification succeeds.
 
 ## 4. Failure handling
 
@@ -172,12 +177,13 @@ and the operator decision are required before publication.
 
 | Gate | Required evidence |
 | --- | --- |
-| F4 | Standard and chaos soak receipts on each supported host at the RC6 SHA; RC5 receipts are historical for the changed feature line |
+| F4 | Schema-v2 standard 3600-second and chaos 600-second soak receipts on the same macOS 15.x/aarch64 host at the RC6 SHA; RC5 receipts are historical only |
 | F6 | Five funded public-testnet transactions at RC6 for four families, including both confirmed legs of `fund_gas` → dependent sweep; mock evidence cannot satisfy this gate |
 | Desktop | Checksum-verified RC6 `.dmg` installs and reaches unlock on a clean machine without a dev toolchain |
-| Doctor | `sigillum doctor` passes on every supported host at RC6 |
+| F7 | 0.1-era data-directory and snapshot upgrade verification passes at RC6 |
+| Doctor | `sigillum doctor` passes on the eligible macOS 15.x/aarch64 host at RC6 |
 | UI | Real-daemon browser smoke plus operator walkthrough/sign-off for all five destinations, palette, keyboard/focus, modal, and accessibility behavior |
-| H2 | Explicit operator decision to tag and publish `v1.0.0` |
+| H2 | Blocked until the evidence-hardening implementation is integrated and re-gated; then explicit operator approval is recorded immediately before the final-tag ceremony and authorizes conditional publication only after every post-tag verification passes |
 
 Work may continue on any independent item while one of these gates is waiting.
 Do not mark H1 or H2 complete until every required receipt names the same
@@ -198,10 +204,13 @@ Preserve the sanitized evidence outside the checkout until final promotion:
    `MANIFEST.json`, `SHA256SUMS`, `f4/standard.json`, `f4/chaos.json`,
    `f6/receipts.json`, `desktop/clean-install.json`,
    `doctor/mac-server.json`, `ui/signoff.json`, and
-   `release/asset-SHA256SUMS`. The doctor receipt is structured, bound to the
-   RC SHA, and records the installed-RC pass. The asset checksum file is the
-   independently verified five-entry `SHA256SUMS` body from the RC draft. F6
-   audit exports live below `f6/audit/` and
+   `release/asset-SHA256SUMS`. Both F4 receipts use schema v2, record
+   `platform: macos`, the exact macOS `ProductVersion`, canonical `aarch64`,
+   and an opaque SHA-256 machine identity; the validator requires macOS 15.x
+   and the same identity in both receipts. The doctor receipt is structured,
+   bound to the RC SHA, and records the installed-RC pass. The asset checksum
+   file is the independently verified five-entry `SHA256SUMS` body from the RC
+   draft. F6 audit exports live below `f6/audit/` and
    are referenced by `f6/receipts.json`.
 2. Put `SHA256SUMS` inside the bundle, name the completed archive
    `sigillum-v1.0.0-release-evidence.tar.gz`, and compute its SHA-256. H2
@@ -210,8 +219,9 @@ Preserve the sanitized evidence outside the checkout until final promotion:
    between the released code and its operator evidence.
    `scripts/check-release-evidence-bundle.sh` rejects missing, empty,
    unchecksummed, duplicate, unsafe, or linked archive members; requires the
-   manifest to bind the exact RC tag-object ID and peeled SHA; validates the F4
-   configured and actual soak durations, requires Ethereum Sepolia (`11155111`)
+   manifest to bind the exact RC tag-object ID and peeled SHA; rejects legacy
+   F4 receipts and validates their same-host macOS 15.x/aarch64 identity plus
+   configured and actual soak durations; requires Ethereum Sepolia (`11155111`)
    plus Base Sepolia (`84532`), Arbitrum Sepolia (`421614`), or OP Sepolia
    (`11155420`), and rejects legacy F6 schema v1. F6 schema v2 validates four
    families with five unique transaction hashes and audit exports. Its nested
@@ -226,12 +236,15 @@ Preserve the sanitized evidence outside the checkout until final promotion:
    Before H2, independently verify all five F6 transactions on the claimed
    public chains, including chain ID, successful receipt, finality, and the
    family effect represented by each audit export.
-3. The executable H2 ceremony waits for the exact final workflow and all six
-   successful jobs, independently checksums its six generated draft assets,
-   uploads the evidence archive as a seventh asset without replacing an
-   existing asset, then re-fetches and re-verifies all seven live draft assets.
-   The evidence SHA-256 must match the digest in the protected final tag in the
-   last executable checks immediately before publishing.
+3. The executable H2 ceremony snapshots the qualified RC draft, then waits for
+   the exact final workflow. Its contract, both source-verification legs, and
+   release job must pass while both artifact jobs are skipped. It verifies the
+   final draft's five renamed payloads are byte-identical and have the same
+   tag-normalized digest manifest as the RC snapshot, uploads the evidence
+   archive as a seventh asset without replacement, then re-fetches and repeats
+   every byte/digest check across all seven live draft assets. The final draft
+   must remain `prerelease=false`. The evidence SHA-256 must match the digest
+   in the protected final tag before the H2-authorized conditional publication.
 4. In H3, update `docs/production-readiness-audit.md` with the public release
    URL, evidence filename and digest, final tag-object ID, RC peeled SHA, and a
    sanitized receipt summary. This post-release documentation commit does not
@@ -252,7 +265,8 @@ or recreating the tag.
    `HEAD == GATE_SHA == origin/main`, then create and push the annotated tag.
    Every pushed `N` is permanently burned, even when no draft was created.
 4. Require the release contract job, both verify legs, both artifact jobs, and
-   the draft-release job to pass.
+   the draft-release job to pass. Require the unique RC release to remain
+   draft, unpublished, and `prerelease=true`.
 5. Download the draft assets and verify `SHA256SUMS`.
 6. Complete the section 5 receipts against that exact peeled RC commit SHA,
    independently verify every F6 transaction through the declared public RPC
@@ -262,14 +276,17 @@ or recreating the tag.
    checksum result, evidence filename, and evidence archive digest. Keep the
    annotated RC tag permanently and retain the RC draft/assets through
    final-draft verification.
-8. After explicit H2 approval, repeat the clean gate and push annotated
+8. Only after the evidence-hardening prerequisite is integrated, re-gated, and
+   reviewed, record explicit H2 approval, repeat the clean gate, and push annotated
    `v1.0.0` at the identical peeled commit as the receipt-bearing RC, with the
    evidence filename and digest in the tag message. If `main` has moved or any
    intervening commit is required, the receipts are void and a new
-   monotonically numbered RC is required. Independently checksum and verify the
-   final draft assets, upload and reverify the digest-bound evidence bundle,
-   then publish. Only after final publication may the older RC draft be
-   deleted.
+   monotonically numbered RC is required. The final workflow must skip artifact
+   rebuilds and copy the qualified RC draft's exact five payload bytes under
+   final names. Verify byte identity and tag-normalized digests, regenerate
+   `SHA256SUMS`, require the final draft to remain `prerelease=false`, upload
+   and reverify the evidence bundle as the seventh asset, then publish. Only
+   after final publication may the older RC draft be deleted.
 
 After publication, perform the post-release version/planning update described
 by H3 in the plan of record.

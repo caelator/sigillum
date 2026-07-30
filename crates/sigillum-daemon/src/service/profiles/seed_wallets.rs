@@ -87,6 +87,7 @@ impl SigillumService {
 
         let profile = self
             .persist_eth_seed_wallet_profile(
+                token,
                 SeedWalletProfileMaterial {
                     name: body.name,
                     label: body.label,
@@ -135,6 +136,7 @@ impl SigillumService {
 
         let profile = self
             .persist_eth_seed_wallet_profile(
+                token,
                 SeedWalletProfileMaterial {
                     name: body.name,
                     label: body.label,
@@ -167,9 +169,11 @@ impl SigillumService {
     /// any mnemonic material.
     async fn persist_eth_seed_wallet_profile(
         &self,
+        token: &str,
         mut material: SeedWalletProfileMaterial,
         mode: SeedWalletWriteMode,
     ) -> ServiceResult<EthSeedWalletProfile> {
+        let session_context = self.capture_session_operation_context(Some(token))?;
         let word_count =
             ethereum_mnemonic_word_count(&material.mnemonic).map_err(map_xpub_error)?;
         if word_count != 12 && word_count != 24 {
@@ -207,7 +211,7 @@ impl SigillumService {
                 .map_err(map_xpub_error)?
                 .address;
 
-        let _guard = self.state.operation_guard().await;
+        let _guard = self.acquire_session_operation(&session_context).await?;
         let mut registry =
             crate::profiles::load_profiles(&self.state.base_dir).map_err(|error| {
                 ServiceError::internal(format!("Failed to load profile registry: {error}"))
@@ -301,7 +305,8 @@ impl SigillumService {
         body: EvmProfileDeleteRequest,
     ) -> ServiceResult<EthSeedWalletProfileMutationResponse> {
         let token = self.require_session(token)?;
-        let _guard = self.state.operation_guard().await;
+        let session_context = self.capture_session_operation_context(Some(token))?;
+        let _guard = self.acquire_session_operation(&session_context).await?;
         let mut registry =
             crate::profiles::load_profiles(&self.state.base_dir).map_err(|error| {
                 ServiceError::internal(format!("Failed to load profile registry: {error}"))

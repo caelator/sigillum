@@ -931,6 +931,7 @@ mod fido2_config_tests {
                 shards: vec!["shard1".to_string(), "shard2".to_string()],
                 registered_at: "2026-03-10T10:00:00Z".to_string(),
             }],
+            ..Default::default()
         };
 
         save_config(&path, &config).unwrap();
@@ -1109,6 +1110,7 @@ mod fido2_config_tests {
                 shards: vec!["ff".to_string(); SHARD_SLOTS],
                 registered_at: "2026-03-10".to_string(),
             }],
+            ..Default::default()
         };
 
         assert!(config.is_fido2_enabled());
@@ -1166,6 +1168,7 @@ mod fido2_config_tests {
                     registered_at: "2026-03-01".to_string(),
                 },
             ],
+            ..Default::default()
         };
 
         save_config(&path, &config).unwrap();

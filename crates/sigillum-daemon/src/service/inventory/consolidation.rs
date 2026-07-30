@@ -2,8 +2,8 @@ use std::collections::BTreeMap;
 
 use sigillum_api::{
     ConsolidationPlan, ConsolidationPlanApproveRequest, ConsolidationPlanGenerateRequest,
-    ConsolidationPlanListResponse, ConsolidationPlanMutationResponse, WalletPlanStatus,
-    WalletPlanStepAction, WalletPlanStepStatus, WalletSimulationStatus,
+    ConsolidationPlanListResponse, ConsolidationPlanMutationResponse, WalletPlanStepAction,
+    WalletPlanStepStatus, WalletSimulationStatus,
 };
 
 use crate::audit_log::AuditEventSpec;
@@ -13,11 +13,12 @@ use super::super::helpers::{now_unix, random_id};
 use super::super::list_query::{
     self, CreatedUpdatedSort, PLAN_STATUSES, SortOrder, effective_order, paginate, validated_value,
 };
-use super::super::{ServiceError, ServiceResult, SigillumService};
+use super::super::{ServiceError, ServiceResult, SessionOperationContext, SigillumService};
 use super::claim_gate::{claim_execution_gate_satisfied, refresh_claim_execution_blocker};
 use super::planner::{
     analyze_plan_linkage, apply_linkage_blockers, apply_policy_blockers_to_step,
-    assign_step_ordering, build_plan_steps, plan_policy_violations, summarize_plan_steps,
+    assign_step_ordering, build_plan_steps, plan_policy_violations, plan_status,
+    summarize_plan_steps,
 };
 use super::simulation::{DEFAULT_SIMULATION_FRESHNESS_SECS, simulation_is_stale};
 use super::support::{load_inventory_state, save_inventory_state, trimmed_optional};
@@ -59,7 +60,8 @@ impl SigillumService {
         body: ConsolidationPlanGenerateRequest,
     ) -> ServiceResult<ConsolidationPlanMutationResponse> {
         let token = self.require_session(token)?;
-        let _guard = self.state.operation_guard().await;
+        let session_context = self.capture_session_operation_context(Some(token))?;
+        let _guard = self.acquire_session_operation(&session_context).await?;
         let mut state = load_inventory_state(&self.state.base_dir)?;
         let registry = crate::profiles::load_profiles(&self.state.base_dir)
             .map_err(|error| ServiceError::internal(format!("Failed to load profiles: {error}")))?;
@@ -108,13 +110,7 @@ impl SigillumService {
                 apply_linkage_blockers(&mut steps);
             }
             let summary = summarize_plan_steps(&steps);
-            let status = if summary.total_steps == 0 {
-                WalletPlanStatus::Empty
-            } else if summary.blocked_steps > 0 || !policy_violations.is_empty() {
-                WalletPlanStatus::Blocked
-            } else {
-                WalletPlanStatus::ReviewRequired
-            };
+            let status = plan_status(&summary, &policy_violations);
             let plan = ConsolidationPlan {
                 id: random_id(),
                 status,
@@ -165,7 +161,18 @@ impl SigillumService {
         body: ConsolidationPlanApproveRequest,
     ) -> ServiceResult<ConsolidationPlanMutationResponse> {
         let token = self.require_session(token)?;
-        let _guard = self.state.operation_guard().await;
+        let session_context = self.capture_session_operation_context(Some(token))?;
+        self.approve_consolidation_plan_with_context(&session_context, body)
+            .await
+    }
+
+    pub(in crate::service) async fn approve_consolidation_plan_with_context(
+        &self,
+        session_context: &SessionOperationContext,
+        body: ConsolidationPlanApproveRequest,
+    ) -> ServiceResult<ConsolidationPlanMutationResponse> {
+        let _guard = self.acquire_session_operation(session_context).await?;
+        let token = session_context.token.as_str();
         let mut state = load_inventory_state(&self.state.base_dir)?;
         let policy = state.treasury_policy.clone();
         let risk_catalog = state.risk_catalog.clone();
@@ -244,13 +251,7 @@ impl SigillumService {
         }
         plan.updated_at_unix = now_unix();
         plan.summary = summarize_plan_steps(&plan.steps);
-        plan.status = if plan.summary.blocked_steps > 0 || !plan.policy_violations.is_empty() {
-            WalletPlanStatus::Blocked
-        } else if plan.summary.review_required_steps > 0 {
-            WalletPlanStatus::ReviewRequired
-        } else {
-            WalletPlanStatus::Approved
-        };
+        plan.status = plan_status(&plan.summary, &plan.policy_violations);
         let plan = plan.clone();
         save_inventory_state(&self.state.base_dir, &state)?;
 

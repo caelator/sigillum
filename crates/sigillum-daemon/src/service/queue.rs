@@ -7,6 +7,8 @@ mod authorization;
 mod broadcast;
 mod dispatch;
 mod enqueue;
+#[cfg(test)]
+mod enqueue_tests;
 mod execution;
 mod failpoints;
 mod failure;

@@ -812,6 +812,11 @@ async fn discovery_jobs_legacy_filter_sort_window() {
     assert_legacy(&body, "jobs", &["dj_1", "dj_2", "dj_3"]);
 
     let body = rig.get_ok("/api/discovery/jobs?state=running").await;
+    assert!(ids(&body, "jobs").is_empty());
+
+    // Startup recovery terminalizes the seeded orphaned running job before
+    // the listener accepts requests.
+    let body = rig.get_ok("/api/discovery/jobs?state=interrupted").await;
     assert_eq!(ids(&body, "jobs"), ["dj_1"]);
 
     let body = rig.get_ok("/api/discovery/jobs?state=failed").await;
@@ -820,9 +825,10 @@ async fn discovery_jobs_legacy_filter_sort_window() {
     let body = rig.get_ok("/api/discovery/jobs?sort=created").await;
     assert_eq!(ids(&body, "jobs"), ["dj_3", "dj_2", "dj_1"]);
 
-    // `updated` = completed_at_unix, falling back to started_at_unix.
+    // `updated` = completed_at_unix, falling back to started_at_unix. The
+    // startup-recovered job has the newest completion timestamp.
     let body = rig.get_ok("/api/discovery/jobs?sort=updated").await;
-    assert_eq!(ids(&body, "jobs"), ["dj_2", "dj_3", "dj_1"]);
+    assert_eq!(ids(&body, "jobs"), ["dj_1", "dj_2", "dj_3"]);
 
     let body = rig.get_ok("/api/discovery/jobs?limit=1&offset=2").await;
     assert_eq!(ids(&body, "jobs"), ["dj_3"]);

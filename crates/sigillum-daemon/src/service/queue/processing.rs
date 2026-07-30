@@ -19,7 +19,7 @@ use crate::service::helpers::now_unix;
 use crate::service::{ServiceError, ServiceResult, SigillumService};
 
 use super::QueueExecution;
-use super::gates::EXECUTION_PAUSED_REASON;
+use super::gates::{DAEMON_LOCKING_REASON, EXECUTION_PAUSED_REASON};
 use super::selection::QueueDrainSelection;
 use super::serialization;
 use super::state::queue_job_is_runnable;
@@ -49,8 +49,9 @@ impl SigillumService {
         body: QueueProcessRequest,
     ) -> ServiceResult<QueueProcessResponse> {
         let token = self.require_session(token)?;
+        let session_context = self.capture_session_operation_context(Some(token))?;
         if body.run_async == Some(true) {
-            let operation = self.spawn_async_queue_process(token, body);
+            let operation = self.spawn_async_queue_process(session_context, body);
             return Ok(QueueProcessResponse {
                 processed: 0,
                 succeeded: 0,
@@ -72,14 +73,15 @@ impl SigillumService {
         let operation = self
             .state
             .start_operation(OPERATION_KIND_QUEUE_PROCESS, Vec::new());
-        self.execute_queue_process(token, body, operation).await
+        self.execute_queue_process(session_context, body, operation)
+            .await
     }
 
     /// Spawn a drain as a background daemon operation, returning the
     /// operation tracking it.
     fn spawn_async_queue_process(
         &self,
-        token: &str,
+        session_context: super::super::SessionOperationContext,
         body: QueueProcessRequest,
     ) -> sigillum_api::Operation {
         let operation = self
@@ -87,9 +89,11 @@ impl SigillumService {
             .start_operation(OPERATION_KIND_QUEUE_PROCESS, Vec::new());
         let operation_id = operation.id().to_string();
         let service = self.clone();
-        let token = token.to_string();
         tokio::spawn(async move {
-            if let Err(error) = service.execute_queue_process(&token, body, operation).await {
+            if let Err(error) = service
+                .execute_queue_process(session_context, body, operation)
+                .await
+            {
                 tracing::warn!(error = %error, "async queue drain failed");
             }
         });
@@ -111,12 +115,12 @@ impl SigillumService {
     /// `running` record.
     async fn execute_queue_process(
         &self,
-        token: &str,
+        session_context: super::super::SessionOperationContext,
         body: QueueProcessRequest,
         operation: OperationHandle,
     ) -> ServiceResult<QueueProcessResponse> {
         let result = self
-            .execute_queue_process_inner(token, body, &operation)
+            .execute_queue_process_inner(&session_context, body, &operation)
             .await;
         if let Err(error) = &result {
             self.state.finish_operation(
@@ -130,15 +134,16 @@ impl SigillumService {
 
     async fn execute_queue_process_inner(
         &self,
-        token: &str,
+        session_context: &super::super::SessionOperationContext,
         body: QueueProcessRequest,
         operation: &OperationHandle,
     ) -> ServiceResult<QueueProcessResponse> {
-        let _guard = self.state.operation_guard().await;
+        let operation_guard = self.acquire_session_operation(session_context).await?;
+        let token = session_context.token.as_str();
         let mut queue = crate::queue_store::load_queue(&self.state.base_dir)
             .map_err(|error| ServiceError::internal(format!("Failed to load queue: {error}")))?;
         let processed = self
-            .process_queue_state(token, &mut queue, body, Some(operation))
+            .process_queue_state(token, &mut queue, body, &operation_guard, Some(operation))
             .await?;
 
         crate::queue_store::save_queue(&self.state.base_dir, &queue)
@@ -174,6 +179,7 @@ impl SigillumService {
         token: &str,
         queue: &mut crate::queue_store::QueueState,
         body: QueueProcessRequest,
+        operation_guard: &tokio::sync::MutexGuard<'_, ()>,
         operation: Option<&OperationHandle>,
     ) -> ServiceResult<QueueProcessResponse> {
         let policy = self.state.runtime_policy();
@@ -183,11 +189,7 @@ impl SigillumService {
         let mut tally = QueueDrainTally::default();
         let mut paused_reason: Option<String> = None;
 
-        // Snapshot of every job's id -> state, refreshed after each job so a
-        // prerequisite polled to `confirmed` can unblock a later dependent
-        // within this drain batch (W6.4 ordering). A freshly broadcast
-        // prerequisite remains `sent`, so its dependent waits for a later
-        // confirmation cycle. The drain uses indexes (rather than `iter_mut`) so it can
+        // Snapshot job state for dependency ordering; indexes
         // durably save the whole queue at the prepare/submission barriers.
         let mut job_states: HashMap<String, String> = queue
             .jobs
@@ -212,6 +214,10 @@ impl SigillumService {
 
         for job_index in 0..queue.jobs.len() {
             if processed.len() >= limit {
+                break;
+            }
+            if self.state.is_locking() {
+                paused_reason = Some(DAEMON_LOCKING_REASON.to_string());
                 break;
             }
             // Cooperative cancel checkpoint: BETWEEN jobs only, never
@@ -297,7 +303,8 @@ impl SigillumService {
             } else if let Some(reason) = gate_block_reason {
                 Ok(QueueExecution::Blocked(reason))
             } else {
-                self.dispatch_queue_job(token, &job, &job_states).await
+                self.dispatch_queue_job(token, &job, &job_states, operation_guard)
+                    .await
             };
 
             let queue_state_before = queue.jobs[job_index].state.clone();
@@ -354,6 +361,9 @@ impl SigillumService {
                     .operation_set_progress(operation.id(), processed.len() as u64);
             }
 
+            if self.state.is_locking() {
+                paused_reason = Some(DAEMON_LOCKING_REASON.to_string());
+            }
             if body.id.is_some() || paused_reason.is_some() {
                 break;
             }

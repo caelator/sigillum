@@ -1,5 +1,13 @@
 # Execution Handoff — Operator Surface & Privacy Plan
 
+> [!CAUTION]
+> Retired historical record. This handoff was superseded by the integrated
+> hardening work and must not be used as current implementation or release
+> authority. The only current release authorities are
+> [`release-1.0-plan.md`](./release-1.0-plan.md) and
+> [`execution-runbook-1.0.md`](./execution-runbook-1.0.md). No RC6 or
+> production-ready release exists.
+
 **Checkpoint date:** 2026-07-18
 
 **Current implementation checkpoint:**
@@ -19,12 +27,10 @@
 **Protected-main baseline:** `7e047438f6305ef1cedecdf4790e1b0e1d7e1e6e`
 (`origin/main`, merged into this branch by `3b647f8`)
 
-**Master plan:** [operator-surface-and-privacy-plan.md](./operator-surface-and-privacy-plan.md)
+**Historical companion:** `operator-surface-and-privacy-plan.md`
 
-This handoff is the zero-context continuation point. Verify that `8ea6f8e` is
-the implementation ancestor and `fc1e93b` is the audited release-gate ancestor
-before relying on it: later work may supersede either checkpoint without
-updating this file.
+This handoff was the zero-context continuation point for its dated branch. It
+is preserved for provenance only and is not executable current guidance.
 
 **Current implementation truth:** `c435611` commits the command palette,
 regenerated bundles, real-daemon browser-smoke migration, and reviewed

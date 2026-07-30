@@ -18,6 +18,7 @@ impl SigillumService {
         token: &str,
         job: &QueueJob,
         job_states: &HashMap<String, String>,
+        operation_guard: &tokio::sync::MutexGuard<'_, ()>,
     ) -> ServiceResult<QueueExecution> {
         match &job.payload {
             QueueJobPayload::EthStealthTransfer {
@@ -31,8 +32,8 @@ impl SigillumService {
                 view_tag_hex,
                 stealth_hash_convention,
             } => self
-                .eth_stealth_send_with_profile(
-                    Some(token),
+                .eth_stealth_send_with_profile_under_operation_guard(
+                    token,
                     EthStealthSendWithProfileRequest {
                         wallet_profile: wallet_profile.clone(),
                         stealth: StealthPaymentRef {
@@ -48,6 +49,7 @@ impl SigillumService {
                         estimate_fees: None,
                         broadcast: Some(false),
                     },
+                    operation_guard,
                 )
                 .await
                 .map(QueueExecution::prepared_from_send),
@@ -63,8 +65,8 @@ impl SigillumService {
                 view_tag_hex,
                 stealth_hash_convention,
             } => self
-                .eth_stealth_send_erc20_with_profile(
-                    Some(token),
+                .eth_stealth_send_erc20_with_profile_under_operation_guard(
+                    token,
                     EthStealthSendErc20WithProfileRequest {
                         wallet_profile: wallet_profile.clone(),
                         stealth: StealthPaymentRef {
@@ -81,6 +83,7 @@ impl SigillumService {
                         estimate_fees: None,
                         broadcast: Some(false),
                     },
+                    operation_guard,
                 )
                 .await
                 .map(QueueExecution::prepared_from_send),
@@ -104,6 +107,7 @@ impl SigillumService {
                     *gas_limit,
                     view_tag_hex.clone(),
                     *stealth_hash_convention,
+                    operation_guard,
                 )
                 .await
             }
@@ -143,6 +147,7 @@ impl SigillumService {
                         *gas_limit,
                         view_tag_hex.clone(),
                         *stealth_hash_convention,
+                        operation_guard,
                     )
                     .await
                 }

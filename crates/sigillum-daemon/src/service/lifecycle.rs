@@ -167,9 +167,26 @@ impl SigillumService {
 
     pub(crate) async fn lock_all(&self, token: Option<&str>) -> ServiceResult<LockResponse> {
         let _ = self.require_session(token)?;
-        let _guard = self.state.operation_guard().await;
-        self.state.lock_all();
-        self.record_audit(None, AuditEventSpec::LockAll)?;
+        if !self.state.begin_locking() {
+            return Err(ServiceError::locked("Daemon is already locking."));
+        }
+
+        // Latch first, then drain in an owned task. If the HTTP request is
+        // disconnected, the daemon must still finish a lock it already
+        // advertised to concurrent authorization checks.
+        let state = self.state.clone();
+        tokio::spawn(async move {
+            let _guard = state.operation_guard().await;
+            state.lock_all();
+            state
+                .record_audit_event(None, AuditEventSpec::LockAll)
+                .map_err(|error| {
+                    ServiceError::internal(format!("Failed to write audit log: {error}"))
+                })
+        })
+        .await
+        .map_err(|error| ServiceError::internal(format!("Lock task failed: {error}")))??;
+
         Ok(LockResponse {
             status: "locked".into(),
             message: "All compartments locked. Master keys zeroized.".into(),
@@ -181,7 +198,8 @@ impl SigillumService {
         token: Option<&str>,
     ) -> ServiceResult<SessionRevokeResponse> {
         let token = self.require_session(token)?.to_string();
-        let _guard = self.state.operation_guard().await;
+        let session_context = self.capture_session_operation_context(Some(&token))?;
+        let _guard = self.acquire_session_operation(&session_context).await?;
         let compartment_id = self.state.active_compartment_id_for(&token);
         self.state.revoke_session(&token);
         self.record_audit(compartment_id, AuditEventSpec::SessionRevoke)?;

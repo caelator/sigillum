@@ -1011,6 +1011,7 @@ impl SigillumService {
         body: EthStealthAnnouncementScanRequest,
     ) -> ServiceResult<EthStealthAnnouncementScanResponse> {
         let token = self.require_scope(token, super::capability_scopes::DEPOSITS_CREATE)?;
+        let session_context = self.capture_session_operation_context(Some(token))?;
         if body.auto_queue_sweep.unwrap_or(false) {
             self.require_scope(Some(token), super::capability_scopes::QUEUE_ENQUEUE_SWEEP)?;
         }
@@ -1104,24 +1105,6 @@ impl SigillumService {
             },
         };
 
-        // Watch-only detection: the scan derives the viewing private key +
-        // spending PUBLIC key only; the spending private key never
-        // materializes outside a short zeroize-on-drop scope inside the core
-        // derivation helper, so no spending secret enters the scan path. The
-        // compartment must still be unlocked (the viewing key derives from
-        // the master key). Sweep signing re-derives the full wallet later.
-        let watch_view = self.with_vault(wallet.compartment_id, |vault| {
-            let master_key = vault
-                .extract_master_key()
-                .ok_or_else(|| ServiceError::vault_locked("Wallet compartment is locked."))?;
-            derive_watch_only_sigillum_ethereum_stealth_wallet(
-                master_key.as_ref(),
-                &wallet.wallet,
-                &wallet.short_name,
-            )
-            .map_err(map_wallet_error)
-        })?;
-
         let topics = vec![
             erc5564_announcement_topic(),
             padded_u64_topic(ETHEREUM_STEALTH_SCHEME_ID),
@@ -1179,7 +1162,28 @@ impl SigillumService {
         let has_more_logs = eligible_count > scanned;
         let last_processed_position = processed_logs.last().map(|(position, _)| *position);
 
-        let _guard = self.state.operation_guard().await;
+        let _guard = self.acquire_session_operation(&session_context).await?;
+        // Watch-only detection derives the viewing private key + spending
+        // PUBLIC key only after the provider awaits and after the original
+        // session/compartment has been revalidated under the operation
+        // boundary. A concurrent lock or compartment switch therefore wins
+        // before any viewing key is materialized; once derived, the guard
+        // stays held until the scan has persisted its result and the
+        // zeroize-on-drop watch view leaves scope. The spending private key
+        // never materializes outside a short zeroize-on-drop scope inside the
+        // core derivation helper. Sweep signing re-derives the full wallet
+        // later.
+        let watch_view = self.with_vault(wallet.compartment_id, |vault| {
+            let master_key = vault
+                .extract_master_key()
+                .ok_or_else(|| ServiceError::vault_locked("Wallet compartment is locked."))?;
+            derive_watch_only_sigillum_ethereum_stealth_wallet(
+                master_key.as_ref(),
+                &wallet.wallet,
+                &wallet.short_name,
+            )
+            .map_err(map_wallet_error)
+        })?;
         let mut deposits = crate::deposits::load_deposits(&self.state.base_dir)
             .map_err(|error| ServiceError::internal(format!("Failed to load deposits: {error}")))?;
         let now = now_unix();
@@ -1287,6 +1291,10 @@ impl SigillumService {
             response_deposits.push(deposit.clone());
             deposits.eth_stealth.push(deposit);
         }
+        // Do not retain the viewing key through cursor persistence or audit
+        // recording. The operation guard remains held until the whole scan
+        // mutation commits, but the key material can leave scope now.
+        drop(watch_view);
 
         // `reset_cursor` is an atomic remove-then-optional-reanchor. Remove
         // the authoritative stored position even when this successful scan
@@ -1490,6 +1498,7 @@ impl SigillumService {
         ephemeral_private_key_hex: Option<String>,
         blueprint: DepositBlueprint,
     ) -> ServiceResult<EthStealthDepositMutationResponse> {
+        let session_context = self.capture_session_operation_context(Some(token))?;
         let meta = self.with_vault(wallet.compartment_id, |vault| {
             let master_key = vault
                 .extract_master_key()
@@ -1565,7 +1574,7 @@ impl SigillumService {
             gas_topup_job_state: None,
         };
 
-        let _guard = self.state.operation_guard().await;
+        let _guard = self.acquire_session_operation(&session_context).await?;
         let mut state = crate::deposits::load_deposits(&self.state.base_dir)
             .map_err(|error| ServiceError::internal(format!("Failed to load deposits: {error}")))?;
         state.eth_stealth.push(deposit.clone());
@@ -1600,7 +1609,8 @@ impl SigillumService {
         body: EthStealthDepositDeleteRequest,
     ) -> ServiceResult<EthStealthDepositMutationResponse> {
         let token = self.require_scope(token, super::capability_scopes::DEPOSITS_DELETE)?;
-        let _guard = self.state.operation_guard().await;
+        let session_context = self.capture_session_operation_context(Some(token))?;
+        let _guard = self.acquire_session_operation(&session_context).await?;
         let mut state = crate::deposits::load_deposits(&self.state.base_dir)
             .map_err(|error| ServiceError::internal(format!("Failed to load deposits: {error}")))?;
         let index = state
@@ -1632,7 +1642,8 @@ impl SigillumService {
         body: ReceivingDepositTagRequest,
     ) -> ServiceResult<EthStealthDepositMutationResponse> {
         let token = self.require_scope(token, super::capability_scopes::DEPOSITS_DELETE)?;
-        let _guard = self.state.operation_guard().await;
+        let session_context = self.capture_session_operation_context(Some(token))?;
+        let _guard = self.acquire_session_operation(&session_context).await?;
         let counterparty_id = body
             .counterparty_id
             .as_deref()
@@ -1700,7 +1711,8 @@ impl SigillumService {
         if body.auto_enqueue.unwrap_or(false) {
             self.require_scope(Some(token), super::capability_scopes::QUEUE_ENQUEUE_SWEEP)?;
         }
-        let _guard = self.state.operation_guard().await;
+        let session_context = self.capture_session_operation_context(Some(token))?;
+        let _guard = self.acquire_session_operation(&session_context).await?;
         let mut deposits = crate::deposits::load_deposits(&self.state.base_dir)
             .map_err(|error| ServiceError::internal(format!("Failed to load deposits: {error}")))?;
         let mut queue = crate::queue_store::load_queue(&self.state.base_dir)
@@ -1734,7 +1746,8 @@ impl SigillumService {
         body: EthStealthDepositEnqueueSweepRequest,
     ) -> ServiceResult<EthStealthDepositEnqueueSweepResponse> {
         let token = self.require_session(token)?;
-        let _guard = self.state.operation_guard().await;
+        let session_context = self.capture_session_operation_context(Some(token))?;
+        let _guard = self.acquire_session_operation(&session_context).await?;
         let mut deposits = crate::deposits::load_deposits(&self.state.base_dir)
             .map_err(|error| ServiceError::internal(format!("Failed to load deposits: {error}")))?;
         let mut queue = crate::queue_store::load_queue(&self.state.base_dir)

@@ -274,6 +274,7 @@ check_no_inline_tests "crates/sigillum-client/src/plans.rs"
 check_no_inline_tests "crates/sigillum-daemon/src/service/queue/state.rs"
 check_no_inline_tests "crates/sigillum-cli/src/daemon_api.rs"
 
+check_not_contains "crates/sigillum-daemon/src/service/inventory/treasury/mod.rs" '^(pub struct|pub enum|fn )' "treasury/mod.rs must remain a facade only"
 check_contains "crates/sigillum-api/src/request.rs" '^mod queue;$' "queue request contracts must stay in crates/sigillum-api/src/request/queue.rs"
 check_contains "crates/sigillum-api/src/request.rs" '^mod fido2;$' "FIDO2 request contracts must stay in crates/sigillum-api/src/request/fido2.rs"
 check_contains "crates/sigillum-api/src/request.rs" '^pub use fido2::\*;$' "FIDO2 request contract names must remain re-exported from request.rs"
@@ -312,5 +313,51 @@ check_contains "crates/sigillum-cli/src/daemon_api.rs" '"plans"[[:space:]]*=>[[:
 check_not_contains "crates/sigillum-cli/src/daemon_api.rs" '^fn cmd_api_plans\(' "plans CLI command handling must not move back into daemon_api.rs"
 check_contains "docs/architecture.md" 'refactor-notes\.md' "architecture docs must link the module ownership notes"
 check_contains "docs/refactor-notes.md" 'Queue Domain Checkpoint' "refactor notes must record the queue domain checkpoint"
+
+# Lockstep: parity doc Verification route count must match live router registrations.
+live_route_count="$(grep -c '\.route(' "${ROOT}/crates/sigillum-daemon/src/routes/mod.rs")"
+doc_route_counts="$(
+  # The backticks are literal Markdown syntax in the matched document.
+  # shellcheck disable=SC2016
+  grep -E 'Route registrations in `crates/sigillum-daemon/src/routes/mod\.rs`: \*\*[0-9]+\*\*' \
+    "${ROOT}/docs/operator-surface-parity.md" \
+    | grep -oE '\*\*[0-9]+\*\*' \
+    | tr -d '*'
+)"
+doc_route_count_matches="$(printf '%s\n' "${doc_route_counts}" | sed '/^$/d' | wc -l | tr -d ' ')"
+if [[ "${doc_route_count_matches}" != "1" ]]; then
+  echo "architecture check failed: expected exactly one Verification route-registration count in docs/operator-surface-parity.md; found ${doc_route_count_matches}" >&2
+  exit 1
+fi
+doc_route_count="$(printf '%s\n' "${doc_route_counts}" | sed '/^$/d' | head -n 1)"
+if [[ "${live_route_count}" != "${doc_route_count}" ]]; then
+  echo "architecture check failed: route registration count drift — live router has ${live_route_count}, docs/operator-surface-parity.md Verification declares ${doc_route_count}. Update the parity doc in the same PR." >&2
+  exit 1
+fi
+
+# Security lockstep: announcement scans may await untrusted provider I/O only
+# while no viewing key exists. The original session must then revalidate under
+# the operation guard before watch-only key derivation, and the view must be
+# explicitly dropped while that guard is still held.
+announcement_scan_body="$(
+  awk '
+    /pub\(crate\) async fn scan_eth_stealth_announcements/ { capture = 1 }
+    /pub\(crate\) async fn create_eth_stealth_native_deposit/ {
+      if (capture) {
+        exit
+      }
+    }
+    capture { print }
+  ' "${ROOT}/crates/sigillum-daemon/src/service/deposits.rs"
+)"
+provider_line="$(grep -nF '.evm_logs_for_provider(' <<<"${announcement_scan_body}" | head -n 1 | cut -d: -f1 || true)"
+guard_line="$(grep -nF 'let _guard = self.acquire_session_operation(&session_context).await?;' <<<"${announcement_scan_body}" | head -n 1 | cut -d: -f1 || true)"
+derive_line="$(grep -nF 'derive_watch_only_sigillum_ethereum_stealth_wallet(' <<<"${announcement_scan_body}" | head -n 1 | cut -d: -f1 || true)"
+drop_line="$(grep -nF 'drop(watch_view);' <<<"${announcement_scan_body}" | head -n 1 | cut -d: -f1 || true)"
+if [[ -z "${provider_line}" || -z "${guard_line}" || -z "${derive_line}" || -z "${drop_line}" ]] \
+  || (( provider_line >= guard_line || guard_line >= derive_line || derive_line >= drop_line )); then
+  echo "architecture check failed: ERC-5564 scan must fetch public provider data, acquire/revalidate its session guard, derive the watch view, then drop the view in that order" >&2
+  exit 1
+fi
 
 echo "architecture checks passed"

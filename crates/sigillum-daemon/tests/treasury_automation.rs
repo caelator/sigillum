@@ -1,9 +1,11 @@
 //! W8 stage 3 integration tests: treasury automation maintenance cycles.
 //! Mock-RPC only; helpers are intentionally duplicated in this file.
 
+mod common;
+
+use common::{get, post_json, spawn_daemon, submitted_raw_transaction_hash};
 use std::collections::{BTreeSet, HashMap};
 use std::net::SocketAddr;
-use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use axum::extract::State;
@@ -12,7 +14,6 @@ use axum::routing::post;
 use axum::{Json, Router};
 use reqwest::StatusCode;
 use serde_json::{Value, json};
-use sha3::{Digest, Keccak256};
 use tempfile::TempDir;
 
 const SEED_MNEMONIC: &str =
@@ -20,15 +21,6 @@ const SEED_MNEMONIC: &str =
 const RPC_TOKEN: &str = "rpc-test-token";
 const PROFILE: &str = "seed-main";
 const PROVIDER: &str = "mainnet";
-
-fn submitted_raw_transaction_hash(request: &Value) -> Value {
-    let raw = request["params"][0]
-        .as_str()
-        .expect("eth_sendRawTransaction carries raw transaction hex");
-    let bytes = hex::decode(raw.strip_prefix("0x").unwrap_or(raw))
-        .expect("submitted raw transaction is valid hex");
-    json!(format!("0x{}", hex::encode(Keccak256::digest(bytes))))
-}
 
 #[derive(Clone, Default)]
 struct RpcState {
@@ -61,17 +53,6 @@ impl TreasuryEnv {
         self.daemon.abort();
         self.rpc.abort();
     }
-}
-
-async fn spawn_daemon(base_dir: PathBuf) -> (SocketAddr, tokio::task::JoinHandle<()>) {
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let addr = listener.local_addr().unwrap();
-    let (app, _state) =
-        sigillum_daemon::build_router(base_dir, addr.port()).expect("router should initialize");
-    let handle = tokio::spawn(async move {
-        axum::serve(listener, app).await.unwrap();
-    });
-    (addr, handle)
 }
 
 fn eth(milli: u64) -> String {
@@ -171,33 +152,6 @@ async fn spawn_mock_evm_provider(state: RpcState) -> (SocketAddr, tokio::task::J
         axum::serve(listener, app).await.unwrap();
     });
     (addr, handle)
-}
-
-async fn post_json(
-    client: &reqwest::Client,
-    addr: SocketAddr,
-    path: &str,
-    body: Value,
-    token: Option<&str>,
-) -> reqwest::Response {
-    let mut request = client.post(format!("http://{addr}{path}")).json(&body);
-    if let Some(token) = token {
-        request = request.bearer_auth(token);
-    }
-    request.send().await.unwrap()
-}
-
-async fn get(
-    client: &reqwest::Client,
-    addr: SocketAddr,
-    path: &str,
-    token: Option<&str>,
-) -> reqwest::Response {
-    let mut request = client.get(format!("http://{addr}{path}"));
-    if let Some(token) = token {
-        request = request.bearer_auth(token);
-    }
-    request.send().await.unwrap()
 }
 
 async fn setup_treasury_env(hot_balance: String, treasury_balance: String) -> TreasuryEnv {

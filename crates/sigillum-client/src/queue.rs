@@ -5,6 +5,7 @@ use sigillum_api::request::{
     QueueEthStealthErc20SweepRequest, QueueEthStealthErc20TransferRequest,
     QueueEthStealthNativeSweepRequest, QueueEthStealthTransferRequest, QueueProcessRequest,
 };
+use sigillum_api::route_paths as p;
 
 use crate::{
     ClientError, QueueEnqueueResponse, QueueExecutionPauseResponse, QueueJob, QueueJobListResponse,
@@ -13,7 +14,7 @@ use crate::{
 
 impl SigillumClient {
     pub async fn list_queue_jobs(&self) -> Result<Vec<QueueJob>, ClientError> {
-        let builder = self.request(Method::GET, "/api/queue/jobs");
+        let builder = self.request(Method::GET, p::API_QUEUE_JOBS);
         Ok(self.send::<QueueJobListResponse>(builder).await?.jobs)
     }
 
@@ -22,7 +23,7 @@ impl SigillumClient {
         request: QueueEthStealthTransferRequest,
     ) -> Result<QueueEnqueueResponse, ClientError> {
         let builder = self
-            .request(Method::POST, "/api/queue/enqueue/eth-stealth-transfer")
+            .request(Method::POST, p::API_QUEUE_ENQUEUE_ETH_STEALTH_TRANSFER)
             .json(&request);
         self.send(builder).await
     }
@@ -34,7 +35,7 @@ impl SigillumClient {
         let builder = self
             .request(
                 Method::POST,
-                "/api/queue/enqueue/eth-stealth-erc20-transfer",
+                p::API_QUEUE_ENQUEUE_ETH_STEALTH_ERC20_TRANSFER,
             )
             .json(&request);
         self.send(builder).await
@@ -45,7 +46,7 @@ impl SigillumClient {
         request: QueueEthStealthNativeSweepRequest,
     ) -> Result<QueueEnqueueResponse, ClientError> {
         let builder = self
-            .request(Method::POST, "/api/queue/enqueue/eth-stealth-native-sweep")
+            .request(Method::POST, p::API_QUEUE_ENQUEUE_ETH_STEALTH_NATIVE_SWEEP)
             .json(&request);
         self.send(builder).await
     }
@@ -55,7 +56,7 @@ impl SigillumClient {
         request: QueueEthStealthErc20SweepRequest,
     ) -> Result<QueueEnqueueResponse, ClientError> {
         let builder = self
-            .request(Method::POST, "/api/queue/enqueue/eth-stealth-erc20-sweep")
+            .request(Method::POST, p::API_QUEUE_ENQUEUE_ETH_STEALTH_ERC20_SWEEP)
             .json(&request);
         self.send(builder).await
     }
@@ -65,18 +66,18 @@ impl SigillumClient {
         request: QueueProcessRequest,
     ) -> Result<QueueProcessResponse, ClientError> {
         let builder = self
-            .request(Method::POST, "/api/queue/process")
+            .request(Method::POST, p::API_QUEUE_PROCESS)
             .json(&request);
         self.send(builder).await
     }
 
     pub async fn pause_queue(&self) -> Result<QueueExecutionPauseResponse, ClientError> {
-        let builder = self.request(Method::POST, "/api/queue/pause");
+        let builder = self.request(Method::POST, p::API_QUEUE_PAUSE);
         self.send(builder).await
     }
 
     pub async fn resume_queue(&self) -> Result<QueueExecutionPauseResponse, ClientError> {
-        let builder = self.request(Method::POST, "/api/queue/resume");
+        let builder = self.request(Method::POST, p::API_QUEUE_RESUME);
         self.send(builder).await
     }
 }

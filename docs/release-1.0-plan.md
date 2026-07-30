@@ -1,7 +1,7 @@
 # Sigillum 1.0 Release Plan
 
 **Status:** Active plan of record for the 1.0 release (rev 5 — wallet management
-and operator-surface feature line in scope; release truth reconciled 2026-07-18)
+and integrated hardening in scope; release truth reconciled 2026-07-30)
 **Baseline verified:** 2026-07-01, branch `feat/private-receiving-desktop` (commits `70a087b`, `1cda1f2` ahead of `main`)
 **Supersedes:** [catchup-plan.md](./catchup-plan.md) Phases 1–3 are absorbed into Phases D–E and W1–W8 below. The
 [wallet-management-roadmap.md](./wallet-management-roadmap.md) product target is **part of 1.0** (EVM scope — see D-9);
@@ -10,9 +10,8 @@ catchup Phase 4 (remote/platform) stays out.
 **Operational companion:** [execution-runbook-1.0.md](./execution-runbook-1.0.md)
 records current hardening truth, release sequencing, operator gates, and
 failure-recovery procedures. Read it before executing anything here.
-The feature implementation ledger and exact continuation point are
-[operator-surface-and-privacy-plan.md](./operator-surface-and-privacy-plan.md)
-and [execution-handoff.md](./execution-handoff.md).
+This plan and the execution runbook are the only current release authorities.
+Historical implementation plans and handoffs do not override them.
 
 This document is written to be executed by an autonomous coding agent with no
 additional context. Every task has an ID, explicit file paths, steps,
@@ -213,7 +212,7 @@ contract. Platform history comes first, then the wallet subsystem.
   held in `WalletInventoryState.chain_profiles`,
   `crates/sigillum-daemon/src/inventory.rs:21`) but there is **no routing
   chain registry**. Mainnet hardcodes: treasury allocations
-  (`service/inventory/treasury.rs:337` and `:354`), canonical Permit2
+  (`service/inventory/treasury/allocations.rs`), canonical Permit2
   fallback (`service/inventory/permit2_discovery.rs:9`). Selfcheck already
   verifies provider chain id via `eth_chainId`
   (`service/selfcheck.rs:186-207`).
@@ -287,7 +286,7 @@ contract. Platform history comes first, then the wallet subsystem.
   `exit_defi_position` (**adapter `aave-v3-withdraw` exists**,
   `service/inventory/defi_adapters.rs:8`).
 - **Test harness:** in-process mock JSON-RPC server in
-  `crates/sigillum-daemon/tests/daemon_service.rs:27-205` (fakes
+  `crates/sigillum-daemon/tests/common/mock_evm.rs` (fakes
   `eth_chainId`, balances, fee history, `eth_call`, `eth_getLogs`,
   `eth_sendRawTransaction`). **No anvil/foundry or live-testnet tooling
   anywhere.**
@@ -324,7 +323,7 @@ any requires human sign-off recorded here.
 |----|----------|-----------|
 | D-1 | **No crates.io publish at 1.0.** All crates get `publish = false`; 1.0 ships as source + GitHub Release binaries. | Publishing 12 interdependent crates is a large irreversible surface; the product is a local-first app. |
 | D-2 | **macOS is the supported desktop platform at 1.0.** Linux desktop compile-only; Windows unsupported. | Dev + soak evidence is macOS; no Linux desktop user yet. |
-| D-3 | **Desktop bundles ship with a project-enforced full-bundle ad-hoc signature by default** (no Apple account; set `APPLE_SIGNING_IDENTITY=-` explicitly after fail-closed credential validation); full Developer ID signing/notarization remains env-gated. macOS 15+ removed the right-click Gatekeeper bypass, so C3/C6 must document the exact System Settings → Privacy & Security → "Open Anyway" path plus `SHA256SUMS` verification. | No Apple Developer credentials assumed. Tauri's no-identity path can leave only a linker signature, as RC3 proved, so source and release bundles must pass strict app/dmg verification before H1. |
+| D-3 | **Desktop bundles ship with a project-enforced full-bundle ad-hoc signature by default** (no Apple account; set `APPLE_SIGNING_IDENTITY=-` explicitly after fail-closed credential validation); full Developer ID signing/notarization remains env-gated. The supported macOS 15.x/aarch64 target removed the right-click Gatekeeper bypass, so C3/C6 must document the exact System Settings → Privacy & Security → "Open Anyway" path plus `SHA256SUMS` verification. | No Apple Developer credentials assumed. Tauri's no-identity path can leave only a linker signature, as RC3 proved, so source and release bundles must pass strict app/dmg verification before H1. |
 | D-4 | **No external penetration test for 1.0.** Claim stays "source-verified local-first release gate". | The audit doc already draws this boundary honestly. |
 | D-5 | **CLI parity for scriptable families only** — `transit`, read-only `evm`, `wallets` export/derive/check/generate, `compartment list`, plus the wallet-management surfaces already bridged. `wallets` sign/send and `evm broadcast` stay API+UI-only. | Signing/broadcast from shell history is an operator hazard; UI/API cover it. |
 | D-6 | **All policy guardrails stay fail-closed opt-in.** Every NEW execution capability (plan execution, claim execution, treasury automation, gas top-ups) defaults OFF behind its own `TreasuryPolicy` opt-in, surfaced in onboarding like `block_cross_party_linkage`. | Execution is the highest-risk surface 1.0 adds; defaults must be safe. |
@@ -537,16 +536,12 @@ A → (B ∥ C ∥ D) → E → (W1 ∥ W2) → (W3 ∥ W4 ∥ W5 ∥ W6) → W7
 
 #### C7 — Operator console UX redesign (user-directed, 2026-07-03)
 
-- **Implementation checkpoint (2026-07-18):** five destination controllers,
-  shared core/SSE runtime, strict stateful mock, receiving parity, modal
-  coordinator, keyboard/focus behavior, and pinned accessibility gate are on
-  the feature line through historical checkpoint `29426df`. Current
-  implementation checkpoint `c435611` commits the exact-seven-command safe
-  palette, regenerated bundles, real-daemon browser-smoke migration,
-  session/SSE race corrections, and modal/FIDO focus guards. UI tests,
-  typecheck/build, the pinned accessibility gate, screenshots, and browser
-  smoke are green there. The documentation-only successor commit, complete
-  clean-tree release gate, merge, and operator sign-off remain.
+- **Current status (2026-07-30):** the five destination controllers, shared
+  core/SSE runtime, receiving parity, modal coordinator, command palette, and
+  keyboard/focus behavior are integrated. Prior checkpoint counts remain
+  historical evidence for their exact SHAs only. C7 is `[~]` until the exact
+  integrated HEAD passes the full gate and the RC6 build completes the
+  five-destination operator walkthrough and sign-off.
 - **Goal:** the embedded console gets a ground-up UX redesign. Previous
   incremental passes were judged insufficient by the operator; this is an
   information-architecture restructure, not a polish pass.
@@ -724,7 +719,8 @@ A → (B ∥ C ∥ D) → E → (W1 ∥ W2) → (W3 ∥ W4 ∥ W5 ∥ W6) → W7
 #### E4 — Persist `chain_id` on receiving records (D-8)
 
 - **Goal:** remove BOTH mainnet hardcodes in
-  `service/inventory/treasury.rs` — they live in different stores:
+  `service/inventory/treasury/{allocations.rs,policy.rs}` — they live in
+  different stores:
   `:337` is the HD **allocation** document; `:354` is
   `stealth_receiving_item`, built from `EthStealthDeposit` (the deposits
   store).
@@ -739,7 +735,7 @@ A → (B ∥ C ∥ D) → E → (W1 ∥ W2) → (W3 ∥ W4 ∥ W5 ∥ W6) → W7
      `stealth_receiving_item` reads it instead of hardcoding `1`.
   3. Expose through treasury/receiving DTOs, UI, and
      `sigillum api treasury receive-list`; delete the comment at
-     `treasury.rs:336`.
+     `treasury/allocations.rs`.
 - **Accept:** both hardcodes gone; new records persist real chain ids; both
   legacy fixtures migrate; W1 can rely on the fields. **Size:** M.
 
@@ -894,7 +890,7 @@ PR chain. Update `docs/wallet-management-roadmap.md` status text and
   (`service/inventory/nft_discovery.rs:17,185,314,363,481,494`). Do NOT
   re-implement it.
 - **Goal:** the missing piece is end-to-end coverage: a mock `eth_getLogs`
-  `TransferBatch` fixture in `tests/daemon_service.rs` exercising the full
+  `TransferBatch` fixture in `tests/inventory_scan.rs` exercising the full
   scan → holding pipeline.
 - **Accept:** a mock batch event with 3 ids yields exactly the
   positive-balance holdings through the real scan route. **Size:** S.
@@ -1265,7 +1261,8 @@ Order within W7 is strict: W7.1 → W7.2 → W7.3 → W7.4 → W7.5.
 
 - **Goal:** the maintenance cycle GENERATES hot-overflow and treasury-refill
   steps under policy; execution rides W7.
-- **Files:** maintenance service, `service/inventory/{planner,treasury}.rs`,
+- **Files:** maintenance service, `service/inventory/planner.rs`,
+  `service/inventory/treasury/{mod.rs,allocations.rs,policy.rs}`,
   `TreasuryPolicy` (+`hot_overflow_wei_hex` threshold,
   `allow_treasury_automation: bool` default false), UI treasury console,
   CLI.
@@ -1329,13 +1326,15 @@ Order within W7 is strict: W7.1 → W7.2 → W7.3 → W7.4 → W7.5.
 - **Ordering note:** depends on G3+G5 — receipts must reference the
   release-candidate SHA. Execute while preparing H1.
 - **Steps:** on each host named supported in
-  `docs/production-readiness-audit.md` (currently `mac-server`): 3600s
-  standard soak + 600s chaos soak at the RC commit; record receipt
-  filename, SHA, host, and OS in the sanitized external release-evidence
-  bundle. H2 binds that bundle's digest into the immutable final tag; H3 writes
-  the sanitized summary and bundle link into the audit doc. Receipts cannot be
+  `docs/production-readiness-audit.md`: 3600s standard soak + 600s chaos soak
+  at the RC commit. Both receipts must use schema v2 and record
+  `platform: macos`, the exact macOS `ProductVersion`, canonical `aarch64`,
+  and the same opaque SHA-256 machine identity. Record the sanitized receipt
+  metadata in the external release-evidence bundle. Receipts cannot be
   committed into their own receipt-bearing RC SHA.
-- **Accept:** fresh receipts per host at the RC SHA. **Size:** M (wall-clock).
+- **Accept:** fresh schema-v2 receipts at the RC SHA from the same eligible
+  macOS 15.x/aarch64 host. The current macOS 26.5.2/arm64 development host is
+  ineligible. **Size:** M (wall-clock).
 
 #### F5 — Execution-path security review
 
@@ -1457,17 +1456,26 @@ Order within W7 is strict: W7.1 → W7.2 → W7.3 → W7.4 → W7.5.
   verifies the release app and read-only-mounted dmg before staging,
   `cargo build --release -p
   sigillum-cli`, uploads `.dmg`/zipped `.app`/CLI binary; job
-  `artifacts-linux` builds + uploads the CLI binary; job `release` creates
-  a draft GitHub Release with the `[1.0.0]` CHANGELOG section and a
-  `SHA256SUMS` file. Job 4 also attaches a `THIRD-PARTY-NOTICES` file
+  `artifacts-linux` is RC-only and builds + uploads the CLI binary. For an RC,
+  job `release` creates an unpublished `prerelease=true` draft GitHub Release
+  with the `[1.0.0]` CHANGELOG section and `SHA256SUMS`. Required final-tag
+  behavior, pending the evidence-hardening integration, is:
+  both source-verification legs rerun, both artifact jobs are skipped, and the
+  release job copies the exact five qualified RC payload bytes under final
+  names, verifies byte identity and tag-normalized digests, and regenerates
+  `SHA256SUMS`; the final draft and published release are
+  `prerelease=false`. The release also attaches a `THIRD-PARTY-NOTICES` file
   generated with a pinned `cargo-about` (MIT/Apache attribution for shipped
   binaries) and includes it in the `.dmg` resources — `cargo deny` gates
   licenses but does not produce attribution. Dry-run with the next monotonically
   numbered annotated RC tag, retain that tag permanently as the receipt anchor,
   and retain its draft/assets through final-draft verification. Delete only the
   older RC draft after final publication.
-- **Accept:** rc dry run produces all artifacts + draft release, and the exact
-  release app/dmg pair passes the reusable strict verifier before upload.
+- **Accept:** RC dry run produces all artifacts plus an unpublished prerelease
+  draft, and the exact release app/dmg pair passes the reusable strict verifier
+  before upload. Final-tag tests reject any rebuild, missing/extra asset,
+  checksum mismatch, byte difference, digest-normalization difference, or
+  invalid draft/prerelease state.
   **Size:** M.
 
 #### G5 — Readiness and product docs final sync
@@ -1515,21 +1523,22 @@ below; the remaining items are operator human-gates.
 > receipt can promote a final tag. RC5 was the next retained candidate after
 > the runtime, L2 allowlist, and F6 schema-v2 fixes passed protected-main gates.
 
-> **RC5 snapshot:** remote annotated tag object
+> **RC5 historical draft:** remote annotated tag object
 > `c726ba913ace7f5ca64987454b1352ffdd9c8f77` peels to protected-main commit
 > `7e047438f6305ef1cedecdf4790e1b0e1d7e1e6e`. Release workflow
 > `29248938476` passed all six jobs, and the five payload assets independently
-> match `SHA256SUMS`. Standard/chaos F4 and doctor receipts bind to that SHA.
-> The GitHub Release remains draft/unpublished. RC5 lacks F6, desktop
-> clean-install, UI sign-off, and the complete evidence bundle. The
-> operator-surface feature line changes code after RC5, so those receipts are
-> historical baseline for it; the next eligible candidate is RC6 after
-> protected-main merge.
+> match `SHA256SUMS`. The GitHub Release remains draft/unpublished. RC5 cannot
+> certify the integrated hardening line. No RC6 exists; RC6 becomes eligible
+> only after the exact integrated HEAD clean gate, independent review,
+> protected merge, and required CI.
 
-- [ ] Fresh clone of `main` at RC6; `./scripts/check-release.sh` passes there.
-- [ ] CI and the six-job draft release workflow are green at the RC6 commit;
-      the five payload assets independently match `SHA256SUMS`.
-- [ ] F4 soak receipts (standard + chaos) reference the RC6 SHA.
+- [ ] Exact integrated HEAD passes `./scripts/check-release.sh` from a clean
+      tree and independent review converges; then protected merge and CI pass.
+- [ ] The RC6 six-job draft release workflow is green; the unique release is
+      draft, unpublished, and `prerelease=true`, and the five payload assets
+      independently match `SHA256SUMS`.
+- [ ] F4 schema-v2 standard 3600-second and chaos 600-second receipts reference
+      the RC6 SHA and the same macOS 15.x/aarch64 machine identity.
 - [ ] F6 testnet receipts record five transactions for the four core execution
       families, including both confirmed gas-chain legs, at RC6. Funded
       public-testnet access is required.
@@ -1537,10 +1546,18 @@ below; the remaining items are operator human-gates.
       the RC6 build; 0.1-era snapshot restores.
 - [ ] Desktop `.dmg` from RC6 strictly verifies, installs, and reaches the unlock
       screen on a machine without a dev toolchain.
-- [ ] `sigillum doctor` passes on each supported host at the RC6 SHA.
+- [ ] `sigillum doctor` passes on the eligible macOS 15.x/aarch64 host at RC6.
 - [ ] Five-destination UI walkthrough, command palette, keyboard/focus/modal
       behavior, pinned accessibility scenarios, and migrated real-daemon
       browser smoke are signed off at RC6.
+- [ ] Schema-v2 evidence bundle validates; the final workflow reruns source
+      verification, skips artifact rebuilds, copies the exact five qualified
+      RC payload bytes, verifies byte identity and tag-normalized digests,
+      regenerates `SHA256SUMS`, and exposes a `prerelease=false` final draft
+      with the evidence bundle as the seventh asset.
+- [ ] Explicit H2 operator approval is recorded immediately before invoking
+      the final-tag ceremony; it authorizes tag creation and conditional
+      publication only if every post-tag verification passes.
 - [~] A full local walkthrough of the completion bar: import a seed →
       multi-chain scan → review inventory/risk → generate plan → approve →
       execute against a local mock provider → audit trail complete. (execute→audit
@@ -1548,14 +1565,29 @@ below; the remaining items are operator human-gates.
       enqueue_step_happy_path_persists_job_marker_evidence_hash_and_audit,
       eth_seed_jobs_are_gate_driven_and_execute_once_gates_pass via spawn_mock_evm_provider,
       chaos_kill_in_flight_plan_step_resumes_terminal_without_duplication; UI click-through = operator acceptance)
-- [~] CHANGELOG date filled for the next candidate; G5 and feature-line docs
-      converged. The branch still needs merge and fresh RC6 evidence.
+- [~] CHANGELOG release-candidate notes are dated and explicitly state that no
+      final release exists; exact-HEAD gate, review, merge, CI, and RC6
+      evidence remain.
 
 #### H2 — Tag and release
+
+> [!IMPORTANT]
+> **Current integration prerequisite:** this ceremony is not executable in the
+> merge-in-progress checkout until the evidence-hardening implementation lands.
+> The promotion script, final-tag workflow branches, and release-state
+> enforcement must be present and tested first. After that integration, rerun
+> the exact-HEAD clean gate and independent review before using this block.
+> The operator records explicit H2 approval immediately before invoking it;
+> there is no later interactive approval pause.
 
 ```bash
 (
   set -euo pipefail
+
+  test "${H2_APPROVED:-}" = "YES" || {
+    echo "explicit H2 operator approval is required before this ceremony" >&2
+    exit 1
+  }
 
   REPO=caelator/sigillum
   FINAL_TAG=v1.0.0
@@ -1606,6 +1638,61 @@ below; the remaining items are operator human-gates.
   test "$(shasum -a 256 "${EVIDENCE_BUNDLE}" | awk '{print $1}')" = \
     "${EVIDENCE_SHA256}"
 
+  # Snapshot the exact qualified RC draft immediately before tagging. The
+  # checksum body must be the one already sealed into the evidence bundle.
+  VERIFY_DIR="$(mktemp -d "${TMPDIR:-/tmp}/sigillum-final-release.XXXXXX")"
+  trap 'rm -rf "${VERIFY_DIR}"' EXIT
+  QUALIFIED_RC_DIR="${VERIFY_DIR}/qualified-rc"
+  mkdir "${QUALIFIED_RC_DIR}"
+  RC_RELEASE="$(gh api --paginate "repos/${REPO}/releases?per_page=100" |
+    jq -sc --arg tag "${RC_TAG}" '
+      add
+      | [.[] | select(.tag_name == $tag)]
+      | if length == 1
+        then .[0]
+        else error("expected exactly one qualified RC release")
+        end')"
+  jq -e --arg tag "${RC_TAG}" '
+    .tag_name == $tag and
+    .draft == true and
+    .prerelease == true and
+    .published_at == null and
+    (.assets | length == 6) and
+    all(.assets[]; .state == "uploaded" and .size > 0)
+  ' <<< "${RC_RELEASE}" >/dev/null
+  RC_EXPECTED_ASSETS="${VERIFY_DIR}/expected-rc-assets"
+  RC_REMOTE_ASSETS="${VERIFY_DIR}/remote-rc-assets"
+  printf '%s\n' \
+    "SHA256SUMS" \
+    "Sigillum-${RC_TAG}-macos-aarch64.app.zip" \
+    "Sigillum-${RC_TAG}-macos-aarch64.dmg" \
+    "THIRD-PARTY-NOTICES.txt" \
+    "sigillum-cli-${RC_TAG}-linux-x86_64.tar.gz" \
+    "sigillum-cli-${RC_TAG}-macos-aarch64.tar.gz" |
+    LC_ALL=C sort > "${RC_EXPECTED_ASSETS}"
+  jq -r '.assets[].name' <<< "${RC_RELEASE}" |
+    LC_ALL=C sort > "${RC_REMOTE_ASSETS}"
+  cmp -s "${RC_EXPECTED_ASSETS}" "${RC_REMOTE_ASSETS}"
+  while IFS=$'\t' read -r asset_name asset_id; do
+    gh api -H 'Accept: application/octet-stream' \
+      "repos/${REPO}/releases/assets/${asset_id}" \
+      > "${QUALIFIED_RC_DIR}/${asset_name}"
+  done < <(jq -r '.assets[] | [.name, (.id | tostring)] | @tsv' \
+    <<< "${RC_RELEASE}")
+  EVIDENCE_EXTRACT_DIR="${VERIFY_DIR}/evidence-bundle"
+  mkdir "${EVIDENCE_EXTRACT_DIR}"
+  tar -xzf "${EVIDENCE_BUNDLE}" -C "${EVIDENCE_EXTRACT_DIR}"
+  cmp -s \
+    "${QUALIFIED_RC_DIR}/SHA256SUMS" \
+    "${EVIDENCE_EXTRACT_DIR}/release/asset-SHA256SUMS"
+  (
+    cd "${QUALIFIED_RC_DIR}"
+    shasum -a 256 --check SHA256SUMS
+  )
+  bash ./scripts/promote-release-assets.sh promote \
+    "${RC_TAG}" "${FINAL_TAG}" \
+    "${QUALIFIED_RC_DIR}" "${VERIFY_DIR}/promotion-preview"
+
   if git ls-remote --exit-code --tags --refs origin "refs/tags/${FINAL_TAG}"; then
     # Safe resume after an interrupted H2: the immutable existing tag must
     # already match the exact RC and evidence binding.
@@ -1626,7 +1713,8 @@ below; the remaining items are operator human-gates.
     git push origin "refs/tags/${FINAL_TAG}:refs/tags/${FINAL_TAG}"
   fi
 
-  # Wait for the exact final-tag workflow and require all six release jobs.
+  # Wait for the exact final-tag workflow. Source verification and release
+  # succeed; the two artifact-build jobs are intentionally RC-only and skipped.
   FINAL_RUN_JSON=""
   for _ in {1..120}; do
     FINAL_RUN_JSON="$(
@@ -1652,23 +1740,33 @@ below; the remaining items are operator human-gates.
     .headSha == $sha and
     .conclusion == "success" and
     (["release-contract", "verify (ubuntu-24.04)", "verify (macos-15)",
-      "artifacts-macos", "artifacts-linux", "release"] -
+      "release"] -
       [.jobs[] | select(.conclusion == "success") | .name] | length == 0) and
-    all(.jobs[]; .conclusion == "success")
+    (["artifacts-macos", "artifacts-linux"] -
+      [.jobs[] | select(.conclusion == "skipped") | .name] | length == 0) and
+    all(.jobs[];
+      .conclusion == "success" or
+      ((.name == "artifacts-macos" or .name == "artifacts-linux") and
+       .conclusion == "skipped"))
   ' <<< "${FINAL_RUN_RESULT}" >/dev/null
 
-  # Require the exact draft and independently verify every generated asset.
-  FINAL_RELEASE="$(gh api "repos/${REPO}/releases?per_page=100" |
-    jq -c --arg tag "${FINAL_TAG}" '
-      [.[] | select(.tag_name == $tag)]
+  # Require the exact draft and independently verify every promoted asset.
+  FINAL_RELEASE="$(gh api --paginate "repos/${REPO}/releases?per_page=100" |
+    jq -sc --arg tag "${FINAL_TAG}" '
+      add
+      | [.[] | select(.tag_name == $tag)]
       | if length == 1 then .[0] else error("expected one final release") end')"
-  jq -e '.draft == true and .published_at == null' \
+  jq -e '
+    .draft == true and
+    .prerelease == false and
+    .published_at == null
+  ' \
     <<< "${FINAL_RELEASE}" >/dev/null
 
-  VERIFY_DIR="$(mktemp -d "${TMPDIR:-/tmp}/sigillum-final-release.XXXXXX")"
-  trap 'rm -rf "${VERIFY_DIR}"' EXIT
   EXPECTED_ASSETS="${VERIFY_DIR}/expected-assets"
   REMOTE_ASSETS="${VERIFY_DIR}/remote-assets"
+  FINAL_ASSETS_DIR="${VERIFY_DIR}/final-assets"
+  mkdir "${FINAL_ASSETS_DIR}"
   printf '%s\n' \
     "SHA256SUMS" \
     "Sigillum-v1.0.0-macos-aarch64.app.zip" \
@@ -1687,24 +1785,33 @@ below; the remaining items are operator human-gates.
 
   while IFS=$'\t' read -r asset_name asset_id; do
     gh api -H 'Accept: application/octet-stream' \
-      "repos/${REPO}/releases/assets/${asset_id}" > "${VERIFY_DIR}/${asset_name}"
+      "repos/${REPO}/releases/assets/${asset_id}" \
+      > "${FINAL_ASSETS_DIR}/${asset_name}"
   done < <(jq -r --arg name "${EVIDENCE_NAME}" \
     '.assets[] | select(.name != $name) | [.name, (.id | tostring)] | @tsv' \
     <<< "${FINAL_RELEASE}")
   (
-    cd "${VERIFY_DIR}"
+    cd "${FINAL_ASSETS_DIR}"
     shasum -a 256 --check SHA256SUMS
   )
+  bash ./scripts/promote-release-assets.sh verify \
+    "${RC_TAG}" "${FINAL_TAG}" "${QUALIFIED_RC_DIR}" "${FINAL_ASSETS_DIR}"
 
   # Upload without replacement, re-download, and compare with the protected
   # tag object immediately before publication.
   if [[ "${EVIDENCE_ASSET_COUNT}" -eq 0 ]]; then
     gh release upload -R "${REPO}" "${FINAL_TAG}" "${EVIDENCE_BUNDLE}"
   fi
-  FINAL_RELEASE="$(gh api "repos/${REPO}/releases?per_page=100" |
-    jq -c --arg tag "${FINAL_TAG}" '
-      [.[] | select(.tag_name == $tag)]
+  FINAL_RELEASE="$(gh api --paginate "repos/${REPO}/releases?per_page=100" |
+    jq -sc --arg tag "${FINAL_TAG}" '
+      add
+      | [.[] | select(.tag_name == $tag)]
       | if length == 1 then .[0] else error("expected one final release") end')"
+  jq -e '
+    .draft == true and
+    .prerelease == false and
+    .published_at == null
+  ' <<< "${FINAL_RELEASE}" >/dev/null
   EVIDENCE_ASSET_ID="$(jq -r --arg name "${EVIDENCE_NAME}" '
     [.assets[] | select(.name == $name)]
     | if length == 1 then .[0].id else error("expected one evidence asset") end' \
@@ -1725,11 +1832,16 @@ below; the remaining items are operator human-gates.
 
   # Re-fetch and reverify all seven live draft assets immediately before the
   # publish mutation, closing the draft-asset replacement window.
-  PREPUBLISH_RELEASE="$(gh api "repos/${REPO}/releases?per_page=100" |
-    jq -c --arg tag "${FINAL_TAG}" '
-      [.[] | select(.tag_name == $tag)]
+  PREPUBLISH_RELEASE="$(gh api --paginate "repos/${REPO}/releases?per_page=100" |
+    jq -sc --arg tag "${FINAL_TAG}" '
+      add
+      | [.[] | select(.tag_name == $tag)]
       | if length == 1 then .[0] else error("expected one final release") end')"
-  jq -e '.draft == true and .published_at == null' \
+  jq -e '
+    .draft == true and
+    .prerelease == false and
+    .published_at == null
+  ' \
     <<< "${PREPUBLISH_RELEASE}" >/dev/null
   PREPUBLISH_EXPECTED="${VERIFY_DIR}/prepublish-expected-assets"
   PREPUBLISH_ACTUAL="${VERIFY_DIR}/prepublish-actual-assets"
@@ -1747,22 +1859,41 @@ below; the remaining items are operator human-gates.
   cmp -s "${PREPUBLISH_EXPECTED}" "${PREPUBLISH_ACTUAL}"
 
   PREPUBLISH_DIR="${VERIFY_DIR}/prepublish"
-  mkdir -p "${PREPUBLISH_DIR}"
+  PREPUBLISH_ASSETS_DIR="${PREPUBLISH_DIR}/release-assets"
+  mkdir -p "${PREPUBLISH_ASSETS_DIR}"
   while IFS=$'\t' read -r asset_name asset_id; do
+    if [[ "${asset_name}" == "${EVIDENCE_NAME}" ]]; then
+      download_path="${PREPUBLISH_DIR}/${asset_name}"
+    else
+      download_path="${PREPUBLISH_ASSETS_DIR}/${asset_name}"
+    fi
     gh api -H 'Accept: application/octet-stream' \
       "repos/${REPO}/releases/assets/${asset_id}" > \
-      "${PREPUBLISH_DIR}/${asset_name}"
+      "${download_path}"
   done < <(jq -r '.assets[] | [.name, (.id | tostring)] | @tsv' \
     <<< "${PREPUBLISH_RELEASE}")
   (
-    cd "${PREPUBLISH_DIR}"
+    cd "${PREPUBLISH_ASSETS_DIR}"
     shasum -a 256 --check SHA256SUMS
   )
+  bash ./scripts/promote-release-assets.sh verify \
+    "${RC_TAG}" "${FINAL_TAG}" \
+    "${QUALIFIED_RC_DIR}" "${PREPUBLISH_ASSETS_DIR}"
   TAG_EVIDENCE_SHA256="$(git cat-file tag "${FINAL_TAG_OBJECT}" |
     sed -n 's/^Release-Evidence-SHA256: //p')"
   test "${TAG_EVIDENCE_SHA256}" = "${EVIDENCE_SHA256}"
   test "$(shasum -a 256 "${PREPUBLISH_DIR}/${EVIDENCE_NAME}" |
     awk '{print $1}')" = "${TAG_EVIDENCE_SHA256}"
+
+  # Close the final tag/highest-RC/main race immediately before publication.
+  git fetch --prune --tags origin
+  test "$(git rev-parse HEAD)" = "${RC_SHA}"
+  test -z "$(git status --porcelain)"
+  test "$(git rev-parse origin/main)" = "${RC_SHA}"
+  bash ./scripts/check-release-tag-contract.sh \
+    "${RC_TAG}" "${RC_SHA}" origin "${RC_TAG_OBJECT}"
+  bash ./scripts/check-release-tag-contract.sh \
+    "${FINAL_TAG}" "${RC_SHA}" origin "${FINAL_TAG_OBJECT}"
 
   FINAL_RELEASE_ID="$(jq -r '.id' <<< "${PREPUBLISH_RELEASE}")"
   PUBLISHED_RELEASE="$(gh api --method PATCH \
@@ -1799,17 +1930,15 @@ Phase B — Workspace hygiene
 Phase C — Desktop productization
 - [x] C1 real icon set
 - [x] C2 bundling enabled (.app/.dmg)
-- [x] C3 fail-closed env-gated signing and explicit full-bundle ad-hoc default
-      (source and RC5 release-workflow proven)
-- [x] C4 strict source + mounted-dmg verification and negative regressions in
-      the release gate (source and RC5 release-workflow proven)
+- [~] C3 fail-closed env-gated signing and explicit full-bundle ad-hoc default
+      (implemented; current-line RC6 workflow proof pending)
+- [~] C4 strict source + mounted-dmg verification and negative regressions in
+      the release gate (implemented; current-line RC6 workflow proof pending)
 - [x] C5 boot helpers extracted + tested
 - [x] C6 desktop docs
-- [~] C7 operator console UX redesign (five controllers, modal, receiving,
-      keyboard/focus, accessibility, exact-seven-command safe palette, and
-      session-token/SSE lifecycle handling implemented; focused UI,
-      accessibility, screenshot, and real-daemon browser gates are green;
-      documentation commit, full gate, merge, and operator sign-off remain)
+- [~] C7 operator console UX redesign (five destinations and interaction
+      contracts implemented; exact integrated-HEAD gate and RC6 operator
+      walkthrough/sign-off remain)
 
 Phase D — Operator-surface parity
 - [x] D1 CLI: transit, evm read-only, wallets read/derive, compartment list
@@ -1859,16 +1988,17 @@ Phase G — Release engineering
 - [x] G1 CHANGELOG.md
 - [x] G2 docs/stability.md
 - [x] G3 version bump to 1.0.0
-- [x] G4 release workflow (historical dry run validated on a22a98a; RC3 exposed
+- [~] G4 release workflow (historical dry run validated on a22a98a; RC3 exposed
       a signature false positive; RC4 exposed an evidence-contract false
       positive and unconfirmed-dependency execution; RC5 run `29248938476`
-      proved all workflow remediations and checksum-valid draft assets)
+      proved the older workflow at `7e04743`; exact-byte current-line RC6 and
+      final-promotion proof remains)
 - [x] G5 readiness + product docs final sync
 
 Phase H — Ship
-- [~] H1 RC verification checklist (RC5 workflow/F4/doctor are historical for
-      the changed feature line; source, release, F4/F6, clean-machine, doctor,
-      browser, and UI evidence must bind RC6)
+- [~] H1 RC verification checklist (RC5 is an unpublished older-code draft;
+      source, release, F7, schema-v2 F4/F6, clean-machine, doctor, C7, and
+      evidence-bundle receipts must bind RC6)
 - [ ] H2 v1.0.0 tagged, artifacts published (human gate — operator go)
 - [ ] H3 post-release bump + planning issue
 

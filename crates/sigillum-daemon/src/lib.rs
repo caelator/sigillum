@@ -56,7 +56,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use axum::extract::DefaultBodyLimit;
-use axum::http::{HeaderValue, Method, header};
+use axum::http::{HeaderName, HeaderValue, Method, header};
 use axum::middleware;
 use axum::{Extension, Router};
 use tower_http::cors::CorsLayer;
@@ -151,10 +151,18 @@ fn build_router_with_event_query_policy(
     let cors = CorsLayer::new()
         .allow_origin(origin)
         .allow_methods([Method::GET, Method::POST, Method::DELETE, Method::OPTIONS])
-        .allow_headers([header::CONTENT_TYPE, header::AUTHORIZATION])
+        .allow_headers([
+            header::CONTENT_TYPE,
+            header::AUTHORIZATION,
+            HeaderName::from_static(routes::BACKGROUND_REQUEST_HEADER),
+        ])
         .allow_credentials(true);
 
     let app = routes::api_router()
+        .layer(middleware::from_fn_with_state(
+            state.clone(),
+            routes::activity_touch,
+        ))
         .layer(middleware::from_fn_with_state(
             state.clone(),
             routes::startup_gate,
@@ -271,38 +279,54 @@ fn spawn_idle_lock_task(state: Arc<AppState>) {
                 Some(Duration::from_secs(policy.idle_lock_force_after_secs))
             };
 
-            let guard = match tokio::time::timeout(drain, state.operation_guard()).await {
-                Ok(guard) => Some(guard),
-                Err(_) => {
-                    tracing::warn!(
-                        drain_secs = policy.idle_lock_drain_secs,
-                        "idle_lock_drain_exceeded; waiting for guarded operations"
-                    );
-                    if let Some(force_after) = force_after {
-                        match tokio::time::timeout(force_after, state.operation_guard()).await {
-                            Ok(guard) => Some(guard),
-                            Err(_) => {
-                                tracing::error!(
-                                    force_after_secs = policy.idle_lock_force_after_secs,
-                                    "idle_lock_force_after_exceeded; force-zeroizing unlocked state"
-                                );
-                                None
-                            }
-                        }
-                    } else {
-                        Some(state.operation_guard().await)
-                    }
-                }
-            };
-
-            if guard.is_none() || state.idle_lock_due_after_drain() {
-                state.lock_all();
-            } else {
-                state.finish_locking();
-            }
-            drop(guard);
+            complete_idle_lock(state.as_ref(), drain, force_after).await;
         }
     });
+}
+
+async fn complete_idle_lock(state: &AppState, drain: Duration, force_after: Option<Duration>) {
+    let guard = match tokio::time::timeout(drain, state.operation_guard()).await {
+        Ok(guard) => Some(guard),
+        Err(_) => {
+            tracing::warn!(
+                drain_secs = drain.as_secs(),
+                "idle_lock_drain_exceeded; waiting for guarded operations"
+            );
+            if let Some(force_after) = force_after {
+                match tokio::time::timeout(force_after, state.operation_guard()).await {
+                    Ok(guard) => Some(guard),
+                    Err(_) => {
+                        tracing::error!(
+                            force_after_secs = force_after.as_secs(),
+                            "idle_lock_force_after_exceeded; force-zeroizing unlocked state"
+                        );
+                        None
+                    }
+                }
+            } else {
+                Some(state.operation_guard().await)
+            }
+        }
+    };
+
+    if let Some(guard) = guard {
+        if state.idle_lock_due_after_drain() {
+            state.lock_all();
+        } else {
+            state.finish_locking();
+        }
+        drop(guard);
+        return;
+    }
+
+    // The configured force deadline elapsed while an operation still owned
+    // the mutex. Zeroize immediately, but keep the lock latch closed so that
+    // the in-flight operation cannot later pass its final broadcast admission.
+    state.force_zeroize_all_while_locking();
+    let _guard = state.operation_guard().await;
+    // Re-zeroize at the serialized boundary in case the interrupted operation
+    // populated any unlocked state after the first forced zeroization.
+    state.lock_all();
 }
 
 fn prepare_base_dir(base_dir: &Path) -> std::io::Result<()> {

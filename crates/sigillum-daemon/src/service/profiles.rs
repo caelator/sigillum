@@ -22,6 +22,7 @@ use crate::audit_log::AuditEventSpec;
 use super::helpers::map_xpub_error;
 use super::{ServiceError, ServiceResult, SigillumService, capability_scopes};
 
+mod fees;
 mod resolution;
 mod seed_wallets;
 mod sends;
@@ -74,7 +75,8 @@ impl SigillumService {
             fee_estimation_enabled: body.fee_estimation_enabled.unwrap_or(false),
         };
 
-        let _guard = self.state.operation_guard().await;
+        let session_context = self.capture_session_operation_context(Some(token))?;
+        let _guard = self.acquire_session_operation(&session_context).await?;
         let mut registry =
             crate::profiles::load_profiles(&self.state.base_dir).map_err(|error| {
                 ServiceError::internal(format!("Failed to load profile registry: {error}"))
@@ -107,7 +109,8 @@ impl SigillumService {
         body: EvmProfileDeleteRequest,
     ) -> ServiceResult<EvmProviderProfileMutationResponse> {
         let token = self.require_session(token)?;
-        let _guard = self.state.operation_guard().await;
+        let session_context = self.capture_session_operation_context(Some(token))?;
+        let _guard = self.acquire_session_operation(&session_context).await?;
         let mut registry =
             crate::profiles::load_profiles(&self.state.base_dir).map_err(|error| {
                 ServiceError::internal(format!("Failed to load profile registry: {error}"))
@@ -196,7 +199,8 @@ impl SigillumService {
             .or_else(|| self.state.active_compartment_id_for(token))
             .ok_or_else(|| ServiceError::vault_locked("No active compartment."))?;
 
-        let _guard = self.state.operation_guard().await;
+        let session_context = self.capture_session_operation_context(Some(token))?;
+        let _guard = self.acquire_session_operation(&session_context).await?;
         let mut registry =
             crate::profiles::load_profiles(&self.state.base_dir).map_err(|error| {
                 ServiceError::internal(format!("Failed to load profile registry: {error}"))
@@ -248,7 +252,8 @@ impl SigillumService {
         body: EvmProfileDeleteRequest,
     ) -> ServiceResult<EthStealthWalletProfileMutationResponse> {
         let token = self.require_session(token)?;
-        let _guard = self.state.operation_guard().await;
+        let session_context = self.capture_session_operation_context(Some(token))?;
+        let _guard = self.acquire_session_operation(&session_context).await?;
         let mut registry =
             crate::profiles::load_profiles(&self.state.base_dir).map_err(|error| {
                 ServiceError::internal(format!("Failed to load profile registry: {error}"))
@@ -322,7 +327,8 @@ impl SigillumService {
             .or_else(|| self.state.active_compartment_id_for(token))
             .ok_or_else(|| ServiceError::vault_locked("No active compartment."))?;
 
-        let _guard = self.state.operation_guard().await;
+        let session_context = self.capture_session_operation_context(Some(token))?;
+        let _guard = self.acquire_session_operation(&session_context).await?;
         let mut registry =
             crate::profiles::load_profiles(&self.state.base_dir).map_err(|error| {
                 ServiceError::internal(format!("Failed to load profile registry: {error}"))
@@ -452,7 +458,8 @@ impl SigillumService {
         body: EvmProfileDeleteRequest,
     ) -> ServiceResult<EthXpubWalletProfileMutationResponse> {
         let token = self.require_session(token)?;
-        let _guard = self.state.operation_guard().await;
+        let session_context = self.capture_session_operation_context(Some(token))?;
+        let _guard = self.acquire_session_operation(&session_context).await?;
         let mut registry =
             crate::profiles::load_profiles(&self.state.base_dir).map_err(|error| {
                 ServiceError::internal(format!("Failed to load profile registry: {error}"))

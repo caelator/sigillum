@@ -213,6 +213,44 @@ impl OperationRegistry {
         self.prune();
     }
 
+    /// Atomically admit completion only while cancellation is still absent.
+    ///
+    /// The registry mutex serializes this check with [`Self::request_cancel`].
+    /// A worker that wins marks the operation completed before releasing the
+    /// mutex; a cancel request that wins keeps the operation non-terminal and
+    /// forces the worker down its durable cancellation path.
+    pub(crate) fn complete_if_not_canceled<E>(
+        &mut self,
+        id: &str,
+        persist_completion: impl FnOnce() -> Result<(), E>,
+    ) -> Result<bool, E> {
+        let Some(record) = self
+            .records
+            .iter_mut()
+            .find(|record| record.operation.id == id)
+        else {
+            return Ok(false);
+        };
+        if record.cancel_requested.load(Ordering::Acquire)
+            || record.operation.state != OPERATION_STATE_RUNNING
+        {
+            return Ok(false);
+        }
+        // Keep the registry mutex held through the final durable write. This
+        // makes the winner linearizable: either cancellation was already
+        // latched, or completion is persisted before the operation becomes
+        // terminal and any later cancel receives a terminal conflict.
+        persist_completion()?;
+        let now = now_unix();
+        record.operation.state = OPERATION_STATE_COMPLETED.to_string();
+        record.operation.error = None;
+        record.operation.updated_at_unix = now;
+        record.operation.completed_at_unix = Some(now);
+        Self::emit(&self.events, &record.operation);
+        self.prune();
+        Ok(true)
+    }
+
     /// Request cancellation of a single operation by id.
     pub(crate) fn request_cancel(&mut self, id: &str) -> OperationCancelRequest {
         let Some(record) = self
@@ -370,6 +408,42 @@ mod tests {
         assert!(matches!(
             registry.request_cancel("op-missing"),
             OperationCancelRequest::NotFound
+        ));
+    }
+
+    #[test]
+    fn completion_admission_is_atomic_with_cancellation() {
+        let mut registry = OperationRegistry::new();
+        let canceled = registry.start("inventory_scan_evm", vec![]);
+        let canceled_id = canceled.id().to_string();
+        assert!(matches!(
+            registry.request_cancel(&canceled_id),
+            OperationCancelRequest::Signaled(_)
+        ));
+        assert!(
+            !registry
+                .complete_if_not_canceled(&canceled_id, || Ok::<_, ()>(()))
+                .unwrap()
+        );
+        assert_eq!(
+            registry.get(&canceled_id).unwrap().state,
+            OPERATION_STATE_CANCEL_REQUESTED
+        );
+
+        let completed = registry.start("inventory_scan_evm", vec![]);
+        let completed_id = completed.id().to_string();
+        assert!(
+            registry
+                .complete_if_not_canceled(&completed_id, || Ok::<_, ()>(()))
+                .unwrap()
+        );
+        assert_eq!(
+            registry.get(&completed_id).unwrap().state,
+            OPERATION_STATE_COMPLETED
+        );
+        assert!(matches!(
+            registry.request_cancel(&completed_id),
+            OperationCancelRequest::Terminal(_)
         ));
     }
 

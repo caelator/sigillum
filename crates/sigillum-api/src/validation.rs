@@ -175,6 +175,23 @@ fn check_optional_eth_address(field: &str, value: &Option<String>) -> Result<(),
     Ok(())
 }
 
+fn check_threshold_at_least_one(field: &str, threshold: usize) -> Result<(), String> {
+    if threshold < 1 {
+        return Err(format!("{field} must be >= 1"));
+    }
+    Ok(())
+}
+
+fn check_optional_threshold_at_least_one(
+    field: &str,
+    threshold: Option<usize>,
+) -> Result<(), String> {
+    if let Some(threshold) = threshold {
+        check_threshold_at_least_one(field, threshold)?;
+    }
+    Ok(())
+}
+
 /// Patch-style address field where omission retains the stored value and an
 /// explicit blank clears it. Nonblank input still has to be a valid address.
 fn check_optional_blank_or_eth_address(field: &str, value: &Option<String>) -> Result<(), String> {
@@ -397,6 +414,7 @@ impl Validate for crate::request::SetupResetRequest {
 impl Validate for crate::request::CompartmentDefinition {
     fn validate(&self) -> Result<(), String> {
         check_len("label", &self.label, MAX_LABEL)?;
+        check_threshold_at_least_one("threshold", self.threshold)?;
         check_optional_len("passphrase_mode", &self.passphrase_mode, MAX_LABEL)?;
         Ok(())
     }
@@ -453,6 +471,7 @@ impl Validate for crate::request::Fido2SetPinRequest {
 impl Validate for crate::request::CompartmentAddRequest {
     fn validate(&self) -> Result<(), String> {
         check_len("label", &self.label, MAX_LABEL)?;
+        check_threshold_at_least_one("threshold", self.threshold)?;
         check_optional_len("passphrase_mode", &self.passphrase_mode, MAX_LABEL)?;
         Ok(())
     }
@@ -462,9 +481,7 @@ impl Validate for crate::request::CompartmentInitRequest {
     fn validate(&self) -> Result<(), String> {
         check_len("passphrase", &self.passphrase, MAX_PASSPHRASE)?;
         check_optional_len("label", &self.label, MAX_LABEL)?;
-        if self.threshold == Some(0) {
-            return Err("threshold must be >= 1".into());
-        }
+        check_optional_threshold_at_least_one("threshold", self.threshold)?;
         Ok(())
     }
 }

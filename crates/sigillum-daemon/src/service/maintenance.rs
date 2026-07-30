@@ -71,8 +71,9 @@ impl SigillumService {
         body: MaintenanceRunRequest,
     ) -> ServiceResult<MaintenanceRunResponse> {
         let token = self.require_session(token)?;
+        let session_context = self.capture_session_operation_context(Some(token))?;
         if body.run_async == Some(true) {
-            let operation = self.spawn_async_maintenance_run(token, body);
+            let operation = self.spawn_async_maintenance_run(session_context, body);
             return Ok(MaintenanceRunResponse {
                 status: "accepted".into(),
                 refreshed: 0,
@@ -98,23 +99,23 @@ impl SigillumService {
         // is still registered as an operation so other clients can observe
         // or cancel it mid-run.
         let operation = self.start_maintenance_operation();
-        self.execute_maintenance_run(token, body, operation).await
+        self.execute_maintenance_run(session_context, body, operation)
+            .await
     }
 
     /// Spawn a maintenance cycle as a background daemon operation, returning
     /// the operation tracking it.
     fn spawn_async_maintenance_run(
         &self,
-        token: &str,
+        session_context: super::SessionOperationContext,
         body: MaintenanceRunRequest,
     ) -> sigillum_api::Operation {
         let operation = self.start_maintenance_operation();
         let operation_id = operation.id().to_string();
         let service = self.clone();
-        let token = token.to_string();
         tokio::spawn(async move {
             if let Err(error) = service
-                .execute_maintenance_run(&token, body, operation)
+                .execute_maintenance_run(session_context, body, operation)
                 .await
             {
                 tracing::warn!(error = %error, "async maintenance run failed");
@@ -136,12 +137,12 @@ impl SigillumService {
     /// record.
     async fn execute_maintenance_run(
         &self,
-        token: &str,
+        session_context: super::SessionOperationContext,
         body: MaintenanceRunRequest,
         operation: OperationHandle,
     ) -> ServiceResult<MaintenanceRunResponse> {
         let result = self
-            .execute_maintenance_run_inner(token, body, &operation)
+            .execute_maintenance_run_inner(&session_context, body, &operation)
             .await;
         if let Err(error) = &result {
             self.state.finish_operation(
@@ -155,10 +156,11 @@ impl SigillumService {
 
     async fn execute_maintenance_run_inner(
         &self,
-        token: &str,
+        session_context: &super::SessionOperationContext,
         body: MaintenanceRunRequest,
         operation: &OperationHandle,
     ) -> ServiceResult<MaintenanceRunResponse> {
+        let token = session_context.token.as_str();
         // Stage 1 — treasury automation (runs before the guard, exactly like
         // the historical synchronous path). Cancel checkpoint: the stage
         // boundary BEFORE any stage work.
@@ -167,7 +169,7 @@ impl SigillumService {
                 .finish_operation(operation.id(), OPERATION_STATE_CANCELED, None);
             return Ok(self.canceled_maintenance_response(None, None, None, None, Vec::new()));
         }
-        let automation = self.run_treasury_automation(token).await?;
+        let automation = self.run_treasury_automation(session_context).await?;
         self.state.operation_set_progress(operation.id(), 1);
 
         // Stage 2 — deposit refresh (+ optional auto-enqueue). Cancel
@@ -185,7 +187,7 @@ impl SigillumService {
             ));
         }
 
-        let _guard = self.state.operation_guard().await;
+        let operation_guard = self.acquire_session_operation(session_context).await?;
         let mut deposits =
             crate::deposits::load_deposits(&self.state.base_dir).map_err(|error| {
                 super::ServiceError::internal(format!("Failed to load deposits: {error}"))
@@ -298,6 +300,7 @@ impl SigillumService {
                     limit: body.queue_process_limit,
                     run_async: None,
                 },
+                &operation_guard,
                 None,
             )
             .await?;

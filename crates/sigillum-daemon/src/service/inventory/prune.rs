@@ -268,7 +268,18 @@ impl SigillumService {
         body: WalletInventoryAddressPruneRequest,
     ) -> ServiceResult<WalletInventoryAddressPruneResponse> {
         let token = self.require_session(token)?;
-        let _guard = self.state.operation_guard().await;
+        let session_context = self.capture_session_operation_context(Some(token))?;
+        self.prune_wallet_inventory_addresses_with_context(session_context, body)
+            .await
+    }
+
+    async fn prune_wallet_inventory_addresses_with_context(
+        &self,
+        session_context: super::super::SessionOperationContext,
+        body: WalletInventoryAddressPruneRequest,
+    ) -> ServiceResult<WalletInventoryAddressPruneResponse> {
+        let _guard = self.acquire_session_operation(&session_context).await?;
+        let token = session_context.token.as_str();
         // Service-layer re-validation for non-HTTP callers: trimming an
         // all-whitespace selector set down to nothing is a validation
         // failure, and a malformed address selector is a bad request.
@@ -380,11 +391,15 @@ impl SigillumService {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
     use sigillum_api::{
         TreasuryReceiveAllocation, WalletAddressActivityState, WalletAssetHolding, WalletAssetKind,
         WalletDiscoveryBlockCursor, WalletDiscoveryCheckpoint, WalletDiscoveryJob,
         WalletInventoryAddress,
     };
+    use sigillum_fido2::config::CompartmentMeta;
+    use tempfile::TempDir;
 
     use super::*;
 
@@ -526,6 +541,15 @@ mod tests {
 
     fn selectors(request: &WalletInventoryAddressPruneRequest) -> InventoryPruneScope<'_> {
         InventoryPruneScope::Selectors(request)
+    }
+
+    fn compartment(id: usize, label: &str) -> CompartmentMeta {
+        CompartmentMeta {
+            id,
+            label: label.into(),
+            threshold: 1,
+            passphrase_mode: None,
+        }
     }
 
     #[test]
@@ -693,5 +717,51 @@ mod tests {
         assert_eq!(state.receive_allocations.len(), 1);
         assert_eq!(state.addresses.len(), 1);
         assert_eq!(state.addresses[0].provider_profile, "mainnet");
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn prune_wait_rejects_compartment_switch_without_mutation() {
+        let dir = TempDir::new().unwrap();
+        let app_state = Arc::new(
+            crate::AppState::new(dir.path().to_path_buf()).expect("app state should initialize"),
+        );
+        app_state.unlock_compartment(0, [1u8; 32], compartment(0, "daily"));
+        app_state.unlock_compartment(1, [2u8; 32], compartment(1, "secure"));
+        let session = app_state.create_session(Some(0));
+        let service = SigillumService::new(app_state.clone());
+
+        let inventory = WalletInventoryState {
+            addresses: vec![address_row("seed-main", "mainnet", ADDR_A, Some(0))],
+            ..Default::default()
+        };
+        save_inventory_state(&app_state.base_dir, &inventory).unwrap();
+        let session_context = service
+            .capture_session_operation_context(Some(&session))
+            .unwrap();
+
+        let held_operation = app_state.operation_guard().await;
+        let queued_service = service.clone();
+        let queued = tokio::spawn(async move {
+            queued_service
+                .prune_wallet_inventory_addresses_with_context(
+                    session_context,
+                    WalletInventoryAddressPruneRequest {
+                        address: Some(ADDR_A.into()),
+                        ..Default::default()
+                    },
+                )
+                .await
+        });
+        tokio::task::yield_now().await;
+        app_state
+            .switch_active_for(&session, 1)
+            .expect("test compartment switch succeeds");
+        drop(held_operation);
+
+        let error = queued.await.unwrap().unwrap_err();
+        assert_eq!(error.status(), axum::http::StatusCode::CONFLICT);
+        let unchanged = load_inventory_state(&app_state.base_dir).unwrap();
+        assert_eq!(unchanged.addresses.len(), 1);
+        assert_eq!(unchanged.addresses[0].address, ADDR_A);
     }
 }

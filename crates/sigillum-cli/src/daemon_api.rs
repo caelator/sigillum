@@ -153,11 +153,11 @@ fn cmd_api_compartment(args: &[String]) {
     }
 }
 
-/// Dispatch `sigillum api profiles <evm|stealth|eth-xpub|eth-seed> <list|upsert|create|delete>`.
+/// Dispatch `sigillum api profiles` for the per-type verb inventory below.
 fn cmd_api_profiles(args: &[String]) {
     if args.len() < 3 {
         eprintln!(
-            "Usage: sigillum api profiles <evm|stealth|eth-xpub|eth-seed> <list|upsert|create|delete> [...]"
+            "Usage: sigillum api profiles evm|stealth|eth-xpub <list|upsert|delete> | eth-seed <list|upsert|create|delete> [...]"
         );
         process::exit(1);
     }
@@ -312,7 +312,7 @@ fn cmd_api_profiles(args: &[String]) {
             run_eth_seed_create(args, request);
         }
         ("eth-seed", "upsert") => {
-            const UPSERT_USAGE: &str = "sigillum api profiles eth-seed upsert --name <NAME> --provider-profile <PROFILE> [--mnemonic-env VAR|--mnemonic-stdin] [--label <LABEL>] [--project-account <N>] [--compartment-id <N>] [--chain-id <N>] [--default-destination-address <ADDR>] [--mnemonic-passphrase-env VAR|--mnemonic-passphrase-stdin] [--execution-enabled|--execution-disabled]";
+            const UPSERT_USAGE: &str = "sigillum api profiles eth-seed upsert --name <NAME> --provider-profile <PROFILE> [--mnemonic-env VAR|--mnemonic-stdin] [--label <LABEL>] [--project-account <N>] [--compartment-id <N>] [--chain-id <N>] [--default-destination-address <ADDR>] [--mnemonic-passphrase-env VAR|--mnemonic-passphrase-stdin] [--execution-enabled|--execution-disabled] (prompts securely for the required mnemonic when its source flag is omitted)";
             let request = EthSeedWalletProfileUpsertRequest {
                 name: require_flag(args, "--name", UPSERT_USAGE),
                 provider_profile: require_flag(args, "--provider-profile", UPSERT_USAGE),
@@ -344,7 +344,7 @@ fn cmd_api_profiles(args: &[String]) {
         }
         _ => {
             eprintln!(
-                "Usage: sigillum api profiles <evm|stealth|eth-xpub|eth-seed> <list|upsert|create|delete> [...]"
+                "Usage: sigillum api profiles evm|stealth|eth-xpub <list|upsert|delete> | eth-seed <list|upsert|create|delete> [...]"
             );
             process::exit(1);
         }

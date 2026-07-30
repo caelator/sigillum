@@ -23,6 +23,19 @@ impl SigillumService {
         body: EthStealthSendTransferRequest,
     ) -> ServiceResult<EthStealthSendResponse> {
         let token = self.require_session(token)?;
+        let session_context = self.capture_session_operation_context(Some(token))?;
+        let operation_guard = self.acquire_session_operation(&session_context).await?;
+        self.eth_stealth_send_transfer_under_operation_guard(token, body, &operation_guard)
+            .await
+    }
+
+    pub(in crate::service) async fn eth_stealth_send_transfer_under_operation_guard(
+        &self,
+        token: &str,
+        body: EthStealthSendTransferRequest,
+        _operation_guard: &tokio::sync::MutexGuard<'_, ()>,
+    ) -> ServiceResult<EthStealthSendResponse> {
+        self.require_session(Some(token))?;
         self.authorize_transaction_policy(TransactionPolicyCheck {
             kind: TransactionPolicyKind::RoutedTransfer,
             destination_address: Some(&body.destination_address),
@@ -91,6 +104,7 @@ impl SigillumService {
         })?;
 
         let broadcast_transaction_hash_hex = if broadcast {
+            self.admit_broadcast()?;
             Some(
                 rpc.send_raw_transaction(&signed.raw_transaction_hex)
                     .await?,
@@ -133,6 +147,19 @@ impl SigillumService {
         body: EthStealthSendErc20TransferRequest,
     ) -> ServiceResult<EthStealthSendResponse> {
         let token = self.require_session(token)?;
+        let session_context = self.capture_session_operation_context(Some(token))?;
+        let operation_guard = self.acquire_session_operation(&session_context).await?;
+        self.eth_stealth_send_erc20_transfer_under_operation_guard(token, body, &operation_guard)
+            .await
+    }
+
+    pub(in crate::service) async fn eth_stealth_send_erc20_transfer_under_operation_guard(
+        &self,
+        token: &str,
+        body: EthStealthSendErc20TransferRequest,
+        _operation_guard: &tokio::sync::MutexGuard<'_, ()>,
+    ) -> ServiceResult<EthStealthSendResponse> {
+        self.require_session(Some(token))?;
         self.authorize_transaction_policy(TransactionPolicyCheck {
             kind: TransactionPolicyKind::RoutedTransfer,
             destination_address: Some(&body.recipient_address),
@@ -199,6 +226,7 @@ impl SigillumService {
         })?;
 
         let broadcast_transaction_hash_hex = if broadcast {
+            self.admit_broadcast()?;
             Some(
                 rpc.send_raw_transaction(&signed.raw_transaction_hex)
                     .await?,

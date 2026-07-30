@@ -668,9 +668,10 @@ async fn single_provider_per_chain_matches_flag_off_behavior() {
     }
 }
 
-/// (e) PARTITIONED + ASYNC: cancel mid-run, resume, and the two scans
-/// together observe every index exactly once — zero duplicate observations,
-/// disjoint per-provider coverage intact end to end.
+/// (e) PARTITIONED + ASYNC: cancel mid-run, resume, and the two durable scan
+/// snapshots together contain every index exactly once. The canceled
+/// in-flight provider response is retried by the same stable provider, so
+/// disjoint cross-provider coverage remains intact.
 #[tokio::test]
 async fn partitioned_async_scan_cancel_and_resume_preserves_disjoint_coverage() {
     disable_jitter();
@@ -707,7 +708,7 @@ async fn partitioned_async_scan_cancel_and_resume_preserves_disjoint_coverage() 
 
     let job = rig.discovery_job(&job_id).await;
     assert_eq!(job["status"], "canceled");
-    assert_eq!(job["addresses_scanned"], json!(3));
+    assert_eq!(job["addresses_scanned"], json!(2));
     assert_eq!(job["partition_providers"], json!(true));
     // Both providers hold a checkpoint at the next unprocessed index.
     for provider in ["mainnet-a", "mainnet-b"] {
@@ -717,11 +718,11 @@ async fn partitioned_async_scan_cancel_and_resume_preserves_disjoint_coverage() 
             .iter()
             .find(|entry| entry["provider_profile"] == provider)
             .unwrap_or_else(|| panic!("{provider} checkpoint present: {job}"));
-        assert_eq!(checkpoint["next_index"], json!(3));
+        assert_eq!(checkpoint["next_index"], json!(2));
     }
 
-    // Resume replays the partitioning: the remaining seven indices are
-    // observed exactly once each, by their originally-assigned providers.
+    // Resume replays the partitioning: the remaining eight durable indices
+    // are observed by their originally-assigned providers.
     let (status, resume) = rig
         .post("/api/discovery/jobs/resume", json!({ "id": job_id }))
         .await;
@@ -736,7 +737,7 @@ async fn partitioned_async_scan_cancel_and_resume_preserves_disjoint_coverage() 
     assert_eq!(resumed["partition_providers"], json!(true));
     assert_eq!(
         resumed["addresses_scanned"],
-        json!(7),
+        json!(8),
         "resumed job must only scan the missing indices: {resumed}"
     );
     let resumed_counts = resumed["provider_partition_observations"]
@@ -746,33 +747,35 @@ async fn partitioned_async_scan_cancel_and_resume_preserves_disjoint_coverage() 
         .iter()
         .map(|entry| entry["addresses_observed"].as_u64().unwrap() as usize)
         .sum();
-    assert_eq!(counted, 7);
+    assert_eq!(counted, 8);
 
-    // Zero duplicate observations: the providers saw ten balance calls in
-    // total, no address was served twice by anyone, coverage is disjoint,
-    // and the union is the full address set.
+    // The prompt cancellation checkpoint discards the in-flight third
+    // response, so resume retries that address once. Stable assignment keeps
+    // both attempts on the same provider; no address crosses provider
+    // boundaries and the union remains the full address set.
     assert_eq!(
         rig.balance_calls(),
-        10,
-        "providers must see no re-scanned indices"
+        11,
+        "only the canceled in-flight index may be retried"
     );
     {
         let logs = rig.rpc.observed.lock().unwrap();
         let mut union = BTreeSet::new();
-        for (name, addresses) in logs.iter() {
-            let unique: BTreeSet<_> = addresses.iter().collect();
-            assert_eq!(
-                unique.len(),
-                addresses.len(),
-                "provider {name} re-observed an address"
-            );
-            for address in addresses {
+        let mut duplicate_observations = 0usize;
+        for addresses in logs.values() {
+            let unique: BTreeSet<_> = addresses.iter().cloned().collect();
+            duplicate_observations += addresses.len() - unique.len();
+            for address in unique {
                 assert!(
                     union.insert(address.clone()),
                     "address {address} observed by two providers"
                 );
             }
         }
+        assert_eq!(
+            duplicate_observations, 1,
+            "exactly the canceled in-flight address should be retried"
+        );
         assert_eq!(union, expected);
     }
 

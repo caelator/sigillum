@@ -28,6 +28,10 @@ pub(in crate::service) mod prune;
 mod risk;
 mod risk_catalog;
 mod scan_execution;
+mod scan_lifecycle;
+mod scan_provider;
+#[cfg(test)]
+mod session_admission_tests;
 mod simulation;
 mod support;
 mod token_discovery;
@@ -37,6 +41,8 @@ mod wallet_selection;
 mod watch_book;
 mod watch_discovery;
 
+pub(in crate::service) use discovery_jobs::recover_interrupted_discovery_jobs;
+
 use sigillum_api::{
     ChainProfile, DEFAULT_DORMANCY_BLOCK_WINDOW, EthSeedWalletProfile, EvmProviderProfile,
     OPERATION_KIND_INVENTORY_SCAN_EVM, RiskFindingListResponse, WalletDiscoveryJob,
@@ -45,7 +51,6 @@ use sigillum_api::{
 };
 
 use allowance_discovery::{Erc20AllowanceDiscoveryConfig, erc20_allowance_discovery_config};
-use checkpoints::sync_inventory_job;
 use claim_discovery::{ClaimCandidateDiscoveryConfig, claim_candidate_discovery_config};
 use defi_discovery::{DefiTokenPositionDiscoveryConfig, defi_token_position_discovery_config};
 use nft_approval_discovery::{
@@ -341,10 +346,11 @@ impl SigillumService {
         body: WalletInventoryScanRequest,
     ) -> ServiceResult<WalletInventoryScanResponse> {
         let token = self.require_session(token)?;
+        let session_context = self.capture_session_operation_context(Some(token))?;
         let run_async = body.run_async == Some(true);
-        let prepared = self.prepare_evm_scan(token, body)?;
+        let prepared = self.prepare_evm_scan(&session_context, body)?;
         if run_async {
-            let (job, operation) = self.spawn_async_evm_scan(token, prepared);
+            let (job, operation) = self.spawn_async_evm_scan(session_context, prepared);
             return Ok(WalletInventoryScanResponse {
                 job,
                 addresses: Vec::new(),
@@ -359,7 +365,7 @@ impl SigillumService {
         let operation = self
             .state
             .start_operation(OPERATION_KIND_INVENTORY_SCAN_EVM, Vec::new());
-        self.execute_evm_scan(token, prepared, operation, None)
+        self.execute_evm_scan(session_context, prepared, operation, None)
             .await
     }
 
@@ -369,10 +375,13 @@ impl SigillumService {
     /// scans) so invalid requests fail fast. The persisted watch address
     /// book is read without the guard — the same read-only access the list
     /// endpoints use; discovery is read-only, so a concurrent watch-book
-    /// change before execution is harmless.
+    /// change before execution is harmless. Compartment-scoped inputs must
+    /// come from `session_context`, never a second live session lookup: an
+    /// active-compartment ABA before the guarded admission must not change
+    /// what the scan probes.
     fn prepare_evm_scan(
         &self,
-        token: &str,
+        session_context: &super::SessionOperationContext,
         body: WalletInventoryScanRequest,
     ) -> ServiceResult<PreparedEvmScan> {
         let gap_limit = validated_gap_limit(body.gap_limit)?;
@@ -428,9 +437,8 @@ impl SigillumService {
             body.claim_candidate_limit,
         )?;
         let token_registry_probe = if body.probe_token_registry == Some(true) {
-            let compartment_id = self
-                .state
-                .active_compartment_id_for(token)
+            let compartment_id = session_context
+                .active_compartment_id
                 .ok_or_else(|| ServiceError::vault_locked("No active compartment."))?;
             let state = crate::token_registry::load_token_registry(&self.state.base_dir).map_err(
                 |error| ServiceError::internal(format!("Failed to load token registry: {error}")),
@@ -536,7 +544,7 @@ impl SigillumService {
     /// guard) and the operation tracking it.
     fn spawn_async_evm_scan(
         &self,
-        token: &str,
+        session_context: super::SessionOperationContext,
         prepared: PreparedEvmScan,
     ) -> (WalletDiscoveryJob, sigillum_api::Operation) {
         let job_id = random_id();
@@ -547,10 +555,9 @@ impl SigillumService {
             .start_operation(OPERATION_KIND_INVENTORY_SCAN_EVM, vec![job_id]);
         let operation_id = operation.id().to_string();
         let service = self.clone();
-        let token = token.to_string();
         tokio::spawn(async move {
             if let Err(error) = service
-                .execute_evm_scan(&token, prepared, operation, Some(accepted_job_id))
+                .execute_evm_scan(session_context, prepared, operation, Some(accepted_job_id))
                 .await
             {
                 tracing::warn!(error = %error, "async inventory scan failed");
@@ -561,22 +568,6 @@ impl SigillumService {
             .get_operation(&operation_id)
             .expect("operation registered above");
         (accepted_job, operation)
-    }
-
-    /// Persist a terminal scan-job state (`canceled` or `failed`) with the
-    /// same per-index durability the loop uses.
-    fn finalize_scan_job(
-        &self,
-        inventory: &mut crate::inventory::WalletInventoryState,
-        job: &mut WalletDiscoveryJob,
-        status: &str,
-        error: Option<&ServiceError>,
-    ) -> ServiceResult<()> {
-        job.status = status.to_string();
-        job.completed_at_unix = Some(now_unix());
-        job.last_error = error.map(|error| error.message().to_string());
-        sync_inventory_job(inventory, job);
-        save_inventory_state(&self.state.base_dir, inventory)
     }
 }
 

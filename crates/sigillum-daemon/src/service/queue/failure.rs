@@ -88,7 +88,10 @@ fn classify_service_error_cause(error: &ServiceError) -> QueueFailureCause {
 }
 
 fn classify_failure_message(status: Option<StatusCode>, message: &str) -> QueueFailureCause {
-    if message.starts_with("execution_gate") || message.starts_with("execution_paused") {
+    if message.starts_with("execution_gate")
+        || message.starts_with("execution_paused")
+        || message.starts_with("submission_held:")
+    {
         return QueueFailureCause::PolicyBlock;
     }
     let lower = message.to_ascii_lowercase();
@@ -251,6 +254,10 @@ mod tests {
             classify_blocked_queue_reason(
                 "execution_paused: queue execution is paused by the operator kill switch"
             ),
+            QueueFailureCause::PolicyBlock
+        );
+        assert_eq!(
+            classify_blocked_queue_reason("submission_held: daemon locking denied broadcast"),
             QueueFailureCause::PolicyBlock
         );
         let disposition = classify_queue_error(

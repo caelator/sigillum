@@ -1,6 +1,13 @@
 # Operator Surface & Privacy Implementation Plan
 
-Status: **in execution; implementation checkpoint `8ea6f8e` and audited
+> [!CAUTION]
+> Retired historical implementation record. The integrated hardening work
+> supersedes its checkpoint and continuation instructions. It is not current
+> release authority; use [`release-1.0-plan.md`](./release-1.0-plan.md) and
+> [`execution-runbook-1.0.md`](./execution-runbook-1.0.md). C7 remains partial
+> until its RC6 operator walkthrough and sign-off are complete.
+
+Historical status at retirement: **in execution; implementation checkpoint `8ea6f8e` and audited
 documentation/release-gate checkpoint `fc1e93b` on 2026-07-18** — started
 2026-07-16 on branch
 `codex/operator-surface-privacy` (worktree
