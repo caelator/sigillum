@@ -1,3 +1,4 @@
+import { ROUTE_PATHS } from "../routePaths";
 import type {
   ActiveCompartment,
   StatusResponse,
@@ -36,7 +37,7 @@ export function setupRequirements(status: StatusResponse | null): SetupRequireme
 }
 
 export function compartmentLabel(compartment: ActiveCompartment | null | undefined): string {
-  return compartment?.label ?? "No active compartment";
+  return compartment?.compartment_label ?? "No active compartment";
 }
 
 interface WizardCompartment {
@@ -278,7 +279,7 @@ export function createSetupWizard(deps: SetupWizardDeps) {
 
   async function wizDetectDevice(): Promise<void> {
     try {
-      const r = await deps.api("GET", "/api/fido2/detect");
+      const r = await deps.api("GET", ROUTE_PATHS.API_FIDO2_DETECT);
       const hint = document.getElementById("wizDeviceHint");
       if (hint) {
         if (r.device_present) {
@@ -312,7 +313,7 @@ export function createSetupWizard(deps: SetupWizardDeps) {
       return;
     }
 
-    const initR = await deps.api("POST", "/api/compartment/init", {
+    const initR = await deps.api("POST", ROUTE_PATHS.API_COMPARTMENT_INIT, {
       id: 0,
       label,
       threshold: 1,
@@ -344,7 +345,7 @@ export function createSetupWizard(deps: SetupWizardDeps) {
     // before committing rather than discovering it mid-ceremony.
     if (wizRequiredKeyCount > 1) {
       try {
-        const detect = await deps.api("GET", "/api/fido2/detect");
+        const detect = await deps.api("GET", ROUTE_PATHS.API_FIDO2_DETECT);
         const detected = Number(detect?.device_count) || 0;
         if (detected > 0 && detected < wizRequiredKeyCount) {
           deps.toast(
@@ -478,7 +479,7 @@ export function createSetupWizard(deps: SetupWizardDeps) {
     };
     if (pin) body.pin = pin;
 
-    const r = await deps.api("POST", "/api/fido2/setup", body);
+    const r = await deps.api("POST", ROUTE_PATHS.API_FIDO2_SETUP, body);
     if (r.error) {
       const message = deps.friendlyFidoError(r.error);
       wizShowStep("wizStepFido2Pin");
@@ -537,7 +538,7 @@ export function createSetupWizard(deps: SetupWizardDeps) {
     deps.toast("Touch your hardware key now...");
     const body: any = { label };
     if (pin) body.pin = pin;
-    const r = await deps.api("POST", "/api/fido2/register", body);
+    const r = await deps.api("POST", ROUTE_PATHS.API_FIDO2_REGISTER, body);
     if (r.error) {
       const message = deps.friendlyFidoError(r.error);
       setInlineInfoById("wizAdditionalKeyStatus", message);
@@ -619,7 +620,7 @@ export function createSetupWizard(deps: SetupWizardDeps) {
   }
 
   async function fetchCurrentTreasuryPolicy(): Promise<TreasuryPolicy | null> {
-    const r = await deps.api("GET", "/api/treasury/policy");
+    const r = await deps.api("GET", ROUTE_PATHS.API_TREASURY_POLICY);
     if (r.error) {
       throw new Error(String(r.error));
     }
@@ -635,7 +636,7 @@ export function createSetupWizard(deps: SetupWizardDeps) {
             block_cross_party_linkage: true,
           }
         : { enabled: false, block_cross_party_linkage: true };
-      const r = await deps.api("POST", "/api/treasury/policy/update", body);
+      const r = await deps.api("POST", ROUTE_PATHS.API_TREASURY_POLICY_UPDATE, body);
       if (r.error) {
         deps.toast(r.error, "error");
         return;
@@ -665,7 +666,7 @@ export function createSetupWizard(deps: SetupWizardDeps) {
             allow_claim_execution: true,
           }
         : { enabled: false, allow_claim_execution: true };
-      const r = await deps.api("POST", "/api/treasury/policy/update", body);
+      const r = await deps.api("POST", ROUTE_PATHS.API_TREASURY_POLICY_UPDATE, body);
       if (r.error) {
         deps.toast(r.error, "error");
         return;
@@ -695,7 +696,7 @@ export function createSetupWizard(deps: SetupWizardDeps) {
             allow_gas_topups: true,
           }
         : { enabled: false, allow_gas_topups: true };
-      const r = await deps.api("POST", "/api/treasury/policy/update", body);
+      const r = await deps.api("POST", ROUTE_PATHS.API_TREASURY_POLICY_UPDATE, body);
       if (r.error) {
         deps.toast(r.error, "error");
         return;

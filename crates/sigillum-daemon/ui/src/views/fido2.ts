@@ -1,3 +1,4 @@
+import { ROUTE_PATHS } from "../routePaths";
 import { clearFields } from "../render/forms";
 import { setInlineInfoById, setTextById } from "../render/dom";
 import { esc, escAttr } from "../render/html";
@@ -184,7 +185,7 @@ export function createFido2Actions(deps: Fido2Deps) {
 
   async function showUnlockTabs(): Promise<void> {
     try {
-      const detect = await deps.api("GET", "/api/fido2/detect");
+      const detect = await deps.api("GET", ROUTE_PATHS.API_FIDO2_DETECT);
       const hasFido = detect.device_present;
       lastFidoDetect = detect;
       const tabs = document.getElementById("unlockTabs");
@@ -225,7 +226,7 @@ export function createFido2Actions(deps: Fido2Deps) {
     fido2Card?.classList.remove("hidden");
 
     try {
-      const detect = await deps.api("GET", "/api/fido2/detect");
+      const detect = await deps.api("GET", ROUTE_PATHS.API_FIDO2_DETECT);
       lastFidoDetect = detect;
       const devEl = document.getElementById("fido2DeviceStatus");
       if (detect.device_present) {
@@ -242,7 +243,7 @@ export function createFido2Actions(deps: Fido2Deps) {
     } catch (_) {}
 
     try {
-      const keys = await deps.api("GET", "/api/fido2/list");
+      const keys = await deps.api("GET", ROUTE_PATHS.API_FIDO2_LIST);
       const listEl = document.getElementById("fido2KeyListSection");
       lastFidoKeys = keys.keys || [];
       if (keys.keys && keys.keys.length > 0) {
@@ -296,7 +297,7 @@ export function createFido2Actions(deps: Fido2Deps) {
       return;
     }
 
-    const r = await deps.api("POST", "/api/fido2/pin/set", { new_pin: pin });
+    const r = await deps.api("POST", ROUTE_PATHS.API_FIDO2_PIN_SET, { new_pin: pin });
     if (r.error) {
       const message = friendlyFidoError(r.error);
       if (hintId) setInlineInfoById(hintId, message);
@@ -355,7 +356,7 @@ export function createFido2Actions(deps: Fido2Deps) {
     if (pin) body.pin = pin;
     if (poison) body.poison = true;
     if (skipKeys.length > 0) body.skip_keys = skipKeys;
-    const r = await deps.api("POST", "/api/fido2/register", body);
+    const r = await deps.api("POST", ROUTE_PATHS.API_FIDO2_REGISTER, body);
     if (r.error) {
       const message = friendlyFidoError(r.error);
       setInlineInfoById("fido2DeviceStatus", message);
@@ -374,7 +375,7 @@ export function createFido2Actions(deps: Fido2Deps) {
     const pin = await promptPin("Enter the current FIDO2 PIN only if the remaining keys require one:");
     const body: any = { label };
     if (pin) body.pin = pin;
-    const r = await deps.api("POST", "/api/fido2/remove", body);
+    const r = await deps.api("POST", ROUTE_PATHS.API_FIDO2_REMOVE, body);
     if (r.error) {
       const message = friendlyFidoError(r.error);
       setInlineInfoById("fido2DeviceStatus", message);
@@ -393,7 +394,7 @@ export function createFido2Actions(deps: Fido2Deps) {
       return;
     }
     deps.toast("Touch your hardware key now...");
-    const r = await deps.api("POST", "/api/fido2/unlock", {
+    const r = await deps.api("POST", ROUTE_PATHS.API_FIDO2_UNLOCK, {
       pins: pin ? [pin] : [],
       tap_count: tapCount,
     });

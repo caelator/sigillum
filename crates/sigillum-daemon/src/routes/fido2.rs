@@ -2,7 +2,6 @@
 
 use std::sync::Arc;
 
-use axum::Json;
 use axum::extract::State;
 use axum::http::HeaderMap;
 use axum::response::Response;
@@ -14,7 +13,7 @@ use sigillum_api::request::{
 use crate::AppState;
 use crate::service::SigillumService;
 
-use super::{bearer_token, service_response, validated};
+use super::{ValidatedJson, bearer_token, service_response};
 
 pub(crate) async fn fido2_status(
     State(state): State<Arc<AppState>>,
@@ -32,12 +31,8 @@ pub(crate) async fn fido2_detect(State(state): State<Arc<AppState>>) -> Response
 pub(crate) async fn fido2_set_pin(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
-    Json(body): Json<Fido2SetPinRequest>,
+    ValidatedJson(body): ValidatedJson<Fido2SetPinRequest>,
 ) -> Response {
-    let body = match validated(Json(body)) {
-        Ok(b) => b,
-        Err(resp) => return resp,
-    };
     let service = SigillumService::new(state);
     service_response(service.fido2_set_pin(bearer_token(&headers).as_deref(), body))
 }
@@ -49,12 +44,8 @@ pub(crate) async fn fido2_list(State(state): State<Arc<AppState>>, headers: Head
 
 pub(crate) async fn fido2_setup(
     State(state): State<Arc<AppState>>,
-    Json(body): Json<Fido2SetupRequest>,
+    ValidatedJson(body): ValidatedJson<Fido2SetupRequest>,
 ) -> Response {
-    let body = match validated(Json(body)) {
-        Ok(b) => b,
-        Err(resp) => return resp,
-    };
     let service = SigillumService::new(state);
     service_response(service.fido2_setup(body).await)
 }
@@ -62,12 +53,8 @@ pub(crate) async fn fido2_setup(
 pub(crate) async fn fido2_register(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
-    Json(body): Json<Fido2RegisterRequest>,
+    ValidatedJson(body): ValidatedJson<Fido2RegisterRequest>,
 ) -> Response {
-    let body = match validated(Json(body)) {
-        Ok(b) => b,
-        Err(resp) => return resp,
-    };
     let service = SigillumService::new(state);
     service_response(
         service
@@ -79,12 +66,8 @@ pub(crate) async fn fido2_register(
 pub(crate) async fn fido2_unlock(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
-    Json(body): Json<Fido2UnlockRequest>,
+    ValidatedJson(body): ValidatedJson<Fido2UnlockRequest>,
 ) -> Response {
-    let body = match validated(Json(body)) {
-        Ok(b) => b,
-        Err(resp) => return resp,
-    };
     let service = SigillumService::new(state);
     service_response(
         service
@@ -96,12 +79,8 @@ pub(crate) async fn fido2_unlock(
 pub(crate) async fn fido2_remove(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
-    Json(body): Json<Fido2RemoveRequest>,
+    ValidatedJson(body): ValidatedJson<Fido2RemoveRequest>,
 ) -> Response {
-    let body = match validated(Json(body)) {
-        Ok(b) => b,
-        Err(resp) => return resp,
-    };
     let service = SigillumService::new(state);
     service_response(
         service

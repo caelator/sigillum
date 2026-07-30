@@ -1,6 +1,7 @@
 use reqwest::Method;
 use sigillum_api::request::SelfCheckRunRequest;
 use sigillum_api::response::SelfCheckRunResponse;
+use sigillum_api::route_paths as p;
 
 use crate::{ClientError, SigillumClient};
 
@@ -15,7 +16,7 @@ impl SigillumClient {
         request: SelfCheckRunRequest,
     ) -> Result<SelfCheckRunResponse, ClientError> {
         let builder = self
-            .request(Method::POST, "/api/selfcheck/run")
+            .request(Method::POST, p::API_SELFCHECK_RUN)
             .json(&request);
         self.send(builder).await
     }

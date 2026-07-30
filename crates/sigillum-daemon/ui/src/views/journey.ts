@@ -1,3 +1,4 @@
+import { ROUTE_PATHS } from "../routePaths";
 import type { TreasuryOverviewResponse, TreasuryPolicy } from "../contracts";
 import { esc, escAttr } from "../render/html";
 
@@ -244,11 +245,11 @@ export function createJourneyActions(deps: JourneyDeps) {
     try {
       const [evmResp, seedResp, xpubResp, overviewResp, policyResp] =
         await Promise.all([
-          deps.api("GET", "/api/profiles/evm"),
-          deps.api("GET", "/api/profiles/eth-seed"),
-          deps.api("GET", "/api/profiles/eth-xpub"),
-          deps.api("GET", "/api/treasury/overview"),
-          deps.api("GET", "/api/treasury/policy"),
+          deps.api("GET", ROUTE_PATHS.API_PROFILES_EVM),
+          deps.api("GET", ROUTE_PATHS.API_PROFILES_ETH_SEED),
+          deps.api("GET", ROUTE_PATHS.API_PROFILES_ETH_XPUB),
+          deps.api("GET", ROUTE_PATHS.API_TREASURY_OVERVIEW),
+          deps.api("GET", ROUTE_PATHS.API_TREASURY_POLICY),
         ]);
       const providerCount = evmResp.error ? 0 : (evmResp.profiles || []).length;
       const seedCount = seedResp.error ? 0 : (seedResp.profiles || []).length;
@@ -304,7 +305,7 @@ export function createJourneyActions(deps: JourneyDeps) {
     deps.toast("Balance scan started — reading every wallet across all providers…");
     try {
       // Empty body = the guided default: scan all profiles on all providers.
-      const r = await deps.api("POST", "/api/inventory/scan/evm", {});
+      const r = await deps.api("POST", ROUTE_PATHS.API_INVENTORY_SCAN_EVM, {});
       if (r.error) {
         deps.toast(r.error, "error");
         return;

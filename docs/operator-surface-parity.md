@@ -5,10 +5,10 @@ assembled in `api_router()` and the API surface in `api_routes()`. All route
 registrations live in that one file (submodules under `src/routes/` contain
 handlers only, no registrations).
 
-**Counts (cross-checked against the router):** 134 route registrations
-(`grep -c '\.route(' crates/sigillum-daemon/src/routes/mod.rs` -> 134), which
-is 135 method endpoints because `/api/treasury/parties` registers both GET
-and POST. The 33 family rows below cover 134/134 registrations; each route
+**Counts (cross-checked against the router):** 136 route registrations
+(`grep -c '\.route(' crates/sigillum-daemon/src/routes/mod.rs` -> 136), which
+is 137 method endpoints because `/api/treasury/parties` registers both GET
+and POST. The 33 family rows below cover 136/136 registrations; each route
 appears in exactly one row.
 
 **Maintenance rule (release-1.0 plan §0.1.5 / D2):** every W-task that adds
@@ -53,14 +53,14 @@ commands.
 | 17 | Transit crypto | `transit/encrypt`, `transit/decrypt`, `transit/hmac` | no | `sigillum api transit encrypt\|decrypt\|hmac` | Machine-to-machine crypto operations; CLI is the right surface, no UI need. |
 | 18 | EVM read-only | `evm/nonce`, `evm/balance`, `evm/erc20-balance`, `evm/fees/estimate` | no | `sigillum api evm nonce\|balance\|erc20-balance\|fees estimate` | Read-only chain queries are scriptable; D1 adds them and explicitly excludes `broadcast`. |
 | 19 | EVM broadcast | `evm/broadcast` | no | no — permanent | Decision (D2): no CLI — hazard: signed payloads in shell history and no plan review. Programmatic API/SDK callers only; interactive sends go through plans + queue. |
-| 20 | Wallet profiles | `profiles/evm` (+`/upsert`,`/delete`), `profiles/eth-stealth` (+`/upsert`,`/delete`), `profiles/eth-xpub` (+`/upsert`,`/delete`), `profiles/eth-seed` (+`/upsert`,`/create`,`/delete`) — 13 routes | `wallets.ts`, `walletManager.ts`, `journey.ts` | `sigillum api profiles <evm\|stealth\|eth-xpub\|eth-seed> <list\|upsert\|create\|delete>` | Fully covered. |
+| 20 | Wallet profiles | `profiles/evm` (+`/upsert`,`/delete`), `profiles/eth-stealth` (+`/upsert`,`/delete`), `profiles/eth-xpub` (+`/upsert`,`/delete`), `profiles/eth-seed` (+`/upsert`,`/create`,`/delete`) — 13 routes | `wallets.ts`, `walletManager.ts`, `journey.ts` | `sigillum api profiles evm\|stealth\|eth-xpub <list\|upsert\|delete>`; `sigillum api profiles eth-seed <list\|upsert\|create\|delete>` | Fully covered. |
 | 21 | Wallet key ops (read/derive, no spend) | `wallets/eth-xpub/export`, `wallets/eth-xpub/derive`, `wallets/eth-stealth/export`, `wallets/eth-stealth/generate`, `wallets/eth-stealth/check` | `wallets.ts` (both exports + derive); generate/check not in UI yet | `sigillum api wallets xpub-export\|xpub-derive\|stealth-export\|stealth-generate\|stealth-check` | No sign/send in this family, so it is safe to script; D1 adds the CLI. |
 | 22 | Wallet sign/send | `wallets/eth-stealth/sign`, `.../sign-transfer`, `.../sign-erc20-transfer`, `.../send-transfer`, `.../send-erc20-transfer`, `.../send-with-profile`, `.../send-erc20-with-profile` | no | no — permanent | Decision (D2): same hazard as `evm/broadcast` — shell history plus no plan review. Interactive spending goes through consolidation plans + queue (review/approve); programmatic callers use the API/SDK. |
 | 23 | Inventory registry | `inventory/wallets`, `chains` (+`/upsert`,`/delete`), `inventory/chains` (+`/upsert`,`/delete` legacy alias), `inventory/scan/evm`, `inventory/watch-addresses` (+`/upsert`,`/delete`), `inventory/token-registry` (+`/import`,`/delete`) | `inventory.ts` (+ `journey.ts`, `walletManager.ts`) | `sigillum api chains <list\|upsert\|delete>`; `sigillum api inventory <list\|chains\|watch\|token-registry\|scan-evm>` (`scan-evm --all-configured-chains --probe-token-registry`) | Fully covered. |
 | 24 | Discovery jobs | `discovery/jobs`, `discovery/jobs/cancel`, `discovery/jobs/resume` | `inventory.ts` (cancel/resume; the job list itself is surfaced via the scan flow, not fetched directly) | `sigillum api discovery jobs <list\|cancel\|resume>` | Covered; the UI job-list gap is cosmetic and the CLI lists jobs. |
 | 25 | Risk | `risk/findings`, `risk/catalog` (+`/upsert`,`/delete`) | `inventory.ts` | `sigillum api risk <list\|catalog\|catalog-upsert\|catalog-delete>` | Fully covered. |
 | 26 | Consolidation plans | `plans/consolidation` (+`/generate`,`/approve`,`/simulate`,`/export`) | `inventory.ts` | `sigillum api plans <list\|generate\|approve\|simulate\|export>` (`generate --chain-id` optional) | Fully covered — this is the reviewed path for spending. |
-| 26a | Plan-step enqueue (W7.2) | `plans/enqueue-step`, `plans/enqueue-plan` | `inventory.ts` (per-step Execute appears only when every gate passes; Execute All Eligible opens the typed-confirmation dialog rendering the exact daemon-computed phrase) | `sigillum api plans enqueue-step --plan-id --step-id --confirm`, `sigillum api plans enqueue-plan --plan-id --confirmation "<PHRASE>"` (run without `--confirmation` to have the daemon print the exact phrase) | Fully covered. Every check is re-validated server-side at enqueue time (W7.1 gates, treasury allowlist/caps, linkage, simulation pass + freshness, W5 claim gate, W6.1 gas-topup opt-in, idempotency, W6.4 dependency order). Enqueued `plan_step_execution` jobs stay hard-blocked at drain time until W7.3 enables execution. |
+| 26a | Plan-step enqueue (W7.2) | `plans/enqueue-step`, `plans/enqueue-plan` | `inventory.ts` (per-step Execute appears only when every gate passes; Execute All Eligible opens the typed-confirmation dialog rendering the exact daemon-computed phrase) | `sigillum api plans enqueue-step --plan-id --step-id --confirm`, `sigillum api plans enqueue-plan --plan-id --confirmation "<PHRASE>"` (run without `--confirmation` to have the daemon print the exact phrase) | Fully covered. Every check is re-validated server-side at enqueue time (W7.1 gates, treasury allowlist/caps, linkage, simulation pass + freshness, W5 claim gate, W6.1 gas-topup opt-in, idempotency, W6.4 dependency order). At drain time, `plan_step_execution` jobs execute behind the W7.3/W7.4 gated path: family allow-flags / kill switch (`execution_gate_block_reason`), simulation-evidence re-verify before signing, then prepare → broadcast → receipt. |
 | 27 | Treasury | `treasury/overview`, `treasury/policy` (+`/update`), `treasury/receive-addresses` (+`/allocate`,`/rotate`), `treasury/parties` (GET+POST) (+`/update`,`/delete`) — 9 registrations | `treasury.ts` (+ `journey.ts`, `walletManager.ts`, `setup.ts` policy update) | `sigillum api treasury <overview\|policy\|policy-update\|receive-list\|receive-allocate\|receive-rotate\|parties ...>` | Fully covered. |
 | 28 | Receiving | `receiving/overview`, `receiving/refresh-balances`, `receiving/deposits/tag` | `receiving.ts` | `sigillum api receiving <overview\|refresh-balances\|tag-deposit>` | Fully covered. |
 | 29 | Stealth deposits | `deposits/eth-stealth` (+`/create-native`,`/create-erc20`,`/scan-announcements`,`/delete`,`/refresh`,`/enqueue-sweep`) — 7 routes | `operations.ts` (+ `receiving.ts` list) | `sigillum api deposits <list\|create-native\|create-erc20\|scan-announcements\|refresh\|enqueue-sweep\|delete>` | Fully covered. |
@@ -71,10 +71,10 @@ commands.
 
 ## Verification
 
-- Route registrations in `crates/sigillum-daemon/src/routes/mod.rs`: **134**
-  (`grep -c '\.route('`). Method endpoints: **135** (`/api/treasury/parties`
+- Route registrations in `crates/sigillum-daemon/src/routes/mod.rs`: **136**
+  (`grep -c '\.route('`). Method endpoints: **137** (`/api/treasury/parties`
   is GET+POST on one registration).
-- Sum of routes across the 33 rows above: **134** — every registration
+- Sum of routes across the 33 rows above: **136** — every registration
   appears in exactly one row.
 - No row is UI=no and CLI=no without an explicit decision (rows 4, 12, 19,
   22, 31 carry D2 decisions; rows 2, 15 are machine-plumbing decisions; row

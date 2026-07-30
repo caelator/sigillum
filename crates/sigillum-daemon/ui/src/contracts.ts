@@ -4,19 +4,30 @@ export interface ErrorResponse {
 }
 
 export interface ActiveCompartment {
+  compartment_id: number;
+  compartment_label: string;
+  api_key_count: number;
+  secret_count?: number | null;
+}
+
+export interface UnlockedCompartment {
   id: number;
   label: string;
   threshold: number;
-  api_key_count: number;
-  secret_count?: number | null;
+  passphrase_mode?: string | null;
+}
+
+export interface Fido2StatusResponse {
+  enabled: boolean;
+  key_count: number;
 }
 
 export interface StatusResponse {
   initialized: boolean;
   locked: boolean;
   active_compartment?: ActiveCompartment | null;
-  unlocked_compartments: ActiveCompartment[];
-  session_token?: string;
+  unlocked_compartments: UnlockedCompartment[];
+  fido2?: Fido2StatusResponse | null;
 }
 
 export interface UnlockResponse {
@@ -24,7 +35,7 @@ export interface UnlockResponse {
   method: string;
   cascading?: boolean | null;
   session_token: string;
-  unlocked_compartments: ActiveCompartment[];
+  unlocked_compartments: UnlockedCompartment[];
   active_compartment_id?: number | null;
 }
 
@@ -171,56 +182,93 @@ export interface RiskCatalogEntry {
 
 type WireString<T extends string> = T | (string & {});
 
-export type WalletAddressActivityState = WireString<"funded" | "active" | "empty">;
+export const WALLET_WIRE_LITERALS = {
+  WalletAddressActivityState: ["funded", "active", "empty"],
+  WalletAddressClassification: [
+    "signer_available",
+    "watch_only",
+    "signer_unknown",
+    "gas_available",
+    "transaction_history",
+    "token_holding",
+    "nft_holding",
+    "protocol_holding",
+    "value_detected",
+    "asset_value_detected",
+    "stranded_value",
+    "approval_exposure",
+    "dormant_candidate",
+    "empty_candidate",
+  ],
+  WalletAssetKind: [
+    "native",
+    "erc20",
+    "erc721",
+    "erc1155",
+    "nft",
+    "approval",
+    "defi",
+    "airdrop",
+    "reward",
+  ],
+  WalletPlanStepAction: [
+    "sweep_native",
+    "sweep_erc20",
+    "sweep_nft",
+    "revoke_erc20_approval",
+    "revoke_permit2_allowance",
+    "revoke_nft_operator_approval",
+    "revoke_approval",
+    "approve_erc20",
+    "exit_defi_position",
+    "claim_reward",
+    "fund_gas",
+    "review_asset",
+  ],
+  WalletPlanStepStatus: ["review_required", "blocked", "approved"],
+  WalletSignerStatus: ["watch_only", "available", "unknown"],
+  WalletSimulationStatus: [
+    "required",
+    "not_run",
+    "passed",
+    "failed",
+    "unsupported",
+    "blocked",
+  ],
+  WalletPlanStatus: ["empty", "blocked", "review_required", "approved"],
+} as const;
+
+export type WalletAddressActivityState = WireString<
+  (typeof WALLET_WIRE_LITERALS.WalletAddressActivityState)[number]
+>;
 
 export type WalletAddressClassification = WireString<
-  | "signer_available"
-  | "watch_only"
-  | "signer_unknown"
-  | "gas_available"
-  | "transaction_history"
-  | "token_holding"
-  | "nft_holding"
-  | "protocol_holding"
-  | "value_detected"
-  | "asset_value_detected"
-  | "stranded_value"
-  | "approval_exposure"
-  | "dormant_candidate"
-  | "empty_candidate"
+  (typeof WALLET_WIRE_LITERALS.WalletAddressClassification)[number]
 >;
 
 export type WalletAssetKind = WireString<
-  | "native"
-  | "erc20"
-  | "erc721"
-  | "erc1155"
-  | "nft"
-  | "approval"
-  | "defi"
-  | "airdrop"
-  | "reward"
+  (typeof WALLET_WIRE_LITERALS.WalletAssetKind)[number]
 >;
 
 export type WalletPlanStepAction = WireString<
-  | "sweep_native"
-  | "sweep_erc20"
-  | "sweep_nft"
-  | "revoke_erc20_approval"
-  | "revoke_permit2_allowance"
-  | "revoke_nft_operator_approval"
-  | "revoke_approval"
-  | "exit_defi_position"
-  | "claim_reward"
-  | "review_asset"
+  (typeof WALLET_WIRE_LITERALS.WalletPlanStepAction)[number]
 >;
 
-export type WalletPlanStepStatus = WireString<"review_required" | "blocked" | "approved">;
-export type WalletSignerStatus = WireString<"watch_only" | "available" | "unknown">;
-export type WalletSimulationStatus = WireString<
-  "required" | "not_run" | "passed" | "failed" | "unsupported" | "blocked"
+export type WalletPlanStepStatus = WireString<
+  (typeof WALLET_WIRE_LITERALS.WalletPlanStepStatus)[number]
 >;
-export type WalletPlanStatus = WireString<"empty" | "blocked" | "review_required" | "approved">;
+
+export type WalletSignerStatus = WireString<
+  (typeof WALLET_WIRE_LITERALS.WalletSignerStatus)[number]
+>;
+
+export type WalletSimulationStatus = WireString<
+  (typeof WALLET_WIRE_LITERALS.WalletSimulationStatus)[number]
+>;
+
+export type WalletPlanStatus = WireString<
+  (typeof WALLET_WIRE_LITERALS.WalletPlanStatus)[number]
+>;
 
 export interface WalletInventoryAddress {
   id: string;

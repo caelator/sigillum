@@ -26,6 +26,6 @@ export function snapshotStatus(status: StatusResponse | null): StatusSnapshot {
     initialized: status?.initialized ?? false,
     locked: status?.locked ?? true,
     unlockedCompartmentCount: status?.unlocked_compartments.length ?? 0,
-    activeCompartmentLabel: status?.active_compartment?.label ?? null,
+    activeCompartmentLabel: status?.active_compartment?.compartment_label ?? null,
   };
 }

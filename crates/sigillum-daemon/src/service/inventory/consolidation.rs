@@ -2,8 +2,8 @@ use std::collections::BTreeMap;
 
 use sigillum_api::{
     ConsolidationPlan, ConsolidationPlanApproveRequest, ConsolidationPlanGenerateRequest,
-    ConsolidationPlanListResponse, ConsolidationPlanMutationResponse, WalletPlanStatus,
-    WalletPlanStepAction, WalletPlanStepStatus, WalletSimulationStatus,
+    ConsolidationPlanListResponse, ConsolidationPlanMutationResponse, WalletPlanStepAction,
+    WalletPlanStepStatus, WalletSimulationStatus,
 };
 
 use crate::audit_log::AuditEventSpec;
@@ -14,7 +14,8 @@ use super::super::{ServiceError, ServiceResult, SigillumService};
 use super::claim_gate::{claim_execution_gate_satisfied, refresh_claim_execution_blocker};
 use super::planner::{
     analyze_plan_linkage, apply_linkage_blockers, apply_policy_blockers_to_step,
-    assign_step_ordering, build_plan_steps, plan_policy_violations, summarize_plan_steps,
+    assign_step_ordering, build_plan_steps, plan_policy_violations, plan_status,
+    summarize_plan_steps,
 };
 use super::simulation::{DEFAULT_SIMULATION_FRESHNESS_SECS, simulation_is_stale};
 use super::support::{load_inventory_state, save_inventory_state, trimmed_optional};
@@ -86,13 +87,7 @@ impl SigillumService {
                 apply_linkage_blockers(&mut steps);
             }
             let summary = summarize_plan_steps(&steps);
-            let status = if summary.total_steps == 0 {
-                WalletPlanStatus::Empty
-            } else if summary.blocked_steps > 0 || !policy_violations.is_empty() {
-                WalletPlanStatus::Blocked
-            } else {
-                WalletPlanStatus::ReviewRequired
-            };
+            let status = plan_status(&summary, &policy_violations);
             let plan = ConsolidationPlan {
                 id: random_id(),
                 status,
@@ -220,13 +215,7 @@ impl SigillumService {
         }
         plan.updated_at_unix = now_unix();
         plan.summary = summarize_plan_steps(&plan.steps);
-        plan.status = if plan.summary.blocked_steps > 0 || !plan.policy_violations.is_empty() {
-            WalletPlanStatus::Blocked
-        } else if plan.summary.review_required_steps > 0 {
-            WalletPlanStatus::ReviewRequired
-        } else {
-            WalletPlanStatus::Approved
-        };
+        plan.status = plan_status(&plan.summary, &plan.policy_violations);
         let plan = plan.clone();
         save_inventory_state(&self.state.base_dir, &state)?;
 

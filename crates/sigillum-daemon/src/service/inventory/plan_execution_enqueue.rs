@@ -16,8 +16,7 @@ use sigillum_api::{
     ConsolidationPlan, ConsolidationPlanStep, PlanEnqueuePlanRequest, PlanEnqueuePlanResponse,
     PlanEnqueueSkippedStep, PlanEnqueueStepRequest, PlanEnqueueStepResponse, PlanEnqueuedStep,
     PlanStepExecutionPayload, QueueJob, QueueJobPayload, RiskCatalogEntry, TreasuryPolicy,
-    WalletAssetKind, WalletPlanStatus, WalletPlanStepAction, WalletPlanStepStatus,
-    WalletSimulationStatus,
+    WalletAssetKind, WalletPlanStepAction, WalletPlanStepStatus, WalletSimulationStatus,
 };
 use sigillum_core::decode_quantity_hex;
 
@@ -25,7 +24,6 @@ use crate::audit_log::AuditEventSpec;
 use crate::inventory::WalletInventoryState;
 use crate::queue_store::QueueState;
 
-use super::super::helpers::{now_unix, random_id, session_fingerprint_hex};
 use super::super::queue::{
     execution_gate_denial, is_active_or_completed_queue_state, mark_job_operator_action_required,
     plan_action_execution_family, queue_job_failed_state, queue_job_operator_action_required,
@@ -37,11 +35,14 @@ use super::export::{
     dependencies_contain_cycle, selected_step_indexes, stable_topological_selected_indexes,
 };
 use super::gas_topup::gas_topup_policy_enabled;
-use super::planner::{analyze_plan_linkage, plan_policy_violations, summarize_plan_steps};
+use super::planner::{
+    analyze_plan_linkage, plan_policy_violations, plan_status, summarize_plan_steps,
+};
 use super::preflight::{PlanStepPreflight, PlanStepPreflightCall, prepare_plan_step_preflight};
 use super::simulation::{DEFAULT_SIMULATION_FRESHNESS_SECS, simulation_is_stale};
 use super::support::{load_inventory_state, save_inventory_state};
-use super::treasury::{add_u256, policy_blockers_for_step};
+use super::treasury::policy_blockers_for_step;
+use crate::service::helpers::{add_u256, now_unix, random_id, session_fingerprint_hex};
 
 // ── Named refusal reasons ──────────────────────────────────────────────────
 // Intrinsic reasons mirror export.rs skip-reason naming where they overlap
@@ -871,7 +872,7 @@ impl SigillumService {
         let plan_state = &mut state.consolidation_plans[plan_index];
         plan_state.updated_at_unix = now;
         plan_state.summary = summarize_plan_steps(&plan_state.steps);
-        plan_state.status = plan_status_for_steps(plan_state);
+        plan_state.status = plan_status(&plan_state.summary, &plan_state.policy_violations);
         save_inventory_state(&self.state.base_dir, &state)?;
 
         let mut enqueued = Vec::new();
@@ -910,7 +911,7 @@ impl SigillumService {
         let plan = &mut state.consolidation_plans[plan_index];
         plan.updated_at_unix = now;
         plan.summary = summarize_plan_steps(&plan.steps);
-        plan.status = plan_status_for_steps(plan);
+        plan.status = plan_status(&plan.summary, &plan.policy_violations);
         save_inventory_state(&self.state.base_dir, state)?;
         Ok(true)
     }
@@ -970,18 +971,6 @@ impl SigillumService {
                 session_fingerprint_hex: session_fingerprint_hex(token),
             },
         )
-    }
-}
-
-fn plan_status_for_steps(plan: &ConsolidationPlan) -> WalletPlanStatus {
-    if plan.summary.total_steps == 0 {
-        WalletPlanStatus::Empty
-    } else if plan.summary.blocked_steps > 0 || !plan.policy_violations.is_empty() {
-        WalletPlanStatus::Blocked
-    } else if plan.summary.review_required_steps > 0 {
-        WalletPlanStatus::ReviewRequired
-    } else {
-        WalletPlanStatus::Approved
     }
 }
 

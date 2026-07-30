@@ -8,7 +8,10 @@ use sigillum_generator::{
     DEFAULT_PASSPHRASE_WORDS, generate_passphrase, generate_password, generate_totp,
 };
 
-use crate::daemon_api::{daemon_base_url, ensure_daemon_ready, require_session_token};
+use crate::daemon_api::{
+    daemon_base_url, ensure_daemon_ready, parse_flag, parse_u32_flag, parse_u64_flag,
+    parse_usize_flag, require_session_token,
+};
 
 pub fn cmd_generate(args: &[String]) {
     if args.is_empty() {
@@ -123,41 +126,6 @@ fn parse_charset(value: &str) -> PasswordCharset {
         "mixalpha-numeric-symbol" => PasswordCharset::MixalphaNumericSymbol,
         other => exit_with_error(&format!("unsupported charset '{other}'")),
     }
-}
-
-fn parse_flag(args: &[String], flag: &str) -> Option<String> {
-    args.iter()
-        .position(|arg| arg == flag)
-        .and_then(|index| args.get(index + 1))
-        .cloned()
-        .or_else(|| {
-            args.iter()
-                .find_map(|arg| arg.strip_prefix(&format!("{flag}=")).map(str::to_string))
-        })
-}
-
-fn parse_usize_flag(args: &[String], flag: &str) -> Option<usize> {
-    parse_flag(args, flag).map(|value| {
-        value
-            .parse::<usize>()
-            .unwrap_or_else(|_| exit_with_error(&format!("{flag} must be a positive integer")))
-    })
-}
-
-fn parse_u64_flag(args: &[String], flag: &str) -> Option<u64> {
-    parse_flag(args, flag).map(|value| {
-        value
-            .parse::<u64>()
-            .unwrap_or_else(|_| exit_with_error(&format!("{flag} must be an integer")))
-    })
-}
-
-fn parse_u32_flag(args: &[String], flag: &str) -> Option<u32> {
-    parse_flag(args, flag).map(|value| {
-        value
-            .parse::<u32>()
-            .unwrap_or_else(|_| exit_with_error(&format!("{flag} must be an integer")))
-    })
 }
 
 fn print_usage_and_exit() -> ! {

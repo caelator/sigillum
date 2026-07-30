@@ -2,22 +2,22 @@ use std::collections::BTreeMap;
 
 use sigillum_api::{
     ConsolidationPlanGenerateRequest, ConsolidationPlanStep, ConsolidationPlanSummary,
-    TreasuryPolicy, WalletAssetHolding, WalletAssetKind, WalletPlanStepAction,
+    TreasuryPolicy, WalletAssetHolding, WalletAssetKind, WalletPlanStatus, WalletPlanStepAction,
     WalletPlanStepStatus, WalletSignerStatus, WalletSimulationStatus,
 };
 use sigillum_core::decode_quantity_hex;
 
 use crate::inventory::WalletInventoryState;
 use crate::profiles::ProfileRegistry;
-use crate::service::helpers::{compare_u256, random_id};
+use crate::service::helpers::{add_u256, compare_u256, random_id};
 
 use super::allowance_discovery::DISCOVERY_SOURCE_ERC20_ALLOWANCE_PROBE;
 use super::claim_discovery::CLAIM_ADAPTER_MERKLE_DISTRIBUTOR_V1;
 use super::defi_adapters::supported_defi_exit_adapter;
 use super::nft_approval_discovery::DISCOVERY_SOURCE_NFT_OPERATOR_APPROVAL_PROBE;
 use super::permit2_discovery::DISCOVERY_SOURCE_PERMIT2_ALLOWANCE_PROBE;
-use super::support::quantity_hex_is_nonzero;
-use super::treasury::{add_u256, policy_blockers_for_step};
+use super::support::{is_very_large_approval, quantity_hex_is_nonzero};
+use super::treasury::policy_blockers_for_step;
 use super::{WALLET_FAMILY_ETH_SEED, WALLET_FAMILY_ETH_WATCH, WALLET_FAMILY_ETH_XPUB};
 
 const DEFAULT_HOT_FLOOR_WEI_HEX: &str = "0xde0b6b3a7640000";
@@ -233,12 +233,6 @@ fn risk_level_for_holding(holding: &WalletAssetHolding) -> &'static str {
     }
 }
 
-fn is_very_large_approval(amount_hex: &str) -> bool {
-    decode_quantity_hex(amount_hex)
-        .map(|bytes| bytes[..16].iter().any(|byte| *byte != 0))
-        .unwrap_or(false)
-}
-
 pub(in crate::service) fn summarize_plan_steps(
     steps: &[ConsolidationPlanStep],
 ) -> ConsolidationPlanSummary {
@@ -265,6 +259,21 @@ pub(in crate::service) fn summarize_plan_steps(
             .iter()
             .filter(|step| quantity_hex_is_nonzero(&step.amount_hex))
             .count(),
+    }
+}
+
+pub(in crate::service) fn plan_status(
+    summary: &ConsolidationPlanSummary,
+    policy_violations: &[String],
+) -> WalletPlanStatus {
+    if summary.total_steps == 0 {
+        WalletPlanStatus::Empty
+    } else if summary.blocked_steps > 0 || !policy_violations.is_empty() {
+        WalletPlanStatus::Blocked
+    } else if summary.review_required_steps > 0 {
+        WalletPlanStatus::ReviewRequired
+    } else {
+        WalletPlanStatus::Approved
     }
 }
 

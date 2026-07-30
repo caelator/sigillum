@@ -40,16 +40,18 @@ mod wallets;
 
 use std::sync::Arc;
 
-use axum::extract::{Request, State};
+use axum::extract::{FromRequest, Request, State};
 use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
 use axum::middleware::Next;
 use axum::response::{Html, IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use serde::Serialize;
+use serde::de::DeserializeOwned;
 use serde_json::json;
 use sigillum_api::Validate;
 use sigillum_api::response::ErrorResponse;
+use sigillum_api::route_paths;
 
 use crate::AppState;
 use crate::service::ServiceResult;
@@ -130,6 +132,24 @@ pub(crate) fn bearer_token(headers: &HeaderMap) -> Option<String> {
         .map(str::to_owned)
 }
 
+/// Extract a JSON request body and validate it against the API contract.
+pub(crate) struct ValidatedJson<T>(pub T);
+
+impl<T, S> FromRequest<S> for ValidatedJson<T>
+where
+    T: DeserializeOwned + Validate,
+    S: Send + Sync,
+{
+    type Rejection = Response;
+
+    async fn from_request(req: Request, state: &S) -> Result<Self, Self::Rejection> {
+        let body = Json::<T>::from_request(req, state)
+            .await
+            .map_err(|rejection| rejection.into_response())?;
+        validated(body).map(Self)
+    }
+}
+
 /// ## Route Handler Pattern
 ///
 /// All route handlers in this module follow a consistent, composable pattern for
@@ -144,8 +164,8 @@ pub(crate) fn bearer_token(headers: &HeaderMap) -> Option<String> {
 ///
 /// 2. **Extract the bearer token** from the `Authorization` header using `bearer_token(&headers)`
 ///
-/// 3. **Validate and destructure** the request body (if any) using `validated()` to ensure
-///    the request conforms to the API contract before proceeding
+/// 3. **Extract, validate, and destructure** the request body (if any) using the
+///    `ValidatedJson` extractor so the request conforms to the API contract before proceeding
 ///
 /// 4. **Delegate to the service layer** via `SigillumService::new(state).method(token, ...)`
 ///    The service layer handles:
@@ -211,8 +231,8 @@ async fn serve_ui() -> Response {
 
 pub fn api_router() -> AppRouter {
     Router::new()
-        .route("/api/health", get(lifecycle::get_health))
-        .route("/", get(serve_ui))
+        .route(route_paths::API_HEALTH, get(lifecycle::get_health))
+        .route(route_paths::UI_ROOT, get(serve_ui))
         .merge(api_routes())
 }
 
@@ -221,7 +241,7 @@ pub(crate) async fn startup_gate(
     req: Request,
     next: Next,
 ) -> Response {
-    if req.uri().path() == "/api/health" || state.startup_ready() {
+    if req.uri().path() == route_paths::API_HEALTH || state.startup_ready() {
         return next.run(req).await;
     }
     err(
@@ -250,12 +270,15 @@ fn api_routes() -> AppRouter {
 
 fn lifecycle_routes() -> AppRouter {
     Router::new()
-        .route("/api/status", get(lifecycle::get_status))
-        .route("/api/unlock", post(lifecycle::post_unlock))
-        .route("/api/lock", post(lifecycle::post_lock))
-        .route("/api/session/revoke", post(lifecycle::post_revoke_session))
+        .route(route_paths::API_STATUS, get(lifecycle::get_status))
+        .route(route_paths::API_UNLOCK, post(lifecycle::post_unlock))
+        .route(route_paths::API_LOCK, post(lifecycle::post_lock))
         .route(
-            "/api/auth/capability",
+            route_paths::API_SESSION_REVOKE,
+            post(lifecycle::post_revoke_session),
+        )
+        .route(
+            route_paths::API_AUTH_CAPABILITY,
             post(lifecycle::post_capability_session),
         )
 }
@@ -263,130 +286,175 @@ fn lifecycle_routes() -> AppRouter {
 fn biometric_routes() -> AppRouter {
     Router::new()
         .route(
-            "/api/biometric/challenge",
+            route_paths::API_BIOMETRIC_CHALLENGE,
             post(biometric::biometric_challenge),
         )
-        .route("/api/biometric/unlock", post(biometric::biometric_unlock))
-        .route("/api/biometric/enroll", post(biometric::biometric_enroll))
+        .route(
+            route_paths::API_BIOMETRIC_UNLOCK,
+            post(biometric::biometric_unlock),
+        )
+        .route(
+            route_paths::API_BIOMETRIC_ENROLL,
+            post(biometric::biometric_enroll),
+        )
 }
 
 fn system_routes() -> AppRouter {
     Router::new()
-        .route("/api/diagnostics", get(diagnostics::diagnostics))
-        .route("/api/selfcheck/run", post(diagnostics::selfcheck_run))
-        .route("/api/maintenance/run", post(maintenance::run_maintenance))
-        .route("/api/audit", get(audit::audit_recent))
-        .route("/api/audit/verify", get(audit::audit_verify))
-        .route("/api/audit/run", post(audit::audit_run))
-        .route("/api/setup/reset", post(backup::setup_reset))
-        .route("/api/backup/export", post(backup::backup_export))
-        .route("/api/backup/restore", post(backup::backup_restore))
+        .route(route_paths::API_DIAGNOSTICS, get(diagnostics::diagnostics))
+        .route(
+            route_paths::API_SELFCHECK_RUN,
+            post(diagnostics::selfcheck_run),
+        )
+        .route(
+            route_paths::API_MAINTENANCE_RUN,
+            post(maintenance::run_maintenance),
+        )
+        .route(route_paths::API_AUDIT, get(audit::audit_recent))
+        .route(route_paths::API_AUDIT_VERIFY, get(audit::audit_verify))
+        .route(route_paths::API_AUDIT_RUN, post(audit::audit_run))
+        .route(route_paths::API_SETUP_RESET, post(backup::setup_reset))
+        .route(route_paths::API_BACKUP_EXPORT, post(backup::backup_export))
+        .route(
+            route_paths::API_BACKUP_RESTORE,
+            post(backup::backup_restore),
+        )
 }
 
 fn compartment_routes() -> AppRouter {
     Router::new()
-        .route("/api/compartment/list", get(compartments::compartment_list))
-        .route("/api/compartment/add", post(compartments::compartment_add))
         .route(
-            "/api/compartment/remove",
+            route_paths::API_COMPARTMENT_LIST,
+            get(compartments::compartment_list),
+        )
+        .route(
+            route_paths::API_COMPARTMENT_ADD,
+            post(compartments::compartment_add),
+        )
+        .route(
+            route_paths::API_COMPARTMENT_REMOVE,
             post(compartments::compartment_remove),
         )
         .route(
-            "/api/compartment/init",
+            route_paths::API_COMPARTMENT_INIT,
             post(compartments::compartment_init),
         )
         .route(
-            "/api/compartment/switch",
+            route_paths::API_COMPARTMENT_SWITCH,
             post(compartments::compartment_switch),
         )
 }
 
 fn secret_routes() -> AppRouter {
     Router::new()
-        .route("/api/api-keys", get(secrets::list_api_keys))
-        .route("/api/api-keys/get", post(secrets::get_api_key))
-        .route("/api/api-keys/set", post(secrets::set_api_key))
-        .route("/api/api-keys/delete", post(secrets::delete_api_key))
-        .route("/api/secrets", get(secrets::list_secrets))
-        .route("/api/secrets/get", post(secrets::get_secret))
-        .route("/api/secrets/set", post(secrets::set_secret))
-        .route("/api/secrets/delete", post(secrets::delete_secret))
-        .route("/api/secrets/resolve-batch", post(secrets::resolve_batch))
-        .route("/api/secrets/push", post(secrets::secrets_push))
+        .route(route_paths::API_API_KEYS, get(secrets::list_api_keys))
+        .route(route_paths::API_API_KEYS_GET, post(secrets::get_api_key))
+        .route(route_paths::API_API_KEYS_SET, post(secrets::set_api_key))
+        .route(
+            route_paths::API_API_KEYS_DELETE,
+            post(secrets::delete_api_key),
+        )
+        .route(route_paths::API_SECRETS, get(secrets::list_secrets))
+        .route(route_paths::API_SECRETS_GET, post(secrets::get_secret))
+        .route(route_paths::API_SECRETS_SET, post(secrets::set_secret))
+        .route(
+            route_paths::API_SECRETS_DELETE,
+            post(secrets::delete_secret),
+        )
+        .route(
+            route_paths::API_SECRETS_RESOLVE_BATCH,
+            post(secrets::resolve_batch),
+        )
+        .route(route_paths::API_SECRETS_PUSH, post(secrets::secrets_push))
 }
 
 fn generate_routes() -> AppRouter {
-    Router::new().route("/api/generate/store", post(generate::generate_store))
+    Router::new().route(
+        route_paths::API_GENERATE_STORE,
+        post(generate::generate_store),
+    )
 }
 
 fn transit_routes() -> AppRouter {
     Router::new()
-        .route("/api/transit/encrypt", post(transit::transit_encrypt))
-        .route("/api/transit/decrypt", post(transit::transit_decrypt))
-        .route("/api/transit/hmac", post(transit::transit_hmac))
+        .route(
+            route_paths::API_TRANSIT_ENCRYPT,
+            post(transit::transit_encrypt),
+        )
+        .route(
+            route_paths::API_TRANSIT_DECRYPT,
+            post(transit::transit_decrypt),
+        )
+        .route(route_paths::API_TRANSIT_HMAC, post(transit::transit_hmac))
 }
 
 fn evm_routes() -> AppRouter {
     Router::new()
-        .route("/api/evm/nonce", post(evm::evm_nonce))
-        .route("/api/evm/balance", post(evm::evm_balance))
-        .route("/api/evm/erc20-balance", post(evm::evm_erc20_balance))
-        .route("/api/evm/broadcast", post(evm::evm_broadcast))
-        .route("/api/evm/fees/estimate", post(evm::evm_estimate_fees))
+        .route(route_paths::API_EVM_NONCE, post(evm::evm_nonce))
+        .route(route_paths::API_EVM_BALANCE, post(evm::evm_balance))
+        .route(
+            route_paths::API_EVM_ERC20_BALANCE,
+            post(evm::evm_erc20_balance),
+        )
+        .route(route_paths::API_EVM_BROADCAST, post(evm::evm_broadcast))
+        .route(
+            route_paths::API_EVM_FEES_ESTIMATE,
+            post(evm::evm_estimate_fees),
+        )
 }
 
 fn profile_routes() -> AppRouter {
     Router::new()
         .route(
-            "/api/profiles/evm",
+            route_paths::API_PROFILES_EVM,
             get(profiles::evm_provider_profiles_list),
         )
         .route(
-            "/api/profiles/evm/upsert",
+            route_paths::API_PROFILES_EVM_UPSERT,
             post(profiles::evm_provider_profiles_upsert),
         )
         .route(
-            "/api/profiles/evm/delete",
+            route_paths::API_PROFILES_EVM_DELETE,
             post(profiles::evm_provider_profiles_delete),
         )
         .route(
-            "/api/profiles/eth-stealth",
+            route_paths::API_PROFILES_ETH_STEALTH,
             get(profiles::eth_stealth_wallet_profiles_list),
         )
         .route(
-            "/api/profiles/eth-stealth/upsert",
+            route_paths::API_PROFILES_ETH_STEALTH_UPSERT,
             post(profiles::eth_stealth_wallet_profiles_upsert),
         )
         .route(
-            "/api/profiles/eth-stealth/delete",
+            route_paths::API_PROFILES_ETH_STEALTH_DELETE,
             post(profiles::eth_stealth_wallet_profiles_delete),
         )
         .route(
-            "/api/profiles/eth-xpub",
+            route_paths::API_PROFILES_ETH_XPUB,
             get(profiles::eth_xpub_wallet_profiles_list),
         )
         .route(
-            "/api/profiles/eth-xpub/upsert",
+            route_paths::API_PROFILES_ETH_XPUB_UPSERT,
             post(profiles::eth_xpub_wallet_profiles_upsert),
         )
         .route(
-            "/api/profiles/eth-xpub/delete",
+            route_paths::API_PROFILES_ETH_XPUB_DELETE,
             post(profiles::eth_xpub_wallet_profiles_delete),
         )
         .route(
-            "/api/profiles/eth-seed",
+            route_paths::API_PROFILES_ETH_SEED,
             get(profiles::eth_seed_wallet_profiles_list),
         )
         .route(
-            "/api/profiles/eth-seed/upsert",
+            route_paths::API_PROFILES_ETH_SEED_UPSERT,
             post(profiles::eth_seed_wallet_profiles_upsert),
         )
         .route(
-            "/api/profiles/eth-seed/create",
+            route_paths::API_PROFILES_ETH_SEED_CREATE,
             post(profiles::eth_seed_wallet_profiles_create),
         )
         .route(
-            "/api/profiles/eth-seed/delete",
+            route_paths::API_PROFILES_ETH_SEED_DELETE,
             post(profiles::eth_seed_wallet_profiles_delete),
         )
 }
@@ -394,51 +462,51 @@ fn profile_routes() -> AppRouter {
 fn wallet_routes() -> AppRouter {
     Router::new()
         .route(
-            "/api/wallets/eth-xpub/export",
+            route_paths::API_WALLETS_ETH_XPUB_EXPORT,
             post(wallets::eth_xpub_export),
         )
         .route(
-            "/api/wallets/eth-xpub/derive",
+            route_paths::API_WALLETS_ETH_XPUB_DERIVE,
             post(wallets::eth_xpub_derive),
         )
         .route(
-            "/api/wallets/eth-stealth/export",
+            route_paths::API_WALLETS_ETH_STEALTH_EXPORT,
             post(wallets::eth_stealth_export),
         )
         .route(
-            "/api/wallets/eth-stealth/generate",
+            route_paths::API_WALLETS_ETH_STEALTH_GENERATE,
             post(wallets::eth_stealth_generate),
         )
         .route(
-            "/api/wallets/eth-stealth/check",
+            route_paths::API_WALLETS_ETH_STEALTH_CHECK,
             post(wallets::eth_stealth_check),
         )
         .route(
-            "/api/wallets/eth-stealth/sign",
+            route_paths::API_WALLETS_ETH_STEALTH_SIGN,
             post(wallets::eth_stealth_sign),
         )
         .route(
-            "/api/wallets/eth-stealth/sign-transfer",
+            route_paths::API_WALLETS_ETH_STEALTH_SIGN_TRANSFER,
             post(wallets::eth_stealth_sign_transfer),
         )
         .route(
-            "/api/wallets/eth-stealth/sign-erc20-transfer",
+            route_paths::API_WALLETS_ETH_STEALTH_SIGN_ERC20_TRANSFER,
             post(wallets::eth_stealth_sign_erc20_transfer),
         )
         .route(
-            "/api/wallets/eth-stealth/send-transfer",
+            route_paths::API_WALLETS_ETH_STEALTH_SEND_TRANSFER,
             post(evm::eth_stealth_send_transfer),
         )
         .route(
-            "/api/wallets/eth-stealth/send-erc20-transfer",
+            route_paths::API_WALLETS_ETH_STEALTH_SEND_ERC20_TRANSFER,
             post(evm::eth_stealth_send_erc20_transfer),
         )
         .route(
-            "/api/wallets/eth-stealth/send-with-profile",
+            route_paths::API_WALLETS_ETH_STEALTH_SEND_WITH_PROFILE,
             post(profiles::eth_stealth_send_with_profile),
         )
         .route(
-            "/api/wallets/eth-stealth/send-erc20-with-profile",
+            route_paths::API_WALLETS_ETH_STEALTH_SEND_ERC20_WITH_PROFILE,
             post(profiles::eth_stealth_send_erc20_with_profile),
         )
 }
@@ -446,156 +514,180 @@ fn wallet_routes() -> AppRouter {
 fn inventory_routes() -> AppRouter {
     Router::new()
         .route(
-            "/api/inventory/wallets",
+            route_paths::API_INVENTORY_WALLETS,
             get(inventory::list_wallet_inventory),
         )
-        .route("/api/chains", get(inventory::list_chain_profiles))
-        .route("/api/chains/upsert", post(inventory::upsert_chain_profile))
-        .route("/api/chains/delete", post(inventory::delete_chain_profile))
-        .route("/api/inventory/chains", get(inventory::list_chain_profiles))
+        .route(route_paths::API_CHAINS, get(inventory::list_chain_profiles))
         .route(
-            "/api/inventory/chains/upsert",
+            route_paths::API_CHAINS_UPSERT,
             post(inventory::upsert_chain_profile),
         )
         .route(
-            "/api/inventory/chains/delete",
+            route_paths::API_CHAINS_DELETE,
             post(inventory::delete_chain_profile),
         )
         .route(
-            "/api/inventory/scan/evm",
+            route_paths::API_INVENTORY_CHAINS,
+            get(inventory::list_chain_profiles),
+        )
+        .route(
+            route_paths::API_INVENTORY_CHAINS_UPSERT,
+            post(inventory::upsert_chain_profile),
+        )
+        .route(
+            route_paths::API_INVENTORY_CHAINS_DELETE,
+            post(inventory::delete_chain_profile),
+        )
+        .route(
+            route_paths::API_INVENTORY_SCAN_EVM,
             post(inventory::scan_wallet_inventory_evm),
         )
         .route(
-            "/api/inventory/nft-metadata/opt-ins",
+            route_paths::API_INVENTORY_NFT_METADATA_OPT_INS,
             get(inventory::list_nft_metadata_optins),
         )
         .route(
-            "/api/inventory/nft-metadata/opt-ins/upsert",
+            route_paths::API_INVENTORY_NFT_METADATA_OPT_INS_UPSERT,
             post(inventory::upsert_nft_metadata_optin),
         )
         .route(
-            "/api/inventory/nft-metadata/opt-ins/delete",
+            route_paths::API_INVENTORY_NFT_METADATA_OPT_INS_DELETE,
             post(inventory::delete_nft_metadata_optin),
         )
         .route(
-            "/api/inventory/nft-metadata/settings",
+            route_paths::API_INVENTORY_NFT_METADATA_SETTINGS,
             post(inventory::update_nft_metadata_settings),
         )
         .route(
-            "/api/inventory/nft-metadata/fetch",
+            route_paths::API_INVENTORY_NFT_METADATA_FETCH,
             post(inventory::fetch_nft_metadata),
         )
         .route(
-            "/api/inventory/watch-addresses",
+            route_paths::API_INVENTORY_WATCH_ADDRESSES,
             get(inventory::list_watch_address_book),
         )
         .route(
-            "/api/inventory/watch-addresses/upsert",
+            route_paths::API_INVENTORY_WATCH_ADDRESSES_UPSERT,
             post(inventory::upsert_watch_address_book_entry),
         )
         .route(
-            "/api/inventory/watch-addresses/delete",
+            route_paths::API_INVENTORY_WATCH_ADDRESSES_DELETE,
             post(inventory::delete_watch_address_book_entry),
         )
         .route(
-            "/api/inventory/token-registry",
+            route_paths::API_INVENTORY_TOKEN_REGISTRY,
             get(inventory::list_token_registry),
         )
         .route(
-            "/api/inventory/token-registry/import",
+            route_paths::API_INVENTORY_TOKEN_REGISTRY_IMPORT,
             post(inventory::import_token_registry),
         )
         .route(
-            "/api/inventory/token-registry/delete",
+            route_paths::API_INVENTORY_TOKEN_REGISTRY_DELETE,
             post(inventory::delete_token_registry_list),
         )
-        .route("/api/discovery/jobs", get(inventory::list_discovery_jobs))
         .route(
-            "/api/discovery/jobs/cancel",
+            route_paths::API_DISCOVERY_JOBS,
+            get(inventory::list_discovery_jobs),
+        )
+        .route(
+            route_paths::API_DISCOVERY_JOBS_CANCEL,
             post(inventory::cancel_discovery_job),
         )
         .route(
-            "/api/discovery/jobs/resume",
+            route_paths::API_DISCOVERY_JOBS_RESUME,
             post(inventory::resume_discovery_job),
         )
-        .route("/api/risk/findings", get(inventory::list_risk_findings))
-        .route("/api/risk/catalog", get(inventory::list_risk_catalog))
         .route(
-            "/api/risk/catalog/upsert",
+            route_paths::API_RISK_FINDINGS,
+            get(inventory::list_risk_findings),
+        )
+        .route(
+            route_paths::API_RISK_CATALOG,
+            get(inventory::list_risk_catalog),
+        )
+        .route(
+            route_paths::API_RISK_CATALOG_UPSERT,
             post(inventory::upsert_risk_catalog_entry),
         )
         .route(
-            "/api/risk/catalog/delete",
+            route_paths::API_RISK_CATALOG_DELETE,
             post(inventory::delete_risk_catalog_entry),
         )
         .route(
-            "/api/plans/consolidation",
+            route_paths::API_PLANS_CONSOLIDATION,
             get(inventory::list_consolidation_plans),
         )
         .route(
-            "/api/plans/consolidation/generate",
+            route_paths::API_PLANS_CONSOLIDATION_GENERATE,
             post(inventory::generate_consolidation_plan),
         )
         .route(
-            "/api/plans/consolidation/approve",
+            route_paths::API_PLANS_CONSOLIDATION_APPROVE,
             post(inventory::approve_consolidation_plan),
         )
         .route(
-            "/api/plans/consolidation/simulate",
+            route_paths::API_PLANS_CONSOLIDATION_SIMULATE,
             post(inventory::simulate_consolidation_plan),
         )
         .route(
-            "/api/plans/consolidation/export",
+            route_paths::API_PLANS_CONSOLIDATION_EXPORT,
             post(inventory::export_consolidation_plan),
         )
         .route(
-            "/api/plans/enqueue-step",
+            route_paths::API_PLANS_ENQUEUE_STEP,
             post(inventory::enqueue_consolidation_plan_step),
         )
         .route(
-            "/api/plans/enqueue-plan",
+            route_paths::API_PLANS_ENQUEUE_PLAN,
             post(inventory::enqueue_consolidation_plan),
         )
-        .route("/api/treasury/overview", get(inventory::treasury_overview))
         .route(
-            "/api/receiving/overview",
+            route_paths::API_TREASURY_OVERVIEW,
+            get(inventory::treasury_overview),
+        )
+        .route(
+            route_paths::API_RECEIVING_OVERVIEW,
             get(inventory::receiving_overview),
         )
         .route(
-            "/api/receiving/refresh-balances",
+            route_paths::API_RECEIVING_REFRESH_BALANCES,
             post(inventory::refresh_receiving_balances),
         )
         .route(
-            "/api/receiving/deposits/tag",
+            route_paths::API_RECEIVING_DEPOSITS_TAG,
             post(deposits::tag_eth_stealth_deposit),
         )
-        .route("/api/treasury/policy", get(inventory::get_treasury_policy))
         .route(
-            "/api/treasury/policy/update",
+            route_paths::API_TREASURY_POLICY,
+            get(inventory::get_treasury_policy),
+        )
+        .route(
+            route_paths::API_TREASURY_POLICY_UPDATE,
             post(inventory::update_treasury_policy),
         )
         .route(
-            "/api/treasury/receive-addresses",
+            route_paths::API_TREASURY_RECEIVE_ADDRESSES,
             get(inventory::list_treasury_receive_allocations),
         )
         .route(
-            "/api/treasury/receive-addresses/allocate",
+            route_paths::API_TREASURY_RECEIVE_ADDRESSES_ALLOCATE,
             post(inventory::allocate_treasury_receive_address),
         )
         .route(
-            "/api/treasury/receive-addresses/rotate",
+            route_paths::API_TREASURY_RECEIVE_ADDRESSES_ROTATE,
             post(inventory::rotate_treasury_receive_address),
         )
         .route(
-            "/api/treasury/parties",
+            route_paths::API_TREASURY_PARTIES,
             get(inventory::list_treasury_parties).post(inventory::create_treasury_party),
         )
         .route(
-            "/api/treasury/parties/update",
+            route_paths::API_TREASURY_PARTIES_UPDATE,
             post(inventory::update_treasury_party),
         )
         .route(
-            "/api/treasury/parties/delete",
+            route_paths::API_TREASURY_PARTIES_DELETE,
             post(inventory::delete_treasury_party),
         )
 }
@@ -603,69 +695,69 @@ fn inventory_routes() -> AppRouter {
 fn deposit_routes() -> AppRouter {
     Router::new()
         .route(
-            "/api/deposits/eth-stealth",
+            route_paths::API_DEPOSITS_ETH_STEALTH,
             get(deposits::list_eth_stealth_deposits),
         )
         .route(
-            "/api/deposits/eth-stealth/create-native",
+            route_paths::API_DEPOSITS_ETH_STEALTH_CREATE_NATIVE,
             post(deposits::create_eth_stealth_native_deposit),
         )
         .route(
-            "/api/deposits/eth-stealth/create-erc20",
+            route_paths::API_DEPOSITS_ETH_STEALTH_CREATE_ERC20,
             post(deposits::create_eth_stealth_erc20_deposit),
         )
         .route(
-            "/api/deposits/eth-stealth/scan-announcements",
+            route_paths::API_DEPOSITS_ETH_STEALTH_SCAN_ANNOUNCEMENTS,
             post(deposits::scan_eth_stealth_announcements),
         )
         .route(
-            "/api/deposits/eth-stealth/delete",
+            route_paths::API_DEPOSITS_ETH_STEALTH_DELETE,
             post(deposits::delete_eth_stealth_deposit),
         )
         .route(
-            "/api/deposits/eth-stealth/refresh",
+            route_paths::API_DEPOSITS_ETH_STEALTH_REFRESH,
             post(deposits::refresh_eth_stealth_deposits),
         )
         .route(
-            "/api/deposits/eth-stealth/enqueue-sweep",
+            route_paths::API_DEPOSITS_ETH_STEALTH_ENQUEUE_SWEEP,
             post(deposits::enqueue_eth_stealth_deposit_sweep),
         )
 }
 
 fn queue_routes() -> AppRouter {
     Router::new()
-        .route("/api/queue/jobs", get(queue::list_jobs))
+        .route(route_paths::API_QUEUE_JOBS, get(queue::list_jobs))
         .route(
-            "/api/queue/enqueue/eth-stealth-transfer",
+            route_paths::API_QUEUE_ENQUEUE_ETH_STEALTH_TRANSFER,
             post(queue::enqueue_eth_stealth_transfer),
         )
         .route(
-            "/api/queue/enqueue/eth-stealth-erc20-transfer",
+            route_paths::API_QUEUE_ENQUEUE_ETH_STEALTH_ERC20_TRANSFER,
             post(queue::enqueue_eth_stealth_erc20_transfer),
         )
         .route(
-            "/api/queue/enqueue/eth-stealth-native-sweep",
+            route_paths::API_QUEUE_ENQUEUE_ETH_STEALTH_NATIVE_SWEEP,
             post(queue::enqueue_eth_stealth_native_sweep),
         )
         .route(
-            "/api/queue/enqueue/eth-stealth-erc20-sweep",
+            route_paths::API_QUEUE_ENQUEUE_ETH_STEALTH_ERC20_SWEEP,
             post(queue::enqueue_eth_stealth_erc20_sweep),
         )
-        .route("/api/queue/pause", post(queue::pause_execution))
-        .route("/api/queue/resume", post(queue::resume_execution))
-        .route("/api/queue/process", post(queue::process_jobs))
+        .route(route_paths::API_QUEUE_PAUSE, post(queue::pause_execution))
+        .route(route_paths::API_QUEUE_RESUME, post(queue::resume_execution))
+        .route(route_paths::API_QUEUE_PROCESS, post(queue::process_jobs))
 }
 
 fn fido2_routes() -> AppRouter {
     Router::new()
-        .route("/api/fido2/status", get(fido2::fido2_status))
-        .route("/api/fido2/detect", get(fido2::fido2_detect))
-        .route("/api/fido2/pin/set", post(fido2::fido2_set_pin))
-        .route("/api/fido2/list", get(fido2::fido2_list))
-        .route("/api/fido2/setup", post(fido2::fido2_setup))
-        .route("/api/fido2/register", post(fido2::fido2_register))
-        .route("/api/fido2/unlock", post(fido2::fido2_unlock))
-        .route("/api/fido2/remove", post(fido2::fido2_remove))
+        .route(route_paths::API_FIDO2_STATUS, get(fido2::fido2_status))
+        .route(route_paths::API_FIDO2_DETECT, get(fido2::fido2_detect))
+        .route(route_paths::API_FIDO2_PIN_SET, post(fido2::fido2_set_pin))
+        .route(route_paths::API_FIDO2_LIST, get(fido2::fido2_list))
+        .route(route_paths::API_FIDO2_SETUP, post(fido2::fido2_setup))
+        .route(route_paths::API_FIDO2_REGISTER, post(fido2::fido2_register))
+        .route(route_paths::API_FIDO2_UNLOCK, post(fido2::fido2_unlock))
+        .route(route_paths::API_FIDO2_REMOVE, post(fido2::fido2_remove))
 }
 
 #[cfg(test)]

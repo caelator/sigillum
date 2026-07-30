@@ -1,3 +1,4 @@
+import { ROUTE_PATHS } from "../routePaths";
 import type {
   Counterparty,
   ReceivingItem,
@@ -40,7 +41,7 @@ function itemPurposeLine(item: ReceivingItem): string {
 }
 
 function itemBalanceLine(item: ReceivingItem): string {
-  if (!item.balance_known) return "balance unknown — refresh in B2";
+  if (!item.balance_known) return "balance unknown — use Refresh balances";
   return "balance=" + esc(formatWeiHexAsEth(item.balance_native_wei_hex || "0x0")) + " ETH";
 }
 
@@ -213,7 +214,7 @@ export function createReceivingActions(deps: ReceivingActionsDeps) {
 
   async function loadReceivingOverview(): Promise<void> {
     try {
-      const r = await deps.api("GET", "/api/receiving/overview");
+      const r = await deps.api("GET", ROUTE_PATHS.API_RECEIVING_OVERVIEW);
       if (r.error) {
         deps.toast(r.error, "error");
         return;
@@ -221,13 +222,13 @@ export function createReceivingActions(deps: ReceivingActionsDeps) {
       const overview = r as ReceivingOverviewResponse;
       renderReceivingOverview(overview, receivingParties, stealthDepositIdByAddress);
       try {
-        const parties = await deps.api("GET", "/api/treasury/parties");
+        const parties = await deps.api("GET", ROUTE_PATHS.API_TREASURY_PARTIES);
         if (!parties.error) receivingParties = parties.parties || [];
       } catch (_) {
         // Overview rendering should not depend on optional selector metadata.
       }
       try {
-        const deposits = await deps.api("GET", "/api/deposits/eth-stealth");
+        const deposits = await deps.api("GET", ROUTE_PATHS.API_DEPOSITS_ETH_STEALTH);
         if (!deposits.error) {
           stealthDepositIdByAddress = {};
           (deposits.deposits || []).forEach((deposit: any) => {
@@ -249,7 +250,7 @@ export function createReceivingActions(deps: ReceivingActionsDeps) {
 
   async function refreshReceivingBalances(): Promise<void> {
     try {
-      const r = await deps.api("POST", "/api/receiving/refresh-balances");
+      const r = await deps.api("POST", ROUTE_PATHS.API_RECEIVING_REFRESH_BALANCES);
       if (r.error) {
         deps.toast(r.error, "error");
         return;
@@ -303,7 +304,7 @@ export function createReceivingActions(deps: ReceivingActionsDeps) {
       deposit_id: depositId,
       counterparty_id: value || null,
     };
-    const r = await deps.api("POST", "/api/receiving/deposits/tag", body);
+    const r = await deps.api("POST", ROUTE_PATHS.API_RECEIVING_DEPOSITS_TAG, body);
     if (r.error) {
       deps.toast(r.error, "error");
       return;

@@ -23,6 +23,7 @@ import { createSessionActions } from "../src/views/session";
 import { createSetupWizard } from "../src/views/setup";
 import { createShellRenderer } from "../src/views/shell";
 import { createWalletActions } from "../src/views/wallets";
+import { WALLET_WIRE_LITERALS } from "../src/contracts";
 import {
   createTreasuryActions,
   formatWeiHexAsEth,
@@ -47,6 +48,79 @@ import type {
   TreasuryReceiveAllocation,
 } from "../src/contracts";
 import { installDom } from "./dom-fixture";
+
+test("wallet wire literal guards match the Rust enum order", () => {
+  deepEqual(WALLET_WIRE_LITERALS.WalletAddressActivityState, [
+    "funded",
+    "active",
+    "empty",
+  ]);
+  deepEqual(WALLET_WIRE_LITERALS.WalletAddressClassification, [
+    "signer_available",
+    "watch_only",
+    "signer_unknown",
+    "gas_available",
+    "transaction_history",
+    "token_holding",
+    "nft_holding",
+    "protocol_holding",
+    "value_detected",
+    "asset_value_detected",
+    "stranded_value",
+    "approval_exposure",
+    "dormant_candidate",
+    "empty_candidate",
+  ]);
+  deepEqual(WALLET_WIRE_LITERALS.WalletAssetKind, [
+    "native",
+    "erc20",
+    "erc721",
+    "erc1155",
+    "nft",
+    "approval",
+    "defi",
+    "airdrop",
+    "reward",
+  ]);
+  deepEqual(WALLET_WIRE_LITERALS.WalletPlanStepAction, [
+    "sweep_native",
+    "sweep_erc20",
+    "sweep_nft",
+    "revoke_erc20_approval",
+    "revoke_permit2_allowance",
+    "revoke_nft_operator_approval",
+    "revoke_approval",
+    "approve_erc20",
+    "exit_defi_position",
+    "claim_reward",
+    "fund_gas",
+    "review_asset",
+  ]);
+  deepEqual(WALLET_WIRE_LITERALS.WalletPlanStepStatus, [
+    "review_required",
+    "blocked",
+    "approved",
+  ]);
+  deepEqual(WALLET_WIRE_LITERALS.WalletSignerStatus, [
+    "watch_only",
+    "available",
+    "unknown",
+  ]);
+  deepEqual(WALLET_WIRE_LITERALS.WalletSimulationStatus, [
+    "required",
+    "not_run",
+    "passed",
+    "failed",
+    "unsupported",
+    "blocked",
+  ]);
+  deepEqual(WALLET_WIRE_LITERALS.WalletPlanStatus, [
+    "empty",
+    "blocked",
+    "review_required",
+    "approved",
+  ]);
+});
 
 test("shell renderer applies setup, locked, and unlocked DOM state", () => {
   const dom = installDom([
@@ -2085,7 +2159,7 @@ test("receiving overview renders party groups, hd and stealth items, and balance
   ok(
     dom
       .el("receivingGroupList")
-      .innerHTML.includes("balance unknown — refresh in B2"),
+      .innerHTML.includes("balance unknown — use Refresh balances"),
   );
   ok(dom.el("receivingGroupList").innerHTML.includes("copyText"));
 });

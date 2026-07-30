@@ -6,37 +6,28 @@ use sigillum_api::{
 use crate::service::evm::normalize_address;
 use crate::service::{ServiceResult, SigillumService};
 
-use super::allowance_discovery::{
-    DISCOVERY_SOURCE_ERC20_ALLOWANCE_PROBE, Erc20AllowanceDiscoveryConfig,
-};
+use super::allowance_discovery::DISCOVERY_SOURCE_ERC20_ALLOWANCE_PROBE;
 use super::checkpoints::{
     BlockCursorProgress, TOPIC_FAMILY_ERC20_TRANSFER, TOPIC_FAMILY_ERC721_TRANSFER,
     TOPIC_FAMILY_ERC1155_TRANSFER, effective_from_block, latest_cursor_block, update_block_cursor,
 };
-use super::claim_discovery::{ClaimCandidateDiscoveryConfig, claim_candidate_source};
-use super::defi_discovery::{DefiTokenPositionDiscoveryConfig, defi_token_probe_source};
-use super::nft_approval_discovery::{
-    DISCOVERY_SOURCE_NFT_OPERATOR_APPROVAL_PROBE, NftOperatorApprovalDiscoveryConfig,
-};
+use super::claim_discovery::claim_candidate_source;
+use super::defi_discovery::defi_token_probe_source;
+use super::nft_approval_discovery::DISCOVERY_SOURCE_NFT_OPERATOR_APPROVAL_PROBE;
 use super::nft_discovery::{
     DISCOVERY_SOURCE_ERC721_TRANSFER_LOG, DISCOVERY_SOURCE_ERC1155_TRANSFER_LOG,
-    Erc721TransferDiscoveryConfig, Erc1155TransferDiscoveryConfig,
 };
-use super::permit2_discovery::{
-    DISCOVERY_SOURCE_PERMIT2_ALLOWANCE_PROBE, Permit2AllowanceDiscoveryConfig,
-};
+use super::permit2_discovery::DISCOVERY_SOURCE_PERMIT2_ALLOWANCE_PROBE;
 use super::support::{
     ClaimRecordMetadata, InventoryAddressObservation, InventoryRecordContext, address_record,
     holding_record, holding_record_with_claim_metadata, holding_record_with_counterparty,
     holding_record_with_protocol_counterparty, holding_record_with_source,
     holding_record_with_token_id, quantity_hex_is_nonzero,
 };
-use super::token_discovery::{
-    DISCOVERY_SOURCE_ERC20_TRANSFER_LOG, Erc20TransferDiscoveryConfig, push_unique_token,
-};
+use super::token_discovery::{DISCOVERY_SOURCE_ERC20_TRANSFER_LOG, push_unique_token};
 use super::{
-    DISCOVERY_SOURCE_LOCAL_RPC, DiscoveryWallet, WALLET_FAMILY_ETH_SEED, WALLET_FAMILY_ETH_WATCH,
-    WALLET_FAMILY_ETH_XPUB,
+    DISCOVERY_SOURCE_LOCAL_RPC, DiscoveryConfigs, DiscoveryWallet, WALLET_FAMILY_ETH_SEED,
+    WALLET_FAMILY_ETH_WATCH, WALLET_FAMILY_ETH_XPUB,
 };
 
 #[derive(Clone, Copy, Debug)]
@@ -48,7 +39,6 @@ pub(super) struct AddressActivityContext {
 }
 
 impl SigillumService {
-    #[allow(clippy::too_many_arguments)]
     pub(super) async fn observe_inventory_address(
         &self,
         wallet: &DiscoveryWallet,
@@ -56,30 +46,25 @@ impl SigillumService {
         address: &str,
         derivation_path: &str,
         address_index: u32,
-        block_tag: &str,
-        token_addresses: &[String],
-        token_discovery: Option<&Erc20TransferDiscoveryConfig>,
-        allowance_discovery: Option<&Erc20AllowanceDiscoveryConfig>,
-        permit2_allowance_discovery: Option<&Permit2AllowanceDiscoveryConfig>,
-        nft_discovery: Option<&Erc721TransferDiscoveryConfig>,
-        erc1155_discovery: Option<&Erc1155TransferDiscoveryConfig>,
-        nft_operator_approval_discovery: Option<&NftOperatorApprovalDiscoveryConfig>,
-        defi_position_discovery: Option<&DefiTokenPositionDiscoveryConfig>,
-        claim_candidate_discovery: Option<&ClaimCandidateDiscoveryConfig>,
+        configs: &DiscoveryConfigs<'_>,
         activity: AddressActivityContext,
         block_cursors: &mut Vec<WalletDiscoveryBlockCursor>,
-        now: u64,
     ) -> ServiceResult<InventoryAddressObservation> {
         let address = normalize_address(address)?;
         let native_balance_wei_hex = self
-            .evm_native_balance_for_provider(provider.compartment_id, provider, &address, block_tag)
+            .evm_native_balance_for_provider(
+                provider.compartment_id,
+                provider,
+                &address,
+                configs.block_tag,
+            )
             .await?;
         let transaction_count = self
             .evm_transaction_count_for_provider(
                 provider.compartment_id,
                 provider,
                 &address,
-                block_tag,
+                configs.block_tag,
             )
             .await?;
         let mut activity_state = if quantity_hex_is_nonzero(&native_balance_wei_hex) {
@@ -95,7 +80,7 @@ impl SigillumService {
             provider,
             address: &address,
             derivation_path,
-            now,
+            now: configs.started_at_unix,
         };
         let mut observed_activity_block = None;
         let mut holdings = vec![holding_record(
@@ -105,9 +90,9 @@ impl SigillumService {
             &native_balance_wei_hex,
         )];
 
-        let mut observed_token_addresses = token_addresses.to_vec();
+        let mut observed_token_addresses = configs.token_addresses.to_vec();
         let mut transfer_log_tokens = Vec::new();
-        if let Some(config) = token_discovery {
+        if let Some(config) = configs.token_discovery {
             let from_block = effective_from_block(
                 &config.from_block,
                 latest_cursor_block(
@@ -133,7 +118,7 @@ impl SigillumService {
                         chain_id: provider.chain_id,
                         topic_family: TOPIC_FAMILY_ERC20_TRANSFER,
                         last_scanned_block: scanned_to_block,
-                        updated_at_unix: now,
+                        updated_at_unix: configs.started_at_unix,
                     },
                 );
             }
@@ -154,7 +139,7 @@ impl SigillumService {
                     provider,
                     token_address,
                     &address,
-                    block_tag,
+                    configs.block_tag,
                 )
                 .await?;
             if quantity_hex_is_nonzero(&amount_hex) {
@@ -169,13 +154,13 @@ impl SigillumService {
             ));
         }
 
-        if let Some(config) = allowance_discovery {
+        if let Some(config) = configs.allowance_discovery {
             let allowances = self
                 .discover_erc20_allowances_for_address(
                     provider,
                     &address,
                     &observed_token_addresses,
-                    block_tag,
+                    configs.block_tag,
                     config,
                 )
                 .await?;
@@ -191,13 +176,13 @@ impl SigillumService {
             }
         }
 
-        if let Some(config) = permit2_allowance_discovery {
+        if let Some(config) = configs.permit2_allowance_discovery {
             let allowances = self
                 .discover_permit2_allowances_for_address(
                     provider,
                     &address,
                     &observed_token_addresses,
-                    block_tag,
+                    configs.block_tag,
                     config,
                 )
                 .await?;
@@ -215,7 +200,7 @@ impl SigillumService {
         }
 
         let mut observed_nft_contract_addresses = Vec::new();
-        if let Some(config) = nft_discovery {
+        if let Some(config) = configs.nft_discovery {
             let from_block = effective_from_block(
                 &config.from_block,
                 latest_cursor_block(
@@ -246,7 +231,7 @@ impl SigillumService {
                         chain_id: provider.chain_id,
                         topic_family: TOPIC_FAMILY_ERC721_TRANSFER,
                         last_scanned_block: scanned_to_block,
-                        updated_at_unix: now,
+                        updated_at_unix: configs.started_at_unix,
                     },
                 );
             }
@@ -270,7 +255,7 @@ impl SigillumService {
             }
         }
 
-        if let Some(config) = erc1155_discovery {
+        if let Some(config) = configs.erc1155_discovery {
             let from_block = effective_from_block(
                 &config.from_block,
                 latest_cursor_block(
@@ -301,7 +286,7 @@ impl SigillumService {
                         chain_id: provider.chain_id,
                         topic_family: TOPIC_FAMILY_ERC1155_TRANSFER,
                         last_scanned_block: scanned_to_block,
-                        updated_at_unix: now,
+                        updated_at_unix: configs.started_at_unix,
                     },
                 );
             }
@@ -325,13 +310,13 @@ impl SigillumService {
             }
         }
 
-        if let Some(config) = nft_operator_approval_discovery {
+        if let Some(config) = configs.nft_operator_approval_discovery {
             let approvals = self
                 .discover_nft_operator_approvals_for_address(
                     provider,
                     &address,
                     &observed_nft_contract_addresses,
-                    block_tag,
+                    configs.block_tag,
                     config,
                 )
                 .await?;
@@ -347,9 +332,14 @@ impl SigillumService {
             }
         }
 
-        if let Some(config) = defi_position_discovery {
+        if let Some(config) = configs.defi_position_discovery {
             let positions = self
-                .discover_defi_token_positions_for_address(provider, &address, block_tag, config)
+                .discover_defi_token_positions_for_address(
+                    provider,
+                    &address,
+                    configs.block_tag,
+                    config,
+                )
                 .await?;
             for position in positions {
                 if quantity_hex_is_nonzero(&position.amount_hex) {
@@ -369,7 +359,7 @@ impl SigillumService {
             }
         }
 
-        if let Some(config) = claim_candidate_discovery {
+        if let Some(config) = configs.claim_candidate_discovery {
             for candidate in config.candidates_for_address(&address) {
                 activity_state = WalletAddressActivityState::Funded;
                 holdings.push(holding_record_with_claim_metadata(

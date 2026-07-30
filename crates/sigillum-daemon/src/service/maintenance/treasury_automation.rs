@@ -4,8 +4,8 @@ use axum::http::StatusCode;
 use sigillum_api::{
     ConsolidationPlan, ConsolidationPlanApproveRequest, ConsolidationPlanSimulateRequest,
     ConsolidationPlanStep, MaintenanceFailureBreakdown, PlanEnqueueStepRequest,
-    TreasuryAutomationRunSummary, WalletAssetKind, WalletInventoryAddress, WalletPlanStatus,
-    WalletPlanStepAction, WalletPlanStepStatus, WalletSignerStatus, WalletSimulationStatus,
+    TreasuryAutomationRunSummary, WalletAssetKind, WalletInventoryAddress, WalletPlanStepAction,
+    WalletPlanStepStatus, WalletSignerStatus, WalletSimulationStatus,
 };
 use sigillum_core::decode_quantity_hex;
 
@@ -17,7 +17,7 @@ use super::super::helpers::{compare_u256, now_unix, random_id, subtract_u256};
 use super::super::inventory::WALLET_FAMILY_ETH_SEED;
 use super::super::inventory::planner::{
     analyze_plan_linkage, apply_linkage_blockers, apply_policy_blockers_to_step,
-    assign_step_ordering, plan_policy_violations, summarize_plan_steps,
+    assign_step_ordering, plan_policy_violations, plan_status, summarize_plan_steps,
 };
 use super::super::queue::{ExecutionFamily, execution_gate_denial, is_active_queue_state};
 use super::super::{ServiceError, ServiceResult, SigillumService};
@@ -429,13 +429,7 @@ fn persist_generated_plans(
             apply_linkage_blockers(&mut steps);
         }
         let summary = summarize_plan_steps(&steps);
-        let status = if summary.total_steps == 0 {
-            WalletPlanStatus::Empty
-        } else if summary.blocked_steps > 0 || !policy_violations.is_empty() {
-            WalletPlanStatus::Blocked
-        } else {
-            WalletPlanStatus::ReviewRequired
-        };
+        let status = plan_status(&summary, &policy_violations);
         generated.push(ConsolidationPlan {
             id: random_id(),
             status,
@@ -585,7 +579,7 @@ fn encode_quantity_hex(value: &[u8; 32]) -> String {
 mod tests {
     use sigillum_api::{
         EthSeedWalletProfile, QueueJob, QueueJobPayload, QueueJobReceipt, TreasuryPolicy,
-        WalletAddressActivityState,
+        WalletAddressActivityState, WalletPlanStatus,
     };
 
     use super::*;

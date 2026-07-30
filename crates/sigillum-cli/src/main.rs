@@ -20,6 +20,8 @@ mod cmd;
 mod daemon_api;
 mod exec;
 
+use crate::daemon_api::{has_flag, parse_flag};
+
 use std::io::{self, Write};
 use std::path::PathBuf;
 use std::process;
@@ -97,7 +99,10 @@ COMMANDS:
     get <KEY>         Retrieve a Tier 2 secret
     delete <KEY>      Delete a Tier 2 secret
     list              List all keys (both tiers)
-    audit             Query audit events; use `audit verify [scope]` for MAC chains
+    audit [--tail N] [--kind K] [--since TIME] [--key K] [--json]
+                      Query audit events; JSON output is an array
+      verify [scope] [--json]
+                      Verify audit MAC chains; JSON output is a report
     doctor            Check local daemon, data dir, session, audit DB, and env
     generate          Generate passwords, passphrases, or TOTPs
     run               Inject resolved secrets into a child process
@@ -125,7 +130,7 @@ COMMANDS:
       remove --label <L>     Remove a hardware key
              --skip <L,..>   Skip these keys during re-split
       status                 Show FIDO2 status
-      unlock --taps <N>      Unlock via FIDO2 (cascading)
+      unlock [--taps <N>]    Unlock via FIDO2 (cascading; prompts when omitted)
 
     daemon [--port N] [--force-daemon-lock]
                       Start HTTP daemon (default: localhost:9743)
@@ -606,14 +611,14 @@ fn cmd_unlock(args: &[String]) {
             if choice.trim() == "2" {
                 unlock_passphrase();
             } else {
-                unlock_fido2();
+                unlock_fido2(&[]);
             }
         } else {
             println!("No FIDO2 device detected. Using passphrase.");
             unlock_passphrase();
         }
     } else if has_fido {
-        unlock_fido2();
+        unlock_fido2(&[]);
     } else if has_passphrase {
         unlock_passphrase();
     } else {
@@ -666,19 +671,21 @@ fn unlock_passphrase() {
     }
 }
 
-fn unlock_fido2() {
+fn unlock_fido2(args: &[String]) {
+    let taps = daemon_api::parse_usize_flag(args, "--taps").unwrap_or_else(|| {
+        // DENIABILITY: no compartment hints, just ask for tap count
+        eprint!("Keys to tap: ");
+        io::stderr().flush().unwrap();
+        let mut taps_str = String::new();
+        io::stdin().read_line(&mut taps_str).unwrap();
+        taps_str.trim().parse().unwrap_or_else(|_| {
+            eprintln!("Invalid tap count");
+            process::exit(1);
+        })
+    });
+
     let base = base_dir();
     let mgr = fido2_manager();
-
-    // DENIABILITY: no compartment hints, just ask for tap count
-    eprint!("Keys to tap: ");
-    io::stderr().flush().unwrap();
-    let mut taps_str = String::new();
-    io::stdin().read_line(&mut taps_str).unwrap();
-    let taps: usize = taps_str.trim().parse().unwrap_or_else(|_| {
-        eprintln!("Invalid tap count");
-        process::exit(1);
-    });
 
     let pin = prompt_optional_pin();
     println!("Touch your FIDO2 key now...");
@@ -713,10 +720,11 @@ fn unlock_fido2() {
 /// Lock all compartments (daemon only).
 ///
 /// The CLI is stateless and does not maintain unlock state between commands.
-/// To lock compartments, use the daemon's web UI or HTTP API.
+/// To lock compartments, use the daemon's web UI or authenticated
+/// `sigillum api lock` command.
 fn cmd_lock() {
     eprintln!("CLI is stateless — keys are not held in memory between commands.");
-    eprintln!("To lock the daemon, use the web UI or: curl -X POST http://localhost:9743/api/lock");
+    eprintln!("To lock the daemon, run the authenticated CLI command: sigillum api lock");
 }
 
 // ── Snapshot backup ─────────────────────────────────────────────
@@ -1120,7 +1128,7 @@ fn cmd_fido2(args: &[String]) {
         "list" => fido2_list(&mgr),
         "remove" => fido2_remove(&mgr, &args[1..]),
         "status" => fido2_status(&mgr),
-        "unlock" => unlock_fido2(),
+        "unlock" => unlock_fido2(&args[1..]),
         other => {
             eprintln!("Unknown fido2 command: {other}");
             process::exit(1);
@@ -1360,21 +1368,6 @@ fn parse_label_arg(args: &[String], cmd: &str) -> String {
         eprintln!("Usage: sigillum fido2 {cmd} --label <LABEL>");
         process::exit(1);
     })
-}
-
-fn has_flag(args: &[String], flag: &str) -> bool {
-    args.iter().any(|a| a == flag)
-}
-
-fn parse_flag(args: &[String], flag: &str) -> Option<String> {
-    let mut i = 0;
-    while i < args.len() {
-        if args[i] == flag && i + 1 < args.len() {
-            return Some(args[i + 1].clone());
-        }
-        i += 1;
-    }
-    None
 }
 
 fn require_arg(args: &[String], cmd: &str, placeholder: &str) -> String {
