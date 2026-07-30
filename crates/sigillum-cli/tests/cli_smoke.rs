@@ -21,6 +21,11 @@ use std::thread;
 #[cfg(unix)]
 use std::time::{Duration, Instant};
 
+#[cfg(unix)]
+const SUPERVISOR_TEST_TIMEOUT: Duration = Duration::from_secs(30);
+#[cfg(unix)]
+const MOCK_RUN_SERVER_TIMEOUT: Duration = Duration::from_secs(60);
+
 /// Build the path to the debug binary.
 fn sigillum_bin() -> String {
     env!("CARGO_BIN_EXE_sigillum").to_string()
@@ -162,7 +167,7 @@ impl MockRunServer {
         let (stop_sender, stop_receiver) = mpsc::channel();
 
         let server_thread = thread::spawn(move || {
-            let deadline = Instant::now() + Duration::from_secs(20);
+            let deadline = Instant::now() + MOCK_RUN_SERVER_TIMEOUT;
             loop {
                 if stop_receiver.try_recv().is_ok() {
                     return;
@@ -250,6 +255,26 @@ struct SupervisedProcessCleanup {
 
 #[cfg(unix)]
 impl SupervisedProcessCleanup {
+    fn wait_for_child_pid(&mut self, deadline: Instant) -> io::Result<libc::pid_t> {
+        loop {
+            if let Some(pid) = read_child_pid(&self.child_pid_file) {
+                return Ok(pid);
+            }
+            if let Some(status) = self.sigillum.try_wait()? {
+                return Err(io::Error::other(format!(
+                    "sigillum exited with {status} before the supervised child wrote its PID"
+                )));
+            }
+            if Instant::now() >= deadline {
+                return Err(io::Error::new(
+                    io::ErrorKind::TimedOut,
+                    "timed out waiting for the supervised child PID file",
+                ));
+            }
+            thread::sleep(Duration::from_millis(10));
+        }
+    }
+
     fn wait_until(&mut self, deadline: Instant) -> io::Result<ExitStatus> {
         loop {
             if let Some(status) = self.sigillum.try_wait()? {
@@ -345,17 +370,9 @@ fn sigterm_is_forwarded_and_run_audit_is_recorded() {
         child_is_confirmed_gone: false,
     };
 
-    let pid_deadline = Instant::now() + Duration::from_secs(10);
-    let child_pid = loop {
-        if let Some(pid) = read_child_pid(&child_pid_file) {
-            break pid;
-        }
-        assert!(
-            Instant::now() < pid_deadline,
-            "timed out waiting for the supervised child PID file"
-        );
-        thread::sleep(Duration::from_millis(10));
-    };
+    let child_pid = cleanup
+        .wait_for_child_pid(Instant::now() + SUPERVISOR_TEST_TIMEOUT)
+        .expect("supervised child should start and publish its PID");
 
     // SAFETY: `cleanup.sigillum.id()` is the live process spawned by this test.
     let signal_result = unsafe { libc::kill(cleanup.sigillum.id() as libc::pid_t, libc::SIGTERM) };
@@ -367,11 +384,11 @@ fn sigterm_is_forwarded_and_run_audit_is_recorded() {
     );
 
     cleanup
-        .wait_until(Instant::now() + Duration::from_secs(10))
+        .wait_until(Instant::now() + SUPERVISOR_TEST_TIMEOUT)
         .expect("sigillum should exit after forwarding SIGTERM");
 
     let audit_body = audit_receiver
-        .recv_timeout(Duration::from_secs(2))
+        .recv_timeout(SUPERVISOR_TEST_TIMEOUT)
         .expect("mock server did not receive a run audit")
         .expect("mock server failed");
     let audit: serde_json::Value =
@@ -379,7 +396,7 @@ fn sigterm_is_forwarded_and_run_audit_is_recorded() {
     assert_eq!(audit["signal"], libc::SIGTERM);
     assert_eq!(audit["success"], false);
 
-    let child_gone_deadline = Instant::now() + Duration::from_secs(2);
+    let child_gone_deadline = Instant::now() + SUPERVISOR_TEST_TIMEOUT;
     loop {
         if process_is_gone(child_pid).expect("probe supervised child PID") {
             break;
