@@ -1452,19 +1452,25 @@ Order within W7 is strict: W7.1 → W7.2 → W7.3 → W7.4 → W7.5.
 - **Steps:** new `.github/workflows/release.yml` on `push: tags: ['v*']`:
   job `verify` (ubuntu+macos matrix mirroring ci.yml) runs
   `./scripts/check-release.sh`; job `artifacts-macos` (needs verify)
-  installs tauri-cli, builds through the fail-closed signing wrapper, strictly
+  is RC-only, installs tauri-cli, builds through the fail-closed signing
+  wrapper, strictly
   verifies the release app and read-only-mounted dmg before staging,
   `cargo build --release -p
   sigillum-cli`, uploads `.dmg`/zipped `.app`/CLI binary; job
   `artifacts-linux` is RC-only and builds + uploads the CLI binary. For an RC,
   job `release` creates an unpublished `prerelease=true` draft GitHub Release
-  with the `[1.0.0]` CHANGELOG section and `SHA256SUMS`. Required final-tag
-  behavior, pending the evidence-hardening integration, is:
-  both source-verification legs rerun, both artifact jobs are skipped, and the
-  release job copies the exact five qualified RC payload bytes under final
-  names, verifies byte identity and tag-normalized digests, and regenerates
-  `SHA256SUMS`; the final draft and published release are
-  `prerelease=false`. The release also attaches a `THIRD-PARTY-NOTICES` file
+  with the `[1.0.0]` CHANGELOG section and a `SHA256SUMS` file. For the final
+  tag, both source-verification legs still run, both artifact jobs must be
+  skipped, and `release` downloads
+  the single unpublished draft for the contract-selected highest retained RC,
+  requires it to remain `prerelease=true`, validates its exact six-asset shape
+  and checksums, copies the exact five payload files under final names without
+  changing their bytes, regenerates `SHA256SUMS`, and proves byte-for-byte plus
+  tag-normalized digest equality through
+  `scripts/promote-release-assets.sh`. It revalidates the exact RC tag object as
+  the live highest retained RC before promotion and around final-draft
+  creation. The final draft and published release are `prerelease=false`. The
+  RC artifact job also attaches a `THIRD-PARTY-NOTICES` file
   generated with a pinned `cargo-about` (MIT/Apache attribution for shipped
   binaries) and includes it in the `.dmg` resources — `cargo deny` gates
   licenses but does not produce attribution. Dry-run with the next monotonically
@@ -1473,9 +1479,12 @@ Order within W7 is strict: W7.1 → W7.2 → W7.3 → W7.4 → W7.5.
   older RC draft after final publication.
 - **Accept:** RC dry run produces all artifacts plus an unpublished prerelease
   draft, and the exact release app/dmg pair passes the reusable strict verifier
-  before upload. Final-tag tests reject any rebuild, missing/extra asset,
-  checksum mismatch, byte difference, digest-normalization difference, or
-  invalid draft/prerelease state.
+  before upload. Hermetic promotion tests prove the final-tag path rejects any
+  rebuild; missing, linked, extra, or malformed assets; checksum mismatches;
+  byte changes; digest-normalization differences; and invalid
+  draft/prerelease state. Final-tag acceptance additionally requires the draft
+  payloads to match the evidence-bound qualified RC after filename
+  normalization; no final rebuild is a valid substitute.
   **Size:** M.
 
 #### G5 — Readiness and product docs final sync
@@ -1545,11 +1554,17 @@ below; the remaining items are operator human-gates.
 - [ ] F7 upgrade-path tests green: 0.1-era fixture dir boots and migrates on
       the RC6 build; 0.1-era snapshot restores.
 - [ ] Desktop `.dmg` from RC6 strictly verifies, installs, and reaches the unlock
-      screen on a machine without a dev toolchain.
-- [ ] `sigillum doctor` passes on the eligible macOS 15.x/aarch64 host at RC6.
+      screen on a machine without a dev toolchain. (No RC6 artifact exists yet.)
+- [ ] `sigillum doctor` passes on the same eligible macOS 15.x/aarch64 host at
+      RC6. (No qualifying RC6 receipt exists yet.)
 - [ ] Five-destination UI walkthrough, command palette, keyboard/focus/modal
       behavior, pinned accessibility scenarios, and migrated real-daemon
       browser smoke are signed off at RC6.
+- [ ] Clean-install, doctor, and C7 receipts pass schema v2 and bind the exact
+      RC tag object/peeled SHA, qualified artifact filename/digest,
+      `mac-server` macOS 15/aarch64 identity, release-operator identity/time,
+      and the required checksum-bound clean-install/UI screenshots. (No
+      qualifying RC6 evidence bundle exists yet.)
 - [ ] Schema-v2 evidence bundle validates; the final workflow reruns source
       verification, skips artifact rebuilds, copies the exact five qualified
       RC payload bytes, verifies byte identity and tag-normalized digests,
@@ -1572,13 +1587,13 @@ below; the remaining items are operator human-gates.
 #### H2 — Tag and release
 
 > [!IMPORTANT]
-> **Current integration prerequisite:** this ceremony is not executable in the
-> merge-in-progress checkout until the evidence-hardening implementation lands.
-> The promotion script, final-tag workflow branches, and release-state
-> enforcement must be present and tested first. After that integration, rerun
-> the exact-HEAD clean gate and independent review before using this block.
-> The operator records explicit H2 approval immediately before invoking it;
-> there is no later interactive approval pause.
+> The evidence-hardening implementation is present, but H2 is not authorized:
+> no RC6 exists. Do not invoke this ceremony until the exact integrated HEAD
+> passes the clean gate and independent review, lands through protected main
+> with required CI, and RC6 satisfies F7, schema-v2 same-host F4, funded F6,
+> doctor, clean-install, C7, and evidence-bundle gates. The operator records
+> explicit H2 approval immediately before invocation; there is no later
+> interactive approval pause.
 
 ```bash
 (
@@ -1638,7 +1653,7 @@ below; the remaining items are operator human-gates.
   test "$(shasum -a 256 "${EVIDENCE_BUNDLE}" | awk '{print $1}')" = \
     "${EVIDENCE_SHA256}"
 
-  # Snapshot the exact qualified RC draft immediately before tagging. The
+  # Snapshot the exact qualified RC draft immediately before tagging. Its
   # checksum body must be the one already sealed into the evidence bundle.
   VERIFY_DIR="$(mktemp -d "${TMPDIR:-/tmp}/sigillum-final-release.XXXXXX")"
   trap 'rm -rf "${VERIFY_DIR}"' EXIT
@@ -1681,6 +1696,9 @@ below; the remaining items are operator human-gates.
     <<< "${RC_RELEASE}")
   EVIDENCE_EXTRACT_DIR="${VERIFY_DIR}/evidence-bundle"
   mkdir "${EVIDENCE_EXTRACT_DIR}"
+  # The bundle checker above has already rejected unsafe, linked, duplicate,
+  # and non-canonical archive entries, so extraction into this empty directory
+  # is safe and accepts either canonical tar spelling of the member path.
   tar -xzf "${EVIDENCE_BUNDLE}" -C "${EVIDENCE_EXTRACT_DIR}"
   cmp -s \
     "${QUALIFIED_RC_DIR}/SHA256SUMS" \
@@ -1886,6 +1904,7 @@ below; the remaining items are operator human-gates.
     awk '{print $1}')" = "${TAG_EVIDENCE_SHA256}"
 
   # Close the final tag/highest-RC/main race immediately before publication.
+  # A new RC, a moved main, or a changed final tag object invalidates H2.
   git fetch --prune --tags origin
   test "$(git rev-parse HEAD)" = "${RC_SHA}"
   test -z "$(git status --porcelain)"

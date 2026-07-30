@@ -130,25 +130,30 @@ changelog-invalid, and missing or malformed final-evidence tags fail closed.
 The normal source release gate runs this regression test before tag time.
 
 > [!IMPORTANT]
-> The source gate above is executable now; the exact-byte final-tag path below
-> is not. This merge-in-progress checkout still lacks the promotion script,
-> final-tag workflow branches, and release-state enforcement. Do not invoke H2
-> until that evidence-hardening implementation lands and the exact integrated
-> HEAD repeats the clean gate and independent review.
+> Exact-byte promotion and release-state enforcement are implemented, but they
+> are not release evidence for the current line. H2 remains blocked until the
+> exact integrated HEAD passes the clean gate and independent review, lands
+> through protected main with required CI, and RC6 satisfies F7, schema-v2
+> same-host F4, funded F6, doctor, clean-install, C7, and evidence-bundle gates.
 
 The release workflow always creates a draft. RC releases must remain
 unpublished drafts with `prerelease=true`; the final draft and published
 release must have `prerelease=false`. RC tags build and checksum the candidate
-payloads once. The final tag reruns the source-verification legs, but its
-artifact jobs are intentionally skipped. The release job selects the qualified
-RC, requires its exact unpublished-prerelease six-asset shape, downloads and
-verifies its five payloads, copies those exact bytes under final names,
-regenerates `SHA256SUMS`, and verifies byte-for-byte plus tag-normalized digest
-equality. A final release must never substitute fresh rebuilds for the
-qualified RC bytes. Release notes, verified assets, and the evidence bundle
-must be complete before the operator records H2 approval and invokes the
-final-tag ceremony. That approval authorizes conditional publication only if
-all post-tag verification succeeds.
+payloads once. The final tag still runs both source-verification
+legs, but its artifact jobs are intentionally skipped: the release job selects
+the highest retained RC identified by the remote tag contract, requires its
+single GitHub Release to remain an unpublished `prerelease=true` draft with the
+exact six-asset shape, downloads and verifies its five payloads, copies those
+exact bytes under final names, regenerates `SHA256SUMS`, and checks
+byte-for-byte plus tag-normalized digest equality with
+`scripts/promote-release-assets.sh`. It revalidates that exact RC tag object as
+the live highest retained RC before promotion and immediately around draft
+creation, so a newer same-commit RC cannot silently change the promotion
+source. A final release must never substitute fresh rebuilds for the qualified
+RC bytes. Release notes, verified assets, and the evidence bundle must be
+complete before the operator records H2 approval and invokes the final-tag
+ceremony. That approval authorizes conditional publication only if every
+post-tag verification succeeds.
 
 ## 4. Failure handling
 
@@ -183,7 +188,7 @@ all post-tag verification succeeds.
 | F7 | 0.1-era data-directory and snapshot upgrade verification passes at RC6 |
 | Doctor | `sigillum doctor` passes on the eligible macOS 15.x/aarch64 host at RC6 |
 | UI | Real-daemon browser smoke plus operator walkthrough/sign-off for all five destinations, palette, keyboard/focus, modal, and accessibility behavior |
-| H2 | Blocked until the evidence-hardening implementation is integrated and re-gated; then explicit operator approval is recorded immediately before the final-tag ceremony and authorizes conditional publication only after every post-tag verification passes |
+| H2 | Blocked until the exact integrated HEAD and every RC6 automated and operator gate pass; explicit operator approval is then recorded immediately before the final-tag ceremony and authorizes conditional publication only after every post-tag verification passes |
 
 Work may continue on any independent item while one of these gates is waiting.
 Do not mark H1 or H2 complete until every required receipt names the same
@@ -207,11 +212,21 @@ Preserve the sanitized evidence outside the checkout until final promotion:
    `release/asset-SHA256SUMS`. Both F4 receipts use schema v2, record
    `platform: macos`, the exact macOS `ProductVersion`, canonical `aarch64`,
    and an opaque SHA-256 machine identity; the validator requires macOS 15.x
-   and the same identity in both receipts. The doctor receipt is structured,
-   bound to the RC SHA, and records the installed-RC pass. The asset checksum
-   file is the independently verified five-entry `SHA256SUMS` body from the RC
-   draft. F6 audit exports live below `f6/audit/` and
-   are referenced by `f6/receipts.json`.
+   and the same identity in both receipts. The clean-install, doctor, and UI
+   operator receipts also use schema v2 and share one exact RC object (`tag`,
+   `tag_object`, and `peeled_sha`). They bind the qualified artifact
+   filename and digest, the `mac-server` host identity (`macos`, macOS 15,
+   `aarch64`), and the release operator identity and UTC review time. The
+   clean-install receipt names the exact RC dmg, application version,
+   identifier and install path, records checksum/dev-toolchain/unlock
+   booleans, and checksum-binds `desktop/screenshots/unlock.png`. The doctor
+   receipt names the exact RC macOS CLI archive, its installed executable hash
+   and version, and structured all-ok checks. The C7 UI receipt names the exact
+   RC dmg, all five destinations, the full H1 journey, setup/locked/unlocked
+   states, and three fixed screenshot hashes. The asset checksum file is the
+   independently verified five-entry `SHA256SUMS` body from the RC draft. F6
+   audit exports live below `f6/audit/` and are referenced by
+   `f6/receipts.json`.
 2. Put `SHA256SUMS` inside the bundle, name the completed archive
    `sigillum-v1.0.0-release-evidence.tar.gz`, and compute its SHA-256. H2
    records that exact evidence filename and archive digest in the
@@ -236,15 +251,19 @@ Preserve the sanitized evidence outside the checkout until final promotion:
    Before H2, independently verify all five F6 transactions on the claimed
    public chains, including chain ID, successful receipt, finality, and the
    family effect represented by each audit export.
-3. The executable H2 ceremony snapshots the qualified RC draft, then waits for
-   the exact final workflow. Its contract, both source-verification legs, and
-   release job must pass while both artifact jobs are skipped. It verifies the
-   final draft's five renamed payloads are byte-identical and have the same
-   tag-normalized digest manifest as the RC snapshot, uploads the evidence
-   archive as a seventh asset without replacement, then re-fetches and repeats
-   every byte/digest check across all seven live draft assets. The final draft
-   must remain `prerelease=false`. The evidence SHA-256 must match the digest
-   in the protected final tag before the H2-authorized conditional publication.
+3. The executable H2 ceremony first downloads the qualified RC draft and
+   requires its `SHA256SUMS` to equal the checksum body embedded in the
+   validated evidence bundle. It then waits for the exact final workflow:
+   release contract, both source-verification legs, and release must succeed,
+   while both RC-only artifact jobs must be skipped. It independently verifies
+   that the final draft's five renamed payloads are byte-identical and have the
+   same tag-normalized digest manifest as that qualified RC snapshot, uploads
+   the evidence archive as a seventh asset without replacing an existing
+   asset, then re-fetches and repeats every byte/digest check across the seven
+   live draft assets. The final draft must remain `prerelease=false`. The
+   evidence SHA-256 must match the digest in the protected final tag in the
+   last executable checks immediately before the H2-authorized conditional
+   publication.
 4. In H3, update `docs/production-readiness-audit.md` with the public release
    URL, evidence filename and digest, final tag-object ID, RC peeled SHA, and a
    sanitized receipt summary. This post-release documentation commit does not
@@ -276,17 +295,21 @@ or recreating the tag.
    checksum result, evidence filename, and evidence archive digest. Keep the
    annotated RC tag permanently and retain the RC draft/assets through
    final-draft verification.
-8. Only after the evidence-hardening prerequisite is integrated, re-gated, and
-   reviewed, record explicit H2 approval, repeat the clean gate, and push annotated
-   `v1.0.0` at the identical peeled commit as the receipt-bearing RC, with the
-   evidence filename and digest in the tag message. If `main` has moved or any
-   intervening commit is required, the receipts are void and a new
+8. Only after the exact integrated HEAD passes the clean gate and independent
+   review, lands through protected main with required CI, and the resulting RC6
+   passes every automated and operator gate, record explicit H2 approval,
+   repeat the clean gate, and push annotated `v1.0.0` at the identical peeled
+   commit as the receipt-bearing RC, with the evidence filename and digest in
+   the tag message. If `main` has moved or any intervening commit is required,
+   the receipts are void and a new
    monotonically numbered RC is required. The final workflow must skip artifact
    rebuilds and copy the qualified RC draft's exact five payload bytes under
-   final names. Verify byte identity and tag-normalized digests, regenerate
-   `SHA256SUMS`, require the final draft to remain `prerelease=false`, upload
-   and reverify the evidence bundle as the seventh asset, then publish. Only
-   after final publication may the older RC draft be deleted.
+   final names. Independently verify byte identity and tag-normalized digests
+   against the evidence-bound RC `SHA256SUMS` with
+   `scripts/promote-release-assets.sh`, upload and reverify the digest-bound
+   evidence bundle as the seventh asset, require the final draft to remain
+   `prerelease=false`, then publish. Only after final publication may the older
+   RC draft be deleted.
 
 After publication, perform the post-release version/planning update described
 by H3 in the plan of record.
