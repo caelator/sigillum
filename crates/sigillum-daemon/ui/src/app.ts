@@ -2,11 +2,14 @@
 
 import "./styles/app.css";
 
+import { ROUTE_PATHS } from "./routePaths";
+
 import {
   clearSessionToken,
   readSessionToken,
   requestWithSession,
   subscribeSessionToken,
+  withBackgroundRequests,
 } from "./api/session";
 import { handleActionEvent as handleDispatchedActionEvent } from "./actions/dispatcher";
 import {

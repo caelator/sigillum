@@ -179,11 +179,13 @@ export function createSetupWizard(deps: SetupWizardDeps) {
   let wizPrimaryKeyLabel = "";
 
   function configureAccessibility(): void {
-    document.getElementById("setupCard")?.setAttribute("aria-labelledby", "wizStageTitle");
+    const setupCard = document.getElementById("setupCard");
+    setupCard?.setAttribute("role", "region");
+    setupCard?.setAttribute("aria-labelledby", "wizStageTitle");
 
     const stageTitle = document.getElementById("wizStageTitle");
     stageTitle?.setAttribute("role", "heading");
-    stageTitle?.setAttribute("aria-level", "3");
+    stageTitle?.setAttribute("aria-level", "2");
     stageTitle?.setAttribute("tabindex", "-1");
 
     const stagePill = document.getElementById("wizStagePill");

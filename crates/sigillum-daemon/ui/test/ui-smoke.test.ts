@@ -1175,6 +1175,7 @@ test("wizard steps focus the first enabled control or the step container", () =>
 
 test("setup wizard passphrase path validates and initializes a local vault", async () => {
   const dom = installDom([
+    "setupCard",
     "wizStep0",
     "wizStepPassphrase",
     "wizStepDone",
@@ -1242,7 +1243,10 @@ test("setup wizard passphrase path validates and initializes a local vault", asy
     equal(dom.el("wizStepPassphrase").getAttribute("aria-hidden"), "false");
     equal((dom.el("wizStep0") as any).inert, true);
     equal((dom.el("wizStepPassphrase") as any).inert, false);
+    equal(dom.el("setupCard").getAttribute("role"), "region");
+    equal(dom.el("setupCard").getAttribute("aria-labelledby"), "wizStageTitle");
     equal(dom.el("wizStageTitle").getAttribute("role"), "heading");
+    equal(dom.el("wizStageTitle").getAttribute("aria-level"), "2");
     equal(dom.el("wizPassphrase").getAttribute("aria-label"), "New vault passphrase");
     equal(focused, "wizStageTitle");
     equal(dom.el("wizStageTitle").textContent, "Create your first local compartment");
