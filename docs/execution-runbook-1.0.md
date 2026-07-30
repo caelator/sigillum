@@ -2,9 +2,11 @@
 
 **Status:** Active hardening and release handbook
 
-**State recorded:** 2026-07-12, protected `main` at `f73b861`; failed RCs
+**State recorded:** 2026-07-30, `origin/main` at `7e04743`;
+`v1.0.0-rc.5` peels to that exact commit and Release run `29248938476`
+succeeded with six assets in an unpublished draft. Failed RCs remain
 `v1.0.0-rc.2` at `815d262`, `v1.0.0-rc.3` at `0a97c18`, and
-`v1.0.0-rc.4` at `f73b861`
+`v1.0.0-rc.4` at `f73b861`.
 
 **Plan authority:** [release-1.0-plan.md](./release-1.0-plan.md)
 
@@ -43,11 +45,20 @@ a commit that contains later hardening changes.
   represented the two-transaction `fund_gas` → sweep chain with one hash. Its
   queue treated `sent` (broadcast, unconfirmed) as prerequisite success instead
   of requiring `confirmed`. No RC4 operator receipt can certify a final
-  release. The next retained candidate is `v1.0.0-rc.5` after the runtime and
-  F6 schema-v2 fixes pass protected-main gates.
+  release.
   Historical release run `29230844456` completed all six jobs and uploaded the
   checksum, CLI, app, dmg, and notices assets to an unpublished draft; that
   proves the signing remediation, not the invalidated F6/runtime contract.
+- `v1.0.0-rc.5` is the retained candidate at `origin/main` commit `7e04743`.
+  Release run `29248938476` passed the contract job, both verify legs, both
+  artifact jobs, and the release job, and its six expected assets remain in an
+  unpublished draft. It proves the corrected release/F6/runtime contracts only
+  for that exact commit. It does not cover the later PostCSS, ERC-5564
+  interoperability, session/broadcast race, discovery lifecycle, and FIDO2
+  causal-recovery hardening, or supply the remaining operator evidence.
+  Therefore it cannot be promoted for the current line. After the hardening
+  branch passes review, the full source gate, protected merge, and CI, the next
+  monotonically eligible candidate is `v1.0.0-rc.6`.
 - Gateway payments are preview-only and disabled by default. Opt-in balance
   observations are not finality proof and must not be represented as supported
   1.0 payment confirmations.
@@ -56,22 +67,28 @@ a commit that contains later hardening changes.
 
 1. Re-anchor on a clean, current `main`; confirm the GitNexus index matches the
    checked-out commit.
-2. Treat the authorization, payment-truth, queue, tag, and signing remediations
-   through `f73b861` as a landed baseline. Complete the RC5 stop-ship
-   remediation in this order:
-   - require the exact `sepolia` and `l2` role set;
-   - accept only integer chain IDs for Sepolia (`11155111`) and Base Sepolia
-     (`84532`), Arbitrum Sepolia (`421614`), or OP Sepolia (`11155420`);
-   - require each plan-step prerequisite to reach `confirmed`, never merely
-     `sent`, before a dependent can sign or broadcast;
-   - use F6 schema v2 to prove four families with five transactions, including
-     two ordered, receipt-confirmed `fund_gas` and dependent-sweep legs bound by
-     plan, job, step, chain, address, and prerequisite identities;
-   - prove all supported IDs pass and mainnet, arbitrary, and non-integer IDs
-     fail, and prove malformed or single-hash gas chains fail, with internally
-     consistent receipt and audit fixtures;
-   - synchronize the runbook, readiness audit, changelog, and plan so RC4 is
-     failed evidence and RC5 is the next candidate.
+2. Treat RC5's authorization, payment-truth, queue, tag, signing, F6 schema-v2,
+   supported-testnet, and confirmed-prerequisite contracts as a landed baseline.
+   Complete and review the RC6 hardening in this order:
+   - keep the daemon UI lockfile on patched PostCSS and Nano ID releases;
+   - generate ERC-5564 scheme-1 payments with the ScopeLift compressed-point
+     convention while preserving detection and spending for legacy Sigillum
+     x-coordinate-only payments;
+   - revalidate admitted sessions and compartments after operation waits and
+     provider I/O, and honor the lock latch at the final broadcast boundary;
+   - recheck first-run restore, compartment initialization, and FIDO2 setup
+     admission after entering the serialized operation boundary;
+   - keep broadcast admission closed throughout forced idle locking and
+     re-zeroize after already-admitted work drains;
+   - stop queue drains on lock admission and preserve exact replay bytes for
+     both prepared and submission-unknown jobs;
+   - make discovery cancellation, failure, restart interruption, and resume
+     real durable lifecycle transitions rather than status-only acknowledgments;
+   - serialize daemon and CLI FIDO2 writers and require an exact causal mutation
+     receipt before startup recovery clears an operation journal;
+   - synchronize this runbook, the readiness audit, changelog, deployment guide,
+     README, and plan so RC5 remains an older draft receipt and RC6 is the next
+     candidate.
 3. Run focused tests for every changed boundary, then run
    `./scripts/check-release.sh` alone. Never run a full gate while another agent
    or build is modifying the same checkout.
@@ -82,7 +99,7 @@ a commit that contains later hardening changes.
    and deletion. Remediate missing settings before landing through a pull
    request, then require both CI legs to pass.
 6. Only then create a new annotated RC tag and complete the operator gates in
-   section 5.
+   section 5. With retained RC5 present, that tag must be `v1.0.0-rc.6`.
 
 ## 3. Executable release contract
 

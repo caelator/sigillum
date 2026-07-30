@@ -46,15 +46,36 @@ export interface DaemonPayload {
   [key: string]: unknown;
 }
 
+export interface RequestOptions {
+  /** Authenticate as background polling without extending idle auto-lock. */
+  background?: boolean;
+}
+
+let backgroundRequestDepth = 0;
+
+/** Mark every request scheduled by `fn` as background polling. */
+export async function withBackgroundRequests<T>(fn: () => Promise<T>): Promise<T> {
+  backgroundRequestDepth += 1;
+  try {
+    return await fn();
+  } finally {
+    backgroundRequestDepth -= 1;
+  }
+}
+
 export async function requestWithSession<TPayload extends DaemonPayload = DaemonPayload>(
   method: DaemonMethod,
   path: string,
   body?: unknown,
+  options?: RequestOptions,
 ): Promise<TPayload> {
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
     ...sessionAuthorizationHeader(),
   };
+  if (options?.background || backgroundRequestDepth > 0) {
+    headers["X-Sigillum-Background"] = "1";
+  }
   const response = await fetch(path, {
     method,
     headers,

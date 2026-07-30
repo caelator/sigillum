@@ -6,6 +6,7 @@
 //! a restart may query the stored hash or submit the exact same bytes, but it
 //! never needs (or is allowed) to derive a signing key again.
 
+use axum::http::StatusCode;
 use sha3::{Digest, Keccak256};
 use sigillum_api::{EvmProviderProfile, QueueJob, QueueJobPayload, WalletPlanStepAction};
 
@@ -17,6 +18,16 @@ use super::gates::plan_action_execution_family;
 use super::plan_steps::receipts::{BroadcastErrorClass, ReceiptPoll, classify_broadcast_error};
 use super::state::normalize_queue_state;
 use super::{QUEUE_STATE_SUBMITTED_UNKNOWN, QueueExecution};
+
+const LOCK_LATCH_HOLD_REASON: &str = "submission_held: daemon locking denied local broadcast admission; exact signed bytes were retained";
+
+fn lock_latch_hold(resume_existing_submission: bool) -> QueueExecution {
+    if resume_existing_submission {
+        QueueExecution::SubmittedUnknownHeld(LOCK_LATCH_HOLD_REASON.into())
+    } else {
+        QueueExecution::PreparedHeld(LOCK_LATCH_HOLD_REASON.into())
+    }
+}
 
 impl SigillumService {
     pub(super) fn persist_queue_submission_marker(
@@ -57,6 +68,9 @@ impl SigillumService {
         })?;
         if let Some(reason) = prepared_integrity_error(job) {
             return Ok(QueueExecution::OperatorActionRequired(reason));
+        }
+        if self.state.is_locking() {
+            return Ok(lock_latch_hold(resume_existing_submission));
         }
         let (provider, wallet_compartment_id) = self.queue_provider_for_payload(&job.payload)?;
 
@@ -123,6 +137,9 @@ impl SigillumService {
                     broadcast_transaction_hash_hex,
                 })
             }
+            Err(error) if error.status() == StatusCode::LOCKED => {
+                Ok(lock_latch_hold(resume_existing_submission))
+            }
             Err(error) => {
                 self.record_queue_broadcast_failure(
                     token,
@@ -154,7 +171,9 @@ impl SigillumService {
                     )
                     .await
                 {
-                    Ok(ReceiptPoll::Pending) | Err(_) => None,
+                    Ok(ReceiptPoll::Pending) => None,
+                    Err(_) if self.state.is_locking() => Some(lock_latch_hold(true)),
+                    Err(_) => None,
                     Ok(ReceiptPoll::PartiallyConfirmed {
                         block_number,
                         gas_used_hex,
@@ -213,7 +232,9 @@ impl SigillumService {
             })),
             // As above, a pre-RPC crash is indistinguishable here. Always
             // allow the caller to resubmit the exact prepared bytes.
-            Ok(None) | Err(_) => Ok(None),
+            Ok(None) => Ok(None),
+            Err(_) if self.state.is_locking() => Ok(Some(lock_latch_hold(true))),
+            Err(_) => Ok(None),
         }
     }
 
@@ -462,7 +483,28 @@ fn classify_prepared_broadcast_failure(job: &QueueJob, message: &str) -> QueueEx
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
+    use sigillum_fido2::config::CompartmentMeta;
+    use tempfile::TempDir;
+
     use super::*;
+    use crate::AppState;
+
+    fn provider_with_vault_auth() -> EvmProviderProfile {
+        EvmProviderProfile {
+            name: "mainnet".into(),
+            rpc_url: "http://127.0.0.1:9/".into(),
+            auth_token_key: Some("rpc-token".into()),
+            compartment_id: 0,
+            chain_id: 1,
+            max_priority_fee_per_gas_hex: None,
+            max_fee_per_gas_hex: None,
+            native_gas_limit: None,
+            erc20_gas_limit: None,
+            fee_estimation_enabled: false,
+        }
+    }
 
     fn plan_job(action: WalletPlanStepAction) -> QueueJob {
         QueueJob {
@@ -542,5 +584,36 @@ mod tests {
             classify_prepared_broadcast_failure(&job, "connection reset by peer"),
             QueueExecution::SubmittedUnknown(_)
         ));
+    }
+
+    #[tokio::test]
+    async fn force_zeroize_auth_loss_holds_existing_submission() {
+        let dir = TempDir::new().unwrap();
+        let state =
+            Arc::new(AppState::new(dir.path().to_path_buf()).expect("state should initialize"));
+        state.unlock_compartment(
+            0,
+            [7u8; 32],
+            CompartmentMeta {
+                id: 0,
+                label: "default".into(),
+                threshold: 1,
+                passphrase_mode: None,
+            },
+        );
+        state.force_zeroize_all_while_locking();
+        let service = SigillumService::new(state);
+        let job = plan_job(WalletPlanStepAction::SweepNative);
+
+        let outcome = service
+            .resume_submitted_queue_job(&job, &provider_with_vault_auth(), "0xabc", 1)
+            .await
+            .unwrap()
+            .expect("locking receipt failure should become an explicit hold");
+
+        let QueueExecution::SubmittedUnknownHeld(reason) = outcome else {
+            panic!("existing submission must remain submission-unknown while locking");
+        };
+        assert_eq!(reason, LOCK_LATCH_HOLD_REASON);
     }
 }

@@ -4,7 +4,12 @@ import "./styles/app.css";
 
 import { ROUTE_PATHS } from "./routePaths";
 
-import { clearSessionToken, readSessionToken, requestWithSession } from "./api/session";
+import {
+  clearSessionToken,
+  readSessionToken,
+  requestWithSession,
+  withBackgroundRequests,
+} from "./api/session";
 import { handleActionEvent as handleDispatchedActionEvent } from "./actions/dispatcher";
 import {
   setHiddenById as setHidden,
@@ -754,7 +759,7 @@ async function refresh() {
   updateRefreshMeta('busy');
   refreshPromise = (async () => {
     try {
-      await runRefreshCycle();
+      await withBackgroundRequests(() => runRefreshCycle());
       markRefreshCompleted();
     } catch (e) {
       console.error('refresh failed', e);

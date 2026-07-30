@@ -773,6 +773,8 @@ fn inventory_response_roundtrip() {
             started_at_unix: 1_783_042_400,
             completed_at_unix: Some(1_783_046_000),
             last_error: None,
+            scan_request: None,
+            resumed_from_job_id: None,
         }],
         addresses: vec![WalletInventoryAddress {
             id: "addr_2026_0001".to_string(),

@@ -2,10 +2,12 @@ mod common;
 
 use common::mock_evm::{
     spawn_activity_mock_evm_provider, spawn_cursor_mock_evm_provider,
-    spawn_erc1155_batch_mock_evm_provider, spawn_mock_evm_provider,
+    spawn_erc1155_batch_mock_evm_provider, spawn_failing_mock_evm_provider,
+    spawn_mock_evm_provider, spawn_slow_mock_evm_provider,
 };
 use common::{configure_mainnet_provider, get, init_default_compartment, post_json, spawn_daemon};
 use std::collections::HashSet;
+use std::time::{Duration, Instant};
 
 use reqwest::StatusCode;
 use serde_json::json;
@@ -418,7 +420,7 @@ async fn wallet_inventory_scan_records_ad_hoc_watch_addresses() {
 }
 
 #[tokio::test]
-async fn wallet_inventory_transfer_log_cursors_resume_after_canceled_job_scan_disjoint_ranges() {
+async fn wallet_inventory_transfer_log_cursors_scan_disjoint_ranges() {
     let dir = TempDir::new().unwrap();
     let (addr, handle) = spawn_daemon(dir.path().to_path_buf()).await;
     let (rpc_addr, rpc_handle, log_ranges) = spawn_cursor_mock_evm_provider().await;
@@ -506,22 +508,6 @@ async fn wallet_inventory_transfer_log_cursors_resume_after_canceled_job_scan_di
             .any(|range| range.from_block == "0x0" && range.to_block == "0x9"),
         "first scan ranges: {first_ranges:?}"
     );
-    let cancel = post_json(
-        &client,
-        addr,
-        "/api/discovery/jobs/cancel",
-        json!({ "id": first_json["job"]["id"] }),
-        Some(&token),
-    )
-    .await;
-    let cancel_status = cancel.status();
-    let cancel_json: serde_json::Value = cancel.json().await.unwrap();
-    assert_eq!(
-        cancel_status,
-        StatusCode::OK,
-        "cancel response: {cancel_json}"
-    );
-    assert_eq!(cancel_json["job"]["status"], "canceled");
     log_ranges.lock().unwrap().clear();
 
     let second = post_json(
@@ -560,6 +546,153 @@ async fn wallet_inventory_transfer_log_cursors_resume_after_canceled_job_scan_di
     assert!(
         second_ranges.iter().all(|range| range.from_block != "0x0"),
         "second scan must not rescan the original lower bound: {second_ranges:?}"
+    );
+
+    handle.abort();
+    rpc_handle.abort();
+}
+
+#[tokio::test]
+async fn wallet_inventory_live_cancel_is_prompt_terminal_and_resumable() {
+    let dir = TempDir::new().unwrap();
+    let (addr, handle) = spawn_daemon(dir.path().to_path_buf()).await;
+    let (rpc_addr, rpc_handle) = spawn_slow_mock_evm_provider(Duration::from_millis(500)).await;
+    let client = reqwest::Client::new();
+    let token = init_default_compartment(&client, addr).await;
+    configure_mainnet_provider(&client, addr, &token, rpc_addr).await;
+
+    let scan_client = client.clone();
+    let scan_token = token.clone();
+    let scan = tokio::spawn(async move {
+        post_json(
+            &scan_client,
+            addr,
+            "/api/inventory/scan/evm",
+            json!({
+                "provider_profile": "mainnet",
+                "wallet_family": "eth-watch",
+                "watch_addresses": [{
+                    "address": "0x7777777777777777777777777777777777777777",
+                    "label": "cancel-me"
+                }]
+            }),
+            Some(&scan_token),
+        )
+        .await
+    });
+
+    let job_id = tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            let jobs = get(&client, addr, "/api/discovery/jobs", Some(&token)).await;
+            if jobs.status() == StatusCode::OK {
+                let jobs: serde_json::Value = jobs.json().await.unwrap();
+                if let Some(id) = jobs["jobs"]
+                    .as_array()
+                    .and_then(|jobs| jobs.iter().find(|job| job["status"] == "running"))
+                    .and_then(|job| job["id"].as_str())
+                {
+                    break id.to_string();
+                }
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    })
+    .await
+    .expect("running discovery job should become visible");
+
+    let cancel_started = Instant::now();
+    let cancel = post_json(
+        &client,
+        addr,
+        "/api/discovery/jobs/cancel",
+        json!({ "id": job_id }),
+        Some(&token),
+    )
+    .await;
+    assert!(
+        cancel_started.elapsed() < Duration::from_millis(250),
+        "cancel must not wait behind the running scan"
+    );
+    let cancel_status = cancel.status();
+    let cancel_json: serde_json::Value = cancel.json().await.unwrap();
+    assert_eq!(
+        cancel_status,
+        StatusCode::OK,
+        "cancel response: {cancel_json}"
+    );
+    assert_eq!(cancel_json["status"], "cancel_requested");
+
+    let scan = scan.await.unwrap();
+    let scan_status = scan.status();
+    let scan_json: serde_json::Value = scan.json().await.unwrap();
+    assert_eq!(scan_status, StatusCode::OK, "scan response: {scan_json}");
+    assert_eq!(scan_json["job"]["status"], "canceled");
+    assert!(scan_json["job"]["completed_at_unix"].is_number());
+    assert!(scan_json["job"]["scan_request"].is_object());
+
+    let resume = post_json(
+        &client,
+        addr,
+        "/api/discovery/jobs/resume",
+        json!({ "id": job_id }),
+        Some(&token),
+    )
+    .await;
+    let resume_status = resume.status();
+    let resume_json: serde_json::Value = resume.json().await.unwrap();
+    assert_eq!(
+        resume_status,
+        StatusCode::OK,
+        "resume response: {resume_json}"
+    );
+    assert_eq!(resume_json["job"]["status"], "completed");
+    assert_eq!(resume_json["job"]["resumed_from_job_id"], job_id);
+
+    handle.abort();
+    rpc_handle.abort();
+}
+
+#[tokio::test]
+async fn wallet_inventory_provider_error_terminalizes_running_job() {
+    let dir = TempDir::new().unwrap();
+    let (addr, handle) = spawn_daemon(dir.path().to_path_buf()).await;
+    let (rpc_addr, rpc_handle) = spawn_failing_mock_evm_provider().await;
+    let client = reqwest::Client::new();
+    let token = init_default_compartment(&client, addr).await;
+    configure_mainnet_provider(&client, addr, &token, rpc_addr).await;
+
+    let scan = post_json(
+        &client,
+        addr,
+        "/api/inventory/scan/evm",
+        json!({
+            "provider_profile": "mainnet",
+            "wallet_family": "eth-watch",
+            "watch_addresses": [{
+                "address": "0x7777777777777777777777777777777777777777",
+                "label": "provider-failure"
+            }]
+        }),
+        Some(&token),
+    )
+    .await;
+    assert!(!scan.status().is_success());
+
+    let jobs = get(&client, addr, "/api/discovery/jobs", Some(&token)).await;
+    let jobs_status = jobs.status();
+    let jobs: serde_json::Value = jobs.json().await.unwrap();
+    assert_eq!(jobs_status, StatusCode::OK, "jobs response: {jobs}");
+    let job = jobs["jobs"]
+        .as_array()
+        .and_then(|jobs| jobs.last())
+        .expect("failed job should remain visible");
+    assert_eq!(job["status"], "failed");
+    assert!(job["completed_at_unix"].is_number());
+    assert!(
+        job["last_error"]
+            .as_str()
+            .is_some_and(|message| message.contains("injected provider failure")),
+        "job: {job}"
     );
 
     handle.abort();

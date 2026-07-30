@@ -7,6 +7,14 @@ from 1.0.0 onward, per the stability policy in `docs/stability.md`.
 
 ## [Unreleased]
 
+No post-1.0 changes are designated yet. The current hardening candidate is
+included in the 1.0.0 release-candidate notes below.
+
+## [1.0.0] - 2026-07-30
+
+> Release-candidate notes required by the tag contract. No final `v1.0.0` tag
+> or published stable release exists; this is not a publication date.
+
 ### Changed
 
 - **Breaking:** `sigillum api deposits create-native` and `create-erc20` no
@@ -16,23 +24,6 @@ from 1.0.0 onward, per the stability policy in `docs/stability.md`.
   `--flag=value`.
 - `sigillum biometric enroll --passphrase-stdin` now trims surrounding
   whitespace and rejects empty input, matching other sensitive stdin handling.
-
-### Fixed
-
-- Approval findings in `[2^128, 2^255)`, including Permit2-max allowances, now
-  move from medium to high advisory risk, and
-  `TreasuryRiskSummary.high_findings` counts increase accordingly. Wire shapes
-  remain unchanged.
-
-### Documentation
-
-- Reframed the public project landing page around Sigillum's local-first EVM
-  wallet-management product, added an indexed documentation map and community
-  health files, clarified the unreleased/unsupported status and invalid RC tag,
-  corrected stale crate descriptions, and enabled private vulnerability
-  reporting.
-
-## [1.0.0] - 2026-07-10
 
 ### Added
 
@@ -160,8 +151,47 @@ from 1.0.0 onward, per the stability policy in `docs/stability.md`.
   acquiring the operation mutex so an in-flight drain can be halted through the
   HTTP API without waiting for the batch to finish.
 
+### Documentation
+
+- Reframed the public project landing page around Sigillum's local-first EVM
+  wallet-management product, added an indexed documentation map and community
+  health files, clarified the unreleased/unsupported status and invalid RC tag,
+  corrected stale crate descriptions, and enabled private vulnerability
+  reporting.
+
 ### Fixed
 
+- Approval findings in `[2^128, 2^255)`, including Permit2-max allowances, now
+  move from medium to high advisory risk, and
+  `TreasuryRiskSummary.high_findings` counts increase accordingly. Wire shapes
+  remain unchanged.
+- Daemon UI dependency resolution now uses patched PostCSS and Nano ID releases,
+  restoring a zero-high-severity `npm audit` result for the release gate.
+- ERC-5564 scheme-1 generation now hashes the compressed SEC1 shared point used
+  by the ScopeLift reference SDK. Detection and spending retain compatibility
+  with Sigillum's pre-release x-coordinate-only convention, and independent
+  known-answer vectors cover both paths.
+- Authenticated mutations revalidate the admitted session and compartment after
+  waiting for the daemon operation boundary, stealth announcement scans
+  revalidate after provider I/O, and funds-moving paths honor the lock latch at
+  the final broadcast admission point.
+- First-run snapshot restore, compartment initialization, and FIDO2 setup
+  recheck initialization after entering the serialized operation boundary, so
+  stale unauthenticated admission cannot overwrite a concurrently initialized
+  daemon.
+- Forced idle locking now keeps the broadcast latch closed while admitted work
+  drains, zeroizes immediately at the force deadline, and zeroizes again after
+  the operation boundary before returning the daemon to its locked-ready state.
+  A queue drain denied by that latch stops the batch and retains exact signed
+  replay bytes as `prepared` or `submitted_unknown` instead of terminalizing
+  the job.
+- Inventory discovery jobs now checkpoint live cancellation, persist terminal
+  failure or interruption states, and resume by launching a real scan from the
+  saved request and latest checkpoint instead of stamping a synthetic status.
+- FIDO2 configuration writes now share a cross-process writer lease and embed a
+  causal mutation receipt in the same atomic write. Startup recovery clears a
+  journal only when its operation ID, kind, subject, generation, resulting key
+  count, and state fingerprint match the current configuration.
 - **Plan-step dependency finality** — Dependent execution jobs remain unsigned
   while prerequisites are merely prepared, submitted, or broadcast, and may
   proceed only after every prerequisite reaches receipt-confirmed success.

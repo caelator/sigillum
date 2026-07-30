@@ -13,7 +13,12 @@
 > `v1.0.0-rc.4` fixed signing but exposed an F6 contract that could accept a
 > mainnet as the L2 testnet, reduce a two-transaction gas-top-up chain to one
 > hash, and let a dependent run before its prerequisite confirmed. All three
-> tags are immutable failure receipts; the next candidate is `v1.0.0-rc.5`.
+> tags are immutable failure receipts. `v1.0.0-rc.5` at pre-hardening
+> `origin/main` commit `7e04743` passed Release run `29248938476` and produced
+> all six expected assets, but its GitHub Release remains a draft and its receipts do
+> not cover the later security, interoperability, lifecycle, and dependency
+> hardening. The next candidate for this line is `v1.0.0-rc.6` after merge and
+> protected CI; no final `v1.0.0` tag or published stable release exists.
 
 Sigillum is a self-hosted, single-operator workstation for finding EVM wallets
 and assets, understanding their provenance and risk, preparing consolidation
@@ -174,7 +179,8 @@ public issues.
 
 - Workspace version: `1.0.0`
 - Supported stable release: none
-- Published GitHub Release: none
+- Published GitHub Release: none (`v1.0.0-rc.5` remains an unpublished draft)
+- Next eligible candidate: annotated, protected `v1.0.0-rc.6` after CI
 - Current supported boundary: source evaluation only
 
 The workspace version describes the intended 1.0 contract; it does not by itself

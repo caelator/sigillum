@@ -126,6 +126,13 @@ pub struct WalletDiscoveryJob {
     pub completed_at_unix: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub last_error: Option<String>,
+    /// Sanitized request that launched the scan. Persisted so a terminal
+    /// interrupted/canceled job can be resumed from its durable checkpoints.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scan_request: Option<Box<crate::WalletInventoryScanRequest>>,
+    /// Job whose checkpoints were used to seed this resumed scan.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub resumed_from_job_id: Option<String>,
 }
 
 /// Cached NFT metadata and spam-review state for a discovered token.

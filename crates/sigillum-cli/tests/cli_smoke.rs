@@ -415,6 +415,47 @@ fn help_flag_exits_zero() {
 }
 
 #[test]
+fn nested_help_is_side_effect_free_for_every_top_level_command() {
+    let commands = [
+        "setup",
+        "status",
+        "unlock",
+        "lock",
+        "biometric",
+        "set",
+        "get",
+        "delete",
+        "list",
+        "audit",
+        "doctor",
+        "generate",
+        "run",
+        "set-api",
+        "get-api",
+        "delete-api",
+        "push",
+        "fido2",
+        "compartment",
+        "backup",
+        "daemon",
+        "api",
+    ];
+    for command in commands {
+        let base = tempfile::tempdir().unwrap();
+        let output = run_with_env(&[command, "--help"], &[("SIGILLUM_BASE_DIR", base.path())]);
+        assert!(
+            output.status.success(),
+            "`sigillum {command} --help` failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(
+            std::fs::read_dir(base.path()).unwrap().next().is_none(),
+            "`sigillum {command} --help` created local state"
+        );
+    }
+}
+
+#[test]
 fn version_shows_version_info() {
     let output = run(&["version"]);
     // Should either succeed with version info or exit non-zero if no subcommand

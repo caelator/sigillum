@@ -164,6 +164,23 @@ const WIZARD_CHROME: Record<
   },
 };
 
+const WIZARD_INPUT_LABELS: Record<string, string> = {
+  wizPLabel: "Compartment name",
+  wizPassphrase: "New vault passphrase",
+  wizPassphraseConfirm: "Confirm new vault passphrase",
+  wizCustomLabel: "Custom compartment name",
+  wizCustomThreshold: "Custom compartment hardware-key threshold",
+  wizFido2Pin: "Current FIDO2 PIN for the primary hardware key",
+  wizFido2Label: "Primary hardware-key label",
+  wizNewFido2Pin: "New FIDO2 PIN for the primary hardware key",
+  wizNewFido2PinConfirm: "Confirm new FIDO2 PIN for the primary hardware key",
+  wizFallbackPass: "Optional fallback passphrase",
+  wizAdditionalKeyPin: "Current FIDO2 PIN for the next hardware key",
+  wizAdditionalKeyLabel: "Next hardware-key label",
+  wizAdditionalNewPin: "New FIDO2 PIN for the next hardware key",
+  wizAdditionalNewPinConfirm: "Confirm new FIDO2 PIN for the next hardware key",
+};
+
 function input(id: string): HTMLInputElement {
   return document.getElementById(id) as HTMLInputElement;
 }
@@ -188,18 +205,73 @@ export function createSetupWizard(deps: SetupWizardDeps) {
   let wizRegisteredKeyCount = 0;
   let wizPrimaryKeyLabel = "";
 
+  function configureAccessibility(): void {
+    document.getElementById("setupCard")?.setAttribute("aria-labelledby", "wizStageTitle");
+
+    const stageTitle = document.getElementById("wizStageTitle");
+    stageTitle?.setAttribute("role", "heading");
+    stageTitle?.setAttribute("aria-level", "3");
+    stageTitle?.setAttribute("tabindex", "-1");
+
+    const stagePill = document.getElementById("wizStagePill");
+    stagePill?.setAttribute("role", "status");
+    stagePill?.setAttribute("aria-live", "polite");
+    stagePill?.setAttribute("aria-atomic", "true");
+
+    const deviceHint = document.getElementById("wizDeviceHint");
+    deviceHint?.setAttribute("role", "status");
+    deviceHint?.setAttribute("aria-live", "polite");
+
+    document.querySelectorAll<HTMLElement>(".wizard-step").forEach((step) => {
+      const active = step.classList.contains("active");
+      step.setAttribute("role", "group");
+      step.setAttribute("aria-labelledby", "wizStageTitle");
+      step.setAttribute("aria-hidden", String(!active));
+      step.inert = !active;
+    });
+
+    Object.entries(WIZARD_INPUT_LABELS).forEach(([id, label]) => {
+      document.getElementById(id)?.setAttribute("aria-label", label);
+    });
+  }
+
+  function focusStageTitle(): void {
+    document.getElementById("wizStageTitle")?.focus();
+  }
+
+  function focusInvalidField(id: string): void {
+    const field = input(id);
+    field.setAttribute("aria-invalid", "true");
+    field.focus();
+  }
+
+  function clearInvalidFields(ids: string[]): void {
+    ids.forEach((id) => document.getElementById(id)?.removeAttribute("aria-invalid"));
+  }
+
+  function setStepState(id: string): void {
+    document.querySelectorAll<HTMLElement>(".wizard-step").forEach((step) => {
+      const active = step.id === id;
+      step.classList.toggle("active", active);
+      step.setAttribute("aria-hidden", String(!active));
+      step.inert = !active;
+    });
+  }
+
   function reset(): void {
     wizCompartments = [];
     customCompartments = [];
     wizRequiredKeyCount = 1;
     wizRegisteredKeyCount = 0;
     wizPrimaryKeyLabel = "";
+    setStepState("wizStepWelcome");
+    updateWizardChrome("wizStepWelcome");
   }
 
   function wizShowStep(id: string): void {
-    document.querySelectorAll(".wizard-step").forEach((step) => step.classList.remove("active"));
-    document.getElementById(id)?.classList.add("active");
+    setStepState(id);
     updateWizardChrome(id);
+    focusStageTitle();
   }
 
   function wizPreset(preset: string): void {
@@ -304,12 +376,15 @@ export function createSetupWizard(deps: SetupWizardDeps) {
     const label = input("wizPLabel").value || "default";
     const p = input("wizPassphrase").value;
     const pc = input("wizPassphraseConfirm").value;
+    clearInvalidFields(["wizPassphrase", "wizPassphraseConfirm"]);
     if (p.length < 8) {
       deps.toast("Min 8 characters", "error");
+      focusInvalidField("wizPassphrase");
       return;
     }
     if (p !== pc) {
       deps.toast("Passphrases do not match", "error");
+      focusInvalidField("wizPassphraseConfirm");
       return;
     }
 
@@ -376,18 +451,22 @@ export function createSetupWizard(deps: SetupWizardDeps) {
   function wizAddCustomComp(): void {
     const label = input("wizCustomLabel").value;
     const threshold = parseInt(input("wizCustomThreshold").value);
+    clearInvalidFields(["wizCustomLabel", "wizCustomThreshold"]);
     if (!label || !threshold) {
       deps.toast("Label and threshold required", "error");
+      focusInvalidField(label ? "wizCustomThreshold" : "wizCustomLabel");
       return;
     }
     if (customCompartments.some((comp) => comp.threshold === threshold)) {
       deps.toast("Threshold " + threshold + " already used", "error");
+      focusInvalidField("wizCustomThreshold");
       return;
     }
     customCompartments.push({ label, threshold });
     clearFields(["wizCustomLabel", "wizCustomThreshold"]);
     setTrustedHtmlById("wizCustomCompList", wizCompRowHtml(customCompartments));
     input("wizCustomContinue").disabled = false;
+    input("wizCustomLabel").focus();
   }
 
   function wizRenderAdditionalKeyState(): void {
@@ -461,8 +540,10 @@ export function createSetupWizard(deps: SetupWizardDeps) {
     const pin = input("wizFido2Pin").value;
     const label = input("wizFido2Label").value;
     const passphrase = input("wizFallbackPass").value || null;
+    clearInvalidFields(["wizFido2Label"]);
     if (!label) {
       deps.toast("Label required", "error");
+      focusInvalidField("wizFido2Label");
       return;
     }
 
@@ -530,8 +611,10 @@ export function createSetupWizard(deps: SetupWizardDeps) {
   async function wizRegisterAdditionalKey(): Promise<void> {
     const pin = input("wizAdditionalKeyPin").value;
     const label = input("wizAdditionalKeyLabel").value;
+    clearInvalidFields(["wizAdditionalKeyLabel"]);
     if (!label) {
       deps.toast("Label required", "error");
+      focusInvalidField("wizAdditionalKeyLabel");
       return;
     }
 
@@ -566,6 +649,7 @@ export function createSetupWizard(deps: SetupWizardDeps) {
           (remaining > 1 ? "s" : "") +
           " to finish this plan.",
       );
+      input("wizAdditionalKeyPin").focus();
       return;
     }
 
@@ -716,6 +800,8 @@ export function createSetupWizard(deps: SetupWizardDeps) {
     );
     deps.toast("You can enable sponsor gas top-ups later in Treasury policy.");
   }
+
+  configureAccessibility();
 
   return {
     reset,

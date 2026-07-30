@@ -1,4 +1,4 @@
-//! sigillum command-line interface for hardware-backed secret management.
+//! Sigillum command-line interface for local wallet operations and secret custody.
 //!
 //! This module provides the CLI entry point and command handlers for the sigillum
 //! vault system. It includes:
@@ -46,6 +46,16 @@ fn main() {
         print_usage();
         process::exit(1);
     }
+    // Help must be side-effect free at every command depth. Intercept it
+    // before dispatch so commands such as `setup --help` never enter a wizard
+    // or create local state.
+    if args[2..]
+        .iter()
+        .any(|arg| matches!(arg.as_str(), "--help" | "-h"))
+    {
+        print_usage();
+        return;
+    }
 
     match args[1].as_str() {
         "setup" => cmd_setup(),
@@ -83,7 +93,7 @@ fn main() {
 fn print_usage() {
     println!(
         "\
-sigillum — hardware-backed secret management
+sigillum — local wallet operations and secret custody
 
 USAGE:
     sigillum <COMMAND> [ARGS]
@@ -303,6 +313,7 @@ fn setup_passphrase() {
     if let Err(e) = mgr.save_config_raw(&sigillum_fido2::config::Fido2Config {
         total_shares: 1,
         keys: Vec::new(),
+        ..Default::default()
     }) {
         eprintln!("Warning: failed to save FIDO2 config: {e}");
     }

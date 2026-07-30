@@ -39,6 +39,10 @@ pub(super) struct AddressActivityContext {
 }
 
 impl SigillumService {
+    // These inputs deliberately mirror the independent evidence recorded for
+    // an address observation. Keeping them explicit makes provider and
+    // checkpoint provenance visible at each call site.
+    #[allow(clippy::too_many_arguments)]
     pub(super) async fn observe_inventory_address(
         &self,
         wallet: &DiscoveryWallet,

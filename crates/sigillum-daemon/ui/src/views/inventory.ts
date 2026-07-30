@@ -501,12 +501,16 @@ export function createInventoryActions(deps: InventoryActionsDeps) {
         esc(cursorSummary) +
         "</div></div>" +
         '<div class="entity-actions">' +
-        '<button class="btn-ghost" data-action="cancelDiscoveryJob" data-arg0="' +
-        escAttr(job.id) +
-        '">Cancel</button>' +
-        '<button class="btn-ghost" data-action="resumeDiscoveryJob" data-arg0="' +
-        escAttr(job.id) +
-        '">Resume</button>' +
+        (job.status === "running"
+          ? '<button class="btn-ghost" data-action="cancelDiscoveryJob" data-arg0="' +
+            escAttr(job.id) +
+            '">Cancel</button>'
+          : "") +
+        (["canceled", "failed", "interrupted"].includes(job.status) && job.scan_request
+          ? '<button class="btn-ghost" data-action="resumeDiscoveryJob" data-arg0="' +
+            escAttr(job.id) +
+            '">Resume</button>'
+          : "") +
         "</div></li>"
       );
     });
@@ -1285,7 +1289,11 @@ export function createInventoryActions(deps: InventoryActionsDeps) {
       deps.toast(r.error, "error");
       return;
     }
-    deps.toast("Discovery job marked canceled");
+    deps.toast(
+      r.status === "cancel_requested"
+        ? "Cancel requested — the scan will stop after its current provider checkpoint"
+        : "Discovery job canceled",
+    );
     void loadInventoryOperations();
   }
 
@@ -1295,7 +1303,11 @@ export function createInventoryActions(deps: InventoryActionsDeps) {
       deps.toast(r.error, "error");
       return;
     }
-    deps.toast("Discovery job marked for resume");
+    deps.toast(
+      r.job && r.job.status === "completed"
+        ? "Resumed discovery scan completed"
+        : "Resumed discovery scan " + String((r.job && r.job.status) || "finished"),
+    );
     void loadInventoryOperations();
   }
 

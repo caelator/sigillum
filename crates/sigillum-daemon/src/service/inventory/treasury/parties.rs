@@ -30,7 +30,8 @@ impl SigillumService {
         body: CounterpartyCreateRequest,
     ) -> ServiceResult<CounterpartyMutationResponse> {
         let token = self.require_session(token)?;
-        let _guard = self.state.operation_guard().await;
+        let session_context = self.capture_session_operation_context(Some(token))?;
+        let _guard = self.acquire_session_operation(&session_context).await?;
         let name = trimmed_required("name", &body.name)?;
         let note = body.note.and_then(trimmed_optional);
         let sweep_destination_address = body
@@ -68,8 +69,9 @@ impl SigillumService {
         token: Option<&str>,
         body: CounterpartyUpdateRequest,
     ) -> ServiceResult<CounterpartyMutationResponse> {
-        let _ = self.require_session(token)?;
-        let _guard = self.state.operation_guard().await;
+        let token = self.require_session(token)?;
+        let session_context = self.capture_session_operation_context(Some(token))?;
+        let _guard = self.acquire_session_operation(&session_context).await?;
         let id = body.id.trim().to_string();
         let name = trimmed_required("name", &body.name)?;
         let note = body.note.and_then(trimmed_optional);
@@ -114,7 +116,8 @@ impl SigillumService {
         body: CounterpartyDeleteRequest,
     ) -> ServiceResult<CounterpartyMutationResponse> {
         let token = self.require_session(token)?;
-        let _guard = self.state.operation_guard().await;
+        let session_context = self.capture_session_operation_context(Some(token))?;
+        let _guard = self.acquire_session_operation(&session_context).await?;
         let id = body.id.trim().to_string();
 
         let mut state = load_inventory_state(&self.state.base_dir)?;

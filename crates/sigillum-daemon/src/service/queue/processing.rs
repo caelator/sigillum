@@ -1,9 +1,4 @@
 //! Queue processing loop and execution-result state transitions.
-//!
-//! The drain loop itself lives here; per-source serialization (W7.4) is
-//! split into `serialization.rs` and applying a job's outcome to its
-//! persisted fields + the drain tally is split into `outcomes.rs` (house
-//! architecture cap).
 
 use std::collections::HashMap;
 
@@ -12,15 +7,14 @@ use sigillum_api::{
     QueueProcessRequest, QueueProcessResponse, StealthPaymentRef,
 };
 
-use crate::audit_log::AuditEventSpec;
-use crate::service::helpers::now_unix;
-use crate::service::{ServiceError, ServiceResult, SigillumService};
-
 use super::QueueExecution;
-use super::gates::EXECUTION_PAUSED_REASON;
+use super::gates::{DAEMON_LOCKING_REASON, EXECUTION_PAUSED_REASON};
 use super::serialization;
 use super::state::queue_job_is_runnable;
 use super::tally::QueueDrainTally;
+use crate::audit_log::AuditEventSpec;
+use crate::service::helpers::now_unix;
+use crate::service::{ServiceError, ServiceResult, SigillumService};
 
 impl SigillumService {
     pub(crate) async fn process_queue(
@@ -29,10 +23,13 @@ impl SigillumService {
         body: QueueProcessRequest,
     ) -> ServiceResult<QueueProcessResponse> {
         let token = self.require_session(token)?;
-        let _guard = self.state.operation_guard().await;
+        let session_context = self.capture_session_operation_context(Some(token))?;
+        let operation_guard = self.acquire_session_operation(&session_context).await?;
         let mut queue = crate::queue_store::load_queue(&self.state.base_dir)
             .map_err(|error| ServiceError::internal(format!("Failed to load queue: {error}")))?;
-        let processed = self.process_queue_state(token, &mut queue, body).await?;
+        let processed = self
+            .process_queue_state(token, &mut queue, body, &operation_guard)
+            .await?;
 
         crate::queue_store::save_queue(&self.state.base_dir, &queue)
             .map_err(|error| ServiceError::internal(format!("Failed to save queue: {error}")))?;
@@ -56,6 +53,7 @@ impl SigillumService {
         token: &str,
         queue: &mut crate::queue_store::QueueState,
         body: QueueProcessRequest,
+        operation_guard: &tokio::sync::MutexGuard<'_, ()>,
     ) -> ServiceResult<QueueProcessResponse> {
         let policy = self.state.runtime_policy();
         let limit = policy.queue_process_limit(body.limit);
@@ -64,11 +62,7 @@ impl SigillumService {
         let mut tally = QueueDrainTally::default();
         let mut paused_reason: Option<String> = None;
 
-        // Snapshot of every job's id -> state, refreshed after each job so a
-        // prerequisite polled to `confirmed` can unblock a later dependent
-        // within this drain batch (W6.4 ordering). A freshly broadcast
-        // prerequisite remains `sent`, so its dependent waits for a later
-        // confirmation cycle. The drain uses indexes (rather than `iter_mut`) so it can
+        // Snapshot job state for dependency ordering; indexes
         // durably save the whole queue at the prepare/submission barriers.
         let mut job_states: HashMap<String, String> = queue
             .jobs
@@ -83,6 +77,10 @@ impl SigillumService {
 
         for job_index in 0..queue.jobs.len() {
             if processed.len() >= limit {
+                break;
+            }
+            if self.state.is_locking() {
+                paused_reason = Some(DAEMON_LOCKING_REASON.to_string());
                 break;
             }
             // Pause is immediate: no new job starts. Any in-flight job finishes
@@ -155,8 +153,8 @@ impl SigillumService {
                     gas_limit,
                     view_tag_hex,
                 } => self
-                    .eth_stealth_send_with_profile(
-                        Some(token),
+                    .eth_stealth_send_with_profile_under_operation_guard(
+                        token,
                         EthStealthSendWithProfileRequest {
                             wallet_profile: wallet_profile.clone(),
                             stealth: StealthPaymentRef {
@@ -171,6 +169,7 @@ impl SigillumService {
                             estimate_fees: None,
                             broadcast: Some(false),
                         },
+                        operation_guard,
                     )
                     .await
                     .map(QueueExecution::prepared_from_send),
@@ -185,8 +184,8 @@ impl SigillumService {
                     gas_limit,
                     view_tag_hex,
                 } => self
-                    .eth_stealth_send_erc20_with_profile(
-                        Some(token),
+                    .eth_stealth_send_erc20_with_profile_under_operation_guard(
+                        token,
                         EthStealthSendErc20WithProfileRequest {
                             wallet_profile: wallet_profile.clone(),
                             stealth: StealthPaymentRef {
@@ -202,6 +201,7 @@ impl SigillumService {
                             estimate_fees: None,
                             broadcast: Some(false),
                         },
+                        operation_guard,
                     )
                     .await
                     .map(QueueExecution::prepared_from_send),
@@ -223,6 +223,7 @@ impl SigillumService {
                         min_value_wei_hex.as_deref(),
                         *gas_limit,
                         view_tag_hex.clone(),
+                        operation_guard,
                     )
                     .await
                 }
@@ -246,6 +247,7 @@ impl SigillumService {
                         min_amount_hex.as_deref(),
                         *gas_limit,
                         view_tag_hex.clone(),
+                        operation_guard,
                     )
                     .await
                 }
@@ -373,6 +375,9 @@ impl SigillumService {
 
             processed.push(super::queue_job_for_response(job.clone()));
 
+            if self.state.is_locking() {
+                paused_reason = Some(DAEMON_LOCKING_REASON.to_string());
+            }
             if body.id.is_some() || paused_reason.is_some() {
                 break;
             }

@@ -138,6 +138,8 @@ mod tests {
             started_at_unix: 1,
             completed_at_unix: Some(2),
             last_error: None,
+            scan_request: None,
+            resumed_from_job_id: None,
         }
     }
 

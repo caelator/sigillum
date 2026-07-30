@@ -38,7 +38,8 @@ impl SigillumService {
         body: ConsolidationPlanGenerateRequest,
     ) -> ServiceResult<ConsolidationPlanMutationResponse> {
         let token = self.require_session(token)?;
-        let _guard = self.state.operation_guard().await;
+        let session_context = self.capture_session_operation_context(Some(token))?;
+        let _guard = self.acquire_session_operation(&session_context).await?;
         let mut state = load_inventory_state(&self.state.base_dir)?;
         let registry = crate::profiles::load_profiles(&self.state.base_dir)
             .map_err(|error| ServiceError::internal(format!("Failed to load profiles: {error}")))?;
@@ -137,7 +138,8 @@ impl SigillumService {
         body: ConsolidationPlanApproveRequest,
     ) -> ServiceResult<ConsolidationPlanMutationResponse> {
         let token = self.require_session(token)?;
-        let _guard = self.state.operation_guard().await;
+        let session_context = self.capture_session_operation_context(Some(token))?;
+        let _guard = self.acquire_session_operation(&session_context).await?;
         let mut state = load_inventory_state(&self.state.base_dir)?;
         let policy = state.treasury_policy.clone();
         let risk_catalog = state.risk_catalog.clone();

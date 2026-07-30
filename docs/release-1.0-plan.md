@@ -1,6 +1,7 @@
 # Sigillum 1.0 Release Plan
 
-**Status:** Active plan of record for the 1.0 release (rev 4 — wallet management IN scope; 2026-07-10 stop-ship hardening semantics reconciled)
+**Status:** Active plan of record for the 1.0 release (rev 5 — wallet management
+IN scope; RC5 draft evidence and 2026-07-30 stop-ship hardening reconciled)
 **Baseline verified:** 2026-07-01, branch `feat/private-receiving-desktop` (commits `70a087b`, `1cda1f2` ahead of `main`)
 **Supersedes:** [catchup-plan.md](./catchup-plan.md) Phases 1–3 are absorbed into Phases D–E and W1–W8 below. The
 [wallet-management-roadmap.md](./wallet-management-roadmap.md) product target is **part of 1.0** (EVM scope — see D-9);
@@ -1489,24 +1490,32 @@ below; the remaining items are operator human-gates.
 > as the L2 and represented the two-transaction gas-top-up chain with one hash.
 > Its queue also treated `sent` (broadcast, unconfirmed) as prerequisite
 > success. Preserve RC4 as immutable failed-contract evidence; no RC4 operator
-> receipt can promote a final tag. The next candidate is RC5 after the runtime,
-> L2 allowlist, and F6 schema-v2 fixes pass protected-main gates.
+> receipt can promote a final tag.
 
-- [ ] Fresh clone of `main` at RC5; `./scripts/check-release.sh` passes there.
-      (No RC5 workflow exists yet.)
-- [ ] CI green on the RC5 commit, both legs. (No qualifying RC5 run yet.)
-- [ ] F4 soak receipts (standard + chaos) reference the RC5 SHA. (No
-      qualifying RC5 receipt yet.)
+> **RC5 draft evidence:** `v1.0.0-rc.5` peels to pre-hardening `origin/main`
+> commit `7e04743`. Release run `29248938476` passed all six jobs and produced the six
+> expected draft assets. The GitHub Release remains unpublished. RC5 does not
+> include the later PostCSS, ERC-5564 interoperability, session/broadcast race,
+> discovery lifecycle, and FIDO2 causal-recovery hardening, so neither its
+> workflow nor any same-SHA receipts certify the current line. After protected
+> merge and CI, the next eligible candidate is the retained, annotated
+> `v1.0.0-rc.6`.
+
+- [ ] Fresh clone of `main` at RC6; `./scripts/check-release.sh` passes there.
+      (The current hardening checkout has not yet completed this gate.)
+- [ ] CI green on the RC6 commit, both legs. (No qualifying RC6 run yet.)
+- [ ] F4 soak receipts (standard + chaos) reference the RC6 SHA. (No
+      qualifying RC6 receipt yet.)
 - [ ] F6 testnet receipts record five transactions for the four core execution
-      families, including both confirmed gas-chain legs. (No qualifying RC5
+      families, including both confirmed gas-chain legs. (No qualifying RC6
       receipt yet; funded testnet access is required.)
 - [ ] F7 upgrade-path tests green: 0.1-era fixture dir boots and migrates on
-      the RC5 build; 0.1-era snapshot restores. (The tests remain in the source
-      gate but must rerun at the RC5 SHA.)
-- [ ] Desktop `.dmg` from RC5 strictly verifies, installs, and reaches the unlock
-      screen on a machine without a dev toolchain. (No RC5 artifact exists yet.)
-- [ ] `sigillum doctor` passes on each supported host at the RC5 SHA. (No
-      qualifying RC5 receipt yet.)
+      the RC6 build; 0.1-era snapshot restores. (The tests remain in the source
+      gate but must rerun at the RC6 SHA.)
+- [ ] Desktop `.dmg` from RC6 strictly verifies, installs, and reaches the unlock
+      screen on a machine without a dev toolchain. (No RC6 artifact exists yet.)
+- [ ] `sigillum doctor` passes on each supported host at the RC6 SHA. (No
+      qualifying RC6 receipt yet.)
 - [~] A full local walkthrough of the completion bar: import a seed →
       multi-chain scan → review inventory/risk → generate plan → approve →
       execute against a local mock provider → audit trail complete. (execute→audit
@@ -1514,9 +1523,9 @@ below; the remaining items are operator human-gates.
       enqueue_step_happy_path_persists_job_marker_evidence_hash_and_audit,
       eth_seed_jobs_are_gate_driven_and_execute_once_gates_pass via spawn_mock_evm_provider,
       chaos_kill_in_flight_plan_step_resumes_terminal_without_duplication; UI click-through = operator acceptance)
-- [~] CHANGELOG date filled for the next candidate; G5 docs merged. (G5 merged
-      PR #33; the new hardening candidate carries the numeric date required by
-      the release workflow, but still needs merge and fresh-RC evidence)
+- [~] CHANGELOG release-candidate notes are dated and explicitly state that no
+      final release exists; G5 docs merged. (The hardening candidate still
+      needs full gate, merge, CI, and fresh-RC evidence.)
 
 #### H2 — Tag and release
 
@@ -1767,11 +1776,11 @@ Phase C — Desktop productization
 - [x] C1 real icon set
 - [x] C2 bundling enabled (.app/.dmg)
 - [~] C3 fail-closed env-gated signing and explicit full-bundle ad-hoc default
-      (landed and source-gate proven on protected `main`; the complete claim
-      needs fresh RC5 release-workflow proof)
+      (landed and RC5 release-workflow proven; final promotion still needs the
+      same proof at RC6 with all current hardening)
 - [~] C4 strict source + mounted-dmg verification and negative regressions in
-      the release gate (landed and source-gate proven on protected `main`; the
-      complete claim needs fresh RC5 release-workflow proof)
+      the release gate (landed and RC5 release-workflow proven; final promotion
+      still needs the same proof at RC6 with all current hardening)
 - [x] C5 boot helpers extracted + tested
 - [x] C6 desktop docs
 - [ ] C7 operator console UX redesign (user-directed)
@@ -1826,14 +1835,16 @@ Phase G — Release engineering
 - [x] G3 version bump to 1.0.0
 - [~] G4 release workflow (historical dry run validated on a22a98a; RC3 exposed
       a signature false positive; RC4 exposed an evidence-contract false
-      positive and unconfirmed-dependency execution; RC5 must prove all
-      remediations)
+      positive and unconfirmed-dependency execution; RC5 proved those
+      remediations and produced six draft assets, while RC6 must cover the later
+      hardening)
 - [x] G5 readiness + product docs final sync
 
 Phase H — Ship
 - [~] H1 RC verification checklist (RC3 void after bundle-signature failure;
-      RC4 void after the F6 schema and dependency-finality failures; all source,
-      release, F4/F6, clean-machine, and doctor evidence must bind RC5)
+      RC4 void after the F6 schema and dependency-finality failures; RC5 is an
+      unpublished older-code draft; all source, release, F4/F6, clean-machine,
+      doctor, C7, and evidence-bundle receipts must bind RC6)
 - [ ] H2 v1.0.0 tagged, artifacts published (human gate — operator go)
 - [ ] H3 post-release bump + planning issue
 
@@ -2196,3 +2207,10 @@ Phase H — Ship
   transactions, and re-run every same-SHA gate. Historical release run
   `29230844456` completed all six jobs and its six-asset unpublished draft,
   proving the signing fix but not curing the assurance/runtime failures.
+- 2026-07-30 RC5 DRAFT EVIDENCE (`7e04743`, Release run `29248938476`):
+  `v1.0.0-rc.5` exactly matches pre-hardening `origin/main` commit `7e04743`;
+  all six workflow jobs passed and the six expected assets remain in an unpublished draft. Preserve
+  the annotated tag and draft as immutable same-SHA evidence. Later PostCSS,
+  ERC-5564 interoperability, session/broadcast race, discovery lifecycle, and
+  FIDO2 causal-recovery hardening invalidate RC5 for current-line promotion;
+  after protected merge and CI, the next eligible candidate is RC6.

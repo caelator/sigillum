@@ -50,7 +50,8 @@ impl SigillumService {
         body: TreasuryReceiveAllocateRequest,
     ) -> ServiceResult<TreasuryReceiveAllocationMutationResponse> {
         let token = self.require_session(token)?;
-        let _guard = self.state.operation_guard().await;
+        let session_context = self.capture_session_operation_context(Some(token))?;
+        let _guard = self.acquire_session_operation(&session_context).await?;
         let wallet_profile = trimmed_required("wallet_profile", &body.wallet_profile)?;
         let purpose = trimmed_required("purpose", &body.purpose)?;
         let label = body.label.and_then(trimmed_optional);
@@ -107,7 +108,8 @@ impl SigillumService {
         body: TreasuryReceiveRotateRequest,
     ) -> ServiceResult<TreasuryReceiveAllocationMutationResponse> {
         let token = self.require_session(token)?;
-        let _guard = self.state.operation_guard().await;
+        let session_context = self.capture_session_operation_context(Some(token))?;
+        let _guard = self.acquire_session_operation(&session_context).await?;
         let allocation_id = body.allocation_id.trim().to_string();
 
         let mut state = load_inventory_state(&self.state.base_dir)?;

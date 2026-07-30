@@ -47,6 +47,7 @@ impl SigillumService {
         &self,
         token: &str,
     ) -> ServiceResult<Option<TreasuryAutomationOutcome>> {
+        let session_context = self.capture_session_operation_context(Some(token))?;
         let state = load_inventory(&self.state.base_dir)?;
         let Some(policy) = state.treasury_policy.clone() else {
             return Ok(None);
@@ -66,7 +67,7 @@ impl SigillumService {
         }
 
         let generated_plans = {
-            let _guard = self.state.operation_guard().await;
+            let _guard = self.acquire_session_operation(&session_context).await?;
             let mut current = load_inventory(&self.state.base_dir)?;
             let candidates = std::mem::take(&mut selection.candidates);
             let plans = persist_generated_plans(&mut current, candidates, now_unix());
@@ -115,7 +116,7 @@ impl SigillumService {
             .map(|plan| plan.id.clone())
             .collect::<Vec<_>>();
         let eligible = {
-            let _guard = self.state.operation_guard().await;
+            let _guard = self.acquire_session_operation(&session_context).await?;
             let mut current = load_inventory(&self.state.base_dir)?;
             let eligible = mark_auto_eligible_steps(
                 &mut current,

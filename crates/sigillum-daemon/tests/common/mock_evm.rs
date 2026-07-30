@@ -1,5 +1,6 @@
 use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use axum::extract::State;
 use axum::http::{HeaderMap, header};
@@ -184,6 +185,125 @@ pub(crate) async fn spawn_mock_evm_provider() -> (SocketAddr, tokio::task::JoinH
     let app = Router::new()
         .route("/", post(rpc_handler))
         .with_state(RpcState);
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let handle = tokio::spawn(async move {
+        axum::serve(listener, app).await.unwrap();
+    });
+    (addr, handle)
+}
+
+pub(crate) async fn spawn_slow_mock_evm_provider(
+    delay: Duration,
+) -> (SocketAddr, tokio::task::JoinHandle<()>) {
+    fn rpc_response(request: &serde_json::Value) -> serde_json::Value {
+        let method = request["method"].as_str().unwrap_or_default();
+        let result = match method {
+            "eth_chainId" => json!("0x1"),
+            "eth_blockNumber" => json!("0x20"),
+            "eth_getTransactionCount" | "eth_getBalance" | "eth_call" => json!("0x0"),
+            "eth_getLogs" => json!([]),
+            other => json!({ "unsupported": other }),
+        };
+        json!({
+            "jsonrpc": "2.0",
+            "id": request.get("id").cloned().unwrap_or(json!(1)),
+            "result": result,
+        })
+    }
+
+    async fn rpc_handler(
+        State(delay): State<Duration>,
+        headers: HeaderMap,
+        Json(body): Json<serde_json::Value>,
+    ) -> (StatusCode, Json<serde_json::Value>) {
+        let auth = headers
+            .get(header::AUTHORIZATION)
+            .and_then(|value| value.to_str().ok())
+            .unwrap_or("");
+        if auth != "Bearer rpc-test-token" {
+            return (
+                StatusCode::UNAUTHORIZED,
+                Json(json!({ "error": "missing provider auth" })),
+            );
+        }
+        let should_delay = body
+            .as_array()
+            .map(|requests| {
+                requests.iter().any(|request| {
+                    matches!(
+                        request["method"].as_str(),
+                        Some("eth_getBalance" | "eth_getTransactionCount")
+                    )
+                })
+            })
+            .unwrap_or_else(|| {
+                matches!(
+                    body["method"].as_str(),
+                    Some("eth_getBalance" | "eth_getTransactionCount")
+                )
+            });
+        if should_delay {
+            tokio::time::sleep(delay).await;
+        }
+        let payload = if let Some(requests) = body.as_array() {
+            serde_json::Value::Array(requests.iter().map(rpc_response).collect())
+        } else {
+            rpc_response(&body)
+        };
+        (StatusCode::OK, Json(payload))
+    }
+
+    let app = Router::new()
+        .route("/", post(rpc_handler))
+        .with_state(delay);
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let handle = tokio::spawn(async move {
+        axum::serve(listener, app).await.unwrap();
+    });
+    (addr, handle)
+}
+
+pub(crate) async fn spawn_failing_mock_evm_provider() -> (SocketAddr, tokio::task::JoinHandle<()>) {
+    fn rpc_response(request: &serde_json::Value) -> serde_json::Value {
+        let id = request.get("id").cloned().unwrap_or(json!(1));
+        match request["method"].as_str().unwrap_or_default() {
+            "eth_chainId" => json!({ "jsonrpc": "2.0", "id": id, "result": "0x1" }),
+            "eth_blockNumber" => {
+                json!({ "jsonrpc": "2.0", "id": id, "result": "0x20" })
+            }
+            _ => json!({
+                "jsonrpc": "2.0",
+                "id": id,
+                "error": { "code": -32000, "message": "injected provider failure" }
+            }),
+        }
+    }
+
+    async fn rpc_handler(
+        headers: HeaderMap,
+        Json(body): Json<serde_json::Value>,
+    ) -> (StatusCode, Json<serde_json::Value>) {
+        let auth = headers
+            .get(header::AUTHORIZATION)
+            .and_then(|value| value.to_str().ok())
+            .unwrap_or("");
+        if auth != "Bearer rpc-test-token" {
+            return (
+                StatusCode::UNAUTHORIZED,
+                Json(json!({ "error": "missing provider auth" })),
+            );
+        }
+        let payload = if let Some(requests) = body.as_array() {
+            serde_json::Value::Array(requests.iter().map(rpc_response).collect())
+        } else {
+            rpc_response(&body)
+        };
+        (StatusCode::OK, Json(payload))
+    }
+
+    let app = Router::new().route("/", post(rpc_handler));
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
     let handle = tokio::spawn(async move {

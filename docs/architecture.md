@@ -309,8 +309,9 @@ What it intentionally does not do today:
 
 ## Privacy & Linkage Model
 
-The receiving/treasury model centers on keeping payers unlinkable. Receive
-allocations and stealth deposits attribute to a first-class `Counterparty`, and
+The receiving/treasury model reduces direct, single-hop cross-payer linkage; it
+does not promise transaction anonymity or unlinkability. Receive allocations
+and stealth deposits attribute to a first-class `Counterparty`, and
 consolidation is linkage-aware: `analyze_plan_linkage` (HD planner) and
 `detect_stealth_sweep_linkage` (stealth sweeps) flag when funds for *different*
 payers would route to the **same destination** — the single-hop common-recipient

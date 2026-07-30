@@ -103,12 +103,12 @@
             <div class="tp-body">The daemon listens only on loopback, and your private keys never leave this computer. No account, no cloud, no telemetry.</div>
           </div>
           <div class="trust-point">
-            <div class="tp-head">Your data is an encrypted vault on this disk</div>
-            <div class="tp-body">State lives in an encrypted vault under ~/.sigillum that only you can unlock. You can snapshot and back it up whenever you want.</div>
+            <div class="tp-head">Vault secrets are encrypted; operational metadata is owner-readable</div>
+            <div class="tp-body">Private keys, seed phrases, and Tier 2 secrets are encrypted. Profiles, queues, deposits, audit records, and other operational metadata remain readable to your local account under ~/.sigillum. Use full-disk encryption and encrypted snapshots to protect the complete data set.</div>
           </div>
           <div class="trust-point">
             <div class="tp-head">Privacy is built in, but you choose your providers</div>
-            <div class="tp-body">Stealth one-time receive addresses keep deposits unlinkable. Any RPC provider you add later can see the addresses you query through it, so you choose and can partition providers.</div>
+            <div class="tp-body">ERC-5564 one-time addresses reduce direct address reuse for a single receiving hop. Amounts, timing, and downstream flows can still link activity, and any RPC provider you use can see the addresses queried through it.</div>
           </div>
           <div class="form-row mt-12">
             <button class="btn-primary" data-action="wizGetStarted">Get started</button>
@@ -293,7 +293,7 @@
 
         <div class="section-divider"></div>
         <div class="section-title">Recover or start over</div>
-        <p class="helper-text">Restore a previously exported snapshot, or erase this machine&rsquo;s local Sigillum data and restart first-run setup.</p>
+        <p class="helper-text">Restore a previously exported snapshot, or archive this machine&rsquo;s current Sigillum data and restart first-run setup.</p>
         <div class="form-row">
           <input type="file" id="setupRestoreFile" class="flex-1">
           <input type="password" id="setupRestorePass" placeholder="Restore passphrase" class="flex-1">
@@ -301,7 +301,7 @@
         </div>
         <div class="form-row">
           <input type="text" id="setupResetConfirm" placeholder="Type RESET LOCAL SIGILLUM DATA to start over">
-          <button class="btn-danger" data-action="resetLocalData" data-arg0="setupResetConfirm">Reset local setup</button>
+          <button class="btn-danger" data-action="resetLocalData" data-arg0="setupResetConfirm">Archive &amp; start fresh</button>
         </div>
         <p class="card-note">Resetting archives the local Sigillum data directory to a timestamped sibling (nothing is deleted). Restoring replaces local state with the selected encrypted snapshot.</p>
       </div>
@@ -1214,10 +1214,10 @@
         <p class="card-note">Exports create an encrypted file you can store elsewhere. Restores require a fresh unlock afterward.</p>
         <div class="section-divider"></div>
         <div class="section-title">Start over on this machine</div>
-        <p class="helper-text">Wipe the local Sigillum data directory and return this daemon to first-run setup.</p>
+        <p class="helper-text">Archive the current Sigillum data directory to a timestamped sibling and return this daemon to first-run setup. Nothing is deleted.</p>
         <div class="form-row">
           <input type="text" id="backupResetConfirm" placeholder="Type RESET LOCAL SIGILLUM DATA to reset">
-          <button class="btn-danger" data-action="resetLocalData" data-arg0="backupResetConfirm">Reset local data</button>
+          <button class="btn-danger" data-action="resetLocalData" data-arg0="backupResetConfirm">Archive &amp; start fresh</button>
         </div>
       </div>
 
@@ -1304,7 +1304,7 @@
     </main>
 
     <footer>
-      Sigillum local daemon &mdash; hardware-backed secret management &mdash;
+      Sigillum local daemon &mdash; local wallet operations and secret custody &mdash;
       <a href="https://github.com/caelator/sigillum">GitHub</a>
     </footer>
   </div>

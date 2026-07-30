@@ -34,7 +34,9 @@ impl SigillumService {
             recover_pending_operations(&self.state.base_dir)?;
         let mut queue = crate::queue_store::load_queue(&self.state.base_dir)?;
         let mut deposits = crate::deposits::load_deposits(&self.state.base_dir)?;
-        let inventory = crate::inventory::load_wallet_inventory(&self.state.base_dir)?;
+        let mut inventory = crate::inventory::load_wallet_inventory(&self.state.base_dir)?;
+        let recovered_discovery_job_count =
+            super::inventory::recover_interrupted_discovery_jobs(&mut inventory);
         self.state.set_queue_execution_pause_latch(
             inventory
                 .treasury_policy
@@ -57,6 +59,13 @@ impl SigillumService {
         }
         if reconciled_deposit_count > 0 {
             crate::deposits::save_deposits(&self.state.base_dir, &deposits)?;
+        }
+        if recovered_discovery_job_count > 0 {
+            crate::inventory::save_wallet_inventory(&self.state.base_dir, &inventory)?;
+            tracing::warn!(
+                recovered_discovery_job_count,
+                "terminalized interrupted discovery jobs during startup recovery"
+            );
         }
 
         let summary = StartupRecoverySummary {
@@ -105,7 +114,7 @@ fn recover_pending_operation(
         }
         PendingOperationSpec::Fido2Setup {
             compartment_count, ..
-        } => recover_fido2_setup(base_dir, *compartment_count)?,
+        } => recover_fido2_setup(base_dir, operation, *compartment_count)?,
         PendingOperationSpec::Fido2Register { .. } => recover_fido2_register(base_dir, operation)?,
         PendingOperationSpec::Fido2Remove { .. } => recover_fido2_remove(base_dir, operation)?,
     };
@@ -174,10 +183,19 @@ fn recover_compartment_init(
         ))
 }
 
-fn recover_fido2_setup(base_dir: &Path, compartment_count: usize) -> Result<bool, io::Error> {
+fn recover_fido2_setup(
+    base_dir: &Path,
+    operation: &PendingOperation,
+    compartment_count: usize,
+) -> Result<bool, io::Error> {
+    let Some(label) = operation.subject.as_deref() else {
+        return Ok(false);
+    };
     let config = load_fido2_config(base_dir)?;
-    if !config.is_fido2_enabled() {
-        return Ok(!base_dir.join(".initialized").exists());
+    if !fido2_receipt_matches(&config, operation)?
+        || config.keys.iter().all(|key| key.label != label)
+    {
+        return Ok(false);
     }
     Ok(base_dir.join(".initialized").exists()
         && count_compartments_with_file(base_dir, "meta.enc") >= compartment_count)
@@ -187,11 +205,12 @@ fn recover_fido2_register(
     base_dir: &Path,
     operation: &PendingOperation,
 ) -> Result<bool, io::Error> {
-    if operation.subject.is_none() {
+    let Some(label) = operation.subject.as_deref() else {
         return Ok(false);
-    }
-    let _ = load_fido2_config(base_dir)?;
-    Ok(true)
+    };
+    let config = load_fido2_config(base_dir)?;
+    Ok(fido2_receipt_matches(&config, operation)?
+        && config.keys.iter().any(|key| key.label == label))
 }
 
 fn recover_fido2_remove(base_dir: &Path, operation: &PendingOperation) -> Result<bool, io::Error> {
@@ -199,7 +218,21 @@ fn recover_fido2_remove(base_dir: &Path, operation: &PendingOperation) -> Result
         return Ok(false);
     };
     let config = load_fido2_config(base_dir)?;
-    Ok(config.keys.iter().all(|key| key.label != label))
+    Ok(fido2_receipt_matches(&config, operation)?
+        && config.keys.iter().all(|key| key.label != label))
+}
+
+fn fido2_receipt_matches(
+    config: &Fido2Config,
+    operation: &PendingOperation,
+) -> Result<bool, io::Error> {
+    config
+        .mutation_receipt_matches(
+            &operation.operation_id,
+            operation.spec.kind(),
+            operation.subject.as_deref(),
+        )
+        .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error.to_string()))
 }
 
 fn load_fido2_config(base_dir: &Path) -> Result<Fido2Config, io::Error> {
@@ -331,6 +364,30 @@ mod tests {
         }
     }
 
+    fn sample_registered_key(label: &str) -> RegisteredKey {
+        RegisteredKey {
+            label: label.into(),
+            credential_id_hex: "11".repeat(16),
+            public_key_der_hex: "22".repeat(16),
+            public_key_pem: "pem".into(),
+            shards: vec!["00".into(); sigillum_fido2::config::SHARD_SLOTS],
+            registered_at: "2026-03-22T00:00:00Z".into(),
+        }
+    }
+
+    fn save_receipted_fido2_config(
+        base: &Path,
+        mut config: Fido2Config,
+        operation_id: &str,
+        kind: &str,
+        subject: &str,
+    ) {
+        config
+            .record_mutation(operation_id, kind, Some(subject.to_owned()))
+            .unwrap();
+        sigillum_fido2::config::save_config(&base.join("fido2_keys.json"), &config).unwrap();
+    }
+
     #[test]
     fn startup_recovery_normalizes_queue_state_and_syncs_deposits() {
         let dir = TempDir::new().unwrap();
@@ -452,10 +509,10 @@ mod tests {
     }
 
     #[test]
-    fn startup_recovery_finalizes_fido2_register_journal_when_key_is_present() {
+    fn startup_recovery_finalizes_only_exact_fido2_register_receipt() {
         let dir = TempDir::new().unwrap();
         let base = dir.path().to_path_buf();
-        let _journal = crate::operations::begin_operation(
+        let journal = crate::operations::begin_operation(
             &base,
             PendingOperationSpec::fido2_register(None),
             Some("backup-key".into()),
@@ -464,16 +521,16 @@ mod tests {
 
         let config = Fido2Config {
             total_shares: 1,
-            keys: vec![RegisteredKey {
-                label: "backup-key".into(),
-                credential_id_hex: "11".repeat(16),
-                public_key_der_hex: "22".repeat(16),
-                public_key_pem: "pem".into(),
-                shards: vec!["00".into(); sigillum_fido2::config::SHARD_SLOTS],
-                registered_at: "2026-03-22T00:00:00Z".into(),
-            }],
+            keys: vec![sample_registered_key("backup-key")],
+            ..Default::default()
         };
-        sigillum_fido2::config::save_config(&base.join("fido2_keys.json"), &config).unwrap();
+        save_receipted_fido2_config(
+            &base,
+            config,
+            journal.operation_id(),
+            "fido2.register",
+            "backup-key",
+        );
 
         let state = Arc::new(AppState::new(base.clone()).expect("app state should initialize"));
         let service = SigillumService::new(state.clone());
@@ -483,5 +540,171 @@ mod tests {
         assert_eq!(summary.recovered_operation_count, 1);
         assert_eq!(summary.unresolved_operation_count, 0);
         assert_eq!(state.pending_operation_count(), 0);
+        journal.complete().unwrap();
+    }
+
+    #[test]
+    fn startup_recovery_rejects_unrelated_fido2_register_receipt() {
+        let dir = TempDir::new().unwrap();
+        let base = dir.path().to_path_buf();
+        let _journal = crate::operations::begin_operation(
+            &base,
+            PendingOperationSpec::fido2_register(None),
+            Some("backup-key".into()),
+        )
+        .unwrap();
+        save_receipted_fido2_config(
+            &base,
+            Fido2Config {
+                total_shares: 1,
+                keys: vec![sample_registered_key("backup-key")],
+                ..Default::default()
+            },
+            "unrelated-operation",
+            "fido2.register",
+            "backup-key",
+        );
+
+        let state = Arc::new(AppState::new(base.clone()).expect("app state should initialize"));
+        let service = SigillumService::new(state.clone());
+        let summary = service.recover_runtime_state().unwrap();
+
+        assert_eq!(summary.recovered_operation_count, 0);
+        assert_eq!(summary.unresolved_operation_count, 1);
+        assert_eq!(state.pending_operation_count(), 1);
+    }
+
+    #[test]
+    fn startup_recovery_rejects_newer_fido2_state() {
+        let dir = TempDir::new().unwrap();
+        let base = dir.path().to_path_buf();
+        let journal = crate::operations::begin_operation(
+            &base,
+            PendingOperationSpec::fido2_register(None),
+            Some("backup-key".into()),
+        )
+        .unwrap();
+        let mut config = Fido2Config {
+            total_shares: 1,
+            keys: vec![sample_registered_key("backup-key")],
+            ..Default::default()
+        };
+        config
+            .record_mutation(
+                journal.operation_id(),
+                "fido2.register",
+                Some("backup-key".into()),
+            )
+            .unwrap();
+        config
+            .record_mutation("newer-cli-write", "fido2.raw-save", None)
+            .unwrap();
+        sigillum_fido2::config::save_config(&base.join("fido2_keys.json"), &config).unwrap();
+
+        let state = Arc::new(AppState::new(base.clone()).expect("app state should initialize"));
+        let service = SigillumService::new(state.clone());
+        let summary = service.recover_runtime_state().unwrap();
+
+        assert_eq!(summary.recovered_operation_count, 0);
+        assert_eq!(summary.unresolved_operation_count, 1);
+        assert_eq!(state.pending_operation_count(), 1);
+    }
+
+    #[test]
+    fn startup_recovery_finalizes_exact_fido2_remove_receipt() {
+        let dir = TempDir::new().unwrap();
+        let base = dir.path().to_path_buf();
+        let journal = crate::operations::begin_operation(
+            &base,
+            PendingOperationSpec::fido2_remove(Vec::new()),
+            Some("retired-key".into()),
+        )
+        .unwrap();
+        save_receipted_fido2_config(
+            &base,
+            Fido2Config {
+                total_shares: 1,
+                keys: vec![sample_registered_key("remaining-key")],
+                ..Default::default()
+            },
+            journal.operation_id(),
+            "fido2.remove",
+            "retired-key",
+        );
+
+        let state = Arc::new(AppState::new(base.clone()).expect("app state should initialize"));
+        let service = SigillumService::new(state.clone());
+        let summary = service.recover_runtime_state().unwrap();
+
+        assert_eq!(summary.recovered_operation_count, 1);
+        assert_eq!(summary.unresolved_operation_count, 0);
+        assert_eq!(state.pending_operation_count(), 0);
+        journal.complete().unwrap();
+    }
+
+    #[test]
+    fn startup_recovery_rejects_absent_key_without_matching_remove_receipt() {
+        let dir = TempDir::new().unwrap();
+        let base = dir.path().to_path_buf();
+        let _journal = crate::operations::begin_operation(
+            &base,
+            PendingOperationSpec::fido2_remove(Vec::new()),
+            Some("retired-key".into()),
+        )
+        .unwrap();
+        save_receipted_fido2_config(
+            &base,
+            Fido2Config {
+                total_shares: 1,
+                keys: vec![sample_registered_key("remaining-key")],
+                ..Default::default()
+            },
+            "unrelated-operation",
+            "fido2.remove",
+            "retired-key",
+        );
+
+        let state = Arc::new(AppState::new(base.clone()).expect("app state should initialize"));
+        let service = SigillumService::new(state.clone());
+        let summary = service.recover_runtime_state().unwrap();
+
+        assert_eq!(summary.recovered_operation_count, 0);
+        assert_eq!(summary.unresolved_operation_count, 1);
+        assert_eq!(state.pending_operation_count(), 1);
+    }
+
+    #[test]
+    fn startup_recovery_finalizes_exact_fido2_setup_receipt_and_tree() {
+        let dir = TempDir::new().unwrap();
+        let base = dir.path().to_path_buf();
+        let journal = crate::operations::begin_operation(
+            &base,
+            PendingOperationSpec::fido2_setup("primary-key", 1),
+            Some("primary-key".into()),
+        )
+        .unwrap();
+        save_receipted_fido2_config(
+            &base,
+            Fido2Config {
+                total_shares: 1,
+                keys: vec![sample_registered_key("primary-key")],
+                ..Default::default()
+            },
+            journal.operation_id(),
+            "fido2.setup",
+            "primary-key",
+        );
+        std::fs::create_dir_all(base.join("compartments/0")).unwrap();
+        std::fs::write(base.join("compartments/0/meta.enc"), b"meta").unwrap();
+        std::fs::write(base.join(".initialized"), b"1").unwrap();
+
+        let state = Arc::new(AppState::new(base.clone()).expect("app state should initialize"));
+        let service = SigillumService::new(state.clone());
+        let summary = service.recover_runtime_state().unwrap();
+
+        assert_eq!(summary.recovered_operation_count, 1);
+        assert_eq!(summary.unresolved_operation_count, 0);
+        assert_eq!(state.pending_operation_count(), 0);
+        journal.complete().unwrap();
     }
 }

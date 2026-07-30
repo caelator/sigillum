@@ -20,7 +20,7 @@
 //! half-mutated security state. The service supervisor is responsible for a
 //! clean restart.
 
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::fmt;
 use std::path::PathBuf;
 use std::sync::Mutex;
@@ -40,6 +40,8 @@ use zeroize::Zeroizing;
 
 mod audit_keys;
 mod recovery_files;
+#[cfg(test)]
+mod test_support;
 #[cfg(test)]
 mod tests;
 
@@ -183,6 +185,9 @@ pub struct AppState {
     /// holds the disk-operation mutex. The persisted treasury policy remains
     /// the source of truth across restarts; startup recovery synchronizes it.
     queue_execution_paused: AtomicBool,
+    /// Discovery-cancel latch kept outside the mutex owned by a running scan
+    /// so cancellation remains observable at provider checkpoints.
+    discovery_cancel_requests: ResilientMutex<HashSet<String>>,
     /// Rate limiter for failed unlock attempts.
     unlock_throttle: ResilientMutex<UnlockThrottle>,
     /// Startup-time reconciliation summary for observability.
@@ -231,6 +236,7 @@ impl AppState {
             sessions: ResilientMutex::new(HashMap::new()),
             operation_lock: AsyncMutex::new(()),
             queue_execution_paused: AtomicBool::new(false),
+            discovery_cancel_requests: ResilientMutex::new(HashSet::new()),
             unlock_throttle: ResilientMutex::new(UnlockThrottle::default()),
             startup_recovery: ResilientMutex::new(StartupRecoverySummary::default()),
             startup_ready: ResilientMutex::new(false),
@@ -305,10 +311,8 @@ impl AppState {
     pub fn active_compartment_id_for(&self, token: &str) -> Option<usize> {
         let active = {
             let sessions = self.sessions.lock();
-            sessions
-                .iter()
-                .find(|(stored, _)| Self::token_matches(stored, token))
-                .and_then(|(_, session)| session.active_compartment_id)
+            let session_key = Self::session_key_for(&sessions, token)?;
+            sessions.get(&session_key)?.active_compartment_id
         };
         active.or_else(|| self.default_active_compartment_id())
     }
@@ -320,6 +324,25 @@ impl AppState {
 
     pub async fn operation_guard(&self) -> tokio::sync::MutexGuard<'_, ()> {
         self.operation_lock.lock().await
+    }
+
+    pub fn try_operation_guard(&self) -> Option<tokio::sync::MutexGuard<'_, ()>> {
+        self.operation_lock.try_lock().ok()
+    }
+
+    pub fn request_discovery_cancel(&self, job_id: &str) {
+        self.discovery_cancel_requests
+            .lock()
+            .insert(job_id.to_string());
+    }
+
+    #[must_use]
+    pub fn is_discovery_cancel_requested(&self, job_id: &str) -> bool {
+        self.discovery_cancel_requests.lock().contains(job_id)
+    }
+
+    pub fn clear_discovery_cancel_request(&self, job_id: &str) {
+        self.discovery_cancel_requests.lock().remove(job_id);
     }
 
     #[must_use]
@@ -347,6 +370,14 @@ impl AppState {
         }
         *state = LockState::Locking;
         true
+    }
+
+    /// Linearize provider submission against [`Self::begin_locking`].
+    /// Callers retain `operation_lock` through dispatch, so whichever boundary
+    /// wins first—the lock latch or submission admission—finishes first.
+    #[must_use]
+    pub(crate) fn admit_broadcast_if_ready(&self) -> bool {
+        *self.lock_state.lock() == LockState::Ready
     }
 
     pub fn finish_locking(&self) {
@@ -655,8 +686,7 @@ impl AppState {
         }
     }
 
-    /// Lock all compartments and clear state.
-    pub fn lock_all(&self) {
+    fn zeroize_all_unlocked_state(&self) {
         let mut vaults = self.vaults.lock();
         for vault in vaults.values() {
             vault.zeroize_master_key();
@@ -665,6 +695,18 @@ impl AppState {
         drop(vaults);
         self.unlocked.lock().clear();
         self.sessions.lock().clear();
+    }
+
+    /// Zeroize immediately after the force deadline while preserving `Locking`
+    /// until the in-flight operation drains and the idle task owns its mutex.
+    pub(crate) fn force_zeroize_all_while_locking(&self) {
+        *self.lock_state.lock() = LockState::Locking;
+        self.zeroize_all_unlocked_state();
+    }
+
+    /// Lock all compartments and clear state.
+    pub fn lock_all(&self) {
+        self.zeroize_all_unlocked_state();
         self.finish_locking();
     }
 
@@ -680,15 +722,39 @@ impl AppState {
         let Some(session_key) = Self::session_key_for(&sessions, candidate) else {
             return false;
         };
-        let Some(session) = sessions.get_mut(&session_key) else {
+        let Some(session) = sessions.get(&session_key) else {
             return false;
         };
         if session.last_activity.elapsed() >= Duration::from_secs(idle_lock_secs) {
             sessions.remove(&session_key);
             return false;
         }
-        session.last_activity = Instant::now();
         true
+    }
+
+    /// Record successful user-initiated activity for a live session.
+    ///
+    /// Validation is intentionally separate: background console polling must
+    /// authenticate without preventing the configured idle auto-lock.
+    pub fn touch_session_activity(&self, candidate: &str) {
+        if self.is_locking() {
+            return;
+        }
+        let idle_lock_secs = self.runtime_policy.idle_lock_secs;
+        let mut sessions = self.sessions.lock();
+        let now = Instant::now();
+        sessions.retain(|_, state| now < state.expires_at);
+        let Some(session_key) = Self::session_key_for(&sessions, candidate) else {
+            return;
+        };
+        let Some(session) = sessions.get_mut(&session_key) else {
+            return;
+        };
+        if session.last_activity.elapsed() >= Duration::from_secs(idle_lock_secs) {
+            sessions.remove(&session_key);
+            return;
+        }
+        session.last_activity = now;
     }
 
     #[must_use]

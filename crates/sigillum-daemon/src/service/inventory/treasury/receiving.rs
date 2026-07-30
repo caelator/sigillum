@@ -302,7 +302,8 @@ impl SigillumService {
     ) -> ServiceResult<ReceivingRefreshResponse> {
         let token =
             self.require_scope(token, crate::service::capability_scopes::DEPOSITS_REFRESH)?;
-        let _guard = self.state.operation_guard().await;
+        let session_context = self.capture_session_operation_context(Some(token))?;
+        let _guard = self.acquire_session_operation(&session_context).await?;
         let registry = crate::profiles::load_profiles(&self.state.base_dir).map_err(|error| {
             ServiceError::internal(format!("Failed to load profile registry: {error}"))
         })?;

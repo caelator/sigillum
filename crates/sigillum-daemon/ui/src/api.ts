@@ -19,6 +19,9 @@ export async function requestJson<TResponse, TBody = unknown>(
   if (options.sessionToken) {
     headers.Authorization = `Bearer ${options.sessionToken}`;
   }
+  if (options.background) {
+    headers["X-Sigillum-Background"] = "1";
+  }
 
   const response = await fetch(options.path, {
     method: options.method,

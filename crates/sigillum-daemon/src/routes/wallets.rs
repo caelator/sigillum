@@ -65,7 +65,11 @@ pub(crate) async fn eth_stealth_sign(
     ValidatedJson(body): ValidatedJson<EthStealthSignRequest>,
 ) -> Response {
     let service = SigillumService::new(state);
-    service_response(service.eth_stealth_sign(bearer_token(&headers).as_deref(), body))
+    service_response(
+        service
+            .eth_stealth_sign(bearer_token(&headers).as_deref(), body)
+            .await,
+    )
 }
 
 pub(crate) async fn eth_stealth_sign_transfer(
@@ -74,7 +78,11 @@ pub(crate) async fn eth_stealth_sign_transfer(
     ValidatedJson(body): ValidatedJson<EthStealthSignTransferRequest>,
 ) -> Response {
     let service = SigillumService::new(state);
-    service_response(service.eth_stealth_sign_transfer(bearer_token(&headers).as_deref(), body))
+    service_response(
+        service
+            .eth_stealth_sign_transfer(bearer_token(&headers).as_deref(), body)
+            .await,
+    )
 }
 
 pub(crate) async fn eth_stealth_sign_erc20_transfer(
@@ -84,6 +92,8 @@ pub(crate) async fn eth_stealth_sign_erc20_transfer(
 ) -> Response {
     let service = SigillumService::new(state);
     service_response(
-        service.eth_stealth_sign_erc20_transfer(bearer_token(&headers).as_deref(), body),
+        service
+            .eth_stealth_sign_erc20_transfer(bearer_token(&headers).as_deref(), body)
+            .await,
     )
 }

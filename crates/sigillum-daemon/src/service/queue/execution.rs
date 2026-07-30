@@ -17,6 +17,9 @@ pub(in crate::service) enum QueueExecution {
     /// Submission may have reached the provider. Recovery must query the
     /// stored hash or resubmit the exact bytes, never sign again.
     SubmittedUnknown(String),
+    /// Submission admission was denied locally while prior submission
+    /// uncertainty still exists; retain the exact replay bytes without retrying.
+    SubmittedUnknownHeld(String),
     Blocked(String),
     /// Terminal-until-human and never auto-retried.
     OperatorActionRequired(String),

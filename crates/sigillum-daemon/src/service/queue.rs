@@ -150,15 +150,16 @@ impl SigillumService {
         audit_kind: AuditQueueJobKind,
     ) -> ServiceResult<QueueEnqueueResponse> {
         let token = self.require_session(token)?;
-        authorization::require_queue_execution_enabled(self, &payload)?;
-        authorization::authorize_queue_payload_policy(self, &payload)?;
-        if let Some(family) = gates::queue_payload_execution_family(&payload) {
-            self.require_execution_family_allowed(family)?;
-        }
+        let session_context = self.capture_session_operation_context(Some(token))?;
         let now = now_unix();
         let job = payloads::queued_job(random_id(), now, payload);
 
-        let _guard = self.state.operation_guard().await;
+        let _guard = self.acquire_session_operation(&session_context).await?;
+        authorization::require_queue_execution_enabled(self, &job.payload)?;
+        authorization::authorize_queue_payload_policy(self, &job.payload)?;
+        if let Some(family) = gates::queue_payload_execution_family(&job.payload) {
+            self.require_execution_family_allowed(family)?;
+        }
         let mut queue = crate::queue_store::load_queue(&self.state.base_dir)
             .map_err(|error| ServiceError::internal(format!("Failed to load queue: {error}")))?;
         queue.jobs.push(job.clone());

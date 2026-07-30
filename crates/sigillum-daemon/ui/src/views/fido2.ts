@@ -104,36 +104,102 @@ function isAlreadyUnlockedConflict(message: unknown): boolean {
   return String(message || "").toLowerCase().includes("already unlocked");
 }
 
-function promptPin(msg: string): Promise<string | null> {
+export function promptPin(msg: string): Promise<string | null | undefined> {
   return new Promise((resolve) => {
+    const previouslyFocused = document.activeElement as HTMLElement | null;
     const overlay = document.createElement("div");
-    overlay.style.cssText =
-      "position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:200;display:flex;align-items:center;justify-content:center;";
-    overlay.innerHTML =
-      '<div class="card pin-modal"><h2>' +
-      esc(msg) +
-      '</h2><div class="form-row"><input type="password" id="pinModalInput" placeholder="Current PIN (leave blank if not required)">' +
-      '<button class="btn-primary" id="pinModalOk">OK</button></div></div>';
+    overlay.className = "pin-modal-overlay";
+
+    const dialog = document.createElement("form");
+    dialog.className = "card pin-modal";
+    dialog.setAttribute("role", "dialog");
+    dialog.setAttribute("aria-modal", "true");
+    dialog.setAttribute("aria-labelledby", "pinModalTitle");
+    dialog.setAttribute("aria-describedby", "pinModalHelp");
+
+    const title = document.createElement("h2");
+    title.id = "pinModalTitle";
+    title.textContent = msg;
+
+    const help = document.createElement("p");
+    help.id = "pinModalHelp";
+    help.className = "helper-text pin-modal-help";
+    help.textContent =
+      "Leave this blank for touch-only keys. Cancelling makes no change.";
+
+    const label = document.createElement("label");
+    label.className = "pin-modal-label";
+    label.setAttribute("for", "pinModalInput");
+    label.textContent = "Current FIDO2 PIN (optional)";
+
+    const inp = document.createElement("input");
+    inp.id = "pinModalInput";
+    inp.type = "password";
+    inp.autocomplete = "current-password";
+    inp.setAttribute("aria-describedby", "pinModalHelp");
+
+    const actions = document.createElement("div");
+    actions.className = "form-row pin-modal-actions";
+
+    const cancelButton = document.createElement("button");
+    cancelButton.id = "pinModalCancel";
+    cancelButton.type = "button";
+    cancelButton.className = "btn-ghost";
+    cancelButton.textContent = "Cancel";
+
+    const continueButton = document.createElement("button");
+    continueButton.id = "pinModalOk";
+    continueButton.type = "submit";
+    continueButton.className = "btn-primary";
+    continueButton.textContent = "Continue";
+
+    actions.append(cancelButton, continueButton);
+    dialog.append(title, help, label, inp, actions);
+    overlay.appendChild(dialog);
     document.body.appendChild(overlay);
-    const inp = input("pinModalInput");
-    inp.focus();
-    const done = () => {
-      const value = inp.value;
+
+    const focusable: HTMLElement[] = [inp, cancelButton, continueButton];
+    let settled = false;
+    const close = (value: string | null | undefined) => {
+      if (settled) return;
+      settled = true;
       overlay.remove();
-      resolve(value || null);
+      if (previouslyFocused?.isConnected && typeof previouslyFocused.focus === "function") {
+        previouslyFocused.focus();
+      }
+      resolve(value);
     };
-    document.getElementById("pinModalOk")?.addEventListener("click", done);
-    inp.addEventListener("keydown", (event) => {
-      if (event.key === "Enter") done();
+
+    inp.focus();
+
+    dialog.addEventListener("submit", (event) => {
+      event.preventDefault();
+      close(inp.value || null);
+    });
+    cancelButton.addEventListener("click", () => close(undefined));
+    overlay.addEventListener("keydown", (event) => {
       if (event.key === "Escape") {
-        overlay.remove();
-        resolve(null);
+        event.preventDefault();
+        close(undefined);
+        return;
+      }
+      if (event.key !== "Tab") return;
+
+      const currentIndex = focusable.indexOf(document.activeElement as HTMLElement);
+      if (event.shiftKey && currentIndex <= 0) {
+        event.preventDefault();
+        continueButton.focus();
+      } else if (!event.shiftKey && currentIndex === focusable.length - 1) {
+        event.preventDefault();
+        inp.focus();
+      } else if (currentIndex === -1) {
+        event.preventDefault();
+        inp.focus();
       }
     });
     overlay.addEventListener("click", (event) => {
       if (event.target === overlay) {
-        overlay.remove();
-        resolve(null);
+        close(undefined);
       }
     });
   });
@@ -373,6 +439,7 @@ export function createFido2Actions(deps: Fido2Deps) {
   async function fido2RemoveKey(label: string): Promise<void> {
     if (!confirm('Remove FIDO2 key "' + label + '"?')) return;
     const pin = await promptPin("Enter the current FIDO2 PIN only if the remaining keys require one:");
+    if (pin === undefined) return;
     const body: any = { label };
     if (pin) body.pin = pin;
     const r = await deps.api("POST", ROUTE_PATHS.API_FIDO2_REMOVE, body);

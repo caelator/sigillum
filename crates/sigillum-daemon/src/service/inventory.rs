@@ -24,6 +24,7 @@ pub(in crate::service) mod planner;
 mod preflight;
 mod risk;
 mod risk_catalog;
+mod scan_lifecycle;
 mod simulation;
 mod support;
 mod token_discovery;
@@ -32,6 +33,8 @@ mod treasury;
 mod wallet_selection;
 mod watch_book;
 mod watch_discovery;
+
+pub(in crate::service) use discovery_jobs::recover_interrupted_discovery_jobs;
 
 use sigillum_api::{
     ChainProfile, DEFAULT_DORMANCY_BLOCK_WINDOW, EvmProviderProfile, RiskFindingListResponse,
@@ -88,6 +91,11 @@ pub(in crate::service) const WALLET_FAMILY_ETH_SEED: &str = "eth-seed";
 const WALLET_FAMILY_ETH_XPUB: &str = "eth-xpub";
 const WALLET_FAMILY_ETH_WATCH: &str = "eth-watch";
 const DISCOVERY_SOURCE_LOCAL_RPC: &str = "local-rpc";
+
+enum DiscoveryScanOutcome {
+    Completed,
+    Canceled,
+}
 const DISCOVERY_SOURCE_OPERATOR: &str = "operator";
 const DEFAULT_GAP_LIMIT: u32 = 20;
 const MAX_GAP_LIMIT: u32 = 100;
@@ -188,6 +196,10 @@ impl SigillumService {
         Ok(())
     }
 
+    // Keep the scan inputs explicit: they cross persistence, provider, and
+    // checkpoint domains, and bundling the mutable outputs would make aliasing
+    // and durability boundaries harder to review.
+    #[allow(clippy::too_many_arguments)]
     async fn scan_address_on_provider(
         &self,
         wallet: &DiscoveryWallet,
@@ -255,7 +267,18 @@ impl SigillumService {
         token: Option<&str>,
         body: WalletInventoryScanRequest,
     ) -> ServiceResult<WalletInventoryScanResponse> {
+        self.scan_wallet_inventory_evm_with_origin(token, body, None)
+            .await
+    }
+
+    pub(crate) async fn scan_wallet_inventory_evm_with_origin(
+        &self,
+        token: Option<&str>,
+        body: WalletInventoryScanRequest,
+        resumed_from_job_id: Option<String>,
+    ) -> ServiceResult<WalletInventoryScanResponse> {
         let token = self.require_session(token)?;
+        let session_context = self.capture_session_operation_context(Some(token))?;
         let gap_limit = validated_gap_limit(body.gap_limit)?;
         let max_index = validated_max_index(body.max_index)?;
         let block_tag = body
@@ -361,7 +384,7 @@ impl SigillumService {
             seed_derivation_pattern,
             account_limit,
         )?;
-        let _guard = self.state.operation_guard().await;
+        let _guard = self.acquire_session_operation(&session_context).await?;
         let mut inventory = load_inventory_state(&self.state.base_dir)?;
         let chain_profiles = inventory.chain_profiles.clone();
         let deposits = crate::deposits::load_deposits(&self.state.base_dir)
@@ -457,6 +480,8 @@ impl SigillumService {
             started_at_unix,
             completed_at_unix: None,
             last_error: None,
+            scan_request: Some(Box::new(body.clone())),
+            resumed_from_job_id,
         };
         inventory.jobs.push(job.clone());
         save_inventory_state(&self.state.base_dir, &inventory)?;
@@ -464,44 +489,70 @@ impl SigillumService {
         let mut scanned_addresses = Vec::new();
         let mut detected_holdings = Vec::new();
 
-        for wallet in &wallets {
-            let (mut index, mut empty_run) = if body.resume_from_latest_checkpoint.unwrap_or(false)
-            {
-                latest_resume_checkpoint(&inventory.jobs, wallet, &providers).unwrap_or((0, 0))
-            } else {
-                (0, 0)
-            };
-            while index <= max_index && empty_run < gap_limit {
-                let derived =
-                    derive_discovery_wallet_address(wallet, index).map_err(map_xpub_error)?;
-                let derivation_path = format!("{}/{index}", wallet.receive_path);
-                let mut index_has_activity = false;
+        let scan_result: ServiceResult<DiscoveryScanOutcome> = async {
+            for wallet in &wallets {
+                let (mut index, mut empty_run) =
+                    if body.resume_from_latest_checkpoint.unwrap_or(false) {
+                        latest_resume_checkpoint(&inventory.jobs, wallet, &providers)
+                            .unwrap_or((0, 0))
+                    } else {
+                        (0, 0)
+                    };
+                while index <= max_index && empty_run < gap_limit {
+                    if self.discovery_scan_checkpoint(token, &job.id)? {
+                        return Ok(DiscoveryScanOutcome::Canceled);
+                    }
+                    let derived =
+                        derive_discovery_wallet_address(wallet, index).map_err(map_xpub_error)?;
+                    let derivation_path = format!("{}/{index}", wallet.receive_path);
+                    let mut index_has_activity = false;
 
-                for provider in &providers {
-                    if self
-                        .scan_address_on_provider(
+                    for provider in &providers {
+                        if self
+                            .scan_address_on_provider(
+                                wallet,
+                                provider,
+                                &derived.address,
+                                &derivation_path,
+                                index,
+                                &configs,
+                                &lookups,
+                                &mut job,
+                                &mut inventory,
+                                &mut detected_holdings,
+                                &mut scanned_addresses,
+                            )
+                            .await?
+                        {
+                            index_has_activity = true;
+                        }
+                        if self.discovery_scan_checkpoint(token, &job.id)? {
+                            return Ok(DiscoveryScanOutcome::Canceled);
+                        }
+                    }
+
+                    if index_has_activity {
+                        empty_run = 0;
+                    } else {
+                        empty_run += 1;
+                    }
+                    for provider in &providers {
+                        update_scan_checkpoint(
+                            &mut job.checkpoints,
                             wallet,
                             provider,
-                            &derived.address,
-                            &derivation_path,
-                            index,
-                            &configs,
-                            &lookups,
-                            &mut job,
-                            &mut inventory,
-                            &mut detected_holdings,
-                            &mut scanned_addresses,
-                        )
-                        .await?
-                    {
-                        index_has_activity = true;
+                            ScanCheckpointProgress {
+                                next_index: index.saturating_add(1),
+                                last_scanned_index: Some(index),
+                                consecutive_empty: empty_run,
+                                completed: false,
+                                updated_at_unix: now_unix(),
+                            },
+                        );
                     }
-                }
-
-                if index_has_activity {
-                    empty_run = 0;
-                } else {
-                    empty_run += 1;
+                    sync_inventory_job(&mut inventory, &job);
+                    save_inventory_state(&self.state.base_dir, &inventory)?;
+                    index += 1;
                 }
                 for provider in &providers {
                     update_scan_checkpoint(
@@ -509,104 +560,128 @@ impl SigillumService {
                         wallet,
                         provider,
                         ScanCheckpointProgress {
-                            next_index: index.saturating_add(1),
-                            last_scanned_index: Some(index),
+                            next_index: index,
+                            last_scanned_index: index.checked_sub(1),
                             consecutive_empty: empty_run,
-                            completed: false,
+                            completed: true,
                             updated_at_unix: now_unix(),
                         },
                     );
                 }
                 sync_inventory_job(&mut inventory, &job);
                 save_inventory_state(&self.state.base_dir, &inventory)?;
-                index += 1;
-            }
-            for provider in &providers {
-                update_scan_checkpoint(
-                    &mut job.checkpoints,
-                    wallet,
-                    provider,
-                    ScanCheckpointProgress {
-                        next_index: index,
-                        last_scanned_index: index.checked_sub(1),
-                        consecutive_empty: empty_run,
-                        completed: true,
-                        updated_at_unix: now_unix(),
-                    },
-                );
-            }
-            sync_inventory_job(&mut inventory, &job);
-            save_inventory_state(&self.state.base_dir, &inventory)?;
 
-            if wallet.family == WALLET_FAMILY_ETH_SEED
-                && wallet.derivation_pattern == DERIVATION_PATTERN_PROJECT
-            {
-                if let Some(seed_profile) = registry
-                    .eth_seed_wallets
-                    .iter()
-                    .find(|p| p.name == wallet.profile)
+                if wallet.family == WALLET_FAMILY_ETH_SEED
+                    && wallet.derivation_pattern == DERIVATION_PATTERN_PROJECT
                 {
-                    if let Some(control_xpub) = &seed_profile.control_xpub {
-                        let control_path = format!("m/44'/60'/{}'/1", seed_profile.project_account);
-                        for control_index in 0..=2 {
-                            let derived = derive_ethereum_address_from_control_xpub(
-                                control_xpub,
-                                control_index,
-                            )
-                            .map_err(map_xpub_error)?;
-                            let derivation_path = format!("{control_path}/{control_index}");
-                            for provider in &providers {
-                                let _ = self
-                                    .scan_address_on_provider(
-                                        wallet,
-                                        provider,
-                                        &derived.address,
-                                        &derivation_path,
-                                        control_index,
-                                        &configs,
-                                        &lookups,
-                                        &mut job,
-                                        &mut inventory,
-                                        &mut detected_holdings,
-                                        &mut scanned_addresses,
-                                    )
-                                    .await?;
-                                sync_inventory_job(&mut inventory, &job);
-                                save_inventory_state(&self.state.base_dir, &inventory)?;
+                    if let Some(seed_profile) = registry
+                        .eth_seed_wallets
+                        .iter()
+                        .find(|p| p.name == wallet.profile)
+                    {
+                        if let Some(control_xpub) = &seed_profile.control_xpub {
+                            let control_path =
+                                format!("m/44'/60'/{}'/1", seed_profile.project_account);
+                            for control_index in 0..=2 {
+                                if self.discovery_scan_checkpoint(token, &job.id)? {
+                                    return Ok(DiscoveryScanOutcome::Canceled);
+                                }
+                                let derived = derive_ethereum_address_from_control_xpub(
+                                    control_xpub,
+                                    control_index,
+                                )
+                                .map_err(map_xpub_error)?;
+                                let derivation_path = format!("{control_path}/{control_index}");
+                                for provider in &providers {
+                                    let _ = self
+                                        .scan_address_on_provider(
+                                            wallet,
+                                            provider,
+                                            &derived.address,
+                                            &derivation_path,
+                                            control_index,
+                                            &configs,
+                                            &lookups,
+                                            &mut job,
+                                            &mut inventory,
+                                            &mut detected_holdings,
+                                            &mut scanned_addresses,
+                                        )
+                                        .await?;
+                                    if self.discovery_scan_checkpoint(token, &job.id)? {
+                                        return Ok(DiscoveryScanOutcome::Canceled);
+                                    }
+                                    sync_inventory_job(&mut inventory, &job);
+                                    save_inventory_state(&self.state.base_dir, &inventory)?;
+                                }
                             }
                         }
                     }
                 }
             }
-        }
 
-        for watch in &watch_addresses {
-            let derivation_path = format!("{}/{}", watch.wallet.receive_path, watch.address_index);
-            for provider in &providers {
-                let _ = self
-                    .scan_address_on_provider(
-                        &watch.wallet,
-                        provider,
-                        &watch.address,
-                        &derivation_path,
-                        watch.address_index,
-                        &configs,
-                        &lookups,
-                        &mut job,
-                        &mut inventory,
-                        &mut detected_holdings,
-                        &mut scanned_addresses,
-                    )
-                    .await?;
-                sync_inventory_job(&mut inventory, &job);
-                save_inventory_state(&self.state.base_dir, &inventory)?;
+            for watch in &watch_addresses {
+                if self.discovery_scan_checkpoint(token, &job.id)? {
+                    return Ok(DiscoveryScanOutcome::Canceled);
+                }
+                let derivation_path =
+                    format!("{}/{}", watch.wallet.receive_path, watch.address_index);
+                for provider in &providers {
+                    let _ = self
+                        .scan_address_on_provider(
+                            &watch.wallet,
+                            provider,
+                            &watch.address,
+                            &derivation_path,
+                            watch.address_index,
+                            &configs,
+                            &lookups,
+                            &mut job,
+                            &mut inventory,
+                            &mut detected_holdings,
+                            &mut scanned_addresses,
+                        )
+                        .await?;
+                    if self.discovery_scan_checkpoint(token, &job.id)? {
+                        return Ok(DiscoveryScanOutcome::Canceled);
+                    }
+                    sync_inventory_job(&mut inventory, &job);
+                    save_inventory_state(&self.state.base_dir, &inventory)?;
+                }
             }
-        }
 
-        job.status = "completed".into();
+            if self.discovery_scan_checkpoint(token, &job.id)? {
+                return Ok(DiscoveryScanOutcome::Canceled);
+            }
+            Ok(DiscoveryScanOutcome::Completed)
+        }
+        .await;
+
+        let scan_outcome = match scan_result {
+            Ok(outcome) => outcome,
+            Err(error) => {
+                if let Err(finalize_error) =
+                    self.finalize_failed_discovery_scan(&job.id, error.message())
+                {
+                    return Err(ServiceError::internal(format!(
+                        "{error}; additionally failed to terminalize discovery job: \
+                         {finalize_error}"
+                    )));
+                }
+                return Err(error);
+            }
+        };
+
+        job.status = match scan_outcome {
+            DiscoveryScanOutcome::Completed => "completed",
+            DiscoveryScanOutcome::Canceled => "canceled",
+        }
+        .into();
         job.completed_at_unix = Some(now_unix());
+        job.last_error = None;
         sync_inventory_job(&mut inventory, &job);
         save_inventory_state(&self.state.base_dir, &inventory)?;
+        self.state.clear_discovery_cancel_request(&job.id);
 
         self.record_audit(
             self.state.active_compartment_id_for(token),

@@ -714,4 +714,6 @@ export interface ApiRequestOptions<TBody = unknown> {
   path: string;
   body?: TBody;
   sessionToken?: string | null;
+  /** Authenticate without extending the daemon idle auto-lock timer. */
+  background?: boolean;
 }

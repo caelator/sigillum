@@ -189,11 +189,12 @@ impl SignalState {
             }
         }
 
-        if self.previous_sigint.is_none() && self.previous_sigterm.is_none() {
-            if self.owns_supervisor_slot {
-                SUPERVISOR_ACTIVE.store(false, Ordering::SeqCst);
-                self.owns_supervisor_slot = false;
-            }
+        if self.previous_sigint.is_none()
+            && self.previous_sigterm.is_none()
+            && self.owns_supervisor_slot
+        {
+            SUPERVISOR_ACTIVE.store(false, Ordering::SeqCst);
+            self.owns_supervisor_slot = false;
         }
 
         match first_error {

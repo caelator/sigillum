@@ -43,8 +43,13 @@ export class FakeElement {
   className = "";
   innerHTML = "";
   id = "";
+  parentElement: FakeElement | null = null;
+  private readonly listeners = new Map<string, Array<(event: any) => void>>();
 
-  constructor(readonly tagName = "DIV") {}
+  constructor(
+    readonly tagName = "DIV",
+    private readonly ownerDocument?: FakeDocument,
+  ) {}
 
   private text = "";
 
@@ -58,15 +63,27 @@ export class FakeElement {
   }
 
   appendChild(child: FakeElement): FakeElement {
+    child.parentElement = this;
     this.children.push(child);
     return child;
   }
 
-  remove(): void {
-    this.isConnected = false;
+  append(...children: FakeElement[]): void {
+    children.forEach((child) => this.appendChild(child));
   }
 
-  focus(): void {}
+  remove(): void {
+    this.isConnected = false;
+    if (this.parentElement) {
+      const index = this.parentElement.children.indexOf(this);
+      if (index >= 0) this.parentElement.children.splice(index, 1);
+      this.parentElement = null;
+    }
+  }
+
+  focus(): void {
+    if (this.ownerDocument) this.ownerDocument.activeElement = this;
+  }
 
   scrollIntoView(): void {}
 
@@ -86,7 +103,28 @@ export class FakeElement {
     return name in this.attributes;
   }
 
-  addEventListener(): void {}
+  addEventListener(type: string, listener: (event: any) => void): void {
+    const listeners = this.listeners.get(type) ?? [];
+    listeners.push(listener);
+    this.listeners.set(type, listeners);
+  }
+
+  dispatchEvent(event: any): boolean {
+    if (!event.target) event.target = this;
+    event.currentTarget = this;
+    for (const listener of this.listeners.get(event.type) ?? []) listener(event);
+    return !event.defaultPrevented;
+  }
+
+  click(): void {
+    this.dispatchEvent({
+      type: "click",
+      defaultPrevented: false,
+      preventDefault() {
+        this.defaultPrevented = true;
+      },
+    });
+  }
 
   closest(): FakeElement | null {
     return this;
@@ -114,13 +152,20 @@ class FakeStorage {
 }
 
 class FakeDocument {
-  readonly body = new FakeElement("BODY") as FakeElement & {
+  readonly body: FakeElement & {
     dataset: Record<string, string>;
   };
+  activeElement: FakeElement | null = null;
   private readonly elements = new Map<string, FakeElement>();
 
+  constructor() {
+    this.body = new FakeElement("BODY", this) as FakeElement & {
+      dataset: Record<string, string>;
+    };
+  }
+
   createElement(tagName: string): FakeElement {
-    return new FakeElement(tagName.toUpperCase());
+    return new FakeElement(tagName.toUpperCase(), this);
   }
 
   getElementById(id: string): FakeElement | null {
@@ -136,7 +181,7 @@ class FakeDocument {
   }
 
   register(id: string, tagName = "DIV"): FakeElement {
-    const element = new FakeElement(tagName.toUpperCase());
+    const element = new FakeElement(tagName.toUpperCase(), this);
     element.id = id;
     this.elements.set(id, element);
     return element;

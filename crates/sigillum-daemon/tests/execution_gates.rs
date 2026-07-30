@@ -3,8 +3,8 @@ mod common;
 use common::{get, post_json, spawn_daemon, submitted_raw_transaction_hash};
 use std::net::SocketAddr;
 use std::path::PathBuf;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use axum::extract::State;
@@ -21,6 +21,8 @@ const RPC_TOKEN: &str = "rpc-test-token";
 const RPC_AUTH: &str = "Bearer rpc-test-token";
 const EXECUTION_PAUSED_REASON: &str =
     "execution_paused: queue execution is paused by the operator kill switch";
+const DAEMON_LOCKING_REASON: &str =
+    "daemon_locking: queue drain stopped because the daemon lock latch is active";
 
 async fn spawn_daemon_with_state(
     base_dir: PathBuf,
@@ -46,14 +48,28 @@ struct BroadcastControl {
     broadcast_count: Arc<AtomicUsize>,
 }
 
+#[derive(Clone, Default)]
+struct PreparationControl {
+    first_nonce_lookup_started: Arc<Notify>,
+    release_first_nonce_lookup: Arc<Notify>,
+    nonce_lookup_count: Arc<AtomicUsize>,
+    first_receipt_lookup_started: Arc<Notify>,
+    release_first_receipt_lookup: Arc<Notify>,
+    receipt_lookup_count: Arc<AtomicUsize>,
+    broadcast_count: Arc<AtomicUsize>,
+    broadcast_raw_hexes: Arc<Mutex<Vec<String>>>,
+}
+
 #[derive(Clone)]
 struct RpcState {
     broadcast_control: Option<BroadcastControl>,
+    preparation_control: Option<PreparationControl>,
 }
 
 async fn spawn_mock_evm_provider() -> (SocketAddr, tokio::task::JoinHandle<()>) {
     spawn_mock_evm_provider_with_state(RpcState {
         broadcast_control: None,
+        preparation_control: None,
     })
     .await
 }
@@ -63,6 +79,18 @@ async fn spawn_holding_mock_evm_provider()
     let control = BroadcastControl::default();
     let (addr, handle) = spawn_mock_evm_provider_with_state(RpcState {
         broadcast_control: Some(control.clone()),
+        preparation_control: None,
+    })
+    .await;
+    (addr, handle, control)
+}
+
+async fn spawn_holding_preparation_mock_evm_provider()
+-> (SocketAddr, tokio::task::JoinHandle<()>, PreparationControl) {
+    let control = PreparationControl::default();
+    let (addr, handle) = spawn_mock_evm_provider_with_state(RpcState {
+        broadcast_control: None,
+        preparation_control: Some(control.clone()),
     })
     .await;
     (addr, handle, control)
@@ -120,7 +148,26 @@ async fn rpc_response(state: &RpcState, request: &Value) -> Value {
     let result = match method {
         "eth_chainId" => json!("0x1"),
         "eth_blockNumber" => json!("0x20"),
-        "eth_getTransactionCount" => json!("0x7"),
+        "eth_getTransactionCount" => {
+            if let Some(control) = state.preparation_control.as_ref() {
+                let lookup_index = control.nonce_lookup_count.fetch_add(1, Ordering::SeqCst);
+                if lookup_index == 0 {
+                    control.first_nonce_lookup_started.notify_one();
+                    control.release_first_nonce_lookup.notified().await;
+                }
+            }
+            json!("0x7")
+        }
+        "eth_getTransactionReceipt" => {
+            if let Some(control) = state.preparation_control.as_ref() {
+                let lookup_index = control.receipt_lookup_count.fetch_add(1, Ordering::SeqCst);
+                if lookup_index == 0 {
+                    control.first_receipt_lookup_started.notify_one();
+                    control.release_first_receipt_lookup.notified().await;
+                }
+            }
+            Value::Null
+        }
         "eth_getBalance" => json!("0xde0b6b3a7640000"),
         "eth_feeHistory" => json!({
             "oldestBlock": "0x1",
@@ -243,6 +290,14 @@ async fn rpc_response(state: &RpcState, request: &Value) -> Value {
             }])
         }
         "eth_sendRawTransaction" => {
+            if let Some(control) = state.preparation_control.as_ref() {
+                control.broadcast_count.fetch_add(1, Ordering::SeqCst);
+                control
+                    .broadcast_raw_hexes
+                    .lock()
+                    .unwrap()
+                    .push(request["params"][0].as_str().unwrap().to_string());
+            }
             if let Some(control) = state.broadcast_control.as_ref() {
                 let broadcast_index = control.broadcast_count.fetch_add(1, Ordering::SeqCst);
                 if broadcast_index == 0 {
@@ -483,6 +538,296 @@ async fn gates_off_with_policy_keeps_stealth_queue_behavior() {
     enqueue_stealth_transfer(&client, addr, &setup).await;
     let process_json = process_queue(&client, addr, &setup.token).await;
     assert_sent_process_response(&process_json);
+
+    handle.abort();
+    rpc_handle.abort();
+}
+
+#[tokio::test]
+async fn locking_mid_drain_preserves_replay_bytes_and_stops_before_broadcast() {
+    let dir = TempDir::new().unwrap();
+    let base_dir = dir.path().to_path_buf();
+    let (addr, state, handle) = spawn_daemon_with_state(base_dir.clone()).await;
+    let (rpc_addr, rpc_handle, control) = spawn_holding_preparation_mock_evm_provider().await;
+    let client = reqwest::Client::new();
+    let setup = setup_stealth_queue(&client, addr, rpc_addr).await;
+
+    for _ in 0..2 {
+        enqueue_stealth_transfer(&client, addr, &setup).await;
+    }
+    let list_before = get(&client, addr, "/api/queue/jobs", Some(&setup.token)).await;
+    assert_eq!(list_before.status(), StatusCode::OK);
+    let before_json: Value = list_before.json().await.unwrap();
+    let before_jobs = before_json["jobs"].as_array().unwrap().clone();
+
+    let process_task = {
+        let client = client.clone();
+        let token = setup.token.clone();
+        tokio::spawn(async move {
+            post_json(&client, addr, "/api/queue/process", json!({}), Some(&token)).await
+        })
+    };
+    tokio::time::timeout(
+        Duration::from_secs(5),
+        control.first_nonce_lookup_started.notified(),
+    )
+    .await
+    .expect("queue preparation should reach the held nonce lookup");
+
+    let lock_task = {
+        let client = client.clone();
+        let token = setup.token.clone();
+        tokio::spawn(
+            async move { post_json(&client, addr, "/api/lock", json!({}), Some(&token)).await },
+        )
+    };
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while !state.is_locking() {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("the API lock request should latch before preparation resumes");
+    control.release_first_nonce_lookup.notify_one();
+
+    let process = process_task.await.expect("queue process task should join");
+    assert_eq!(process.status(), StatusCode::OK);
+    let process_json: Value = process.json().await.unwrap();
+    assert_eq!(process_json["processed"], json!(1), "{process_json}");
+    assert_eq!(process_json["succeeded"], json!(0), "{process_json}");
+    assert_eq!(process_json["blocked"], json!(1), "{process_json}");
+    assert_eq!(process_json["retrying"], json!(0), "{process_json}");
+    assert_eq!(process_json["failed"], json!(0), "{process_json}");
+    assert_eq!(
+        process_json["operator_action_required"],
+        json!(0),
+        "{process_json}"
+    );
+    assert_eq!(
+        process_json["failures_by_cause"]["policy_block"],
+        json!(1),
+        "{process_json}"
+    );
+    assert_eq!(
+        process_json["paused_reason"],
+        json!(DAEMON_LOCKING_REASON),
+        "{process_json}"
+    );
+    assert_eq!(process_json["jobs"][0]["state"], json!("prepared"));
+    assert!(
+        process_json["jobs"][0]["last_error"]
+            .as_str()
+            .unwrap()
+            .contains("daemon locking denied local broadcast admission"),
+        "{process_json}"
+    );
+    assert_eq!(control.broadcast_count.load(Ordering::SeqCst), 0);
+    let lock = lock_task.await.expect("API lock task should join");
+    assert_eq!(lock.status(), StatusCode::OK);
+    assert_eq!(
+        lock.json::<Value>().await.unwrap()["status"],
+        json!("locked")
+    );
+
+    let queue_path = base_dir.join("queue.json");
+    let store: Value = serde_json::from_slice(&std::fs::read(&queue_path).unwrap()).unwrap();
+    let jobs = store["data"]["jobs"].as_array().unwrap();
+    let held = &jobs[0];
+    let raw = held["signed_raw_transaction_hex"]
+        .as_str()
+        .expect("held job retains exact signed bytes")
+        .to_string();
+    let held_id = held["id"].as_str().unwrap().to_string();
+    let transaction_hash = held["transaction_hash_hex"].as_str().unwrap().to_string();
+    let payload_hash = held["prepared_payload_hash_hex"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let binding_hash = held["prepared_binding_hash_hex"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let expected_hash = submitted_raw_transaction_hash(&json!({ "params": [&raw] }));
+    assert_eq!(held["state"], json!("prepared"));
+    assert_eq!(
+        held["transaction_hash_hex"].as_str().unwrap(),
+        expected_hash.as_str().unwrap().trim_start_matches("0x")
+    );
+    assert!(held["broadcast_at_unix"].is_null());
+    assert!(held["next_attempt_after_unix"].is_null());
+    assert!(held["prepared_payload_hash_hex"].is_string());
+    assert!(held["prepared_binding_hash_hex"].is_string());
+
+    assert_eq!(jobs[1]["id"], before_jobs[1]["id"]);
+    assert_eq!(jobs[1]["state"], json!("queued"));
+    assert_eq!(jobs[1]["attempts"], json!(0));
+    assert_eq!(
+        jobs[1]["updated_at_unix"],
+        before_jobs[1]["updated_at_unix"]
+    );
+
+    let unlock = post_json(
+        &client,
+        addr,
+        "/api/unlock",
+        json!({ "passphrase": "correct horse battery staple" }),
+        None,
+    )
+    .await;
+    assert_eq!(unlock.status(), StatusCode::OK);
+    let token = unlock.json::<Value>().await.unwrap()["session_token"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let replay = post_json(
+        &client,
+        addr,
+        "/api/queue/process",
+        json!({ "id": held_id }),
+        Some(&token),
+    )
+    .await;
+    assert_eq!(replay.status(), StatusCode::OK);
+    let replay_json: Value = replay.json().await.unwrap();
+    assert_eq!(replay_json["succeeded"], json!(1), "{replay_json}");
+    assert_eq!(control.nonce_lookup_count.load(Ordering::SeqCst), 1);
+    assert_eq!(control.broadcast_count.load(Ordering::SeqCst), 1);
+    assert_eq!(
+        control.broadcast_raw_hexes.lock().unwrap()[0].trim_start_matches("0x"),
+        raw
+    );
+
+    let mut store: Value = serde_json::from_slice(&std::fs::read(&queue_path).unwrap()).unwrap();
+    let replayed = store["data"]["jobs"]
+        .as_array_mut()
+        .unwrap()
+        .iter_mut()
+        .find(|job| job["id"] == json!(held_id))
+        .unwrap();
+    replayed["state"] = json!("submitted_unknown");
+    replayed["signed_raw_transaction_hex"] = json!(raw);
+    replayed["transaction_hash_hex"] = json!(transaction_hash);
+    replayed["broadcast_transaction_hash_hex"] = Value::Null;
+    replayed["prepared_payload_hash_hex"] = json!(payload_hash);
+    replayed["prepared_binding_hash_hex"] = json!(binding_hash);
+    replayed["broadcast_at_unix"] = json!(4242);
+    replayed["next_attempt_after_unix"] = Value::Null;
+    replayed["last_error"] = Value::Null;
+    std::fs::write(&queue_path, serde_json::to_vec_pretty(&store).unwrap()).unwrap();
+
+    let resume_task = {
+        let client = client.clone();
+        let token = token.clone();
+        let held_id = held_id.clone();
+        tokio::spawn(async move {
+            post_json(
+                &client,
+                addr,
+                "/api/queue/process",
+                json!({ "id": held_id }),
+                Some(&token),
+            )
+            .await
+        })
+    };
+    tokio::time::timeout(
+        Duration::from_secs(5),
+        control.first_receipt_lookup_started.notified(),
+    )
+    .await
+    .expect("submitted_unknown recovery should poll its receipt first");
+    let second_lock_task = {
+        let client = client.clone();
+        let token = token.clone();
+        tokio::spawn(
+            async move { post_json(&client, addr, "/api/lock", json!({}), Some(&token)).await },
+        )
+    };
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while !state.is_locking() {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("the second API lock should latch before replay admission");
+    control.release_first_receipt_lookup.notify_one();
+
+    let resume = resume_task
+        .await
+        .expect("submitted_unknown task should join");
+    assert_eq!(resume.status(), StatusCode::OK);
+    let resume_json: Value = resume.json().await.unwrap();
+    assert_eq!(resume_json["processed"], json!(1), "{resume_json}");
+    assert_eq!(resume_json["blocked"], json!(1), "{resume_json}");
+    assert_eq!(resume_json["retrying"], json!(0), "{resume_json}");
+    assert_eq!(resume_json["failed"], json!(0), "{resume_json}");
+    assert_eq!(
+        resume_json["operator_action_required"],
+        json!(0),
+        "{resume_json}"
+    );
+    assert_eq!(resume_json["paused_reason"], json!(DAEMON_LOCKING_REASON));
+    assert_eq!(resume_json["jobs"][0]["state"], json!("submitted_unknown"));
+    assert_eq!(control.broadcast_count.load(Ordering::SeqCst), 1);
+    let second_lock = second_lock_task
+        .await
+        .expect("second lock task should join");
+    assert_eq!(second_lock.status(), StatusCode::OK);
+
+    let held_unknown: Value = serde_json::from_slice(&std::fs::read(&queue_path).unwrap()).unwrap();
+    let held_unknown = held_unknown["data"]["jobs"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|job| job["id"] == json!(held_id))
+        .unwrap();
+    assert_eq!(held_unknown["state"], json!("submitted_unknown"));
+    assert_eq!(held_unknown["signed_raw_transaction_hex"], json!(raw));
+    assert_eq!(
+        held_unknown["transaction_hash_hex"],
+        json!(transaction_hash)
+    );
+    assert_eq!(held_unknown["broadcast_at_unix"], json!(4242));
+    assert!(held_unknown["next_attempt_after_unix"].is_null());
+
+    let unlock = post_json(
+        &client,
+        addr,
+        "/api/unlock",
+        json!({ "passphrase": "correct horse battery staple" }),
+        None,
+    )
+    .await;
+    assert_eq!(unlock.status(), StatusCode::OK);
+    let final_token = unlock.json::<Value>().await.unwrap()["session_token"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let final_replay = post_json(
+        &client,
+        addr,
+        "/api/queue/process",
+        json!({ "id": held_id }),
+        Some(&final_token),
+    )
+    .await;
+    assert_eq!(final_replay.status(), StatusCode::OK);
+    let final_replay_json: Value = final_replay.json().await.unwrap();
+    assert_eq!(
+        final_replay_json["succeeded"],
+        json!(1),
+        "{final_replay_json}"
+    );
+    assert_eq!(control.nonce_lookup_count.load(Ordering::SeqCst), 1);
+    assert_eq!(control.broadcast_count.load(Ordering::SeqCst), 2);
+    for replayed_raw in control.broadcast_raw_hexes.lock().unwrap().iter() {
+        assert_eq!(replayed_raw.trim_start_matches("0x"), raw);
+    }
+
+    let final_store: Value = serde_json::from_slice(&std::fs::read(&queue_path).unwrap()).unwrap();
+    let final_jobs = final_store["data"]["jobs"].as_array().unwrap();
+    assert_eq!(final_jobs[1]["state"], json!("queued"));
+    assert_eq!(final_jobs[1]["attempts"], json!(0));
 
     handle.abort();
     rpc_handle.abort();

@@ -674,6 +674,8 @@ fn test_wallet_inventory_scan_response_roundtrip() {
         started_at_unix: 1,
         completed_at_unix: Some(2),
         last_error: None,
+        scan_request: None,
+        resumed_from_job_id: None,
     };
     roundtrip_test(WalletInventoryScanResponse {
         job,

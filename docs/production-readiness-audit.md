@@ -1,24 +1,23 @@
 # Production Readiness Audit
 
-**Date:** June 4, 2026 (updated July 12, 2026)
+**Date:** June 4, 2026 (updated July 30, 2026)
 **Scope:** local-first, single-host Sigillum source checkout and local-sidecar
 gateway boundary
-**Verdict:** there is no valid release candidate. RC2 is an immutable
-annotated-tag-contract failure. RC3 passed the legacy workflows but shipped a
-macOS app without a complete bundle signature; strict verification fails and
-its assets and same-SHA operator receipts cannot certify a final release. The
-RC4 signing remediation passed protected-main gates, but its evidence checker
-could accept a mainnet or arbitrary chain as the required L2 testnet and prove
-the required two-transaction gas-top-up chain with only one hash. The same
-source treated a broadcast-but-unconfirmed prerequisite as successful, so a
-dependent could run before the top-up confirmed. RC4 and its same-SHA receipts
-therefore cannot certify a final release either. The
-source may be called release-ready for the local-first boundary only after the
-tightened `./scripts/check-release.sh` passes on protected `main`, RC5's release
-app and mounted dmg app pass the same verifier, and the remaining operator
-receipts reference that exact RC5 commit. Gateway payments remain
-disabled-by-default experimental observations, not supported 1.0 confirmation
-semantics.
+**Verdict:** there is no production-ready or published stable release. RC2 is
+an immutable annotated-tag-contract failure. RC3 passed the legacy workflows
+but shipped a macOS app without a complete bundle signature. RC4 proved the
+signing remediation but failed the F6/runtime assurance contract.
+`v1.0.0-rc.5` exactly matches pre-hardening `origin/main` commit `7e04743`;
+Release run `29248938476` passed all six jobs and produced the expected six assets, but
+the GitHub Release remains a draft. RC5 does not include the later PostCSS,
+ERC-5564 interoperability, session/broadcast race, discovery lifecycle, and
+FIDO2 causal-recovery hardening, and its commit has no complete operator
+evidence bundle. The current source may be called release-ready for the
+local-first boundary only after the tightened `./scripts/check-release.sh`
+passes, protected merge and CI succeed, RC6's source app and mounted dmg app
+pass the same verifier, and every remaining operator receipt names that exact
+RC6 peeled commit. Gateway payments remain disabled-by-default experimental
+observations, not supported 1.0 confirmation semantics.
 
 RC4 release run `29230844456` nevertheless completed all six jobs, including
 strict source and mounted-dmg verification, and produced its six expected draft
@@ -26,11 +25,21 @@ assets. That is retained as positive evidence for the signing remediation and
 negative evidence that a green workflow cannot override a defective assurance
 contract.
 
+RC5 release run `29248938476` completed the corrected six-job workflow and left
+its six expected assets in an unpublished draft. That is positive evidence for
+the RC5 code and release contracts at `7e04743`, not for later commits. Because
+the current hardening line changes security- and recovery-sensitive behavior,
+its next valid evidence anchor must be the monotonically required
+`v1.0.0-rc.6`; RC5 receipts cannot be carried forward.
+
 ## Evidence Snapshot
 
 The current hardening commit is considered source-ready for the documented
 single-host boundary only when `./scripts/check-release.sh` passes without
-mutating tracked files. The gate makes the release standard executable instead
+mutating tracked files. Until that run and independent review complete, the
+implemented PostCSS dependency, ERC-5564 interop, session/broadcast admission,
+discovery lifecycle, and FIDO2 causal-recovery changes are candidate code, not
+green release evidence. The gate makes the release standard executable instead
 of scattering it across README, CI, and readiness notes.
 
 The gate covers:
@@ -89,9 +98,10 @@ draft assets contained an app for which `codesign -dv` misleadingly printed
 `Signature=adhoc`, while `codesign --verify --deep --strict` failed because the
 bundle had no resource seal. The new verifier rejects that exact linker-only
 shape, mounts the dmg read-only without executing its binary, and requires the
-mounted app to match the already verified source app. The next permitted
-candidate after the separate RC4 evidence-contract failure is
-`v1.0.0-rc.5`.
+mounted app to match the already verified source app. RC5 is the retained
+candidate after the separate RC4 evidence-contract failure. Because the current
+hardening line is a later commit, its next permitted candidate is
+`v1.0.0-rc.6`.
 
 The first sandboxed run failed when loopback integration tests could not bind
 local sockets under the execution sandbox. The same release gate passed outside
@@ -228,7 +238,7 @@ pass with empty ignore lists.
 | Runtime daemon lifecycle behavior | `scripts/check-runtime-smoke.sh` starts the daemon, verifies status, initializes a passphrase compartment, writes and reads vault canaries, locks, unlocks, lists compartments, and runs doctor | Proven for current checkout in an unsandboxed local environment |
 | Queue submission durability, dependency finality, and pause | Queue schema v5 persists `prepared` raw bytes/hash and a pre-RPC `submitted_unknown` marker; recovery checks receipts or resubmits exact bytes without re-signing; dependent plan steps remain unsigned until every prerequisite reaches receipt-confirmed finality; the real HTTP pause regression latches before the active drain mutex and blocks later broadcasts | Implemented on the current hardening line; fresh full-gate and CI evidence is still required |
 | Runtime browser/UI visual behavior | DOM smoke tests pass, the runtime smoke checks the served UI shell, and `scripts/check-browser-smoke.sh` repeatably drives a headless browser through setup, unlocked operator workspace, vault canary write/reveal, browser-session logout, passphrase re-authentication, and post-auth canary count checks against an isolated local daemon inside the release gate | Proven for current checkout as repeatable automation in an unsandboxed local environment with a Chromium-family browser |
-| Desktop app bundle readiness | `scripts/check-desktop.sh` uses the signing wrapper, strictly verifies the source and mounted-dmg app, compares CDHash, and runs RC3/tamper/identifier/layout/symlink regressions; Developer ID mode explicitly submits/staples the post-Tauri dmg and validates tickets on both app copies and the dmg; an offline fake-tool regression covers credential routing and notary/stapler failures; the release artifact job runs the same verifier after adding notices and before upload | RC3 failed this strengthened invariant; the remediation landed on protected `main`, but the complete release claim must be reproved by the source gate and release workflow at the RC5 SHA. Mode-independent hostile dmg-layout regressions run in the always-on ad-hoc suite; non-macOS release-gate legs remain compile-only. |
+| Desktop app bundle readiness | `scripts/check-desktop.sh` uses the signing wrapper, strictly verifies the source and mounted-dmg app, compares CDHash, and runs RC3/tamper/identifier/layout/symlink regressions; Developer ID mode explicitly submits/staples the post-Tauri dmg and validates tickets on both app copies and the dmg; an offline fake-tool regression covers credential routing and notary/stapler failures; the release artifact job runs the same verifier after adding notices and before upload | RC3 failed this strengthened invariant and RC5 later proved it at `7e04743`; the complete current-line release claim must be reproved by the source gate and release workflow at the RC6 SHA. Mode-independent hostile dmg-layout regressions run in the always-on ad-hoc suite; non-macOS release-gate legs remain compile-only. |
 | Long-duration reliability | Recovery and crash tests pass, `scripts/check-local-soak.sh` passed a bounded 300-second local daemon/gateway run with 28 iterations, and an older `mac-server` run passed a 3600-second target with 117 iterations | Local automated baseline only; standard plus chaos receipts on each supported host at the new RC SHA remain an H1 gate |
 | External security assurance | Code gates, audit, deny, local adversarial/fuzz gate, SSRF/local-boundary tests, and UI boundary tests pass | Local boundary pass proven for current checkout; independent external penetration test not performed |
 | Full wallet-management product roadmap | EVM roadmap phases 1-9 shipped and tested: discovery, inventory, risk, planning, policy-gated fail-closed execution (default off), DeFi exit adapters, and treasury automation | EVM scope is complete except swap execution, which is deferred per D-13; only non-EVM chains (phase 10), swap execution (D-13), and fiat/NFT valuation (D-16) remain deferred |
@@ -275,25 +285,35 @@ wallet operations remain deferred.
 
 ## Remaining Work Before A Broader Completion Claim
 
-The active product objective remains larger than the current release gate. To
-claim Sigillum is fully operational and production ready without qualification,
-the project still needs:
+The active product objective remains larger than the current release gate. For
+the documented local-first release boundary, the project still needs:
 
-1. a target-host `sigillum doctor` and soak receipt for each additional host
-   being called ready beyond `mac-server`
-2. an independent external penetration test if the claim expands beyond
-   the source-verified local-first release gate; no external penetration test
-   has been performed, and the release does not claim one (D-4)
-3. five public-testnet transactions for the four core execution families:
-   native sweep, ERC-20 sweep, revoke, and both legs of `fund_gas` → dependent
-   sweep on Ethereum Sepolia (`11155111`) plus one supported L2 testnet: Base
-   Sepolia (`84532`), Arbitrum Sepolia (`421614`), or OP Sepolia (`11155420`)
-   (F6)
+1. a clean `./scripts/check-release.sh`, protected merge, and green CI before
+   creating annotated, protected `v1.0.0-rc.6`, followed by a successful
+   six-job draft workflow and independently verified assets at that exact SHA
+2. F4 standard and chaos soak receipts on every supported host at the RC6 SHA
+3. five funded public-testnet transactions for the four core execution
+   families: native sweep, ERC-20 sweep, revoke, and both legs of `fund_gas` →
+   dependent sweep on Ethereum Sepolia (`11155111`) plus one supported L2
+   testnet: Base Sepolia (`84532`), Arbitrum Sepolia (`421614`), or OP Sepolia
+   (`11155420`) (F6)
+4. checksum-verified clean-machine dmg install and unlock without a development
+   toolchain
+5. `sigillum doctor` on every supported host at the exact RC6 SHA
+6. the remaining C7 operator-console walkthrough and sign-off
+7. a sanitized, independently verified evidence bundle containing all same-RC
+   receipts and bound by filename and SHA-256 digest
+8. the explicit H2 operator decision before the final `v1.0.0` tag is created
+   and its draft Release is published
 
-Until those are complete, the accurate claim is narrower: the prior RC proved
-the workflow shape, while the current hardening checkout still needs a fresh
-full gate and same-commit operator receipts. These docs identify the remaining
-assurance and product-completeness work.
+No independent external penetration test has been performed, and the release
+does not claim one. One becomes necessary if the assurance claim expands beyond
+the source-verified local-first boundary (D-4).
+
+Until those are complete, the accurate claim is narrower: RC5 proved its
+workflow and asset shape at `7e04743`, while the current hardening checkout
+still needs a fresh full gate, RC6, and same-commit operator receipts. These docs
+identify the remaining assurance and product-completeness work.
 
 ## Execution-path security review (F5)
 

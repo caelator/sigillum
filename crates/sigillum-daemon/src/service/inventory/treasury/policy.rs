@@ -40,7 +40,8 @@ impl SigillumService {
                 "simulation_freshness_secs must be greater than 0",
             ));
         }
-        let _guard = self.state.operation_guard().await;
+        let session_context = self.capture_session_operation_context(Some(token))?;
+        let _guard = self.acquire_session_operation(&session_context).await?;
         let mut state = load_inventory_state(&self.state.base_dir)?;
         let previous_policy = state.treasury_policy.clone();
         let now = now_unix();

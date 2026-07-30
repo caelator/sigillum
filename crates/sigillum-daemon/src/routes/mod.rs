@@ -66,6 +66,8 @@ const API_CSP: &str = "default-src 'none'; \
     base-uri 'self'; \
     form-action 'self'";
 
+pub(crate) const BACKGROUND_REQUEST_HEADER: &str = "x-sigillum-background";
+
 fn common_security_headers(h: &mut axum::http::header::HeaderMap) {
     h.insert(
         "x-content-type-options",
@@ -248,6 +250,27 @@ pub(crate) async fn startup_gate(
         StatusCode::SERVICE_UNAVAILABLE,
         "Startup recovery is not ready.",
     )
+}
+
+/// Touch session activity only for successful, user-initiated HTTP requests.
+/// Background polling authenticates normally but cannot keep the vault open.
+pub(crate) async fn activity_touch(
+    State(state): State<Arc<AppState>>,
+    req: Request,
+    next: Next,
+) -> Response {
+    let token = bearer_token(req.headers());
+    let is_background = req
+        .headers()
+        .get(BACKGROUND_REQUEST_HEADER)
+        .is_some_and(|value| value.as_bytes() == b"1");
+    let response = next.run(req).await;
+    if !is_background && response.status().is_success() {
+        if let Some(token) = token {
+            state.touch_session_activity(&token);
+        }
+    }
+    response
 }
 
 fn api_routes() -> AppRouter {
@@ -762,9 +785,20 @@ fn fido2_routes() -> AppRouter {
 
 #[cfg(test)]
 mod tests {
-    use axum::body::to_bytes;
+    use std::sync::Arc;
+    use std::time::Duration;
 
-    use super::serve_ui;
+    use axum::Router;
+    use axum::body::to_bytes;
+    use axum::http::{Request, StatusCode};
+    use axum::middleware;
+    use axum::routing::get;
+    use sigillum_fido2::config::CompartmentMeta;
+    use tempfile::TempDir;
+    use tower::util::ServiceExt;
+
+    use super::{BACKGROUND_REQUEST_HEADER, activity_touch, serve_ui};
+    use crate::AppState;
 
     #[tokio::test]
     async fn serve_ui_csp_matches_delegated_handlers_present_in_html() {
@@ -794,5 +828,54 @@ mod tests {
         assert!(html.contains("data-action=\"togglePoisonWarning\""));
         assert!(csp.contains("script-src 'nonce-"));
         assert!(!csp.contains("script-src-attr 'unsafe-inline'"));
+    }
+
+    #[tokio::test]
+    async fn background_polling_does_not_touch_session_activity() {
+        let dir = TempDir::new().unwrap();
+        let state =
+            Arc::new(AppState::new(dir.path().to_path_buf()).expect("state should initialize"));
+        state.unlock_compartment(
+            0,
+            [1_u8; 32],
+            CompartmentMeta {
+                id: 0,
+                label: "daily".into(),
+                threshold: 1,
+                passphrase_mode: None,
+            },
+        );
+        let session = state.create_session(Some(0));
+        state.backdate_session_activity(&session, Duration::from_secs(60));
+
+        let app = Router::new()
+            .fallback(get(|| async { StatusCode::OK }))
+            .layer(middleware::from_fn_with_state(
+                state.clone(),
+                activity_touch,
+            ))
+            .with_state(state.clone());
+        let background = Request::builder()
+            .uri("/")
+            .header("authorization", format!("Bearer {session}"))
+            .header(BACKGROUND_REQUEST_HEADER, "1")
+            .body(axum::body::Body::empty())
+            .unwrap();
+        assert_eq!(
+            app.clone().oneshot(background).await.unwrap().status(),
+            StatusCode::OK
+        );
+        assert!(state.session_activity_elapsed(&session).unwrap() >= Duration::from_secs(59));
+
+        let interactive = Request::builder()
+            .uri("/")
+            .header("authorization", format!("Bearer {session}"))
+            .body(axum::body::Body::empty())
+            .unwrap();
+        assert_eq!(
+            app.oneshot(interactive).await.unwrap().status(),
+            StatusCode::OK
+        );
+        assert!(state.session_activity_elapsed(&session).unwrap() < Duration::from_secs(1));
     }
 }
