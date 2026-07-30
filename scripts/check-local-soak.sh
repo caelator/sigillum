@@ -27,8 +27,7 @@ DAEMON_LOG="${BASE_DIR}/daemon.log"
 GATEWAY_LOG="${BASE_DIR}/gateway.log"
 RECEIPT_PATH="${SIGILLUM_SOAK_RECEIPT:-}"
 KEEP_ARTIFACTS="${SIGILLUM_SOAK_KEEP_ARTIFACTS:-0}"
-HOST_NAME="$(hostname 2>/dev/null || echo unknown)"
-HOST_OS="$(uname -s 2>/dev/null || echo unknown) $(uname -r 2>/dev/null || echo unknown)"
+HOST_METADATA_JSON=""
 GIT_COMMIT="$(git rev-parse HEAD 2>/dev/null || echo unknown)"
 GIT_BRANCH="$(git branch --show-current 2>/dev/null || echo unknown)"
 if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
@@ -64,7 +63,10 @@ write_receipt() {
     return 0
   fi
 
-  mkdir -p "$(dirname "${RECEIPT_PATH}")"
+  if ! mkdir -p "$(dirname "${RECEIPT_PATH}")"; then
+    echo "local soak failed: could not create receipt directory" >&2
+    return 1
+  fi
 
   local finished_epoch
   local finished_iso
@@ -77,11 +79,12 @@ write_receipt() {
     duration_seconds=0
   fi
 
-  SIGILLUM_SOAK_RECEIPT_PATH="${RECEIPT_PATH}" \
+  # The JavaScript source intentionally reads process.env at runtime.
+  # shellcheck disable=SC2016
+  if ! SIGILLUM_SOAK_RECEIPT_PATH="${RECEIPT_PATH}" \
   SIGILLUM_SOAK_RECEIPT_STATUS="${status}" \
   SIGILLUM_SOAK_RECEIPT_FAILURE="${failure_reason}" \
-  SIGILLUM_SOAK_RECEIPT_HOST="${HOST_NAME}" \
-  SIGILLUM_SOAK_RECEIPT_HOST_OS="${HOST_OS}" \
+  SIGILLUM_SOAK_RECEIPT_HOST_METADATA="${HOST_METADATA_JSON}" \
   SIGILLUM_SOAK_RECEIPT_COMMIT="${GIT_COMMIT}" \
   SIGILLUM_SOAK_RECEIPT_BRANCH="${GIT_BRANCH}" \
   SIGILLUM_SOAK_RECEIPT_DIRTY="${GIT_DIRTY}" \
@@ -117,7 +120,7 @@ const chaosEnabled = process.env.SIGILLUM_SOAK_RECEIPT_CHAOS === "1";
 const chaosAssertionStatus = process.env.SIGILLUM_SOAK_RECEIPT_CHAOS_IN_FLIGHT_STATUS || "";
 const dirtyValue = process.env.SIGILLUM_SOAK_RECEIPT_DIRTY;
 const data = {
-  schema_version: 1,
+  schema_version: 2,
   kind: "sigillum.local_soak",
   status: process.env.SIGILLUM_SOAK_RECEIPT_STATUS,
   failure_reason: process.env.SIGILLUM_SOAK_RECEIPT_FAILURE || null,
@@ -126,10 +129,7 @@ const data = {
     branch: process.env.SIGILLUM_SOAK_RECEIPT_BRANCH,
     dirty: dirtyValue === "true" ? true : dirtyValue === "false" ? false : null,
   },
-  host: {
-    name: process.env.SIGILLUM_SOAK_RECEIPT_HOST,
-    os: process.env.SIGILLUM_SOAK_RECEIPT_HOST_OS,
-  },
+  host: JSON.parse(process.env.SIGILLUM_SOAK_RECEIPT_HOST_METADATA || "null"),
   urls: {
     daemon: process.env.SIGILLUM_SOAK_RECEIPT_DAEMON_URL,
     gateway: process.env.SIGILLUM_SOAK_RECEIPT_GATEWAY_URL,
@@ -179,7 +179,14 @@ const data = {
     : null,
 };
 fs.writeFileSync(path, `${JSON.stringify(data, null, 2)}\n`);
-' || true
+'; then
+    echo "local soak failed: could not persist schema-v2 receipt" >&2
+    return 1
+  fi
+  if [[ ! -s "${RECEIPT_PATH}" ]]; then
+    echo "local soak failed: receipt is missing or empty after write" >&2
+    return 1
+  fi
   RECEIPT_WRITTEN=1
 }
 
@@ -200,7 +207,9 @@ cleanup() {
 on_exit() {
   local status="$?"
   if [[ "${status}" -ne 0 && "${RECEIPT_WRITTEN}" != "1" ]]; then
-    write_receipt "failed" "script exited with status ${status}"
+    if ! write_receipt "failed" "script exited with status ${status}"; then
+      echo "local soak failed: failure receipt could not be persisted" >&2
+    fi
   fi
   cleanup
 }
@@ -214,7 +223,9 @@ fail() {
       tail -n 80 "${log}" >&2 || true
     fi
   done
-  write_receipt "failed" "$*"
+  if ! write_receipt "failed" "$*"; then
+    echo "local soak failed: failure receipt could not be persisted" >&2
+  fi
   exit 1
 }
 
@@ -229,6 +240,8 @@ json_assert() {
   local json="$1"
   local label="$2"
   local predicate="$3"
+  # The JavaScript source intentionally contains a template literal.
+  # shellcheck disable=SC2016
   node -e '
 const fs = require("fs");
 const label = process.argv[1];
@@ -245,6 +258,8 @@ if (!ok) {
 }
 
 json_session_token() {
+  # The JavaScript source intentionally contains a template literal.
+  # shellcheck disable=SC2016
   node -e '
 const fs = require("fs");
 const data = JSON.parse(fs.readFileSync(0, "utf8"));
@@ -437,6 +452,10 @@ return data.gateway === "ok" &&
 require_command cargo
 require_command curl
 require_command node
+require_command shasum
+
+HOST_METADATA_JSON="$(bash ./scripts/release-host-metadata.sh)" ||
+  fail "could not collect release host metadata"
 
 if ! [[ "${SOAK_SECONDS}" =~ ^[0-9]+$ ]] || [[ "${SOAK_SECONDS}" -lt 1 ]]; then
   fail "SIGILLUM_SOAK_SECONDS must be a positive integer"

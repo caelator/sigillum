@@ -138,7 +138,9 @@ The normal source release gate runs this regression test before tag time.
 
 The release workflow always creates a draft. RC releases must remain
 unpublished drafts with `prerelease=true`; the final draft and published
-release must have `prerelease=false`. RC tags build and checksum the candidate
+release must have `prerelease=false`.
+`scripts/check-release-state-contract.sh` rejects any other RC-draft,
+final-draft, or final-published state. RC tags build and checksum the candidate
 payloads once. The final tag still runs both source-verification
 legs, but its artifact jobs are intentionally skipped: the release job selects
 the highest retained RC identified by the remote tag contract, requires its
@@ -209,12 +211,13 @@ Preserve the sanitized evidence outside the checkout until final promotion:
    `MANIFEST.json`, `SHA256SUMS`, `f4/standard.json`, `f4/chaos.json`,
    `f6/receipts.json`, `desktop/clean-install.json`,
    `doctor/mac-server.json`, `ui/signoff.json`, and
-   `release/asset-SHA256SUMS`. Both F4 receipts use schema v2, record
-   `platform: macos`, the exact macOS `ProductVersion`, canonical `aarch64`,
-   and an opaque SHA-256 machine identity; the validator requires macOS 15.x
-   and the same identity in both receipts. The clean-install, doctor, and UI
-   operator receipts also use schema v2 and share one exact RC object (`tag`,
-   `tag_object`, and `peeled_sha`). They bind the qualified artifact
+   `release/asset-SHA256SUMS`. Both F4 soak receipts use schema v2 and record
+   `platform: macos`, the exact `sw_vers -productVersion` value, canonical
+   `aarch64`, and an opaque SHA-256 of the machine identity. The bundle checker
+   requires macOS 15.x on both receipts and requires their identity digests to
+   match. The clean-install, doctor, and UI operator receipts also use schema
+   v2 and share one exact RC object (`tag`, `tag_object`, and `peeled_sha`).
+   They bind the qualified artifact
    filename and digest, the `mac-server` host identity (`macos`, macOS 15,
    `aarch64`), and the release operator identity and UTC review time. The
    clean-install receipt names the exact RC dmg, application version,
@@ -284,8 +287,10 @@ or recreating the tag.
    `HEAD == GATE_SHA == origin/main`, then create and push the annotated tag.
    Every pushed `N` is permanently burned, even when no draft was created.
 4. Require the release contract job, both verify legs, both artifact jobs, and
-   the draft-release job to pass. Require the unique RC release to remain
-   draft, unpublished, and `prerelease=true`.
+   the draft-release job to pass. Fetch the unique RC release metadata and run
+   `bash ./scripts/check-release-state-contract.sh rc-draft "$RC_TAG"` with
+   that JSON on standard input; it must still be a draft, unpublished, and
+   explicitly marked as `prerelease=true`.
 5. Download the draft assets and verify `SHA256SUMS`.
 6. Complete the section 5 receipts against that exact peeled RC commit SHA,
    independently verify every F6 transaction through the declared public RPC

@@ -160,14 +160,24 @@ jq -e \
   ' "${EXTRACTED}/MANIFEST.json" >/dev/null ||
   fail "MANIFEST.json does not bind every required gate to the exact RC identities"
 
-jq -e --arg rc_sha "${RC_SHA}" '
-    .schema_version == 1 and
+F4_HOST_FILTER='
+  .host.name == "mac-server" and
+  .host.platform == "macos" and
+  (.host.product_version |
+    type == "string" and
+    test("^15\\.[0-9]+(\\.[0-9]+)?$")) and
+  .host.arch == "aarch64" and
+  (.host.identity_sha256 |
+    type == "string" and test("^[0-9a-f]{64}$"))
+'
+
+jq -e --arg rc_sha "${RC_SHA}" "${F4_HOST_FILTER}"'
+    and
+    .schema_version == 2 and
     .kind == "sigillum.local_soak" and
     .status == "passed" and
     .repo.commit == $rc_sha and
     .repo.dirty == false and
-    .host.name == "mac-server" and
-    (.host.os | type == "string" and length > 0) and
     (.configured.soak_seconds |
       type == "number" and . == floor and . >= 3600) and
     (.timing.duration_seconds |
@@ -178,14 +188,13 @@ jq -e --arg rc_sha "${RC_SHA}" '
   ' "${EXTRACTED}/f4/standard.json" >/dev/null ||
   fail "F4 standard receipt does not prove the required clean 3600-second RC soak"
 
-jq -e --arg rc_sha "${RC_SHA}" '
-    .schema_version == 1 and
+jq -e --arg rc_sha "${RC_SHA}" "${F4_HOST_FILTER}"'
+    and
+    .schema_version == 2 and
     .kind == "sigillum.local_soak" and
     .status == "passed" and
     .repo.commit == $rc_sha and
     .repo.dirty == false and
-    .host.name == "mac-server" and
-    (.host.os | type == "string" and length > 0) and
     (.configured.soak_seconds |
       type == "number" and . == floor and . >= 600) and
     (.timing.duration_seconds |
@@ -197,6 +206,15 @@ jq -e --arg rc_sha "${RC_SHA}" '
     .chaos.in_flight_assertion.status == "passed"
   ' "${EXTRACTED}/f4/chaos.json" >/dev/null ||
   fail "F4 chaos receipt does not prove the required clean 600-second RC soak"
+
+STANDARD_HOST_IDENTITY="$(
+  jq -r '.host.identity_sha256' "${EXTRACTED}/f4/standard.json"
+)"
+CHAOS_HOST_IDENTITY="$(
+  jq -r '.host.identity_sha256' "${EXTRACTED}/f4/chaos.json"
+)"
+[[ "${STANDARD_HOST_IDENTITY}" == "${CHAOS_HOST_IDENTITY}" ]] ||
+  fail "F4 standard and chaos receipts do not bind the same host identity"
 
 jq -e --arg rc_sha "${RC_SHA}" '
     def flattened_claims:

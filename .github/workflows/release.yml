@@ -335,10 +335,9 @@ jobs:
                   end
               '
           )"
-          jq -e --arg tag "${PROMOTION_RC_TAG}" '
-            .tag_name == $tag and
-            .draft == true and
-            .published_at == null and
+          bash ./scripts/check-release-state-contract.sh \
+            rc-draft "${PROMOTION_RC_TAG}" <<< "${rc_release}"
+          jq -e '
             (.assets | length == 6) and
             all(.assets[]; .state == "uploaded" and .size > 0)
           ' <<< "${rc_release}" >/dev/null
@@ -409,6 +408,7 @@ jobs:
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
           RELEASE_TAG: ${{ github.ref_name }}
           RELEASE_SHA: ${{ github.sha }}
           RELEASE_TAG_OBJECT: ${{ needs.release-contract.outputs.tag_object }}
@@ -425,7 +425,38 @@ jobs:
           fi
           GITHUB_OUTPUT="" bash ./scripts/check-release-tag-contract.sh \
             "${RELEASE_TAG}" "${RELEASE_SHA}" origin "${RELEASE_TAG_OBJECT}"
-          gh release create "${RELEASE_TAG}" --draft --verify-tag --title "Sigillum ${RELEASE_TAG}" --notes-file "${RUNNER_TEMP}/release-notes.md" dist/*
+
+          release_role="final-draft"
+          release_args=(
+            "${RELEASE_TAG}"
+            --draft
+            --verify-tag
+            --title "Sigillum ${RELEASE_TAG}"
+            --notes-file "${RUNNER_TEMP}/release-notes.md"
+          )
+          if [[ "${RELEASE_TAG}" == *-rc.* ]]; then
+            release_role="rc-draft"
+            release_args+=(--prerelease)
+          fi
+          gh release create "${release_args[@]}" dist/*
+
+          created_release="$(
+            gh api --paginate "repos/${REPOSITORY}/releases?per_page=100" |
+              jq -sc --arg tag "${RELEASE_TAG}" '
+                add
+                | [.[] | select(.tag_name == $tag)]
+                | if length == 1
+                  then .[0]
+                  else error("expected exactly one created release")
+                  end
+              '
+          )"
+          bash ./scripts/check-release-state-contract.sh \
+            "${release_role}" "${RELEASE_TAG}" <<< "${created_release}"
+          jq -e '
+            (.assets | length == 6) and
+            all(.assets[]; .state == "uploaded" and .size > 0)
+          ' <<< "${created_release}" >/dev/null
           if [[ -n "${PROMOTION_RC_TAG}" ]]; then
             GITHUB_OUTPUT="" bash ./scripts/check-release-tag-contract.sh \
               "${PROMOTION_RC_TAG}" "${PROMOTION_RC_SHA}" origin \

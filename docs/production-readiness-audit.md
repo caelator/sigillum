@@ -100,15 +100,20 @@ draft/assets remain available through final-draft verification. A final
 `v1.0.0` tag must peel to the identical commit as the RC receipts, or those
 receipts are void and a new RC is required.
 
-The intended final-promotion contract reruns the source-verification legs but
+The final-promotion implementation reruns the source-verification legs but
 skips artifact rebuilds. It copies the exact five qualified RC payload bytes
 under final names, verifies byte identity and tag-normalized digest equality,
-regenerates `SHA256SUMS`, attaches the validated release-evidence bundle as the
-seventh asset, and re-verifies the live final draft before the H2-authorized
-conditional publication. That path is not yet executable in the
-merge-in-progress checkout: the promotion script, final-tag workflow branches,
-and release-state enforcement are an integration prerequisite. Fresh final-tag
-payload builds cannot substitute for the qualified RC bytes.
+regenerates `SHA256SUMS`, and adds the validated release-evidence bundle as the
+seventh asset. Fresh final-tag payload builds cannot substitute for the
+qualified RC bytes. This implementation remains unqualified release machinery
+until the exact integrated HEAD and RC6 gates pass.
+
+RC release records must remain unpublished drafts with `prerelease=true`
+through qualification and exact-byte promotion. The final draft and published
+release must both have `prerelease=false`.
+`scripts/check-release-state-contract.sh` and the H2 ceremony validate
+`rc-draft`, each `final-draft` snapshot, and `final-published` explicitly
+instead of treating `draft` alone as sufficient release metadata.
 
 The historical `v1.0.0-rc.1` rehearsal tag was deleted under the superseded
 cleanup procedure. That number remains burned and is not recreated. It is the
@@ -262,14 +267,14 @@ pass with empty ignore lists.
 | Daemon UI compiles and tested source matches generated assets | `npm ci`, `npm audit --audit-level=high`, `npm run typecheck`, `npm test`, `npm run build`, generated-asset freshness, and pinned accessibility checks | Five-destination implementation is integrated; exact integrated-HEAD gate and RC6 operator sign-off pending |
 | Rust workspace builds, tests, and lints | Locked workspace check/test/clippy plus independent no-HID FIDO2 check/test/clippy inside the release gate | Focused integration checks exist; exact integrated-HEAD release gate pending |
 | Security and supply-chain baseline | `cargo audit --file Cargo.lock` and `cargo deny --locked check` inside the release gate | Must be re-established for the exact integrated lockfile |
-| Release identity and monotonicity | Remote direct/peeled tag validation, event-SHA and cross-job tag-object binding, scratch-ref recovery, retained monotonically numbered RC tags, and draft-only release creation | Proven only when the tag workflow passes at the gated `main` SHA; branch/tag protection is a fail-closed pre-merge settings check |
+| Release identity and monotonicity | Remote direct/peeled tag validation, event-SHA and cross-job tag-object binding, scratch-ref recovery, retained monotonically numbered RC tags, draft-only release creation, and explicit RC/final draft/published prerelease-state contracts | Proven only when the tag workflow passes at the gated `main` SHA; branch/tag protection is a fail-closed pre-merge settings check |
 | Local daemon and gateway loopback integration behavior | Workspace integration tests pass outside the sandbox | Focused integration tests pass; exact integrated-HEAD gate, protected-main CI, and RC6 evidence remain |
-| Target-host operational readiness | RC5 standard soak, chaos soak, and doctor receipts bind to `7e04743` | Proven for RC5 only; repeat all required host evidence at RC6 because the feature line changes code |
+| Target-host operational readiness | RC5 standard soak, chaos soak, and doctor receipts bind to `7e04743`; the schema-v2 receipt contract records platform, exact macOS product version, canonical architecture, and opaque machine identity | Proven for RC5 only; repeat the 3600-second standard soak, 600-second chaos soak, and doctor at RC6 on the same eligible macOS 15.x/aarch64 host |
 | Runtime daemon lifecycle behavior | `scripts/check-runtime-smoke.sh` starts the daemon, verifies status, initializes a passphrase compartment, writes and reads vault canaries, locks, unlocks, lists compartments, and runs doctor | Exact integrated-HEAD runtime gate plus eligible-host RC6 doctor receipt pending |
 | Queue submission durability, dependency finality, and pause | Queue schema v5 persists `prepared` raw bytes/hash and a pre-RPC `submitted_unknown` marker; recovery checks receipts or resubmits exact bytes without re-signing; dependent plan steps remain unsigned until every prerequisite reaches receipt-confirmed finality; the real HTTP pause regression latches before the active drain mutex and blocks later broadcasts | Focused integration tests pass; exact integrated-HEAD gate, protected-main CI, and RC6 evidence remain |
 | Runtime browser/UI visual behavior | DOM tests, mock accessibility, screenshots, and migrated real-daemon browser smoke cover visible setup and all five destinations | Implementation evidence exists; exact integrated-HEAD gate and RC6 operator walkthrough/sign-off remain |
 | Desktop app bundle readiness | Source/mounted-dmg verification runs inside `./scripts/check-release.sh`; RC5 workflow `29248938476` produced checksum-valid historical draft assets | Exact integrated-HEAD source gate, fresh RC6 workflow/assets, and clean-machine install/unlock remain unproved |
-| Long-duration reliability | Recovery/crash tests plus RC5 standard 3600-second and chaos 600-second receipts passed at `7e04743` | Historical for the feature line; standard plus chaos receipts on each supported host must bind to RC6 |
+| Long-duration reliability | Recovery/crash tests plus RC5 standard 3600-second and chaos 600-second receipts passed at `7e04743` | Historical for the feature line; schema-v2 standard and chaos receipts from the same eligible target host must bind to RC6 |
 | External security assurance | Code gates, audit, deny, local adversarial/fuzz gate, SSRF/local-boundary tests, and UI boundary tests are part of the release contract | Exact integrated-HEAD source contract and independent review pending; no independent external penetration test has been performed |
 | Full wallet-management product roadmap | EVM roadmap phases 1-9 shipped and tested: discovery, inventory, risk, planning, policy-gated fail-closed execution (default off), DeFi exit adapters, and treasury automation | EVM scope is complete except swap execution, which is deferred per D-13; only non-EVM chains (phase 10), swap execution (D-13), and fiat/NFT valuation (D-16) remain deferred |
 

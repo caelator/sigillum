@@ -440,6 +440,8 @@ pinned-SHA and post-gate identity checks with a shorter tag command:
 4. Verify the RC release is a draft, unpublished, and `prerelease=true`, then
    verify it contains the `.dmg`, zipped `.app`, both `sigillum-cli` `tar.gz`
    archives, `THIRD-PARTY-NOTICES.txt`, and `SHA256SUMS`.
+   `scripts/check-release-state-contract.sh rc-draft` performs the
+   fail-closed release-state check against the fetched release JSON.
 5. Download the assets and run `shasum -a 256 --check SHA256SUMS --ignore-missing`.
 6. Confirm the release remains an unpublished prerelease draft and its body
    carries the dated `CHANGELOG` section for the version. There is no fallback
@@ -455,14 +457,15 @@ operator-evidence archive digest into the protected annotated tag, waits for
 the exact final workflow, reruns source verification while skipping artifact
 rebuilds, copies the exact five qualified RC payload bytes to final names,
 verifies byte identity and tag-normalized digests, regenerates `SHA256SUMS`,
-requires the final draft to be `prerelease=false`, uploads the evidence bundle
-as the seventh asset without replacement, re-downloads and re-verifies all
-seven assets, and only then performs the conditional publication authorized by
-the H2 approval recorded before the ceremony began.
-This path is not executable in the merge-in-progress checkout: the promotion
-script, final-tag workflow branches, and release-state enforcement must be
-integrated, then the exact HEAD must repeat the clean gate and independent
-review before H2.
+requires each final-draft snapshot to be `prerelease=false`, uploads the
+evidence bundle as the seventh asset without replacement, re-downloads and
+re-verifies all seven assets, then requires the published release to retain
+`prerelease=false`. `scripts/check-release-state-contract.sh` enforces those
+`final-draft` and `final-published` transitions before the conditional
+publication authorized by the H2 approval recorded before the ceremony began.
+The exact-byte promotion path is implemented, but no RC6 exists and H2 remains
+blocked until the exact integrated HEAD, protected CI, RC6 qualification,
+operator receipts, and evidence bundle all pass.
 
 ## Operational Notes
 

@@ -81,11 +81,17 @@ JSON
 
   cat > "${payload}/f4/standard.json" <<JSON
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "kind": "sigillum.local_soak",
   "status": "passed",
   "repo": {"commit": "${RC_SHA}", "dirty": false},
-  "host": {"name": "mac-server", "os": "macOS test fixture"},
+  "host": {
+    "name": "mac-server",
+    "platform": "macos",
+    "product_version": "15.7.1",
+    "arch": "aarch64",
+    "identity_sha256": "9999999999999999999999999999999999999999999999999999999999999999"
+  },
   "configured": {"soak_seconds": 3600},
   "timing": {"duration_seconds": 3605},
   "evidence": {"iterations": 120, "doctor_runs": 120},
@@ -95,11 +101,17 @@ JSON
 
   cat > "${payload}/f4/chaos.json" <<JSON
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "kind": "sigillum.local_soak",
   "status": "passed",
   "repo": {"commit": "${RC_SHA}", "dirty": false},
-  "host": {"name": "mac-server", "os": "macOS test fixture"},
+  "host": {
+    "name": "mac-server",
+    "platform": "macos",
+    "product_version": "15.7.1",
+    "arch": "aarch64",
+    "identity_sha256": "9999999999999999999999999999999999999999999999999999999999999999"
+  },
   "configured": {"soak_seconds": 600},
   "timing": {"duration_seconds": 605},
   "evidence": {"iterations": 60, "doctor_runs": 60},
@@ -628,6 +640,12 @@ archive_payload "${SHORT_SOAK_CASE}/payload" "${SHORT_SOAK_CASE}/${BUNDLE_NAME}"
 expect_failure "${SHORT_SOAK_CASE}/${BUNDLE_NAME}" \
   "F4 standard receipt does not prove the required clean 3600-second RC soak"
 
+short_standard_configured_bundle="$(build_evidence_mutation_case \
+  f4-short-standard-configured f4/standard.json \
+  '.configured.soak_seconds = 3599')"
+expect_failure "${short_standard_configured_bundle}" \
+  "F4 standard receipt does not prove the required clean 3600-second RC soak"
+
 STRING_SOAK_CASE="${TMP_ROOT}/string-soak"
 mkdir -p "${STRING_SOAK_CASE}"
 write_payload "${STRING_SOAK_CASE}/payload"
@@ -654,6 +672,96 @@ generate_sums "${WRONG_HOST_CASE}/payload"
 archive_payload "${WRONG_HOST_CASE}/payload" "${WRONG_HOST_CASE}/${BUNDLE_NAME}"
 expect_failure "${WRONG_HOST_CASE}/${BUNDLE_NAME}" \
   "F4 standard receipt does not prove the required clean 3600-second RC soak"
+
+wrong_standard_commit_bundle="$(build_evidence_mutation_case \
+  f4-standard-wrong-commit f4/standard.json \
+  '.repo.commit = "3333333333333333333333333333333333333333"')"
+expect_failure "${wrong_standard_commit_bundle}" \
+  "F4 standard receipt does not prove the required clean 3600-second RC soak"
+
+dirty_standard_bundle="$(build_evidence_mutation_case \
+  f4-standard-dirty f4/standard.json \
+  '.repo.dirty = true')"
+expect_failure "${dirty_standard_bundle}" \
+  "F4 standard receipt does not prove the required clean 3600-second RC soak"
+
+legacy_f4_bundle="$(build_evidence_mutation_case \
+  f4-legacy-schema f4/standard.json \
+  '.schema_version = 1')"
+expect_failure "${legacy_f4_bundle}" \
+  "F4 standard receipt does not prove the required clean 3600-second RC soak"
+
+wrong_f4_platform_bundle="$(build_evidence_mutation_case \
+  f4-wrong-platform f4/standard.json \
+  '.host.platform = "linux"')"
+expect_failure "${wrong_f4_platform_bundle}" \
+  "F4 standard receipt does not prove the required clean 3600-second RC soak"
+
+wrong_f4_product_version_bundle="$(build_evidence_mutation_case \
+  f4-wrong-product-version f4/standard.json \
+  '.host.product_version = "26.5.2"')"
+expect_failure "${wrong_f4_product_version_bundle}" \
+  "F4 standard receipt does not prove the required clean 3600-second RC soak"
+
+wrong_f4_arch_bundle="$(build_evidence_mutation_case \
+  f4-wrong-arch f4/standard.json \
+  '.host.arch = "x86_64"')"
+expect_failure "${wrong_f4_arch_bundle}" \
+  "F4 standard receipt does not prove the required clean 3600-second RC soak"
+
+legacy_f4_chaos_bundle="$(build_evidence_mutation_case \
+  f4-chaos-legacy-schema f4/chaos.json \
+  '.schema_version = 1')"
+expect_failure "${legacy_f4_chaos_bundle}" \
+  "F4 chaos receipt does not prove the required clean 600-second RC soak"
+
+wrong_f4_chaos_platform_bundle="$(build_evidence_mutation_case \
+  f4-chaos-wrong-platform f4/chaos.json \
+  '.host.platform = "linux"')"
+expect_failure "${wrong_f4_chaos_platform_bundle}" \
+  "F4 chaos receipt does not prove the required clean 600-second RC soak"
+
+wrong_f4_chaos_product_version_bundle="$(build_evidence_mutation_case \
+  f4-chaos-wrong-product-version f4/chaos.json \
+  '.host.product_version = "26.5.2"')"
+expect_failure "${wrong_f4_chaos_product_version_bundle}" \
+  "F4 chaos receipt does not prove the required clean 600-second RC soak"
+
+wrong_f4_chaos_arch_bundle="$(build_evidence_mutation_case \
+  f4-chaos-wrong-arch f4/chaos.json \
+  '.host.arch = "x86_64"')"
+expect_failure "${wrong_f4_chaos_arch_bundle}" \
+  "F4 chaos receipt does not prove the required clean 600-second RC soak"
+
+wrong_chaos_commit_bundle="$(build_evidence_mutation_case \
+  f4-chaos-wrong-commit f4/chaos.json \
+  '.repo.commit = "3333333333333333333333333333333333333333"')"
+expect_failure "${wrong_chaos_commit_bundle}" \
+  "F4 chaos receipt does not prove the required clean 600-second RC soak"
+
+dirty_chaos_bundle="$(build_evidence_mutation_case \
+  f4-chaos-dirty f4/chaos.json \
+  '.repo.dirty = true')"
+expect_failure "${dirty_chaos_bundle}" \
+  "F4 chaos receipt does not prove the required clean 600-second RC soak"
+
+short_chaos_configured_bundle="$(build_evidence_mutation_case \
+  f4-chaos-short-configured f4/chaos.json \
+  '.configured.soak_seconds = 599')"
+expect_failure "${short_chaos_configured_bundle}" \
+  "F4 chaos receipt does not prove the required clean 600-second RC soak"
+
+short_chaos_duration_bundle="$(build_evidence_mutation_case \
+  f4-chaos-short-duration f4/chaos.json \
+  '.timing.duration_seconds = 599')"
+expect_failure "${short_chaos_duration_bundle}" \
+  "F4 chaos receipt does not prove the required clean 600-second RC soak"
+
+mismatched_f4_identity_bundle="$(build_evidence_mutation_case \
+  f4-mismatched-identity f4/chaos.json \
+  '.host.identity_sha256 = "8888888888888888888888888888888888888888888888888888888888888888"')"
+expect_failure "${mismatched_f4_identity_bundle}" \
+  "F4 standard and chaos receipts do not bind the same host identity"
 
 legacy_clean_install_bundle="$(build_evidence_mutation_case \
   clean-install-legacy-schema desktop/clean-install.json \

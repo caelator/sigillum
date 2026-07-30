@@ -1321,16 +1321,19 @@ Order within W7 is strict: W7.1 → W7.2 → W7.3 → W7.4 → W7.5.
 - **Accept:** 600s chaos run passes with ≥2 kill cycles and the in-flight
   job assertion. **Size:** M.
 
-#### F4 — Release-commit soak receipts per supported host
+#### F4 — Release-commit soak receipts on the eligible target host
 
 - **Ordering note:** depends on G3+G5 — receipts must reference the
   release-candidate SHA. Execute while preparing H1.
-- **Steps:** on each host named supported in
-  `docs/production-readiness-audit.md`: 3600s standard soak + 600s chaos soak
-  at the RC commit. Both receipts must use schema v2 and record
+- **Steps:** on the eligible target host named in
+  `docs/production-readiness-audit.md` (currently `mac-server`): 3600s standard
+  soak + 600s chaos soak at the RC commit. Both receipts must use schema v2 and
+  record
   `platform: macos`, the exact macOS `ProductVersion`, canonical `aarch64`,
   and the same opaque SHA-256 machine identity. Record the sanitized receipt
-  metadata in the external release-evidence bundle. Receipts cannot be
+  filename, SHA, and host metadata in the external release-evidence bundle. H2
+  binds that bundle's digest into the immutable final tag; H3 writes the
+  sanitized summary and bundle link into the audit doc. Receipts cannot be
   committed into their own receipt-bearing RC SHA.
 - **Accept:** fresh schema-v2 receipts at the RC SHA from the same eligible
   macOS 15.x/aarch64 host. The current macOS 26.5.2/arm64 development host is
@@ -1469,8 +1472,10 @@ Order within W7 is strict: W7.1 → W7.2 → W7.3 → W7.4 → W7.5.
   tag-normalized digest equality through
   `scripts/promote-release-assets.sh`. It revalidates the exact RC tag object as
   the live highest retained RC before promotion and around final-draft
-  creation. The final draft and published release are `prerelease=false`. The
-  RC artifact job also attaches a `THIRD-PARTY-NOTICES` file
+  creation. The final draft and published release must both retain
+  `prerelease=false`; `scripts/check-release-state-contract.sh` fails closed on
+  every RC-draft, final-draft, and final-published state transition. The RC
+  artifact job also attaches a `THIRD-PARTY-NOTICES` file
   generated with a pinned `cargo-about` (MIT/Apache attribution for shipped
   binaries) and includes it in the `.dmg` resources — `cargo deny` gates
   licenses but does not produce attribution. Dry-run with the next monotonically
@@ -1542,12 +1547,15 @@ below; the remaining items are operator human-gates.
 > protected merge, and required CI.
 
 - [ ] Exact integrated HEAD passes `./scripts/check-release.sh` from a clean
-      tree and independent review converges; then protected merge and CI pass.
+      tree and independent review converges; then protected merge and required
+      CI pass. (No qualifying exact-HEAD receipt exists yet.)
 - [ ] The RC6 six-job draft release workflow is green; the unique release is
-      draft, unpublished, and `prerelease=true`, and the five payload assets
-      independently match `SHA256SUMS`.
+      draft, unpublished, and `prerelease=true` under the release-state
+      contract, and the five payload assets independently match `SHA256SUMS`.
+      (No RC6 exists.)
 - [ ] F4 schema-v2 standard 3600-second and chaos 600-second receipts reference
-      the RC6 SHA and the same macOS 15.x/aarch64 machine identity.
+      the RC6 SHA and the same macOS 15.x/aarch64 machine identity. (No
+      qualifying RC6 receipt exists.)
 - [ ] F6 testnet receipts record five transactions for the four core execution
       families, including both confirmed gas-chain legs, at RC6. Funded
       public-testnet access is required.
@@ -1667,11 +1675,9 @@ below; the remaining items are operator human-gates.
         then .[0]
         else error("expected exactly one qualified RC release")
         end')"
-  jq -e --arg tag "${RC_TAG}" '
-    .tag_name == $tag and
-    .draft == true and
-    .prerelease == true and
-    .published_at == null and
+  bash ./scripts/check-release-state-contract.sh \
+    rc-draft "${RC_TAG}" <<< "${RC_RELEASE}"
+  jq -e '
     (.assets | length == 6) and
     all(.assets[]; .state == "uploaded" and .size > 0)
   ' <<< "${RC_RELEASE}" >/dev/null
@@ -1774,12 +1780,8 @@ below; the remaining items are operator human-gates.
       add
       | [.[] | select(.tag_name == $tag)]
       | if length == 1 then .[0] else error("expected one final release") end')"
-  jq -e '
-    .draft == true and
-    .prerelease == false and
-    .published_at == null
-  ' \
-    <<< "${FINAL_RELEASE}" >/dev/null
+  bash ./scripts/check-release-state-contract.sh \
+    final-draft "${FINAL_TAG}" <<< "${FINAL_RELEASE}"
 
   EXPECTED_ASSETS="${VERIFY_DIR}/expected-assets"
   REMOTE_ASSETS="${VERIFY_DIR}/remote-assets"
@@ -1825,11 +1827,8 @@ below; the remaining items are operator human-gates.
       add
       | [.[] | select(.tag_name == $tag)]
       | if length == 1 then .[0] else error("expected one final release") end')"
-  jq -e '
-    .draft == true and
-    .prerelease == false and
-    .published_at == null
-  ' <<< "${FINAL_RELEASE}" >/dev/null
+  bash ./scripts/check-release-state-contract.sh \
+    final-draft "${FINAL_TAG}" <<< "${FINAL_RELEASE}"
   EVIDENCE_ASSET_ID="$(jq -r --arg name "${EVIDENCE_NAME}" '
     [.assets[] | select(.name == $name)]
     | if length == 1 then .[0].id else error("expected one evidence asset") end' \
@@ -1855,12 +1854,8 @@ below; the remaining items are operator human-gates.
       add
       | [.[] | select(.tag_name == $tag)]
       | if length == 1 then .[0] else error("expected one final release") end')"
-  jq -e '
-    .draft == true and
-    .prerelease == false and
-    .published_at == null
-  ' \
-    <<< "${PREPUBLISH_RELEASE}" >/dev/null
+  bash ./scripts/check-release-state-contract.sh \
+    final-draft "${FINAL_TAG}" <<< "${PREPUBLISH_RELEASE}"
   PREPUBLISH_EXPECTED="${VERIFY_DIR}/prepublish-expected-assets"
   PREPUBLISH_ACTUAL="${VERIFY_DIR}/prepublish-actual-assets"
   printf '%s\n' \
@@ -1918,8 +1913,8 @@ below; the remaining items are operator human-gates.
   PUBLISHED_RELEASE="$(gh api --method PATCH \
     "repos/${REPO}/releases/${FINAL_RELEASE_ID}" \
     -F draft=false -F prerelease=false -f make_latest=true)"
-  jq -e '.draft == false and .prerelease == false and .published_at != null' \
-    <<< "${PUBLISHED_RELEASE}" >/dev/null
+  bash ./scripts/check-release-state-contract.sh \
+    final-published "${FINAL_TAG}" <<< "${PUBLISHED_RELEASE}"
 )
 ```
 
@@ -1998,7 +1993,7 @@ Phase F — Assurance
 - [x] F1 adversarial coverage: receiving/treasury/chains/execution
 - [x] F2 nightly deep-fuzz
 - [x] F3 chaos soak mode (+ in-flight job assertion)
-- [ ] F4 RC soak receipts per supported host
+- [ ] F4 RC soak receipts on the same eligible target host
 - [x] F5 execution-path security review
 - [ ] F6 testnet execution receipts (human-in-the-loop)
 - [x] F7 0.1→1.0 data-dir upgrade verification
