@@ -2,11 +2,11 @@
 
 .result-box {
   margin: var(--space-3) 0;
-  padding: var(--space-3) var(--space-4);
-  background: var(--bg);
-  border: 1px solid var(--border-strong);
-  border-left: 2px solid var(--accent);
-  border-radius: var(--radius-sm);
+  padding: 4px 0 4px var(--space-3);
+  background: transparent;
+  border: 0;
+  border-left: 1px solid var(--accent);
+  border-radius: 0;
   font-family: var(--mono);
   font-size: var(--fs-xs);
   font-variant-numeric: tabular-nums;
@@ -17,10 +17,11 @@
 
 .info-box {
   margin: var(--space-3) 0;
-  padding: 10px var(--space-4);
-  background: var(--info-tint);
-  border: 1px solid rgba(74, 163, 216, 0.28);
-  border-radius: var(--radius-sm);
+  padding: 4px 0 4px var(--space-3);
+  background: transparent;
+  border: 0;
+  border-left: 1px solid var(--border);
+  border-radius: 0;
   font-size: var(--fs-xs);
   color: var(--text-secondary);
   line-height: 1.6;
@@ -28,20 +29,35 @@
 
 .poison-warning {
   margin: var(--space-3) 0;
-  padding: 10px var(--space-4);
-  background: var(--danger-tint);
-  border: 1px solid rgba(229, 84, 79, 0.4);
-  border-radius: var(--radius-sm);
+  padding: 4px 0 4px var(--space-3);
+  background: transparent;
+  border: 0;
+  border-left: 1px solid var(--danger);
+  border-radius: 0;
   font-size: var(--fs-xs);
   color: var(--danger-text);
   line-height: 1.6;
 }
 
+.warning-box {
+  margin: var(--space-3) 0;
+  padding: 4px 0 4px var(--space-3);
+  background: transparent;
+  border: 0;
+  border-left: 1px solid var(--warning);
+  border-radius: 0;
+  font-size: var(--fs-xs);
+  color: var(--warning-text);
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+
 .empty-state {
   margin: var(--space-2) 0;
-  padding: var(--space-6);
-  border: 1px dashed var(--border-strong);
+  padding: var(--space-6) var(--space-5);
+  border: 0;
   border-radius: var(--radius);
+  background: rgba(168, 179, 196, 0.035);
   font-size: var(--fs-sm);
   color: var(--text-muted);
   text-align: center;
@@ -57,10 +73,10 @@
   height: var(--control-h);
   margin-top: var(--space-2);
   padding: 0 var(--space-3);
-  background: transparent;
-  border: 1px solid var(--border-strong);
+  background: var(--accent-tint);
+  border: 1px solid rgba(91, 124, 250, 0.35);
   border-radius: var(--radius-sm);
-  color: var(--text-secondary);
+  color: var(--accent-text);
   font: inherit;
   font-size: var(--fs-sm);
   font-weight: 600;
@@ -74,9 +90,27 @@
 }
 
 .empty-state-action:hover:not(:disabled) {
-  background: var(--surface-2);
-  border-color: #4a5670;
+  background: var(--accent-tint-strong);
+  border-color: rgba(91, 124, 250, 0.55);
   color: var(--text);
+}
+
+.empty-state-action:focus-visible {
+  outline: 2px solid var(--accent-ring);
+  outline-offset: 2px;
+}
+
+#auditList.text-meta,
+#auditList > .text-meta,
+#compartmentList > .text-meta {
+  display: block;
+  margin: var(--space-2) 0;
+  padding: var(--space-5);
+  border-radius: var(--radius);
+  background: rgba(168, 179, 196, 0.035);
+  color: var(--text-muted);
+  text-align: center;
+  line-height: 1.55;
 }
 
 /* ── 12b. Wallet manager (segmented tabs, advanced fields, mnemonic) ──────── */
@@ -171,10 +205,11 @@
 
 .mnemonic-reveal {
   margin: var(--space-3) 0;
-  padding: var(--space-4);
-  background: var(--bg);
-  border: 1px solid rgba(229, 84, 79, 0.35);
-  border-radius: var(--radius);
+  padding: 4px 0 4px var(--space-3);
+  background: transparent;
+  border: 0;
+  border-left: 1px solid var(--danger);
+  border-radius: 0;
 }
 
 .mnemonic-grid {
@@ -191,8 +226,8 @@
   align-items: center;
   gap: var(--space-2);
   padding: 6px 10px;
-  background: var(--surface-2);
-  border: 1px solid var(--border);
+  background: rgba(168, 179, 196, 0.045);
+  border: 0;
   border-radius: var(--radius-sm);
   font-size: var(--fs-sm);
   overflow-wrap: anywhere;

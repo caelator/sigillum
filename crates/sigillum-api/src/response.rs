@@ -20,11 +20,39 @@ use crate::request::Eip1559Fees;
 // ── Lifecycle ───────────────────────────────────
 
 /// Standard error envelope returned for non-2xx responses.
+///
+/// `code` is a stable machine-readable `snake_case` string from
+/// [`crate::error_codes`] that refines the HTTP status (403 and 404 are
+/// overloaded without it). Envelopes serialized before `code` existed
+/// deserialize with [`crate::error_codes::UNKNOWN`]; clients should treat
+/// that value as "no code" and fall back to the HTTP status.
+///
+/// `fields` carries a per-field validation breakdown for
+/// `validation_failed` errors; it is absent for all other failures.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ErrorResponse {
+    #[serde(default = "default_error_code")]
+    pub code: String,
     pub error: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub action: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fields: Option<Vec<FieldError>>,
+}
+
+/// One field-level validation failure inside an [`ErrorResponse`].
+///
+/// `field` is the dot/bracket path of the offending request field (for
+/// example `name` or `allowed_destinations[0].address`); `message` is the
+/// human-readable failure for that field.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct FieldError {
+    pub field: String,
+    pub message: String,
+}
+
+fn default_error_code() -> String {
+    crate::error_codes::UNKNOWN.to_string()
 }
 
 /// Summary of the currently active compartment within a session.
@@ -278,6 +306,42 @@ pub struct RuntimePolicyResponse {
     pub idle_lock_force_after_secs: u64,
 }
 
+/// Background-scheduler status, embedded in [`DiagnosticsResponse`].
+///
+/// The scheduler (plan task 1.6) advances queue retries, receipt
+/// confirmations, and stealth-deposit refreshes without a client driving the
+/// request surface. `enabled`, `queue_tick_secs`, and `refresh_secs` echo the
+/// effective configuration (env-overridable); `last_tick_at_unix` /
+/// `last_cycle_outcome` / `consecutive_failures` describe the most recent
+/// cycle (`last_cycle_outcome` is one of `advanced`, `idle`,
+/// `skipped_locked`, `skipped_guard_busy`, or `failed`); the due-work fields
+/// are computed from the persisted queue at request time.
+///
+/// Every field deserializes from an absent payload (whole-struct
+/// `Default`), so older daemons without this block read cleanly.
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SchedulerStatusResponse {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default)]
+    pub queue_tick_secs: u64,
+    #[serde(default)]
+    pub refresh_secs: u64,
+    #[serde(default)]
+    pub last_tick_at_unix: Option<u64>,
+    #[serde(default)]
+    pub last_cycle_outcome: Option<String>,
+    #[serde(default)]
+    pub consecutive_failures: u32,
+    /// Jobs a drain would attempt right now (runnable states whose backoff,
+    /// if any, has elapsed).
+    #[serde(default)]
+    pub due_queue_job_count: usize,
+    /// Earliest `next_attempt_after_unix` among backoff-waiting jobs.
+    #[serde(default)]
+    pub next_retry_at_unix: Option<u64>,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct DiagnosticsResponse {
     pub status: String,
@@ -316,6 +380,8 @@ pub struct DiagnosticsResponse {
     pub runtime_policy: RuntimePolicyResponse,
     pub eth_stealth_deposit_count: usize,
     pub funded_eth_stealth_deposit_count: usize,
+    #[serde(default)]
+    pub scheduler: SchedulerStatusResponse,
 }
 
 // ── Self-check ──────────────────────────────────
@@ -446,8 +512,16 @@ pub struct EthStealthGenerateResponse {
     pub stealth_address: String,
     pub ephemeral_public_key_hex: String,
     pub view_tag_hex: String,
+    /// Shared-secret hash convention the address was derived with (always the
+    /// standard `compressed33` for newly generated payments).
+    #[serde(default)]
+    pub stealth_hash_convention: sigillum_core::StealthHashConvention,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub announcement: Option<EthStealthAnnouncementPayload>,
+    /// Non-blocking cautionary warnings (e.g. foreign meta-address, ephemeral
+    /// key reuse). Empty when nothing suspicious was detected.
+    #[serde(default)]
+    pub warnings: Vec<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -469,6 +543,10 @@ pub struct EthStealthCheckResponse {
     pub matches: bool,
     pub derived_stealth_address: String,
     pub view_tag_hex: String,
+    /// Convention that produced the derived values; when `matches` is true,
+    /// the convention the payment was actually made with.
+    #[serde(default)]
+    pub stealth_hash_convention: sigillum_core::StealthHashConvention,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -560,11 +638,20 @@ pub use wallet_domains::*;
 mod inventory;
 pub use inventory::*;
 
+mod operations;
+pub use operations::*;
+
+mod events;
+pub use events::*;
+
 mod consolidation_export;
 pub use consolidation_export::*;
 
 mod watch_book;
 pub use watch_book::*;
+
+mod pagination;
+pub use pagination::*;
 
 mod treasury;
 pub use treasury::*;
@@ -604,8 +691,19 @@ pub struct MaintenanceRunResponse {
     pub failures_by_cause: MaintenanceFailureBreakdown,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub treasury_automation: Option<TreasuryAutomationRunSummary>,
+    /// Plan task 3.3: outcome of the one-time receive lifecycle stage
+    /// (absent on responses produced before the stage existed, and on
+    /// responses for vaults with no one-time allocations).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub one_time_receive: Option<OneTimeReceiveRunSummary>,
     pub deposits: Vec<EthStealthDeposit>,
     pub jobs: Vec<QueueJob>,
+    /// The background operation driving the cycle. Present only when the
+    /// request set `run_async: true`; the tally fields, `deposits`, and
+    /// `jobs` are then all zero/empty and per-stage progress is reported
+    /// through the operation itself (`GET /api/operations/{id}`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub operation: Option<Operation>,
 }
 
 fn default_ethereum_stealth_scheme_id() -> u64 {

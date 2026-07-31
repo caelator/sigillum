@@ -231,21 +231,24 @@ impl PendingOperationSpec {
 /// and can safely retry cleanup or validate the operation's effects.
 pub struct OperationGuard {
     path: PathBuf,
+    operation_id: String,
     completed: bool,
 }
 
 impl OperationGuard {
+    /// Return the operation ID persisted in this guard's journal.
+    pub fn operation_id(&self) -> &str {
+        &self.operation_id
+    }
+
     /// Mark the operation as completed and delete the journal file.
     ///
     /// Returns `Ok(())` if the file was deleted or already doesn't exist.
     /// Returns `Err` only for real I/O errors (permission denied, disk full, etc).
     pub fn complete(mut self) -> Result<(), std::io::Error> {
+        remove_operation_journal(&self.path)?;
         self.completed = true;
-        match std::fs::remove_file(&self.path) {
-            Ok(()) => Ok(()),
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
-            Err(error) => Err(error),
-        }
+        Ok(())
     }
 }
 
@@ -285,6 +288,7 @@ pub fn begin_operation(
 
     Ok(OperationGuard {
         path,
+        operation_id,
         completed: false,
     })
 }
@@ -313,11 +317,29 @@ pub fn list_pending_operations(base_dir: &Path) -> Result<Vec<PendingOperation>,
 
 pub fn clear_pending_operation(base_dir: &Path, operation_id: &str) -> Result<(), std::io::Error> {
     let path = operations_dir(base_dir).join(format!("{operation_id}.json"));
+    remove_operation_journal(&path)
+}
+
+fn remove_operation_journal(path: &Path) -> Result<(), std::io::Error> {
     match std::fs::remove_file(path) {
-        Ok(()) => Ok(()),
+        Ok(()) => sync_parent_directory(path),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
         Err(error) => Err(error),
     }
+}
+
+fn sync_parent_directory(path: &Path) -> Result<(), std::io::Error> {
+    #[cfg(unix)]
+    {
+        if let Some(parent) = path.parent() {
+            std::fs::File::open(parent)?.sync_all()?;
+        }
+    }
+
+    #[cfg(not(unix))]
+    let _ = path;
+
+    Ok(())
 }
 
 fn new_operation_id(started_at_unix: u64) -> String {

@@ -108,6 +108,19 @@ pub struct TreasuryAutomationRunSummary {
     pub skipped_reasons: Vec<String>,
 }
 
+/// Per-maintenance-cycle one-time receive lifecycle outcome (plan task 3.3).
+///
+/// Counts what the one-time stage did this cycle: balances observed,
+/// sweeps auto-enqueued, allocations retired on sweep confirmation, and
+/// records purged (`purge_after_sweep`).
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct OneTimeReceiveRunSummary {
+    pub observed_allocations: usize,
+    pub enqueued_sweeps: usize,
+    pub retired_allocations: usize,
+    pub purged_allocations: usize,
+}
+
 /// Treasury-console posture for W8 automation.
 ///
 /// Counts aggregate steps of plans whose origin is `treasury_automation`;
@@ -180,7 +193,11 @@ pub struct TreasuryPolicy {
     #[serde(default)]
     pub allow_raw_digest_signing: bool,
     /// Fail-closed: when true, any step the linkage analyzer flags is hard-blocked.
-    #[serde(default)]
+    /// Defaults to TRUE (absent field ⇒ on) since plan task 3.5: cross-party
+    /// linkage blocking is the default posture and disabling it is an
+    /// explicit operator opt-out. Policies persisted by older daemons carry
+    /// the field explicitly, so their chosen value is unaffected.
+    #[serde(default = "default_block_cross_party_linkage")]
     pub block_cross_party_linkage: bool,
     /// Fail-closed opt-in: allows merkle-distributor-v1 claim steps to clear the
     /// claim_execution_disabled blocker only once every execution gate holds
@@ -254,6 +271,10 @@ fn default_require_simulation() -> bool {
     true
 }
 
+fn default_block_cross_party_linkage() -> bool {
+    true
+}
+
 fn default_simulation_freshness_secs() -> u64 {
     900
 }
@@ -286,6 +307,16 @@ pub struct TreasuryPolicyMutationResponse {
 /// math (no provider or network calls), and per-purpose addresses keep
 /// unrelated payments unlinkable on-chain. Retired allocations are kept for
 /// history; only `status == "active"` entries should be handed out.
+///
+/// Plan task 3.3 adds the one-time lifecycle: with `one_time` set, the
+/// scheduler watches the address, auto-enqueues a native sweep to
+/// `sweep_destination_address` once the observed balance reaches
+/// `min_sweep_amount_hex` (any nonzero balance when unset), retires the
+/// allocation once the sweep job settles (`sent` — the legacy EthSeed
+/// family's terminal state — or `confirmed`), and purges the record when
+/// `purge_after_sweep` is set. `lifecycle_state`/`sweep_blocker` are computed
+/// at read time from `status`, `sweep_job_id`, the queue, and the treasury
+/// policy — they are never persisted with meaning.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct TreasuryReceiveAllocation {
     pub id: String,
@@ -308,6 +339,43 @@ pub struct TreasuryReceiveAllocation {
     pub retired_at_unix: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub counterparty_id: Option<String>,
+    /// Plan task 3.3: allocate → auto-watch → auto-sweep-on-funds → retire →
+    /// optional purge. Requires `sweep_destination_address` and a signing
+    /// (eth-seed) wallet profile.
+    #[serde(default)]
+    pub one_time: bool,
+    /// Sweep destination for one-time mode; validated against the destination
+    /// allowlist like any sweep destination, both at allocation and again at
+    /// every enqueue evaluation.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sweep_destination_address: Option<String>,
+    /// One-time sweep threshold (0x-prefixed uint256 wei): the auto-sweep only
+    /// enqueues once the observed native balance reaches it. Unset means any
+    /// nonzero balance.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub min_sweep_amount_hex: Option<String>,
+    /// One-time mode: purge the record (3.2 semantics) once the sweep
+    /// confirms and the allocation is retired.
+    #[serde(default)]
+    pub purge_after_sweep: bool,
+    /// Queue job id of the one-time auto-sweep, once enqueued; always tracks
+    /// the LATEST sweep job (a terminally failed job is replaced by the next
+    /// enqueue, never re-signed).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sweep_job_id: Option<String>,
+    /// Read-time derivation for one-time allocations: "watching" |
+    /// "sweep_queued" | "swept" | "retired" ("purged" is terminal record
+    /// absence plus a `treasury.receive.purge` audit event). Absent for
+    /// non-one-time allocations and on stored records.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lifecycle_state: Option<String>,
+    /// Why a `watching` one-time allocation has not swept yet:
+    /// "awaiting_balance" | "below_threshold" | "execution_gates" |
+    /// "destination_policy" | "step_cap" | "cross_party_linkage" |
+    /// "sweep_failed" | "sweep_attention". Absent when the allocation is
+    /// sweep-eligible or not `watching`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sweep_blocker: Option<String>,
 }
 
 /// A payer/counterparty an operator hands a dedicated receive address to.
@@ -341,6 +409,18 @@ pub struct TreasuryReceiveAllocationListResponse {
 pub struct TreasuryReceiveAllocationMutationResponse {
     pub status: String,
     pub allocation: TreasuryReceiveAllocation,
+}
+
+/// Result of purging a retired receive allocation (plan task 3.2).
+///
+/// The record is gone for good, so the response carries only the id and
+/// whether a counterparty binding died with it (the counterparty itself
+/// always remains).
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct TreasuryReceivePurgeResponse {
+    pub status: String,
+    pub allocation_id: String,
+    pub counterparty_binding_removed: bool,
 }
 
 /// All known counterparties, newest-first is NOT required; preserve insertion order.
@@ -378,6 +458,9 @@ pub struct ReceivingItem {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub balance_native_wei_hex: Option<String>,
     pub balance_known: bool,
+    /// When the balance observation backing this item was last checked.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub balance_last_checked_at_unix: Option<u64>,
     pub status: String,
     pub created_at_unix: u64,
 }

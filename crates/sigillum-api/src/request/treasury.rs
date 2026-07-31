@@ -19,7 +19,10 @@ pub struct TreasuryAllowedDestinationInput {
 /// Updates are whole-document: the daemon normalizes and dedupes the
 /// destination allowlist, validates the caps, and preserves the original
 /// `created_at_unix`. `require_simulation` defaults to true when omitted so
-/// loosening that gate is always an explicit choice.
+/// loosening that gate is always an explicit choice. Since plan task 3.5,
+/// `block_cross_party_linkage` likewise defaults to TRUE when omitted:
+/// cross-party linkage blocking is the default posture and turning it off
+/// requires passing an explicit `false`.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct TreasuryPolicyUpdateRequest {
     pub enabled: bool,
@@ -78,12 +81,42 @@ pub struct TreasuryReceiveAllocateRequest {
     pub label: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub counterparty_id: Option<String>,
+    /// Plan task 3.3 one-time mode: allocate → auto-watch → auto-sweep-on-funds
+    /// → retire → optional purge. One-time fields are rejected when this is
+    /// not `true`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub one_time: Option<bool>,
+    /// Required when `one_time`: the auto-sweep destination, validated against
+    /// the destination allowlist like any sweep destination.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sweep_destination_address: Option<String>,
+    /// One-time sweep threshold (0x-prefixed uint256 wei); below it funds sit.
+    /// Unset means any nonzero balance triggers the sweep.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub min_sweep_amount_hex: Option<String>,
+    /// One-time mode: purge the record after the sweep confirms (default false).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub purge_after_sweep: Option<bool>,
 }
 
 /// Retire an active receive allocation and issue the next index for the same
 /// wallet profile, carrying over its purpose and label.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct TreasuryReceiveRotateRequest {
+    pub allocation_id: String,
+}
+
+/// Permanently delete a RETIRED receive allocation and the counterparty
+/// binding it carries (plan task 3.2).
+///
+/// Purging is the forget half of the receive-address lifecycle: the
+/// allocation record (address → purpose → counterparty linkage) leaves the
+/// store for good. Active allocations are refused with 409 — rotate first
+/// (rotation retires), or use a profile delete with `prune_inventory` to
+/// retire-then-purge in one operation. The counterparty record itself always
+/// remains; only the binding dies.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct TreasuryReceivePurgeRequest {
     pub allocation_id: String,
 }
 
@@ -97,7 +130,8 @@ pub struct CounterpartyCreateRequest {
     pub sweep_destination_address: Option<String>,
 }
 
-/// Rename or re-note an existing counterparty.
+/// Update an existing counterparty. Omitting `sweep_destination_address`
+/// retains the stored destination; an explicit blank string clears it.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct CounterpartyUpdateRequest {
     pub id: String,

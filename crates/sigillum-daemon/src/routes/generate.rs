@@ -2,7 +2,6 @@
 
 use std::sync::Arc;
 
-use axum::Json;
 use axum::extract::State;
 use axum::http::HeaderMap;
 use axum::response::Response;
@@ -11,17 +10,13 @@ use sigillum_api::request::GenerateStoreRequest;
 use crate::AppState;
 use crate::service::SigillumService;
 
-use super::{bearer_token, service_response, validated};
+use super::{ValidatedJson, bearer_token, service_response};
 
 pub(crate) async fn generate_store(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
-    Json(body): Json<GenerateStoreRequest>,
+    ValidatedJson(body): ValidatedJson<GenerateStoreRequest>,
 ) -> Response {
-    let body = match validated(Json(body)) {
-        Ok(body) => body,
-        Err(response) => return response,
-    };
     let service = SigillumService::new(state);
     service_response(
         service

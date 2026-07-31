@@ -2,7 +2,7 @@
 //!
 //! Thin server-facing facade over the local daemon implementation.
 
-pub use sigillum_daemon::{AppState, build_router, run};
+pub use sigillum_daemon::{AppState, build_router, build_router_for_addr, run};
 
 #[cfg(test)]
 mod tests {

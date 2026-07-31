@@ -4,9 +4,9 @@ use sigillum_api::{
     Counterparty, DefiTokenProbe, ErrorResponse, EthStealthAnnouncementPayload, EthStealthDeposit,
     EthStealthDepositCreateNativeRequest, EthStealthDepositListResponse, EvmProviderProfile,
     EvmProviderProfileListResponse, EvmProviderProfileUpsertRequest, EvmProviderRef,
-    NftMetadataCacheEntry, QueueEthStealthNativeSweepRequest, QueueJob, QueueJobListResponse,
-    QueueJobPayload, ReceivingCoverage, ReceivingDepositTagRequest, ReceivingItem,
-    ReceivingOverviewResponse, ReceivingPartyGroup, ReceivingTotals, StatusResponse,
+    NftMetadataCacheEntry, ProviderPartitionObservation, QueueEthStealthNativeSweepRequest,
+    QueueJob, QueueJobListResponse, QueueJobPayload, ReceivingCoverage, ReceivingDepositTagRequest,
+    ReceivingItem, ReceivingOverviewResponse, ReceivingPartyGroup, ReceivingTotals, StatusResponse,
     StealthPaymentRef, TreasuryAllowedDestination, TreasuryAllowedDestinationInput, TreasuryPolicy,
     TreasuryPolicyResponse, TreasuryPolicyUpdateRequest, UnlockedCompartment,
     WalletAddressActivityState, WalletAddressClassification, WalletAssetHolding, WalletAssetKind,
@@ -394,6 +394,8 @@ fn deposits_request_roundtrip() {
         ephemeral_private_key_hex: Some(
             "0x1111111111111111111111111111111111111111111111111111111111111111".to_string(),
         ),
+        request_gas: Some(true),
+        gas_amount_wei_hex: Some("0xec350c1800".to_string()),
     });
 }
 
@@ -416,6 +418,7 @@ fn deposits_response_roundtrip() {
             ephemeral_public_key_hex:
                 "0x020202020202020202020202020202020202020202020202020202020202020202".to_string(),
             view_tag_hex: "0x7f".to_string(),
+            stealth_hash_convention: sigillum_core::StealthHashConvention::STANDARD,
             announcement: Some(EthStealthAnnouncementPayload {
                 announcer_address: "0x1111222233334444555566667777888899990000".to_string(),
                 announce_function: "announce".to_string(),
@@ -447,7 +450,11 @@ fn deposits_response_roundtrip() {
                 "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".to_string(),
             ),
             counterparty_id: Some("party_client_alpha".to_string()),
+            requested_gas_wei_hex: Some("0xec350c1800".to_string()),
+            gas_topup_job_id: Some("job_topup_0001".to_string()),
+            gas_topup_job_state: Some("sent".to_string()),
         }],
+        pagination: None,
     });
 }
 
@@ -460,6 +467,7 @@ fn queue_request_roundtrip() {
             ephemeral_public_key_hex:
                 "0x020202020202020202020202020202020202020202020202020202020202020202".to_string(),
             view_tag_hex: Some("0x7f".to_string()),
+            stealth_hash_convention: None,
         },
         destination_address: Some("0x8b8b6f6f5e5e4d4d3c3c2b2b1a1a090908080707".to_string()),
         min_value_wei_hex: Some("0x2386f26fc10000".to_string()),
@@ -487,12 +495,14 @@ fn queue_response_roundtrip() {
                 min_value_wei_hex: Some("0x2386f26fc10000".to_string()),
                 gas_limit: Some(42_000),
                 view_tag_hex: Some("0x7f".to_string()),
+                stealth_hash_convention: None,
             },
             last_error: Some("provider rate limited previous attempt".to_string()),
             transaction_hash_hex: None,
             broadcast_transaction_hash_hex: None,
             receipt: Default::default(),
         }],
+        pagination: None,
     });
 }
 
@@ -651,6 +661,7 @@ fn receiving_response_roundtrip() {
                 linkage_warning: Some("shares configured sweep destination".to_string()),
                 balance_native_wei_hex: Some("0xde0b6b3a7640000".to_string()),
                 balance_known: true,
+                balance_last_checked_at_unix: Some(1_783_046_000),
                 status: "active".to_string(),
                 created_at_unix: 1_782_960_000,
             }],
@@ -667,6 +678,19 @@ fn receiving_response_roundtrip() {
             note: "all active receiving addresses refreshed".to_string(),
         },
     });
+
+    let legacy: ReceivingItem = serde_json::from_value(serde_json::json!({
+        "source_type": "hd_allocation",
+        "address": "0x9c9c8b8b7a7a6969585847473636252514140303",
+        "chain_id": 1,
+        "chain_id_assumed": false,
+        "balance_native_wei_hex": "0xde0b6b3a7640000",
+        "balance_known": true,
+        "status": "active",
+        "created_at_unix": 1_782_960_000
+    }))
+    .expect("legacy receiving item without balance timestamp should decode");
+    assert_eq!(legacy.balance_last_checked_at_unix, None);
 }
 
 #[test]
@@ -686,6 +710,8 @@ fn inventory_request_roundtrip() {
         gap_limit: Some(20),
         max_index: Some(250),
         resume_from_latest_checkpoint: Some(true),
+        run_async: Some(false),
+        partition_providers: Some(true),
         token_addresses: vec![
             "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48".to_string(),
             "0xdac17f958d2ee523a2206206994597c13d831ec7".to_string(),
@@ -773,6 +799,12 @@ fn inventory_response_roundtrip() {
             started_at_unix: 1_783_042_400,
             completed_at_unix: Some(1_783_046_000),
             last_error: None,
+            partition_providers: Some(true),
+            provider_partition_observations: vec![ProviderPartitionObservation {
+                provider_profile: "ethereum-mainnet-alchemy".to_string(),
+                chain_id: 1,
+                addresses_observed: 18,
+            }],
         }],
         addresses: vec![WalletInventoryAddress {
             id: "addr_2026_0001".to_string(),
@@ -836,6 +868,7 @@ fn inventory_response_roundtrip() {
             fetch_skipped_reason: None,
             updated_at_unix: 1_783_046_000,
         }],
+        pagination: None,
     });
 }
 
@@ -854,8 +887,10 @@ fn unknown_fields_are_tolerated_for_request_and_response() {
     assert_eq!(request, expected_request);
 
     let expected_response = ErrorResponse {
+        code: sigillum_api::error_codes::UNKNOWN.to_string(),
         error: "treasury policy violation".to_string(),
         action: Some("review_treasury_policy".to_string()),
+        fields: None,
     };
     let response: ErrorResponse = serde_json::from_value(serde_json::json!({
         "error": "treasury policy violation",
@@ -864,4 +899,34 @@ fn unknown_fields_are_tolerated_for_request_and_response() {
     }))
     .expect("ErrorResponse should ignore unknown fields");
     assert_eq!(response, expected_response);
+}
+
+#[test]
+fn error_response_code_and_fields_roundtrip() {
+    let expected = ErrorResponse {
+        code: sigillum_api::error_codes::VALIDATION_FAILED.to_string(),
+        error: "name exceeds maximum length of 256 bytes (got 300 bytes)".to_string(),
+        action: None,
+        fields: Some(vec![sigillum_api::response::FieldError {
+            field: "name".to_string(),
+            message: "name exceeds maximum length of 256 bytes (got 300 bytes)".to_string(),
+        }]),
+    };
+    let value = serde_json::to_value(&expected).expect("ErrorResponse should serialize");
+    assert_eq!(value["code"], "validation_failed");
+    assert_eq!(value["fields"][0]["field"], "name");
+
+    let parsed: ErrorResponse =
+        serde_json::from_value(value).expect("ErrorResponse should deserialize");
+    assert_eq!(parsed, expected);
+
+    // Forward-compat: payloads from a newer daemon carrying extra fields parse.
+    let future: ErrorResponse = serde_json::from_value(serde_json::json!({
+        "code": "some_future_code",
+        "error": "new failure mode",
+        "fields": [{"field": "name", "message": "bad", "extra": true}],
+        "__future_field": 123
+    }))
+    .expect("ErrorResponse should tolerate newer fields");
+    assert_eq!(future.code, "some_future_code");
 }

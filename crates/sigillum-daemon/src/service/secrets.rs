@@ -111,7 +111,8 @@ impl SigillumService {
             .value
             .filter(|value| !value.is_empty())
             .ok_or_else(|| ServiceError::bad_request("value is required"))?;
-        let _guard = self.state.operation_guard().await;
+        let session_context = self.capture_session_operation_context(Some(token))?;
+        let _guard = self.acquire_session_operation(&session_context).await?;
         let active_compartment_id = self.state.active_compartment_id_for(token);
         self.with_active_vault(token, |vault, _| Ok(vault.set_api_key(&key, &value)?))?;
         self.record_audit(
@@ -132,7 +133,8 @@ impl SigillumService {
     ) -> ServiceResult<KeyMutationResponse> {
         let token = self.require_session(token)?;
         let key = body.key;
-        let _guard = self.state.operation_guard().await;
+        let session_context = self.capture_session_operation_context(Some(token))?;
+        let _guard = self.acquire_session_operation(&session_context).await?;
         let active_compartment_id = self.state.active_compartment_id_for(token);
         self.with_active_vault(token, |vault, _| Ok(vault.delete_api_key(&key)?))?;
         self.record_audit(
@@ -150,7 +152,7 @@ impl SigillumService {
         let token = self.require_session(token)?;
         let keys = self.with_active_vault(token, |vault, _| {
             if !vault.is_unlocked() {
-                return Err(ServiceError::forbidden("Vault is locked."));
+                return Err(ServiceError::vault_locked("Vault is locked."));
             }
             Ok(vault.read_secrets()?)
         })?;
@@ -166,7 +168,7 @@ impl SigillumService {
         let key = body.key;
         let value = self.with_active_vault(token, |vault, _| {
             if !vault.is_unlocked() {
-                return Err(ServiceError::forbidden("Vault is locked."));
+                return Err(ServiceError::vault_locked("Vault is locked."));
             }
             vault
                 .read_secret(&key)?
@@ -187,11 +189,12 @@ impl SigillumService {
             .value
             .filter(|value| !value.is_empty())
             .ok_or_else(|| ServiceError::bad_request("value is required"))?;
-        let _guard = self.state.operation_guard().await;
+        let session_context = self.capture_session_operation_context(Some(token))?;
+        let _guard = self.acquire_session_operation(&session_context).await?;
         let active_compartment_id = self.state.active_compartment_id_for(token);
         self.with_active_vault(token, |vault, _| {
             if !vault.is_unlocked() {
-                return Err(ServiceError::forbidden("Vault is locked."));
+                return Err(ServiceError::vault_locked("Vault is locked."));
             }
             Ok(vault.set_secret(&key, &value)?)
         })?;
@@ -213,11 +216,12 @@ impl SigillumService {
     ) -> ServiceResult<KeyMutationResponse> {
         let token = self.require_session(token)?;
         let key = body.key;
-        let _guard = self.state.operation_guard().await;
+        let session_context = self.capture_session_operation_context(Some(token))?;
+        let _guard = self.acquire_session_operation(&session_context).await?;
         let active_compartment_id = self.state.active_compartment_id_for(token);
         self.with_active_vault(token, |vault, _| {
             if !vault.is_unlocked() {
-                return Err(ServiceError::forbidden("Vault is locked."));
+                return Err(ServiceError::vault_locked("Vault is locked."));
             }
             Ok(vault.delete_secret(&key)?)
         })?;
@@ -237,11 +241,12 @@ impl SigillumService {
         token: Option<&str>,
         body: SecretsPushRequest,
     ) -> ServiceResult<PushResponse> {
-        let _ = self.require_session(token)?;
-        let _guard = self.state.operation_guard().await;
+        let token = self.require_session(token)?;
+        let session_context = self.capture_session_operation_context(Some(token))?;
+        let _guard = self.acquire_session_operation(&session_context).await?;
         let unlocked = self.state.unlocked_compartments();
         if unlocked.len() < 2 {
-            return Err(ServiceError::forbidden("Access denied."));
+            return Err(ServiceError::vault_locked("Access denied."));
         }
         if !unlocked.iter().any(|meta| meta.id == body.from_compartment) {
             return Err(ServiceError::not_found("Source compartment not unlocked."));
@@ -271,7 +276,7 @@ impl SigillumService {
         } else {
             self.with_vault(body.from_compartment, |vault| {
                 if !vault.is_unlocked() {
-                    return Err(ServiceError::forbidden("Vault is locked."));
+                    return Err(ServiceError::vault_locked("Vault is locked."));
                 }
                 vault
                     .read_secret(&key)?
@@ -287,7 +292,7 @@ impl SigillumService {
                 Ok(vault.set_api_key(&target_key, &value)?)
             } else {
                 if !vault.is_unlocked() {
-                    return Err(ServiceError::forbidden("Vault is locked."));
+                    return Err(ServiceError::vault_locked("Vault is locked."));
                 }
                 Ok(vault.set_secret(&target_key, &value)?)
             }

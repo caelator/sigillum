@@ -3,9 +3,13 @@ use std::process;
 use chrono::{DateTime, Utc};
 use sigillum_client::{AuditEventQuery, SigillumClient};
 
-use crate::daemon_api::{daemon_base_url, ensure_daemon_ready, require_session_token};
+use crate::daemon_api::{
+    daemon_base_url, ensure_daemon_ready, has_flag, parse_flag, parse_usize_flag, print_json,
+    require_session_token,
+};
 
 pub fn cmd_audit(args: &[String]) {
+    let json = has_flag(args, "--json");
     let base_url = daemon_base_url(args);
     if let Err(error) = ensure_daemon_ready(&base_url) {
         eprintln!("failed to reach daemon: {error}");
@@ -36,6 +40,10 @@ pub fn cmd_audit(args: &[String]) {
                 eprintln!("failed to verify audit chain: {error}");
                 process::exit(1);
             });
+        if json {
+            print_json(&report);
+            return;
+        }
         println!(
             "scope={} status={} verified={} broken={} legacy={}",
             report.scope, report.status, report.verified, report.broken, report.legacy
@@ -49,6 +57,11 @@ pub fn cmd_audit(args: &[String]) {
             eprintln!("failed to query audit events: {error}");
             process::exit(1);
         });
+
+    if json {
+        print_json(&events);
+        return;
+    }
 
     if events.is_empty() {
         println!("No audit events matched.");
@@ -97,23 +110,4 @@ fn parse_since_flag(args: &[String], flag: &str) -> Option<u64> {
             eprintln!("invalid value for {flag}: expected unix seconds or RFC3339 timestamp");
             process::exit(1);
         })
-}
-
-fn parse_flag(args: &[String], flag: &str) -> Option<String> {
-    args.windows(2).find_map(|window| {
-        if window[0] == flag {
-            Some(window[1].clone())
-        } else {
-            None
-        }
-    })
-}
-
-fn parse_usize_flag(args: &[String], flag: &str) -> Option<usize> {
-    parse_flag(args, flag).map(|raw| {
-        raw.parse::<usize>().unwrap_or_else(|_| {
-            eprintln!("invalid value for {flag}: {raw}");
-            process::exit(1);
-        })
-    })
 }

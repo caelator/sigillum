@@ -21,6 +21,11 @@ pub struct StealthPaymentRef {
     pub ephemeral_public_key_hex: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub view_tag_hex: Option<String>,
+    /// Shared-secret hash convention of the payment (`"compressed33"` standard,
+    /// `"x32"` legacy). Absent means unknown: the daemon probes both
+    /// conventions (standard first) and verifies by address match.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stealth_hash_convention: Option<sigillum_core::StealthHashConvention>,
 }
 
 /// Connection parameters for an EVM JSON-RPC provider.
@@ -111,89 +116,10 @@ pub struct SetupResetRequest {
     pub confirmation: String,
 }
 
-/// Definition of a compartment during FIDO2 setup or addition.
-///
-/// `threshold` determines how many FIDO2 key taps are required to unlock this
-/// compartment. `passphrase_mode` controls whether a passphrase fallback is
-/// configured (e.g. "FIXED" for a setup-time passphrase).
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
-pub struct CompartmentDefinition {
-    pub label: String,
-    pub threshold: usize,
-    pub passphrase_mode: Option<String>,
-}
-
 // ── FIDO2 hardware key operations ────────────────────────────────
 
-/// Initialize the vault with a FIDO2 hardware key and one or more compartments.
-///
-/// This is the primary setup path for new vaults. The first key registered
-/// becomes the initial Shamir share holder. Compartment thresholds determine
-/// how many distinct key taps are needed to unlock each compartment. `pin` is
-/// optional so touch-only authenticators can be enrolled without forcing a PIN
-/// round-trip; provide it only when the inserted key currently requires one.
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
-pub struct Fido2SetupRequest {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub pin: Option<String>,
-    pub label: String,
-    pub compartments: Vec<CompartmentDefinition>,
-    pub passphrase: Option<String>,
-}
-
-/// Register an additional FIDO2 key (or poison key) to the vault.
-///
-/// When `poison` is `true`, the key is registered as a decoy — tapping it
-/// produces plausible deniability by appearing to unlock an empty vault.
-/// `skip_keys` lists credential IDs of keys that should not participate
-/// in the re-sharing ceremony (e.g. keys that are physically unavailable).
-/// `pin` is optional and should only be supplied when the inserted key or the
-/// re-sharing ceremony requires the current PIN.
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
-pub struct Fido2RegisterRequest {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub pin: Option<String>,
-    pub label: String,
-    pub poison: Option<bool>,
-    pub skip_keys: Option<Vec<String>>,
-}
-
-/// Unlock the vault by tapping one or more FIDO2 hardware keys.
-///
-/// `tap_count` specifies how many keys will be tapped in sequence.
-/// Each key's HMAC-secret is used to decrypt its Shamir share; when enough
-/// shares are gathered (meeting a compartment's threshold), that compartment
-/// unlocks. Higher tap counts unlock higher-threshold compartments. `pins`
-/// may be empty for touch-only authenticators; otherwise provide one PIN per
-/// round or a single shared PIN for all rounds.
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
-pub struct Fido2UnlockRequest {
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub pins: Vec<String>,
-    pub tap_count: usize,
-}
-
-/// Remove a FIDO2 key from the vault and re-share master keys among remaining keys.
-///
-/// `pin` is optional and should be provided only when the remaining enrolled
-/// keys require their current PIN during the re-sharing ceremony.
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
-pub struct Fido2RemoveRequest {
-    pub label: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub pin: Option<String>,
-    pub skip_keys: Option<Vec<String>>,
-}
-
-/// Set a brand-new FIDO2 PIN on an authenticator that does not have one yet.
-///
-/// This is intended for fresh hardware keys during setup or before registering
-/// an additional backup key. Existing keys with a configured PIN should use
-/// vendor tooling or a future dedicated change-PIN flow.
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
-pub struct Fido2SetPinRequest {
-    pub new_pin: String,
-}
+mod fido2;
+pub use fido2::*;
 
 // ── Compartment management ──────────────────────────────────────
 
@@ -271,6 +197,10 @@ pub struct TransitHmacRequest {
 // ── Ethereum stealth wallet operations ──────────────────────────
 
 /// Export a wallet's stealth meta-address for sharing with senders.
+///
+/// The response is public payer-facing information only (spending + viewing
+/// public keys); the daemon derives it via the watch-only path, without
+/// retaining the spending private key.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct EthStealthExportRequest {
     pub wallet: String,
@@ -290,6 +220,11 @@ pub struct EthStealthGenerateRequest {
 }
 
 /// Check whether a stealth address belongs to a wallet.
+///
+/// Watch-only per EIP-5564 `checkStealthAddress`: the daemon runs this from
+/// the viewing private key + spending PUBLIC key; the spending private key
+/// never enters the check path (the vault must still be unlocked, since the
+/// viewing key derives from the compartment master key).
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct EthStealthCheckRequest {
     pub wallet: String,
@@ -465,9 +400,20 @@ pub struct EvmProviderProfileUpsertRequest {
 }
 
 /// Delete an EVM provider profile by name.
+///
+/// Shared by every profile delete route (`profiles/evm|eth-stealth|eth-xpub|eth-seed
+/// /delete`). `prune_inventory` opts into the forget cascade (plan task 3.2):
+/// when true, the profile's wallet-inventory rows (scanned addresses,
+/// holdings, scan state), its receive allocations, and the counterparty
+/// bindings those allocations carried are removed in the same guarded
+/// operation. Absent/false preserves the legacy behavior exactly: only the
+/// profile record (and, for seed wallets, the vault secret) is removed and
+/// inventory history is left behind.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct EvmProfileDeleteRequest {
     pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prune_inventory: Option<bool>,
 }
 
 /// Create or update a stealth wallet profile (named wallet + provider binding).
@@ -578,6 +524,11 @@ pub struct EthXpubDeriveRequest {
 mod inventory;
 pub use inventory::*;
 
+// ── List pagination / filtering / sorting ──────────────────────────
+
+mod pagination;
+pub use pagination::*;
+
 // ── Treasury policy ─────────────────────────────────────────────────
 
 mod treasury;
@@ -635,6 +586,15 @@ pub use queue::*;
 ///
 /// When `auto_queue_sweep` is true, a sweep job is automatically enqueued
 /// once the deposit is confirmed on-chain.
+///
+/// `request_gas` asks the payer to attach gas for the recipient's subsequent
+/// sweep (the EIP-5564 "Recipients' transaction costs" sponsorship pattern):
+/// the announcement metadata then follows the EIP-5564 native-token SHOULD
+/// layout (`view tag ‖ 0xeeeeeeee ‖ sentinel address ‖ amount`) whose amount
+/// is the expected value plus the requested gas, so a standards-aware payer
+/// wallet learns the total native value to attach. `gas_amount_wei_hex` is
+/// the requested gas; when omitted, the provider profile's static sweep gas
+/// estimate is used.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct EthStealthDepositCreateNativeRequest {
     pub wallet_profile: String,
@@ -650,9 +610,22 @@ pub struct EthStealthDepositCreateNativeRequest {
     pub note: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ephemeral_private_key_hex: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub request_gas: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub gas_amount_wei_hex: Option<String>,
 }
 
 /// Create an ERC-20 deposit monitor for a fresh stealth address.
+///
+/// `request_gas` asks the payer to attach native gas for the recipient's
+/// subsequent sweep: the announcement metadata then follows the EIP-5564
+/// token SHOULD layout (`view tag ‖ transfer(address,uint256) selector ‖
+/// token contract ‖ amount`), so a standards-aware payer wallet learns the
+/// asset and amount to send; the requested gas amount
+/// (`gas_amount_wei_hex`, defaulting to the provider profile's static sweep
+/// gas estimate) is recorded on the deposit and shown in the payment
+/// instructions as the native amount to attach alongside the token transfer.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct EthStealthDepositCreateErc20Request {
     pub wallet_profile: String,
@@ -669,6 +642,10 @@ pub struct EthStealthDepositCreateErc20Request {
     pub note: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ephemeral_private_key_hex: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub request_gas: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub gas_amount_wei_hex: Option<String>,
 }
 
 /// Remove a deposit monitor.
@@ -693,12 +670,28 @@ pub struct EthStealthDepositRefreshRequest {
 }
 
 /// Scan bounded ERC-5564 announcement logs for a stealth wallet profile.
-/// `from_block` is required; `token_address` turns matches into ERC-20 deposit
-/// candidates instead of native deposit candidates.
+/// `from_block` is optional: when omitted the scan resumes from the persisted
+/// per-(wallet, provider) announcement cursor (or `earliest` on the first
+/// scan); when supplied it wins over the cursor for manual rescans. A
+/// successful scan advances the cursor. `reset_cursor` first drops the
+/// stored cursor, so the scan re-anchors from the given `from_block` (or
+/// `earliest`); if a successful scan has no trustworthy numeric anchor, the
+/// cursor remains absent. A legacy block-only cursor must replay full history
+/// before it can become an exact-position cursor; while that migration is
+/// pending, an explicit non-genesis `from_block` without `reset_cursor`
+/// returns 409.
+/// `token_address` turns matches into ERC-20 deposit candidates instead of
+/// native deposit candidates.
+///
+/// Detection is watch-only: matching uses the viewing private key + spending
+/// PUBLIC key only; the spending private key is never loaded for scanning
+/// (the wallet compartment must still be unlocked — the viewing key derives
+/// from its master key).
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct EthStealthAnnouncementScanRequest {
     pub wallet_profile: String,
-    pub from_block: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub from_block: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub to_block: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -713,6 +706,8 @@ pub struct EthStealthAnnouncementScanRequest {
     pub min_sweep_amount_hex: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub note: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reset_cursor: Option<bool>,
 }
 
 /// Enqueue a sweep job for a specific deposit.
@@ -750,6 +745,16 @@ pub struct MaintenanceRunRequest {
     pub queue_process_limit: Option<usize>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub auto_enqueue: Option<bool>,
+    /// Run the cycle as a background daemon operation instead of blocking the
+    /// request until it completes.
+    ///
+    /// When `true`, the daemon validates the request, starts an `Operation`
+    /// of kind `maintenance_run` (see `GET /api/operations`) that drives the
+    /// same maintenance pipeline in a spawned task, and returns immediately
+    /// with the operation tracking it. Absent or `false` keeps the original
+    /// synchronous behavior, so existing clients see no contract change.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub run_async: Option<bool>,
 }
 
 /// Resolve a secret reference into plaintext for command execution.

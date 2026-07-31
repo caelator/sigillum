@@ -6,11 +6,14 @@ use axum::{Json, Router};
 use serde_json::json;
 use sigillum_api::request::{
     CounterpartyCreateRequest, CounterpartyDeleteRequest, CounterpartyUpdateRequest, Eip1559Fees,
-    EvmProviderRef, NftMetadataFetchRequest, NftMetadataOptInDeleteRequest,
-    NftMetadataOptInUpsertRequest, NftMetadataSettingsUpdateRequest,
-    QueueEthStealthErc20SweepRequest, QueueEthStealthNativeSweepRequest,
-    QueueEthStealthTransferRequest, QueueProcessRequest, ReceivingDepositTagRequest,
-    TokenRegistryImportRequest,
+    EthStealthAnnouncementScanRequest, EthStealthDepositCreateErc20Request,
+    EthStealthDepositCreateNativeRequest, EthStealthDepositDeleteRequest,
+    EthStealthDepositEnqueueSweepRequest, EthStealthDepositRefreshRequest,
+    EthStealthWalletProfileUpsertRequest, EvmProviderProfileUpsertRequest, EvmProviderRef,
+    NftMetadataFetchRequest, NftMetadataOptInDeleteRequest, NftMetadataOptInUpsertRequest,
+    NftMetadataSettingsUpdateRequest, QueueEthStealthErc20SweepRequest,
+    QueueEthStealthNativeSweepRequest, QueueEthStealthTransferRequest, QueueProcessRequest,
+    ReceivingDepositTagRequest, TokenRegistryImportRequest,
 };
 
 use super::*;
@@ -497,6 +500,78 @@ async fn maintenance_run_route(
             },
             "deposits": [],
             "jobs": []
+        })),
+    )
+}
+
+fn operation_fixture() -> serde_json::Value {
+    json!({
+        "id": "op-1",
+        "kind": "inventory_scan_evm",
+        "state": "running",
+        "progress": { "processed": 3 },
+        "related_ids": ["job-1"],
+        "created_at_unix": 10,
+        "updated_at_unix": 12
+    })
+}
+
+fn authorized(headers: &HeaderMap) -> bool {
+    headers
+        .get(header::AUTHORIZATION)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("")
+        == "Bearer test-token"
+}
+
+async fn operations_list_route(headers: HeaderMap) -> (StatusCode, Json<serde_json::Value>) {
+    if !authorized(&headers) {
+        return (
+            StatusCode::UNAUTHORIZED,
+            Json(json!({ "error": "missing auth" })),
+        );
+    }
+    (
+        StatusCode::OK,
+        Json(json!({ "operations": [operation_fixture()] })),
+    )
+}
+
+async fn operation_get_route(
+    headers: HeaderMap,
+    axum::extract::Path(id): axum::extract::Path<String>,
+) -> (StatusCode, Json<serde_json::Value>) {
+    if !authorized(&headers) {
+        return (
+            StatusCode::UNAUTHORIZED,
+            Json(json!({ "error": "missing auth" })),
+        );
+    }
+    assert_eq!(id, "op-1");
+    (
+        StatusCode::OK,
+        Json(json!({ "operation": operation_fixture() })),
+    )
+}
+
+async fn operation_cancel_route(
+    headers: HeaderMap,
+    axum::extract::Path(id): axum::extract::Path<String>,
+) -> (StatusCode, Json<serde_json::Value>) {
+    if !authorized(&headers) {
+        return (
+            StatusCode::UNAUTHORIZED,
+            Json(json!({ "error": "missing auth" })),
+        );
+    }
+    assert_eq!(id, "op-1");
+    let mut operation = operation_fixture();
+    operation["state"] = json!("cancel_requested");
+    (
+        StatusCode::OK,
+        Json(json!({
+            "status": "cancel_requested",
+            "operation": operation
         })),
     )
 }
@@ -1763,6 +1838,9 @@ async fn spawn_test_server() -> Option<SocketAddr> {
         .route("/api/audit/run", post(audit_run_route))
         .route("/api/diagnostics", get(diagnostics_route))
         .route("/api/maintenance/run", post(maintenance_run_route))
+        .route("/api/operations", get(operations_list_route))
+        .route("/api/operations/{id}", get(operation_get_route))
+        .route("/api/operations/{id}/cancel", post(operation_cancel_route))
         .route("/api/session/revoke", post(revoke_session_route))
         .route("/api/backup/export", post(export_snapshot_route))
         .route("/api/backup/restore", post(restore_snapshot_route))
@@ -1911,6 +1989,30 @@ async fn unlock_stores_session_for_follow_up_requests() {
 
     let keys = client.list_api_keys().await.unwrap();
     assert_eq!(keys, vec!["alpha".to_string(), "beta".to_string()]);
+}
+
+#[tokio::test]
+async fn operation_routes_roundtrip() {
+    let Some(addr) = spawn_test_server().await else {
+        return;
+    };
+    let client = SigillumClient::new(format!("http://{addr}")).expect("client should build");
+    client.set_session_token("test-token");
+
+    let list = client.list_operations().await.unwrap();
+    assert_eq!(list.operations.len(), 1);
+    assert_eq!(list.operations[0].id, "op-1");
+    assert_eq!(list.operations[0].kind, "inventory_scan_evm");
+    assert_eq!(list.operations[0].state, "running");
+    assert_eq!(list.operations[0].progress.processed, 3);
+    assert_eq!(list.operations[0].related_ids, vec!["job-1".to_string()]);
+
+    let fetched = client.get_operation("op-1").await.unwrap();
+    assert_eq!(fetched.operation.id, "op-1");
+
+    let canceled = client.cancel_operation("op-1").await.unwrap();
+    assert_eq!(canceled.status, "cancel_requested");
+    assert_eq!(canceled.operation.state, "cancel_requested");
 }
 
 #[tokio::test]
@@ -2178,6 +2280,7 @@ async fn transaction_signing_helpers_roundtrip_response_shapes() {
                 stealth_address: "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".into(),
                 ephemeral_public_key_hex: "03".repeat(33),
                 view_tag_hex: Some("01".into()),
+                stealth_hash_convention: None,
             },
             fees: sigillum_api::Eip1559Fees {
                 chain_id: 1,
@@ -2201,6 +2304,7 @@ async fn transaction_signing_helpers_roundtrip_response_shapes() {
                 stealth_address: "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".into(),
                 ephemeral_public_key_hex: "03".repeat(33),
                 view_tag_hex: Some("01".into()),
+                stealth_hash_convention: None,
             },
             fees: sigillum_api::Eip1559Fees {
                 chain_id: 1,
@@ -2316,6 +2420,7 @@ async fn stealth_send_helpers_roundtrip_response_shapes() {
                 stealth_address: "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".into(),
                 ephemeral_public_key_hex: "03".repeat(33),
                 view_tag_hex: Some("01".into()),
+                stealth_hash_convention: None,
             },
             fees: Eip1559Fees {
                 chain_id: 1,
@@ -2344,6 +2449,7 @@ async fn stealth_send_helpers_roundtrip_response_shapes() {
                 stealth_address: "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".into(),
                 ephemeral_public_key_hex: "03".repeat(33),
                 view_tag_hex: Some("01".into()),
+                stealth_hash_convention: None,
             },
             fees: Eip1559Fees {
                 chain_id: 1,
@@ -2421,6 +2527,7 @@ async fn profile_and_queue_helpers_roundtrip_response_shapes() {
                 stealth_address: "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".into(),
                 ephemeral_public_key_hex: "03".repeat(33),
                 view_tag_hex: Some("01".into()),
+                stealth_hash_convention: None,
             },
             value_wei_hex: "0x1".into(),
             destination_address: None,
@@ -2443,6 +2550,7 @@ async fn profile_and_queue_helpers_roundtrip_response_shapes() {
                 stealth_address: "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".into(),
                 ephemeral_public_key_hex: "03".repeat(33),
                 view_tag_hex: Some("01".into()),
+                stealth_hash_convention: None,
             },
             value_wei_hex: "0x1".into(),
             destination_address: None,
@@ -2459,6 +2567,7 @@ async fn profile_and_queue_helpers_roundtrip_response_shapes() {
         .process_queue(QueueProcessRequest {
             id: None,
             limit: None,
+            run_async: None,
         })
         .await
         .unwrap();
@@ -2487,6 +2596,8 @@ async fn profile_and_queue_helpers_roundtrip_response_shapes() {
             min_sweep_value_wei_hex: Some("0x1".into()),
             note: Some("invoice-42".into()),
             ephemeral_private_key_hex: None,
+            request_gas: None,
+            gas_amount_wei_hex: None,
         })
         .await
         .unwrap();
@@ -2502,6 +2613,8 @@ async fn profile_and_queue_helpers_roundtrip_response_shapes() {
             min_sweep_amount_hex: Some("0xf4240".into()),
             note: None,
             ephemeral_private_key_hex: None,
+            request_gas: None,
+            gas_amount_wei_hex: None,
         })
         .await
         .unwrap();
@@ -2513,7 +2626,7 @@ async fn profile_and_queue_helpers_roundtrip_response_shapes() {
     let announced = client
         .scan_eth_stealth_announcements(EthStealthAnnouncementScanRequest {
             wallet_profile: "payments-mainnet".into(),
-            from_block: "0x100".into(),
+            from_block: Some("0x100".into()),
             to_block: Some("latest".into()),
             token_address: Some("0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48".into()),
             limit: Some(100),
@@ -2521,6 +2634,7 @@ async fn profile_and_queue_helpers_roundtrip_response_shapes() {
             sweep_destination_address: Some("0x1111111111111111111111111111111111111111".into()),
             min_sweep_amount_hex: Some("0xf4240".into()),
             note: None,
+            reset_cursor: None,
         })
         .await
         .unwrap();
@@ -2554,6 +2668,7 @@ async fn profile_and_queue_helpers_roundtrip_response_shapes() {
                 stealth_address: "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb".into(),
                 ephemeral_public_key_hex: "03".repeat(33),
                 view_tag_hex: Some("01".into()),
+                stealth_hash_convention: None,
             },
             destination_address: Some("0x1111111111111111111111111111111111111111".into()),
             min_value_wei_hex: Some("0x1".into()),
@@ -2570,6 +2685,7 @@ async fn profile_and_queue_helpers_roundtrip_response_shapes() {
                 stealth_address: "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb".into(),
                 ephemeral_public_key_hex: "03".repeat(33),
                 view_tag_hex: Some("01".into()),
+                stealth_hash_convention: None,
             },
             token_address: "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48".into(),
             recipient_address: Some("0x1111111111111111111111111111111111111111".into()),
@@ -2591,6 +2707,7 @@ async fn profile_and_queue_helpers_roundtrip_response_shapes() {
             deposit_refresh_limit: Some(10),
             queue_process_limit: Some(10),
             auto_enqueue: Some(true),
+            run_async: None,
         })
         .await
         .unwrap();
@@ -2777,4 +2894,130 @@ async fn tag_stealth_deposit_posts_deposit_id_and_parses_status() {
     assert_eq!(response.status, "tagged");
     assert_eq!(response.deposit.id, "dep-1");
     assert_eq!(response.deposit.counterparty_id.as_deref(), Some("party-1"));
+}
+
+// ── Structured error codes (1.4) ─────────────────────────────────
+
+async fn spawn_error_server() -> Option<SocketAddr> {
+    async fn gated() -> (StatusCode, Json<serde_json::Value>) {
+        (
+            StatusCode::FORBIDDEN,
+            Json(json!({
+                "code": "execution_gate_denied",
+                "error": "treasury execution gates deny this operation",
+            })),
+        )
+    }
+    async fn invalid() -> (StatusCode, Json<serde_json::Value>) {
+        (
+            StatusCode::BAD_REQUEST,
+            Json(json!({
+                "code": "validation_failed",
+                "error": "name exceeds maximum length of 256 bytes (got 300 bytes)",
+                "fields": [
+                    {
+                        "field": "name",
+                        "message": "name exceeds maximum length of 256 bytes (got 300 bytes)"
+                    },
+                    {
+                        "field": "rpc_url",
+                        "message": "rpc_url exceeds maximum length of 2048 bytes (got 2100 bytes)"
+                    }
+                ]
+            })),
+        )
+    }
+    async fn legacy() -> (StatusCode, Json<serde_json::Value>) {
+        (
+            StatusCode::UNAUTHORIZED,
+            Json(json!({ "error": "Invalid or missing session token." })),
+        )
+    }
+    let app = Router::new()
+        .route("/gated", post(gated))
+        .route("/invalid", post(invalid))
+        .route("/legacy", post(legacy));
+    let listener = match tokio::net::TcpListener::bind("127.0.0.1:0").await {
+        Ok(listener) => listener,
+        Err(error) => {
+            eprintln!("skipping loopback test: sandbox blocks loopback bind: {error}");
+            return None;
+        }
+    };
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        axum::serve(listener, app).await.unwrap();
+    });
+    Some(addr)
+}
+
+#[tokio::test]
+async fn api_error_exposes_code_and_field_errors() {
+    let Some(addr) = spawn_error_server().await else {
+        return;
+    };
+    let client = SigillumClient::new(format!("http://{addr}")).expect("client should build");
+
+    let error = client
+        .send::<serde_json::Value>(
+            client
+                .request(reqwest::Method::POST, "/invalid")
+                .json(&json!({})),
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(error.code(), Some("validation_failed"));
+    assert_eq!(
+        error.to_string(),
+        "api error (400 Bad Request): name exceeds maximum length of 256 bytes (got 300 bytes)"
+    );
+    let fields = error.fields();
+    assert_eq!(fields.len(), 2);
+    assert_eq!(fields[0].field, "name");
+    assert_eq!(
+        fields[0].message,
+        "name exceeds maximum length of 256 bytes (got 300 bytes)"
+    );
+    assert_eq!(fields[1].field, "rpc_url");
+
+    let error = client
+        .send::<serde_json::Value>(
+            client
+                .request(reqwest::Method::POST, "/gated")
+                .json(&json!({})),
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(error.code(), Some("execution_gate_denied"));
+    assert!(error.fields().is_empty());
+}
+
+#[tokio::test]
+async fn legacy_envelope_without_code_maps_to_none() {
+    let Some(addr) = spawn_error_server().await else {
+        return;
+    };
+    let client = SigillumClient::new(format!("http://{addr}")).expect("client should build");
+
+    let error = client
+        .send::<serde_json::Value>(
+            client
+                .request(reqwest::Method::POST, "/legacy")
+                .json(&json!({})),
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(error.code(), None);
+    assert!(error.fields().is_empty());
+    assert_eq!(
+        error.to_string(),
+        "api error (401 Unauthorized): Invalid or missing session token."
+    );
+}
+
+#[test]
+fn non_api_errors_have_no_code_or_fields() {
+    let error = ClientError::Encoding("bad hex".to_string());
+    assert_eq!(error.code(), None);
+    assert!(error.fields().is_empty());
 }

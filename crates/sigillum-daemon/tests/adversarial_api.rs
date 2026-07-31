@@ -586,6 +586,111 @@ async fn treasury_routes_reject_adversarial_inputs_without_state_changes() {
     );
 }
 
+#[tokio::test]
+async fn counterparty_update_omission_retains_and_blank_clears_sweep_destination() {
+    const DESTINATION: &str = "0x1111111111111111111111111111111111111111";
+
+    let (app, _dir) = test_app();
+    let token = init_session(&app).await;
+    let (create_status, created) = post_json(
+        &app,
+        "/api/treasury/parties",
+        json!({
+            "name": "Clearable destination",
+            "sweep_destination_address": DESTINATION
+        }),
+        Some(&token),
+    )
+    .await;
+    assert_eq!(create_status, StatusCode::OK, "party create: {created:?}");
+    let party_id = created["party"]["id"]
+        .as_str()
+        .expect("created party id")
+        .to_string();
+
+    let (omitted_status, omitted) = post_json(
+        &app,
+        "/api/treasury/parties/update",
+        json!({"id": party_id, "name": "Destination retained"}),
+        Some(&token),
+    )
+    .await;
+    assert_eq!(
+        omitted_status,
+        StatusCode::OK,
+        "omitted update: {omitted:?}"
+    );
+    assert_eq!(
+        omitted["party"]["sweep_destination_address"],
+        json!(DESTINATION),
+        "omitting the patch field must retain the stored destination"
+    );
+
+    let (malformed_status, malformed) = post_json(
+        &app,
+        "/api/treasury/parties/update",
+        json!({
+            "id": party_id,
+            "name": "Malformed rejected",
+            "sweep_destination_address": "0x123"
+        }),
+        Some(&token),
+    )
+    .await;
+    assert_eq!(
+        malformed_status,
+        StatusCode::BAD_REQUEST,
+        "malformed nonblank destination must be rejected: {malformed:?}"
+    );
+    assert_eq!(malformed["code"], json!("validation_failed"));
+    assert_eq!(
+        malformed["fields"],
+        json!([{
+            "field": "sweep_destination_address",
+            "message": "sweep_destination_address must be a valid ethereum address (optional 0x prefix plus 40 hex characters)"
+        }]),
+        "the HTTP validation envelope must identify the editable destination field"
+    );
+
+    let parties = get_json(&app, "/api/treasury/parties", &token).await;
+    let persisted = parties["parties"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|party| party["id"] == json!(party_id))
+        .expect("persisted party after malformed update");
+    assert_eq!(persisted["name"], json!("Destination retained"));
+    assert_eq!(persisted["sweep_destination_address"], json!(DESTINATION));
+
+    let (blank_status, blank) = post_json(
+        &app,
+        "/api/treasury/parties/update",
+        json!({
+            "id": party_id,
+            "name": "Destination cleared",
+            "sweep_destination_address": "   "
+        }),
+        Some(&token),
+    )
+    .await;
+    assert_eq!(
+        blank_status,
+        StatusCode::OK,
+        "blank clear update: {blank:?}"
+    );
+    assert_eq!(blank["party"]["sweep_destination_address"], Value::Null);
+
+    let parties = get_json(&app, "/api/treasury/parties", &token).await;
+    let persisted = parties["parties"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|party| party["id"] == json!(party_id))
+        .expect("persisted party after blank clear");
+    assert_eq!(persisted["name"], json!("Destination cleared"));
+    assert_eq!(persisted["sweep_destination_address"], Value::Null);
+}
+
 // ── Receiving API ───────────────────────────────────────────────────────────
 
 #[tokio::test]

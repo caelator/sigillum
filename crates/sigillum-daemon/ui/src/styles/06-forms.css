@@ -70,6 +70,15 @@ textarea:focus {
   outline-offset: 2px;
 }
 
+input[type="text"]:focus-visible,
+input[type="password"]:focus-visible,
+input[type="number"]:focus-visible,
+select:focus-visible,
+textarea:focus-visible {
+  outline: 2px solid var(--accent-ring);
+  outline-offset: 2px;
+}
+
 /* Validation failure: red border + red ring, independent of focus/hover */
 input.input-invalid,
 input.input-invalid:hover,
@@ -103,15 +112,10 @@ textarea {
 }
 
 select {
-  appearance: none;
-  -webkit-appearance: none;
-  padding-right: 28px;
-  background-image:
-    linear-gradient(45deg, transparent 50%, #a8b3c4 50%),
-    linear-gradient(135deg, #a8b3c4 50%, transparent 50%);
-  background-position: calc(100% - 15px) 15px, calc(100% - 10px) 15px;
-  background-size: 5px 5px;
-  background-repeat: no-repeat;
+  appearance: auto;
+  -webkit-appearance: menulist;
+  padding-right: 10px;
+  background-image: none;
   cursor: pointer;
 }
 
@@ -184,3 +188,11 @@ input[type="radio"] {
 .input-mid     { flex: 0 1 150px !important; }
 .input-wide    { flex: 1 1 200px !important; }
 .input-wider   { flex: 0 1 220px !important; }
+
+/* Visible field labels for dense operator forms (policy caps, refills). */
+.field-label {
+  font-size: var(--fs-sm);
+  color: var(--text-secondary);
+  white-space: nowrap;
+  align-self: center;
+}

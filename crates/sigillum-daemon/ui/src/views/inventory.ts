@@ -1,3 +1,4 @@
+import { ROUTE_PATHS } from "../routePaths";
 import type {
   ChainProfile,
   ConsolidationPlan,
@@ -21,34 +22,13 @@ import {
   renderEntityList,
   textValue,
 } from "../render/forms";
+import { confirmDangerDialog, confirmTypedDialog } from "../render/confirm";
+import {
+  amountWithRawHtml,
+  chainLabel as resolveChainLabel,
+  formatTimestamp,
+} from "../render/format";
 import { esc, escAttr, statusPill } from "../render/html";
-
-export interface InventoryViewModel {
-  enabledChains: ChainProfile[];
-  watchAddressBook: WatchAddressBookEntry[];
-  discoveryJobs: WalletDiscoveryJob[];
-  riskCatalog: RiskCatalogEntry[];
-  riskFindings: RiskFinding[];
-  consolidationPlans: ConsolidationPlan[];
-}
-
-export function summarizeInventory(view: InventoryViewModel): string {
-  return [
-    `${view.enabledChains.length} enabled chains`,
-    `${view.watchAddressBook.length} saved watch addresses`,
-    `${view.discoveryJobs.length} discovery jobs`,
-    `${view.riskCatalog.length} risk catalog entries`,
-    `${view.riskFindings.length} risk findings`,
-    `${view.consolidationPlans.length} plans`,
-  ].join(" | ");
-}
-
-export function inventoryNeedsOperatorReview(view: InventoryViewModel): boolean {
-  return (
-    view.riskFindings.length > 0 ||
-    view.consolidationPlans.some((plan) => plan.summary?.review_required_steps > 0)
-  );
-}
 
 /// Per-family W7.1 execution gate field for each plan-step action.
 /// review_asset is deliberately absent: it is never executable.
@@ -136,6 +116,7 @@ export function createInventoryActions(deps: InventoryActionsDeps) {
   let planRoutingListenerBound = false;
   let planPartyDestinationInputIds: string[] = [];
   let latestChainProfiles: ChainProfile[] = [];
+  let latestTokenLists: TokenRegistryList[] = [];
   let latestTreasuryPolicy: Record<string, unknown> | null = null;
 
   function planRoutingStrategy(): "single" | "per_party" {
@@ -180,7 +161,7 @@ export function createInventoryActions(deps: InventoryActionsDeps) {
     }
 
     try {
-      const r = await deps.api("GET", "/api/treasury/parties");
+      const r = await deps.api("GET", ROUTE_PATHS.API_TREASURY_PARTIES);
       if (r.error) {
         planPartyDestinationInputIds = [];
         container.innerHTML = "";
@@ -306,12 +287,63 @@ export function createInventoryActions(deps: InventoryActionsDeps) {
   }
 
   function chainLabel(chainId: number | string | null | undefined): string {
-    if (chainId === null || chainId === undefined) return "-";
+    return resolveChainLabel(chainId, latestChainProfiles);
+  }
+
+  interface AmountUnits {
+    decimals: number;
+    symbol: string | null;
+  }
+
+  /// Native amounts use the chain profile's decimals/symbol when the chain
+  /// is configured, else the EVM-native 18-decimal ETH convention.
+  function nativeUnits(chainId: unknown): AmountUnits {
     const numericChainId = Number(chainId);
     const profile = latestChainProfiles.find(
-      (chain) => chain.enabled && chain.chain_id === numericChainId,
+      (chain) => chain.chain_id === numericChainId,
     );
-    return profile ? `${numericChainId} (${profile.name})` : String(chainId);
+    return {
+      decimals: profile?.native_decimals ?? 18,
+      symbol: profile?.native_symbol || "ETH",
+    };
+  }
+
+  /// Token amounts only humanize when an imported token registry list knows
+  /// the contract's decimals; otherwise the raw hex stays (never guess units).
+  function tokenUnits(chainId: unknown, assetAddress: unknown): AmountUnits | null {
+    const numericChainId = Number(chainId);
+    const address = String(assetAddress || "").toLowerCase();
+    if (!address) return null;
+    for (const list of latestTokenLists) {
+      const entry = (list.entries || []).find(
+        (candidate) =>
+          candidate.chain_id === numericChainId &&
+          candidate.address.toLowerCase() === address,
+      );
+      if (entry) return { decimals: entry.decimals, symbol: entry.symbol };
+    }
+    return null;
+  }
+
+  function assetUnits(
+    assetKind: unknown,
+    chainId: unknown,
+    assetAddress: unknown,
+  ): AmountUnits | null {
+    if (assetKind === "native" || !assetAddress) return nativeUnits(chainId);
+    return tokenUnits(chainId, assetAddress);
+  }
+
+  function assetAmountHtml(
+    amountHex: string | null | undefined,
+    assetKind: unknown,
+    chainId: unknown,
+    assetAddress: unknown,
+  ): string {
+    const units = assetUnits(assetKind, chainId, assetAddress);
+    return units
+      ? amountWithRawHtml(amountHex, units)
+      : esc(amountHex || "-");
   }
 
   function blockCursorSummary(job: WalletDiscoveryJob): string {
@@ -354,7 +386,7 @@ export function createInventoryActions(deps: InventoryActionsDeps) {
           "chain=" +
           esc(chainLabel(optIn.chain_id)) +
           " · updated=" +
-          esc(String(optIn.updated_at_unix || "-")) +
+          esc(formatTimestamp(optIn.updated_at_unix)) +
           "</div></div>" +
           '<div class="entity-actions">' +
           '<button class="btn-ghost" data-action="toggleNftMetadataOptIn" data-arg0="' +
@@ -407,7 +439,7 @@ export function createInventoryActions(deps: InventoryActionsDeps) {
   function nftMetadataProvenanceLine(entry: NftMetadataCacheEntry): string {
     const fetchedParts: string[] = [];
     if (entry.fetched_at_unix !== undefined && entry.fetched_at_unix !== null) {
-      fetchedParts.push("fetched=" + String(entry.fetched_at_unix));
+      fetchedParts.push("fetched=" + formatTimestamp(entry.fetched_at_unix));
     }
     if (entry.fetched_uri) fetchedParts.push("uri=" + entry.fetched_uri);
     if (entry.content_sha256) {
@@ -500,10 +532,13 @@ export function createInventoryActions(deps: InventoryActionsDeps) {
         esc(cursorSummary) +
         "</div></div>" +
         '<div class="entity-actions">' +
-        '<button class="btn-ghost" data-action="cancelDiscoveryJob" data-arg0="' +
+        // Plan task 1.2: cancel/resume are real — cancel cooperatively
+        // stops the running scan (progress so far is kept), resume starts a
+        // new background operation continuing from the job's checkpoints.
+        '<button class="btn-ghost" title="Stop this scan after the current address; progress so far is kept" data-action="cancelDiscoveryJob" data-arg0="' +
         escAttr(job.id) +
         '">Cancel</button>' +
-        '<button class="btn-ghost" data-action="resumeDiscoveryJob" data-arg0="' +
+        '<button class="btn-ghost" title="Continue from this job&#39;s checkpoints in a new background scan" data-action="resumeDiscoveryJob" data-arg0="' +
         escAttr(job.id) +
         '">Resume</button>' +
         "</div></li>"
@@ -541,7 +576,10 @@ export function createInventoryActions(deps: InventoryActionsDeps) {
         esc(address.derivation_path) +
         "<br>" +
         "native=" +
-        esc(address.native_balance_wei_hex || "0x0") +
+        amountWithRawHtml(
+          address.native_balance_wei_hex || "0x0",
+          nativeUnits(address.chain_id),
+        ) +
         " · txCount=" +
         esc(String(address.transaction_count || 0)) +
         (address.last_activity_block !== undefined && address.last_activity_block !== null
@@ -586,7 +624,12 @@ export function createInventoryActions(deps: InventoryActionsDeps) {
           ? " · proofWords=" + esc(String((holding.claim_proof || []).length))
           : "") +
         " · amount=" +
-        esc(holding.amount_hex) +
+        assetAmountHtml(
+          holding.amount_hex,
+          holding.asset_kind,
+          holding.chain_id,
+          holding.asset_address,
+        ) +
         "<br>" +
         esc(holding.wallet_family) +
         "/" +
@@ -629,7 +672,7 @@ export function createInventoryActions(deps: InventoryActionsDeps) {
           " · source=" +
           esc(entry.source || "-") +
           " · updated=" +
-          esc(String(entry.updated_at_unix || "-")) +
+          esc(formatTimestamp(entry.updated_at_unix)) +
           "</div></div>" +
           '<div class="entity-actions">' +
           '<button class="btn-ghost" data-action="loadWatchAddressBookEntry" data-arg0="' +
@@ -685,7 +728,7 @@ export function createInventoryActions(deps: InventoryActionsDeps) {
           " entries · chains=" +
           esc(chainIds) +
           " · updated=" +
-          esc(String(list.updated_at_unix)) +
+          esc(formatTimestamp(list.updated_at_unix)) +
           "</div></div>" +
           '<div class="entity-actions">' +
           '<button class="btn-danger" data-action="deleteTokenRegistryList" data-arg0="' +
@@ -776,6 +819,12 @@ export function createInventoryActions(deps: InventoryActionsDeps) {
             const evidence = (step.simulation_evidence || []).join(" | ");
             const linkageWarnings = step.linkage_warnings || [];
             const blockers = (step.blockers || []).map(blockerLabel).join(", ");
+            const stepAmountHtml = assetAmountHtml(
+              step.amount_hex,
+              step.asset_kind,
+              step.chain_id,
+              step.asset_address,
+            );
             // Execute appears ONLY when every gate passes; the daemon
             // re-validates everything at enqueue time regardless.
             const executeButton = stepExecutionEligible(
@@ -807,7 +856,7 @@ export function createInventoryActions(deps: InventoryActionsDeps) {
                   " · funds=" +
                   esc(step.destination_address || "-") +
                   " · topup=" +
-                  esc(step.amount_hex)
+                  amountWithRawHtml(step.amount_hex, nativeUnits(step.chain_id))
                 : "") +
               (step.token_id_hex ? " #" + esc(step.token_id_hex) : "") +
               (step.counterparty_address
@@ -831,7 +880,7 @@ export function createInventoryActions(deps: InventoryActionsDeps) {
                 ? " · proofWords=" + esc(String((step.claim_proof || []).length))
                 : "") +
               " · amount=" +
-              esc(step.amount_hex) +
+              stepAmountHtml +
               " · simulation=" +
               esc(step.simulation_status || "not_run") +
               " · blockers=" +
@@ -915,23 +964,26 @@ export function createInventoryActions(deps: InventoryActionsDeps) {
         nftOptIns,
         treasuryPolicy,
       ] = await Promise.all([
-        deps.api("GET", "/api/chains"),
-        deps.api("GET", "/api/inventory/watch-addresses"),
-        deps.api("GET", "/api/inventory/wallets"),
-        deps.api("GET", "/api/inventory/token-registry"),
-        deps.api("GET", "/api/risk/catalog"),
-        deps.api("GET", "/api/risk/findings"),
-        deps.api("GET", "/api/plans/consolidation"),
-        deps.api("GET", "/api/inventory/nft-metadata/opt-ins"),
-        deps.api("GET", "/api/treasury/policy"),
+        deps.api("GET", ROUTE_PATHS.API_CHAINS),
+        deps.api("GET", ROUTE_PATHS.API_INVENTORY_WATCH_ADDRESSES),
+        deps.api("GET", ROUTE_PATHS.API_INVENTORY_WALLETS),
+        deps.api("GET", ROUTE_PATHS.API_INVENTORY_TOKEN_REGISTRY),
+        deps.api("GET", ROUTE_PATHS.API_RISK_CATALOG),
+        deps.api("GET", ROUTE_PATHS.API_RISK_FINDINGS),
+        deps.api("GET", ROUTE_PATHS.API_PLANS_CONSOLIDATION),
+        deps.api("GET", ROUTE_PATHS.API_INVENTORY_NFT_METADATA_OPT_INS),
+        deps.api("GET", ROUTE_PATHS.API_TREASURY_POLICY),
       ]);
       if (!chains.error) {
         latestChainProfiles = chains.profiles || [];
         renderChainProfiles(latestChainProfiles);
       }
+      // Token units must be captured before the inventory render so holding
+      // amounts humanize with registry decimals.
+      if (!tokenRegistry.error) latestTokenLists = tokenRegistry.lists || [];
       if (!watchBook.error) renderWatchAddressBook(watchBook.entries || []);
       if (!inventory.error) renderInventoryState(inventory);
-      if (!tokenRegistry.error) renderTokenRegistry(tokenRegistry.lists || []);
+      if (!tokenRegistry.error) renderTokenRegistry(latestTokenLists);
       if (!catalog.error) renderRiskCatalog(catalog.entries || []);
       if (!risks.error) renderRiskFindings(risks.findings || []);
       // The policy gates decide whether Execute affordances render, so it
@@ -951,7 +1003,7 @@ export function createInventoryActions(deps: InventoryActionsDeps) {
       deps.toast("Chain profile name and family are required", "error");
       return;
     }
-    const r = await deps.api("POST", "/api/chains/upsert", {
+    const r = await deps.api("POST", ROUTE_PATHS.API_CHAINS_UPSERT, {
       name,
       chain_family: family,
       chain_id: optionalNumberValue("chainProfileId"),
@@ -984,7 +1036,15 @@ export function createInventoryActions(deps: InventoryActionsDeps) {
   }
 
   async function deleteChainProfile(name: string): Promise<void> {
-    if (!confirm('Delete chain profile "' + name + '"?')) return;
+    const confirmed = await confirmDangerDialog({
+      title: "Delete chain profile",
+      body:
+        'Delete chain profile "' +
+        name +
+        '"? Inventory scans and plans that reference this chain will no longer resolve it.',
+      actionLabel: "Delete",
+    });
+    if (!confirmed) return;
     const r = await deps.api("POST", "/api/chains/delete", { name });
     if (r.error) {
       deps.toast(r.error, "error");
@@ -1061,12 +1121,27 @@ export function createInventoryActions(deps: InventoryActionsDeps) {
       nft_discovery_limit: optionalNumberValue("inventoryNftDiscoveryLimit"),
     };
     if (allConfiguredChains) body.all_configured_chains = true;
+    const runAsync =
+      (document.getElementById("inventoryRunAsync") as HTMLInputElement | null)?.checked ??
+      false;
+    if (runAsync) body.run_async = true;
     const r = await deps.api("POST", "/api/inventory/scan/evm", body);
     if (r.error) {
       deps.toast(r.error, "error");
       return;
     }
-    deps.toast("Inventory scan completed");
+    if (runAsync && r.operation && r.operation.id) {
+      // Background scan accepted: progress renders in the job list on the
+      // next refresh; the operation id lets the operator cross-check via
+      // GET /api/operations/{id} (and cancel from the job row).
+      deps.toast(
+        "Scan started in background — operation " +
+          String(r.operation.id) +
+          "; progress shows in the job list below",
+      );
+    } else {
+      deps.toast("Inventory scan completed");
+    }
     void loadInventoryOperations();
   }
 
@@ -1088,7 +1163,7 @@ export function createInventoryActions(deps: InventoryActionsDeps) {
       deps.toast("Watch address is required", "error");
       return;
     }
-    const r = await deps.api("POST", "/api/inventory/watch-addresses/upsert", {
+    const r = await deps.api("POST", ROUTE_PATHS.API_INVENTORY_WATCH_ADDRESSES_UPSERT, {
       address,
       label: optionalTextValue("watchBookLabel"),
       tags: parseTagList(optionalTextValue("watchBookTags")),
@@ -1116,7 +1191,7 @@ export function createInventoryActions(deps: InventoryActionsDeps) {
     }
     const tags = parseTagList(optionalTextValue("watchBookTags"));
     for (const probe of probes) {
-      const r = await deps.api("POST", "/api/inventory/watch-addresses/upsert", {
+      const r = await deps.api("POST", ROUTE_PATHS.API_INVENTORY_WATCH_ADDRESSES_UPSERT, {
         address: probe.address,
         label: probe.label || null,
         tags,
@@ -1137,7 +1212,7 @@ export function createInventoryActions(deps: InventoryActionsDeps) {
     tagsCsv: string,
     enabled: string,
   ): Promise<void> {
-    const r = await deps.api("POST", "/api/inventory/watch-addresses/upsert", {
+    const r = await deps.api("POST", ROUTE_PATHS.API_INVENTORY_WATCH_ADDRESSES_UPSERT, {
       address,
       label: label || null,
       tags: parseTagList(tagsCsv),
@@ -1152,7 +1227,15 @@ export function createInventoryActions(deps: InventoryActionsDeps) {
   }
 
   async function deleteWatchAddressBookEntry(address: string): Promise<void> {
-    if (!confirm('Delete saved watch address "' + address + '"?')) return;
+    const confirmed = await confirmDangerDialog({
+      title: "Delete watch address",
+      body:
+        'Delete saved watch address "' +
+        address +
+        '"? The daemon stops tracking its balances and approvals.',
+      actionLabel: "Delete",
+    });
+    if (!confirmed) return;
     const r = await deps.api("POST", "/api/inventory/watch-addresses/delete", { address });
     if (r.error) {
       deps.toast(r.error, "error");
@@ -1169,7 +1252,7 @@ export function createInventoryActions(deps: InventoryActionsDeps) {
       deps.toast("Chain id and collection contract address are required", "error");
       return;
     }
-    const r = await deps.api("POST", "/api/inventory/nft-metadata/opt-ins/upsert", {
+    const r = await deps.api("POST", ROUTE_PATHS.API_INVENTORY_NFT_METADATA_OPT_INS_UPSERT, {
       chain_id: chainId,
       contract_address: contractAddress,
       enabled: true,
@@ -1194,7 +1277,7 @@ export function createInventoryActions(deps: InventoryActionsDeps) {
       return;
     }
     const nextEnabled = enabled === "true";
-    const r = await deps.api("POST", "/api/inventory/nft-metadata/opt-ins/upsert", {
+    const r = await deps.api("POST", ROUTE_PATHS.API_INVENTORY_NFT_METADATA_OPT_INS_UPSERT, {
       chain_id: numericChainId,
       contract_address: contractAddress,
       enabled: nextEnabled,
@@ -1216,7 +1299,15 @@ export function createInventoryActions(deps: InventoryActionsDeps) {
       deps.toast("NFT metadata opt-in target is invalid", "error");
       return;
     }
-    if (!confirm('Delete NFT metadata opt-in "' + contractAddress + '"?')) return;
+    const confirmed = await confirmDangerDialog({
+      title: "Delete NFT metadata opt-in",
+      body:
+        'Delete NFT metadata opt-in "' +
+        contractAddress +
+        '"? Cached metadata for this collection is dropped and no longer fetched.',
+      actionLabel: "Delete",
+    });
+    if (!confirmed) return;
     const r = await deps.api("POST", "/api/inventory/nft-metadata/opt-ins/delete", {
       chain_id: numericChainId,
       contract_address: contractAddress,
@@ -1230,7 +1321,7 @@ export function createInventoryActions(deps: InventoryActionsDeps) {
   }
 
   async function saveNftMetadataSettings(): Promise<void> {
-    const r = await deps.api("POST", "/api/inventory/nft-metadata/settings", {
+    const r = await deps.api("POST", ROUTE_PATHS.API_INVENTORY_NFT_METADATA_SETTINGS, {
       ipfs_gateway_url: textValue("nftMetaGatewayUrl"),
     });
     if (r.error) {
@@ -1258,7 +1349,7 @@ export function createInventoryActions(deps: InventoryActionsDeps) {
     const fetchButton = document.querySelector('[data-action="fetchNftMetadata"]');
     if (fetchButton) fetchButton.classList.add("btn-busy");
     try {
-      const r = await deps.api("POST", "/api/inventory/nft-metadata/fetch", {});
+      const r = await deps.api("POST", ROUTE_PATHS.API_INVENTORY_NFT_METADATA_FETCH, {});
       if (r.error) {
         deps.toast(r.error, "error");
         return;
@@ -1279,22 +1370,35 @@ export function createInventoryActions(deps: InventoryActionsDeps) {
   }
 
   async function cancelDiscoveryJob(id: string): Promise<void> {
+    const confirmed = await confirmDangerDialog({
+      title: "Cancel discovery scan",
+      body:
+        'Stop discovery job "' +
+        id +
+        '"? The scan stops after the address it is currently checking. Progress so far is kept and you can resume from it later.',
+      actionLabel: "Cancel scan",
+    });
+    if (!confirmed) return;
     const r = await deps.api("POST", "/api/discovery/jobs/cancel", { id });
     if (r.error) {
       deps.toast(r.error, "error");
       return;
     }
-    deps.toast("Discovery job marked canceled");
+    if (r.status === "cancel_requested") {
+      deps.toast("Cancel requested — the scan stops after the current address");
+    } else {
+      deps.toast("Discovery job canceled");
+    }
     void loadInventoryOperations();
   }
 
   async function resumeDiscoveryJob(id: string): Promise<void> {
-    const r = await deps.api("POST", "/api/discovery/jobs/resume", { id });
+    const r = await deps.api("POST", ROUTE_PATHS.API_DISCOVERY_JOBS_RESUME, { id });
     if (r.error) {
       deps.toast(r.error, "error");
       return;
     }
-    deps.toast("Discovery job marked for resume");
+    deps.toast("Discovery scan resumed in the background");
     void loadInventoryOperations();
   }
 
@@ -1310,7 +1414,7 @@ export function createInventoryActions(deps: InventoryActionsDeps) {
       deps.toast("Provide pasted JSON entries or a local file path (not both)", "error");
       return;
     }
-    const r = await deps.api("POST", "/api/inventory/token-registry/import", {
+    const r = await deps.api("POST", ROUTE_PATHS.API_INVENTORY_TOKEN_REGISTRY_IMPORT, {
       name,
       entries_json: entriesJson || undefined,
       file_path: filePath || undefined,
@@ -1325,7 +1429,15 @@ export function createInventoryActions(deps: InventoryActionsDeps) {
   }
 
   async function deleteTokenRegistryList(name: string): Promise<void> {
-    if (!confirm('Delete token registry list "' + name + '"?')) return;
+    const confirmed = await confirmDangerDialog({
+      title: "Delete token registry list",
+      body:
+        'Delete token registry list "' +
+        name +
+        '"? Its token metadata is removed from local inventory views.',
+      actionLabel: "Delete",
+    });
+    if (!confirmed) return;
     const r = await deps.api("POST", "/api/inventory/token-registry/delete", { name });
     if (r.error) {
       deps.toast(r.error, "error");
@@ -1337,8 +1449,8 @@ export function createInventoryActions(deps: InventoryActionsDeps) {
 
   async function loadRiskFindings(): Promise<void> {
     const [catalog, risks] = await Promise.all([
-      deps.api("GET", "/api/risk/catalog"),
-      deps.api("GET", "/api/risk/findings"),
+      deps.api("GET", ROUTE_PATHS.API_RISK_CATALOG),
+      deps.api("GET", ROUTE_PATHS.API_RISK_FINDINGS),
     ]);
     if (catalog.error || risks.error) {
       deps.toast(catalog.error || risks.error, "error");
@@ -1357,7 +1469,7 @@ export function createInventoryActions(deps: InventoryActionsDeps) {
       return;
     }
     const note = optionalTextValue("riskCatalogNote");
-    const r = await deps.api("POST", "/api/risk/catalog/upsert", {
+    const r = await deps.api("POST", ROUTE_PATHS.API_RISK_CATALOG_UPSERT, {
       address,
       label: optionalTextValue("riskCatalogLabel"),
       risk_level: riskLevel,
@@ -1373,7 +1485,15 @@ export function createInventoryActions(deps: InventoryActionsDeps) {
   }
 
   async function deleteRiskCatalogEntry(address: string): Promise<void> {
-    if (!confirm('Delete risk catalog entry "' + address + '"?')) return;
+    const confirmed = await confirmDangerDialog({
+      title: "Delete risk catalog entry",
+      body:
+        'Delete risk catalog entry "' +
+        address +
+        '"? Findings derived from it disappear from the risk view.',
+      actionLabel: "Delete",
+    });
+    if (!confirmed) return;
     const r = await deps.api("POST", "/api/risk/catalog/delete", { address });
     if (r.error) {
       deps.toast(r.error, "error");
@@ -1400,7 +1520,7 @@ export function createInventoryActions(deps: InventoryActionsDeps) {
     if (chainId !== null) body.chain_id = chainId;
     if (routingStrategy === "per_party") body.party_destinations = partyDestinations;
 
-    const r = await deps.api("POST", "/api/plans/consolidation/generate", body);
+    const r = await deps.api("POST", ROUTE_PATHS.API_PLANS_CONSOLIDATION_GENERATE, body);
     if (r.error) {
       deps.toast(r.error, "error");
       return;
@@ -1410,7 +1530,7 @@ export function createInventoryActions(deps: InventoryActionsDeps) {
   }
 
   async function approveConsolidationPlan(planId: string): Promise<void> {
-    const r = await deps.api("POST", "/api/plans/consolidation/approve", {
+    const r = await deps.api("POST", ROUTE_PATHS.API_PLANS_CONSOLIDATION_APPROVE, {
       plan_id: planId,
       step_ids: [],
     });
@@ -1423,7 +1543,7 @@ export function createInventoryActions(deps: InventoryActionsDeps) {
   }
 
   async function simulateConsolidationPlan(planId: string): Promise<void> {
-    const r = await deps.api("POST", "/api/plans/consolidation/simulate", {
+    const r = await deps.api("POST", ROUTE_PATHS.API_PLANS_CONSOLIDATION_SIMULATE, {
       plan_id: planId,
       step_ids: [],
     });
@@ -1447,7 +1567,7 @@ export function createInventoryActions(deps: InventoryActionsDeps) {
       return;
     }
 
-    const r = (await deps.api("POST", "/api/plans/consolidation/export", {
+    const r = (await deps.api("POST", ROUTE_PATHS.API_PLANS_CONSOLIDATION_EXPORT, {
       plan_id: planId,
       step_ids: [],
       format,
@@ -1468,17 +1588,19 @@ export function createInventoryActions(deps: InventoryActionsDeps) {
   }
 
   async function enqueuePlanStep(planId: string, stepId: string): Promise<void> {
-    if (
-      !confirm(
+    const confirmed = await confirmDangerDialog({
+      title: "Enqueue plan step",
+      body:
         "Enqueue plan step " +
-          stepId +
-          " as an execution queue job? The daemon re-validates every gate; " +
-          "queued plan-step jobs stay blocked until execution is enabled (W7.3).",
-      )
-    ) {
+        stepId +
+        " as an execution queue job? The daemon re-validates every gate; " +
+        "queued plan-step jobs stay blocked until execution is enabled (W7.3).",
+      actionLabel: "Enqueue step",
+    });
+    if (!confirmed) {
       return;
     }
-    const r = await deps.api("POST", "/api/plans/enqueue-step", {
+    const r = await deps.api("POST", ROUTE_PATHS.API_PLANS_ENQUEUE_STEP, {
       plan_id: planId,
       step_id: stepId,
       confirm: true,
@@ -1495,7 +1617,7 @@ export function createInventoryActions(deps: InventoryActionsDeps) {
     // Probe with an empty confirmation: the daemon computes the exact
     // expected phrase from the CURRENTLY eligible steps and returns it in
     // the machine-readable `action` field (nothing is enqueued).
-    const probe = await deps.api("POST", "/api/plans/enqueue-plan", {
+    const probe = await deps.api("POST", ROUTE_PATHS.API_PLANS_ENQUEUE_PLAN, {
       plan_id: planId,
       confirmation: "",
     });
@@ -1504,19 +1626,19 @@ export function createInventoryActions(deps: InventoryActionsDeps) {
       deps.toast(probe.error || "No plan steps are eligible for enqueue", "error");
       return;
     }
-    const typed = prompt(
-      "Typed confirmation required (house pattern).\n\n" +
-        "Type this phrase exactly to enqueue every eligible step:\n\n" +
-        expected,
-    );
-    if (typed === null) return;
-    if (typed.trim() !== expected) {
-      deps.toast("Confirmation phrase does not match. Expected: " + expected, "error");
-      return;
-    }
+    const confirmed = await confirmTypedDialog({
+      title: "Enqueue all eligible plan steps",
+      body:
+        "This enqueues every eligible step of the plan as execution queue jobs. " +
+        "The daemon re-validates every gate before executing; steps that pass " +
+        "their checks are signed and broadcast on-chain.",
+      phrase: expected,
+      actionLabel: "Enqueue all",
+    });
+    if (!confirmed) return;
     const r = await deps.api("POST", "/api/plans/enqueue-plan", {
       plan_id: planId,
-      confirmation: typed.trim(),
+      confirmation: expected,
     });
     if (r.error) {
       deps.toast(r.error, "error");
@@ -1533,10 +1655,10 @@ export function createInventoryActions(deps: InventoryActionsDeps) {
 
   async function exportInventoryReport(): Promise<void> {
     const [watchBook, inventory, risks, plans] = await Promise.all([
-      deps.api("GET", "/api/inventory/watch-addresses"),
-      deps.api("GET", "/api/inventory/wallets"),
-      deps.api("GET", "/api/risk/findings"),
-      deps.api("GET", "/api/plans/consolidation"),
+      deps.api("GET", ROUTE_PATHS.API_INVENTORY_WATCH_ADDRESSES),
+      deps.api("GET", ROUTE_PATHS.API_INVENTORY_WALLETS),
+      deps.api("GET", ROUTE_PATHS.API_RISK_FINDINGS),
+      deps.api("GET", ROUTE_PATHS.API_PLANS_CONSOLIDATION),
     ]);
     if (watchBook.error || inventory.error || risks.error || plans.error) {
       deps.toast(watchBook.error || inventory.error || risks.error || plans.error, "error");
@@ -1704,7 +1826,9 @@ function safeAddressForExportAction(actionEl: unknown): string | null {
     | undefined;
   const fromInput = input?.value?.trim();
   if (fromInput) return fromInput;
-  return window.prompt("Safe address")?.trim() || null;
+  // No modal prompt here: the row input is the only source, so the export
+  // flow stays inside the styled UI and the fake-DOM test harness.
+  return null;
 }
 
 function exportFilename(response: ConsolidationPlanExportResponse): string {

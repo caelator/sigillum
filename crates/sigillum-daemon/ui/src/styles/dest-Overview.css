@@ -1,0 +1,159 @@
+/* ── dest-Overview.css — Overview destination (plan 4.3) ────────────────────
+   Layout for the "what needs my attention?" destination, rendered into the
+   legacy #statusCard hero container by src/destinations/Overview.ts. Only
+   layout/spacing lives here: colors come from the design tokens and the v2
+   components (.attention-item, .section-empty, .status-dot, [data-tier]);
+   legacy .stats/.stat/.pill/.btn-* carry the strip and actions. No per-screen
+   hex values, no inline-style replacements. */
+
+.dest-overview {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+/* Freshness watermark + transport dot, right side of the page header. */
+.dest-overview-watermark {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--fs-xs);
+  color: var(--text-dim);
+  margin: 0;
+  white-space: nowrap;
+}
+
+/* Persistent stale-data banner (never a toast). The [data-tier] attribute on
+   the element supplies the --_tier-* custom properties from 14-components. */
+.dest-overview-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--density-pad-y) var(--density-pad-x);
+  margin: 0 0 var(--space-5);
+  background: var(--_tier-surface, var(--surface));
+  border: 1px solid var(--_tier-border, var(--border));
+  border-left-width: 3px;
+  border-left-color: var(--_tier-accent, var(--accent));
+  border-radius: var(--radius);
+}
+
+.dest-overview-banner-copy {
+  min-width: 0;
+}
+
+.dest-overview-banner-title {
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  color: var(--text);
+  margin: 0;
+}
+
+.dest-overview-banner-body {
+  font-size: var(--fs-xs);
+  color: var(--text-muted);
+  margin: var(--space-1) 0 0;
+}
+
+/* Compact workspace status: lock pill + compartment on one row, counts as
+   legacy stat tiles below. */
+.dest-overview-status {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding-bottom: var(--space-4);
+  border-bottom: 1px solid var(--border-faint);
+}
+
+.dest-overview-lock-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+}
+
+.dest-overview-comp {
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  color: var(--text);
+}
+
+.dest-overview-comp-meta {
+  font-size: var(--fs-xs);
+  color: var(--text-dim);
+}
+
+.dest-overview-stats {
+  margin: 0;
+}
+
+/* Sections (attention queue, recent activity) — heading rhythm matches the
+   legacy .section-title; lists get their own spacing. */
+.dest-overview-section {
+  display: flex;
+  flex-direction: column;
+}
+
+.dest-overview-section .section-title {
+  margin: var(--space-4) 0 var(--space-3);
+}
+
+.dest-overview-attention-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+/* Audit digest rows: description left, relative time + compartment right. */
+.dest-overview-audit-list {
+  display: flex;
+  flex-direction: column;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.dest-overview-audit-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-2) 0;
+  border-bottom: 1px solid var(--border-faint);
+}
+
+.dest-overview-audit-row:last-child {
+  border-bottom: none;
+}
+
+.dest-overview-audit-text {
+  font-size: var(--fs-sm);
+  color: var(--text-secondary);
+  margin: 0;
+  min-width: 0;
+}
+
+.dest-overview-audit-meta {
+  font-size: var(--fs-xs);
+  color: var(--text-dim);
+  margin: 0;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.dest-overview-more-row {
+  display: flex;
+  justify-content: center;
+  padding-top: var(--space-3);
+}
+
+/* Skeleton stacks while the first refresh is in flight. */
+.dest-overview-skeleton-stack {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}

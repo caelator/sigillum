@@ -5,6 +5,7 @@ use sigillum_api::{
     WalletAddressActivityState, WalletAssetHolding, WalletAssetKind, WalletDiscoveryJob,
     WalletInventoryAddress,
 };
+use sigillum_core::decode_quantity_hex;
 
 use crate::service::helpers::random_id;
 use crate::service::{ServiceError, ServiceResult};
@@ -77,10 +78,18 @@ pub(super) fn record_inventory_observation(
     observation: InventoryAddressObservation,
     detected_holdings: &mut Vec<WalletAssetHolding>,
     scanned_addresses: &mut Vec<WalletInventoryAddress>,
+    track_provider_partitions: bool,
 ) {
     job.addresses_scanned += 1;
     if observation.address.activity_state != WalletAddressActivityState::Empty {
         job.active_addresses += 1;
+    }
+    if track_provider_partitions {
+        record_provider_partition_observation(
+            job,
+            &observation.address.provider_profile,
+            observation.address.chain_id,
+        );
     }
     for holding in &observation.holdings {
         if quantity_hex_is_nonzero(&holding.amount_hex) {
@@ -113,6 +122,30 @@ pub(super) fn record_inventory_observation(
         }
     }
     scanned_addresses.push(observation.address);
+}
+
+/// Attribute one observed address to its serving provider on the job
+/// record, so a partitioned scan carries per-provider coverage counts an
+/// operator can verify for disjointness (plan task 3.1).
+fn record_provider_partition_observation(
+    job: &mut WalletDiscoveryJob,
+    provider_profile: &str,
+    chain_id: u64,
+) {
+    if let Some(existing) = job
+        .provider_partition_observations
+        .iter_mut()
+        .find(|entry| entry.provider_profile == provider_profile && entry.chain_id == chain_id)
+    {
+        existing.addresses_observed += 1;
+    } else {
+        job.provider_partition_observations
+            .push(sigillum_api::ProviderPartitionObservation {
+                provider_profile: provider_profile.to_string(),
+                chain_id,
+                addresses_observed: 1,
+            });
+    }
 }
 
 pub(super) fn conservative_nft_spam_label(
@@ -591,6 +624,14 @@ fn protocol_address_key_matches(left: &WalletAssetHolding, right: &WalletAssetHo
         && (left.protocol_address.is_none() || right.protocol_address.is_none())
 }
 
+/// Flags effectively unlimited approvals, including uint160-max Permit2 allowances, not only
+/// uint256-max approvals.
+pub(super) fn is_very_large_approval(amount_hex: &str) -> bool {
+    decode_quantity_hex(amount_hex)
+        .map(|bytes| bytes[..16].iter().any(|byte| *byte != 0))
+        .unwrap_or(false)
+}
+
 pub(super) fn quantity_hex_is_nonzero(value: &str) -> bool {
     value
         .strip_prefix("0x")
@@ -666,6 +707,37 @@ mod tests {
     const OWNER: &str = "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
     const CONTRACT: &str = "0x1111111111111111111111111111111111111111";
     const TRUSTED: &str = "0xdead000000000000000000000000000000000000";
+
+    #[test]
+    fn very_large_approval_threshold_is_inclusive_at_two_to_the_128() {
+        let cases = [
+            ("2^128 - 1", "0xffffffffffffffffffffffffffffffff", false),
+            ("2^128", "0x100000000000000000000000000000000", true),
+            (
+                "Permit2 maximum allowance (2^160 - 1)",
+                "0xffffffffffffffffffffffffffffffffffffffff",
+                true,
+            ),
+            (
+                "2^255",
+                "0x8000000000000000000000000000000000000000000000000000000000000000",
+                true,
+            ),
+            (
+                "2^256 - 1",
+                "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+                true,
+            ),
+        ];
+
+        for (label, amount_hex, expected) in cases {
+            assert_eq!(
+                is_very_large_approval(amount_hex),
+                expected,
+                "{label} classification"
+            );
+        }
+    }
 
     #[test]
     fn airdropped_mock_collection_is_flagged_with_both_reasons() {
@@ -824,6 +896,7 @@ mod tests {
             stealth_address: stealth_address.into(),
             ephemeral_public_key_hex: "0x02".into(),
             view_tag_hex: "0xaa".into(),
+            stealth_hash_convention: sigillum_core::StealthHashConvention::STANDARD,
             announcement: None,
             token_address: None,
             expected_amount_hex: None,
@@ -840,6 +913,9 @@ mod tests {
             last_checked_at_unix: None,
             broadcast_transaction_hash_hex: None,
             counterparty_id: None,
+            requested_gas_wei_hex: None,
+            gas_topup_job_id: None,
+            gas_topup_job_state: None,
         }
     }
 

@@ -1,11 +1,12 @@
 //! Profile-backed stealth send request resolution.
 
 use sigillum_api::{
-    Eip1559Fees, EthStealthSendErc20TransferRequest, EthStealthSendErc20WithProfileRequest,
+    EthStealthSendErc20TransferRequest, EthStealthSendErc20WithProfileRequest,
     EthStealthSendResponse, EthStealthSendTransferRequest, EthStealthSendWithProfileRequest,
     EvmFeeEstimateRequest, EvmProviderRef,
 };
 
+use super::fees::static_profile_fees;
 use crate::service::{ServiceError, ServiceResult, SigillumService};
 
 impl SigillumService {
@@ -14,7 +15,20 @@ impl SigillumService {
         token: Option<&str>,
         body: EthStealthSendWithProfileRequest,
     ) -> ServiceResult<EthStealthSendResponse> {
-        let session_token = self.require_session(token)?;
+        let token = self.require_session(token)?;
+        let session_context = self.capture_session_operation_context(Some(token))?;
+        let operation_guard = self.acquire_session_operation(&session_context).await?;
+        self.eth_stealth_send_with_profile_under_operation_guard(token, body, &operation_guard)
+            .await
+    }
+
+    pub(in crate::service) async fn eth_stealth_send_with_profile_under_operation_guard(
+        &self,
+        token: &str,
+        body: EthStealthSendWithProfileRequest,
+        operation_guard: &tokio::sync::MutexGuard<'_, ()>,
+    ) -> ServiceResult<EthStealthSendResponse> {
+        let session_token = self.require_session(Some(token))?;
         let (provider, wallet) = self.resolve_wallet_profile(&body.wallet_profile)?;
         let chain_id = wallet.chain_id.unwrap_or(provider.chain_id);
         let gas_limit = body.gas_limit.or(provider.native_gas_limit);
@@ -45,7 +59,7 @@ impl SigillumService {
                 )
             })?;
 
-        self.eth_stealth_send_transfer(
+        self.eth_stealth_send_transfer_under_operation_guard(
             token,
             EthStealthSendTransferRequest {
                 rpc_url: provider.rpc_url,
@@ -61,6 +75,7 @@ impl SigillumService {
                 gas_limit,
                 broadcast: body.broadcast,
             },
+            operation_guard,
         )
         .await
     }
@@ -70,7 +85,24 @@ impl SigillumService {
         token: Option<&str>,
         body: EthStealthSendErc20WithProfileRequest,
     ) -> ServiceResult<EthStealthSendResponse> {
-        let session_token = self.require_session(token)?;
+        let token = self.require_session(token)?;
+        let session_context = self.capture_session_operation_context(Some(token))?;
+        let operation_guard = self.acquire_session_operation(&session_context).await?;
+        self.eth_stealth_send_erc20_with_profile_under_operation_guard(
+            token,
+            body,
+            &operation_guard,
+        )
+        .await
+    }
+
+    pub(in crate::service) async fn eth_stealth_send_erc20_with_profile_under_operation_guard(
+        &self,
+        token: &str,
+        body: EthStealthSendErc20WithProfileRequest,
+        operation_guard: &tokio::sync::MutexGuard<'_, ()>,
+    ) -> ServiceResult<EthStealthSendResponse> {
+        let session_token = self.require_session(Some(token))?;
         let (provider, wallet) = self.resolve_wallet_profile(&body.wallet_profile)?;
         let chain_id = wallet.chain_id.unwrap_or(provider.chain_id);
         let gas_limit = body.gas_limit.or(provider.erc20_gas_limit);
@@ -93,7 +125,7 @@ impl SigillumService {
             static_profile_fees(&provider, chain_id)?
         };
 
-        self.eth_stealth_send_erc20_transfer(
+        self.eth_stealth_send_erc20_transfer_under_operation_guard(
             token,
             EthStealthSendErc20TransferRequest {
                 rpc_url: provider.rpc_url,
@@ -110,26 +142,8 @@ impl SigillumService {
                 gas_limit,
                 broadcast: body.broadcast,
             },
+            operation_guard,
         )
         .await
     }
-}
-
-fn static_profile_fees(
-    provider: &sigillum_api::EvmProviderProfile,
-    chain_id: u64,
-) -> ServiceResult<Eip1559Fees> {
-    Ok(Eip1559Fees {
-        chain_id,
-        max_priority_fee_per_gas_hex: provider.max_priority_fee_per_gas_hex.clone().ok_or_else(
-            || {
-                ServiceError::bad_request(
-                    "provider profile is missing max_priority_fee_per_gas_hex",
-                )
-            },
-        )?,
-        max_fee_per_gas_hex: provider.max_fee_per_gas_hex.clone().ok_or_else(|| {
-            ServiceError::bad_request("provider profile is missing max_fee_per_gas_hex")
-        })?,
-    })
 }

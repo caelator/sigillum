@@ -27,6 +27,7 @@ thiserror = { workspace = true }
 hex = { workspace = true }
 blahaj = { workspace = true }
 chrono = { workspace = true }
+libc = { workspace = true }
 ctap-hid-fido2 = { workspace = true, optional = true }
 
 [dev-dependencies]

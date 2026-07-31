@@ -1,3 +1,4 @@
+import { ROUTE_PATHS } from "../routePaths";
 import {
   clearFields,
   optionalNumberValue,
@@ -7,37 +8,33 @@ import {
   showResultBox,
   textValue,
 } from "../render/forms";
+import { confirmDangerDialog, informDialog } from "../render/confirm";
 import { esc, escAttr } from "../render/html";
+import { formatWeiHexAsGwei } from "./treasury";
 
 export type WalletProfileKind = "stealth" | "xpub" | "seed";
+
+// An xpub is watch-only material, but it exposes the wallet's ENTIRE past
+// and future receive-address tree to anyone holding it (plan task 3.4).
+// Export flows pin this warning inline and toast it; copy flows gate the
+// FIRST xpub copy of each session behind an inform-tier acknowledgement
+// instead of nagging on every click.
+export const XPUB_EXPOSURE_WARNING =
+  "An xpub exposes this wallet's entire receive tree — every past and future address — to anyone holding it. Share it only with systems that must watch those addresses; never publish it or send it to a payer.";
+
+// The daemon restates the exposure on every xpub export; older daemons omit
+// the field, so read it defensively and fall back to the local copy.
+export function xpubExportWarnings(response: { warning?: unknown }): string[] {
+  return typeof response.warning === "string" && response.warning.length > 0
+    ? [response.warning]
+    : [XPUB_EXPOSURE_WARNING];
+}
 
 export interface WalletProfileView {
   name: string;
   kind: WalletProfileKind;
   provider_profile?: string | null;
   signer_available?: boolean | null;
-}
-
-export interface WalletFamilyCounts {
-  stealth: number;
-  xpub: number;
-  seed: number;
-}
-
-export function countWalletFamilies(profiles: WalletProfileView[]): WalletFamilyCounts {
-  return profiles.reduce<WalletFamilyCounts>(
-    (counts, profile) => ({
-      ...counts,
-      [profile.kind]: counts[profile.kind] + 1,
-    }),
-    { stealth: 0, xpub: 0, seed: 0 },
-  );
-}
-
-export function hasOperationalWallet(profiles: WalletProfileView[]): boolean {
-  return profiles.some(
-    (profile) => profile.kind === "stealth" && profile.signer_available !== false,
-  );
 }
 
 export interface WalletProfilesState {
@@ -63,6 +60,18 @@ export function createWalletActions(deps: WalletActionsDeps) {
   let lastWalletProfiles: any[] = [];
   let lastXpubWalletProfiles: any[] = [];
   let lastSeedWalletProfiles: any[] = [];
+  // Session-scoped acknowledgement for the xpub exposure notice: the first
+  // xpub copy of each session confirms the inform dialog once, later copies
+  // proceed directly.
+  let xpubCopyAcknowledged = false;
+
+  function feeCap(value: unknown): string {
+    if (value === null || value === undefined) return "Not configured";
+    if (typeof value !== "string" || !/^0x[0-9a-fA-F]+$/.test(value)) {
+      return "Invalid saved value";
+    }
+    return formatWeiHexAsGwei(value) + " gwei";
+  }
 
   function renderProviderProfiles(profiles: any[]): void {
     renderEntityList(
@@ -71,15 +80,15 @@ export function createWalletActions(deps: WalletActionsDeps) {
       "No provider profiles yet. Save an RPC endpoint and fee policy above to let deposits and queue work talk to a chain.",
       (profile) => {
         const feeInfo =
-          "priority=" +
-          (profile.max_priority_fee_per_gas_hex || "-") +
-          " · max=" +
-          (profile.max_fee_per_gas_hex || "-") +
-          " · nativeGas=" +
-          (profile.native_gas_limit || "-") +
-          " · erc20Gas=" +
-          (profile.erc20_gas_limit || "-") +
-          " · feeEstimation=" +
+          "Priority fee cap: " +
+          feeCap(profile.max_priority_fee_per_gas_hex) +
+          " · Max fee cap: " +
+          feeCap(profile.max_fee_per_gas_hex) +
+          " · Native gas limit: " +
+          (profile.native_gas_limit || "Not configured") +
+          " · ERC-20 gas limit: " +
+          (profile.erc20_gas_limit || "Not configured") +
+          " · Fee estimation " +
           (profile.fee_estimation_enabled ? "on" : "off");
         return (
           '<li><div class="entity-main">' +
@@ -87,17 +96,26 @@ export function createWalletActions(deps: WalletActionsDeps) {
           esc(profile.name) +
           "</div>" +
           '<div class="entity-meta">' +
-          "rpc=" +
+          "RPC endpoint: " +
           esc(profile.rpc_url) +
           "<br>" +
-          "chain=" +
+          "Chain " +
           esc(String(profile.chain_id)) +
-          " · compartment=" +
-          esc(String(profile.compartment_id)) +
-          " · authKey=" +
-          esc(profile.auth_token_key || "-") +
+          " · " +
+          (profile.compartment_id != null
+            ? "Compartment " + esc(String(profile.compartment_id))
+            : "Compartment not specified") +
+          " · " +
+          (profile.auth_token_key
+            ? "Authentication key configured"
+            : "No authentication key") +
           "<br>" +
           esc(feeInfo) +
+          (profile.auth_token_key
+            ? '<details class="technical-detail"><summary>Connection key reference</summary><code>' +
+              esc(profile.auth_token_key) +
+              "</code></details>"
+            : "") +
           "</div></div>" +
           '<div class="entity-actions">' +
           '<button class="btn-ghost" data-action="copyText" data-arg0="' +
@@ -123,19 +141,21 @@ export function createWalletActions(deps: WalletActionsDeps) {
         esc(profile.name) +
         "</div>" +
         '<div class="entity-meta">' +
-        "wallet=" +
+        "Wallet " +
         esc(profile.wallet) +
-        " · short=" +
+        " · Short name " +
         esc(profile.short_name) +
-        " · provider=" +
+        " · Provider " +
         esc(profile.provider_profile) +
         "<br>" +
-        "compartment=" +
+        "Compartment " +
         esc(String(profile.compartment_id)) +
-        " · chain=" +
-        esc(profile.chain_id != null ? String(profile.chain_id) : "-") +
-        " · defaultDestination=" +
-        esc(profile.default_destination_address || "-") +
+        " · " +
+        (profile.chain_id != null
+          ? "Chain " + esc(String(profile.chain_id))
+          : "Chain not specified") +
+        " · Default destination: " +
+        esc(profile.default_destination_address || "Not configured") +
         "</div></div>" +
         '<div class="entity-actions">' +
         '<button class="btn-ghost" data-action="exportWalletMeta" data-arg0="' +
@@ -174,24 +194,26 @@ export function createWalletActions(deps: WalletActionsDeps) {
           esc(profile.name) +
           "</div>" +
           '<div class="entity-meta">' +
-          "projectAccount=" +
+          "Project account " +
           esc(String(profile.project_account)) +
-          " · provider=" +
+          " · Provider " +
           esc(profile.provider_profile) +
-          " · source=" +
+          " · Source: " +
           esc(source) +
           "<br>" +
-          "accountPath=" +
+          "Account path " +
           esc(accountPath) +
-          " · receivePath=" +
+          " · Receive path " +
           esc(receivePath) +
           "<br>" +
-          "compartment=" +
+          "Compartment " +
           esc(String(profile.compartment_id)) +
-          " · chain=" +
-          esc(profile.chain_id != null ? String(profile.chain_id) : "-") +
-          " · defaultDestination=" +
-          esc(profile.default_destination_address || "-") +
+          " · " +
+          (profile.chain_id != null
+            ? "Chain " + esc(String(profile.chain_id))
+            : "Chain not specified") +
+          " · Default destination: " +
+          esc(profile.default_destination_address || "Not configured") +
           "</div></div>" +
           '<div class="entity-actions">' +
           '<button class="btn-ghost" data-action="exportXpubWalletProfile" data-arg0="' +
@@ -212,38 +234,40 @@ export function createWalletActions(deps: WalletActionsDeps) {
       profiles,
       "No imported seed wallets yet. Import a 12-word or 24-word phrase to add another receive wallet profile.",
       (profile) => {
-        const label = profile.label ? " · label=" + profile.label : "";
+        const label = profile.label ? " · Label: " + profile.label : "";
         return (
           '<li><div class="entity-main">' +
           '<div class="entity-title">' +
           esc(profile.name) +
           "</div>" +
           '<div class="entity-meta">' +
-          "words=" +
           esc(String(profile.word_count)) +
-          " · account=" +
+          " words" +
+          " · Account " +
           esc(String(profile.project_account)) +
-          " · provider=" +
+          " · Provider " +
           esc(profile.provider_profile) +
           esc(label) +
           "<br>" +
-          "accountPath=" +
-          esc(profile.account_path || "-") +
-          " · receivePath=" +
-          esc(profile.receive_path || "-") +
+          "Account path " +
+          esc(profile.account_path || "Not available") +
+          " · Receive path " +
+          esc(profile.receive_path || "Not available") +
           "<br>" +
-          "firstAddress=" +
-          esc(profile.first_receive_address || "-") +
+          "First address: " +
+          esc(profile.first_receive_address || "Not available") +
           "<br>" +
-          "compartment=" +
+          "Compartment " +
           esc(String(profile.compartment_id)) +
-          " · chain=" +
-          esc(profile.chain_id != null ? String(profile.chain_id) : "-") +
-          " · defaultDestination=" +
-          esc(profile.default_destination_address || "-") +
+          " · " +
+          (profile.chain_id != null
+            ? "Chain " + esc(String(profile.chain_id))
+            : "Chain not specified") +
+          " · Default destination: " +
+          esc(profile.default_destination_address || "Not configured") +
           "</div></div>" +
           '<div class="entity-actions">' +
-          '<button class="btn-ghost" data-action="copyText" data-arg0="' +
+          '<button class="btn-ghost" data-action="copyXpubWithWarning" data-arg0="' +
           escAttr(profile.receive_xpub || "") +
           '" data-arg1="Seed wallet receive xpub">Copy Xpub</button>' +
           '<button class="btn-ghost" data-action="copyText" data-arg0="' +
@@ -261,10 +285,10 @@ export function createWalletActions(deps: WalletActionsDeps) {
   async function loadProfiles(): Promise<void> {
     try {
       const [providerResp, walletResp, xpubResp, seedResp] = await Promise.all([
-        deps.api("GET", "/api/profiles/evm"),
-        deps.api("GET", "/api/profiles/eth-stealth"),
-        deps.api("GET", "/api/profiles/eth-xpub"),
-        deps.api("GET", "/api/profiles/eth-seed"),
+        deps.api("GET", ROUTE_PATHS.API_PROFILES_EVM),
+        deps.api("GET", ROUTE_PATHS.API_PROFILES_ETH_STEALTH),
+        deps.api("GET", ROUTE_PATHS.API_PROFILES_ETH_XPUB),
+        deps.api("GET", ROUTE_PATHS.API_PROFILES_ETH_SEED),
       ]);
       if (providerResp.error || walletResp.error || xpubResp.error || seedResp.error) return;
 
@@ -346,7 +370,7 @@ export function createWalletActions(deps: WalletActionsDeps) {
       return;
     }
 
-    const r = await deps.api("POST", "/api/profiles/evm/upsert", {
+    const r = await deps.api("POST", ROUTE_PATHS.API_PROFILES_EVM_UPSERT, {
       name,
       rpc_url: rpcUrl,
       auth_token_key: optionalTextValue("providerAuthTokenKey"),
@@ -380,7 +404,15 @@ export function createWalletActions(deps: WalletActionsDeps) {
   }
 
   async function deleteProviderProfile(name: string): Promise<void> {
-    if (!confirm('Delete provider profile "' + name + '"?')) return;
+    const confirmed = await confirmDangerDialog({
+      title: "Delete provider profile",
+      body:
+        'Delete provider profile "' +
+        name +
+        '"? Wallets and deposits that reference it lose their chain connection.',
+      actionLabel: "Delete",
+    });
+    if (!confirmed) return;
     const r = await deps.api("POST", "/api/profiles/evm/delete", { name });
     if (r.error) {
       deps.toast(r.error, "error");
@@ -399,7 +431,7 @@ export function createWalletActions(deps: WalletActionsDeps) {
       return;
     }
 
-    const r = await deps.api("POST", "/api/profiles/eth-stealth/upsert", {
+    const r = await deps.api("POST", ROUTE_PATHS.API_PROFILES_ETH_STEALTH_UPSERT, {
       name,
       wallet,
       short_name: optionalTextValue("walletShortName"),
@@ -426,7 +458,15 @@ export function createWalletActions(deps: WalletActionsDeps) {
   }
 
   async function deleteWalletProfile(name: string): Promise<void> {
-    if (!confirm('Delete wallet profile "' + name + '"?')) return;
+    const confirmed = await confirmDangerDialog({
+      title: "Delete wallet profile",
+      body:
+        'Delete wallet profile "' +
+        name +
+        '"? Its deposit and receive configuration is removed from this daemon.',
+      actionLabel: "Delete",
+    });
+    if (!confirmed) return;
     const r = await deps.api("POST", "/api/profiles/eth-stealth/delete", { name });
     if (r.error) {
       deps.toast(r.error, "error");
@@ -445,7 +485,7 @@ export function createWalletActions(deps: WalletActionsDeps) {
       return;
     }
 
-    const r = await deps.api("POST", "/api/profiles/eth-xpub/upsert", {
+    const r = await deps.api("POST", ROUTE_PATHS.API_PROFILES_ETH_XPUB_UPSERT, {
       name,
       project_account: projectAccount,
       provider_profile: providerProfile,
@@ -478,7 +518,15 @@ export function createWalletActions(deps: WalletActionsDeps) {
   }
 
   async function deleteXpubWalletProfile(name: string): Promise<void> {
-    if (!confirm('Delete xpub wallet profile "' + name + '"?')) return;
+    const confirmed = await confirmDangerDialog({
+      title: "Delete xpub wallet profile",
+      body:
+        'Delete xpub wallet profile "' +
+        name +
+        '"? The watch-only profile is removed from this daemon.',
+      actionLabel: "Delete",
+    });
+    if (!confirmed) return;
     const r = await deps.api("POST", "/api/profiles/eth-xpub/delete", { name });
     if (r.error) {
       deps.toast(r.error, "error");
@@ -503,7 +551,7 @@ export function createWalletActions(deps: WalletActionsDeps) {
       return;
     }
 
-    const r = await deps.api("POST", "/api/profiles/eth-seed/upsert", {
+    const r = await deps.api("POST", ROUTE_PATHS.API_PROFILES_ETH_SEED_UPSERT, {
       name,
       label: optionalTextValue("seedProfileLabel"),
       mnemonic,
@@ -534,7 +582,15 @@ export function createWalletActions(deps: WalletActionsDeps) {
   }
 
   async function deleteSeedWalletProfile(name: string): Promise<void> {
-    if (!confirm('Delete seed wallet profile "' + name + '"?')) return;
+    const confirmed = await confirmDangerDialog({
+      title: "Delete seed wallet profile",
+      body:
+        'Delete seed wallet profile "' +
+        name +
+        '"? The stored mnemonic is removed from this daemon\'s vault; on-chain funds are not moved, but this daemon can no longer sign with it.',
+      actionLabel: "Delete",
+    });
+    if (!confirmed) return;
     const r = await deps.api("POST", "/api/profiles/eth-seed/delete", { name });
     if (r.error) {
       deps.toast(r.error, "error");
@@ -553,8 +609,21 @@ export function createWalletActions(deps: WalletActionsDeps) {
     await exportXpubWalletProfile(walletProfile);
   }
 
+  // Cautions only — never block the flow. The exposure warning gets a toast
+  // and is pinned next to the exported xpub so it stays visible after the
+  // toast fades; the next export refreshes the box.
+  function surfaceXpubExportWarnings(response: { warning?: unknown }): void {
+    const warnings = xpubExportWarnings(response);
+    warnings.forEach((warning) => deps.toast(warning, "warning"));
+    showResultBox(
+      "xpubExportWarnings",
+      "<strong>Xpub exposure — review before sharing.</strong><br>" +
+        warnings.map((warning) => esc(warning)).join("<br>"),
+    );
+  }
+
   async function exportXpubWalletProfile(walletProfile: string): Promise<void> {
-    const r = await deps.api("POST", "/api/wallets/eth-xpub/export", {
+    const r = await deps.api("POST", ROUTE_PATHS.API_WALLETS_ETH_XPUB_EXPORT, {
       wallet_profile: walletProfile,
     });
     if (r.error) {
@@ -565,6 +634,7 @@ export function createWalletActions(deps: WalletActionsDeps) {
     const exportedXpub = r.receive_xpub || "";
     input("xpubPreviewProfile").value = walletProfile;
     input("xpubReceiveXpub").value = exportedXpub;
+    surfaceXpubExportWarnings(r);
 
     showResultBox(
       "xpubExportResult",
@@ -581,13 +651,30 @@ export function createWalletActions(deps: WalletActionsDeps) {
         esc(exportedXpub) +
         "<br>" +
         '<div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap;">' +
-        '<button class="btn-ghost" data-action="copyText" data-arg0="' +
+        '<button class="btn-ghost" data-action="copyXpubWithWarning" data-arg0="' +
         escAttr(exportedXpub) +
         '" data-arg1="Receive branch xpub">Copy Xpub</button>' +
         "</div>",
     );
 
     await previewXpubReceiveAddress();
+  }
+
+  async function copyXpubWithWarning(value: string, label: string): Promise<void> {
+    if (!value) {
+      deps.toast("No xpub to copy", "error");
+      return;
+    }
+    if (!xpubCopyAcknowledged) {
+      const acknowledged = await informDialog({
+        title: "Xpub exposes the whole address tree",
+        body: XPUB_EXPOSURE_WARNING,
+        actionLabel: "Copy xpub",
+      });
+      if (!acknowledged) return;
+      xpubCopyAcknowledged = true;
+    }
+    await deps.copyText(value, label);
   }
 
   async function previewXpubReceiveAddress(): Promise<void> {
@@ -602,7 +689,7 @@ export function createWalletActions(deps: WalletActionsDeps) {
       return;
     }
 
-    const r = await deps.api("POST", "/api/wallets/eth-xpub/derive", { xpub, index });
+    const r = await deps.api("POST", ROUTE_PATHS.API_WALLETS_ETH_XPUB_DERIVE, { xpub, index });
     if (r.error) {
       deps.toast(r.error, "error");
       return;
@@ -628,7 +715,7 @@ export function createWalletActions(deps: WalletActionsDeps) {
   }
 
   async function exportWalletMeta(wallet: string, shortName?: string): Promise<void> {
-    const r = await deps.api("POST", "/api/wallets/eth-stealth/export", {
+    const r = await deps.api("POST", ROUTE_PATHS.API_WALLETS_ETH_STEALTH_EXPORT, {
       wallet,
       short_name: shortName || null,
     });
@@ -662,6 +749,7 @@ export function createWalletActions(deps: WalletActionsDeps) {
     exportSelectedXpubWallet,
     exportXpubWalletProfile,
     previewXpubReceiveAddress,
+    copyXpubWithWarning,
     exportWalletMeta,
   };
 }

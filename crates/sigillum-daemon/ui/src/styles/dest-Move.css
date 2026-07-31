@@ -1,0 +1,749 @@
+/* ── 22. Move destination (plan task 4.3.1) ───────────────────────────────
+   Styles for the rebuilt Move destination (src/destinations/Move.ts):
+   plan review as a hardware-wallet-grade approval screen, the queue as an
+   ops timeline, and the treasury policy as a guided editor. Token-only —
+   no per-screen hex, no inline styles (DESIGN.md). Consequence grading
+   rides on [data-tier] via the v2 tier tokens (00-design-tokens-v2.css §1b). */
+
+/* Focus mode: the plan review screen conceals the other Move cards. The
+   legacy switcher toggles `hidden`/`section-hidden` every refresh, so this
+   is a dedicated class nothing else touches. */
+.card.move-concealed {
+  display: none;
+}
+
+.move-root {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.move-time {
+  color: var(--text-dim);
+  font-size: var(--fs-xs);
+}
+
+/* Anchors reusing the button classes. */
+.move-btn-link {
+  display: inline-flex;
+  align-items: center;
+  text-decoration: none;
+}
+
+.move-inline-link {
+  color: var(--accent-text);
+}
+
+/* ── Banners, failures, notices ───────────────────────────────────────────
+   Persistent banners for stale data and plan-level warnings; failures are
+   first-load states driven by the daemon's error code. */
+
+.move-banner {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  background: var(--_tier-tint, var(--surface-2));
+  border: 1px solid var(--_tier-border, var(--border));
+  border-left: 3px solid var(--_tier-accent, var(--accent));
+  border-radius: var(--radius);
+}
+
+.move-banner-text {
+  margin: 0;
+  font-size: var(--fs-sm);
+  color: var(--_tier-accent-text, var(--text-secondary));
+}
+
+.move-banner-details {
+  flex-shrink: 0;
+  font-size: var(--fs-sm);
+  color: var(--text-muted);
+}
+
+.move-failure {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-5) var(--space-4);
+  background: var(--_tier-tint, var(--surface));
+  border: 1px solid var(--_tier-border, var(--border));
+  border-left: 3px solid var(--_tier-accent, var(--danger));
+  border-radius: var(--radius);
+}
+
+.move-failure-title {
+  margin: 0;
+  font-size: var(--fs-base);
+  font-weight: 600;
+  color: var(--_tier-accent-text, var(--text));
+}
+
+.move-failure-body {
+  margin: 0;
+  font-size: var(--fs-sm);
+  color: var(--text-muted);
+  max-width: 56ch;
+}
+
+.move-failure-actions {
+  display: flex;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+}
+
+.move-notice {
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-sm);
+  font-size: var(--fs-sm);
+}
+
+.move-notice[data-tone="success"] {
+  background: var(--success-tint);
+  color: var(--success-text);
+}
+
+.move-notice[data-tone="error"] {
+  background: var(--danger-tint);
+  color: var(--danger-text);
+}
+
+.move-notice[data-tone="warning"] {
+  background: var(--warning-tint);
+  color: var(--warning-text);
+}
+
+.move-notice[data-tone="info"] {
+  background: var(--accent-tint);
+  color: var(--accent-text);
+}
+
+.move-notice-text {
+  margin: 0;
+}
+
+.move-field-errors {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.move-field-error {
+  margin: 0;
+  font-size: var(--fs-sm);
+  color: var(--danger-text);
+}
+
+.move-skeletons {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.move-skeleton-row {
+  min-height: var(--density-row-h);
+}
+
+/* ── Card heads (queue / policy / maintenance) ─────────────────────────── */
+
+.move-card-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.move-card-title {
+  margin: 0 0 var(--space-1);
+  font-size: var(--fs-md);
+  font-weight: 650;
+  color: var(--text);
+}
+
+.move-card-summary {
+  margin: 0;
+  font-size: var(--fs-sm);
+  color: var(--text-muted);
+  max-width: 64ch;
+}
+
+.move-card-head-actions {
+  display: flex;
+  gap: var(--space-2);
+  flex-shrink: 0;
+}
+
+/* ── Plan list ─────────────────────────────────────────────────────────── */
+
+.move-plan-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.move-plan-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--density-pad-y) var(--density-pad-x);
+  background: var(--_tier-surface, var(--surface));
+  border: 1px solid var(--_tier-border, var(--border));
+  border-left: 3px solid var(--_tier-accent, var(--border-strong));
+  border-radius: var(--radius);
+}
+
+.move-plan-row-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.move-plan-row-title {
+  margin: 0;
+  font-size: var(--fs-base);
+  font-weight: 600;
+  color: var(--text);
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.move-plan-row-summary {
+  margin: 0;
+  font-size: var(--fs-sm);
+  color: var(--text-muted);
+}
+
+.move-plan-row-warning {
+  margin: 0;
+  font-size: var(--fs-sm);
+  color: var(--warning-text);
+}
+
+.move-plan-row-actions {
+  flex-shrink: 0;
+}
+
+.move-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-3);
+}
+
+.move-pagination-label {
+  font-size: var(--fs-sm);
+  color: var(--text-muted);
+}
+
+/* ── Plan generation ───────────────────────────────────────────────────── */
+
+.move-generate > summary {
+  cursor: pointer;
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  color: var(--accent-text);
+}
+
+.move-generate-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  margin-top: var(--space-3);
+}
+
+.move-grow {
+  flex: 1;
+}
+
+.move-party-destinations {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.move-party-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+/* ── Plan review screen ────────────────────────────────────────────────── */
+
+.move-back-row {
+  margin: 0;
+}
+
+.move-back {
+  color: var(--accent-text);
+  text-decoration: none;
+  font-size: var(--fs-sm);
+}
+
+.move-detail-head {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.move-detail-title {
+  margin: 0;
+  font-size: var(--fs-lg);
+  font-weight: 650;
+  color: var(--text);
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.move-detail-totals {
+  margin: 0;
+  font-size: var(--fs-sm);
+  color: var(--text-secondary);
+}
+
+.move-detail-guide {
+  margin: 0;
+  font-size: var(--fs-sm);
+  color: var(--text-muted);
+  max-width: 72ch;
+}
+
+.move-steps {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.move-step {
+  padding: var(--space-4);
+  background: var(--_tier-surface, var(--surface));
+  border: 1px solid var(--_tier-border, var(--border));
+  border-left: 3px solid var(--_tier-accent, var(--border-strong));
+  border-radius: var(--radius);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.move-step-head {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-3);
+}
+
+.move-step-num {
+  flex-shrink: 0;
+  font-size: var(--fs-sm);
+  font-weight: 650;
+  color: var(--text-dim);
+}
+
+.move-step-title {
+  margin: 0;
+  font-size: var(--fs-base);
+  font-weight: 600;
+  color: var(--text);
+}
+
+.move-step-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.move-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px var(--space-2);
+  border-radius: var(--radius-sm);
+  font-size: var(--fs-xs);
+  background: var(--_tier-tint, var(--surface-2));
+  border: 1px solid var(--_tier-border, var(--border));
+  color: var(--_tier-accent-text, var(--text-secondary));
+}
+
+.move-step-blockers,
+.move-step-warnings {
+  margin: 0;
+  padding-left: var(--space-5);
+  font-size: var(--fs-sm);
+}
+
+.move-step-blockers {
+  color: var(--danger-text);
+}
+
+.move-step-warnings {
+  color: var(--warning-text);
+}
+
+.move-step-queued {
+  margin: 0;
+  font-size: var(--fs-sm);
+  color: var(--text-muted);
+}
+
+.move-step-raw > summary {
+  cursor: pointer;
+  font-size: var(--fs-xs);
+  color: var(--text-dim);
+}
+
+.move-step-actions {
+  display: flex;
+  gap: var(--space-2);
+}
+
+.move-kv-list {
+  margin: var(--space-2) 0 0;
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: var(--space-1);
+  font-size: var(--fs-xs);
+}
+
+.move-kv {
+  display: grid;
+  grid-template-columns: minmax(140px, 200px) 1fr;
+  gap: var(--space-2);
+}
+
+.move-kv dt {
+  color: var(--text-dim);
+}
+
+.move-kv dd {
+  margin: 0;
+  color: var(--text-secondary);
+  word-break: break-all;
+}
+
+.move-actionbar {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: var(--space-4);
+  flex-wrap: wrap;
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--border-faint);
+}
+
+.move-actionbar-secondary {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.move-safe-export {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.move-actionbar-primary {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.move-actionbar-hint {
+  margin: 0;
+  font-size: var(--fs-sm);
+  color: var(--text-muted);
+  max-width: 40ch;
+}
+
+/* ── Queue ─────────────────────────────────────────────────────────────── */
+
+.move-queue-controls {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+}
+
+.move-ops {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.move-op {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.move-op-label {
+  margin: 0;
+  flex: 1;
+  font-size: var(--fs-sm);
+  color: var(--text-secondary);
+}
+
+.move-queue-groups {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.move-queue-group-title {
+  margin: 0 0 var(--space-2);
+  font-size: var(--fs-sm);
+  font-weight: 650;
+  color: var(--_tier-accent-text, var(--text-secondary));
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.move-job-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.move-job {
+  padding: var(--space-3) var(--space-4);
+  background: var(--_tier-surface, var(--surface));
+  border: 1px solid var(--_tier-border, var(--border));
+  border-left: 3px solid var(--_tier-accent, var(--border-strong));
+  border-radius: var(--radius);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.move-job-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.move-job-title {
+  margin: 0;
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  color: var(--text);
+}
+
+.move-job-meta {
+  margin: 0;
+  font-size: var(--fs-xs);
+  color: var(--text-dim);
+}
+
+.move-job-error {
+  margin: 0;
+  font-size: var(--fs-sm);
+  color: var(--danger-text);
+}
+
+.move-job-receipt {
+  margin: 0;
+  font-size: var(--fs-xs);
+  color: var(--text-muted);
+}
+
+.move-job-timeline {
+  margin: 0;
+  font-size: var(--fs-xs);
+  color: var(--text-muted);
+}
+
+.move-job-timeline-label {
+  color: var(--text-dim);
+}
+
+.move-job-actions {
+  display: flex;
+  gap: var(--space-2);
+  margin-top: var(--space-1);
+}
+
+/* ── Policy ────────────────────────────────────────────────────────────── */
+
+.move-policy-current {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-4);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.move-policy-current-title {
+  margin: 0;
+  font-size: var(--fs-base);
+  font-weight: 600;
+  color: var(--text);
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.move-policy-sentences {
+  margin: 0;
+  padding-left: var(--space-5);
+  font-size: var(--fs-sm);
+  color: var(--text-secondary);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.move-destinations {
+  margin: 0;
+  padding-left: var(--space-5);
+  font-size: var(--fs-sm);
+  color: var(--text-secondary);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.move-policy-updated {
+  margin: 0;
+  font-size: var(--fs-xs);
+  color: var(--text-dim);
+}
+
+.move-policy-raw > summary {
+  cursor: pointer;
+  font-size: var(--fs-xs);
+  color: var(--text-dim);
+}
+
+.move-presets {
+  display: flex;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.move-preset {
+  padding: var(--space-2) var(--space-3);
+  background: var(--surface-2);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  color: var(--text-secondary);
+  font-size: var(--fs-sm);
+  cursor: pointer;
+}
+
+.move-preset:hover {
+  border-color: var(--accent);
+  color: var(--text);
+}
+
+.move-preset[aria-pressed="true"] {
+  border-color: var(--accent);
+  background: var(--accent-tint);
+  color: var(--accent-text);
+}
+
+.move-policy-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.move-policy-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.move-policy-heading {
+  margin: 0;
+  font-size: var(--fs-sm);
+  font-weight: 650;
+  color: var(--text-secondary);
+}
+
+.move-policy-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: var(--space-3);
+}
+
+/* The shared dense-form label stays on one line, which is useful in legacy
+   row forms but makes a policy-grid cell use the combined width of its label,
+   input, and hint. Stack only these fields so long guidance wraps inside the
+   grid column instead of widening the document. */
+.move-policy-grid > .field-label {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  align-self: stretch;
+  gap: var(--space-1);
+  min-width: 0;
+  white-space: normal;
+}
+
+.move-policy-grid > .field-label > .input-mid {
+  flex: none !important;
+  width: 100%;
+}
+
+.move-policy-grid > .field-label > .field-hint {
+  margin-top: 0;
+  white-space: normal;
+}
+
+.move-policy-preview {
+  padding: var(--space-3) var(--space-4);
+  background: var(--accent-tint);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.move-policy-preview-title {
+  margin: 0 0 var(--space-1);
+  font-size: var(--fs-sm);
+  font-weight: 650;
+  color: var(--accent-text);
+}
+
+/* ── Maintenance ───────────────────────────────────────────────────────── */
+
+.move-maintenance-form {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+}
+
+/* ── Small screens ─────────────────────────────────────────────────────── */
+
+@media (max-width: 720px) {
+  .move-actionbar {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .move-actionbar-primary {
+    justify-content: space-between;
+  }
+
+  .move-plan-row {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+}

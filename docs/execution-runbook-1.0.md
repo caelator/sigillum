@@ -2,9 +2,12 @@
 
 **Status:** Active hardening and release handbook
 
-**State recorded:** 2026-07-12, protected `main` at `f73b861`; failed RCs
-`v1.0.0-rc.2` at `815d262`, `v1.0.0-rc.3` at `0a97c18`, and
-`v1.0.0-rc.4` at `f73b861`
+**State recorded:** 2026-07-30. `v1.0.0-rc.5` peels to protected-main
+commit `7e04743` and has an unpublished historical draft. It does not certify
+the integrated hardening line. RC2–RC4 remain immutable failure receipts. No
+RC6, final `v1.0.0` tag, or published stable release exists. The exact
+integrated HEAD still needs the clean release gate, independent review,
+protected merge, and required CI before RC6 is eligible.
 
 **Plan authority:** [release-1.0-plan.md](./release-1.0-plan.md)
 
@@ -43,46 +46,38 @@ a commit that contains later hardening changes.
   represented the two-transaction `fund_gas` → sweep chain with one hash. Its
   queue treated `sent` (broadcast, unconfirmed) as prerequisite success instead
   of requiring `confirmed`. No RC4 operator receipt can certify a final
-  release. The next retained candidate is `v1.0.0-rc.5` after the runtime and
-  F6 schema-v2 fixes pass protected-main gates.
+  release.
   Historical release run `29230844456` completed all six jobs and uploaded the
   checksum, CLI, app, dmg, and notices assets to an unpublished draft; that
   proves the signing remediation, not the invalidated F6/runtime contract.
+- `v1.0.0-rc.5` is a retained historical draft. Remote tag object
+  `c726ba913ace7f5ca64987454b1352ffdd9c8f77` peels to protected-main commit
+  `7e047438f6305ef1cedecdf4790e1b0e1d7e1e6e`. Release workflow
+  `29248938476` passed all six jobs; its five payload assets independently
+  match `SHA256SUMS`. Standard/chaos F4 and doctor receipts bind to the same
+  SHA. The GitHub Release remains draft/unpublished.
+- RC5 is incomplete and cannot certify the integrated hardening line. No
+  qualifying F6 public-testnet receipt set, clean-install receipt, C7 sign-off,
+  or complete external evidence bundle exists for the current line. The next
+  eligible candidate is `v1.0.0-rc.6` only after exact-HEAD gating, review,
+  protected merge, and CI; rerun every H1 gate at its exact peeled SHA.
 - Gateway payments are preview-only and disabled by default. Opt-in balance
   observations are not finality proof and must not be represented as supported
   1.0 payment confirmations.
 
 ## 2. Execution order
 
-1. Re-anchor on a clean, current `main`; confirm the GitNexus index matches the
-   checked-out commit.
-2. Treat the authorization, payment-truth, queue, tag, and signing remediations
-   through `f73b861` as a landed baseline. Complete the RC5 stop-ship
-   remediation in this order:
-   - require the exact `sepolia` and `l2` role set;
-   - accept only integer chain IDs for Sepolia (`11155111`) and Base Sepolia
-     (`84532`), Arbitrum Sepolia (`421614`), or OP Sepolia (`11155420`);
-   - require each plan-step prerequisite to reach `confirmed`, never merely
-     `sent`, before a dependent can sign or broadcast;
-   - use F6 schema v2 to prove four families with five transactions, including
-     two ordered, receipt-confirmed `fund_gas` and dependent-sweep legs bound by
-     plan, job, step, chain, address, and prerequisite identities;
-   - prove all supported IDs pass and mainnet, arbitrary, and non-integer IDs
-     fail, and prove malformed or single-hash gas chains fail, with internally
-     consistent receipt and audit fixtures;
-   - synchronize the runbook, readiness audit, changelog, and plan so RC4 is
-     failed evidence and RC5 is the next candidate.
-3. Run focused tests for every changed boundary, then run
-   `./scripts/check-release.sh` alone. Never run a full gate while another agent
-   or build is modifying the same checkout.
-4. Review the complete diff, rerun GitNexus impact checks for materially changed
-   symbols, and re-index the repository.
-5. Before merge, verify that `main` protection requires both fixed-runner CI
+1. Run `./scripts/check-release.sh` from a clean checkout at the exact
+   integrated HEAD and complete the required independent review. Never overlap
+   a full gate with another agent or build modifying the checkout.
+2. Before merge, verify that `main` protection requires both fixed-runner CI
    legs, blocks force-pushes, and that release-tag governance prevents updates
    and deletion. Remediate missing settings before landing through a pull
    request, then require both CI legs to pass.
-6. Only then create a new annotated RC tag and complete the operator gates in
-   section 5.
+3. Only then create annotated `v1.0.0-rc.6`. Require its unique GitHub Release
+   to remain draft, unpublished, and `prerelease=true`; verify its live asset
+   checksums and complete every operator gate in section 5 at the RC6 peeled
+   SHA.
 
 ## 3. Executable release contract
 
@@ -91,6 +86,8 @@ a commit that contains later hardening changes.
 - resolves dependency-aware Cargo commands with the committed `Cargo.lock`;
 - checks default and no-HID FIDO2 configurations;
 - verifies UI lock metadata and generated assets;
+- runs the pinned 15-scenario axe-core accessibility gate; mock accessibility
+  and screenshots do not replace real-daemon browser smoke;
 - runs workspace, adversarial, runtime, browser, desktop, audit, and deny gates;
 - on macOS, builds app/dmg bundles through the project signing wrapper, rejects
   incomplete or mixed Apple credentials, refuses Developer ID without one
@@ -132,8 +129,33 @@ lightweight, wrong-SHA, off-main, skipped-number, malformed,
 changelog-invalid, and missing or malformed final-evidence tags fail closed.
 The normal source release gate runs this regression test before tag time.
 
-The release workflow always creates a draft. Asset checksums, release notes,
-and the operator decision are required before publication.
+> [!IMPORTANT]
+> Exact-byte promotion and release-state enforcement are implemented, but they
+> are not release evidence for the current line. H2 remains blocked until the
+> exact integrated HEAD passes the clean gate and independent review, lands
+> through protected main with required CI, and RC6 satisfies F7, schema-v2
+> same-host F4, funded F6, doctor, clean-install, C7, and evidence-bundle gates.
+
+The release workflow always creates a draft. RC releases must remain
+unpublished drafts with `prerelease=true`; the final draft and published
+release must have `prerelease=false`.
+`scripts/check-release-state-contract.sh` rejects any other RC-draft,
+final-draft, or final-published state. RC tags build and checksum the candidate
+payloads once. The final tag still runs both source-verification
+legs, but its artifact jobs are intentionally skipped: the release job selects
+the highest retained RC identified by the remote tag contract, requires its
+single GitHub Release to remain an unpublished `prerelease=true` draft with the
+exact six-asset shape, downloads and verifies its five payloads, copies those
+exact bytes under final names, regenerates `SHA256SUMS`, and checks
+byte-for-byte plus tag-normalized digest equality with
+`scripts/promote-release-assets.sh`. It revalidates that exact RC tag object as
+the live highest retained RC before promotion and immediately around draft
+creation, so a newer same-commit RC cannot silently change the promotion
+source. A final release must never substitute fresh rebuilds for the qualified
+RC bytes. Release notes, verified assets, and the evidence bundle must be
+complete before the operator records H2 approval and invokes the final-tag
+ceremony. That approval authorizes conditional publication only if every
+post-tag verification succeeds.
 
 ## 4. Failure handling
 
@@ -162,12 +184,13 @@ and the operator decision are required before publication.
 
 | Gate | Required evidence |
 | --- | --- |
-| F4 | Standard and chaos soak receipts on each supported host at the new RC SHA |
-| F6 | Five funded testnet transactions for four families, including both confirmed legs of `fund_gas` → dependent sweep, with any mock-only family labeled honestly |
-| Desktop | Checksum-verified RC `.dmg` installs and reaches unlock on a clean machine without a dev toolchain |
-| Doctor | `sigillum doctor` passes on every supported host at the new RC |
-| UI | Operator walkthrough/sign-off for the remaining C7 console acceptance surface |
-| H2 | Explicit operator decision to tag and publish `v1.0.0` |
+| F4 | Schema-v2 standard 3600-second and chaos 600-second soak receipts on the same macOS 15.x/aarch64 host at the RC6 SHA; RC5 receipts are historical only |
+| F6 | Five funded public-testnet transactions at RC6 for four families, including both confirmed legs of `fund_gas` → dependent sweep; mock evidence cannot satisfy this gate |
+| Desktop | Checksum-verified RC6 `.dmg` installs and reaches unlock on a clean machine without a dev toolchain |
+| F7 | 0.1-era data-directory and snapshot upgrade verification passes at RC6 |
+| Doctor | `sigillum doctor` passes on the eligible macOS 15.x/aarch64 host at RC6 |
+| UI | Real-daemon browser smoke plus operator walkthrough/sign-off for all five destinations, palette, keyboard/focus, modal, and accessibility behavior |
+| H2 | Blocked until the exact integrated HEAD and every RC6 automated and operator gate pass; explicit operator approval is then recorded immediately before the final-tag ceremony and authorizes conditional publication only after every post-tag verification passes |
 
 Work may continue on any independent item while one of these gates is waiting.
 Do not mark H1 or H2 complete until every required receipt names the same
@@ -188,11 +211,25 @@ Preserve the sanitized evidence outside the checkout until final promotion:
    `MANIFEST.json`, `SHA256SUMS`, `f4/standard.json`, `f4/chaos.json`,
    `f6/receipts.json`, `desktop/clean-install.json`,
    `doctor/mac-server.json`, `ui/signoff.json`, and
-   `release/asset-SHA256SUMS`. The doctor receipt is structured, bound to the
-   RC SHA, and records the installed-RC pass. The asset checksum file is the
+   `release/asset-SHA256SUMS`. Both F4 soak receipts use schema v2 and record
+   `platform: macos`, the exact `sw_vers -productVersion` value, canonical
+   `aarch64`, and an opaque SHA-256 of the machine identity. The bundle checker
+   requires macOS 15.x on both receipts and requires their identity digests to
+   match. The clean-install, doctor, and UI operator receipts also use schema
+   v2 and share one exact RC object (`tag`, `tag_object`, and `peeled_sha`).
+   They bind the qualified artifact
+   filename and digest, the `mac-server` host identity (`macos`, macOS 15,
+   `aarch64`), and the release operator identity and UTC review time. The
+   clean-install receipt names the exact RC dmg, application version,
+   identifier and install path, records checksum/dev-toolchain/unlock
+   booleans, and checksum-binds `desktop/screenshots/unlock.png`. The doctor
+   receipt names the exact RC macOS CLI archive, its installed executable hash
+   and version, and structured all-ok checks. The C7 UI receipt names the exact
+   RC dmg, all five destinations, the full H1 journey, setup/locked/unlocked
+   states, and three fixed screenshot hashes. The asset checksum file is the
    independently verified five-entry `SHA256SUMS` body from the RC draft. F6
-   audit exports live below `f6/audit/` and
-   are referenced by `f6/receipts.json`.
+   audit exports live below `f6/audit/` and are referenced by
+   `f6/receipts.json`.
 2. Put `SHA256SUMS` inside the bundle, name the completed archive
    `sigillum-v1.0.0-release-evidence.tar.gz`, and compute its SHA-256. H2
    records that exact evidence filename and archive digest in the
@@ -200,8 +237,9 @@ Preserve the sanitized evidence outside the checkout until final promotion:
    between the released code and its operator evidence.
    `scripts/check-release-evidence-bundle.sh` rejects missing, empty,
    unchecksummed, duplicate, unsafe, or linked archive members; requires the
-   manifest to bind the exact RC tag-object ID and peeled SHA; validates the F4
-   configured and actual soak durations, requires Ethereum Sepolia (`11155111`)
+   manifest to bind the exact RC tag-object ID and peeled SHA; rejects legacy
+   F4 receipts and validates their same-host macOS 15.x/aarch64 identity plus
+   configured and actual soak durations; requires Ethereum Sepolia (`11155111`)
    plus Base Sepolia (`84532`), Arbitrum Sepolia (`421614`), or OP Sepolia
    (`11155420`), and rejects legacy F6 schema v1. F6 schema v2 validates four
    families with five unique transaction hashes and audit exports. Its nested
@@ -216,12 +254,19 @@ Preserve the sanitized evidence outside the checkout until final promotion:
    Before H2, independently verify all five F6 transactions on the claimed
    public chains, including chain ID, successful receipt, finality, and the
    family effect represented by each audit export.
-3. The executable H2 ceremony waits for the exact final workflow and all six
-   successful jobs, independently checksums its six generated draft assets,
-   uploads the evidence archive as a seventh asset without replacing an
-   existing asset, then re-fetches and re-verifies all seven live draft assets.
-   The evidence SHA-256 must match the digest in the protected final tag in the
-   last executable checks immediately before publishing.
+3. The executable H2 ceremony first downloads the qualified RC draft and
+   requires its `SHA256SUMS` to equal the checksum body embedded in the
+   validated evidence bundle. It then waits for the exact final workflow:
+   release contract, both source-verification legs, and release must succeed,
+   while both RC-only artifact jobs must be skipped. It independently verifies
+   that the final draft's five renamed payloads are byte-identical and have the
+   same tag-normalized digest manifest as that qualified RC snapshot, uploads
+   the evidence archive as a seventh asset without replacing an existing
+   asset, then re-fetches and repeats every byte/digest check across the seven
+   live draft assets. The final draft must remain `prerelease=false`. The
+   evidence SHA-256 must match the digest in the protected final tag in the
+   last executable checks immediately before the H2-authorized conditional
+   publication.
 4. In H3, update `docs/production-readiness-audit.md` with the public release
    URL, evidence filename and digest, final tag-object ID, RC peeled SHA, and a
    sanitized receipt summary. This post-release documentation commit does not
@@ -242,7 +287,10 @@ or recreating the tag.
    `HEAD == GATE_SHA == origin/main`, then create and push the annotated tag.
    Every pushed `N` is permanently burned, even when no draft was created.
 4. Require the release contract job, both verify legs, both artifact jobs, and
-   the draft-release job to pass.
+   the draft-release job to pass. Fetch the unique RC release metadata and run
+   `bash ./scripts/check-release-state-contract.sh rc-draft "$RC_TAG"` with
+   that JSON on standard input; it must still be a draft, unpublished, and
+   explicitly marked as `prerelease=true`.
 5. Download the draft assets and verify `SHA256SUMS`.
 6. Complete the section 5 receipts against that exact peeled RC commit SHA,
    independently verify every F6 transaction through the declared public RPC
@@ -252,14 +300,21 @@ or recreating the tag.
    checksum result, evidence filename, and evidence archive digest. Keep the
    annotated RC tag permanently and retain the RC draft/assets through
    final-draft verification.
-8. After explicit H2 approval, repeat the clean gate and push annotated
-   `v1.0.0` at the identical peeled commit as the receipt-bearing RC, with the
-   evidence filename and digest in the tag message. If `main` has moved or any
-   intervening commit is required, the receipts are void and a new
-   monotonically numbered RC is required. Independently checksum and verify the
-   final draft assets, upload and reverify the digest-bound evidence bundle,
-   then publish. Only after final publication may the older RC draft be
-   deleted.
+8. Only after the exact integrated HEAD passes the clean gate and independent
+   review, lands through protected main with required CI, and the resulting RC6
+   passes every automated and operator gate, record explicit H2 approval,
+   repeat the clean gate, and push annotated `v1.0.0` at the identical peeled
+   commit as the receipt-bearing RC, with the evidence filename and digest in
+   the tag message. If `main` has moved or any intervening commit is required,
+   the receipts are void and a new
+   monotonically numbered RC is required. The final workflow must skip artifact
+   rebuilds and copy the qualified RC draft's exact five payload bytes under
+   final names. Independently verify byte identity and tag-normalized digests
+   against the evidence-bound RC `SHA256SUMS` with
+   `scripts/promote-release-assets.sh`, upload and reverify the digest-bound
+   evidence bundle as the seventh asset, require the final draft to remain
+   `prerelease=false`, then publish. Only after final publication may the older
+   RC draft be deleted.
 
 After publication, perform the post-release version/planning update described
 by H3 in the plan of record.

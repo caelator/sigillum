@@ -9,6 +9,9 @@ RC_SHA="1111111111111111111111111111111111111111"
 RC_TAG_OBJECT="2222222222222222222222222222222222222222"
 BUNDLE_NAME="sigillum-v1.0.0-release-evidence.tar.gz"
 F6_FAILURE="F6 receipt does not prove four core families and both ordered gas-top-up chain legs across supported testnets"
+DESKTOP_FAILURE="desktop receipt does not bind the qualified RC dmg, supported clean host, unlock screenshot, and operator review"
+UI_FAILURE="UI receipt does not bind the qualified RC dmg, five-destination journey, screenshots, and operator review"
+DOCTOR_FAILURE="doctor receipt does not bind the qualified RC CLI, supported host, all blocking checks, and operator review"
 
 cleanup() {
   rm -rf "${TMP_ROOT}"
@@ -26,10 +29,35 @@ write_payload() {
   mkdir -p \
     "${payload}/f4" \
     "${payload}/f6/audit" \
-    "${payload}/desktop" \
+    "${payload}/desktop/screenshots" \
     "${payload}/doctor" \
-    "${payload}/ui" \
+    "${payload}/ui/screenshots" \
     "${payload}/release"
+
+  printf '\211PNG\r\n\032\nsigillum clean-install unlock fixture\n' \
+    > "${payload}/desktop/screenshots/unlock.png"
+  printf '\211PNG\r\n\032\nsigillum UI setup fixture\n' \
+    > "${payload}/ui/screenshots/setup.png"
+  printf '\211PNG\r\n\032\nsigillum UI locked fixture\n' \
+    > "${payload}/ui/screenshots/locked.png"
+  printf '\211PNG\r\n\032\nsigillum UI unlocked fixture\n' \
+    > "${payload}/ui/screenshots/unlocked.png"
+  local desktop_unlock_sha256
+  local ui_setup_sha256
+  local ui_locked_sha256
+  local ui_unlocked_sha256
+  desktop_unlock_sha256="$(
+    shasum -a 256 "${payload}/desktop/screenshots/unlock.png" | awk '{ print $1 }'
+  )"
+  ui_setup_sha256="$(
+    shasum -a 256 "${payload}/ui/screenshots/setup.png" | awk '{ print $1 }'
+  )"
+  ui_locked_sha256="$(
+    shasum -a 256 "${payload}/ui/screenshots/locked.png" | awk '{ print $1 }'
+  )"
+  ui_unlocked_sha256="$(
+    shasum -a 256 "${payload}/ui/screenshots/unlocked.png" | awk '{ print $1 }'
+  )"
 
   cat > "${payload}/MANIFEST.json" <<JSON
 {
@@ -53,11 +81,17 @@ JSON
 
   cat > "${payload}/f4/standard.json" <<JSON
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "kind": "sigillum.local_soak",
   "status": "passed",
   "repo": {"commit": "${RC_SHA}", "dirty": false},
-  "host": {"name": "mac-server", "os": "macOS test fixture"},
+  "host": {
+    "name": "mac-server",
+    "platform": "macos",
+    "product_version": "15.7.1",
+    "arch": "aarch64",
+    "identity_sha256": "9999999999999999999999999999999999999999999999999999999999999999"
+  },
   "configured": {"soak_seconds": 3600},
   "timing": {"duration_seconds": 3605},
   "evidence": {"iterations": 120, "doctor_runs": 120},
@@ -67,11 +101,17 @@ JSON
 
   cat > "${payload}/f4/chaos.json" <<JSON
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "kind": "sigillum.local_soak",
   "status": "passed",
   "repo": {"commit": "${RC_SHA}", "dirty": false},
-  "host": {"name": "mac-server", "os": "macOS test fixture"},
+  "host": {
+    "name": "mac-server",
+    "platform": "macos",
+    "product_version": "15.7.1",
+    "arch": "aarch64",
+    "identity_sha256": "9999999999999999999999999999999999999999999999999999999999999999"
+  },
   "configured": {"soak_seconds": 600},
   "timing": {"duration_seconds": 605},
   "evidence": {"iterations": 60, "doctor_runs": 60},
@@ -218,34 +258,155 @@ JSON
 
   cat > "${payload}/desktop/clean-install.json" <<JSON
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "kind": "sigillum.clean_install",
   "status": "passed",
-  "rc_sha": "${RC_SHA}",
-  "dev_toolchain_absent": true,
-  "unlock_reached": true
+  "rc": {
+    "tag": "${RC_TAG}",
+    "tag_object": "${RC_TAG_OBJECT}",
+    "peeled_sha": "${RC_SHA}"
+  },
+  "artifact": {
+    "filename": "Sigillum-${RC_TAG}-macos-aarch64.dmg",
+    "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+  },
+  "host": {
+    "role": "mac-server",
+    "name": "mac-server",
+    "platform": "macos",
+    "os_version": "15.7.1",
+    "arch": "aarch64"
+  },
+  "installation": {
+    "path": "/Applications/Sigillum.app",
+    "bundle_identifier": "com.sigillum.desktop",
+    "app_version": "1.0.0",
+    "checksum_verified": true,
+    "dev_toolchain_absent": true,
+    "unlock_reached": true
+  },
+  "reviewer": {
+    "id": "release-operator",
+    "role": "release_operator",
+    "reviewed_at_utc": "2026-07-30T12:00:00Z"
+  },
+  "screenshots": [
+    {
+      "state": "unlock",
+      "path": "desktop/screenshots/unlock.png",
+      "sha256": "${desktop_unlock_sha256}"
+    }
+  ]
 }
 JSON
 
   cat > "${payload}/ui/signoff.json" <<JSON
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "kind": "sigillum.ui_signoff",
   "status": "passed",
-  "rc_sha": "${RC_SHA}",
-  "full_walkthrough_completed": true
+  "rc": {
+    "tag": "${RC_TAG}",
+    "tag_object": "${RC_TAG_OBJECT}",
+    "peeled_sha": "${RC_SHA}"
+  },
+  "artifact": {
+    "filename": "Sigillum-${RC_TAG}-macos-aarch64.dmg",
+    "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+  },
+  "host": {
+    "role": "mac-server",
+    "name": "mac-server",
+    "platform": "macos",
+    "os_version": "15.7.1",
+    "arch": "aarch64"
+  },
+  "reviewer": {
+    "id": "release-operator",
+    "role": "release_operator",
+    "reviewed_at_utc": "2026-07-30T12:30:00Z"
+  },
+  "walkthrough": {
+    "full_walkthrough_completed": true,
+    "destinations": ["overview", "receive", "portfolio", "move", "vault"],
+    "states": ["setup", "locked", "unlocked"],
+    "journey": [
+      "import_seed",
+      "multi_chain_scan",
+      "review_inventory_risk",
+      "generate_plan",
+      "approve_plan",
+      "execute_mock_provider",
+      "audit_trail_complete"
+    ],
+    "operator_surface_parity_reviewed": true,
+    "accessibility_review_completed": true
+  },
+  "screenshots": [
+    {
+      "state": "setup",
+      "path": "ui/screenshots/setup.png",
+      "sha256": "${ui_setup_sha256}"
+    },
+    {
+      "state": "locked",
+      "path": "ui/screenshots/locked.png",
+      "sha256": "${ui_locked_sha256}"
+    },
+    {
+      "state": "unlocked",
+      "path": "ui/screenshots/unlocked.png",
+      "sha256": "${ui_unlocked_sha256}"
+    }
+  ]
 }
 JSON
 
   cat > "${payload}/doctor/mac-server.json" <<JSON
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "kind": "sigillum.doctor",
   "status": "passed",
-  "rc_sha": "${RC_SHA}",
-  "host": {"name": "mac-server", "os": "macOS test fixture"},
-  "installed_rc_cli": true,
-  "checks_passed": true
+  "rc": {
+    "tag": "${RC_TAG}",
+    "tag_object": "${RC_TAG_OBJECT}",
+    "peeled_sha": "${RC_SHA}"
+  },
+  "artifact": {
+    "filename": "sigillum-cli-${RC_TAG}-macos-aarch64.tar.gz",
+    "sha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+  },
+  "host": {
+    "role": "mac-server",
+    "name": "mac-server",
+    "platform": "macos",
+    "os_version": "15.7.1",
+    "arch": "aarch64"
+  },
+  "cli": {
+    "version": "1.0.0",
+    "executable_path": "/usr/local/bin/sigillum",
+    "executable_sha256": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+  },
+  "doctor": {
+    "command": "sigillum doctor",
+    "exit_code": 0,
+    "checks_passed": true,
+    "checks": [
+      {"name": "data_dir", "status": "ok"},
+      {"name": "data_dir_permissions", "status": "ok"},
+      {"name": "audit_db", "status": "ok"},
+      {"name": "daemon_url", "status": "ok"},
+      {"name": "session_token", "status": "ok"},
+      {"name": "daemon_reachability", "status": "ok"},
+      {"name": "active_compartment", "status": "ok"}
+    ]
+  },
+  "reviewer": {
+    "id": "release-operator",
+    "role": "release_operator",
+    "reviewed_at_utc": "2026-07-30T12:45:00Z"
+  }
 }
 JSON
 
@@ -308,6 +469,21 @@ build_receipt_mutation_case() {
   write_payload "${payload}"
   jq "${filter}" "${payload}/f6/receipts.json" > "${case_dir}/receipts.tmp"
   mv "${case_dir}/receipts.tmp" "${payload}/f6/receipts.json"
+  generate_sums "${payload}"
+  archive_payload "${payload}" "${case_dir}/${BUNDLE_NAME}"
+  printf '%s\n' "${case_dir}/${BUNDLE_NAME}"
+}
+
+build_evidence_mutation_case() {
+  local case_name="$1"
+  local evidence_path="$2"
+  local filter="$3"
+  local case_dir="${TMP_ROOT}/${case_name}"
+  local payload="${case_dir}/payload"
+  mkdir -p "${case_dir}"
+  write_payload "${payload}"
+  jq "${filter}" "${payload}/${evidence_path}" > "${case_dir}/evidence.tmp"
+  mv "${case_dir}/evidence.tmp" "${payload}/${evidence_path}"
   generate_sums "${payload}"
   archive_payload "${payload}" "${case_dir}/${BUNDLE_NAME}"
   printf '%s\n' "${case_dir}/${BUNDLE_NAME}"
@@ -464,6 +640,12 @@ archive_payload "${SHORT_SOAK_CASE}/payload" "${SHORT_SOAK_CASE}/${BUNDLE_NAME}"
 expect_failure "${SHORT_SOAK_CASE}/${BUNDLE_NAME}" \
   "F4 standard receipt does not prove the required clean 3600-second RC soak"
 
+short_standard_configured_bundle="$(build_evidence_mutation_case \
+  f4-short-standard-configured f4/standard.json \
+  '.configured.soak_seconds = 3599')"
+expect_failure "${short_standard_configured_bundle}" \
+  "F4 standard receipt does not prove the required clean 3600-second RC soak"
+
 STRING_SOAK_CASE="${TMP_ROOT}/string-soak"
 mkdir -p "${STRING_SOAK_CASE}"
 write_payload "${STRING_SOAK_CASE}/payload"
@@ -490,6 +672,158 @@ generate_sums "${WRONG_HOST_CASE}/payload"
 archive_payload "${WRONG_HOST_CASE}/payload" "${WRONG_HOST_CASE}/${BUNDLE_NAME}"
 expect_failure "${WRONG_HOST_CASE}/${BUNDLE_NAME}" \
   "F4 standard receipt does not prove the required clean 3600-second RC soak"
+
+wrong_standard_commit_bundle="$(build_evidence_mutation_case \
+  f4-standard-wrong-commit f4/standard.json \
+  '.repo.commit = "3333333333333333333333333333333333333333"')"
+expect_failure "${wrong_standard_commit_bundle}" \
+  "F4 standard receipt does not prove the required clean 3600-second RC soak"
+
+dirty_standard_bundle="$(build_evidence_mutation_case \
+  f4-standard-dirty f4/standard.json \
+  '.repo.dirty = true')"
+expect_failure "${dirty_standard_bundle}" \
+  "F4 standard receipt does not prove the required clean 3600-second RC soak"
+
+legacy_f4_bundle="$(build_evidence_mutation_case \
+  f4-legacy-schema f4/standard.json \
+  '.schema_version = 1')"
+expect_failure "${legacy_f4_bundle}" \
+  "F4 standard receipt does not prove the required clean 3600-second RC soak"
+
+wrong_f4_platform_bundle="$(build_evidence_mutation_case \
+  f4-wrong-platform f4/standard.json \
+  '.host.platform = "linux"')"
+expect_failure "${wrong_f4_platform_bundle}" \
+  "F4 standard receipt does not prove the required clean 3600-second RC soak"
+
+wrong_f4_product_version_bundle="$(build_evidence_mutation_case \
+  f4-wrong-product-version f4/standard.json \
+  '.host.product_version = "26.5.2"')"
+expect_failure "${wrong_f4_product_version_bundle}" \
+  "F4 standard receipt does not prove the required clean 3600-second RC soak"
+
+wrong_f4_arch_bundle="$(build_evidence_mutation_case \
+  f4-wrong-arch f4/standard.json \
+  '.host.arch = "x86_64"')"
+expect_failure "${wrong_f4_arch_bundle}" \
+  "F4 standard receipt does not prove the required clean 3600-second RC soak"
+
+legacy_f4_chaos_bundle="$(build_evidence_mutation_case \
+  f4-chaos-legacy-schema f4/chaos.json \
+  '.schema_version = 1')"
+expect_failure "${legacy_f4_chaos_bundle}" \
+  "F4 chaos receipt does not prove the required clean 600-second RC soak"
+
+wrong_f4_chaos_platform_bundle="$(build_evidence_mutation_case \
+  f4-chaos-wrong-platform f4/chaos.json \
+  '.host.platform = "linux"')"
+expect_failure "${wrong_f4_chaos_platform_bundle}" \
+  "F4 chaos receipt does not prove the required clean 600-second RC soak"
+
+wrong_f4_chaos_product_version_bundle="$(build_evidence_mutation_case \
+  f4-chaos-wrong-product-version f4/chaos.json \
+  '.host.product_version = "26.5.2"')"
+expect_failure "${wrong_f4_chaos_product_version_bundle}" \
+  "F4 chaos receipt does not prove the required clean 600-second RC soak"
+
+wrong_f4_chaos_arch_bundle="$(build_evidence_mutation_case \
+  f4-chaos-wrong-arch f4/chaos.json \
+  '.host.arch = "x86_64"')"
+expect_failure "${wrong_f4_chaos_arch_bundle}" \
+  "F4 chaos receipt does not prove the required clean 600-second RC soak"
+
+wrong_chaos_commit_bundle="$(build_evidence_mutation_case \
+  f4-chaos-wrong-commit f4/chaos.json \
+  '.repo.commit = "3333333333333333333333333333333333333333"')"
+expect_failure "${wrong_chaos_commit_bundle}" \
+  "F4 chaos receipt does not prove the required clean 600-second RC soak"
+
+dirty_chaos_bundle="$(build_evidence_mutation_case \
+  f4-chaos-dirty f4/chaos.json \
+  '.repo.dirty = true')"
+expect_failure "${dirty_chaos_bundle}" \
+  "F4 chaos receipt does not prove the required clean 600-second RC soak"
+
+short_chaos_configured_bundle="$(build_evidence_mutation_case \
+  f4-chaos-short-configured f4/chaos.json \
+  '.configured.soak_seconds = 599')"
+expect_failure "${short_chaos_configured_bundle}" \
+  "F4 chaos receipt does not prove the required clean 600-second RC soak"
+
+short_chaos_duration_bundle="$(build_evidence_mutation_case \
+  f4-chaos-short-duration f4/chaos.json \
+  '.timing.duration_seconds = 599')"
+expect_failure "${short_chaos_duration_bundle}" \
+  "F4 chaos receipt does not prove the required clean 600-second RC soak"
+
+mismatched_f4_identity_bundle="$(build_evidence_mutation_case \
+  f4-mismatched-identity f4/chaos.json \
+  '.host.identity_sha256 = "8888888888888888888888888888888888888888888888888888888888888888"')"
+expect_failure "${mismatched_f4_identity_bundle}" \
+  "F4 standard and chaos receipts do not bind the same host identity"
+
+legacy_clean_install_bundle="$(build_evidence_mutation_case \
+  clean-install-legacy-schema desktop/clean-install.json \
+  '.schema_version = 1')"
+expect_failure "${legacy_clean_install_bundle}" "${DESKTOP_FAILURE}"
+
+wrong_clean_install_artifact_bundle="$(build_evidence_mutation_case \
+  clean-install-wrong-artifact desktop/clean-install.json \
+  '.artifact.sha256 = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"')"
+expect_failure "${wrong_clean_install_artifact_bundle}" "${DESKTOP_FAILURE}"
+
+wrong_clean_install_host_bundle="$(build_evidence_mutation_case \
+  clean-install-wrong-host desktop/clean-install.json \
+  '.host.os_version = "26.5.2" | .host.arch = "x86_64"')"
+expect_failure "${wrong_clean_install_host_bundle}" "${DESKTOP_FAILURE}"
+
+TAMPERED_UNLOCK_CASE="${TMP_ROOT}/clean-install-tampered-screenshot"
+mkdir -p "${TAMPERED_UNLOCK_CASE}"
+write_payload "${TAMPERED_UNLOCK_CASE}/payload"
+printf 'not the reviewed unlock screenshot\n' \
+  > "${TAMPERED_UNLOCK_CASE}/payload/desktop/screenshots/unlock.png"
+generate_sums "${TAMPERED_UNLOCK_CASE}/payload"
+archive_payload "${TAMPERED_UNLOCK_CASE}/payload" \
+  "${TAMPERED_UNLOCK_CASE}/${BUNDLE_NAME}"
+expect_failure "${TAMPERED_UNLOCK_CASE}/${BUNDLE_NAME}" \
+  "desktop unlock screenshot digest does not match desktop/clean-install.json"
+
+missing_ui_destination_bundle="$(build_evidence_mutation_case \
+  ui-missing-destination ui/signoff.json \
+  '.walkthrough.destinations = ["overview", "receive", "portfolio", "move"]')"
+expect_failure "${missing_ui_destination_bundle}" "${UI_FAILURE}"
+
+wrong_ui_reviewer_bundle="$(build_evidence_mutation_case \
+  ui-wrong-reviewer ui/signoff.json \
+  '.reviewer.role = "automation"')"
+expect_failure "${wrong_ui_reviewer_bundle}" "${UI_FAILURE}"
+
+TAMPERED_UI_CASE="${TMP_ROOT}/ui-tampered-screenshot"
+mkdir -p "${TAMPERED_UI_CASE}"
+write_payload "${TAMPERED_UI_CASE}/payload"
+printf 'not the reviewed unlocked screenshot\n' \
+  > "${TAMPERED_UI_CASE}/payload/ui/screenshots/unlocked.png"
+generate_sums "${TAMPERED_UI_CASE}/payload"
+archive_payload "${TAMPERED_UI_CASE}/payload" \
+  "${TAMPERED_UI_CASE}/${BUNDLE_NAME}"
+expect_failure "${TAMPERED_UI_CASE}/${BUNDLE_NAME}" \
+  "UI walkthrough screenshot digest does not match ui/signoff.json"
+
+wrong_doctor_artifact_bundle="$(build_evidence_mutation_case \
+  doctor-wrong-artifact doctor/mac-server.json \
+  '.artifact.sha256 = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"')"
+expect_failure "${wrong_doctor_artifact_bundle}" "${DOCTOR_FAILURE}"
+
+warn_doctor_check_bundle="$(build_evidence_mutation_case \
+  doctor-warning-check doctor/mac-server.json \
+  '(.doctor.checks[] | select(.name == "active_compartment") | .status) = "warn"')"
+expect_failure "${warn_doctor_check_bundle}" "${DOCTOR_FAILURE}"
+
+wrong_doctor_rc_bundle="$(build_evidence_mutation_case \
+  doctor-wrong-rc doctor/mac-server.json \
+  '.rc.tag_object = "3333333333333333333333333333333333333333"')"
+expect_failure "${wrong_doctor_rc_bundle}" "${DOCTOR_FAILURE}"
 
 REPLAY_CASE="${TMP_ROOT}/f6-replay"
 mkdir -p "${REPLAY_CASE}"

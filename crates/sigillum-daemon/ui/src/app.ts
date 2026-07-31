@@ -2,7 +2,15 @@
 
 import "./styles/app.css";
 
-import { clearSessionToken, readSessionToken, requestWithSession } from "./api/session";
+import { ROUTE_PATHS } from "./routePaths";
+
+import {
+  clearSessionToken,
+  readSessionToken,
+  requestWithSession,
+  subscribeSessionToken,
+  withBackgroundRequests,
+} from "./api/session";
 import { handleActionEvent as handleDispatchedActionEvent } from "./actions/dispatcher";
 import {
   setHiddenById as setHidden,
@@ -10,6 +18,7 @@ import {
   setTrustedHtmlById as setTrustedHtml,
 } from "./render/dom";
 import { clearFields, showResultBox } from "./render/forms";
+import { confirmDangerDialog, confirmTypedDialog, informDialog } from "./render/confirm";
 import { esc, escAttr, formatTs, statBox } from "./render/html";
 import {
   clearRefreshTimer,
@@ -26,11 +35,24 @@ import { createOperationsActions } from "./views/operations";
 import { createReceivingActions } from "./views/receiving";
 import { createSelfCheckActions } from "./views/selfcheck";
 import { createSessionActions } from "./views/session";
-import { createShellRenderer } from "./views/shell";
+import {
+  createShellRenderer,
+  renderActiveCompartment,
+  renderCompartmentSwitcher,
+  renderWorkspaceSectionNav,
+} from "./views/shell";
 import { createSetupWizard } from "./views/setup";
 import { createTreasuryActions } from "./views/treasury";
 import { createWalletManagerActions } from "./views/walletManager";
 import { createWalletActions } from "./views/wallets";
+import { startCoreRuntime } from "./core/live";
+import { handleLegacyEnter } from "./core/keyboard";
+import { createCommandPalette, createCommandRegistry } from "./core/palette";
+import { createOverviewDestination } from "./destinations/Overview";
+import { createMoveDestination } from "./destinations/Move";
+import { createReceivingDestination } from "./destinations/Receiving";
+import { createPortfolioDestination } from "./destinations/portfolio";
+import { createVaultDestination } from "./destinations/Vault";
 
 const SETUP_RESET_CONFIRMATION = 'RESET LOCAL SIGILLUM DATA';
 const OPERATOR_CARD_IDS = [
@@ -45,9 +67,12 @@ const OPERATOR_CARD_IDS = [
   'profilesCard',
   'xpubCard',
   'receivingCard',
+  'receiveBookCard',
   'treasuryCard',
   'inventoryCard',
   'depositsCard',
+  'plansCard',
+  'policyCard',
   'queueCard',
   'maintenanceCard',
   'fido2Card',
@@ -56,42 +81,32 @@ const OPERATOR_CARD_IDS = [
   'diagCard',
 ];
 const WORKSPACE_SECTION_KEY = 'sigillumWorkspaceSection';
-const DEFAULT_WORKSPACE_SECTION = 'receiving';
+const DEFAULT_WORKSPACE_SECTION = 'overview';
 const WORKSPACE_SECTIONS = [
   {
-    id: 'receiving',
-    label: 'Receiving',
-    summary: 'Active receive addresses and stealth deposits, grouped by counterparty.',
+    id: 'overview',
+    label: 'Overview',
+    summary: 'Status, next actions, and recent audit events.',
   },
   {
-    id: 'treasury',
-    label: 'Treasury',
-    summary: 'Tracked balances, wallet groups, routing readiness, policy, and receive addresses.',
+    id: 'receive',
+    label: 'Receive',
+    summary: 'Allocations, stealth deposits, counterparties, and rotation.',
   },
   {
-    id: 'wallets',
-    label: 'Wallets',
-    summary: 'Provider endpoints, stealth wallets, and deterministic receive trees.',
+    id: 'portfolio',
+    label: 'Portfolio',
+    summary: 'Wallets, inventory discovery, risk findings, and watch book.',
   },
   {
-    id: 'operations',
-    label: 'Operations',
-    summary: 'Inventory discovery, tracked deposits, queue execution, and maintenance cycles.',
+    id: 'move',
+    label: 'Move',
+    summary: 'Consolidation plans, queue, maintenance, and policy.',
   },
   {
-    id: 'secrets',
-    label: 'Secrets',
-    summary: 'Encrypted secrets, connection keys, compartments, and secret movement.',
-  },
-  {
-    id: 'security',
-    label: 'Security',
-    summary: 'Hardware keys, encrypted snapshots, and the local audit trail.',
-  },
-  {
-    id: 'system',
-    label: 'System',
-    summary: 'Daemon health, runtime policy, and the operator guide.',
+    id: 'vault',
+    label: 'Vault',
+    summary: 'Secrets, connection keys, compartments, hardware keys, snapshots, and diagnostics.',
   },
 ];
 let currentStatus = null;
@@ -103,6 +118,12 @@ let lastApiKeys = [];
 let lastSecretKeys = [];
 let nextStepPrimaryTarget = null;
 let nextStepSecondaryTarget = null;
+// Strict-typed core runtime (plan task 4.1): store + SSE + hash router with
+// the legacy-section adapter. Started at the bottom of this module; legacy
+// behavior is unchanged except where the core intentionally takes over
+// (refresh-meta rendering; URL hash mirrors the workspace section).
+let coreRuntime = null;
+let commandPalette = null;
 
 try {
   activeWorkspaceSection =
@@ -160,6 +181,9 @@ function storeWorkspaceSection(sectionId) {
   try {
     window.sessionStorage.setItem(WORKSPACE_SECTION_KEY, sectionId);
   } catch (_) {}
+  // Migration seam (adapter contract rule 3): keep the URL hash in sync
+  // with the legacy switcher. Guarded — null until the core starts below.
+  if (coreRuntime) coreRuntime.notifyLegacySection(sectionId);
 }
 
 function ensureActiveWorkspaceSection() {
@@ -212,7 +236,7 @@ function syncSectionNav() {
   const sections = availableWorkspaceSections();
   if (sections.length <= 1) {
     nav.classList.add('hidden');
-    nav.innerHTML = '';
+    renderWorkspaceSectionNav(nav, sections, activeWorkspaceSection);
     if (main) main.classList.remove('has-nav');
     syncWorkspaceSections();
     syncTopbar();
@@ -220,18 +244,7 @@ function syncSectionNav() {
   }
 
   ensureActiveWorkspaceSection();
-  nav.innerHTML = sections.map(section => {
-    const isActive = section.id === activeWorkspaceSection;
-    return (
-      '<button type="button" class="nav-item' +
-        (isActive ? ' active' : '') +
-        '"' + (isActive ? ' aria-current="page"' : '') +
-        ' data-action="selectWorkspaceSection" data-arg0="' + escAttr(section.id) + '"' +
-        ' title="' + escAttr(section.summary) + '">' +
-        esc(section.label) +
-      '</button>'
-    );
-  }).join('');
+  renderWorkspaceSectionNav(nav, sections, activeWorkspaceSection);
   nav.classList.remove('hidden');
   if (main) main.classList.add('has-nav');
   syncWorkspaceSections();
@@ -285,11 +298,11 @@ function focusWalletCreate() {
 }
 
 function focusTreasuryReceive() {
-  jumpToField('treasuryCard', 'treasuryReceivePurpose');
+  jumpToField('receiveBookCard', 'treasuryReceivePurpose');
 }
 
 function focusTreasuryParty() {
-  jumpToField('treasuryCard', 'treasuryPartyName');
+  jumpToField('receiveBookCard', 'treasuryPartyName');
 }
 
 function focusWatchBook() {
@@ -297,31 +310,10 @@ function focusWatchBook() {
 }
 
 function heroPrimaryAction() {
-  if (currentUiMode === 'setup') {
-    jumpToCard('setupCard');
-    return;
-  }
-  if (currentUiMode === 'locked') {
-    jumpToCard('authCard');
-    const input = document.getElementById('passphrase');
-    if (input) input.focus();
-    return;
-  }
   jumpToCard('secretsCard');
 }
 
 function heroSecondaryAction() {
-  if (currentUiMode === 'setup') {
-    jumpToCard('setupCard');
-    return;
-  }
-  if (currentUiMode === 'locked') {
-    jumpToCard('authCard');
-    fido2Actions.switchUnlockTab('fido2');
-    const input = document.getElementById('fido2Pin');
-    if (input) input.focus();
-    return;
-  }
   jumpToCard('profilesCard');
 }
 
@@ -362,8 +354,8 @@ function updateNextStepCard() {
     title: 'Choose the next concrete operation',
     summary: 'The vault is live. Run maintenance, inspect queue work, review audit history, and verify local daemon health from the workspace sections.',
     items: [
-      { title: 'Operations', body: 'Maintenance refreshes deposits and drains queue work with the current local policy settings.' },
-      { title: 'Security & system', body: 'Snapshots, audit trail, and diagnostics help you validate and recover the local daemon state.' },
+      { title: 'Move', body: 'Maintenance refreshes deposits and drains queue work with the current local policy settings.' },
+      { title: 'Vault', body: 'Snapshots, audit trail, and diagnostics help you validate and recover the local daemon state.' },
     ],
     primaryLabel: 'Open maintenance',
     primaryTarget: 'maintenanceCard',
@@ -408,7 +400,7 @@ function updateNextStepCard() {
         { title: 'Stealth wallet', body: 'Use this when you want tracked deposits, sweep queues, and maintenance workflows today.' },
         { title: 'Seed or xpub receive wallet', body: 'Use this when you want deterministic receive-address previews and multiple wallet profiles visible in one place.' },
       ],
-      primaryLabel: 'Open wallets',
+      primaryLabel: 'Open portfolio',
       primaryTarget: 'profilesCard',
       secondaryLabel: 'Read operator guide',
       secondaryTarget: 'guideCard',
@@ -420,9 +412,9 @@ function updateNextStepCard() {
       summary: 'Your receive wallet profile is ready for address visibility, but tracked deposits, sweep queues, and maintenance still run on stealth wallets today.',
       items: [
         { title: 'Keep receive wallets for visibility', body: 'Use the xpub card to export receive branches and preview deposit addresses by index.' },
-        { title: 'Add stealth for operations', body: 'Use the stealth wallet card when you want deposits, queue jobs, and maintenance cycles to run locally.' },
+        { title: 'Add stealth for live flows', body: 'Use the stealth wallet card when you want deposits, queue jobs, and maintenance cycles to run locally.' },
       ],
-      primaryLabel: 'Open wallets',
+      primaryLabel: 'Open portfolio',
       primaryTarget: 'profilesCard',
       secondaryLabel: 'Open xpub tools',
       secondaryTarget: 'xpubCard',
@@ -485,91 +477,30 @@ function updateNextStepCard() {
   setHidden('nextStepCard', false);
 }
 
-function updateHeroState(mode, active, unlocked) {
+// The hero (#statusCard) is hidden outside unlocked mode, so this only ever
+// renders the unlocked overview banner.
+function updateHeroState(active, unlocked) {
   const primary = document.getElementById('heroPrimaryBtn');
   const secondary = document.getElementById('heroSecondaryBtn');
-
-  if (mode === 'setup') {
-    setText('statusEyebrow', 'First run');
-    setText('statusTitle', 'Set up the vault');
-    setText('statusSummary', 'This daemon is ready, but the machine does not have a vault yet. Finish setup first, then Sigillum will reveal the working operator surface below.');
-    setText('heroModeValue', 'Setup required');
-    setText('heroModeDetail', 'You only do this once per local data directory. Everything else stays quiet until setup is complete.');
-    primary.textContent = 'Start setup';
-    secondary.textContent = 'View options';
-    setTrustedHtml('statusContext', renderHeroContext([
-      { title: 'Pick a model', body: 'Start with Daily + Secure if you want the best default for one person managing everyday and higher-trust work.' },
-      { title: 'Register access', body: 'Use a hardware key for stronger local protection, or choose passphrase-only if this machine will not use hardware keys.' },
-      { title: 'Verify the path', body: 'When setup finishes, unlock once and store a first real value so the workflow is proven end to end.' },
-    ]));
-    return;
-  }
-
-  if (mode === 'locked') {
-    setText('statusEyebrow', 'Locked state');
-    setText('statusTitle', 'Unlock to continue');
-    setText('statusSummary', 'Your local data is still on disk, but this browser session is not authenticated. Unlock to reach secrets, profiles, deposits, queue actions, backups, and diagnostics.');
-    setText('heroModeValue', 'Locked');
-    setText('heroModeDetail', 'Use the same passphrase or hardware-key threshold you configured during setup. The session token stays only in this tab.');
-    primary.textContent = 'Unlock now';
-    secondary.textContent = 'Use hardware key';
-    setTrustedHtml('statusContext', renderHeroContext([
-      { title: 'Passphrase path', body: 'Use this if you configured passphrase fallback or built a passphrase-only vault.' },
-      { title: 'Hardware-key path', body: 'Use the hardware-key tab when a FIDO2 device is attached and you want threshold-based unlock.' },
-      { title: 'Session scope', body: 'Unlock state lives in the daemon process and the session token lives only in this browser tab.' },
-    ]));
-    return;
-  }
+  // When a migrated destination owns the hero card its legacy markup is
+  // detached; hero updates must no-op instead of crashing the refresh loop.
+  if (!primary || !secondary) return;
 
   const activeLabel = active ? (active.compartment_label || ('Compartment ' + active.compartment_id)) : 'No active compartment';
   setText('statusEyebrow', 'Vault unlocked');
-  setText('statusTitle', 'Treasury workspace');
-  setText('statusSummary', 'Every operator surface on this machine is live. Use the sidebar to move between treasury, wallets, operations, secrets, security, and system.');
+  setText('statusTitle', 'Operator workspace');
+  setText('statusSummary', 'Every operator surface on this machine is live. Use the sidebar to move between Overview, Receive, Portfolio, Move, and Vault.');
   setText('heroModeValue', activeLabel);
   setText('heroModeDetail', unlocked.length > 1
     ? 'Multiple compartments are unlocked. Use the sidebar switcher to choose which compartment new operations target.'
     : 'One compartment is unlocked in this session. Additional compartments appear when their thresholds are met.');
-  primary.textContent = 'Open secrets';
-  secondary.textContent = 'Open wallets';
+  primary.textContent = 'Open vault';
+  secondary.textContent = 'Open portfolio';
   setTrustedHtml('statusContext', renderHeroContext([
     { title: 'Protected values', body: 'Use Encrypted Secrets for sensitive data and Connection Keys for values the daemon needs during operator workflows.' },
     { title: 'Wallet families', body: 'Stealth wallets drive deposits and queue workflows today, while xpub receive wallets export public receive branches and preview deterministic addresses.' },
-    { title: 'Operator loop', body: 'Deposits, queue, maintenance, snapshots, audit, and diagnostics each live in a dedicated workspace section.' },
+    { title: 'Operator loop', body: 'Deposits, queue, maintenance, snapshots, audit, and diagnostics each live in a dedicated destination.' },
   ]));
-}
-
-function renderCompartmentSwitcher(unlocked, active) {
-  const switcher = document.getElementById('compSwitcher');
-  if (unlocked.length <= 1) {
-    switcher.innerHTML = '';
-    setHidden('compSwitcher', true);
-    return;
-  }
-
-  let html = '';
-  unlocked.forEach(c => {
-    const isActive = active && active.compartment_id === c.id;
-    html += '<button class="' + (isActive ? 'active' : '') + '" data-action="switchCompartment" data-arg0="' +
-      escAttr(String(c.id)) + '" data-arg0-type="number">' + esc(c.label) + '</button>';
-  });
-  switcher.innerHTML = html;
-  setHidden('compSwitcher', false);
-}
-
-function renderActiveCompartment(active, unlocked) {
-  const compBadge = document.getElementById('compartmentBadge');
-  if (active) {
-    compBadge.textContent = active.compartment_label || ('Compartment ' + active.compartment_id);
-    setHidden('compartmentBadge', false);
-    setText('apiKeyCount', active.api_key_count || 0);
-    setText('secretCount', active.secret_count != null ? active.secret_count : '(locked)');
-  } else {
-    setHidden('compartmentBadge', true);
-    setText('apiKeyCount', '-');
-    setText('secretCount', '-');
-  }
-
-  setText('compartmentCount', unlocked.length);
 }
 
 async function api(method, path, body) {
@@ -612,6 +543,7 @@ const setupWizard = createSetupWizard({
   api,
   toast,
   refresh: () => refresh(),
+  navigateToMovePolicy: () => coreRuntime?.router.navigate('#/move'),
   submitNewFido2Pin: fido2Actions.submitNewFido2Pin,
   friendlyFidoError: fido2Actions.friendlyFidoError,
 });
@@ -690,9 +622,22 @@ const shellRenderer = createShellRenderer({
   buildPushSelectors,
 });
 
+function applyLockedShell() {
+  shellRenderer.applyLockedUi();
+  syncSectionNav();
+  void fido2Actions.showUnlockTabs();
+}
+
+// Revocation and 401 handling clear the token synchronously. Mirror that
+// authorization boundary in the visible shell in the same task so unlocked
+// chrome and palette eligibility never linger until the periodic refresh.
+subscribeSessionToken(token => {
+  if (token === null && currentUiMode === 'unlocked') applyLockedShell();
+});
+
 async function runRefreshCycle() {
   const sessionTokenAtStart = readSessionToken();
-  const s = await api('GET', '/api/status');
+  const s = await api('GET', ROUTE_PATHS.API_STATUS);
   const sessionTokenAfterStatus = readSessionToken();
   currentStatus = s;
   const active = s.active_compartment;
@@ -715,9 +660,7 @@ async function runRefreshCycle() {
       refreshQueued = true;
       return;
     }
-    shellRenderer.applyLockedUi();
-    syncSectionNav();
-    fido2Actions.showUnlockTabs();
+    applyLockedShell();
     return;
   }
 
@@ -752,7 +695,7 @@ async function refresh() {
   updateRefreshMeta('busy');
   refreshPromise = (async () => {
     try {
-      await runRefreshCycle();
+      await withBackgroundRequests(() => runRefreshCycle());
       markRefreshCompleted();
     } catch (e) {
       console.error('refresh failed', e);
@@ -792,7 +735,7 @@ function buildPushSelectors(unlocked) {
 }
 
 async function switchCompartment(id) {
-  const r = await api('POST', '/api/compartment/switch', { id });
+  const r = await api('POST', ROUTE_PATHS.API_COMPARTMENT_SWITCH, { id });
   if (r.error) { toast(r.error, 'error'); return; }
   toast('Switched to compartment #' + id);
   refresh();
@@ -806,7 +749,7 @@ async function pushSecret() {
   const tier = parseInt(document.getElementById('pushTier').value);
   if (!key) { toast('Key name required', 'error'); return; }
   if (from === to) { toast('Source and target must differ', 'error'); return; }
-  const r = await api('POST', '/api/secrets/push', {
+  const r = await api('POST', ROUTE_PATHS.API_SECRETS_PUSH, {
     from_compartment: from, to_compartment: to, key, new_key: newKey, tier,
   });
   if (r.error) { toast(r.error, 'error'); return; }
@@ -818,7 +761,7 @@ async function pushSecret() {
 
 async function loadCompartments() {
   try {
-    const r = await api('GET', '/api/compartment/list');
+    const r = await api('GET', ROUTE_PATHS.API_COMPARTMENT_LIST);
     const el = document.getElementById('compartmentList');
     const comps = r.compartments || [];
     if (comps.length === 0) {
@@ -844,14 +787,18 @@ async function copyText(value, label) {
       return;
     }
   } catch (_) {}
-  window.prompt('Copy ' + label + ':', value);
+  await informDialog({
+    title: 'Copy ' + label,
+    body: 'Clipboard access is unavailable in this browser context. Select the value below and copy it manually.',
+    valueDisplay: value,
+  });
 }
 
 // ── API Keys & Secrets ────────────────────────────────────────
 
 async function loadApiKeys() {
   try {
-    const r = await api('GET', '/api/api-keys');
+    const r = await api('GET', ROUTE_PATHS.API_API_KEYS);
     if (r.error) return;
     const list = document.getElementById('apiKeyList');
     lastApiKeys = r.keys || [];
@@ -873,7 +820,7 @@ async function loadApiKeys() {
 
 async function loadSecrets() {
   try {
-    const r = await api('GET', '/api/secrets');
+    const r = await api('GET', ROUTE_PATHS.API_SECRETS);
     if (r.error) return;
     const list = document.getElementById('secretList');
     lastSecretKeys = r.keys || [];
@@ -897,7 +844,7 @@ async function setApiKey() {
   const key = document.getElementById('apiKeyName').value;
   const value = document.getElementById('apiKeyValue').value;
   if (!key || !value) { toast('Key and value required', 'error'); return; }
-  const r = await api('POST', '/api/api-keys/set', { key, value });
+  const r = await api('POST', ROUTE_PATHS.API_API_KEYS_SET, { key, value });
   if (r.error) { toast(r.error, 'error'); return; }
   clearFields(['apiKeyName', 'apiKeyValue']);
   toast('API key stored');
@@ -908,7 +855,7 @@ async function setSecret() {
   const key = document.getElementById('secretName').value;
   const value = document.getElementById('secretValue').value;
   if (!key || !value) { toast('Key and value required', 'error'); return; }
-  const r = await api('POST', '/api/secrets/set', { key, value });
+  const r = await api('POST', ROUTE_PATHS.API_SECRETS_SET, { key, value });
   if (r.error) { toast(r.error, 'error'); return; }
   clearFields(['secretName', 'secretValue']);
   toast('Secret stored');
@@ -930,13 +877,13 @@ function showRevealedValue(li, btn, value) {
 }
 
 async function revealApiKey(key, btn) {
-  const r = await api('POST', '/api/api-keys/get', { key });
+  const r = await api('POST', ROUTE_PATHS.API_API_KEYS_GET, { key });
   if (r.error) { toast(r.error, 'error'); return; }
   showRevealedValue(btn.closest('li'), btn, r.value);
 }
 
 async function revealSecret(key, btn) {
-  const r = await api('POST', '/api/secrets/get', { key });
+  const r = await api('POST', ROUTE_PATHS.API_SECRETS_GET, { key });
   if (r.error) { toast(r.error, 'error'); return; }
   showRevealedValue(btn.closest('li'), btn, r.value);
 }
@@ -950,7 +897,12 @@ function revealSecretButton(key, btn) {
 }
 
 async function deleteApiKey(key) {
-  if (!confirm('Delete API key "' + key + '"?')) return;
+  const confirmed = await confirmDangerDialog({
+    title: 'Delete API key',
+    body: 'Delete API key "' + key + '"? Providers using this stored credential lose their authenticated access.',
+    actionLabel: 'Delete',
+  });
+  if (!confirmed) return;
   const r = await api('POST', '/api/api-keys/delete', { key });
   if (r.error) { toast(r.error, 'error'); return; }
   toast('Deleted');
@@ -958,7 +910,12 @@ async function deleteApiKey(key) {
 }
 
 async function deleteSecret(key) {
-  if (!confirm('Delete secret "' + key + '"?')) return;
+  const confirmed = await confirmDangerDialog({
+    title: 'Delete secret',
+    body: 'Delete secret "' + key + '"? The encrypted value is removed from this compartment and cannot be recovered from the vault.',
+    actionLabel: 'Delete',
+  });
+  if (!confirmed) return;
   const r = await api('POST', '/api/secrets/delete', { key });
   if (r.error) { toast(r.error, 'error'); return; }
   toast('Deleted');
@@ -985,7 +942,7 @@ async function exportSnapshot() {
     return;
   }
 
-  const r = await api('POST', '/api/backup/export', { passphrase });
+  const r = await api('POST', ROUTE_PATHS.API_BACKUP_EXPORT, { passphrase });
   if (r.error) { toast(r.error, 'error'); return; }
 
   try {
@@ -1024,7 +981,12 @@ async function restoreSnapshot(
     toast('Restore passphrase must be at least 8 characters', 'error');
     return;
   }
-  if (!confirm('Restore this snapshot? Current on-disk Sigillum data will be replaced and you will need to unlock again.')) return;
+  const confirmed = await confirmDangerDialog({
+    title: 'Restore snapshot',
+    body: 'Restore this snapshot? Current on-disk Sigillum data will be replaced and you will need to unlock again.',
+    actionLabel: 'Restore',
+  });
+  if (!confirmed) return;
 
   let snapshotHex;
   try {
@@ -1035,7 +997,7 @@ async function restoreSnapshot(
     return;
   }
 
-  const r = await api('POST', '/api/backup/restore', {
+  const r = await api('POST', ROUTE_PATHS.API_BACKUP_RESTORE, {
     passphrase,
     snapshot_hex: snapshotHex,
   });
@@ -1064,29 +1026,20 @@ function restoreAuthSnapshot() {
   );
 }
 
-async function resetLocalData(confirmId = 'setupResetConfirm') {
-  const confirmInput = document.getElementById(confirmId);
-  if (!confirmInput) {
-    toast('Reset controls are unavailable.', 'error');
-    return;
-  }
-  const confirmation = confirmInput.value.trim();
-  if (confirmation !== SETUP_RESET_CONFIRMATION) {
-    toast("Type '" + SETUP_RESET_CONFIRMATION + "' exactly to continue.", 'error');
-    return;
-  }
-  if (!confirm('Archive this machine\'s Sigillum data and return to first-run setup? The current data directory is moved aside (not deleted), but you will need a new vault to continue.')) {
-    return;
-  }
+async function resetLocalData() {
+  const confirmed = await confirmTypedDialog({
+    title: 'Reset local Sigillum data',
+    body: 'Archive this machine\'s Sigillum data and return to first-run setup? The current data directory is moved aside (not deleted), but you will need a new vault to continue.',
+    phrase: SETUP_RESET_CONFIRMATION,
+    actionLabel: 'Archive & reset',
+  });
+  if (!confirmed) return;
 
-  const r = await api('POST', '/api/setup/reset', { confirmation });
+  const r = await api('POST', '/api/setup/reset', { confirmation: SETUP_RESET_CONFIRMATION });
   if (r.error) { toast(r.error, 'error'); return; }
 
   clearSessionToken();
   clearFields([
-    'setupResetConfirm',
-    'authResetConfirm',
-    'backupResetConfirm',
     'setupRestorePass',
     'authRestorePass',
     'backupRestorePass',
@@ -1145,7 +1098,7 @@ function formatAuditEvent(event) {
 
 async function loadAudit() {
   try {
-    const r = await api('GET', '/api/audit?limit=20');
+    const r = await api('GET', `${ROUTE_PATHS.API_AUDIT}?limit=20`);
     if (r.error) return;
     const list = document.getElementById('auditList');
     const events = r.events || [];
@@ -1155,7 +1108,7 @@ async function loadAudit() {
     }
     let html = '<ul class="key-list">';
     events.forEach(event => {
-      const when = new Date((event.created_at_unix || 0) * 1000).toLocaleString();
+      const when = formatTs(event.created_at_unix);
       const comp = event.compartment_id != null
         ? '<span style="color:var(--text-dim);font-size:11px;">compartment #' + event.compartment_id + '</span>'
         : '<span style="color:var(--text-dim);font-size:11px;">global</span>';
@@ -1170,13 +1123,13 @@ async function loadAudit() {
 
 async function loadDiagnostics() {
   try {
-    const r = await api('GET', '/api/diagnostics');
+    const r = await api('GET', ROUTE_PATHS.API_DIAGNOSTICS);
     const el = document.getElementById('diagGrid');
     if (r.error) {
       el.innerHTML = '<div style="color:var(--danger);font-size:13px;">' + esc(r.error) + '</div>';
       return;
     }
-    const started = r.started_at_unix ? new Date(r.started_at_unix * 1000).toLocaleString() : '-';
+    const started = formatTs(r.started_at_unix);
     el.innerHTML = [
       statBox(r.version || '-', 'Version'),
       statBox(r.unlock_scope || '-', 'Unlock Scope'),
@@ -1231,6 +1184,7 @@ const UI_ACTIONS = {
   copyMnemonicPhrase: walletManagerActions.copyMnemonicPhrase,
   copyText,
   copyWalletAddress: walletManagerActions.copyWalletAddress,
+  copyXpubWithWarning: walletActions.copyXpubWithWarning,
   createTreasuryParty: treasuryActions.createTreasuryParty,
   clearTreasuryPartySweepDest: treasuryActions.clearTreasuryPartySweepDest,
   createErc20Deposit: operationsActions.createErc20Deposit,
@@ -1385,12 +1339,20 @@ function handleActionEvent(event) {
   });
 }
 
+const LEGACY_ENTER_ACTIONS = {
+  unlock: sessionActions.unlock,
+  fido2Unlock: fido2Actions.fido2Unlock,
+  wizInitPassphrase: setupWizard.wizInitPassphrase,
+  wizRegisterKey: setupWizard.wizRegisterKey,
+  wizRegisterAdditionalKey: setupWizard.wizRegisterAdditionalKey,
+  wizSetNewPin: setupWizard.wizSetNewPin,
+  wizSetAdditionalKeyPin: setupWizard.wizSetAdditionalKeyPin,
+  wizAddCustomComp: setupWizard.wizAddCustomComp,
+};
+
 document.addEventListener('keydown', e => {
-  if (e.key !== 'Enter') return;
-  if (e.target.id === 'passphrase') sessionActions.unlock();
-  if (e.target.id === 'fido2Pin') fido2Actions.fido2Unlock();
-  if (e.target.id === 'wizPassphraseConfirm') setupWizard.wizInitPassphrase();
-  if (e.target.id === 'wizFido2Label') setupWizard.wizRegisterKey();
+  if (commandPalette?.handleKeydown(e)) return;
+  handleLegacyEnter(e, LEGACY_ENTER_ACTIONS);
 });
 
 document.addEventListener('visibilitychange', () => {
@@ -1430,4 +1392,33 @@ function enhanceUiChrome() {
 }
 
 enhanceUiChrome();
+// Start the strict-typed core: store + typed API + hash router (synced with
+// the legacy section switcher via the adapter) + SSE-fed live slices, and
+// the proof-of-life refresh-meta migration. Legacy views keep their own
+// refresh loop until each migrates.
+coreRuntime = startCoreRuntime({
+  bridge: {
+    readSection: () => activeWorkspaceSection,
+    selectSection: id => selectWorkspaceSection(id),
+  },
+  destinations: [
+    createOverviewDestination,
+    createMoveDestination,
+    createReceivingDestination,
+    createPortfolioDestination,
+    createVaultDestination,
+  ],
+});
+commandPalette = createCommandPalette({
+  isUnlocked: () => currentUiMode === 'unlocked',
+  commands: createCommandRegistry({
+    navigate: hash => coreRuntime.router.navigate(hash),
+    refreshWorkspace: refresh,
+    runSelfCheck: selfCheckActions.runSelfCheck,
+  }),
+  onError: (error, command) => {
+    const message = error instanceof Error ? error.message : String(error);
+    toast(command.label + ' failed: ' + message, 'error');
+  },
+});
 void refresh();

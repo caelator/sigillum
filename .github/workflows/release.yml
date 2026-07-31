@@ -7,8 +7,12 @@
 #   5. Download the assets and run: shasum -a 256 --check SHA256SUMS --ignore-missing
 #   6. Confirm the release is still a draft and its body contains the dated CHANGELOG section.
 #   7. Retain the RC tag and draft assets through final verification; remove only the RC draft after final publication.
-# Final v1.0.0 promotion is governed by plan H2. Its operator-evidence bundle
-# is uploaded and digest-verified after this workflow creates the final draft.
+# Final v1.0.0 promotion is governed by plan H2. Both source-verification legs
+# still run, but the artifact jobs are RC-only. The final draft copies the
+# contract-selected highest retained RC draft payloads under final filenames,
+# regenerates SHA256SUMS, and verifies byte-for-byte and normalized-digest
+# equality. Its operator-evidence bundle is uploaded and digest-verified only
+# after that exact-byte final draft exists.
 
 name: Release
 
@@ -29,6 +33,9 @@ jobs:
     timeout-minutes: 10
     outputs:
       tag_object: ${{ steps.validate.outputs.tag_object }}
+      promotion_rc_tag: ${{ steps.validate.outputs.promotion_rc_tag }}
+      promotion_rc_tag_object: ${{ steps.validate.outputs.promotion_rc_tag_object }}
+      promotion_rc_sha: ${{ steps.validate.outputs.promotion_rc_sha }}
 
     steps:
       - name: Checkout full history
@@ -100,6 +107,7 @@ jobs:
 
   artifacts-macos:
     needs: verify
+    if: ${{ contains(github.ref_name, '-rc.') }}
     runs-on: macos-15
     timeout-minutes: 90
 
@@ -199,6 +207,7 @@ jobs:
 
   artifacts-linux:
     needs: verify
+    if: ${{ contains(github.ref_name, '-rc.') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 60
 
@@ -244,7 +253,25 @@ jobs:
           if-no-files-found: error
 
   release:
-    needs: [release-contract, artifacts-macos, artifacts-linux]
+    needs: [release-contract, verify, artifacts-macos, artifacts-linux]
+    if: >-
+      ${{
+        always() &&
+        needs.release-contract.result == 'success' &&
+        needs.verify.result == 'success' &&
+        (
+          (
+            contains(github.ref_name, '-rc.') &&
+            needs.artifacts-macos.result == 'success' &&
+            needs.artifacts-linux.result == 'success'
+          ) ||
+          (
+            ! contains(github.ref_name, '-rc.') &&
+            needs.artifacts-macos.result == 'skipped' &&
+            needs.artifacts-linux.result == 'skipped'
+          )
+        )
+      }}
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     permissions:
@@ -258,6 +285,7 @@ jobs:
           fetch-depth: 0
 
       - name: Download release artifacts
+        if: ${{ contains(github.ref_name, '-rc.') }}
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           pattern: release-artifacts-*
@@ -265,6 +293,7 @@ jobs:
           merge-multiple: true
 
       - name: Generate SHA256SUMS
+        if: ${{ contains(github.ref_name, '-rc.') }}
         shell: bash
         run: |
           set -euo pipefail
@@ -272,6 +301,77 @@ jobs:
           cd dist
           sha256sum -- * > SHA256SUMS
           cat SHA256SUMS
+
+      - name: Promote exact highest-RC payload bytes
+        if: ${{ ! contains(github.ref_name, '-rc.') }}
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          RELEASE_TAG: ${{ github.ref_name }}
+          RELEASE_SHA: ${{ github.sha }}
+          PROMOTION_RC_TAG: ${{ needs.release-contract.outputs.promotion_rc_tag }}
+          PROMOTION_RC_TAG_OBJECT: ${{ needs.release-contract.outputs.promotion_rc_tag_object }}
+          PROMOTION_RC_SHA: ${{ needs.release-contract.outputs.promotion_rc_sha }}
+        run: |
+          set -euo pipefail
+
+          [[ "${PROMOTION_RC_TAG}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+-rc\.[1-9][0-9]*$ ]]
+          [[ "${PROMOTION_RC_TAG_OBJECT}" =~ ^[0-9a-f]{40}$ ]]
+          [[ "${PROMOTION_RC_SHA}" =~ ^[0-9a-f]{40}$ ]]
+          [[ "${PROMOTION_RC_SHA}" == "${RELEASE_SHA}" ]]
+          GITHUB_OUTPUT="" bash ./scripts/check-release-tag-contract.sh \
+            "${PROMOTION_RC_TAG}" "${PROMOTION_RC_SHA}" origin \
+            "${PROMOTION_RC_TAG_OBJECT}"
+
+          rc_release="$(
+            gh api --paginate "repos/${REPOSITORY}/releases?per_page=100" |
+              jq -sc --arg tag "${PROMOTION_RC_TAG}" '
+                add
+                | [.[] | select(.tag_name == $tag)]
+                | if length == 1
+                  then .[0]
+                  else error("expected exactly one highest-RC release")
+                  end
+              '
+          )"
+          bash ./scripts/check-release-state-contract.sh \
+            rc-draft "${PROMOTION_RC_TAG}" <<< "${rc_release}"
+          jq -e '
+            (.assets | length == 6) and
+            all(.assets[]; .state == "uploaded" and .size > 0)
+          ' <<< "${rc_release}" >/dev/null
+
+          expected_assets="${RUNNER_TEMP}/expected-rc-assets"
+          remote_assets="${RUNNER_TEMP}/remote-rc-assets"
+          printf '%s\n' \
+            "SHA256SUMS" \
+            "Sigillum-${PROMOTION_RC_TAG}-macos-aarch64.app.zip" \
+            "Sigillum-${PROMOTION_RC_TAG}-macos-aarch64.dmg" \
+            "THIRD-PARTY-NOTICES.txt" \
+            "sigillum-cli-${PROMOTION_RC_TAG}-linux-x86_64.tar.gz" \
+            "sigillum-cli-${PROMOTION_RC_TAG}-macos-aarch64.tar.gz" |
+            LC_ALL=C sort > "${expected_assets}"
+          jq -r '.assets[].name' <<< "${rc_release}" |
+            LC_ALL=C sort > "${remote_assets}"
+          cmp -s "${expected_assets}" "${remote_assets}"
+
+          mkdir rc-dist
+          while IFS=$'\t' read -r asset_name asset_id; do
+            gh api -H 'Accept: application/octet-stream' \
+              "repos/${REPOSITORY}/releases/assets/${asset_id}" \
+              > "rc-dist/${asset_name}"
+          done < <(
+            jq -r '.assets[] | [.name, (.id | tostring)] | @tsv' \
+              <<< "${rc_release}"
+          )
+
+          bash ./scripts/promote-release-assets.sh promote \
+            "${PROMOTION_RC_TAG}" "${RELEASE_TAG}" rc-dist dist
+          bash ./scripts/promote-release-assets.sh verify \
+            "${PROMOTION_RC_TAG}" "${RELEASE_TAG}" rc-dist dist
+          printf 'promoted exact payload bytes from %s (%s -> %s)\n' \
+            "${PROMOTION_RC_TAG}" "${PROMOTION_RC_TAG_OBJECT}" "${PROMOTION_RC_SHA}"
 
       - name: Prepare release notes
         shell: bash
@@ -308,11 +408,57 @@ jobs:
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
           RELEASE_TAG: ${{ github.ref_name }}
           RELEASE_SHA: ${{ github.sha }}
           RELEASE_TAG_OBJECT: ${{ needs.release-contract.outputs.tag_object }}
+          PROMOTION_RC_TAG: ${{ needs.release-contract.outputs.promotion_rc_tag }}
+          PROMOTION_RC_TAG_OBJECT: ${{ needs.release-contract.outputs.promotion_rc_tag_object }}
+          PROMOTION_RC_SHA: ${{ needs.release-contract.outputs.promotion_rc_sha }}
         run: |
           set -euo pipefail
 
-          bash ./scripts/check-release-tag-contract.sh "${RELEASE_TAG}" "${RELEASE_SHA}" origin "${RELEASE_TAG_OBJECT}"
-          gh release create "${RELEASE_TAG}" --draft --verify-tag --title "Sigillum ${RELEASE_TAG}" --notes-file "${RUNNER_TEMP}/release-notes.md" dist/*
+          if [[ -n "${PROMOTION_RC_TAG}" ]]; then
+            GITHUB_OUTPUT="" bash ./scripts/check-release-tag-contract.sh \
+              "${PROMOTION_RC_TAG}" "${PROMOTION_RC_SHA}" origin \
+              "${PROMOTION_RC_TAG_OBJECT}"
+          fi
+          GITHUB_OUTPUT="" bash ./scripts/check-release-tag-contract.sh \
+            "${RELEASE_TAG}" "${RELEASE_SHA}" origin "${RELEASE_TAG_OBJECT}"
+
+          release_role="final-draft"
+          release_args=(
+            "${RELEASE_TAG}"
+            --draft
+            --verify-tag
+            --title "Sigillum ${RELEASE_TAG}"
+            --notes-file "${RUNNER_TEMP}/release-notes.md"
+          )
+          if [[ "${RELEASE_TAG}" == *-rc.* ]]; then
+            release_role="rc-draft"
+            release_args+=(--prerelease)
+          fi
+          gh release create "${release_args[@]}" dist/*
+
+          created_release="$(
+            gh api --paginate "repos/${REPOSITORY}/releases?per_page=100" |
+              jq -sc --arg tag "${RELEASE_TAG}" '
+                add
+                | [.[] | select(.tag_name == $tag)]
+                | if length == 1
+                  then .[0]
+                  else error("expected exactly one created release")
+                  end
+              '
+          )"
+          bash ./scripts/check-release-state-contract.sh \
+            "${release_role}" "${RELEASE_TAG}" <<< "${created_release}"
+          jq -e '
+            (.assets | length == 6) and
+            all(.assets[]; .state == "uploaded" and .size > 0)
+          ' <<< "${created_release}" >/dev/null
+          if [[ -n "${PROMOTION_RC_TAG}" ]]; then
+            GITHUB_OUTPUT="" bash ./scripts/check-release-tag-contract.sh \
+              "${PROMOTION_RC_TAG}" "${PROMOTION_RC_SHA}" origin \
+              "${PROMOTION_RC_TAG_OBJECT}"
+          fi

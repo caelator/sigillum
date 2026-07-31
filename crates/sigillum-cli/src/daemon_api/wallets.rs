@@ -3,7 +3,8 @@
 use std::process;
 
 use super::{
-    parse_flag, read_optional_sensitive_input, require_flag, require_u32_flag, run_api_command,
+    decode_32_byte_hex, parse_flag, read_optional_sensitive_input, reject_raw_ephemeral_key_flags,
+    require_flag, require_u32_flag, run_api_command, run_api_command_with,
 };
 
 const USAGE: &str = "Usage: sigillum api wallets <xpub-export|xpub-derive|stealth-export|stealth-generate|stealth-check> [...]";
@@ -36,9 +37,19 @@ pub(super) fn cmd_api_wallets(args: &[String]) {
 
 fn xpub_export(args: &[String]) {
     let wallet_profile = require_flag(args, "--wallet-profile", XPUB_EXPORT_USAGE);
-    run_api_command(args, true, move |client| async move {
-        client.export_eth_xpub_receive_branch(&wallet_profile).await
-    });
+    run_api_command_with(
+        args,
+        true,
+        move |client| async move { client.export_eth_xpub_receive_branch(&wallet_profile).await },
+        |response| {
+            // The daemon restates the xpub exposure on every export (plan task
+            // 3.4); surface it on stderr exactly like the stealth warnings so
+            // JSON stdout stays clean. Empty on older daemons.
+            if !response.warning.is_empty() {
+                eprintln!("Warning: {}", response.warning);
+            }
+        },
+    );
 }
 
 fn xpub_derive(args: &[String]) {
@@ -63,11 +74,20 @@ fn stealth_generate(args: &[String]) {
     reject_raw_ephemeral_key_flags(args);
     let meta_address = require_flag(args, "--meta-address", STEALTH_GENERATE_USAGE);
     let ephemeral = read_optional_ephemeral_private_key(args);
-    run_api_command(args, true, move |client| async move {
-        client
-            .generate_eth_stealth_address(&meta_address, ephemeral.as_ref())
-            .await
-    });
+    run_api_command_with(
+        args,
+        true,
+        move |client| async move {
+            client
+                .generate_eth_stealth_address(&meta_address, ephemeral.as_ref())
+                .await
+        },
+        |response| {
+            for warning in &response.warnings {
+                eprintln!("Warning: {warning}");
+            }
+        },
+    );
 }
 
 fn stealth_check(args: &[String]) {
@@ -88,21 +108,6 @@ fn read_optional_ephemeral_private_key(args: &[String]) -> Option<[u8; 32]> {
         .map(|value| decode_32_byte_hex("ephemeral private key", &value))
 }
 
-fn reject_raw_ephemeral_key_flags(args: &[String]) {
-    for flag in [
-        "--ephemeral-key",
-        "--ephemeral-private-key",
-        "--ephemeral-private-key-hex",
-    ] {
-        if args.iter().any(|arg| arg == flag) {
-            eprintln!(
-                "Do not pass ephemeral private keys as CLI arguments; use --ephemeral-key-env VAR or --ephemeral-key-stdin."
-            );
-            process::exit(1);
-        }
-    }
-}
-
 fn parse_view_tag(args: &[String]) -> Option<u8> {
     parse_flag(args, "--view-tag-hex").map(|value| {
         let bytes = decode_hex_flag("--view-tag-hex", &value);
@@ -120,21 +125,6 @@ fn parse_view_tag(args: &[String]) -> Option<u8> {
 fn require_hex_flag(args: &[String], flag: &str, usage: &str) -> Vec<u8> {
     let value = require_flag(args, flag, usage);
     decode_hex_flag(flag, &value)
-}
-
-fn decode_32_byte_hex(name: &str, value: &str) -> [u8; 32] {
-    let bytes = hex::decode(value).unwrap_or_else(|error| {
-        eprintln!("Invalid hex for {name}: {error}");
-        process::exit(1);
-    });
-    if bytes.len() != 32 {
-        eprintln!(
-            "Invalid value for {name}: expected exactly 32 bytes, got {}.",
-            bytes.len()
-        );
-        process::exit(1);
-    }
-    bytes.try_into().expect("length checked")
 }
 
 fn decode_hex_flag(flag: &str, value: &str) -> Vec<u8> {

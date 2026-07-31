@@ -95,8 +95,12 @@ snapshot_generated_assets
 
 run_cargo_metadata
 run_step bash ./scripts/test-release-tracked-state.sh
+run_step bash ./scripts/test-release-host-metadata.sh
+run_step bash ./scripts/test-local-soak-receipt-contract.sh
 run_step bash ./scripts/test-release-evidence-bundle.sh
+run_step bash ./scripts/test-release-asset-promotion.sh
 run_step bash ./scripts/test-release-tag-contract.sh
+run_step bash ./scripts/test-release-workflow-contract.sh
 run_step ./scripts/check-architecture.sh
 run_step npm --prefix crates/sigillum-daemon/ui ci --ignore-scripts
 run_step npm --prefix crates/sigillum-daemon/ui audit --audit-level=high
@@ -104,6 +108,7 @@ run_step npm --prefix crates/sigillum-daemon/ui run typecheck
 run_step npm --prefix crates/sigillum-daemon/ui test
 run_step npm --prefix crates/sigillum-daemon/ui run build
 verify_generated_assets_unchanged
+run_step ./scripts/check-ui-accessibility.sh
 run_step cargo fmt --all --check
 run_step cargo check --workspace --locked
 run_step cargo check -p sigillum-fido2 --no-default-features --locked

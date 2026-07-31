@@ -35,6 +35,7 @@ pub(super) fn eth_stealth_transfer_payload(
         nonce: body.nonce,
         gas_limit: body.gas_limit,
         view_tag_hex: body.stealth.view_tag_hex,
+        stealth_hash_convention: body.stealth.stealth_hash_convention,
     }
 }
 
@@ -51,6 +52,7 @@ pub(super) fn eth_stealth_erc20_transfer_payload(
         nonce: body.nonce,
         gas_limit: body.gas_limit,
         view_tag_hex: body.stealth.view_tag_hex,
+        stealth_hash_convention: body.stealth.stealth_hash_convention,
     }
 }
 
@@ -65,6 +67,7 @@ pub(super) fn eth_stealth_native_sweep_payload(
         min_value_wei_hex: body.min_value_wei_hex,
         gas_limit: body.gas_limit,
         view_tag_hex: body.stealth.view_tag_hex,
+        stealth_hash_convention: body.stealth.stealth_hash_convention,
     }
 }
 
@@ -80,5 +83,9 @@ pub(super) fn eth_stealth_erc20_sweep_payload(
         min_amount_hex: body.min_amount_hex,
         gas_limit: body.gas_limit,
         view_tag_hex: body.stealth.view_tag_hex,
+        stealth_hash_convention: body.stealth.stealth_hash_convention,
+        // The public enqueue endpoint wires no dependencies; sponsor top-up
+        // prerequisites are set only by the deposit sweep flow internally.
+        prerequisite_job_ids: Vec::new(),
     }
 }

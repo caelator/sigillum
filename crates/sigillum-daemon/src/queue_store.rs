@@ -97,6 +97,7 @@ mod tests {
                 min_value_wei_hex: None,
                 gas_limit: None,
                 view_tag_hex: None,
+                stealth_hash_convention: None,
             },
             last_error: None,
             transaction_hash_hex: None,

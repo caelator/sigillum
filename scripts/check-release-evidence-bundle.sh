@@ -160,14 +160,24 @@ jq -e \
   ' "${EXTRACTED}/MANIFEST.json" >/dev/null ||
   fail "MANIFEST.json does not bind every required gate to the exact RC identities"
 
-jq -e --arg rc_sha "${RC_SHA}" '
-    .schema_version == 1 and
+F4_HOST_FILTER='
+  .host.name == "mac-server" and
+  .host.platform == "macos" and
+  (.host.product_version |
+    type == "string" and
+    test("^15\\.[0-9]+(\\.[0-9]+)?$")) and
+  .host.arch == "aarch64" and
+  (.host.identity_sha256 |
+    type == "string" and test("^[0-9a-f]{64}$"))
+'
+
+jq -e --arg rc_sha "${RC_SHA}" "${F4_HOST_FILTER}"'
+    and
+    .schema_version == 2 and
     .kind == "sigillum.local_soak" and
     .status == "passed" and
     .repo.commit == $rc_sha and
     .repo.dirty == false and
-    .host.name == "mac-server" and
-    (.host.os | type == "string" and length > 0) and
     (.configured.soak_seconds |
       type == "number" and . == floor and . >= 3600) and
     (.timing.duration_seconds |
@@ -178,14 +188,13 @@ jq -e --arg rc_sha "${RC_SHA}" '
   ' "${EXTRACTED}/f4/standard.json" >/dev/null ||
   fail "F4 standard receipt does not prove the required clean 3600-second RC soak"
 
-jq -e --arg rc_sha "${RC_SHA}" '
-    .schema_version == 1 and
+jq -e --arg rc_sha "${RC_SHA}" "${F4_HOST_FILTER}"'
+    and
+    .schema_version == 2 and
     .kind == "sigillum.local_soak" and
     .status == "passed" and
     .repo.commit == $rc_sha and
     .repo.dirty == false and
-    .host.name == "mac-server" and
-    (.host.os | type == "string" and length > 0) and
     (.configured.soak_seconds |
       type == "number" and . == floor and . >= 600) and
     (.timing.duration_seconds |
@@ -197,6 +206,15 @@ jq -e --arg rc_sha "${RC_SHA}" '
     .chaos.in_flight_assertion.status == "passed"
   ' "${EXTRACTED}/f4/chaos.json" >/dev/null ||
   fail "F4 chaos receipt does not prove the required clean 600-second RC soak"
+
+STANDARD_HOST_IDENTITY="$(
+  jq -r '.host.identity_sha256' "${EXTRACTED}/f4/standard.json"
+)"
+CHAOS_HOST_IDENTITY="$(
+  jq -r '.host.identity_sha256' "${EXTRACTED}/f4/chaos.json"
+)"
+[[ "${STANDARD_HOST_IDENTITY}" == "${CHAOS_HOST_IDENTITY}" ]] ||
+  fail "F4 standard and chaos receipts do not bind the same host identity"
 
 jq -e --arg rc_sha "${RC_SHA}" '
     def flattened_claims:
@@ -348,37 +366,6 @@ done < <(jq -c '
     .
   end' "${EXTRACTED}/f6/receipts.json")
 
-jq -e --arg rc_sha "${RC_SHA}" '
-    .schema_version == 1 and
-    .kind == "sigillum.clean_install" and
-    .status == "passed" and
-    .rc_sha == $rc_sha and
-    .dev_toolchain_absent == true and
-    .unlock_reached == true
-  ' "${EXTRACTED}/desktop/clean-install.json" >/dev/null ||
-  fail "desktop receipt does not prove a clean-machine install reaching unlock"
-
-jq -e --arg rc_sha "${RC_SHA}" '
-    .schema_version == 1 and
-    .kind == "sigillum.ui_signoff" and
-    .status == "passed" and
-    .rc_sha == $rc_sha and
-    .full_walkthrough_completed == true
-  ' "${EXTRACTED}/ui/signoff.json" >/dev/null ||
-  fail "UI receipt does not prove the required full walkthrough"
-
-jq -e --arg rc_sha "${RC_SHA}" '
-    .schema_version == 1 and
-    .kind == "sigillum.doctor" and
-    .status == "passed" and
-    .rc_sha == $rc_sha and
-    .host.name == "mac-server" and
-    (.host.os | type == "string" and length > 0) and
-    .installed_rc_cli == true and
-    .checks_passed == true
-  ' "${EXTRACTED}/doctor/mac-server.json" >/dev/null ||
-  fail "doctor receipt does not prove the installed RC passed on mac-server"
-
 EXPECTED_RC_ASSETS="${TMP_ROOT}/expected-rc-assets"
 RECORDED_RC_ASSETS="${TMP_ROOT}/recorded-rc-assets"
 printf '%s\n' \
@@ -397,6 +384,170 @@ done < "${EXTRACTED}/release/asset-SHA256SUMS"
 LC_ALL=C sort -o "${RECORDED_RC_ASSETS}" "${RECORDED_RC_ASSETS}"
 cmp -s "${EXPECTED_RC_ASSETS}" "${RECORDED_RC_ASSETS}" ||
   fail "release/asset-SHA256SUMS must contain the exact five RC payload assets"
+
+RC_DMG_NAME="Sigillum-${RC_TAG}-macos-aarch64.dmg"
+RC_CLI_NAME="sigillum-cli-${RC_TAG}-macos-aarch64.tar.gz"
+RC_DMG_SHA256="$(
+  awk -v name="${RC_DMG_NAME}" '$2 == name { print $1 }' \
+    "${EXTRACTED}/release/asset-SHA256SUMS"
+)"
+RC_CLI_SHA256="$(
+  awk -v name="${RC_CLI_NAME}" '$2 == name { print $1 }' \
+    "${EXTRACTED}/release/asset-SHA256SUMS"
+)"
+[[ "${RC_DMG_SHA256}" =~ ^[0-9a-f]{64}$ ]] ||
+  fail "release/asset-SHA256SUMS is missing the RC dmg digest"
+[[ "${RC_CLI_SHA256}" =~ ^[0-9a-f]{64}$ ]] ||
+  fail "release/asset-SHA256SUMS is missing the RC macOS CLI digest"
+
+REVIEWER_AND_HOST_FILTER='
+  (.reviewer.id |
+    type == "string" and test("^[A-Za-z0-9._@-]{1,128}$")) and
+  .reviewer.role == "release_operator" and
+  (.reviewer.reviewed_at_utc |
+    type == "string" and
+    test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$")) and
+  .host.role == "mac-server" and
+  .host.name == "mac-server" and
+  .host.platform == "macos" and
+  (.host.os_version |
+    type == "string" and test("^15(\\.|$)")) and
+  .host.arch == "aarch64"
+'
+
+jq -e \
+  --arg version "${VERSION}" \
+  --arg rc_tag "${RC_TAG}" \
+  --arg rc_sha "${RC_SHA}" \
+  --arg rc_tag_object "${RC_TAG_OBJECT}" \
+  --arg artifact_name "${RC_DMG_NAME}" \
+  --arg artifact_sha256 "${RC_DMG_SHA256}" \
+  "${REVIEWER_AND_HOST_FILTER} and
+    .schema_version == 2 and
+    .kind == \"sigillum.clean_install\" and
+    .status == \"passed\" and
+    .rc.tag == \$rc_tag and
+    .rc.tag_object == \$rc_tag_object and
+    .rc.peeled_sha == \$rc_sha and
+    .artifact.filename == \$artifact_name and
+    .artifact.sha256 == \$artifact_sha256 and
+    .installation.path == \"/Applications/Sigillum.app\" and
+    .installation.bundle_identifier == \"com.sigillum.desktop\" and
+    .installation.app_version == \$version and
+    .installation.checksum_verified == true and
+    .installation.dev_toolchain_absent == true and
+    .installation.unlock_reached == true and
+    (.screenshots | type == \"array\" and length == 1) and
+    .screenshots[0].state == \"unlock\" and
+    .screenshots[0].path == \"desktop/screenshots/unlock.png\" and
+    (.screenshots[0].sha256 | test(\"^[0-9a-f]{64}$\"))
+  " "${EXTRACTED}/desktop/clean-install.json" >/dev/null ||
+  fail "desktop receipt does not bind the qualified RC dmg, supported clean host, unlock screenshot, and operator review"
+
+jq -e \
+  --arg rc_tag "${RC_TAG}" \
+  --arg rc_sha "${RC_SHA}" \
+  --arg rc_tag_object "${RC_TAG_OBJECT}" \
+  --arg artifact_name "${RC_DMG_NAME}" \
+  --arg artifact_sha256 "${RC_DMG_SHA256}" \
+  "${REVIEWER_AND_HOST_FILTER} and
+    .schema_version == 2 and
+    .kind == \"sigillum.ui_signoff\" and
+    .status == \"passed\" and
+    .rc.tag == \$rc_tag and
+    .rc.tag_object == \$rc_tag_object and
+    .rc.peeled_sha == \$rc_sha and
+    .artifact.filename == \$artifact_name and
+    .artifact.sha256 == \$artifact_sha256 and
+    .walkthrough.full_walkthrough_completed == true and
+    .walkthrough.destinations ==
+      [\"overview\", \"receive\", \"portfolio\", \"move\", \"vault\"] and
+    .walkthrough.states == [\"setup\", \"locked\", \"unlocked\"] and
+    .walkthrough.journey == [
+      \"import_seed\",
+      \"multi_chain_scan\",
+      \"review_inventory_risk\",
+      \"generate_plan\",
+      \"approve_plan\",
+      \"execute_mock_provider\",
+      \"audit_trail_complete\"
+    ] and
+    .walkthrough.operator_surface_parity_reviewed == true and
+    .walkthrough.accessibility_review_completed == true and
+    (.screenshots | type == \"array\" and length == 3) and
+    [.screenshots[].state] == [\"setup\", \"locked\", \"unlocked\"] and
+    [.screenshots[].path] == [
+      \"ui/screenshots/setup.png\",
+      \"ui/screenshots/locked.png\",
+      \"ui/screenshots/unlocked.png\"
+    ] and
+    all(.screenshots[]; (.sha256 | test(\"^[0-9a-f]{64}$\")))
+  " "${EXTRACTED}/ui/signoff.json" >/dev/null ||
+  fail "UI receipt does not bind the qualified RC dmg, five-destination journey, screenshots, and operator review"
+
+jq -e \
+  --arg version "${VERSION}" \
+  --arg rc_tag "${RC_TAG}" \
+  --arg rc_sha "${RC_SHA}" \
+  --arg rc_tag_object "${RC_TAG_OBJECT}" \
+  --arg artifact_name "${RC_CLI_NAME}" \
+  --arg artifact_sha256 "${RC_CLI_SHA256}" \
+  "${REVIEWER_AND_HOST_FILTER} and
+    .schema_version == 2 and
+    .kind == \"sigillum.doctor\" and
+    .status == \"passed\" and
+    .rc.tag == \$rc_tag and
+    .rc.tag_object == \$rc_tag_object and
+    .rc.peeled_sha == \$rc_sha and
+    .artifact.filename == \$artifact_name and
+    .artifact.sha256 == \$artifact_sha256 and
+    .cli.version == \$version and
+    (.cli.executable_path |
+      type == \"string\" and startswith(\"/\") and length > 1) and
+    (.cli.executable_sha256 | test(\"^[0-9a-f]{64}$\")) and
+    .doctor.command == \"sigillum doctor\" and
+    .doctor.exit_code == 0 and
+    .doctor.checks_passed == true and
+    (.doctor.checks | type == \"array\" and length == 7) and
+    ([.doctor.checks[].name] | sort) == [
+      \"active_compartment\",
+      \"audit_db\",
+      \"daemon_reachability\",
+      \"daemon_url\",
+      \"data_dir\",
+      \"data_dir_permissions\",
+      \"session_token\"
+    ] and
+    all(.doctor.checks[]; .status == \"ok\")
+  " "${EXTRACTED}/doctor/mac-server.json" >/dev/null ||
+  fail "doctor receipt does not bind the qualified RC CLI, supported host, all blocking checks, and operator review"
+
+verify_bound_evidence_file() {
+  local receipt_path="$1"
+  local evidence_path="$2"
+  local expected_sha256="$3"
+  local label="$4"
+  local actual_sha256
+  [[ -s "${EXTRACTED}/${evidence_path}" ]] ||
+    fail "${label} is missing or empty: ${evidence_path}"
+  actual_sha256="$(shasum -a 256 "${EXTRACTED}/${evidence_path}" | awk '{ print $1 }')"
+  [[ "${actual_sha256}" == "${expected_sha256}" ]] ||
+    fail "${label} digest does not match ${receipt_path}: ${evidence_path}"
+}
+
+while IFS=$'\t' read -r screenshot_path screenshot_sha256; do
+  verify_bound_evidence_file \
+    "desktop/clean-install.json" "${screenshot_path}" "${screenshot_sha256}" \
+    "desktop unlock screenshot"
+done < <(jq -r '.screenshots[] | [.path, .sha256] | @tsv' \
+  "${EXTRACTED}/desktop/clean-install.json")
+
+while IFS=$'\t' read -r screenshot_path screenshot_sha256; do
+  verify_bound_evidence_file \
+    "ui/signoff.json" "${screenshot_path}" "${screenshot_sha256}" \
+    "UI walkthrough screenshot"
+done < <(jq -r '.screenshots[] | [.path, .sha256] | @tsv' \
+  "${EXTRACTED}/ui/signoff.json")
 
 BUNDLE_SHA256="$(shasum -a 256 "${BUNDLE}" | awk '{print $1}')"
 [[ "${BUNDLE_SHA256}" =~ ^[0-9a-f]{64}$ ]] || fail "could not compute bundle SHA-256"

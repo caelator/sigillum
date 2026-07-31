@@ -44,13 +44,18 @@ records and historical engineering evidence.
 
 ## Planning records
 
-The [1.0 release plan](release-1.0-plan.md) and [catch-up plan](catchup-plan.md)
-are retained as engineering records. Check their dated status and the live
-repository before treating any checklist entry as current release truth.
+The [1.0 release plan](release-1.0-plan.md) and
+[1.0 execution runbook](execution-runbook-1.0.md) are the only current release
+authorities. Other plans and handoffs are historical engineering records; they
+must not be used as current release proof. Verify the live repository and
+GitHub state before treating any checklist entry as satisfied.
 
 ## Release-status rule
 
-Sigillum currently has no supported stable release and no published GitHub
-Release. A tag alone is not proof of release. Valid release evidence requires an
-annotated tag on `main`, a passing Release workflow, verified artifacts and
-checksums, and a published GitHub Release.
+Sigillum currently has no supported stable release, no RC6, and no published
+GitHub Release. RC2–RC4 are immutable failure receipts; RC5 is an unpublished
+historical draft for `7e04743` only. A tag or draft alone is not release proof.
+Valid final release evidence requires the qualified same-SHA RC receipts, an
+annotated final tag on protected `main`, exact-byte promotion of the five RC
+payloads, a validated evidence bundle, explicit H2 approval, and a published
+GitHub Release.

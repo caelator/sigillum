@@ -1,15 +1,14 @@
 //! Apply one queue execution outcome or classified error to persisted fields and the drain tally.
 
-use sigillum_api::QueueJob;
-
 use crate::policy::RuntimePolicy;
 use crate::service::ServiceError;
+use sigillum_api::QueueJob;
 
 use super::failure::{
     QueueFailureCause, QueueFailureDisposition, classify_blocked_queue_reason,
     classify_operator_action_reason, classify_queue_error,
 };
-use super::replay::{clear_replay_bytes, hold_prepared};
+use super::replay::{clear_replay_bytes, hold_prepared, hold_submitted_unknown};
 use super::state::mark_job_operator_action_required;
 use super::tally::QueueDrainTally;
 use super::{
@@ -17,7 +16,6 @@ use super::{
     QUEUE_STATE_RETRYING, QUEUE_STATE_SENT, QUEUE_STATE_SUBMITTED_UNKNOWN, QueueExecution,
 };
 
-/// Apply the E1/W7.4 state-transition rules and update the drain tally.
 pub(super) fn apply(
     job: &mut QueueJob,
     result: Result<QueueExecution, ServiceError>,
@@ -69,6 +67,9 @@ pub(super) fn apply(
             job.receipt.prepared_binding_hash_hex = Some(binding_hash);
         }
         Ok(QueueExecution::PreparedHeld(reason)) => hold_prepared(job, reason, tally),
+        Ok(QueueExecution::SubmittedUnknownHeld(reason)) => {
+            hold_submitted_unknown(job, reason, tally)
+        }
         Ok(QueueExecution::Broadcasted {
             broadcast_transaction_hash_hex,
         }) => {
@@ -77,8 +78,7 @@ pub(super) fn apply(
             job.next_attempt_after_unix = None;
             job.broadcast_transaction_hash_hex = Some(broadcast_transaction_hash_hex);
             clear_replay_bytes(job);
-            // Start confirmation timeout from an affirmative provider
-            // acceptance, not from the earlier pre-I/O crash marker.
+            // Start confirmation timeout at affirmative provider acceptance.
             job.receipt.broadcast_at_unix = Some(now);
             tally.succeeded += 1;
         }

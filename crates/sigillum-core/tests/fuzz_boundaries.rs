@@ -142,6 +142,7 @@ mod api_serde {
                 stealth_address: addr.clone(),
                 ephemeral_public_key_hex: epk.clone(),
                 view_tag_hex: view_tag.clone(),
+                stealth_hash_convention: None,
             };
             let json = serde_json::to_string(&original).unwrap();
             let deserialized: sigillum_api::request::StealthPaymentRef =

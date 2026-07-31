@@ -6,7 +6,9 @@ cd "${ROOT}"
 
 PORT="${SIGILLUM_BROWSER_SMOKE_PORT:-19843}"
 URL="http://127.0.0.1:${PORT}"
-BASE_DIR="$(mktemp -d "${TMPDIR:-/tmp}/sigillum-browser-smoke.XXXXXX")"
+STARTUP_TIMEOUT_SECONDS="${SIGILLUM_BROWSER_SMOKE_STARTUP_TIMEOUT_SECONDS:-120}"
+TEMP_ROOT="${RUNNER_TEMP:-${TMPDIR:-/tmp}}"
+BASE_DIR="$(mktemp -d "${TEMP_ROOT}/sigillum-browser-smoke.XXXXXX")"
 ARTIFACT_DIR="${SIGILLUM_BROWSER_SMOKE_ARTIFACT_DIR:-${BASE_DIR}/artifacts}"
 LOG_FILE="${BASE_DIR}/daemon.log"
 DAEMON_PID=""
@@ -48,7 +50,8 @@ require_command() {
 }
 
 wait_for_daemon() {
-  for _ in {1..80}; do
+  local deadline=$((SECONDS + STARTUP_TIMEOUT_SECONDS))
+  while (( SECONDS < deadline )); do
     if curl -fsS "${URL}/api/status" >/dev/null 2>&1; then
       return
     fi
@@ -57,7 +60,7 @@ wait_for_daemon() {
     fi
     sleep 0.25
   done
-  fail "daemon did not become ready at ${URL}"
+  fail "daemon did not become ready at ${URL} within ${STARTUP_TIMEOUT_SECONDS}s"
 }
 
 require_command cargo

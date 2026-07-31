@@ -10,7 +10,9 @@ use sigillum_core::{
 };
 
 use crate::audit_log::AuditEventSpec;
-use crate::service::helpers::{decode_optional_view_tag, map_wallet_error};
+use crate::service::helpers::{
+    decode_optional_view_tag, map_wallet_error, probe_stealth_sign, stealth_convention_or_standard,
+};
 use crate::service::transaction_policy::{TransactionPolicyCheck, TransactionPolicyKind};
 use crate::service::{ServiceError, ServiceResult, SigillumService};
 
@@ -21,6 +23,19 @@ impl SigillumService {
         body: EthStealthSendTransferRequest,
     ) -> ServiceResult<EthStealthSendResponse> {
         let token = self.require_session(token)?;
+        let session_context = self.capture_session_operation_context(Some(token))?;
+        let operation_guard = self.acquire_session_operation(&session_context).await?;
+        self.eth_stealth_send_transfer_under_operation_guard(token, body, &operation_guard)
+            .await
+    }
+
+    pub(in crate::service) async fn eth_stealth_send_transfer_under_operation_guard(
+        &self,
+        token: &str,
+        body: EthStealthSendTransferRequest,
+        _operation_guard: &tokio::sync::MutexGuard<'_, ()>,
+    ) -> ServiceResult<EthStealthSendResponse> {
+        self.require_session(Some(token))?;
         self.authorize_transaction_policy(TransactionPolicyCheck {
             kind: TransactionPolicyKind::RoutedTransfer,
             destination_address: Some(&body.destination_address),
@@ -30,7 +45,7 @@ impl SigillumService {
         let active_compartment_id = self
             .state
             .active_compartment_id_for(token)
-            .ok_or_else(|| ServiceError::forbidden("No active compartment."))?;
+            .ok_or_else(|| ServiceError::vault_locked("No active compartment."))?;
         let provider_compartment_id = body
             .provider_compartment_id
             .unwrap_or(active_compartment_id);
@@ -53,35 +68,43 @@ impl SigillumService {
             decode_quantity_hex(&body.fees.max_fee_per_gas_hex).map_err(map_wallet_error)?;
         let value = decode_quantity_hex(&body.value_wei_hex).map_err(map_wallet_error)?;
         let view_tag = decode_optional_view_tag(body.stealth.view_tag_hex.as_deref())?;
+        let convention = stealth_convention_or_standard(body.stealth.stealth_hash_convention);
         let gas_limit = body.gas_limit.unwrap_or(21_000);
         let broadcast = body.broadcast.unwrap_or(false);
 
         let signed = self.with_vault(wallet_compartment_id, |vault| {
             let master_key = vault
                 .extract_master_key()
-                .ok_or_else(|| ServiceError::forbidden("Vault is locked."))?;
+                .ok_or_else(|| ServiceError::vault_locked("Vault is locked."))?;
             let derived =
                 derive_sigillum_ethereum_stealth_wallet(master_key.as_ref(), &body.wallet, "eth")
                     .map_err(map_wallet_error)?;
-            sign_ethereum_stealth_native_transfer(
-                &derived,
-                &body.stealth.stealth_address,
-                &body.stealth.ephemeral_public_key_hex,
-                view_tag,
-                &EthereumEip1559Transfer {
-                    chain_id: body.fees.chain_id,
-                    nonce,
-                    max_priority_fee_per_gas,
-                    max_fee_per_gas,
-                    gas_limit,
-                    destination_address: body.destination_address.clone(),
-                    value,
-                },
-            )
+            // The record-stamped (or caller-supplied) convention is tried
+            // first; the other convention is probed on mismatch so legacy
+            // payments remain spendable even with a missing/wrong stamp.
+            probe_stealth_sign(convention, |convention| {
+                sign_ethereum_stealth_native_transfer(
+                    &derived,
+                    &body.stealth.stealth_address,
+                    &body.stealth.ephemeral_public_key_hex,
+                    view_tag,
+                    &EthereumEip1559Transfer {
+                        chain_id: body.fees.chain_id,
+                        nonce,
+                        max_priority_fee_per_gas,
+                        max_fee_per_gas,
+                        gas_limit,
+                        destination_address: body.destination_address.clone(),
+                        value,
+                    },
+                    convention,
+                )
+            })
             .map_err(map_wallet_error)
         })?;
 
         let broadcast_transaction_hash_hex = if broadcast {
+            self.admit_broadcast()?;
             Some(
                 rpc.send_raw_transaction(&signed.raw_transaction_hex)
                     .await?,
@@ -124,6 +147,19 @@ impl SigillumService {
         body: EthStealthSendErc20TransferRequest,
     ) -> ServiceResult<EthStealthSendResponse> {
         let token = self.require_session(token)?;
+        let session_context = self.capture_session_operation_context(Some(token))?;
+        let operation_guard = self.acquire_session_operation(&session_context).await?;
+        self.eth_stealth_send_erc20_transfer_under_operation_guard(token, body, &operation_guard)
+            .await
+    }
+
+    pub(in crate::service) async fn eth_stealth_send_erc20_transfer_under_operation_guard(
+        &self,
+        token: &str,
+        body: EthStealthSendErc20TransferRequest,
+        _operation_guard: &tokio::sync::MutexGuard<'_, ()>,
+    ) -> ServiceResult<EthStealthSendResponse> {
+        self.require_session(Some(token))?;
         self.authorize_transaction_policy(TransactionPolicyCheck {
             kind: TransactionPolicyKind::RoutedTransfer,
             destination_address: Some(&body.recipient_address),
@@ -133,7 +169,7 @@ impl SigillumService {
         let active_compartment_id = self
             .state
             .active_compartment_id_for(token)
-            .ok_or_else(|| ServiceError::forbidden("No active compartment."))?;
+            .ok_or_else(|| ServiceError::vault_locked("No active compartment."))?;
         let provider_compartment_id = body
             .provider_compartment_id
             .unwrap_or(active_compartment_id);
@@ -156,36 +192,41 @@ impl SigillumService {
             decode_quantity_hex(&body.fees.max_fee_per_gas_hex).map_err(map_wallet_error)?;
         let amount = decode_quantity_hex(&body.amount_hex).map_err(map_wallet_error)?;
         let view_tag = decode_optional_view_tag(body.stealth.view_tag_hex.as_deref())?;
+        let convention = stealth_convention_or_standard(body.stealth.stealth_hash_convention);
         let gas_limit = body.gas_limit.unwrap_or(65_000);
         let broadcast = body.broadcast.unwrap_or(false);
 
         let signed = self.with_vault(wallet_compartment_id, |vault| {
             let master_key = vault
                 .extract_master_key()
-                .ok_or_else(|| ServiceError::forbidden("Vault is locked."))?;
+                .ok_or_else(|| ServiceError::vault_locked("Vault is locked."))?;
             let derived =
                 derive_sigillum_ethereum_stealth_wallet(master_key.as_ref(), &body.wallet, "eth")
                     .map_err(map_wallet_error)?;
-            sign_ethereum_stealth_erc20_transfer(
-                &derived,
-                &body.stealth.stealth_address,
-                &body.stealth.ephemeral_public_key_hex,
-                view_tag,
-                &EthereumEip1559Erc20Transfer {
-                    chain_id: body.fees.chain_id,
-                    nonce,
-                    max_priority_fee_per_gas,
-                    max_fee_per_gas,
-                    gas_limit,
-                    token_address: body.token_address.clone(),
-                    recipient_address: body.recipient_address.clone(),
-                    amount,
-                },
-            )
+            probe_stealth_sign(convention, |convention| {
+                sign_ethereum_stealth_erc20_transfer(
+                    &derived,
+                    &body.stealth.stealth_address,
+                    &body.stealth.ephemeral_public_key_hex,
+                    view_tag,
+                    &EthereumEip1559Erc20Transfer {
+                        chain_id: body.fees.chain_id,
+                        nonce,
+                        max_priority_fee_per_gas,
+                        max_fee_per_gas,
+                        gas_limit,
+                        token_address: body.token_address.clone(),
+                        recipient_address: body.recipient_address.clone(),
+                        amount,
+                    },
+                    convention,
+                )
+            })
             .map_err(map_wallet_error)
         })?;
 
         let broadcast_transaction_hash_hex = if broadcast {
+            self.admit_broadcast()?;
             Some(
                 rpc.send_raw_transaction(&signed.raw_transaction_hex)
                     .await?,

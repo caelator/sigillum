@@ -1,3 +1,4 @@
+import { ROUTE_PATHS } from "../routePaths";
 import type {
   Counterparty,
   TreasuryAutomationStatus,
@@ -12,6 +13,7 @@ import type {
   TreasuryRiskSummary,
   TreasuryRoutingStatus,
 } from "../contracts";
+import { confirmDangerDialog } from "../render/confirm";
 import { setTextById as setText } from "../render/dom";
 import {
   clearFields,
@@ -19,26 +21,17 @@ import {
   renderEntityList,
   textValue,
 } from "../render/forms";
+import { formatTokenAmount } from "../render/format";
 import { esc, escAttr, formatTs, statBox, statusPill } from "../render/html";
 
 const WEI_PER_ETH = 10n ** 18n;
 const DEFAULT_HOT_REFILL_WEI_HEX = "0xde0b6b3a7640000";
 
+// The BigInt formatting core lives in render/format.ts (shared with the
+// inventory/operations views); these keep the historical "0" fallback
+// treasury callers rely on.
 export function formatWeiHexAsEth(weiHex: string): string {
-  if (typeof weiHex !== "string") return "0";
-  const trimmed = weiHex.trim();
-  if (!/^0x[0-9a-fA-F]+$/.test(trimmed)) return "0";
-  let wei: bigint;
-  try {
-    wei = BigInt(trimmed);
-  } catch (_) {
-    return "0";
-  }
-  const whole = wei / WEI_PER_ETH;
-  const fraction = wei % WEI_PER_ETH;
-  if (fraction === 0n) return whole.toString();
-  const fractionText = fraction.toString().padStart(18, "0").replace(/0+$/, "");
-  return whole.toString() + "." + fractionText;
+  return formatTokenAmount(weiHex, 18) ?? "0";
 }
 
 export function parseEthToWeiHex(value: string): string | null {
@@ -55,20 +48,7 @@ export function parseEthToWeiHex(value: string): string | null {
 const WEI_PER_GWEI = 10n ** 9n;
 
 export function formatWeiHexAsGwei(weiHex: string): string {
-  if (typeof weiHex !== "string") return "0";
-  const trimmed = weiHex.trim();
-  if (!/^0x[0-9a-fA-F]+$/.test(trimmed)) return "0";
-  let wei: bigint;
-  try {
-    wei = BigInt(trimmed);
-  } catch (_) {
-    return "0";
-  }
-  const whole = wei / WEI_PER_GWEI;
-  const fraction = wei % WEI_PER_GWEI;
-  if (fraction === 0n) return whole.toString();
-  const fractionText = fraction.toString().padStart(9, "0").replace(/0+$/, "");
-  return whole.toString() + "." + fractionText;
+  return formatTokenAmount(weiHex, 9) ?? "0";
 }
 
 export function parseGweiToWeiHex(value: string): string | null {
@@ -130,12 +110,107 @@ function nativeAmount(
   return symbol ? amount + " " + symbol : amount;
 }
 
+function countLabel(
+  count: number | null | undefined,
+  singular: string,
+  plural = singular + "s",
+): string {
+  const value = count || 0;
+  return String(value) + " " + (value === 1 ? singular : plural);
+}
+
+function humanizePolicyViolation(value: string): string {
+  const trimmed = value.trim();
+  const match = /^([^:=]+)(?:[:=](.*))?$/.exec(trimmed);
+  const code = (match?.[1] || trimmed).trim();
+  const detail = (match?.[2] || "").trim();
+  switch (code) {
+    case "exceeds_policy_plan_cap":
+      return "The plan exceeds the policy's native-value cap";
+    case "destination_not_allowed":
+      return detail
+        ? "Destination " + detail + " is not on the policy allow-list"
+        : "A destination is not on the policy allow-list";
+    case "cross_party_linkage":
+      return "The plan would link different payers through a shared route";
+    default: {
+      const words = code.replace(/[_-]+/g, " ").trim();
+      const label = words
+        ? words.charAt(0).toUpperCase() + words.slice(1)
+        : "Policy review required";
+      return detail ? label + ": " + detail : label;
+    }
+  }
+}
+
 function shortAddress(value: string): string {
   const trimmed = value.trim();
   if (trimmed.startsWith("0x") && trimmed.length > 14) {
     return trimmed.slice(0, 6) + "..." + trimmed.slice(-4);
   }
   return trimmed.length > 24 ? trimmed.slice(0, 12) + "..." + trimmed.slice(-6) : trimmed;
+}
+
+function joinEnglishList(items: string[]): string {
+  if (items.length <= 1) return items.join("");
+  if (items.length === 2) return items[0] + " and " + items[1];
+  return items.slice(0, -1).join(", ") + ", and " + items[items.length - 1];
+}
+
+/// Plain-English description of what the current policy permits, in 2-4
+/// short sentences. The raw key=value state stays available behind the
+/// "Technical state" details in renderTreasuryPolicy.
+export function treasuryPolicySummary(policy: TreasuryPolicy): string[] {
+  const sentences: string[] = [];
+  if (!policy.enabled) {
+    sentences.push(
+      "The policy is disabled, so nothing may execute — no plan steps and no stealth deposit sweeps.",
+    );
+  } else if (!policy.allow_plan_execution) {
+    sentences.push(
+      "Plan execution is switched off, so no plan step or stealth deposit sweep may execute yet.",
+    );
+  } else {
+    const allowed: string[] = [];
+    if (policy.allow_sweep_execution) allowed.push("sweeps");
+    if (policy.allow_revoke_execution) allowed.push("revokes");
+    if (policy.allow_exit_execution) allowed.push("DeFi exits");
+    if (policy.allow_claim_execution) allowed.push("claims");
+    if (allowed.length) {
+      sentences.push("Plans may execute " + joinEnglishList(allowed) + ".");
+    }
+    const blocked: string[] = [];
+    if (!policy.allow_claim_execution) blocked.push("Claims");
+    if (!policy.allow_exit_execution) blocked.push("DeFi exits");
+    if (!policy.allow_sweep_execution) blocked.push("Sweeps");
+    if (!policy.allow_revoke_execution) blocked.push("Revokes");
+    if (blocked.length) {
+      sentences.push(joinEnglishList(blocked) + " are blocked.");
+    }
+    // Plan task 2.5: the sweep gate covers the stealth families too — no
+    // "stealth bypasses the gates" carve-out may be implied here.
+    sentences.push(
+      policy.allow_sweep_execution
+        ? "The sweep gate also covers stealth deposit sweeps and transfers."
+        : "Stealth deposit sweeps and transfers stay blocked until the sweep gate is on.",
+    );
+  }
+  sentences.push(
+    policy.block_cross_party_linkage
+      ? "Cross-party linkage blocking is on; destinations are limited to the allow-list below."
+      : "Cross-party linkage blocking is off — plans may route different payers to a shared destination.",
+  );
+  const operational: string[] = [];
+  operational.push(
+    policy.allow_gas_topups
+      ? "Sponsor gas top-ups (plan and stealth) are allowed"
+      : "Sponsor gas top-ups (plan and stealth) are off",
+  );
+  if (policy.execution_paused) {
+    operational.push("queue execution is currently paused");
+  }
+  sentences.push(operational.join("; ") + ".");
+  return sentences;
 }
 
 export interface TreasuryActionsDeps {
@@ -162,7 +237,7 @@ export function createTreasuryActions(deps: TreasuryActionsDeps) {
       (chain) =>
         '<li><div class="entity-main">' +
         '<div class="entity-title">' +
-        "chain " +
+        "Chain " +
         esc(String(chain.chain_id)) +
         " · " +
         esc(chain.native_symbol || "-") +
@@ -170,12 +245,12 @@ export function createTreasuryActions(deps: TreasuryActionsDeps) {
         statusPill((chain.funded_address_count || 0) > 0 ? "funded" : "empty") +
         "</div>" +
         '<div class="entity-meta">' +
-        "addresses=" +
         esc(String(chain.funded_address_count || 0)) +
-        "/" +
+        " of " +
         esc(String(chain.address_count || 0)) +
-        " funded · native=" +
+        " addresses funded · " +
         esc(nativeAmount(chain.native_total_wei_hex, chain.native_symbol)) +
+        " native" +
         "</div></div></li>",
     );
   }
@@ -204,31 +279,30 @@ export function createTreasuryActions(deps: TreasuryActionsDeps) {
           : "") +
         "</div>" +
         '<div class="entity-meta">' +
-        "chain=" +
+        "Chain " +
         esc(String(group.chain_id)) +
-        " · addresses=" +
+        " · " +
         esc(String(group.funded_address_count || 0)) +
-        "/" +
+        " of " +
         esc(String(group.address_count || 0)) +
-        " funded · native=" +
+        " addresses funded · " +
         esc(nativeAmount(group.native_total_wei_hex, symbolByChain.get(group.chain_id))) +
-        " · signers=" +
-        esc(String(group.signer_address_count || 0)) +
-        " · watchOnly=" +
-        esc(String(group.watch_only_address_count || 0)) +
+        " native · " +
+        esc(countLabel(group.signer_address_count, "signer address")) +
+        " · " +
+        esc(countLabel(group.watch_only_address_count, "watch-only address")) +
         "<br>" +
-        "erc20=" +
-        esc(String(group.erc20_holding_count || 0)) +
-        " · nft=" +
-        esc(String(group.nft_holding_count || 0)) +
-        " · defi=" +
-        esc(String(group.defi_holding_count || 0)) +
-        " · claimable=" +
-        esc(String(group.claimable_holding_count || 0)) +
-        " · approvals=" +
-        esc(String(group.approval_exposure_count || 0)) +
-        " · dormant=" +
-        esc(String(group.dormant_candidate_count || 0)) +
+        esc(countLabel(group.erc20_holding_count, "ERC-20 holding")) +
+        " · " +
+        esc(countLabel(group.nft_holding_count, "NFT holding")) +
+        " · " +
+        esc(countLabel(group.defi_holding_count, "DeFi holding")) +
+        " · " +
+        esc(countLabel(group.claimable_holding_count, "claimable holding")) +
+        " · " +
+        esc(countLabel(group.approval_exposure_count, "approval exposure")) +
+        " · " +
+        esc(countLabel(group.dormant_candidate_count, "dormant candidate")) +
         "</div></div></li>",
     );
   }
@@ -246,20 +320,24 @@ export function createTreasuryActions(deps: TreasuryActionsDeps) {
         statusPill(route.routing_ready ? "ready" : "unconfigured") +
         "</div>" +
         '<div class="entity-meta">' +
-        "hot=" +
-        esc(route.hot_address || "-") +
+        "Hot wallet: " +
+        esc(route.hot_address || "Not configured") +
         (route.hot_native_balance_wei_hex
-          ? " (" + esc(formatWeiHexAsEth(route.hot_native_balance_wei_hex)) + ")"
+          ? " · " +
+            esc(formatWeiHexAsEth(route.hot_native_balance_wei_hex)) +
+            " native units"
           : "") +
         "<br>" +
-        "treasury=" +
-        esc(route.treasury_address || "-") +
+        "Treasury: " +
+        esc(route.treasury_address || "Not configured") +
         (route.treasury_native_balance_wei_hex
-          ? " (" + esc(formatWeiHexAsEth(route.treasury_native_balance_wei_hex)) + ")"
+          ? " · " +
+            esc(formatWeiHexAsEth(route.treasury_native_balance_wei_hex)) +
+            " native units"
           : "") +
         "<br>" +
-        "defaultDestination=" +
-        esc(route.default_destination_address || "-") +
+        "Default destination: " +
+        esc(route.default_destination_address || "Not configured") +
         "</div></div></li>",
     );
   }
@@ -289,16 +367,15 @@ export function createTreasuryActions(deps: TreasuryActionsDeps) {
             statusPill((row.risk.total_findings || 0) > 0 ? "detected" : "ok") +
             "</div>" +
             '<div class="entity-meta">' +
-            "critical=" +
-            esc(String(row.risk.critical_findings || 0)) +
-            " · high=" +
-            esc(String(row.risk.high_findings || 0)) +
-            " · medium=" +
-            esc(String(row.risk.medium_findings || 0)) +
-            " · low=" +
-            esc(String(row.risk.low_findings || 0)) +
-            " · total=" +
-            esc(String(row.risk.total_findings || 0)) +
+            esc(countLabel(row.risk.critical_findings, "critical finding")) +
+            " · " +
+            esc(countLabel(row.risk.high_findings, "high finding")) +
+            " · " +
+            esc(countLabel(row.risk.medium_findings, "medium finding")) +
+            " · " +
+            esc(countLabel(row.risk.low_findings, "low finding")) +
+            " · " +
+            esc(countLabel(row.risk.total_findings, "total finding")) +
             "</div></div></li>"
           );
         }
@@ -309,12 +386,16 @@ export function createTreasuryActions(deps: TreasuryActionsDeps) {
             statusPill(row.automation.enabled ? "enabled" : "off") +
             "</div>" +
             '<div class="entity-meta">' +
-            "overflow=" +
-            esc(capAsEth(row.automation.hot_overflow_wei_hex)) +
-            " · generatedSteps=" +
-            esc(String(row.automation.generated_steps || 0)) +
-            " · enqueuedSteps=" +
-            esc(String(row.automation.enqueued_steps || 0)) +
+            "Overflow threshold: " +
+            esc(
+              row.automation.hot_overflow_wei_hex
+                ? capAsEth(row.automation.hot_overflow_wei_hex)
+                : "Not configured",
+            ) +
+            " · " +
+            esc(countLabel(row.automation.generated_steps, "step generated")) +
+            " · " +
+            esc(countLabel(row.automation.enqueued_steps, "step enqueued")) +
             (row.automation.enabled
               ? "<br>auto-enqueue still requires passed simulation + execution gates"
               : "") +
@@ -329,21 +410,20 @@ export function createTreasuryActions(deps: TreasuryActionsDeps) {
           statusPill(row.plans.latest_plan_status || "none") +
           "</div>" +
           '<div class="entity-meta">' +
-          "plans=" +
-          esc(String(row.plans.total_plans || 0)) +
-          " · latest=" +
+          esc(countLabel(row.plans.total_plans, "plan")) +
+          " · Latest plan: " +
           esc(row.plans.latest_plan_id || "-") +
           "<br>" +
-          "review=" +
-          esc(String(row.plans.latest_review_required_steps || 0)) +
-          " · approved=" +
-          esc(String(row.plans.latest_approved_steps || 0)) +
-          " · executable=" +
-          esc(String(row.plans.latest_executable_steps || 0)) +
-          " · blocked=" +
-          esc(String(row.plans.latest_blocked_steps || 0)) +
+          esc(countLabel(row.plans.latest_review_required_steps, "step needing review")) +
+          " · " +
+          esc(countLabel(row.plans.latest_approved_steps, "approved step")) +
+          " · " +
+          esc(countLabel(row.plans.latest_executable_steps, "executable step")) +
+          " · " +
+          esc(countLabel(row.plans.latest_blocked_steps, "blocked step")) +
           (policyViolations.length
-            ? " · policyViolations=" + esc(policyViolations.join(", "))
+            ? " · Policy review: " +
+              esc(policyViolations.map(humanizePolicyViolation).join("; "))
             : "") +
           "</div></div></li>"
         );
@@ -398,10 +478,16 @@ export function createTreasuryActions(deps: TreasuryActionsDeps) {
           '<div class="entity-title">Treasury policy ' +
           statusPill(current.enabled ? "enabled" : "disabled") +
           "</div>" +
+          '<p class="policy-summary">' +
+          esc(treasuryPolicySummary(current).join(" ")) +
+          "</p>" +
           '<div class="entity-meta">' +
           "destinations=" +
           esc(destinations || "-") +
-          "<br>" +
+          "</div>" +
+          '<details class="policy-details">' +
+          "<summary>Technical state</summary>" +
+          '<div class="entity-meta">' +
           "maxStep=" +
           esc(capAsEth(current.max_step_native_wei_hex)) +
           " · maxPlan=" +
@@ -440,7 +526,7 @@ export function createTreasuryActions(deps: TreasuryActionsDeps) {
           esc(String(current.simulation_freshness_secs ?? 900)) +
           " · updated=" +
           esc(formatTs(current.updated_at_unix)) +
-          "</div></div></li>"
+          "</div></details></li>"
         );
       },
     );
@@ -487,7 +573,10 @@ export function createTreasuryActions(deps: TreasuryActionsDeps) {
     if (requireSimEl) requireSimEl.checked = policy ? policy.require_simulation : true;
     const blockLinkageEl = input("treasuryPolicyBlockLinkage");
     if (blockLinkageEl) {
-      blockLinkageEl.checked = policy ? Boolean(policy.block_cross_party_linkage) : false;
+      // Default-on (plan task 3.5): with no saved policy the checkbox shows
+      // the daemon's default posture — protection ON unless explicitly
+      // turned off.
+      blockLinkageEl.checked = policy ? Boolean(policy.block_cross_party_linkage) : true;
     }
     const allowClaimExecEl = input("treasuryPolicyAllowClaimExec");
     if (allowClaimExecEl) {
@@ -585,42 +674,90 @@ export function createTreasuryActions(deps: TreasuryActionsDeps) {
         actionLabel: "Allocate an address",
         action: "focusTreasuryReceive",
       },
-      (allocation) =>
-        '<li><div class="entity-main">' +
-        '<div class="entity-title">' +
-        esc(allocation.address) +
-        " " +
-        statusPill(allocation.status) +
-        "</div>" +
-        '<div class="entity-meta">' +
-        esc(allocation.wallet_family) +
-        "/" +
-        esc(allocation.wallet_profile) +
-        " · chain=" +
-        esc(String(allocation.chain_id)) +
-        (allocation.chain_id_assumed ? " (assumed mainnet)" : "") +
-        " · purpose=" +
-        esc(allocation.purpose) +
-        (allocation.label ? " · label=" + esc(allocation.label) : "") +
-        (allocation.counterparty_id
-          ? " · party=" +
-            esc(partyNameById(allocation.counterparty_id) || allocation.counterparty_id)
-          : "") +
-        "<br>" +
-        "path=" +
-        esc(allocation.derivation_path) +
-        " · index=" +
-        esc(String(allocation.address_index)) +
-        "</div></div>" +
-        (allocation.status === "active"
-          ? '<div class="entity-actions">' +
-            '<button class="btn-ghost" data-action="rotateTreasuryReceiveAddress" data-arg0="' +
-            escAttr(allocation.id) +
-            '">Rotate</button>' +
-            "</div>"
-          : "") +
-        "</li>",
+      (allocation) => {
+        const oneTimeBadge = allocation.one_time
+          ? ' <span class="pill">One-time</span>' +
+            (allocation.lifecycle_state
+              ? " " + statusPill(allocation.lifecycle_state)
+              : "")
+          : "";
+        const oneTimeMeta = allocation.one_time
+          ? "<br>" +
+            "one-time sweep &rarr; " +
+            esc(shortAddress(allocation.sweep_destination_address || "")) +
+            " · threshold " +
+            (allocation.min_sweep_amount_hex
+              ? esc(formatWeiHexAsEth(allocation.min_sweep_amount_hex)) + " ETH"
+              : "any funds") +
+            (allocation.purge_after_sweep ? " · purges after sweep" : "") +
+            (allocation.sweep_blocker
+              ? " · " + esc(oneTimeBlockerCopy(allocation.sweep_blocker))
+              : "")
+          : "";
+        return (
+          '<li><div class="entity-main">' +
+          '<div class="entity-title">' +
+          esc(allocation.address) +
+          " " +
+          statusPill(allocation.status) +
+          oneTimeBadge +
+          "</div>" +
+          '<div class="entity-meta">' +
+          esc(allocation.wallet_family) +
+          "/" +
+          esc(allocation.wallet_profile) +
+          " · chain=" +
+          esc(String(allocation.chain_id)) +
+          (allocation.chain_id_assumed ? " (assumed mainnet)" : "") +
+          " · purpose=" +
+          esc(allocation.purpose) +
+          (allocation.label ? " · label=" + esc(allocation.label) : "") +
+          (allocation.counterparty_id
+            ? " · party=" +
+              esc(partyNameById(allocation.counterparty_id) || allocation.counterparty_id)
+            : "") +
+          "<br>" +
+          "path=" +
+          esc(allocation.derivation_path) +
+          " · index=" +
+          esc(String(allocation.address_index)) +
+          oneTimeMeta +
+          "</div></div>" +
+          (allocation.status === "active"
+            ? '<div class="entity-actions">' +
+              '<button class="btn-ghost" data-action="rotateTreasuryReceiveAddress" data-arg0="' +
+              escAttr(allocation.id) +
+              '">Rotate</button>' +
+              "</div>"
+            : "") +
+          "</li>"
+        );
+      },
     );
+  }
+
+  // Plain-English reason a watching one-time allocation has not swept yet.
+  function oneTimeBlockerCopy(blocker: string): string {
+    switch (blocker) {
+      case "awaiting_balance":
+        return "waiting for a balance check";
+      case "below_threshold":
+        return "below the sweep threshold";
+      case "execution_gates":
+        return "waiting on execution gates";
+      case "destination_policy":
+        return "destination blocked by treasury policy";
+      case "step_cap":
+        return "above the per-step cap";
+      case "cross_party_linkage":
+        return "blocked: shared destination would link parties";
+      case "sweep_failed":
+        return "last sweep failed";
+      case "sweep_attention":
+        return "sweep needs attention";
+      default:
+        return blocker.replace(/_/g, " ");
+    }
   }
 
   function renderTreasuryParties(parties: Counterparty[]): void {
@@ -668,7 +805,7 @@ export function createTreasuryActions(deps: TreasuryActionsDeps) {
 
   async function loadTreasuryParties(): Promise<void> {
     try {
-      const r = await deps.api("GET", "/api/treasury/parties");
+      const r = await deps.api("GET", ROUTE_PATHS.API_TREASURY_PARTIES);
       if (r.error) return;
       treasuryParties = (r.parties || []) as Counterparty[];
       renderTreasuryParties(treasuryParties);
@@ -697,7 +834,7 @@ export function createTreasuryActions(deps: TreasuryActionsDeps) {
 
   async function loadTreasuryOverviewOnly(): Promise<void> {
     try {
-      const r = await deps.api("GET", "/api/treasury/overview");
+      const r = await deps.api("GET", ROUTE_PATHS.API_TREASURY_OVERVIEW);
       if (r.error) return;
       renderTreasuryOverview(r as TreasuryOverviewResponse);
     } catch (_) {}
@@ -705,7 +842,7 @@ export function createTreasuryActions(deps: TreasuryActionsDeps) {
 
   async function loadTreasuryPolicy(): Promise<void> {
     try {
-      const r = await deps.api("GET", "/api/treasury/policy");
+      const r = await deps.api("GET", ROUTE_PATHS.API_TREASURY_POLICY);
       if (r.error) return;
       const policy = (r.policy || null) as TreasuryPolicy | null;
       renderTreasuryPolicy(policy);
@@ -715,7 +852,7 @@ export function createTreasuryActions(deps: TreasuryActionsDeps) {
 
   async function loadTreasuryReceiveAddresses(): Promise<void> {
     try {
-      const r = await deps.api("GET", "/api/treasury/receive-addresses");
+      const r = await deps.api("GET", ROUTE_PATHS.API_TREASURY_RECEIVE_ADDRESSES);
       if (r.error) return;
       renderTreasuryReceiveAllocations(
         (r.allocations || []) as TreasuryReceiveAllocation[],
@@ -733,7 +870,7 @@ export function createTreasuryActions(deps: TreasuryActionsDeps) {
   }
 
   async function refreshTreasuryOverview(): Promise<void> {
-    const r = await deps.api("GET", "/api/treasury/overview");
+    const r = await deps.api("GET", ROUTE_PATHS.API_TREASURY_OVERVIEW);
     if (r.error) {
       deps.toast(r.error, "error");
       return;
@@ -882,7 +1019,7 @@ export function createTreasuryActions(deps: TreasuryActionsDeps) {
     );
     if (saveButton) saveButton.classList.add("btn-busy");
     try {
-      const r = await deps.api("POST", "/api/treasury/policy/update", body);
+      const r = await deps.api("POST", ROUTE_PATHS.API_TREASURY_POLICY_UPDATE, body);
       if (r.error) {
         deps.toast(r.error, "error");
         return;
@@ -908,27 +1045,70 @@ export function createTreasuryActions(deps: TreasuryActionsDeps) {
     const partyId =
       (document.getElementById("treasuryReceiveParty") as HTMLSelectElement | null)
         ?.value || "";
+    const oneTime =
+      (document.getElementById("treasuryReceiveOneTime") as HTMLInputElement | null)
+        ?.checked === true;
     const body: {
       wallet_profile: string;
       purpose: string;
       label?: string;
       counterparty_id?: string;
+      one_time?: boolean;
+      sweep_destination_address?: string;
+      min_sweep_amount_hex?: string;
+      purge_after_sweep?: boolean;
     } = {
       wallet_profile: walletProfile,
       purpose,
     };
     if (label) body.label = label;
     if (partyId) body.counterparty_id = partyId;
+    if (oneTime) {
+      const destination = optionalTextValue("treasuryReceiveSweepDestination");
+      if (!destination) {
+        deps.toast("One-time addresses need a sweep destination", "error");
+        return;
+      }
+      const thresholdEth = optionalTextValue("treasuryReceiveMinSweepEth");
+      let thresholdWeiHex: string | null = null;
+      if (thresholdEth) {
+        thresholdWeiHex = parseEthToWeiHex(thresholdEth);
+        if (!thresholdWeiHex) {
+          deps.toast("Min sweep must be an ETH amount like 0.05", "error");
+          return;
+        }
+      }
+      body.one_time = true;
+      body.sweep_destination_address = destination;
+      if (thresholdWeiHex) body.min_sweep_amount_hex = thresholdWeiHex;
+      body.purge_after_sweep =
+        (document.getElementById("treasuryReceivePurgeAfterSweep") as HTMLInputElement | null)
+          ?.checked === true;
+    }
     const r = await deps.api("POST", "/api/treasury/receive-addresses/allocate", body);
     if (r.error) {
       deps.toast(r.error, "error");
       return;
     }
-    clearFields(["treasuryReceiveProfile", "treasuryReceivePurpose", "treasuryReceiveLabel"]);
+    clearFields([
+      "treasuryReceiveProfile",
+      "treasuryReceivePurpose",
+      "treasuryReceiveLabel",
+      "treasuryReceiveSweepDestination",
+      "treasuryReceiveMinSweepEth",
+    ]);
     const partySelect = document.getElementById(
       "treasuryReceiveParty",
     ) as HTMLSelectElement | null;
     if (partySelect) partySelect.value = "";
+    const oneTimeBox = document.getElementById(
+      "treasuryReceiveOneTime",
+    ) as HTMLInputElement | null;
+    if (oneTimeBox) oneTimeBox.checked = false;
+    const purgeBox = document.getElementById(
+      "treasuryReceivePurgeAfterSweep",
+    ) as HTMLInputElement | null;
+    if (purgeBox) purgeBox.checked = false;
     const allocation = r.allocation as TreasuryReceiveAllocation | undefined;
     deps.toast(
       "Receive address allocated" + (allocation?.address ? ": " + allocation.address : ""),
@@ -941,6 +1121,13 @@ export function createTreasuryActions(deps: TreasuryActionsDeps) {
   }
 
   async function rotateTreasuryReceiveAddress(allocationId: string): Promise<void> {
+    const confirmed = await confirmDangerDialog({
+      title: "Rotate receive address",
+      body:
+        "Rotate this receive address? The current address is retired and a fresh address is derived for future payments. The old address stays valid on-chain, but it no longer shows as the active receive address here.",
+      actionLabel: "Rotate address",
+    });
+    if (!confirmed) return;
     const r = await deps.api("POST", "/api/treasury/receive-addresses/rotate", {
       allocation_id: allocationId,
     });
@@ -967,7 +1154,7 @@ export function createTreasuryActions(deps: TreasuryActionsDeps) {
     const body: { name: string; note?: string; sweep_destination_address?: string } = { name };
     if (note) body.note = note;
     if (sweepDestination) body.sweep_destination_address = sweepDestination;
-    const r = await deps.api("POST", "/api/treasury/parties", body);
+    const r = await deps.api("POST", ROUTE_PATHS.API_TREASURY_PARTIES, body);
     if (r.error) {
       deps.toast(r.error, "error");
       return;
@@ -1025,7 +1212,7 @@ export function createTreasuryActions(deps: TreasuryActionsDeps) {
     }
     const r = await deps.api(
       "POST",
-      "/api/treasury/parties/update",
+      ROUTE_PATHS.API_TREASURY_PARTIES_UPDATE,
       partyUpdateBody(party, sweepDestination),
     );
     if (r.error) {
@@ -1044,7 +1231,7 @@ export function createTreasuryActions(deps: TreasuryActionsDeps) {
     }
     const r = await deps.api(
       "POST",
-      "/api/treasury/parties/update",
+      ROUTE_PATHS.API_TREASURY_PARTIES_UPDATE,
       partyUpdateBody(party, ""),
     );
     if (r.error) {
@@ -1056,6 +1243,16 @@ export function createTreasuryActions(deps: TreasuryActionsDeps) {
   }
 
   async function deleteTreasuryParty(partyId: string): Promise<void> {
+    const party = treasuryParties.find((candidate) => candidate.id === partyId);
+    const confirmed = await confirmDangerDialog({
+      title: "Delete counterparty",
+      body:
+        'Delete counterparty "' +
+        (party?.name || partyId) +
+        '"? Existing receive allocations are kept, but their link to this party is removed.',
+      actionLabel: "Delete",
+    });
+    if (!confirmed) return;
     const r = await deps.api("POST", "/api/treasury/parties/delete", {
       id: partyId,
     });

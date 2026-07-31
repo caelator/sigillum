@@ -1,5 +1,8 @@
 //! 0.1-era daemon data-dir and snapshot upgrade coverage.
 
+mod common;
+
+use common::{get, post_json, spawn_daemon};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::fs;
@@ -27,44 +30,6 @@ struct Manifest {
 struct ManifestEntry {
     path: String,
     data_hex: String,
-}
-
-async fn spawn_daemon(base_dir: PathBuf) -> (SocketAddr, tokio::task::JoinHandle<()>) {
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let addr = listener.local_addr().unwrap();
-    let (app, _state) =
-        sigillum_daemon::build_router(base_dir, addr.port()).expect("router should initialize");
-    let handle = tokio::spawn(async move {
-        axum::serve(listener, app).await.unwrap();
-    });
-    (addr, handle)
-}
-
-async fn post_json(
-    client: &reqwest::Client,
-    addr: SocketAddr,
-    path: &str,
-    body: serde_json::Value,
-    token: Option<&str>,
-) -> reqwest::Response {
-    let mut req = client.post(format!("http://{addr}{path}")).json(&body);
-    if let Some(token) = token {
-        req = req.bearer_auth(token);
-    }
-    req.send().await.unwrap()
-}
-
-async fn get(
-    client: &reqwest::Client,
-    addr: SocketAddr,
-    path: &str,
-    token: Option<&str>,
-) -> reqwest::Response {
-    let mut req = client.get(format!("http://{addr}{path}"));
-    if let Some(token) = token {
-        req = req.bearer_auth(token);
-    }
-    req.send().await.unwrap()
 }
 
 fn fixture_path(relative: &str) -> PathBuf {
@@ -723,7 +688,15 @@ async fn upgrade_0_1_datadir_migrates_all_stores() {
         "deposit tag",
     )
     .await;
-    assert_schema_version(base.path(), "deposits.json", 2);
+    assert_schema_version(base.path(), "deposits.json", 3);
+    // The 0.1 deposit record predates the stealth hash-convention switch:
+    // the v1→v3 migration must have stamped it with the legacy convention.
+    let deposits_store = read_json(&base.path().join("deposits.json"));
+    assert_eq!(
+        deposits_store["data"]["eth_stealth"][0]["stealth_hash_convention"],
+        json!("x32"),
+        "pre-switch deposit record must be stamped with the legacy convention"
+    );
 
     assert_success(
         post_json(&client, addr, "/api/queue/process", json!({}), Some(&token)).await,
@@ -747,7 +720,7 @@ async fn upgrade_0_1_datadir_migrates_all_stores() {
         "watch address upsert",
     )
     .await;
-    assert_schema_version(base.path(), "wallet_inventory.json", 20);
+    assert_schema_version(base.path(), "wallet_inventory.json", 21);
     assert_schema_version(base.path(), "token_registry.json", 1);
 
     let policy = assert_success(

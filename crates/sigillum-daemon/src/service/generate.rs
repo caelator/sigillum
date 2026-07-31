@@ -16,7 +16,8 @@ impl SigillumService {
         body: GenerateStoreRequest,
     ) -> ServiceResult<GenerateStoreResponse> {
         let token = self.require_session(token)?;
-        let _guard = self.state.operation_guard().await;
+        let session_context = self.capture_session_operation_context(Some(token))?;
+        let _guard = self.acquire_session_operation(&session_context).await?;
         let active_compartment_id = self.state.active_compartment_id_for(token);
         let key = body.key;
 
@@ -38,7 +39,7 @@ impl SigillumService {
 
         self.with_active_vault(token, |vault, _| {
             if !vault.is_unlocked() {
-                return Err(ServiceError::forbidden("Vault is locked."));
+                return Err(ServiceError::vault_locked("Vault is locked."));
             }
             Ok(vault.set_secret(&key, &value)?)
         })?;

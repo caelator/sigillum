@@ -10,13 +10,14 @@ use sigillum_core::decode_quantity_hex;
 use crate::inventory::WalletInventoryState;
 use crate::profiles::ProfileRegistry;
 use crate::service::SigillumService;
-use crate::service::helpers::{compare_u256, multiply_u256_u64, random_id};
+use crate::service::helpers::{
+    add_u256, compare_u256, encode_quantity_hex, multiply_u256_u64, random_id,
+};
 
 use super::WALLET_FAMILY_ETH_SEED;
 use super::simulation::{
     FeeBasisResolution, inventory_native_balance_hex_for_step, zero_value_transaction_gas_limit,
 };
-use super::treasury::{add_u256, encode_quantity_hex};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) struct ResolvedGasFees {
@@ -182,9 +183,17 @@ impl SigillumService {
     }
 }
 
-pub(super) fn gas_topup_policy_enabled(policy: Option<&TreasuryPolicy>) -> bool {
+pub(in crate::service) fn gas_topup_policy_enabled(policy: Option<&TreasuryPolicy>) -> bool {
     policy
-        .map(|policy| policy.enabled && policy.allow_gas_topups)
+        .map(|policy| {
+            let cap_is_valid = policy
+                .max_gas_topup_wei_hex
+                .as_deref()
+                .map(str::trim)
+                .filter(|cap| cap.len() > 2 && (cap.starts_with("0x") || cap.starts_with("0X")))
+                .is_some_and(|cap| decode_quantity_hex(cap).is_ok());
+            policy.enabled && policy.allow_gas_topups && cap_is_valid
+        })
         .unwrap_or(false)
 }
 
@@ -218,7 +227,7 @@ fn step_has_gas_shortfall(
     Some(compare_u256(&balance, gas_cost).is_lt())
 }
 
-fn topup_exceeds_cap(topup: &[u8; 32], cap_hex: Option<&str>) -> bool {
+pub(in crate::service) fn topup_exceeds_cap(topup: &[u8; 32], cap_hex: Option<&str>) -> bool {
     let Some(cap_hex) = cap_hex else {
         return false;
     };
@@ -290,7 +299,7 @@ fn fund_gas_step(
     }
 }
 
-fn shr1_u256(value: &[u8; 32]) -> [u8; 32] {
+pub(in crate::service) fn shr1_u256(value: &[u8; 32]) -> [u8; 32] {
     let mut out = [0u8; 32];
     let mut carry = 0u8;
     for (index, byte) in value.iter().enumerate() {
@@ -324,7 +333,7 @@ mod tests {
             block_cross_party_linkage: false,
             allow_claim_execution: false,
             allow_gas_topups: true,
-            max_gas_topup_wei_hex: None,
+            max_gas_topup_wei_hex: Some("0x2f9b8".into()),
             allow_plan_execution: false,
             allow_sweep_execution: false,
             allow_revoke_execution: false,
@@ -567,6 +576,42 @@ mod tests {
             vec![inventory_address(SOURCE, "0x0")],
             input.clone(),
         );
+        assert_eq!(output, input);
+    }
+
+    #[test]
+    fn gas_topup_policy_requires_an_explicit_valid_cap() {
+        let mut policy = sample_policy();
+        assert!(gas_topup_policy_enabled(Some(&policy)));
+
+        for invalid_cap in [
+            None,
+            Some("   "),
+            Some("0x"),
+            Some("2f9b8"),
+            Some("0xnot-hex"),
+        ] {
+            policy.max_gas_topup_wei_hex = invalid_cap.map(str::to_string);
+            assert!(!gas_topup_policy_enabled(Some(&policy)));
+        }
+    }
+
+    #[test]
+    fn legacy_uncapped_policy_leaves_plan_steps_byte_identical() {
+        let mut policy = sample_policy();
+        policy.max_gas_topup_wei_hex = None;
+        let input = vec![sample_step(WalletPlanStepAction::SweepErc20, "0xf4240")];
+
+        let output = run_apply(
+            Some(&policy),
+            vec![sample_seed_profile(Some(SPONSOR))],
+            vec![
+                inventory_address(SOURCE, "0x0"),
+                inventory_address(SPONSOR, "0x100000"),
+            ],
+            input.clone(),
+        );
+
         assert_eq!(output, input);
     }
 

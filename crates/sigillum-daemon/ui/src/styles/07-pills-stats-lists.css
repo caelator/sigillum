@@ -65,22 +65,22 @@
 .stats {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(132px, 1fr));
-  gap: var(--space-2);
-  margin: var(--space-3) 0;
+  gap: var(--space-4);
+  margin: var(--space-4) 0;
 }
 
 .stat {
-  background: var(--surface-2);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: 10px var(--space-3);
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  padding: 4px 0;
   min-width: 0;
 }
 
 .stat .value {
   font-size: var(--fs-lg);
-  font-weight: 650;
-  letter-spacing: -0.015em;
+  font-weight: 700;
+  letter-spacing: 0;
   font-variant-numeric: tabular-nums;
   line-height: 1.25;
   white-space: nowrap;
@@ -101,21 +101,21 @@
 }
 
 .stat-tiles .stat {
-  transition: border-color var(--t-fast);
+  transition: color var(--t-fast);
 }
 
 .stat-tiles .stat:hover {
-  border-color: var(--border-strong);
+  color: var(--text);
 }
 
 /* ── 11. Entity & key lists ───────────────────────────────────────────────── */
 
 .entity-list {
   margin-top: var(--space-2);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  overflow: hidden;
-  background: var(--surface-2);
+  border: 0;
+  border-radius: 0;
+  overflow: visible;
+  background: transparent;
 }
 
 .entity-list li {
@@ -123,7 +123,7 @@
   align-items: flex-start;
   justify-content: space-between;
   gap: var(--space-4);
-  padding: var(--space-3) var(--space-4);
+  padding: 8px 0;
   border-bottom: 1px solid var(--border-faint);
   transition: background var(--t-fast);
 }
@@ -133,7 +133,7 @@
 }
 
 .entity-list li:hover {
-  background: var(--surface-3);
+  background: rgba(168, 179, 196, 0.04);
 }
 
 .entity-main {
@@ -161,11 +161,11 @@
 
 .plan-linkage-banner {
   margin-top: var(--space-2);
-  padding: 8px 10px;
-  background: var(--warning-tint);
-  border: 1px solid rgba(224, 168, 60, 0.4);
-  border-left: 3px solid var(--warning);
-  border-radius: var(--radius-sm);
+  padding: 4px 0 4px var(--space-3);
+  background: transparent;
+  border: 0;
+  border-left: 1px solid var(--warning);
+  border-radius: 0;
   color: var(--text-secondary);
   font-size: var(--fs-xs);
   line-height: 1.6;
@@ -214,10 +214,10 @@
 
 .key-list {
   margin-top: var(--space-2);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  overflow: hidden;
-  background: var(--surface-2);
+  border: 0;
+  border-radius: 0;
+  overflow: visible;
+  background: transparent;
 }
 
 .key-list:empty {
@@ -230,7 +230,7 @@
   justify-content: space-between;
   flex-wrap: wrap;
   gap: var(--space-2) var(--space-4);
-  padding: 9px var(--space-4);
+  padding: 7px 0;
   border-bottom: 1px solid var(--border-faint);
   font-size: var(--fs-sm);
   transition: background var(--t-fast);
@@ -241,7 +241,7 @@
 }
 
 .key-list li:hover {
-  background: var(--surface-3);
+  background: rgba(168, 179, 196, 0.04);
 }
 
 .key-list li > span:first-child {
@@ -274,10 +274,11 @@
 .secret-value {
   flex-basis: 100%;
   margin-top: var(--space-2);
-  padding: var(--space-2) 10px;
-  background: var(--bg);
-  border: 1px dashed rgba(224, 168, 60, 0.45);
-  border-radius: var(--radius-sm);
+  padding: 4px 0 4px var(--space-3);
+  background: transparent;
+  border: 0;
+  border-left: 1px solid var(--warning);
+  border-radius: 0;
   font-family: var(--mono);
   font-size: var(--fs-xs);
   color: var(--warning-text);

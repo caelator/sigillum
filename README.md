@@ -8,12 +8,13 @@
 > [!IMPORTANT]
 > Sigillum has not published a supported stable release. Build and evaluate the
 > current source on a non-production machine with test wallets first.
-> `v1.0.0-rc.2` failed the annotated-tag contract, and `v1.0.0-rc.3` later
-> exposed an invalid macOS bundle signature despite a green legacy check.
-> `v1.0.0-rc.4` fixed signing but exposed an F6 contract that could accept a
-> mainnet as the L2 testnet, reduce a two-transaction gas-top-up chain to one
-> hash, and let a dependent run before its prerequisite confirmed. All three
-> tags are immutable failure receipts; the next candidate is `v1.0.0-rc.5`.
+> `v1.0.0-rc.2` through `v1.0.0-rc.4` are immutable failure receipts.
+> `v1.0.0-rc.5` at `7e04743` is an unpublished historical draft only; it
+> cannot certify the integrated hardening changes. No RC6 exists. The next
+> eligible candidate is RC6 only after the exact integrated HEAD passes the
+> clean release gate and independent review, lands through protected `main`,
+> and passes required CI. No final `v1.0.0` tag or published GitHub Release
+> exists.
 
 Sigillum is a self-hosted, single-operator workstation for finding EVM wallets
 and assets, understanding their provenance and risk, preparing consolidation
@@ -154,13 +155,16 @@ Start with the [documentation map](docs/README.md). Key references include:
 - [FIDO2 model and constraints](docs/fido2.md)
 - [Privacy and linkage model](docs/architecture.md#privacy--linkage-model)
 - [Current readiness evidence](docs/production-readiness-audit.md)
+- [1.0 release plan](docs/release-1.0-plan.md)
+- [1.0 execution runbook](docs/execution-runbook-1.0.md)
 - [Wallet-management roadmap](docs/wallet-management-roadmap.md)
 
 ## Development
 
 The full gate checks formatting, architecture constraints, UI build freshness,
-Rust builds/tests/lints, runtime and browser smoke flows, dependency advisories,
-licenses, and repository cleanliness:
+the pinned 15-scenario accessibility suite, Rust builds/tests/lints, runtime and
+real-daemon browser smoke flows, dependency advisories, licenses, and repository
+cleanliness:
 
 ```bash
 ./scripts/check-release.sh
@@ -175,12 +179,16 @@ public issues.
 - Workspace version: `1.0.0`
 - Supported stable release: none
 - Published GitHub Release: none
+- Historical unpublished draft: `v1.0.0-rc.5` at protected-main `7e04743`
+- Current RC6: none
+- Release-evidence target: macOS 15.x on Apple Silicon (`aarch64`) only
 - Current supported boundary: source evaluation only
 
 The workspace version describes the intended 1.0 contract; it does not by itself
 mean a release was published. Final release status is authoritative only when an
 annotated `v1.0.0` tag and its GitHub Release both exist and the release workflow
-passes.
+passes. RC releases must remain draft, unpublished, and marked as prereleases;
+the final draft and published release must not be marked as prereleases.
 
 ## License
 

@@ -2,8 +2,7 @@
 
 use std::sync::Arc;
 
-use axum::Json;
-use axum::extract::State;
+use axum::extract::{Query, State};
 use axum::http::HeaderMap;
 use axum::response::Response;
 use sigillum_api::{
@@ -14,22 +13,27 @@ use sigillum_api::{
 use crate::AppState;
 use crate::service::SigillumService;
 
-use super::{bearer_token, service_response, validated};
+use super::list_query::QueueJobsRawQuery;
+use super::{ValidatedJson, bearer_token, service_response};
 
-pub(crate) async fn list_jobs(State(state): State<Arc<AppState>>, headers: HeaderMap) -> Response {
+pub(crate) async fn list_jobs(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Query(query): Query<QueueJobsRawQuery>,
+) -> Response {
+    let query = match query.resolve() {
+        Ok(query) => query,
+        Err(resp) => return resp,
+    };
     let service = SigillumService::new(state);
-    service_response(service.list_queue_jobs(bearer_token(&headers).as_deref()))
+    service_response(service.list_queue_jobs(bearer_token(&headers).as_deref(), query))
 }
 
 pub(crate) async fn enqueue_eth_stealth_transfer(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
-    Json(body): Json<QueueEthStealthTransferRequest>,
+    ValidatedJson(body): ValidatedJson<QueueEthStealthTransferRequest>,
 ) -> Response {
-    let body = match validated(Json(body)) {
-        Ok(b) => b,
-        Err(resp) => return resp,
-    };
     let service = SigillumService::new(state);
     service_response(
         service
@@ -41,12 +45,8 @@ pub(crate) async fn enqueue_eth_stealth_transfer(
 pub(crate) async fn enqueue_eth_stealth_erc20_transfer(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
-    Json(body): Json<QueueEthStealthErc20TransferRequest>,
+    ValidatedJson(body): ValidatedJson<QueueEthStealthErc20TransferRequest>,
 ) -> Response {
-    let body = match validated(Json(body)) {
-        Ok(b) => b,
-        Err(resp) => return resp,
-    };
     let service = SigillumService::new(state);
     service_response(
         service
@@ -58,12 +58,8 @@ pub(crate) async fn enqueue_eth_stealth_erc20_transfer(
 pub(crate) async fn enqueue_eth_stealth_native_sweep(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
-    Json(body): Json<QueueEthStealthNativeSweepRequest>,
+    ValidatedJson(body): ValidatedJson<QueueEthStealthNativeSweepRequest>,
 ) -> Response {
-    let body = match validated(Json(body)) {
-        Ok(b) => b,
-        Err(resp) => return resp,
-    };
     let service = SigillumService::new(state);
     service_response(
         service
@@ -75,12 +71,8 @@ pub(crate) async fn enqueue_eth_stealth_native_sweep(
 pub(crate) async fn enqueue_eth_stealth_erc20_sweep(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
-    Json(body): Json<QueueEthStealthErc20SweepRequest>,
+    ValidatedJson(body): ValidatedJson<QueueEthStealthErc20SweepRequest>,
 ) -> Response {
-    let body = match validated(Json(body)) {
-        Ok(b) => b,
-        Err(resp) => return resp,
-    };
     let service = SigillumService::new(state);
     service_response(
         service
@@ -92,12 +84,8 @@ pub(crate) async fn enqueue_eth_stealth_erc20_sweep(
 pub(crate) async fn process_jobs(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
-    Json(body): Json<QueueProcessRequest>,
+    ValidatedJson(body): ValidatedJson<QueueProcessRequest>,
 ) -> Response {
-    let body = match validated(Json(body)) {
-        Ok(b) => b,
-        Err(resp) => return resp,
-    };
     let service = SigillumService::new(state);
     service_response(
         service

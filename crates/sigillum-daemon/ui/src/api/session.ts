@@ -1,6 +1,27 @@
+import type { FieldError } from "../contracts";
+
 export const SESSION_TOKEN_KEY = "sigillumSessionToken";
 
 let volatileSessionToken: string | null = null;
+const sessionTokenListeners = new Set<(token: string | null) => void>();
+
+function notifySessionTokenListeners(token: string | null): void {
+  for (const listener of Array.from(sessionTokenListeners)) {
+    try {
+      listener(token);
+    } catch (_) {
+      // Token persistence and revocation must not depend on an observer.
+    }
+  }
+}
+
+/** Observe same-tab token changes (the browser storage event does not). */
+export function subscribeSessionToken(
+  listener: (token: string | null) => void,
+): () => void {
+  sessionTokenListeners.add(listener);
+  return () => sessionTokenListeners.delete(listener);
+}
 
 function sessionStorageOrNull(): Storage | null {
   try {
@@ -20,21 +41,26 @@ export function writeSessionToken(token: string | null | undefined): void {
   if (!token) {
     return;
   }
+  const previous = readSessionToken();
   volatileSessionToken = token;
   try {
     sessionStorageOrNull()?.setItem(SESSION_TOKEN_KEY, token);
   } catch (_) {}
+  if (previous !== token) notifySessionTokenListeners(token);
 }
 
 export function clearSessionToken(): void {
+  const previous = readSessionToken();
   volatileSessionToken = null;
   try {
     sessionStorageOrNull()?.removeItem(SESSION_TOKEN_KEY);
   } catch (_) {}
+  if (previous !== null) notifySessionTokenListeners(null);
 }
 
-export function sessionAuthorizationHeader(): Record<string, string> {
-  const token = readSessionToken();
+export function sessionAuthorizationHeader(
+  token: string | null = readSessionToken(),
+): Record<string, string> {
   return token ? { Authorization: `Bearer ${token}` } : {};
 }
 
@@ -42,19 +68,43 @@ export type DaemonMethod = "GET" | "POST" | "DELETE";
 
 export interface DaemonPayload {
   error?: string;
+  code?: string;
+  fields?: FieldError[];
   session_token?: string;
   [key: string]: unknown;
+}
+
+export interface RequestOptions {
+  /** Authenticate as background polling without extending idle auto-lock. */
+  background?: boolean;
+}
+
+let backgroundRequestDepth = 0;
+
+/** Mark every request scheduled by `fn` as background polling. */
+export async function withBackgroundRequests<T>(fn: () => Promise<T>): Promise<T> {
+  backgroundRequestDepth += 1;
+  try {
+    return await fn();
+  } finally {
+    backgroundRequestDepth -= 1;
+  }
 }
 
 export async function requestWithSession<TPayload extends DaemonPayload = DaemonPayload>(
   method: DaemonMethod,
   path: string,
   body?: unknown,
+  options?: RequestOptions,
 ): Promise<TPayload> {
+  const requestSessionToken = readSessionToken();
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
-    ...sessionAuthorizationHeader(),
+    ...sessionAuthorizationHeader(requestSessionToken),
   };
+  if (options?.background || backgroundRequestDepth > 0) {
+    headers["X-Sigillum-Background"] = "1";
+  }
   const response = await fetch(path, {
     method,
     headers,
@@ -69,7 +119,12 @@ export async function requestWithSession<TPayload extends DaemonPayload = Daemon
   if (payload.session_token) {
     writeSessionToken(payload.session_token);
   }
-  if (response.status === 401) {
+  // A response can arrive after a reauthentication rotated the tab to a new
+  // token. Never let a stale 401 revoke that newer session.
+  if (
+    response.status === 401 &&
+    readSessionToken() === requestSessionToken
+  ) {
     clearSessionToken();
   }
   return payload as TPayload;

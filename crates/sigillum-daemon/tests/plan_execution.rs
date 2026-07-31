@@ -5,10 +5,13 @@
 //! store-surgery helpers build enqueued jobs end-to-end through the real
 //! routes; this file adds execution (drain) on top.
 
+mod common;
+
+use common::{get, post_json, spawn_daemon, submitted_raw_transaction_hash};
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 use axum::extract::State;
 use axum::http::{HeaderMap, header};
@@ -16,7 +19,6 @@ use axum::routing::post;
 use axum::{Json, Router};
 use reqwest::StatusCode;
 use serde_json::{Value, json};
-use sha3::{Digest, Keccak256};
 use tempfile::TempDir;
 
 const DESTINATION: &str = "0x9999999999999999999999999999999999999999";
@@ -26,30 +28,11 @@ const SEED_MNEMONIC: &str =
 const ONE_ETH_HEX: &str = "0xde0b6b3a7640000";
 const RPC_TOKEN: &str = "rpc-test-token";
 
-fn submitted_raw_transaction_hash(request: &Value) -> Value {
-    let raw = request["params"][0]
-        .as_str()
-        .expect("eth_sendRawTransaction carries raw transaction hex");
-    let bytes = hex::decode(raw.strip_prefix("0x").unwrap_or(raw))
-        .expect("submitted raw transaction is valid hex");
-    json!(format!("0x{}", hex::encode(Keccak256::digest(bytes))))
-}
-
-async fn spawn_daemon(base_dir: PathBuf) -> (SocketAddr, tokio::task::JoinHandle<()>) {
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let addr = listener.local_addr().unwrap();
-    let (app, _state) =
-        sigillum_daemon::build_router(base_dir, addr.port()).expect("router should initialize");
-    let handle = tokio::spawn(async move {
-        axum::serve(listener, app).await.unwrap();
-    });
-    (addr, handle)
-}
-
 #[derive(Clone, Default)]
 struct RpcState {
     fail_broadcast: Arc<AtomicBool>,
-    broadcast_count: Arc<std::sync::atomic::AtomicUsize>,
+    broadcast_count: Arc<AtomicUsize>,
+    nonce_count: Arc<AtomicUsize>,
 }
 
 fn rpc_response(state: &RpcState, request: &Value) -> Value {
@@ -57,7 +40,10 @@ fn rpc_response(state: &RpcState, request: &Value) -> Value {
     let result = match method {
         "eth_chainId" => json!("0x1"),
         "eth_blockNumber" => json!("0x20"),
-        "eth_getTransactionCount" => json!("0x7"),
+        "eth_getTransactionCount" => {
+            state.nonce_count.fetch_add(1, Ordering::SeqCst);
+            json!("0x7")
+        }
         "eth_getBalance" => json!(ONE_ETH_HEX),
         "eth_maxPriorityFeePerGas" => json!("0x59682f00"),
         "eth_feeHistory" => json!({
@@ -143,33 +129,6 @@ async fn spawn_mock_evm_provider(state: RpcState) -> (SocketAddr, tokio::task::J
         axum::serve(listener, app).await.unwrap();
     });
     (addr, handle)
-}
-
-async fn post_json(
-    client: &reqwest::Client,
-    addr: SocketAddr,
-    path: &str,
-    body: Value,
-    token: Option<&str>,
-) -> reqwest::Response {
-    let mut request = client.post(format!("http://{addr}{path}")).json(&body);
-    if let Some(token) = token {
-        request = request.bearer_auth(token);
-    }
-    request.send().await.unwrap()
-}
-
-async fn get(
-    client: &reqwest::Client,
-    addr: SocketAddr,
-    path: &str,
-    token: Option<&str>,
-) -> reqwest::Response {
-    let mut request = client.get(format!("http://{addr}{path}"));
-    if let Some(token) = token {
-        request = request.bearer_auth(token);
-    }
-    request.send().await.unwrap()
 }
 
 struct PlanEnv {
@@ -301,6 +260,7 @@ fn gates_on_policy_body() -> Value {
         "allow_exit_execution": true,
         "allow_claim_execution": true,
         "allow_gas_topups": true,
+        "max_gas_topup_wei_hex": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
     })
 }
 
@@ -1228,6 +1188,70 @@ async fn eth_seed_jobs_are_gate_driven_and_execute_once_gates_pass() {
     let job = jobs.iter().find(|job| job["id"] == json!(job_id)).unwrap();
     assert_eq!(job["state"], json!("sent"), "{job}");
     assert!(job["transaction_hash_hex"].is_string(), "{job}");
+
+    env.shutdown();
+}
+
+#[tokio::test]
+async fn eth_seed_native_sweep_reauthorizes_fresh_spendable_before_signing() {
+    let env = setup_plan_env().await;
+    let mut policy = gates_on_policy_body();
+    // The raw queue payload's minimum is allowed at enqueue/drain-gate time,
+    // while the provider's fresh one-ETH balance is deliberately over cap.
+    policy["max_step_native_wei_hex"] = json!("0x1");
+    update_policy(&env, policy).await;
+    let job_id = insert_eth_seed_job(
+        &env,
+        json!({
+            "kind": "eth_seed_native_sweep",
+            "wallet_profile": "seed-main",
+            "address": SEED_ADDRESS,
+            "derivation_path": "m/44'/60'/0'/0/0",
+            "destination_address": DESTINATION,
+            "min_value_wei_hex": "0x1",
+        }),
+    );
+    let nonce_count_before = env.rpc_state.nonce_count.load(Ordering::SeqCst);
+    let broadcast_count_before = env.rpc_state.broadcast_count.load(Ordering::SeqCst);
+
+    let process_json = process_queue(&env).await;
+    assert_eq!(process_json["blocked"], json!(1), "process: {process_json}");
+    assert_eq!(
+        process_json["succeeded"],
+        json!(0),
+        "process: {process_json}"
+    );
+
+    let jobs = queue_jobs(&env).await;
+    let job = jobs.iter().find(|job| job["id"] == json!(job_id)).unwrap();
+    assert_eq!(job["state"], json!("blocked"), "{job}");
+    assert_eq!(
+        job["last_error"],
+        json!("policy_violation: block_step_cap"),
+        "{job}"
+    );
+    assert!(job["transaction_hash_hex"].is_null(), "never signed: {job}");
+    assert_eq!(
+        env.rpc_state.nonce_count.load(Ordering::SeqCst),
+        nonce_count_before,
+        "policy must block before nonce resolution"
+    );
+    assert_eq!(
+        env.rpc_state.broadcast_count.load(Ordering::SeqCst),
+        broadcast_count_before,
+        "policy must block before broadcast"
+    );
+    let persisted = read_store(&queue_path(&env));
+    let persisted_job = persisted["data"]["jobs"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|job| job["id"] == json!(job_id))
+        .expect("persisted queue job exists");
+    assert!(
+        persisted_job.get("signed_raw_transaction_hex").is_none(),
+        "policy block must not produce replayable signed bytes: {persisted_job}"
+    );
 
     env.shutdown();
 }

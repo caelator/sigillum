@@ -120,12 +120,15 @@ impl SigillumService {
         body: EvmRpcBroadcastRequest,
     ) -> ServiceResult<EvmRpcBroadcastResponse> {
         let token = self.require_session(token)?;
+        let session_context = self.capture_session_operation_context(Some(token))?;
+        let _guard = self.acquire_session_operation(&session_context).await?;
         let rpc = self.resolve_provider_rpc_client(
             token,
             &body.provider.rpc_url,
             body.provider.compartment_id,
             body.provider.auth_token_key.as_deref(),
         )?;
+        self.admit_broadcast()?;
         let tx_hash = rpc.send_raw_transaction(&body.raw_transaction_hex).await?;
 
         self.record_audit(
@@ -166,7 +169,7 @@ impl SigillumService {
     ) -> ServiceResult<ProviderRpcClient> {
         let compartment_id = compartment_id
             .or_else(|| self.state.active_compartment_id_for(token))
-            .ok_or_else(|| ServiceError::forbidden("No active compartment."))?;
+            .ok_or_else(|| ServiceError::vault_locked("No active compartment."))?;
         self.resolve_provider_rpc_client_for_compartment(compartment_id, rpc_url, auth_token_key)
     }
 
@@ -381,9 +384,17 @@ impl SigillumService {
         provider: &sigillum_api::EvmProviderProfile,
         raw_transaction_hex: &str,
     ) -> ServiceResult<String> {
-        self.provider_rpc_for_profile(provider_compartment_id, provider)?
-            .send_raw_transaction(raw_transaction_hex)
-            .await
+        self.admit_broadcast()?;
+        let rpc = match self.provider_rpc_for_profile(provider_compartment_id, provider) {
+            Ok(rpc) => rpc,
+            Err(_) if self.state.is_locking() => {
+                return Err(ServiceError::locked(
+                    "Daemon locked before provider submission; transaction was not dispatched.",
+                ));
+            }
+            Err(error) => return Err(error),
+        };
+        rpc.send_raw_transaction(raw_transaction_hex).await
     }
 
     /// Current chain head (`eth_blockNumber`), used by W7.4 receipt

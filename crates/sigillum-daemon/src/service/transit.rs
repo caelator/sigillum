@@ -37,7 +37,7 @@ impl SigillumService {
             self.with_active_vault(token, |vault, compartment_id| {
                 let master_key = vault
                     .extract_master_key()
-                    .ok_or_else(|| ServiceError::forbidden("Vault is locked."))?;
+                    .ok_or_else(|| ServiceError::vault_locked("Vault is locked."))?;
                 let transit_key = derive_transit_key(master_key.as_ref(), &key_name)?;
                 let cipher = Aes256Gcm::new_from_slice(&transit_key).map_err(|error| {
                     ServiceError::internal(format!("Transit cipher init failed: {error}"))
@@ -90,7 +90,7 @@ impl SigillumService {
             self.with_active_vault(token, |vault, compartment_id| {
                 let master_key = vault
                     .extract_master_key()
-                    .ok_or_else(|| ServiceError::forbidden("Vault is locked."))?;
+                    .ok_or_else(|| ServiceError::vault_locked("Vault is locked."))?;
                 let transit_key = derive_transit_key(master_key.as_ref(), &key_name)?;
                 let cipher = Aes256Gcm::new_from_slice(&transit_key).map_err(|error| {
                     ServiceError::internal(format!("Transit cipher init failed: {error}"))
@@ -132,7 +132,7 @@ impl SigillumService {
             self.with_active_vault(token, |vault, compartment_id| {
                 let master_key = vault
                     .extract_master_key()
-                    .ok_or_else(|| ServiceError::forbidden("Vault is locked."))?;
+                    .ok_or_else(|| ServiceError::vault_locked("Vault is locked."))?;
                 let transit_key = derive_transit_key(master_key.as_ref(), &key_name)?;
                 let mut mac =
                     <HmacSha256 as Mac>::new_from_slice(&transit_key).map_err(|error| {

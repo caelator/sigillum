@@ -2,6 +2,12 @@
 //!
 //! Provides wallet export, address generation, checking, and transaction signing
 //! for Ethereum stealth addresses using master key derivation.
+//!
+//! Detection (`eth_stealth_check`) and public-info paths (`eth_stealth_export`,
+//! the known-meta-address guardrail) are watch-only: they derive the viewing
+//! private key + spending PUBLIC key and never retain the spending private
+//! key. Signing paths (`eth_stealth_sign*`) derive the full wallet — the
+//! spending key's only job.
 
 use sigillum_api::{
     EthSignedTransactionResponse, EthStealthAnnouncementPayload, EthStealthCheckRequest,
@@ -11,13 +17,14 @@ use sigillum_api::{
     EthXpubAddressResponse, EthXpubDeriveRequest, EthXpubExportRequest, EthXpubExportResponse,
 };
 use sigillum_core::{
-    EthereumEip1559Erc20Transfer, EthereumEip1559Transfer, VaultLifecycle,
-    build_erc5564_announcement, check_ethereum_stealth_address, decode_quantity_hex,
+    EthereumEip1559Erc20Transfer, EthereumEip1559Transfer, StealthHashConvention, VaultLifecycle,
+    build_erc5564_announcement, check_ethereum_stealth_address_any_watch_only, decode_quantity_hex,
     derive_ethereum_address_from_xpub, derive_ethereum_receive_branch_from_account_xpub,
     derive_ethereum_receive_branch_from_account_xpub_with_path,
     derive_sigillum_ethereum_stealth_wallet, derive_sigillum_ethereum_xpub_receive_branch,
-    generate_ethereum_stealth_address, sign_ethereum_stealth_digest,
-    sign_ethereum_stealth_erc20_transfer, sign_ethereum_stealth_native_transfer,
+    derive_watch_only_sigillum_ethereum_stealth_wallet, generate_ethereum_stealth_address,
+    sign_ethereum_stealth_digest, sign_ethereum_stealth_erc20_transfer,
+    sign_ethereum_stealth_native_transfer,
 };
 use zeroize::Zeroizing;
 
@@ -25,9 +32,25 @@ use crate::audit_log::AuditEventSpec;
 
 use super::helpers::{
     decode_fixed_hex, decode_optional_view_tag, map_wallet_error, map_xpub_error,
+    probe_stealth_sign, stealth_convention_or_standard,
 };
 use super::transaction_policy::{TransactionPolicyCheck, TransactionPolicyKind};
 use super::{ServiceError, ServiceResult, SigillumService};
+
+/// Cautionary warning returned by stealth address generation when the target
+/// meta-address cannot be confirmed as one of this vault's own.
+const FOREIGN_STEALTH_META_ADDRESS_WARNING: &str = "This meta-address does not match any of this vault's known stealth wallets. Sigillum generates stealth addresses with the compressed-point scheme-1 convention (ScopeLift-compatible); recipients using a different convention (e.g. Fluidkey's 64-byte encoding) will not detect or spend these. See docs/architecture.md#stealth-addresses-erc-5564.";
+
+/// Cautionary warning returned by stealth address generation when a supplied
+/// ephemeral key was already used for a recorded deposit.
+const EPHEMERAL_KEY_REUSE_WARNING: &str = "This ephemeral key was already used for an existing deposit; reusing it with the same meta-address produces the identical stealth address (linkable, address reuse).";
+
+/// Cautionary warning carried by every xpub export (plan task 3.4): an xpub
+/// is watch-only material, but it exposes the wallet's ENTIRE past and future
+/// receive-address tree to anyone holding it. Restated here so every API
+/// consumer (CLI stderr, console) can surface the exposure at the point of
+/// export without hard-coding the copy.
+pub(crate) const XPUB_EXPOSURE_WARNING: &str = "An xpub exposes this wallet's entire receive tree: anyone holding it can derive and watch every past and future address of the wallet. Share it only with systems that must watch those addresses; never publish it or send it to a payer.";
 
 impl SigillumService {
     pub(crate) fn eth_xpub_export(
@@ -40,7 +63,7 @@ impl SigillumService {
         let active_compartment_id = self
             .state
             .active_compartment_id_for(token)
-            .ok_or_else(|| ServiceError::forbidden("No active compartment."))?;
+            .ok_or_else(|| ServiceError::vault_locked("No active compartment."))?;
         if active_compartment_id != profile.compartment_id {
             return Err(ServiceError::forbidden(
                 "Wallet profile is not in the active compartment.",
@@ -62,6 +85,7 @@ impl SigillumService {
                 account_path: parent_derivation_path(&receive_path),
                 receive_path,
                 receive_xpub: receive_xpub.to_string(),
+                warning: XPUB_EXPOSURE_WARNING.to_string(),
             }
         } else if let Some(account_xpub) = profile
             .external_account_xpub
@@ -93,12 +117,13 @@ impl SigillumService {
                 account_path: export.account_path,
                 receive_path: export.receive_path,
                 receive_xpub: export.receive_xpub,
+                warning: XPUB_EXPOSURE_WARNING.to_string(),
             }
         } else {
             let export = self.with_active_vault(token, |vault, _| {
                 let master_key = vault
                     .extract_master_key()
-                    .ok_or_else(|| ServiceError::forbidden("Vault is locked."))?;
+                    .ok_or_else(|| ServiceError::vault_locked("Vault is locked."))?;
                 derive_sigillum_ethereum_xpub_receive_branch(
                     master_key.as_ref(),
                     profile.project_account,
@@ -111,6 +136,7 @@ impl SigillumService {
                 account_path: export.account_path,
                 receive_path: export.receive_path,
                 receive_xpub: export.receive_xpub,
+                warning: XPUB_EXPOSURE_WARNING.to_string(),
             }
         };
 
@@ -125,10 +151,25 @@ impl SigillumService {
         Ok(export)
     }
 
+    /// Derive the receive address at `index` from an operator-supplied xpub.
+    ///
+    /// This endpoint is deliberately **unauthenticated**: it is pure local
+    /// math over caller-supplied public material and touches no vault,
+    /// session, or compartment state, so any local process able to reach the
+    /// loopback listener can use the daemon as a derivation oracle. That is
+    /// accepted and documented (see `docs/architecture.md`): the xpub itself
+    /// is not secret to the caller — but note an xpub handed here still
+    /// exposes the wallet's whole address tree to its holder, and uses are
+    /// traced at debug level for operator visibility. Never add
+    /// secret-dependent behavior to this path.
     pub(crate) fn eth_xpub_derive(
         &self,
         body: EthXpubDeriveRequest,
     ) -> ServiceResult<EthXpubAddressResponse> {
+        tracing::debug!(
+            index = body.index,
+            "eth-xpub/derive invoked (unauthenticated local derivation oracle)"
+        );
         let derived =
             derive_ethereum_address_from_xpub(&body.xpub, body.index).map_err(map_xpub_error)?;
         Ok(EthXpubAddressResponse {
@@ -137,6 +178,12 @@ impl SigillumService {
         })
     }
 
+    /// Export the stealth meta-address for a wallet label.
+    ///
+    /// The response is entirely public payer-facing information (spending and
+    /// viewing PUBLIC keys), so this derives the watch-only view: the
+    /// spending private key is never retained outside the core derivation
+    /// helper's zeroize-on-drop scope.
     pub(crate) fn eth_stealth_export(
         &self,
         token: Option<&str>,
@@ -150,8 +197,8 @@ impl SigillumService {
             self.with_active_vault(token, |vault, compartment_id| {
                 let master_key = vault
                     .extract_master_key()
-                    .ok_or_else(|| ServiceError::forbidden("Vault is locked."))?;
-                let derived = derive_sigillum_ethereum_stealth_wallet(
+                    .ok_or_else(|| ServiceError::vault_locked("Vault is locked."))?;
+                let derived = derive_watch_only_sigillum_ethereum_stealth_wallet(
                     master_key.as_ref(),
                     &wallet,
                     &short_name,
@@ -187,10 +234,30 @@ impl SigillumService {
             .as_deref()
             .map(|value| decode_fixed_hex::<32>(value, "ephemeral_private_key"))
             .transpose()?;
-        let payment =
-            generate_ethereum_stealth_address(&body.stealth_meta_address, ephemeral_private_key)
-                .map_err(map_wallet_error)?;
+        // New payments are always generated with the standard (ScopeLift-
+        // compatible compressed-point) convention.
+        let payment = generate_ethereum_stealth_address(
+            &body.stealth_meta_address,
+            ephemeral_private_key,
+            StealthHashConvention::STANDARD,
+        )
+        .map_err(map_wallet_error)?;
         let announcement = build_erc5564_announcement(&payment).map_err(map_wallet_error)?;
+
+        // Best-effort guardrails: load the deposit records once and reuse them
+        // for both the foreign meta-address and the ephemeral-key reuse check.
+        let deposits = crate::deposits::load_deposits(&self.state.base_dir)
+            .map(|state| state.eth_stealth)
+            .unwrap_or_default();
+        let mut warnings = Vec::new();
+        if !self.is_known_own_stealth_meta_address(&body.stealth_meta_address, &deposits) {
+            warnings.push(FOREIGN_STEALTH_META_ADDRESS_WARNING.to_string());
+        }
+        if body.ephemeral_private_key_hex.is_some()
+            && ephemeral_public_key_already_used(&payment.ephemeral_public_key_hex, &deposits)
+        {
+            warnings.push(EPHEMERAL_KEY_REUSE_WARNING.to_string());
+        }
 
         Ok(EthStealthGenerateResponse {
             short_name: payment.short_name,
@@ -199,6 +266,7 @@ impl SigillumService {
             stealth_address: payment.stealth_address,
             ephemeral_public_key_hex: payment.ephemeral_public_key_hex,
             view_tag_hex: payment.view_tag_hex,
+            stealth_hash_convention: payment.stealth_hash_convention,
             announcement: Some(EthStealthAnnouncementPayload {
                 announcer_address: announcement.announcer_address,
                 announce_function: announcement.announce_function,
@@ -209,9 +277,61 @@ impl SigillumService {
                 calldata_hex: announcement.calldata_hex,
                 value_wei_hex: announcement.value_wei_hex,
             }),
+            warnings,
         })
     }
 
+    /// Best-effort check whether `stealth_meta_address` belongs to this vault:
+    /// either recorded on an existing stealth deposit, or derivable from a
+    /// registered stealth wallet profile in an unlocked compartment.
+    ///
+    /// This endpoint is session-less, so only already-unlocked compartment
+    /// vaults can be consulted; meta-addresses exported ad-hoc (no profile and
+    /// no deposit) or whose compartment is locked cannot be confirmed and are
+    /// treated as foreign, which fails safe for a cautionary warning.
+    fn is_known_own_stealth_meta_address(
+        &self,
+        stealth_meta_address: &str,
+        deposits: &[sigillum_api::EthStealthDeposit],
+    ) -> bool {
+        if deposits
+            .iter()
+            .any(|deposit| deposit.stealth_meta_address == stealth_meta_address)
+        {
+            return true;
+        }
+
+        let profiles = crate::profiles::load_profiles(&self.state.base_dir)
+            .map(|registry| registry.eth_stealth_wallets)
+            .unwrap_or_default();
+        profiles.iter().any(|profile| {
+            self.state
+                .with_vault(profile.compartment_id, |vault| {
+                    let master_key = vault.extract_master_key()?;
+                    // Comparing meta-addresses needs only the watch-only view
+                    // (public keys); no spending secret is retained.
+                    derive_watch_only_sigillum_ethereum_stealth_wallet(
+                        master_key.as_ref(),
+                        &profile.wallet,
+                        &profile.short_name,
+                    )
+                    .ok()
+                    .map(|derived| derived.meta_address().stealth_meta_address.clone())
+                })
+                .flatten()
+                .as_deref()
+                == Some(stealth_meta_address)
+        })
+    }
+
+    /// Check whether a stealth payment (stealth address + ephemeral public
+    /// key) belongs to a wallet — the recipient-side `checkStealthAddress`.
+    ///
+    /// Runs watch-only per EIP-5564: detection derives the viewing private
+    /// key + spending PUBLIC key from the compartment master key and never
+    /// materializes the spending private key in the check path. The vault
+    /// must still be unlocked (the viewing key derives from the master key);
+    /// the spending key is only needed later, when sweeping/signing.
     pub(crate) fn eth_stealth_check(
         &self,
         token: Option<&str>,
@@ -223,22 +343,41 @@ impl SigillumService {
         let stealth_address = body.stealth.stealth_address;
         let ephemeral_public_key_hex = body.stealth.ephemeral_public_key_hex;
 
+        // Dual-decode: probe the standard convention first, then the legacy
+        // one, so payments created before the hash-convention switch are still
+        // detected. Watch-only: no spending secret enters the check.
         let (check, compartment_id) = self.with_active_vault(token, |vault, compartment_id| {
             let master_key = vault
                 .extract_master_key()
-                .ok_or_else(|| ServiceError::forbidden("Vault is locked."))?;
-            let derived =
-                derive_sigillum_ethereum_stealth_wallet(master_key.as_ref(), &wallet, "eth")
-                    .map_err(map_wallet_error)?;
-            let check = check_ethereum_stealth_address(
+                .ok_or_else(|| ServiceError::vault_locked("Vault is locked."))?;
+            let derived = derive_watch_only_sigillum_ethereum_stealth_wallet(
+                master_key.as_ref(),
+                &wallet,
+                "eth",
+            )
+            .map_err(map_wallet_error)?;
+            let check = check_ethereum_stealth_address_any_watch_only(
                 &derived,
                 &stealth_address,
                 &ephemeral_public_key_hex,
                 view_tag,
+                &StealthHashConvention::PROBE_ORDER,
             )
             .map_err(map_wallet_error)?;
             Ok((check, compartment_id))
         })?;
+
+        // A match records the payment's actual convention on any deposit
+        // record tracking this payment, so later sweeps derive the stealth
+        // key with the right convention even if the stored stamp was missing
+        // or wrong (e.g. a hand-edited store).
+        if check.matches {
+            self.stamp_matching_deposit_convention(
+                &stealth_address,
+                &ephemeral_public_key_hex,
+                check.stealth_hash_convention,
+            );
+        }
 
         self.record_audit(
             Some(compartment_id),
@@ -253,15 +392,48 @@ impl SigillumService {
             matches: check.matches,
             derived_stealth_address: check.derived_stealth_address,
             view_tag_hex: check.view_tag_hex,
+            stealth_hash_convention: check.stealth_hash_convention,
         })
     }
 
-    pub(crate) fn eth_stealth_sign(
+    /// Best-effort persist of the detected convention onto deposit records
+    /// tracking this payment (matched by stealth address + ephemeral key).
+    /// Load/save failures are ignored: detection still succeeded, and the
+    /// next scan re-probes anyway.
+    fn stamp_matching_deposit_convention(
+        &self,
+        stealth_address: &str,
+        ephemeral_public_key_hex: &str,
+        convention: StealthHashConvention,
+    ) {
+        let wanted_address = stealth_address.to_lowercase();
+        let wanted_key = normalize_hex_key(ephemeral_public_key_hex);
+        let Ok(mut state) = crate::deposits::load_deposits(&self.state.base_dir) else {
+            return;
+        };
+        let mut changed = false;
+        for deposit in &mut state.eth_stealth {
+            if deposit.stealth_address.to_lowercase() == wanted_address
+                && normalize_hex_key(&deposit.ephemeral_public_key_hex) == wanted_key
+                && deposit.stealth_hash_convention != convention
+            {
+                deposit.stealth_hash_convention = convention;
+                changed = true;
+            }
+        }
+        if changed {
+            let _ = crate::deposits::save_deposits(&self.state.base_dir, &state);
+        }
+    }
+
+    pub(crate) async fn eth_stealth_sign(
         &self,
         token: Option<&str>,
         body: EthStealthSignRequest,
     ) -> ServiceResult<EthStealthSignResponse> {
         let token = self.require_session(token)?;
+        let session_context = self.capture_session_operation_context(Some(token))?;
+        let _guard = self.acquire_session_operation(&session_context).await?;
         self.authorize_transaction_policy(TransactionPolicyCheck {
             kind: TransactionPolicyKind::RawDigest,
             destination_address: None,
@@ -270,6 +442,7 @@ impl SigillumService {
         })?;
         let wallet = body.wallet;
         let view_tag = decode_optional_view_tag(body.stealth.view_tag_hex.as_deref())?;
+        let convention = stealth_convention_or_standard(body.stealth.stealth_hash_convention);
         let stealth_address = body.stealth.stealth_address;
         let ephemeral_public_key_hex = body.stealth.ephemeral_public_key_hex;
         let digest = Zeroizing::new(decode_fixed_hex::<32>(&body.digest_hex, "digest")?);
@@ -278,17 +451,20 @@ impl SigillumService {
             self.with_active_vault(token, |vault, compartment_id| {
                 let master_key = vault
                     .extract_master_key()
-                    .ok_or_else(|| ServiceError::forbidden("Vault is locked."))?;
+                    .ok_or_else(|| ServiceError::vault_locked("Vault is locked."))?;
                 let derived =
                     derive_sigillum_ethereum_stealth_wallet(master_key.as_ref(), &wallet, "eth")
                         .map_err(map_wallet_error)?;
-                let signature = sign_ethereum_stealth_digest(
-                    &derived,
-                    &stealth_address,
-                    &ephemeral_public_key_hex,
-                    view_tag,
-                    digest.as_ref(),
-                )
+                let signature = probe_stealth_sign(convention, |convention| {
+                    sign_ethereum_stealth_digest(
+                        &derived,
+                        &stealth_address,
+                        &ephemeral_public_key_hex,
+                        view_tag,
+                        digest.as_ref(),
+                        convention,
+                    )
+                })
                 .map_err(map_wallet_error)?;
                 Ok((signature, compartment_id))
             })?;
@@ -310,12 +486,14 @@ impl SigillumService {
         })
     }
 
-    pub(crate) fn eth_stealth_sign_transfer(
+    pub(crate) async fn eth_stealth_sign_transfer(
         &self,
         token: Option<&str>,
         body: EthStealthSignTransferRequest,
     ) -> ServiceResult<EthSignedTransactionResponse> {
         let token = self.require_session(token)?;
+        let session_context = self.capture_session_operation_context(Some(token))?;
+        let _guard = self.acquire_session_operation(&session_context).await?;
         self.authorize_transaction_policy(TransactionPolicyCheck {
             kind: TransactionPolicyKind::RoutedTransfer,
             destination_address: Some(&body.destination_address),
@@ -324,6 +502,7 @@ impl SigillumService {
         })?;
         let wallet = body.wallet;
         let view_tag = decode_optional_view_tag(body.stealth.view_tag_hex.as_deref())?;
+        let convention = stealth_convention_or_standard(body.stealth.stealth_hash_convention);
         let max_priority_fee_per_gas = decode_quantity_hex(&body.fees.max_priority_fee_per_gas_hex)
             .map_err(map_wallet_error)?;
         let max_fee_per_gas =
@@ -333,25 +512,28 @@ impl SigillumService {
         let (signed, compartment_id) = self.with_active_vault(token, |vault, compartment_id| {
             let master_key = vault
                 .extract_master_key()
-                .ok_or_else(|| ServiceError::forbidden("Vault is locked."))?;
+                .ok_or_else(|| ServiceError::vault_locked("Vault is locked."))?;
             let derived =
                 derive_sigillum_ethereum_stealth_wallet(master_key.as_ref(), &wallet, "eth")
                     .map_err(map_wallet_error)?;
-            let signed = sign_ethereum_stealth_native_transfer(
-                &derived,
-                &body.stealth.stealth_address,
-                &body.stealth.ephemeral_public_key_hex,
-                view_tag,
-                &EthereumEip1559Transfer {
-                    chain_id: body.fees.chain_id,
-                    nonce: body.nonce,
-                    max_priority_fee_per_gas,
-                    max_fee_per_gas,
-                    gas_limit: body.gas_limit,
-                    destination_address: body.destination_address.clone(),
-                    value,
-                },
-            )
+            let signed = probe_stealth_sign(convention, |convention| {
+                sign_ethereum_stealth_native_transfer(
+                    &derived,
+                    &body.stealth.stealth_address,
+                    &body.stealth.ephemeral_public_key_hex,
+                    view_tag,
+                    &EthereumEip1559Transfer {
+                        chain_id: body.fees.chain_id,
+                        nonce: body.nonce,
+                        max_priority_fee_per_gas,
+                        max_fee_per_gas,
+                        gas_limit: body.gas_limit,
+                        destination_address: body.destination_address.clone(),
+                        value,
+                    },
+                    convention,
+                )
+            })
             .map_err(map_wallet_error)?;
             Ok((signed, compartment_id))
         })?;
@@ -380,12 +562,14 @@ impl SigillumService {
         })
     }
 
-    pub(crate) fn eth_stealth_sign_erc20_transfer(
+    pub(crate) async fn eth_stealth_sign_erc20_transfer(
         &self,
         token: Option<&str>,
         body: EthStealthSignErc20TransferRequest,
     ) -> ServiceResult<EthSignedTransactionResponse> {
         let token = self.require_session(token)?;
+        let session_context = self.capture_session_operation_context(Some(token))?;
+        let _guard = self.acquire_session_operation(&session_context).await?;
         self.authorize_transaction_policy(TransactionPolicyCheck {
             kind: TransactionPolicyKind::RoutedTransfer,
             destination_address: Some(&body.recipient_address),
@@ -394,6 +578,7 @@ impl SigillumService {
         })?;
         let wallet = body.wallet;
         let view_tag = decode_optional_view_tag(body.stealth.view_tag_hex.as_deref())?;
+        let convention = stealth_convention_or_standard(body.stealth.stealth_hash_convention);
         let max_priority_fee_per_gas = decode_quantity_hex(&body.fees.max_priority_fee_per_gas_hex)
             .map_err(map_wallet_error)?;
         let max_fee_per_gas =
@@ -403,26 +588,29 @@ impl SigillumService {
         let (signed, compartment_id) = self.with_active_vault(token, |vault, compartment_id| {
             let master_key = vault
                 .extract_master_key()
-                .ok_or_else(|| ServiceError::forbidden("Vault is locked."))?;
+                .ok_or_else(|| ServiceError::vault_locked("Vault is locked."))?;
             let derived =
                 derive_sigillum_ethereum_stealth_wallet(master_key.as_ref(), &wallet, "eth")
                     .map_err(map_wallet_error)?;
-            let signed = sign_ethereum_stealth_erc20_transfer(
-                &derived,
-                &body.stealth.stealth_address,
-                &body.stealth.ephemeral_public_key_hex,
-                view_tag,
-                &EthereumEip1559Erc20Transfer {
-                    chain_id: body.fees.chain_id,
-                    nonce: body.nonce,
-                    max_priority_fee_per_gas,
-                    max_fee_per_gas,
-                    gas_limit: body.gas_limit,
-                    token_address: body.token_address.clone(),
-                    recipient_address: body.recipient_address.clone(),
-                    amount,
-                },
-            )
+            let signed = probe_stealth_sign(convention, |convention| {
+                sign_ethereum_stealth_erc20_transfer(
+                    &derived,
+                    &body.stealth.stealth_address,
+                    &body.stealth.ephemeral_public_key_hex,
+                    view_tag,
+                    &EthereumEip1559Erc20Transfer {
+                        chain_id: body.fees.chain_id,
+                        nonce: body.nonce,
+                        max_priority_fee_per_gas,
+                        max_fee_per_gas,
+                        gas_limit: body.gas_limit,
+                        token_address: body.token_address.clone(),
+                        recipient_address: body.recipient_address.clone(),
+                        amount,
+                    },
+                    convention,
+                )
+            })
             .map_err(map_wallet_error)?;
             Ok((signed, compartment_id))
         })?;
@@ -466,15 +654,38 @@ fn parent_derivation_path(path: &str) -> String {
         .unwrap_or_else(|| path.to_string())
 }
 
+/// Check whether `ephemeral_public_key_hex` already appears on a recorded
+/// stealth deposit. Bare generate calls are not journaled anywhere, so only
+/// deposit records can be consulted.
+fn ephemeral_public_key_already_used(
+    ephemeral_public_key_hex: &str,
+    deposits: &[sigillum_api::EthStealthDeposit],
+) -> bool {
+    let wanted = normalize_hex_key(ephemeral_public_key_hex);
+    deposits
+        .iter()
+        .any(|deposit| normalize_hex_key(&deposit.ephemeral_public_key_hex) == wanted)
+}
+
+fn normalize_hex_key(value: &str) -> String {
+    let trimmed = value.trim();
+    let trimmed = trimmed
+        .strip_prefix("0x")
+        .or_else(|| trimmed.strip_prefix("0X"))
+        .unwrap_or(trimmed);
+    trimmed.to_lowercase()
+}
+
 #[cfg(test)]
 mod tests {
     use std::sync::Arc;
 
     use sigillum_api::{
-        EthStealthCheckRequest, EthStealthExportRequest, EthStealthGenerateRequest,
-        EthStealthSignErc20TransferRequest, EthStealthSignRequest, EthStealthSignTransferRequest,
-        EthXpubExportRequest, EthXpubWalletProfile, EvmProviderProfile, StealthPaymentRef,
-        TreasuryAllowedDestination, TreasuryPolicy,
+        EthStealthCheckRequest, EthStealthDeposit, EthStealthExportRequest,
+        EthStealthGenerateRequest, EthStealthSignErc20TransferRequest, EthStealthSignRequest,
+        EthStealthSignTransferRequest, EthStealthWalletProfile, EthXpubExportRequest,
+        EthXpubWalletProfile, EvmProviderProfile, StealthPaymentRef, TreasuryAllowedDestination,
+        TreasuryPolicy,
     };
     use sigillum_core::{
         derive_ethereum_account_xpub_from_mnemonic,
@@ -486,6 +697,7 @@ mod tests {
 
     use super::*;
     use crate::AppState;
+    use crate::deposits::{DepositState, save_deposits};
     use crate::inventory::{WalletInventoryState, save_wallet_inventory};
     use crate::profiles::{ProfileRegistry, save_profiles};
 
@@ -505,11 +717,12 @@ mod tests {
             stealth_address: payment.stealth_address.clone(),
             ephemeral_public_key_hex: payment.ephemeral_public_key_hex.clone(),
             view_tag_hex: Some(payment.view_tag_hex.clone()),
+            stealth_hash_convention: None,
         }
     }
 
-    #[test]
-    fn export_generate_check_and_sign_roundtrip() {
+    #[tokio::test]
+    async fn export_generate_check_and_sign_roundtrip() {
         let dir = TempDir::new().unwrap();
         let state =
             Arc::new(AppState::new(dir.path().to_path_buf()).expect("app state should initialize"));
@@ -543,6 +756,7 @@ mod tests {
                         stealth_address: payment.stealth_address.clone(),
                         ephemeral_public_key_hex: payment.ephemeral_public_key_hex.clone(),
                         view_tag_hex: Some(payment.view_tag_hex.clone()),
+                        stealth_hash_convention: None,
                     },
                 },
             )
@@ -558,10 +772,12 @@ mod tests {
                         stealth_address: payment.stealth_address.clone(),
                         ephemeral_public_key_hex: payment.ephemeral_public_key_hex.clone(),
                         view_tag_hex: Some(payment.view_tag_hex.clone()),
+                        stealth_hash_convention: None,
                     },
                     digest_hex: hex::encode([9u8; 32]),
                 },
             )
+            .await
             .unwrap();
         assert_eq!(signature.stealth_address, payment.stealth_address);
         assert_eq!(hex::decode(signature.signature_hex).unwrap().len(), 65);
@@ -575,6 +791,7 @@ mod tests {
                         stealth_address: payment.stealth_address.clone(),
                         ephemeral_public_key_hex: payment.ephemeral_public_key_hex.clone(),
                         view_tag_hex: Some(payment.view_tag_hex.clone()),
+                        stealth_hash_convention: None,
                     },
                     fees: sigillum_api::Eip1559Fees {
                         chain_id: 1,
@@ -587,6 +804,7 @@ mod tests {
                     value_wei_hex: "0xde0b6b3a7640000".into(),
                 },
             )
+            .await
             .unwrap();
         assert_eq!(signed_transfer.kind, "eth-transfer");
         assert!(signed_transfer.raw_transaction_hex.starts_with("02"));
@@ -600,6 +818,7 @@ mod tests {
                         stealth_address: payment.stealth_address,
                         ephemeral_public_key_hex: payment.ephemeral_public_key_hex.clone(),
                         view_tag_hex: Some(payment.view_tag_hex.clone()),
+                        stealth_hash_convention: None,
                     },
                     fees: sigillum_api::Eip1559Fees {
                         chain_id: 1,
@@ -613,13 +832,132 @@ mod tests {
                     amount_hex: "0x0f4240".into(),
                 },
             )
+            .await
             .unwrap();
         assert_eq!(signed_erc20.kind, "erc20-transfer");
         assert!(signed_erc20.data_hex.starts_with("a9059cbb"));
     }
 
+    /// Detection (`eth_stealth_check`) is watch-only: the service derives the
+    /// viewing private key + spending PUBLIC key via
+    /// `derive_watch_only_sigillum_ethereum_stealth_wallet` and never touches
+    /// the spending-key derivation. This test proves the daemon's check
+    /// result equals what the viewing key + spending public key ALONE produce
+    /// for the same compartment master key ([7u8; 32], known to the test) —
+    /// `EthereumStealthWatchView` has no field that could hold the spending
+    /// private key, so equality is achievable only if detection ran without
+    /// it.
     #[test]
-    fn enabled_policy_rejects_raw_digest_signing_by_default() {
+    fn check_runs_watch_only_from_viewing_key_and_spending_pubkey() {
+        let dir = TempDir::new().unwrap();
+        let state =
+            Arc::new(AppState::new(dir.path().to_path_buf()).expect("app state should initialize"));
+        state.unlock_compartment(0, [7u8; 32], meta(0, 1, "default"));
+        let session = state.create_session(Some(0));
+        let service = SigillumService::new(state.clone());
+
+        let meta = service
+            .eth_stealth_export(
+                Some(&session),
+                EthStealthExportRequest {
+                    wallet: "payments".into(),
+                    short_name: Some("eth".into()),
+                },
+            )
+            .unwrap();
+
+        // The watch-only view for the exact inputs the service uses: the
+        // exported meta-address (public info) must equal the watch-only
+        // derivation's — while the view itself carries no spending secret.
+        let watch_view = sigillum_core::derive_watch_only_sigillum_ethereum_stealth_wallet(
+            &[7u8; 32], "payments", "eth",
+        )
+        .unwrap();
+        assert_eq!(
+            watch_view.meta_address().stealth_meta_address,
+            meta.stealth_meta_address
+        );
+
+        for convention in [
+            StealthHashConvention::Compressed33,
+            StealthHashConvention::XOnly32,
+        ] {
+            let payment = sigillum_core::generate_ethereum_stealth_address(
+                &meta.stealth_meta_address,
+                Some([3u8; 32]),
+                convention,
+            )
+            .unwrap();
+            let view_tag = hex::decode(&payment.view_tag_hex).unwrap()[0];
+
+            // Daemon detection.
+            let check = service
+                .eth_stealth_check(
+                    Some(&session),
+                    EthStealthCheckRequest {
+                        wallet: "payments".into(),
+                        stealth: sigillum_api::StealthPaymentRef {
+                            stealth_address: payment.stealth_address.clone(),
+                            ephemeral_public_key_hex: payment.ephemeral_public_key_hex.clone(),
+                            view_tag_hex: Some(payment.view_tag_hex.clone()),
+                            stealth_hash_convention: None,
+                        },
+                    },
+                )
+                .unwrap();
+            assert!(
+                check.matches,
+                "daemon check must detect a {convention} payment"
+            );
+            assert_eq!(check.stealth_hash_convention, convention);
+
+            // Detection from the viewing key + spending public key alone
+            // (same core the scan delegates to) is byte-identical.
+            let watch_only = sigillum_core::check_ethereum_stealth_address_any_watch_only(
+                &watch_view,
+                &payment.stealth_address,
+                &payment.ephemeral_public_key_hex,
+                Some(view_tag),
+                &StealthHashConvention::PROBE_ORDER,
+            )
+            .unwrap();
+            assert!(watch_only.matches);
+            assert_eq!(
+                watch_only.derived_stealth_address,
+                check.derived_stealth_address
+            );
+            assert_eq!(watch_only.view_tag_hex, check.view_tag_hex);
+            assert_eq!(
+                watch_only.stealth_hash_convention,
+                check.stealth_hash_convention
+            );
+        }
+
+        // Watch-only ≠ lock-tolerant: the viewing key derives from the
+        // compartment master key, so after lock (master keys zeroized, no
+        // viewing-key cache by design) detection fails `vault_locked` even
+        // with a valid session.
+        state.lock_all();
+        let locked_session = state.create_session(Some(0));
+        let error = service
+            .eth_stealth_check(
+                Some(&locked_session),
+                EthStealthCheckRequest {
+                    wallet: "payments".into(),
+                    stealth: sigillum_api::StealthPaymentRef {
+                        stealth_address: "0x0000000000000000000000000000000000000001".into(),
+                        ephemeral_public_key_hex: meta.viewing_public_key_hex.clone(),
+                        view_tag_hex: None,
+                        stealth_hash_convention: None,
+                    },
+                },
+            )
+            .unwrap_err();
+        assert_eq!(error.code(), "vault_locked");
+    }
+
+    #[tokio::test]
+    async fn enabled_policy_rejects_raw_digest_signing_by_default() {
         let dir = TempDir::new().unwrap();
         let state =
             Arc::new(AppState::new(dir.path().to_path_buf()).expect("app state should initialize"));
@@ -685,10 +1023,209 @@ mod tests {
                     digest_hex: hex::encode([9u8; 32]),
                 },
             )
+            .await
             .unwrap_err();
 
         assert_eq!(error.message(), "policy_violation");
         assert_eq!(error.action(), Some("block_raw_digest"));
+    }
+
+    fn register_payments_stealth_profile(dir: &TempDir) {
+        save_profiles(
+            dir.path(),
+            &ProfileRegistry {
+                eth_stealth_wallets: vec![EthStealthWalletProfile {
+                    name: "payments".into(),
+                    wallet: "payments".into(),
+                    short_name: "eth".into(),
+                    provider_profile: "mainnet".into(),
+                    compartment_id: 0,
+                    chain_id: Some(1),
+                    default_destination_address: None,
+                    execution_enabled: false,
+                }],
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    }
+
+    fn deposit_record(
+        meta_address: &str,
+        stealth_address: &str,
+        ephemeral_public_key_hex: &str,
+    ) -> EthStealthDeposit {
+        EthStealthDeposit {
+            id: "dep_1".into(),
+            status: "pending".into(),
+            asset_kind: "native".into(),
+            wallet_profile: "payments".into(),
+            chain_id: 1,
+            chain_id_assumed: false,
+            wallet_compartment_id: 0,
+            provider_compartment_id: 0,
+            wallet: "payments".into(),
+            short_name: "eth".into(),
+            stealth_meta_address: meta_address.into(),
+            stealth_address: stealth_address.into(),
+            ephemeral_public_key_hex: ephemeral_public_key_hex.into(),
+            view_tag_hex: "0xaa".into(),
+            stealth_hash_convention: StealthHashConvention::STANDARD,
+            announcement: None,
+            token_address: None,
+            expected_amount_hex: None,
+            observed_amount_hex: None,
+            observed_native_balance_wei_hex: None,
+            auto_queue_sweep: false,
+            sweep_destination_address: None,
+            min_sweep_amount_hex: None,
+            queue_job_id: None,
+            queue_job_state: None,
+            note: None,
+            created_at_unix: 1,
+            updated_at_unix: 1,
+            last_checked_at_unix: None,
+            broadcast_transaction_hash_hex: None,
+            counterparty_id: None,
+            requested_gas_wei_hex: None,
+            gas_topup_job_id: None,
+            gas_topup_job_state: None,
+        }
+    }
+
+    #[test]
+    fn generate_warns_for_foreign_meta_address() {
+        let dir = TempDir::new().unwrap();
+        let state =
+            Arc::new(AppState::new(dir.path().to_path_buf()).expect("app state should initialize"));
+        let service = SigillumService::new(state);
+
+        // Derived from a master key this vault does not hold.
+        let foreign =
+            derive_sigillum_ethereum_stealth_wallet(&[9u8; 32], "foreign", "eth").unwrap();
+        let payment = service
+            .eth_stealth_generate(EthStealthGenerateRequest {
+                stealth_meta_address: foreign.meta_address().stealth_meta_address.clone(),
+                ephemeral_private_key_hex: None,
+            })
+            .unwrap();
+
+        assert_eq!(payment.warnings.len(), 1);
+        assert!(
+            payment.warnings[0]
+                .contains("does not match any of this vault's known stealth wallets")
+        );
+    }
+
+    #[test]
+    fn generate_omits_warnings_for_own_profile_meta_address() {
+        let dir = TempDir::new().unwrap();
+        let state =
+            Arc::new(AppState::new(dir.path().to_path_buf()).expect("app state should initialize"));
+        state.unlock_compartment(0, [7u8; 32], meta(0, 1, "default"));
+        let session = state.create_session(Some(0));
+        let service = SigillumService::new(state);
+        register_payments_stealth_profile(&dir);
+
+        let meta = service
+            .eth_stealth_export(
+                Some(&session),
+                EthStealthExportRequest {
+                    wallet: "payments".into(),
+                    short_name: Some("eth".into()),
+                },
+            )
+            .unwrap();
+        let payment = service
+            .eth_stealth_generate(EthStealthGenerateRequest {
+                stealth_meta_address: meta.stealth_meta_address,
+                ephemeral_private_key_hex: None,
+            })
+            .unwrap();
+
+        assert!(payment.warnings.is_empty());
+    }
+
+    #[test]
+    fn generate_omits_reuse_warning_on_first_ephemeral_key_use() {
+        let dir = TempDir::new().unwrap();
+        let state =
+            Arc::new(AppState::new(dir.path().to_path_buf()).expect("app state should initialize"));
+        state.unlock_compartment(0, [7u8; 32], meta(0, 1, "default"));
+        let session = state.create_session(Some(0));
+        let service = SigillumService::new(state);
+        register_payments_stealth_profile(&dir);
+
+        let meta = service
+            .eth_stealth_export(
+                Some(&session),
+                EthStealthExportRequest {
+                    wallet: "payments".into(),
+                    short_name: Some("eth".into()),
+                },
+            )
+            .unwrap();
+        let payment = service
+            .eth_stealth_generate(EthStealthGenerateRequest {
+                stealth_meta_address: meta.stealth_meta_address,
+                ephemeral_private_key_hex: Some(hex::encode([3u8; 32])),
+            })
+            .unwrap();
+
+        assert!(payment.warnings.is_empty());
+    }
+
+    #[test]
+    fn generate_warns_on_ephemeral_key_reuse() {
+        let dir = TempDir::new().unwrap();
+        let state =
+            Arc::new(AppState::new(dir.path().to_path_buf()).expect("app state should initialize"));
+        state.unlock_compartment(0, [7u8; 32], meta(0, 1, "default"));
+        let session = state.create_session(Some(0));
+        let service = SigillumService::new(state);
+        register_payments_stealth_profile(&dir);
+
+        let meta = service
+            .eth_stealth_export(
+                Some(&session),
+                EthStealthExportRequest {
+                    wallet: "payments".into(),
+                    short_name: Some("eth".into()),
+                },
+            )
+            .unwrap();
+        let first = service
+            .eth_stealth_generate(EthStealthGenerateRequest {
+                stealth_meta_address: meta.stealth_meta_address.clone(),
+                ephemeral_private_key_hex: Some(hex::encode([3u8; 32])),
+            })
+            .unwrap();
+        assert!(first.warnings.is_empty());
+
+        save_deposits(
+            dir.path(),
+            &DepositState {
+                eth_stealth: vec![deposit_record(
+                    &meta.stealth_meta_address,
+                    &first.stealth_address,
+                    &first.ephemeral_public_key_hex,
+                )],
+                announcement_scan_cursors: Vec::new(),
+            },
+        )
+        .unwrap();
+
+        let second = service
+            .eth_stealth_generate(EthStealthGenerateRequest {
+                stealth_meta_address: meta.stealth_meta_address,
+                ephemeral_private_key_hex: Some(hex::encode([3u8; 32])),
+            })
+            .unwrap();
+
+        // Same ephemeral key + same meta-address derives the identical address.
+        assert_eq!(second.stealth_address, first.stealth_address);
+        assert_eq!(second.warnings.len(), 1);
+        assert!(second.warnings[0].contains("ephemeral key was already used"));
     }
 
     #[test]

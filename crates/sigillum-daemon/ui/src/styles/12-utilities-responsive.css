@@ -1,18 +1,4 @@
-/* ── 18. Pin modal (created at runtime by fido2.ts) ───────────────────────── */
-
-.pin-modal {
-  width: min(420px, calc(100vw - 48px));
-  box-shadow: var(--shadow-3);
-}
-
-.pin-modal h2 {
-  font-size: var(--fs-base);
-  font-weight: 600;
-  line-height: 1.5;
-  margin-bottom: var(--space-3);
-}
-
-/* ── 19. Utilities ────────────────────────────────────────────────────────── */
+/* ── 19. Utilities ─────────────────────────────────────────────────────────── */
 
 .flex-1 { flex: 1 1 160px; min-width: 0; }
 .mt-8   { margin-top: var(--space-2); }
@@ -25,7 +11,7 @@ textarea.mono {
   font-size: var(--fs-xs);
 }
 
-/* ── 20. Scrollbars, selection, motion & responsive ───────────────────────── */
+/* ── 20. Scrollbars, selection, motion & responsive ──────────────────────── */
 
 ::selection {
   background: rgba(91, 124, 250, 0.35);
@@ -77,6 +63,16 @@ textarea.mono {
   }
 }
 
+@media (max-width: 1100px) {
+  .topbar-heading {
+    flex: 1 1 calc(100% - 220px);
+  }
+
+  .topbar-status {
+    flex: 1 1 100%;
+  }
+}
+
 @media (max-width: 960px) {
   .sidebar {
     position: static;
@@ -105,6 +101,7 @@ textarea.mono {
 
   .nav-item {
     width: auto;
+    min-height: 36px;
     padding: 6px 12px;
   }
 
@@ -118,11 +115,6 @@ textarea.mono {
     flex-direction: row;
     align-items: center;
     border-top: 0;
-    padding-top: 0;
-  }
-
-  .session-controls {
-    flex-direction: row;
     padding-top: 0;
   }
 
@@ -160,10 +152,5 @@ textarea.mono {
 
   .card {
     padding: var(--space-4);
-  }
-
-  .section-divider {
-    margin-left: calc(-1 * var(--space-4));
-    margin-right: calc(-1 * var(--space-4));
   }
 }

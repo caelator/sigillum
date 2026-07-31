@@ -6,9 +6,43 @@
 
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use sigillum_core::{EthereumStealthError, EthereumXpubError};
+use sigillum_core::{EthereumStealthError, EthereumXpubError, StealthHashConvention};
 
 use super::{ServiceError, ServiceResult};
+
+// ── Stealth hash-convention probing ──────────────────────────────
+
+/// Effective convention for a caller-supplied optional convention: the
+/// standard compressed-point convention when absent.
+pub(crate) fn stealth_convention_or_standard(
+    convention: Option<StealthHashConvention>,
+) -> StealthHashConvention {
+    convention.unwrap_or(StealthHashConvention::STANDARD)
+}
+
+/// Run a stealth signing/derivation `operation` with `preferred`, falling back
+/// to the other convention when the first attempt fails with
+/// [`EthereumStealthError::AddressMismatch`] or
+/// [`EthereumStealthError::ViewTagMismatch`].
+///
+/// This is the signing-side half of dual-decode: it covers deposit records
+/// whose stored convention is missing or wrong (corrupt/hand-edited store) and
+/// queue jobs enqueued before the convention switch (no convention field).
+/// Probing is safe because every stealth signing path verifies the derived
+/// stealth address before releasing key material — a wrong convention can
+/// never yield a wrong key, only a mismatch error. Any other error aborts
+/// without probing.
+pub(crate) fn probe_stealth_sign<T>(
+    preferred: StealthHashConvention,
+    operation: impl Fn(StealthHashConvention) -> Result<T, EthereumStealthError>,
+) -> Result<T, EthereumStealthError> {
+    match operation(preferred) {
+        Err(EthereumStealthError::AddressMismatch | EthereumStealthError::ViewTagMismatch) => {
+            operation(preferred.other())
+        }
+        result => result,
+    }
+}
 
 // ── Hex decoding ─────────────────────────────────────────────────
 
@@ -66,6 +100,7 @@ pub(crate) fn map_wallet_error(error: EthereumStealthError) -> ServiceError {
         | EthereumStealthError::InvalidEthereumAddress
         | EthereumStealthError::InvalidAnnouncementField(_)
         | EthereumStealthError::InvalidQuantity(_)
+        | EthereumStealthError::InvalidStealthHashConvention(_)
         | EthereumStealthError::InvalidFeeConfiguration => {
             ServiceError::bad_request(error.to_string())
         }
@@ -95,6 +130,44 @@ pub(crate) fn map_xpub_error(error: EthereumXpubError) -> ServiceError {
 }
 
 // ── u256 arithmetic ──────────────────────────────────────────────
+
+/// Saturating big-endian addition of two 256-bit quantities.
+pub(crate) fn add_u256(left: &[u8; 32], right: &[u8; 32]) -> [u8; 32] {
+    let mut out = [0u8; 32];
+    let mut carry = 0u16;
+    for index in (0..32).rev() {
+        let sum = left[index] as u16 + right[index] as u16 + carry;
+        out[index] = (sum & 0xff) as u8;
+        carry = sum >> 8;
+    }
+    if carry > 0 {
+        // Saturate rather than wrap: an overflowing treasury total is already
+        // far outside plausible balances, and wrapping would understate value.
+        return [0xff; 32];
+    }
+    out
+}
+
+pub(crate) fn encode_quantity_hex(value: &[u8; 32]) -> String {
+    let first_nonzero = value.iter().position(|byte| *byte != 0);
+    match first_nonzero {
+        None => "0x0".to_string(),
+        Some(start) => {
+            let mut encoded = String::with_capacity(2 + (32 - start) * 2);
+            encoded.push_str("0x");
+            let mut rendered = false;
+            for byte in &value[start..] {
+                if rendered {
+                    encoded.push_str(&format!("{byte:02x}"));
+                } else {
+                    encoded.push_str(&format!("{byte:x}"));
+                    rendered = true;
+                }
+            }
+            encoded
+        }
+    }
+}
 
 /// Compare two big-endian 256-bit unsigned integers.
 pub(crate) fn compare_u256(left: &[u8; 32], right: &[u8; 32]) -> std::cmp::Ordering {

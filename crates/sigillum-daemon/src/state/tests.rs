@@ -1,4 +1,6 @@
 use super::*;
+use crate::audit_db::AuditQuery;
+use crate::audit_log::AuditEventSpec;
 
 const POISON_CHILD_ENV: &str = "SIGILLUM_TEST_POISONED_MUTEX_CHILD";
 
@@ -74,6 +76,58 @@ fn sessions_track_active_compartments_independently() {
 }
 
 #[test]
+fn internal_sessions_do_not_consume_or_displace_user_capacity() {
+    let dir = TempDir::new().unwrap();
+    let state = AppState::new(dir.path().to_path_buf()).expect("app state should initialize");
+
+    state.unlock_compartment(0, [1u8; 32], meta(0, 1, "daily"));
+    let user_sessions: Vec<String> = (0..MAX_SESSIONS)
+        .map(|_| state.create_session(Some(0)))
+        .collect();
+    let internal = state.create_internal_session(Some(0));
+
+    assert_eq!(state.session_count(), MAX_SESSIONS);
+    assert!(state.verify_token_passive(&internal));
+    assert!(
+        user_sessions
+            .iter()
+            .all(|session| state.verify_token_passive(session)),
+        "all user sessions must survive while an internal session is active"
+    );
+
+    let replacement = state.create_session(Some(0));
+    assert_eq!(state.session_count(), MAX_SESSIONS);
+    assert!(state.verify_token_passive(&internal));
+    assert!(state.verify_token_passive(&replacement));
+    assert_eq!(
+        user_sessions
+            .iter()
+            .filter(|session| state.verify_token_passive(session))
+            .count(),
+        MAX_SESSIONS - 1,
+        "only the oldest user session should be evicted at user capacity"
+    );
+
+    state.revoke_session(&internal);
+    assert_eq!(state.session_count(), MAX_SESSIONS);
+}
+
+#[test]
+fn internal_session_does_not_defer_operator_idle_lock() {
+    let dir = TempDir::new().unwrap();
+    let state = AppState::new(dir.path().to_path_buf()).expect("app state should initialize");
+
+    state.unlock_compartment(0, [1u8; 32], meta(0, 1, "daily"));
+    let internal = state.create_internal_session(Some(0));
+
+    assert!(state.verify_token_passive(&internal));
+    assert!(
+        state.idle_lock_due(),
+        "an internal scheduler token is not operator presence"
+    );
+}
+
+#[test]
 fn removing_active_compartment_repoints_sessions() {
     let dir = TempDir::new().unwrap();
     let state = AppState::new(dir.path().to_path_buf()).expect("app state should initialize");
@@ -121,6 +175,103 @@ fn idle_sessions_are_rejected_and_removed() {
 
     assert!(!state.verify_token(&session));
     assert_eq!(state.session_count(), 0);
+}
+
+/// Both validation entry points authenticate without refreshing activity.
+/// Only the successful interactive-request boundary may call
+/// `touch_session_activity`.
+#[test]
+fn passive_and_standard_validation_do_not_refresh_activity() {
+    let dir = TempDir::new().unwrap();
+    let state = AppState::new(dir.path().to_path_buf()).expect("app state should initialize");
+
+    state.unlock_compartment(0, [1u8; 32], meta(0, 1, "daily"));
+    let session = state.create_session(Some(0));
+
+    let before = state.sessions.lock().get(&session).unwrap().last_activity;
+    assert!(state.verify_token_passive(&session));
+    let after_passive = state.sessions.lock().get(&session).unwrap().last_activity;
+    assert_eq!(
+        before, after_passive,
+        "passive verify must not touch last_activity"
+    );
+
+    std::thread::sleep(Duration::from_millis(10));
+    assert!(state.verify_token(&session));
+    let after_standard = state.sessions.lock().get(&session).unwrap().last_activity;
+    assert_eq!(
+        after_standard, after_passive,
+        "ordinary token validation must not refresh last_activity"
+    );
+}
+
+/// The contract that keeps an always-open SSE stream from defeating the
+/// vault auto-lock: a session that only ever had passive reads is still
+/// evicted once it goes idle past `idle_lock_secs`.
+#[test]
+fn passive_only_session_is_still_evicted_on_idle_timeout() {
+    let dir = TempDir::new().unwrap();
+    let state = AppState::new(dir.path().to_path_buf()).expect("app state should initialize");
+
+    state.unlock_compartment(0, [1u8; 32], meta(0, 1, "daily"));
+    let session = state.create_session(Some(0));
+
+    // Repeated passive verifies (an SSE connect plus reconnects) succeed...
+    assert!(state.verify_token_passive(&session));
+    assert!(state.verify_token_passive(&session));
+
+    // ...but the idle clock keeps running from the last ACTIVE request.
+    {
+        let mut sessions = state.sessions.lock();
+        sessions.get_mut(&session).unwrap().last_activity =
+            Instant::now() - Duration::from_secs(state.runtime_policy().idle_lock_secs + 1);
+    }
+
+    // The next verify — passive or active — evicts it.
+    assert!(!state.verify_token_passive(&session));
+    assert!(!state.verify_token(&session));
+    assert_eq!(state.session_count(), 0);
+    assert!(state.idle_lock_due());
+}
+
+#[test]
+fn validation_does_not_touch_idle_activity_but_explicit_touch_does() {
+    let dir = TempDir::new().unwrap();
+    let state = AppState::new(dir.path().to_path_buf()).expect("app state should initialize");
+
+    state.unlock_compartment(0, [1u8; 32], meta(0, 1, "daily"));
+    let session = state.create_session(Some(0));
+    let prior_idle = Duration::from_secs(state.runtime_policy().idle_lock_secs - 10);
+    {
+        let mut sessions = state.sessions.lock();
+        sessions.get_mut(&session).unwrap().last_activity = Instant::now() - prior_idle;
+    }
+
+    for _ in 0..3 {
+        assert!(state.verify_token(&session));
+    }
+    assert!(
+        state
+            .sessions
+            .lock()
+            .get(&session)
+            .unwrap()
+            .last_activity
+            .elapsed()
+            >= prior_idle.saturating_sub(Duration::from_secs(1))
+    );
+
+    state.touch_session_activity(&session);
+    assert!(
+        state
+            .sessions
+            .lock()
+            .get(&session)
+            .unwrap()
+            .last_activity
+            .elapsed()
+            < Duration::from_secs(1)
+    );
 }
 
 #[test]
@@ -177,6 +328,62 @@ fn locking_state_rejects_session_validation_until_lock_finishes() {
     assert!(!state.verify_token(&session));
     state.lock_all();
     assert!(!state.is_locking());
+}
+
+#[tokio::test]
+async fn forced_idle_lock_keeps_broadcast_latched_until_operation_drains() {
+    let dir = TempDir::new().unwrap();
+    let state =
+        std::sync::Arc::new(AppState::new(dir.path().to_path_buf()).expect("app state init"));
+
+    state.unlock_compartment(0, [1u8; 32], meta(0, 1, "daily"));
+    let session = state.create_session(Some(0));
+    {
+        let mut sessions = state.sessions.lock();
+        sessions.get_mut(&session).unwrap().last_activity =
+            Instant::now() - Duration::from_secs(state.runtime_policy().idle_lock_secs + 1);
+    }
+
+    // Model an authenticated funds-moving operation that already owns the
+    // mutation boundary when the idle lock latches.
+    let in_flight_operation = state.operation_guard().await;
+    assert!(state.idle_lock_due());
+    assert!(state.begin_locking());
+
+    let completing_state = state.clone();
+    let forced_lock = tokio::spawn(async move {
+        crate::complete_idle_lock(
+            completing_state.as_ref(),
+            Duration::ZERO,
+            Some(Duration::ZERO),
+        )
+        .await;
+    });
+
+    tokio::time::timeout(Duration::from_secs(1), async {
+        while state.is_unlocked() {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("forced idle lock should zeroize before the operation drains");
+
+    assert!(state.is_locking());
+    assert!(!state.admit_broadcast_if_ready());
+    assert!(
+        !forced_lock.is_finished(),
+        "lock completion must wait for the in-flight operation boundary"
+    );
+
+    drop(in_flight_operation);
+    tokio::time::timeout(Duration::from_secs(1), forced_lock)
+        .await
+        .expect("forced idle lock should finish after the operation drains")
+        .expect("forced idle lock task should not panic");
+
+    assert!(!state.is_locking());
+    assert!(!state.is_unlocked());
+    assert!(!state.verify_token(&session));
 }
 
 #[test]

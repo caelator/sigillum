@@ -292,6 +292,7 @@ fn test_eth_stealth_check_request_roundtrip() {
             stealth_address: "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".to_string(),
             ephemeral_public_key_hex: "0xephemeral".to_string(),
             view_tag_hex: Some("0xaa".to_string()),
+            stealth_hash_convention: None,
         },
     };
     roundtrip_test(req);
@@ -452,6 +453,7 @@ fn test_optional_eth_address_validation_allows_omitted_address() {
             stealth_address: "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".to_string(),
             ephemeral_public_key_hex: "0xeph".to_string(),
             view_tag_hex: None,
+            stealth_hash_convention: None,
         },
         value_wei_hex: "0x100".to_string(),
         destination_address: None,
@@ -486,6 +488,7 @@ fn test_eth_stealth_send_transfer_request_full() {
             stealth_address: "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".to_string(),
             ephemeral_public_key_hex: "0xeph".to_string(),
             view_tag_hex: Some("0xaa".to_string()),
+            stealth_hash_convention: None,
         },
         fees: Eip1559Fees {
             chain_id: 1,
@@ -513,6 +516,7 @@ fn test_eth_stealth_send_transfer_request_minimal() {
             stealth_address: "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".to_string(),
             ephemeral_public_key_hex: "0xeph".to_string(),
             view_tag_hex: None,
+            stealth_hash_convention: None,
         },
         fees: Eip1559Fees {
             chain_id: 1,
@@ -594,6 +598,7 @@ fn test_eth_stealth_send_erc20_transfer_request_roundtrip() {
             stealth_address: "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".to_string(),
             ephemeral_public_key_hex: "0xeph".to_string(),
             view_tag_hex: None,
+            stealth_hash_convention: None,
         },
         fees: Eip1559Fees {
             chain_id: 1,
@@ -649,6 +654,28 @@ fn test_evm_provider_profile_upsert_request_minimal() {
         fee_estimation_enabled: None,
     };
     roundtrip_test(req);
+}
+
+#[test]
+fn test_evm_profile_delete_request_prune_inventory_is_additive() {
+    // Legacy payloads (no flag) deserialize with the cascade off...
+    let legacy: EvmProfileDeleteRequest = serde_json::from_str(r#"{"name":"seed-main"}"#).unwrap();
+    assert_eq!(legacy.prune_inventory, None);
+
+    // ...and serializing without the flag stays byte-identical to legacy.
+    let req = EvmProfileDeleteRequest {
+        name: "seed-main".to_string(),
+        prune_inventory: None,
+    };
+    assert_eq!(
+        serde_json::to_string(&req).unwrap(),
+        r#"{"name":"seed-main"}"#
+    );
+
+    roundtrip_test(EvmProfileDeleteRequest {
+        name: "seed-main".to_string(),
+        prune_inventory: Some(true),
+    });
 }
 
 #[test]
@@ -820,6 +847,8 @@ fn test_wallet_inventory_scan_request_roundtrip() {
         gap_limit: Some(20),
         max_index: Some(200),
         resume_from_latest_checkpoint: Some(true),
+        run_async: Some(true),
+        partition_providers: Some(true),
         token_addresses: vec!["0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48".to_string()],
         block_tag: Some("latest".to_string()),
         probe_token_registry: Some(true),
@@ -1090,6 +1119,7 @@ fn test_eth_stealth_send_with_profile_request_roundtrip() {
             stealth_address: "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".to_string(),
             ephemeral_public_key_hex: "0xeph".to_string(),
             view_tag_hex: None,
+            stealth_hash_convention: None,
         },
         value_wei_hex: "0x100".to_string(),
         destination_address: Some("0x000000000000000000000000000000000000dEaD".to_string()),
@@ -1109,6 +1139,7 @@ fn test_eth_stealth_send_erc20_with_profile_request_roundtrip() {
             stealth_address: "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".to_string(),
             ephemeral_public_key_hex: "0xeph".to_string(),
             view_tag_hex: Some("0xff".to_string()),
+            stealth_hash_convention: None,
         },
         token_address: "0x2222222222222222222222222222222222222222".to_string(),
         recipient_address: "0x4444444444444444444444444444444444444444".to_string(),
@@ -1129,6 +1160,7 @@ fn test_queue_eth_stealth_native_sweep_request_full() {
             stealth_address: "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".to_string(),
             ephemeral_public_key_hex: "0xeph".to_string(),
             view_tag_hex: Some("0xaa".to_string()),
+            stealth_hash_convention: None,
         },
         destination_address: Some("0x000000000000000000000000000000000000dEaD".to_string()),
         min_value_wei_hex: Some("0x1".to_string()),
@@ -1147,6 +1179,8 @@ fn test_eth_stealth_deposit_create_native_request_roundtrip() {
         min_sweep_value_wei_hex: Some("0x10".to_string()),
         note: Some("test deposit".to_string()),
         ephemeral_private_key_hex: None,
+        request_gas: Some(true),
+        gas_amount_wei_hex: Some("0x5208".to_string()),
     };
     roundtrip_test(req);
 }
@@ -1162,8 +1196,50 @@ fn test_eth_stealth_deposit_create_erc20_request_roundtrip() {
         min_sweep_amount_hex: None,
         note: None,
         ephemeral_private_key_hex: Some("0xkey".to_string()),
+        request_gas: Some(true),
+        gas_amount_wei_hex: Some("0x5208".to_string()),
     };
     roundtrip_test(req);
+}
+
+#[test]
+fn test_eth_stealth_deposit_create_gas_amount_requires_request_gas() {
+    let base = EthStealthDepositCreateNativeRequest {
+        wallet_profile: "profile1".to_string(),
+        expected_value_wei_hex: None,
+        auto_queue_sweep: None,
+        sweep_destination_address: None,
+        min_sweep_value_wei_hex: None,
+        note: None,
+        ephemeral_private_key_hex: None,
+        request_gas: None,
+        gas_amount_wei_hex: Some("0x5208".to_string()),
+    };
+    assert_eq!(
+        base.validate().unwrap_err(),
+        "gas_amount_wei_hex requires request_gas"
+    );
+    let erc20 = EthStealthDepositCreateErc20Request {
+        wallet_profile: "profile1".to_string(),
+        token_address: "0x2222222222222222222222222222222222222222".to_string(),
+        expected_amount_hex: None,
+        auto_queue_sweep: None,
+        sweep_destination_address: None,
+        min_sweep_amount_hex: None,
+        note: None,
+        ephemeral_private_key_hex: None,
+        request_gas: Some(false),
+        gas_amount_wei_hex: Some("0x5208".to_string()),
+    };
+    assert_eq!(
+        erc20.validate().unwrap_err(),
+        "gas_amount_wei_hex requires request_gas"
+    );
+    let ok = EthStealthDepositCreateErc20Request {
+        request_gas: Some(true),
+        ..erc20
+    };
+    ok.validate().unwrap();
 }
 
 #[test]
@@ -1198,7 +1274,7 @@ fn test_eth_stealth_deposit_refresh_request_empty() {
 fn test_eth_stealth_announcement_scan_request_roundtrip() {
     let req = EthStealthAnnouncementScanRequest {
         wallet_profile: "profile2".to_string(),
-        from_block: "0x100".to_string(),
+        from_block: Some("0x100".to_string()),
         to_block: Some("latest".to_string()),
         token_address: Some("0x2222222222222222222222222222222222222222".to_string()),
         limit: Some(250),
@@ -1206,7 +1282,31 @@ fn test_eth_stealth_announcement_scan_request_roundtrip() {
         sweep_destination_address: Some("0x000000000000000000000000000000000000dEaD".to_string()),
         min_sweep_amount_hex: Some("0x10".to_string()),
         note: Some("scan known claim window".to_string()),
+        reset_cursor: Some(true),
     };
+    roundtrip_test(req);
+}
+
+#[test]
+fn test_eth_stealth_announcement_scan_request_cursor_resume_defaults() {
+    // Plan task 2.6: a cursor-resuming scan omits `from_block` entirely;
+    // legacy payloads without it (and without `reset_cursor`) deserialize to
+    // the same shape.
+    let req = EthStealthAnnouncementScanRequest {
+        wallet_profile: "profile2".to_string(),
+        from_block: None,
+        to_block: None,
+        token_address: None,
+        limit: None,
+        auto_queue_sweep: None,
+        sweep_destination_address: None,
+        min_sweep_amount_hex: None,
+        note: None,
+        reset_cursor: None,
+    };
+    let legacy: EthStealthAnnouncementScanRequest =
+        serde_json::from_value(serde_json::json!({ "wallet_profile": "profile2" })).unwrap();
+    assert_eq!(req, legacy);
     roundtrip_test(req);
 }
 
@@ -1225,6 +1325,7 @@ fn test_maintenance_run_request_full() {
         deposit_refresh_limit: Some(50),
         queue_process_limit: Some(100),
         auto_enqueue: Some(true),
+        run_async: Some(true),
     };
     roundtrip_test(req);
 }
@@ -1235,6 +1336,7 @@ fn test_maintenance_run_request_empty() {
         deposit_refresh_limit: None,
         queue_process_limit: None,
         auto_enqueue: None,
+        run_async: None,
     };
     roundtrip_test(req);
 }
@@ -1244,6 +1346,7 @@ fn test_queue_process_request_with_id() {
     let req = QueueProcessRequest {
         id: Some("job_123".to_string()),
         limit: Some(5),
+        run_async: None,
     };
     roundtrip_test(req);
 }
@@ -1253,6 +1356,7 @@ fn test_queue_process_request_empty() {
     let req = QueueProcessRequest {
         id: None,
         limit: None,
+        run_async: None,
     };
     roundtrip_test(req);
 }
@@ -1350,18 +1454,41 @@ fn test_treasury_receive_allocate_request_roundtrip() {
         purpose: "counterparty-acme".to_string(),
         label: Some("Acme invoices".to_string()),
         counterparty_id: None,
+        one_time: None,
+        sweep_destination_address: None,
+        min_sweep_amount_hex: None,
+        purge_after_sweep: None,
     });
     roundtrip_test(TreasuryReceiveAllocateRequest {
         wallet_profile: "seed-main".to_string(),
         purpose: "grant-payout".to_string(),
         label: None,
         counterparty_id: None,
+        one_time: None,
+        sweep_destination_address: None,
+        min_sweep_amount_hex: None,
+        purge_after_sweep: None,
     });
     roundtrip_test(TreasuryReceiveAllocateRequest {
         wallet_profile: "seed-main".to_string(),
         purpose: "counterparty-acme".to_string(),
         label: None,
         counterparty_id: Some("cp_1".to_string()),
+        one_time: None,
+        sweep_destination_address: None,
+        min_sweep_amount_hex: None,
+        purge_after_sweep: None,
+    });
+    // Plan task 3.3 one-time mode fields.
+    roundtrip_test(TreasuryReceiveAllocateRequest {
+        wallet_profile: "seed-main".to_string(),
+        purpose: "one-time-invoice".to_string(),
+        label: None,
+        counterparty_id: Some("cp_1".to_string()),
+        one_time: Some(true),
+        sweep_destination_address: Some("0x2222222222222222222222222222222222222222".to_string()),
+        min_sweep_amount_hex: Some("0xde0b6b3a7640000".to_string()),
+        purge_after_sweep: Some(true),
     });
 }
 
@@ -1370,6 +1497,53 @@ fn test_treasury_receive_rotate_request_roundtrip() {
     roundtrip_test(TreasuryReceiveRotateRequest {
         allocation_id: "alloc_123".to_string(),
     });
+}
+
+#[test]
+fn test_treasury_receive_purge_request_roundtrip() {
+    roundtrip_test(TreasuryReceivePurgeRequest {
+        allocation_id: "alloc_123".to_string(),
+    });
+}
+
+#[test]
+fn test_wallet_inventory_address_prune_request_roundtrip_and_validation() {
+    roundtrip_test(WalletInventoryAddressPruneRequest {
+        address: Some("0x1111111111111111111111111111111111111111".to_string()),
+        wallet_family: Some("eth-seed".to_string()),
+        wallet_profile: Some("seed-main".to_string()),
+        provider_profile: Some("mainnet".to_string()),
+        chain_id: Some(1),
+        account_index: Some(0),
+    });
+
+    let by_profile = WalletInventoryAddressPruneRequest {
+        wallet_profile: Some("seed-main".to_string()),
+        ..WalletInventoryAddressPruneRequest::default()
+    };
+    assert!(by_profile.validate().is_ok());
+    let by_account = WalletInventoryAddressPruneRequest {
+        account_index: Some(3),
+        ..WalletInventoryAddressPruneRequest::default()
+    };
+    assert!(by_account.validate().is_ok());
+
+    // Fail closed: no selector, a malformed address, or an unknown family.
+    assert!(
+        WalletInventoryAddressPruneRequest::default()
+            .validate()
+            .is_err()
+    );
+    let bad_address = WalletInventoryAddressPruneRequest {
+        address: Some("not-an-address".to_string()),
+        ..WalletInventoryAddressPruneRequest::default()
+    };
+    assert!(bad_address.validate().is_err());
+    let bad_family = WalletInventoryAddressPruneRequest {
+        wallet_family: Some("btc".to_string()),
+        ..WalletInventoryAddressPruneRequest::default()
+    };
+    assert!(bad_family.validate().is_err());
 }
 
 #[test]
@@ -1394,6 +1568,96 @@ fn test_counterparty_update_request_roundtrip() {
         note: None,
         sweep_destination_address: Some("0x6666666666666666666666666666666666666666".into()),
     });
+    roundtrip_test(CounterpartyUpdateRequest {
+        id: "cp_1".into(),
+        name: "Acme".into(),
+        note: None,
+        sweep_destination_address: Some("   ".into()),
+    });
+
+    let omitted: CounterpartyUpdateRequest =
+        serde_json::from_str(r#"{"id":"cp_1","name":"Acme"}"#).unwrap();
+    assert_eq!(omitted.sweep_destination_address, None);
+    let explicit_blank: CounterpartyUpdateRequest =
+        serde_json::from_str(r#"{"id":"cp_1","name":"Acme","sweep_destination_address":""}"#)
+            .unwrap();
+    assert_eq!(
+        explicit_blank.sweep_destination_address.as_deref(),
+        Some("")
+    );
+}
+
+#[test]
+fn test_counterparty_update_sweep_destination_accepts_blank_or_valid_only() {
+    for destination in [
+        "",
+        "   ",
+        "0x6666666666666666666666666666666666666666",
+        "  0x6666666666666666666666666666666666666666  ",
+    ] {
+        let request = CounterpartyUpdateRequest {
+            id: "cp_1".into(),
+            name: "Acme".into(),
+            note: None,
+            sweep_destination_address: Some(destination.into()),
+        };
+        assert!(
+            request.validate().is_ok(),
+            "blank or valid destination should validate: {destination:?}"
+        );
+    }
+
+    for destination in ["not-an-address", "0x123"] {
+        let request = CounterpartyUpdateRequest {
+            id: "cp_1".into(),
+            name: "Acme".into(),
+            note: None,
+            sweep_destination_address: Some(destination.into()),
+        };
+        let error = request
+            .validate()
+            .expect_err("malformed nonblank destination must fail validation");
+        assert!(error.contains("sweep_destination_address"), "{error}");
+    }
+
+    let oversized_blank = CounterpartyUpdateRequest {
+        id: "cp_1".into(),
+        name: "Acme".into(),
+        note: None,
+        sweep_destination_address: Some(" ".repeat(129)),
+    };
+    let error = oversized_blank
+        .validate()
+        .expect_err("oversized blank destination must retain the input bound");
+    assert!(error.contains("sweep_destination_address"), "{error}");
+}
+
+#[test]
+fn test_counterparty_update_fields_preserve_fail_fast_order_and_name_destination() {
+    let request = CounterpartyUpdateRequest {
+        id: "i".repeat(257),
+        name: " ".into(),
+        note: Some("n".repeat(1025)),
+        sweep_destination_address: Some("0x123".into()),
+    };
+
+    let failure = request.validate_fields().unwrap_err();
+    let paths: Vec<&str> = failure
+        .fields()
+        .iter()
+        .map(|field| field.field.as_str())
+        .collect();
+    assert_eq!(
+        paths,
+        vec!["id", "name", "note", "sweep_destination_address"]
+    );
+    assert_eq!(request.validate().unwrap_err(), failure.message());
+    assert!(failure.message().starts_with("id exceeds maximum length"));
+    assert!(
+        failure.fields()[3]
+            .message
+            .contains("must be a valid ethereum address")
+    );
 }
 
 #[test]
@@ -1441,4 +1705,395 @@ fn test_self_check_run_request_validation() {
         domains: vec!["p".repeat(65)],
     };
     assert!(oversize.validate().is_err());
+}
+
+// ── Field-level validation (validate_fields) ─────────────────────
+
+#[test]
+fn test_validate_fields_default_wraps_single_string_without_fields() {
+    // DTOs that only implement `validate()` report one failure with no
+    // per-field breakdown.
+    let req = PassphraseRequest {
+        passphrase: "x".repeat(2048),
+    };
+    let failure = req.validate_fields().unwrap_err();
+    assert!(failure.message().contains("passphrase"));
+    assert!(failure.fields().is_empty());
+}
+
+#[test]
+fn test_evm_provider_profile_upsert_fields_accumulate_with_flattened_paths() {
+    let req = EvmProviderProfileUpsertRequest {
+        name: "n".repeat(300),
+        provider: EvmProviderRef {
+            rpc_url: "u".repeat(2100),
+            auth_token_key: Some("k".repeat(600)),
+            compartment_id: None,
+        },
+        chain_id: 1,
+        max_priority_fee_per_gas_hex: None,
+        max_fee_per_gas_hex: Some("f".repeat(4100)),
+        native_gas_limit: None,
+        erc20_gas_limit: None,
+        fee_estimation_enabled: None,
+    };
+    let failure = req.validate_fields().unwrap_err();
+    let paths: Vec<&str> = failure.fields().iter().map(|f| f.field.as_str()).collect();
+    // `provider` is #[serde(flatten)] on the wire, so rpc_url/auth_token_key
+    // stay top-level field paths.
+    assert_eq!(
+        paths,
+        vec!["name", "rpc_url", "auth_token_key", "max_fee_per_gas_hex"]
+    );
+    // Legacy single-string contract: first field message, byte-identical.
+    assert_eq!(req.validate().unwrap_err(), failure.message());
+    assert!(failure.fields()[0].message.contains("name"));
+}
+
+#[test]
+fn test_eth_xpub_wallet_profile_upsert_fields_cover_cross_field_rules() {
+    let req = EthXpubWalletProfileUpsertRequest {
+        name: "treasury_receive".to_string(),
+        project_account: 7,
+        provider_profile: "mainnet".to_string(),
+        compartment_id: None,
+        chain_id: None,
+        external_receive_xpub: None,
+        external_receive_path: Some("m/44'/60'/7'/1".to_string()),
+        external_account_xpub: None,
+        external_account_path: Some("m/44'/60'/7'".to_string()),
+        default_destination_address: Some("not-an-address".to_string()),
+        execution_enabled: None,
+    };
+    let failure = req.validate_fields().unwrap_err();
+    let paths: Vec<&str> = failure.fields().iter().map(|f| f.field.as_str()).collect();
+    assert_eq!(
+        paths,
+        vec![
+            "external_receive_path",
+            "external_account_path",
+            "external_receive_path",
+            "default_destination_address"
+        ]
+    );
+    assert_eq!(
+        failure.fields()[0].message,
+        "external_receive_path requires external_receive_xpub"
+    );
+    assert_eq!(
+        failure.fields()[2].message,
+        "external_receive_path and external_account_path are mutually exclusive"
+    );
+    // Single-error case keeps the historical message exactly.
+    assert_eq!(
+        req.validate().unwrap_err(),
+        "external_receive_path requires external_receive_xpub"
+    );
+}
+
+#[test]
+fn test_eth_seed_wallet_profile_upsert_fields_accumulate() {
+    let req = EthSeedWalletProfileUpsertRequest {
+        name: "n".repeat(300),
+        label: None,
+        mnemonic: "abandon abandon abandon".to_string(),
+        mnemonic_passphrase: None,
+        project_account: 0,
+        provider_profile: "mainnet".to_string(),
+        compartment_id: None,
+        chain_id: None,
+        default_destination_address: Some("0xnothex".to_string()),
+        execution_enabled: None,
+    };
+    let failure = req.validate_fields().unwrap_err();
+    let paths: Vec<&str> = failure.fields().iter().map(|f| f.field.as_str()).collect();
+    assert_eq!(paths, vec!["name", "default_destination_address"]);
+    assert!(
+        failure.fields()[1]
+            .message
+            .contains("must be a valid ethereum address")
+    );
+}
+
+#[test]
+fn test_wallet_inventory_scan_fields_use_indexed_paths() {
+    let req = WalletInventoryScanRequest {
+        wallet_family: None,
+        wallet_profile: None,
+        provider_profile: Some("mainnet".to_string()),
+        all_configured_chains: Some(true),
+        derivation_pattern: None,
+        account_limit: None,
+        watch_addresses: vec![WatchAddressProbe {
+            address: "0xnothex".to_string(),
+            label: None,
+        }],
+        include_watch_book: None,
+        gap_limit: None,
+        max_index: None,
+        resume_from_latest_checkpoint: None,
+        run_async: None,
+        partition_providers: None,
+        token_addresses: vec![
+            "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48".to_string(),
+            "0xtooshort".to_string(),
+        ],
+        block_tag: None,
+        probe_token_registry: None,
+        discover_erc20_transfers: None,
+        token_discovery_from_block: None,
+        token_discovery_to_block: None,
+        token_discovery_limit: None,
+        discover_erc20_allowances: None,
+        allowance_spender_addresses: Vec::new(),
+        allowance_discovery_limit: None,
+        discover_permit2_allowances: None,
+        permit2_contract_addresses: Vec::new(),
+        permit2_spender_addresses: Vec::new(),
+        permit2_allowance_limit: None,
+        discover_erc721_transfers: None,
+        discover_erc1155_transfers: None,
+        discover_nft_operator_approvals: None,
+        nft_operator_addresses: Vec::new(),
+        nft_operator_approval_limit: None,
+        discover_defi_token_positions: None,
+        defi_token_probes: Vec::new(),
+        defi_position_limit: None,
+        discover_claim_candidates: None,
+        claim_candidate_probes: Vec::new(),
+        claim_candidate_limit: None,
+        nft_discovery_from_block: None,
+        nft_discovery_to_block: None,
+        nft_discovery_limit: None,
+    };
+    let failure = req.validate_fields().unwrap_err();
+    let paths: Vec<&str> = failure.fields().iter().map(|f| f.field.as_str()).collect();
+    assert_eq!(
+        paths,
+        vec![
+            "provider_profile",
+            "token_addresses[1]",
+            "watch_addresses[0].address"
+        ]
+    );
+    assert_eq!(
+        failure.fields()[0].message,
+        "provider_profile cannot be combined with all_configured_chains"
+    );
+    assert_eq!(req.validate().unwrap_err(), failure.message());
+}
+
+#[test]
+fn test_treasury_policy_update_fields_use_indexed_paths() {
+    let req = TreasuryPolicyUpdateRequest {
+        enabled: true,
+        allowed_destinations: vec![
+            TreasuryAllowedDestinationInput {
+                address: " ".to_string(),
+                label: None,
+            },
+            TreasuryAllowedDestinationInput {
+                address: "0xnothex".to_string(),
+                label: Some("l".repeat(300)),
+            },
+        ],
+        max_step_native_wei_hex: Some("h".repeat(4100)),
+        max_plan_native_wei_hex: None,
+        require_simulation: None,
+        allow_raw_digest_signing: None,
+        block_cross_party_linkage: None,
+        allow_claim_execution: None,
+        allow_gas_topups: None,
+        max_gas_topup_wei_hex: None,
+        allow_plan_execution: None,
+        allow_sweep_execution: None,
+        allow_revoke_execution: None,
+        allow_exit_execution: None,
+        execution_paused: None,
+        max_fee_per_gas_cap_hex: None,
+        simulation_freshness_secs: None,
+        hot_floor_wei_hex: None,
+        hot_target_wei_hex: None,
+        hot_overflow_wei_hex: None,
+        allow_treasury_automation: None,
+    };
+    let failure = req.validate_fields().unwrap_err();
+    let paths: Vec<&str> = failure.fields().iter().map(|f| f.field.as_str()).collect();
+    assert_eq!(
+        paths,
+        vec![
+            "allowed_destinations[0].address",
+            "allowed_destinations[1].address",
+            "allowed_destinations[1].label",
+            "max_step_native_wei_hex"
+        ]
+    );
+    assert_eq!(
+        failure.fields()[0].message,
+        "allowed_destinations[0].address must not be empty"
+    );
+}
+
+#[test]
+fn test_treasury_policy_update_requires_gas_topup_cap_at_field_level() {
+    for (max_gas_topup_wei_hex, expected_message) in [
+        (
+            None,
+            "max_gas_topup_wei_hex is required when allow_gas_topups is true",
+        ),
+        (
+            Some("   ".to_string()),
+            "max_gas_topup_wei_hex is required when allow_gas_topups is true",
+        ),
+        (
+            Some("0x".to_string()),
+            "max_gas_topup_wei_hex must include at least one hexadecimal digit",
+        ),
+    ] {
+        let req = TreasuryPolicyUpdateRequest {
+            enabled: true,
+            allowed_destinations: Vec::new(),
+            max_step_native_wei_hex: None,
+            max_plan_native_wei_hex: None,
+            require_simulation: None,
+            allow_raw_digest_signing: None,
+            block_cross_party_linkage: None,
+            allow_claim_execution: None,
+            allow_gas_topups: Some(true),
+            max_gas_topup_wei_hex,
+            allow_plan_execution: None,
+            allow_sweep_execution: None,
+            allow_revoke_execution: None,
+            allow_exit_execution: None,
+            execution_paused: None,
+            max_fee_per_gas_cap_hex: None,
+            simulation_freshness_secs: None,
+            hot_floor_wei_hex: None,
+            hot_target_wei_hex: None,
+            hot_overflow_wei_hex: None,
+            allow_treasury_automation: None,
+        };
+
+        let failure = req.validate_fields().unwrap_err();
+        assert_eq!(failure.fields().len(), 1);
+        assert_eq!(failure.fields()[0].field, "max_gas_topup_wei_hex");
+        assert_eq!(failure.fields()[0].message, expected_message);
+        assert_eq!(req.validate().unwrap_err(), failure.message());
+    }
+}
+
+#[test]
+fn test_validate_fields_pass_for_valid_dtos() {
+    let provider = EvmProviderProfileUpsertRequest {
+        name: "mainnet".to_string(),
+        provider: EvmProviderRef {
+            rpc_url: "https://eth.example.com".to_string(),
+            auth_token_key: None,
+            compartment_id: None,
+        },
+        chain_id: 1,
+        max_priority_fee_per_gas_hex: None,
+        max_fee_per_gas_hex: None,
+        native_gas_limit: None,
+        erc20_gas_limit: None,
+        fee_estimation_enabled: None,
+    };
+    assert!(provider.validate_fields().is_ok());
+
+    let policy = TreasuryPolicyUpdateRequest {
+        enabled: true,
+        allowed_destinations: vec![TreasuryAllowedDestinationInput {
+            address: "0x9999999999999999999999999999999999999999".to_string(),
+            label: Some("cold".to_string()),
+        }],
+        max_step_native_wei_hex: None,
+        max_plan_native_wei_hex: None,
+        require_simulation: None,
+        allow_raw_digest_signing: None,
+        block_cross_party_linkage: None,
+        allow_claim_execution: None,
+        allow_gas_topups: None,
+        max_gas_topup_wei_hex: None,
+        allow_plan_execution: None,
+        allow_sweep_execution: None,
+        allow_revoke_execution: None,
+        allow_exit_execution: None,
+        execution_paused: None,
+        max_fee_per_gas_cap_hex: None,
+        simulation_freshness_secs: None,
+        hot_floor_wei_hex: None,
+        hot_target_wei_hex: None,
+        hot_overflow_wei_hex: None,
+        allow_treasury_automation: None,
+    };
+    assert!(policy.validate_fields().is_ok());
+}
+
+// ── List pagination / filtering / sorting ──────────────────────────
+
+#[test]
+fn test_pagination_query_roundtrip() {
+    roundtrip_test(PaginationQuery {
+        limit: Some(50),
+        offset: Some(100),
+    });
+    roundtrip_test(PaginationQuery::default());
+}
+
+#[test]
+fn test_list_options_roundtrip() {
+    roundtrip_test(QueueJobListOptions {
+        page: PaginationQuery {
+            limit: Some(25),
+            offset: None,
+        },
+        state: Some("queued".to_string()),
+        kind: Some("plan_step_execution".to_string()),
+        chain_id: Some(1),
+        sort: Some("created".to_string()),
+        order: Some("desc".to_string()),
+    });
+    roundtrip_test(WalletInventoryListOptions {
+        chain_id: Some(1),
+        funded: Some(true),
+        sort: Some("last_scanned".to_string()),
+        ..Default::default()
+    });
+    roundtrip_test(EthStealthDepositListOptions {
+        status: Some("sweep_queued".to_string()),
+        counterparty_id: Some("party_client_alpha".to_string()),
+        ..Default::default()
+    });
+    roundtrip_test(ConsolidationPlanListOptions {
+        status: Some("review_required".to_string()),
+        sort: Some("updated".to_string()),
+        order: Some("asc".to_string()),
+        ..Default::default()
+    });
+    roundtrip_test(RiskFindingListOptions {
+        severity: Some("critical".to_string()),
+        kind: Some("risky_approval".to_string()),
+        chain_id: Some(1),
+        sort: Some("severity".to_string()),
+        ..Default::default()
+    });
+    roundtrip_test(DiscoveryJobListOptions {
+        state: Some("running".to_string()),
+        sort: Some("created".to_string()),
+        ..Default::default()
+    });
+}
+
+#[test]
+fn test_list_options_default_serializes_to_empty_object() {
+    // A default options struct adds no query parameters: the legacy
+    // request shape (and therefore the legacy response) is unchanged.
+    assert_eq!(
+        serde_json::to_value(QueueJobListOptions::default()).unwrap(),
+        serde_json::json!({})
+    );
+    assert_eq!(
+        serde_json::to_value(PaginationQuery::default()).unwrap(),
+        serde_json::json!({})
+    );
 }

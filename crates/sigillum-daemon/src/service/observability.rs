@@ -25,7 +25,7 @@ impl SigillumService {
             });
         }
 
-        let Some(token) = self.optional_session(token) else {
+        let Some(token) = self.optional_session_passive(token) else {
             return Ok(StatusResponse {
                 locked: true,
                 initialized,
@@ -127,6 +127,13 @@ impl SigillumService {
         let queue_counts = super::queue::count_queue_states(&queue);
         let recovery = self.state.startup_recovery_summary();
         let runtime_policy = self.state.runtime_policy();
+        let scheduler = {
+            let mut status = self.state.scheduler_status();
+            let due = super::queue::queue_due_stats(&queue, super::helpers::now_unix());
+            status.due_queue_job_count = due.due_now;
+            status.next_retry_at_unix = due.next_retry_at_unix;
+            status
+        };
         Ok(DiagnosticsResponse {
             status: "ok".into(),
             version: env!("CARGO_PKG_VERSION").into(),
@@ -163,6 +170,7 @@ impl SigillumService {
                     )
                 })
                 .count(),
+            scheduler,
         })
     }
 }

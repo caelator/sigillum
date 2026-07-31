@@ -47,7 +47,8 @@ impl SigillumService {
         body: TokenRegistryImportRequest,
     ) -> ServiceResult<TokenRegistryMutationResponse> {
         let token = self.require_session(token)?;
-        let _guard = self.state.operation_guard().await;
+        let session_context = self.capture_session_operation_context(Some(token))?;
+        let _guard = self.acquire_session_operation(&session_context).await?;
         let compartment_id = active_compartment_id(self, token)?;
         let name = support::trimmed_required("name", &body.name)?;
         let (payload, source) = token_registry_payload(body.entries_json, body.file_path)?;
@@ -98,7 +99,8 @@ impl SigillumService {
         body: TokenRegistryDeleteRequest,
     ) -> ServiceResult<TokenRegistryMutationResponse> {
         let token = self.require_session(token)?;
-        let _guard = self.state.operation_guard().await;
+        let session_context = self.capture_session_operation_context(Some(token))?;
+        let _guard = self.acquire_session_operation(&session_context).await?;
         let compartment_id = active_compartment_id(self, token)?;
         let name = support::trimmed_required("name", &body.name)?;
         let mut state = load_token_registry_state(self)?;
@@ -229,7 +231,7 @@ fn active_compartment_id(service: &SigillumService, token: &str) -> ServiceResul
     service
         .state
         .active_compartment_id_for(token)
-        .ok_or_else(|| ServiceError::forbidden("No active compartment."))
+        .ok_or_else(|| ServiceError::vault_locked("No active compartment."))
 }
 
 fn load_token_registry_state(

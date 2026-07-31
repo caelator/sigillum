@@ -2,19 +2,23 @@ use std::collections::BTreeMap;
 
 use sigillum_api::{
     ConsolidationPlan, ConsolidationPlanApproveRequest, ConsolidationPlanGenerateRequest,
-    ConsolidationPlanListResponse, ConsolidationPlanMutationResponse, WalletPlanStatus,
-    WalletPlanStepAction, WalletPlanStepStatus, WalletSimulationStatus,
+    ConsolidationPlanListResponse, ConsolidationPlanMutationResponse, WalletPlanStepAction,
+    WalletPlanStepStatus, WalletSimulationStatus,
 };
 
 use crate::audit_log::AuditEventSpec;
 use crate::inventory::WalletInventoryState;
 
 use super::super::helpers::{now_unix, random_id};
-use super::super::{ServiceError, ServiceResult, SigillumService};
+use super::super::list_query::{
+    self, CreatedUpdatedSort, PLAN_STATUSES, SortOrder, effective_order, paginate, validated_value,
+};
+use super::super::{ServiceError, ServiceResult, SessionOperationContext, SigillumService};
 use super::claim_gate::{claim_execution_gate_satisfied, refresh_claim_execution_blocker};
 use super::planner::{
     analyze_plan_linkage, apply_linkage_blockers, apply_policy_blockers_to_step,
-    assign_step_ordering, build_plan_steps, plan_policy_violations, summarize_plan_steps,
+    assign_step_ordering, build_plan_steps, plan_policy_violations, plan_status,
+    summarize_plan_steps,
 };
 use super::simulation::{DEFAULT_SIMULATION_FRESHNESS_SECS, simulation_is_stale};
 use super::support::{load_inventory_state, save_inventory_state, trimmed_optional};
@@ -23,12 +27,31 @@ impl SigillumService {
     pub(crate) fn list_consolidation_plans(
         &self,
         token: Option<&str>,
+        query: list_query::ConsolidationPlanListQuery,
     ) -> ServiceResult<ConsolidationPlanListResponse> {
         let _ = self.require_session(token)?;
+        let status = query
+            .status
+            .map(|value| validated_value("status", value, &PLAN_STATUSES))
+            .transpose()?;
         let state = load_inventory_state(&self.state.base_dir)?;
-        Ok(ConsolidationPlanListResponse {
-            plans: state.consolidation_plans,
-        })
+        let mut plans = state.consolidation_plans;
+        if let Some(status) = status.as_deref() {
+            plans.retain(|plan| plan.status.as_str() == status);
+        }
+        if let Some(sort) = query.sort {
+            let order = effective_order(query.sort.as_ref(), query.order);
+            let key = |plan: &ConsolidationPlan| match sort {
+                CreatedUpdatedSort::Created => plan.created_at_unix,
+                CreatedUpdatedSort::Updated => plan.updated_at_unix,
+            };
+            match order {
+                SortOrder::Asc => plans.sort_by_key(&key),
+                SortOrder::Desc => plans.sort_by_key(|plan| std::cmp::Reverse(key(plan))),
+            }
+        }
+        let (plans, pagination) = paginate(plans, query.page);
+        Ok(ConsolidationPlanListResponse { plans, pagination })
     }
 
     pub(crate) async fn generate_consolidation_plan(
@@ -37,7 +60,8 @@ impl SigillumService {
         body: ConsolidationPlanGenerateRequest,
     ) -> ServiceResult<ConsolidationPlanMutationResponse> {
         let token = self.require_session(token)?;
-        let _guard = self.state.operation_guard().await;
+        let session_context = self.capture_session_operation_context(Some(token))?;
+        let _guard = self.acquire_session_operation(&session_context).await?;
         let mut state = load_inventory_state(&self.state.base_dir)?;
         let registry = crate::profiles::load_profiles(&self.state.base_dir)
             .map_err(|error| ServiceError::internal(format!("Failed to load profiles: {error}")))?;
@@ -77,7 +101,7 @@ impl SigillumService {
                 .as_ref()
                 .map(|policy| plan_policy_violations(policy, &steps))
                 .unwrap_or_default();
-            let linkage_findings = analyze_plan_linkage(&state, &mut steps);
+            let linkage_analysis = analyze_plan_linkage(&state, &mut steps);
             if policy
                 .as_ref()
                 .map(|policy| policy.block_cross_party_linkage)
@@ -86,13 +110,7 @@ impl SigillumService {
                 apply_linkage_blockers(&mut steps);
             }
             let summary = summarize_plan_steps(&steps);
-            let status = if summary.total_steps == 0 {
-                WalletPlanStatus::Empty
-            } else if summary.blocked_steps > 0 || !policy_violations.is_empty() {
-                WalletPlanStatus::Blocked
-            } else {
-                WalletPlanStatus::ReviewRequired
-            };
+            let status = plan_status(&summary, &policy_violations);
             let plan = ConsolidationPlan {
                 id: random_id(),
                 status,
@@ -103,7 +121,8 @@ impl SigillumService {
                 updated_at_unix: now,
                 summary,
                 policy_violations,
-                linkage_findings,
+                linkage_findings: linkage_analysis.findings,
+                risk_findings: linkage_analysis.risk_findings,
                 steps,
             };
             generated_plans.push(plan);
@@ -142,7 +161,18 @@ impl SigillumService {
         body: ConsolidationPlanApproveRequest,
     ) -> ServiceResult<ConsolidationPlanMutationResponse> {
         let token = self.require_session(token)?;
-        let _guard = self.state.operation_guard().await;
+        let session_context = self.capture_session_operation_context(Some(token))?;
+        self.approve_consolidation_plan_with_context(&session_context, body)
+            .await
+    }
+
+    pub(in crate::service) async fn approve_consolidation_plan_with_context(
+        &self,
+        session_context: &SessionOperationContext,
+        body: ConsolidationPlanApproveRequest,
+    ) -> ServiceResult<ConsolidationPlanMutationResponse> {
+        let _guard = self.acquire_session_operation(session_context).await?;
+        let token = session_context.token.as_str();
         let mut state = load_inventory_state(&self.state.base_dir)?;
         let policy = state.treasury_policy.clone();
         let risk_catalog = state.risk_catalog.clone();
@@ -165,7 +195,8 @@ impl SigillumService {
             .find(|plan| plan.id == body.plan_id)
             .ok_or_else(|| ServiceError::not_found("Consolidation plan not found."))?;
         if let Some(linkage_state) = linkage_state.as_ref() {
-            let _ = analyze_plan_linkage(linkage_state, &mut plan.steps);
+            let analysis = analyze_plan_linkage(linkage_state, &mut plan.steps);
+            plan.risk_findings = analysis.risk_findings;
             apply_linkage_blockers(&mut plan.steps);
         }
         let freshness_secs = policy
@@ -220,13 +251,7 @@ impl SigillumService {
         }
         plan.updated_at_unix = now_unix();
         plan.summary = summarize_plan_steps(&plan.steps);
-        plan.status = if plan.summary.blocked_steps > 0 || !plan.policy_violations.is_empty() {
-            WalletPlanStatus::Blocked
-        } else if plan.summary.review_required_steps > 0 {
-            WalletPlanStatus::ReviewRequired
-        } else {
-            WalletPlanStatus::Approved
-        };
+        plan.status = plan_status(&plan.summary, &plan.policy_violations);
         let plan = plan.clone();
         save_inventory_state(&self.state.base_dir, &state)?;
 

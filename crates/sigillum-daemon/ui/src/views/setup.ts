@@ -1,6 +1,5 @@
+import { ROUTE_PATHS } from "../routePaths";
 import type {
-  ActiveCompartment,
-  StatusResponse,
   TreasuryPolicy,
   TreasuryPolicyUpdateRequest,
 } from "../contracts";
@@ -11,33 +10,7 @@ import {
   setTrustedHtmlById,
 } from "../render/dom";
 import { esc } from "../render/html";
-import { deriveUiMode } from "../state/status";
-
-export interface SetupRequirement {
-  id: "vault" | "unlock" | "compartment";
-  complete: boolean;
-}
-
-export function setupRequirements(status: StatusResponse | null): SetupRequirement[] {
-  return [
-    {
-      id: "vault",
-      complete: deriveUiMode(status) !== "setup",
-    },
-    {
-      id: "unlock",
-      complete: deriveUiMode(status) === "unlocked",
-    },
-    {
-      id: "compartment",
-      complete: Boolean(status?.active_compartment),
-    },
-  ];
-}
-
-export function compartmentLabel(compartment: ActiveCompartment | null | undefined): string {
-  return compartment?.label ?? "No active compartment";
-}
+import { focusableElements } from "../render/modal";
 
 interface WizardCompartment {
   label: string;
@@ -48,6 +21,7 @@ export interface SetupWizardDeps {
   api: (method: string, path: string, body?: unknown) => Promise<any>;
   toast: (message: string, type?: string) => void;
   refresh: () => unknown;
+  navigateToMovePolicy?: () => void;
   submitNewFido2Pin: (
     pinId: string,
     confirmId: string,
@@ -163,6 +137,23 @@ const WIZARD_CHROME: Record<
   },
 };
 
+const WIZARD_INPUT_LABELS: Record<string, string> = {
+  wizPLabel: "Compartment name",
+  wizPassphrase: "New vault passphrase",
+  wizPassphraseConfirm: "Confirm new vault passphrase",
+  wizCustomLabel: "Custom compartment name",
+  wizCustomThreshold: "Custom compartment hardware-key threshold",
+  wizFido2Pin: "Current FIDO2 PIN for the primary hardware key",
+  wizFido2Label: "Primary hardware-key label",
+  wizNewFido2Pin: "New FIDO2 PIN for the primary hardware key",
+  wizNewFido2PinConfirm: "Confirm new FIDO2 PIN for the primary hardware key",
+  wizFallbackPass: "Optional fallback passphrase",
+  wizAdditionalKeyPin: "Current FIDO2 PIN for the next hardware key",
+  wizAdditionalKeyLabel: "Next hardware-key label",
+  wizAdditionalNewPin: "New FIDO2 PIN for the next hardware key",
+  wizAdditionalNewPinConfirm: "Confirm new FIDO2 PIN for the next hardware key",
+};
+
 function input(id: string): HTMLInputElement {
   return document.getElementById(id) as HTMLInputElement;
 }
@@ -187,18 +178,101 @@ export function createSetupWizard(deps: SetupWizardDeps) {
   let wizRegisteredKeyCount = 0;
   let wizPrimaryKeyLabel = "";
 
+  function configureAccessibility(): void {
+    const setupCard = document.getElementById("setupCard");
+    setupCard?.setAttribute("role", "region");
+    setupCard?.setAttribute("aria-labelledby", "wizStageTitle");
+
+    const stageTitle = document.getElementById("wizStageTitle");
+    stageTitle?.setAttribute("role", "heading");
+    stageTitle?.setAttribute("aria-level", "2");
+    stageTitle?.setAttribute("tabindex", "-1");
+
+    const stagePill = document.getElementById("wizStagePill");
+    stagePill?.setAttribute("role", "status");
+    stagePill?.setAttribute("aria-live", "polite");
+    stagePill?.setAttribute("aria-atomic", "true");
+
+    const deviceHint = document.getElementById("wizDeviceHint");
+    deviceHint?.setAttribute("role", "status");
+    deviceHint?.setAttribute("aria-live", "polite");
+
+    document.querySelectorAll<HTMLElement>(".wizard-step").forEach((step) => {
+      const active = step.classList.contains("active");
+      step.setAttribute("role", "group");
+      step.setAttribute("aria-labelledby", "wizStageTitle");
+      step.setAttribute("aria-hidden", String(!active));
+      step.inert = !active;
+    });
+
+    Object.entries(WIZARD_INPUT_LABELS).forEach(([id, label]) => {
+      document.getElementById(id)?.setAttribute("aria-label", label);
+    });
+  }
+
+  function focusStageTitle(): void {
+    document.getElementById("wizStageTitle")?.focus();
+  }
+
+  function focusInvalidField(id: string): void {
+    const field = input(id);
+    field.setAttribute("aria-invalid", "true");
+    field.focus();
+  }
+
+  function clearInvalidFields(ids: string[]): void {
+    ids.forEach((id) => document.getElementById(id)?.removeAttribute("aria-invalid"));
+  }
+
+  function setStepState(id: string): void {
+    document.querySelectorAll<HTMLElement>(".wizard-step").forEach((step) => {
+      const active = step.id === id;
+      step.classList.toggle("active", active);
+      step.setAttribute("aria-hidden", String(!active));
+      step.inert = !active;
+    });
+  }
+
   function reset(): void {
     wizCompartments = [];
     customCompartments = [];
     wizRequiredKeyCount = 1;
     wizRegisteredKeyCount = 0;
     wizPrimaryKeyLabel = "";
+    setStepState("wizStepWelcome");
+    updateWizardChrome("wizStepWelcome");
   }
 
   function wizShowStep(id: string): void {
-    document.querySelectorAll(".wizard-step").forEach((step) => step.classList.remove("active"));
-    document.getElementById(id)?.classList.add("active");
+    setStepState(id);
+    const step = document.getElementById(id) as HTMLElement | null;
     updateWizardChrome(id);
+    if (!step) return;
+    // Keep the target authoritative even in reduced DOM implementations
+    // whose class selector support is incomplete.
+    step.classList.add("active");
+    step.setAttribute("aria-hidden", "false");
+    step.inert = false;
+
+    // Real wizard stages announce their changed heading to keyboard and
+    // assistive-technology users. Extension/test-only stages without chrome
+    // metadata retain the legacy first-control focus behavior.
+    if (Object.prototype.hasOwnProperty.call(WIZARD_CHROME, id)) {
+      focusStageTitle();
+      return;
+    }
+
+    const firstControl = focusableElements(step).find((element) =>
+      ["INPUT", "BUTTON", "SELECT", "TEXTAREA", "SUMMARY", "A"].includes(
+        element.tagName.toUpperCase(),
+      ),
+    );
+    if (firstControl) {
+      firstControl.focus();
+      return;
+    }
+    step.setAttribute("tabindex", "-1");
+    step.focus();
   }
 
   function wizPreset(preset: string): void {
@@ -278,7 +352,7 @@ export function createSetupWizard(deps: SetupWizardDeps) {
 
   async function wizDetectDevice(): Promise<void> {
     try {
-      const r = await deps.api("GET", "/api/fido2/detect");
+      const r = await deps.api("GET", ROUTE_PATHS.API_FIDO2_DETECT);
       const hint = document.getElementById("wizDeviceHint");
       if (hint) {
         if (r.device_present) {
@@ -303,16 +377,19 @@ export function createSetupWizard(deps: SetupWizardDeps) {
     const label = input("wizPLabel").value || "default";
     const p = input("wizPassphrase").value;
     const pc = input("wizPassphraseConfirm").value;
+    clearInvalidFields(["wizPassphrase", "wizPassphraseConfirm"]);
     if (p.length < 8) {
       deps.toast("Min 8 characters", "error");
+      focusInvalidField("wizPassphrase");
       return;
     }
     if (p !== pc) {
       deps.toast("Passphrases do not match", "error");
+      focusInvalidField("wizPassphraseConfirm");
       return;
     }
 
-    const initR = await deps.api("POST", "/api/compartment/init", {
+    const initR = await deps.api("POST", ROUTE_PATHS.API_COMPARTMENT_INIT, {
       id: 0,
       label,
       threshold: 1,
@@ -344,7 +421,7 @@ export function createSetupWizard(deps: SetupWizardDeps) {
     // before committing rather than discovering it mid-ceremony.
     if (wizRequiredKeyCount > 1) {
       try {
-        const detect = await deps.api("GET", "/api/fido2/detect");
+        const detect = await deps.api("GET", ROUTE_PATHS.API_FIDO2_DETECT);
         const detected = Number(detect?.device_count) || 0;
         if (detected > 0 && detected < wizRequiredKeyCount) {
           deps.toast(
@@ -375,18 +452,22 @@ export function createSetupWizard(deps: SetupWizardDeps) {
   function wizAddCustomComp(): void {
     const label = input("wizCustomLabel").value;
     const threshold = parseInt(input("wizCustomThreshold").value);
+    clearInvalidFields(["wizCustomLabel", "wizCustomThreshold"]);
     if (!label || !threshold) {
       deps.toast("Label and threshold required", "error");
+      focusInvalidField(label ? "wizCustomThreshold" : "wizCustomLabel");
       return;
     }
     if (customCompartments.some((comp) => comp.threshold === threshold)) {
       deps.toast("Threshold " + threshold + " already used", "error");
+      focusInvalidField("wizCustomThreshold");
       return;
     }
     customCompartments.push({ label, threshold });
     clearFields(["wizCustomLabel", "wizCustomThreshold"]);
     setTrustedHtmlById("wizCustomCompList", wizCompRowHtml(customCompartments));
     input("wizCustomContinue").disabled = false;
+    input("wizCustomLabel").focus();
   }
 
   function wizRenderAdditionalKeyState(): void {
@@ -460,8 +541,10 @@ export function createSetupWizard(deps: SetupWizardDeps) {
     const pin = input("wizFido2Pin").value;
     const label = input("wizFido2Label").value;
     const passphrase = input("wizFallbackPass").value || null;
+    clearInvalidFields(["wizFido2Label"]);
     if (!label) {
       deps.toast("Label required", "error");
+      focusInvalidField("wizFido2Label");
       return;
     }
 
@@ -478,7 +561,7 @@ export function createSetupWizard(deps: SetupWizardDeps) {
     };
     if (pin) body.pin = pin;
 
-    const r = await deps.api("POST", "/api/fido2/setup", body);
+    const r = await deps.api("POST", ROUTE_PATHS.API_FIDO2_SETUP, body);
     if (r.error) {
       const message = deps.friendlyFidoError(r.error);
       wizShowStep("wizStepFido2Pin");
@@ -529,15 +612,17 @@ export function createSetupWizard(deps: SetupWizardDeps) {
   async function wizRegisterAdditionalKey(): Promise<void> {
     const pin = input("wizAdditionalKeyPin").value;
     const label = input("wizAdditionalKeyLabel").value;
+    clearInvalidFields(["wizAdditionalKeyLabel"]);
     if (!label) {
       deps.toast("Label required", "error");
+      focusInvalidField("wizAdditionalKeyLabel");
       return;
     }
 
     deps.toast("Touch your hardware key now...");
     const body: any = { label };
     if (pin) body.pin = pin;
-    const r = await deps.api("POST", "/api/fido2/register", body);
+    const r = await deps.api("POST", ROUTE_PATHS.API_FIDO2_REGISTER, body);
     if (r.error) {
       const message = deps.friendlyFidoError(r.error);
       setInlineInfoById("wizAdditionalKeyStatus", message);
@@ -565,6 +650,7 @@ export function createSetupWizard(deps: SetupWizardDeps) {
           (remaining > 1 ? "s" : "") +
           " to finish this plan.",
       );
+      input("wizAdditionalKeyPin").focus();
       return;
     }
 
@@ -619,7 +705,7 @@ export function createSetupWizard(deps: SetupWizardDeps) {
   }
 
   async function fetchCurrentTreasuryPolicy(): Promise<TreasuryPolicy | null> {
-    const r = await deps.api("GET", "/api/treasury/policy");
+    const r = await deps.api("GET", ROUTE_PATHS.API_TREASURY_POLICY);
     if (r.error) {
       throw new Error(String(r.error));
     }
@@ -635,13 +721,13 @@ export function createSetupWizard(deps: SetupWizardDeps) {
             block_cross_party_linkage: true,
           }
         : { enabled: false, block_cross_party_linkage: true };
-      const r = await deps.api("POST", "/api/treasury/policy/update", body);
+      const r = await deps.api("POST", ROUTE_PATHS.API_TREASURY_POLICY_UPDATE, body);
       if (r.error) {
         deps.toast(r.error, "error");
         return;
       }
       showLinkageChoiceStatus(
-        "Payer-linkage protection is on. Sweeps that would link different payers to the same destination are now blocked. Adjust anytime in Treasury policy.",
+        "Payer-linkage protection is on (the default for new policies). Sweeps that would link different payers to the same destination are blocked. Adjust anytime in Treasury policy.",
       );
       deps.toast("Payer-linkage protection enabled");
     } catch (e: any) {
@@ -651,9 +737,9 @@ export function createSetupWizard(deps: SetupWizardDeps) {
 
   function wizDeclineLinkageProtection(): void {
     showLinkageChoiceStatus(
-      "Left off for now. You can enable payer-linkage protection later in Treasury policy.",
+      "No change recorded — payer-linkage protection defaults to ON for any policy you save later. Turn it off anytime in Treasury policy.",
     );
-    deps.toast("You can enable payer-linkage protection later in Treasury policy.");
+    deps.toast("Payer-linkage protection defaults to on; adjust anytime in Treasury policy.");
   }
 
   async function wizEnableClaimExecution(): Promise<void> {
@@ -665,7 +751,7 @@ export function createSetupWizard(deps: SetupWizardDeps) {
             allow_claim_execution: true,
           }
         : { enabled: false, allow_claim_execution: true };
-      const r = await deps.api("POST", "/api/treasury/policy/update", body);
+      const r = await deps.api("POST", ROUTE_PATHS.API_TREASURY_POLICY_UPDATE, body);
       if (r.error) {
         deps.toast(r.error, "error");
         return;
@@ -686,27 +772,12 @@ export function createSetupWizard(deps: SetupWizardDeps) {
     deps.toast("You can enable Merkle claim execution later in Treasury policy.");
   }
 
-  async function wizEnableGasTopups(): Promise<void> {
-    try {
-      const policy = await fetchCurrentTreasuryPolicy();
-      const body: TreasuryPolicyUpdateRequest = policy
-        ? {
-            ...treasuryPolicyUpdateFromCurrent(policy),
-            allow_gas_topups: true,
-          }
-        : { enabled: false, allow_gas_topups: true };
-      const r = await deps.api("POST", "/api/treasury/policy/update", body);
-      if (r.error) {
-        deps.toast(r.error, "error");
-        return;
-      }
-      showGasTopupsChoiceStatus(
-        "Sponsor gas top-up opt-in recorded. Top-ups only appear inside reviewed consolidation plans, are capped by the Treasury policy, and cross-party sponsor funding is still linkage-checked.",
-      );
-      deps.toast("Sponsor gas top-up opt-in recorded");
-    } catch (e: any) {
-      deps.toast(String(e?.message ?? e), "error");
-    }
+  function wizEnableGasTopups(): void {
+    showGasTopupsChoiceStatus(
+      "Sponsor gas top-ups need a finite maximum. Open Move, enter the cap in Treasury policy, review the recovery gates, and save.",
+    );
+    deps.toast("Set a finite sponsor gas top-up cap in Treasury policy.");
+    deps.navigateToMovePolicy?.();
   }
 
   function wizDeclineGasTopups(): void {
@@ -715,6 +786,8 @@ export function createSetupWizard(deps: SetupWizardDeps) {
     );
     deps.toast("You can enable sponsor gas top-ups later in Treasury policy.");
   }
+
+  configureAccessibility();
 
   return {
     reset,

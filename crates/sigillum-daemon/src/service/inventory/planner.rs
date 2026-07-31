@@ -1,24 +1,29 @@
 use std::collections::BTreeMap;
 
 use sigillum_api::{
-    ConsolidationPlanGenerateRequest, ConsolidationPlanStep, ConsolidationPlanSummary,
-    TreasuryPolicy, WalletAssetHolding, WalletAssetKind, WalletPlanStepAction,
+    ConsolidationPlanGenerateRequest, ConsolidationPlanStep, ConsolidationPlanSummary, RiskFinding,
+    TreasuryPolicy, WalletAssetHolding, WalletAssetKind, WalletPlanStatus, WalletPlanStepAction,
     WalletPlanStepStatus, WalletSignerStatus, WalletSimulationStatus,
 };
 use sigillum_core::decode_quantity_hex;
 
 use crate::inventory::WalletInventoryState;
 use crate::profiles::ProfileRegistry;
-use crate::service::helpers::{compare_u256, random_id};
+use crate::service::helpers::{add_u256, compare_u256, now_unix, random_id};
 
 use super::allowance_discovery::DISCOVERY_SOURCE_ERC20_ALLOWANCE_PROBE;
 use super::claim_discovery::CLAIM_ADAPTER_MERKLE_DISTRIBUTOR_V1;
 use super::defi_adapters::supported_defi_exit_adapter;
 use super::nft_approval_discovery::DISCOVERY_SOURCE_NFT_OPERATOR_APPROVAL_PROBE;
 use super::permit2_discovery::DISCOVERY_SOURCE_PERMIT2_ALLOWANCE_PROBE;
-use super::support::quantity_hex_is_nonzero;
-use super::treasury::{add_u256, policy_blockers_for_step};
+use super::support::{is_very_large_approval, quantity_hex_is_nonzero};
+use super::treasury::policy_blockers_for_step;
 use super::{WALLET_FAMILY_ETH_SEED, WALLET_FAMILY_ETH_WATCH, WALLET_FAMILY_ETH_XPUB};
+
+// Re-exported for the stealth sponsor path (`service/deposits.rs`): the
+// `risk` module is private to `inventory`, so the common-funder finding
+// constructor reaches the rest of the service through this module.
+pub(in crate::service) use super::risk::common_gas_funder_finding;
 
 const DEFAULT_HOT_FLOOR_WEI_HEX: &str = "0xde0b6b3a7640000";
 
@@ -233,12 +238,6 @@ fn risk_level_for_holding(holding: &WalletAssetHolding) -> &'static str {
     }
 }
 
-fn is_very_large_approval(amount_hex: &str) -> bool {
-    decode_quantity_hex(amount_hex)
-        .map(|bytes| bytes[..16].iter().any(|byte| *byte != 0))
-        .unwrap_or(false)
-}
-
 pub(in crate::service) fn summarize_plan_steps(
     steps: &[ConsolidationPlanStep],
 ) -> ConsolidationPlanSummary {
@@ -265,6 +264,21 @@ pub(in crate::service) fn summarize_plan_steps(
             .iter()
             .filter(|step| quantity_hex_is_nonzero(&step.amount_hex))
             .count(),
+    }
+}
+
+pub(in crate::service) fn plan_status(
+    summary: &ConsolidationPlanSummary,
+    policy_violations: &[String],
+) -> WalletPlanStatus {
+    if summary.total_steps == 0 {
+        WalletPlanStatus::Empty
+    } else if summary.blocked_steps > 0 || !policy_violations.is_empty() {
+        WalletPlanStatus::Blocked
+    } else if summary.review_required_steps > 0 {
+        WalletPlanStatus::ReviewRequired
+    } else {
+        WalletPlanStatus::Approved
     }
 }
 
@@ -418,9 +432,10 @@ fn resolve_default_destination(
             .iter()
             .find(|p| p.name == holding.wallet_profile)
         {
-            if seed_profile.hot_address.is_some() && seed_profile.treasury_address.is_some() {
-                let hot_addr = seed_profile.hot_address.as_ref().unwrap();
-                let treasury_addr = seed_profile.treasury_address.as_ref().unwrap();
+            if let (Some(hot_addr), Some(treasury_addr)) = (
+                seed_profile.hot_address.as_ref(),
+                seed_profile.treasury_address.as_ref(),
+            ) {
                 let hot_balance = state
                     .addresses
                     .iter()
@@ -433,15 +448,34 @@ fn resolve_default_destination(
                     .treasury_policy
                     .as_ref()
                     .and_then(|policy| decode_quantity_hex(&policy.hot_floor_wei_hex).ok())
-                    .unwrap_or_else(|| decode_quantity_hex(DEFAULT_HOT_FLOOR_WEI_HEX).unwrap());
+                    .or_else(|| decode_quantity_hex(DEFAULT_HOT_FLOOR_WEI_HEX).ok());
                 // hot_target_wei_hex is the execution refill ceiling, not a
                 // routing trigger: only balance below the floor routes hot.
+                let Some(floor) = floor else {
+                    // Fail closed: without a decodable floor the hot-wallet
+                    // routing decision is undefined, so fall back to the
+                    // profile's static default destination.
+                    tracing::warn!(
+                        wallet_profile = %seed_profile.name,
+                        "treasury hot floor is undecodable; using default destination"
+                    );
+                    return seed_profile.default_destination_address.clone();
+                };
                 if compare_u256(&hot_balance, &floor).is_lt() {
                     Some(hot_addr.clone())
                 } else {
                     Some(treasury_addr.clone())
                 }
             } else {
+                if seed_profile.hot_address.is_some() || seed_profile.treasury_address.is_some() {
+                    // Fail closed: hot/treasury routing requires both
+                    // addresses; an inconsistent profile record falls back to
+                    // the static default destination.
+                    tracing::warn!(
+                        wallet_profile = %seed_profile.name,
+                        "seed profile sets only one of hot/treasury address; using default destination"
+                    );
+                }
                 seed_profile.default_destination_address.clone()
             }
         } else {
@@ -531,11 +565,22 @@ struct LinkageIdentity {
     label: String,
 }
 
+/// Output of the plan linkage analysis (plan task 3.5): the long-standing
+/// human-readable plan-level findings plus structured `common_gas_funder`
+/// risk findings built by the risk machinery (`super::risk`). Both are
+/// advisory — execution blocking stays governed by `block_cross_party_linkage`
+/// via `apply_linkage_blockers` and is unchanged by the structured findings.
+#[derive(Clone, Debug, Default)]
+pub(in crate::service) struct PlanLinkageAnalysis {
+    pub findings: Vec<String>,
+    pub risk_findings: Vec<RiskFinding>,
+}
+
 /// Detect common-recipient privacy linkage without changing plan execution.
 pub(in crate::service) fn analyze_plan_linkage(
     state: &WalletInventoryState,
     steps: &mut [ConsolidationPlanStep],
-) -> Vec<String> {
+) -> PlanLinkageAnalysis {
     let mut counterparty_by_address = BTreeMap::new();
     for allocation in &state.receive_allocations {
         if let Some(counterparty_id) = allocation.counterparty_id.as_deref() {
@@ -638,6 +683,8 @@ pub(in crate::service) fn analyze_plan_linkage(
         ));
     }
 
+    let mut risk_findings = Vec::new();
+    let seen_at_unix = now_unix();
     for (funder, entries) in steps_by_funder {
         let mut labels_by_identity = BTreeMap::new();
         for (_, identity) in &entries {
@@ -656,6 +703,20 @@ pub(in crate::service) fn analyze_plan_linkage(
             short_form(&funder, 10),
             labels_by_identity.len(),
             all_labels.join(", ")
+        ));
+
+        // Plan task 3.5: surface the same common-funder detection as a
+        // structured risk finding (advisory; blocking is unchanged and stays
+        // governed by block_cross_party_linkage).
+        let context_step = &steps[entries[0].0];
+        risk_findings.push(common_gas_funder_finding(
+            &context_step.wallet_family,
+            &context_step.wallet_profile,
+            &context_step.provider_profile,
+            context_step.chain_id,
+            &funder,
+            &all_labels,
+            seen_at_unix,
         ));
 
         for (index, identity) in &entries {
@@ -680,7 +741,10 @@ pub(in crate::service) fn analyze_plan_linkage(
         }
     }
 
-    findings
+    PlanLinkageAnalysis {
+        findings,
+        risk_findings,
+    }
 }
 
 fn linkage_identity_for_step(
@@ -787,6 +851,13 @@ mod tests {
             created_at_unix: 1,
             retired_at_unix: None,
             counterparty_id: counterparty_id.map(str::to_string),
+            one_time: false,
+            sweep_destination_address: None,
+            min_sweep_amount_hex: None,
+            purge_after_sweep: false,
+            sweep_job_id: None,
+            lifecycle_state: None,
+            sweep_blocker: None,
         }
     }
 
@@ -1054,6 +1125,62 @@ mod tests {
 
         assert_eq!(
             default_destination_for_hot_balance("0x1", Some(policy)).as_deref(),
+            Some("0x3333333333333333333333333333333333333333")
+        );
+    }
+
+    #[test]
+    fn inconsistent_hot_treasury_pair_falls_back_to_default_destination() {
+        let default = "0x9999999999999999999999999999999999999999";
+        let hot = "0x2222222222222222222222222222222222222222";
+        let treasury = "0x3333333333333333333333333333333333333333";
+
+        for (hot_address, treasury_address) in [(Some(hot), None), (None, Some(treasury))] {
+            let mut registry = sample_seed_registry();
+            registry.eth_seed_wallets[0].hot_address = hot_address.map(str::to_string);
+            registry.eth_seed_wallets[0].treasury_address = treasury_address.map(str::to_string);
+            registry.eth_seed_wallets[0].default_destination_address = Some(default.into());
+            let state = WalletInventoryState {
+                addresses: vec![sample_hot_address("0x1")],
+                ..WalletInventoryState::default()
+            };
+            let holding = sample_native_holding_at("0x1111111111111111111111111111111111111111");
+
+            assert_eq!(
+                resolve_default_destination(&state, &registry, &holding, &None).as_deref(),
+                Some(default)
+            );
+        }
+    }
+
+    #[test]
+    fn inconsistent_hot_treasury_pair_without_default_yields_no_destination() {
+        let mut registry = sample_seed_registry();
+        registry.eth_seed_wallets[0].treasury_address = None;
+        let state = WalletInventoryState {
+            addresses: vec![sample_hot_address("0x1")],
+            ..WalletInventoryState::default()
+        };
+        let holding = sample_native_holding_at("0x1111111111111111111111111111111111111111");
+
+        // No destination resolves here, so downstream sweep steps pick up the
+        // missing_destination blocker and stay blocked instead of panicking.
+        assert_eq!(
+            resolve_default_destination(&state, &registry, &holding, &None),
+            None
+        );
+    }
+
+    #[test]
+    fn undecodable_policy_hot_floor_uses_default_floor_without_panic() {
+        let policy = sample_routing_policy("0xzz", "0x2");
+
+        assert_eq!(
+            default_destination_for_hot_balance("0x1", Some(policy.clone())).as_deref(),
+            Some("0x2222222222222222222222222222222222222222")
+        );
+        assert_eq!(
+            default_destination_for_hot_balance("0xde0b6b3a7640001", Some(policy)).as_deref(),
             Some("0x3333333333333333333333333333333333333333")
         );
     }
@@ -1387,7 +1514,7 @@ mod tests {
         );
         let mut steps = build_plan_steps(&state, &ProfileRegistry::default(), &body, &None);
 
-        let findings = analyze_plan_linkage(&state, &mut steps);
+        let findings = analyze_plan_linkage(&state, &mut steps).findings;
 
         assert!(findings.is_empty());
         assert!(steps.iter().all(|step| step.linkage_warnings.is_empty()));
@@ -1428,7 +1555,7 @@ mod tests {
         );
         let mut steps = build_plan_steps(&state, &ProfileRegistry::default(), &body, &None);
 
-        let findings = analyze_plan_linkage(&state, &mut steps);
+        let findings = analyze_plan_linkage(&state, &mut steps).findings;
 
         assert!(!findings.is_empty());
         assert!(steps.iter().all(|step| !step.linkage_warnings.is_empty()));
@@ -1460,7 +1587,7 @@ mod tests {
             ),
         ];
 
-        let findings = analyze_plan_linkage(&state, &mut steps);
+        let findings = analyze_plan_linkage(&state, &mut steps).findings;
         apply_linkage_blockers(&mut steps);
 
         assert!(!findings.is_empty());
@@ -1496,7 +1623,7 @@ mod tests {
             sample_sweep_step(bob_address, destination),
         ];
 
-        let findings = analyze_plan_linkage(&state, &mut steps);
+        let findings = analyze_plan_linkage(&state, &mut steps).findings;
 
         assert_eq!(findings.len(), 1);
         assert!(findings[0].contains("Destination 0x99999999... links 2 payers"));
@@ -1532,7 +1659,7 @@ mod tests {
             sample_sweep_step(bob_address, destination_upper),
         ];
 
-        let findings = analyze_plan_linkage(&state, &mut steps);
+        let findings = analyze_plan_linkage(&state, &mut steps).findings;
 
         assert_eq!(findings.len(), 1);
         assert!(findings[0].contains("Destination 0xabcdefab... links 2 payers"));
@@ -1564,7 +1691,7 @@ mod tests {
             sample_sweep_step(second_address, destination),
         ];
 
-        let findings = analyze_plan_linkage(&state, &mut steps);
+        let findings = analyze_plan_linkage(&state, &mut steps).findings;
 
         assert!(findings.is_empty());
         assert!(steps.iter().all(|step| step.linkage_warnings.is_empty()));
@@ -1581,7 +1708,7 @@ mod tests {
             sample_sweep_step(second_address, destination),
         ];
 
-        let findings = analyze_plan_linkage(&state, &mut steps);
+        let findings = analyze_plan_linkage(&state, &mut steps).findings;
 
         assert_eq!(findings.len(), 1);
         assert!(findings[0].contains("links 2 payers"));
@@ -1603,7 +1730,7 @@ mod tests {
             sample_sweep_step(address, destination),
         ];
 
-        let findings = analyze_plan_linkage(&state, &mut steps);
+        let findings = analyze_plan_linkage(&state, &mut steps).findings;
 
         assert!(findings.is_empty());
         assert!(steps.iter().all(|step| step.linkage_warnings.is_empty()));
@@ -1630,7 +1757,7 @@ mod tests {
             sample_fund_gas_step("fund_bob", sponsor, bob_address),
         ];
 
-        let findings = analyze_plan_linkage(&state, &mut steps);
+        let findings = analyze_plan_linkage(&state, &mut steps).findings;
 
         assert_eq!(findings.len(), 1);
         assert!(findings[0].contains("Sponsor"));
@@ -1643,6 +1770,90 @@ mod tests {
         assert_eq!(steps[1].linkage_warnings.len(), 1);
         assert!(steps[1].linkage_warnings[0].contains("Acme"));
         assert!(!steps[1].linkage_warnings[0].contains("Bob"));
+    }
+
+    /// Plan task 3.5: a plan whose steps share a gas funder across parties
+    /// produces a structured `common_gas_funder` risk finding (advisory —
+    /// steps are NOT blocked by the finding itself).
+    #[test]
+    fn fund_gas_shared_funder_across_parties_yields_common_gas_funder_finding() {
+        let sponsor = "0x4444444444444444444444444444444444444444";
+        let acme_address = "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+        let bob_address = "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+        let state = WalletInventoryState {
+            receive_allocations: vec![
+                sample_receive_allocation(acme_address, Some("party_acme")),
+                sample_receive_allocation(bob_address, Some("party_bob")),
+            ],
+            parties: vec![
+                sample_party("party_acme", "Acme"),
+                sample_party("party_bob", "Bob"),
+            ],
+            ..Default::default()
+        };
+        let mut steps = vec![
+            sample_fund_gas_step("fund_acme", sponsor, acme_address),
+            sample_fund_gas_step("fund_bob", sponsor, bob_address),
+        ];
+
+        let analysis = analyze_plan_linkage(&state, &mut steps);
+
+        assert_eq!(analysis.risk_findings.len(), 1);
+        let finding = &analysis.risk_findings[0];
+        assert_eq!(finding.category, "common_gas_funder");
+        assert_eq!(finding.risk_level, "medium");
+        assert_eq!(finding.subject_type, "gas_funder");
+        assert_eq!(finding.subject, sponsor);
+        assert_eq!(
+            finding.id,
+            format!("common_gas_funder:{}:{sponsor}", steps[0].chain_id)
+        );
+        assert!(finding.recommendation.contains("distinct sponsor"));
+        assert!(
+            finding
+                .evidence
+                .iter()
+                .any(|value| value == "Distinct payer identities funded: 2")
+        );
+        assert!(
+            finding
+                .evidence
+                .iter()
+                .any(|value| value == "Linked payer: Acme")
+        );
+        assert!(
+            finding
+                .evidence
+                .iter()
+                .any(|value| value == "Linked payer: Bob")
+        );
+        // Advisory only: the analysis itself never blocks steps.
+        assert!(steps.iter().all(|step| step.blockers.is_empty()));
+    }
+
+    #[test]
+    fn fund_gas_same_party_topups_yield_no_common_gas_funder_finding() {
+        let sponsor = "0x4444444444444444444444444444444444444444";
+        let first_address = "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+        let second_address = "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+        let state = WalletInventoryState {
+            receive_allocations: vec![
+                sample_receive_allocation(first_address, Some("party_acme")),
+                sample_receive_allocation(second_address, Some("party_acme")),
+            ],
+            parties: vec![sample_party("party_acme", "Acme")],
+            ..Default::default()
+        };
+        let mut steps = vec![
+            sample_fund_gas_step("fund_1", sponsor, first_address),
+            sample_fund_gas_step("fund_2", sponsor, second_address),
+        ];
+
+        let analysis = analyze_plan_linkage(&state, &mut steps);
+
+        assert!(analysis.findings.is_empty());
+        assert!(analysis.risk_findings.is_empty());
+        assert!(steps.iter().all(|step| step.linkage_warnings.is_empty()));
     }
 
     #[test]
@@ -1663,7 +1874,7 @@ mod tests {
             sample_fund_gas_step("fund_2", sponsor, second_address),
         ];
 
-        let findings = analyze_plan_linkage(&state, &mut steps);
+        let findings = analyze_plan_linkage(&state, &mut steps).findings;
 
         assert!(findings.is_empty());
         assert!(steps.iter().all(|step| step.linkage_warnings.is_empty()));
@@ -1680,7 +1891,7 @@ mod tests {
             sample_fund_gas_step("fund_2", sponsor, second_address),
         ];
 
-        let findings = analyze_plan_linkage(&state, &mut steps);
+        let findings = analyze_plan_linkage(&state, &mut steps).findings;
 
         assert_eq!(findings.len(), 1);
         assert!(findings[0].contains("funds 2 parties"));
@@ -1717,7 +1928,7 @@ mod tests {
             ),
         ];
 
-        let findings = analyze_plan_linkage(&state, &mut steps);
+        let findings = analyze_plan_linkage(&state, &mut steps).findings;
         apply_linkage_blockers(&mut steps);
 
         assert_eq!(findings.len(), 1);

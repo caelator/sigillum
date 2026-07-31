@@ -2,11 +2,34 @@
 //!
 //! Wraps [`EthStealthDeposit`] records in a versioned [`JsonDocument`] so they
 //! survive daemon restarts with automatic backup-on-schema-change recovery.
+//!
+//! ## Schema v3: stealth hash convention stamping
+//!
+//! Version 3 added `stealth_hash_convention` to every record (see
+//! `docs/architecture.md` — the ERC-5564 shared-secret hash convention switch).
+//! Records written before the switch (schema v1/v2 and pre-envelope legacy
+//! files) were ALL created with the legacy x-only convention, so the migration
+//! stamps them `x32` unconditionally. New records are written with the
+//! standard `compressed33` convention. If a v3 record ever lacks the field
+//! (corrupt or hand-edited store), serde defaults it to the standard
+//! convention and detection re-probes both conventions on the next scan/check,
+//! correcting the stamp on match (documented fail-safe: signing verifies the
+//! derived address, so a wrong stamp can never produce a wrong key).
+//!
+//! ## Announcement-scan cursors (plan task 2.6)
+//!
+//! `announcement_scan_cursors` persists the per-(wallet profile, provider
+//! profile) announcement-scan progress so `scan-announcements` can resume
+//! incrementally instead of requiring a manual `from_block` per call. The
+//! field is additive with a serde default, so the schema stays v3: v3 files
+//! written before cursors existed load with an empty cursor list, and older
+//! binaries ignore the field outright.
 
 use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
-use sigillum_api::EthStealthDeposit;
+use sigillum_api::{EthStealthAnnouncementScanCursor, EthStealthDeposit};
+use sigillum_core::StealthHashConvention;
 
 use crate::json_store::{JsonDocument, JsonSchema};
 
@@ -14,10 +37,35 @@ use crate::json_store::{JsonDocument, JsonSchema};
 pub struct DepositState {
     #[serde(default)]
     pub eth_stealth: Vec<EthStealthDeposit>,
+    #[serde(default)]
+    pub announcement_scan_cursors: Vec<EthStealthAnnouncementScanCursor>,
+}
+
+impl DepositState {
+    fn parse(path: &std::path::Path, data: serde_json::Value) -> Result<Self, std::io::Error> {
+        serde_json::from_value(data).map_err(|error| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!(
+                    "failed to parse sigillum.deposits schema payload {}: {error}",
+                    path.display()
+                ),
+            )
+        })
+    }
+}
+
+/// Stamp every record with the legacy convention. Only applied to stores
+/// written before the convention switch (schema v1/v2 and legacy unwrapped
+/// files), whose records were all created with the x-only hash.
+fn stamp_pre_switch_records_legacy(state: &mut DepositState) {
+    for deposit in &mut state.eth_stealth {
+        deposit.stealth_hash_convention = StealthHashConvention::LEGACY;
+    }
 }
 
 impl JsonDocument for DepositState {
-    const SCHEMA: JsonSchema = JsonSchema::new("sigillum.deposits", 2);
+    const SCHEMA: JsonSchema = JsonSchema::new("sigillum.deposits", 3);
 
     fn from_enveloped_json(
         path: &std::path::Path,
@@ -25,15 +73,12 @@ impl JsonDocument for DepositState {
         data: serde_json::Value,
     ) -> Result<Self, std::io::Error> {
         match version {
-            1 | 2 => serde_json::from_value(data).map_err(|error| {
-                std::io::Error::new(
-                    std::io::ErrorKind::InvalidData,
-                    format!(
-                        "failed to parse sigillum.deposits schema payload {}: {error}",
-                        path.display()
-                    ),
-                )
-            }),
+            1 | 2 => {
+                let mut state = Self::parse(path, data)?;
+                stamp_pre_switch_records_legacy(&mut state);
+                Ok(state)
+            }
+            3 => Self::parse(path, data),
             _ => Err(std::io::Error::new(
                 std::io::ErrorKind::InvalidData,
                 format!(
@@ -44,6 +89,15 @@ impl JsonDocument for DepositState {
                 ),
             )),
         }
+    }
+
+    fn from_legacy_json(
+        path: &std::path::Path,
+        value: serde_json::Value,
+    ) -> Result<Self, std::io::Error> {
+        let mut state = Self::parse(path, value)?;
+        stamp_pre_switch_records_legacy(&mut state);
+        Ok(state)
     }
 }
 
@@ -87,6 +141,7 @@ mod tests {
             stealth_address: "0x0000000000000000000000000000000000000001".into(),
             ephemeral_public_key_hex: "0x02".into(),
             view_tag_hex: "0xaa".into(),
+            stealth_hash_convention: StealthHashConvention::STANDARD,
             announcement: None,
             token_address: None,
             expected_amount_hex: None,
@@ -103,6 +158,9 @@ mod tests {
             last_checked_at_unix: None,
             broadcast_transaction_hash_hex: None,
             counterparty_id: None,
+            requested_gas_wei_hex: None,
+            gas_topup_job_id: None,
+            gas_topup_job_state: None,
         }
     }
 
@@ -150,8 +208,12 @@ mod tests {
         let saved: serde_json::Value =
             serde_json::from_slice(&std::fs::read(deposits_path(dir.path())).unwrap()).unwrap();
         assert_eq!(saved["schema"], json!("sigillum.deposits"));
-        assert_eq!(saved["schema_version"], json!(2));
+        assert_eq!(saved["schema_version"], json!(3));
         assert!(saved["data"]["eth_stealth"].is_array());
+        assert_eq!(
+            saved["data"]["eth_stealth"][0]["stealth_hash_convention"],
+            json!("compressed33")
+        );
     }
 
     #[test]
@@ -164,6 +226,11 @@ mod tests {
 
         let loaded = load_deposits(dir.path()).unwrap();
         assert_eq!(loaded.eth_stealth.len(), 1);
+        // Pre-envelope files predate the convention switch: stamped legacy.
+        assert_eq!(
+            loaded.eth_stealth[0].stealth_hash_convention,
+            StealthHashConvention::LEGACY
+        );
     }
 
     #[test]
@@ -203,5 +270,111 @@ mod tests {
 
         assert_eq!(loaded.eth_stealth[0].chain_id, 1);
         assert!(loaded.eth_stealth[0].chain_id_assumed);
+        assert_eq!(
+            loaded.eth_stealth[0].stealth_hash_convention,
+            StealthHashConvention::LEGACY
+        );
+    }
+
+    #[test]
+    fn v2_deposits_migrate_with_legacy_convention_stamp() {
+        let dir = TempDir::new().unwrap();
+        let path = deposits_path(dir.path());
+        // A v2 store (pre-convention-switch) has no convention field; every
+        // record was created with the legacy x-only hash and must be stamped
+        // `x32` so sweeps keep deriving the right key.
+        std::fs::write(
+            &path,
+            serde_json::to_vec_pretty(&json!({
+                "schema": "sigillum.deposits",
+                "schema_version": 2,
+                "data": {
+                    "eth_stealth": [{
+                        "id": "dep_1",
+                        "status": "pending",
+                        "asset_kind": "native",
+                        "wallet_profile": "wallet-a",
+                        "chain_id": 1,
+                        "wallet_compartment_id": 0,
+                        "provider_compartment_id": 0,
+                        "wallet": "wallet-a",
+                        "short_name": "eth",
+                        "stealth_meta_address": "st:eth:example",
+                        "stealth_address": "0x0000000000000000000000000000000000000001",
+                        "ephemeral_public_key_hex": "0x02",
+                        "view_tag_hex": "0xaa",
+                        "auto_queue_sweep": false,
+                        "created_at_unix": 1,
+                        "updated_at_unix": 1
+                    }]
+                }
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+
+        let loaded = load_deposits(dir.path()).unwrap();
+
+        assert_eq!(
+            loaded.eth_stealth[0].stealth_hash_convention,
+            StealthHashConvention::LEGACY
+        );
+        // Persisting after migration writes the v3 envelope with the stamp.
+        save_deposits(dir.path(), &loaded).unwrap();
+        let saved: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(deposits_path(dir.path())).unwrap()).unwrap();
+        assert_eq!(saved["schema_version"], json!(3));
+        assert_eq!(
+            saved["data"]["eth_stealth"][0]["stealth_hash_convention"],
+            json!("x32")
+        );
+    }
+
+    #[test]
+    fn v3_deposits_keep_their_stored_convention() {
+        let dir = TempDir::new().unwrap();
+        let mut state = DepositState::default();
+        let mut legacy = sample_deposit();
+        legacy.stealth_hash_convention = StealthHashConvention::LEGACY;
+        state.eth_stealth.push(legacy);
+        state.eth_stealth.push(sample_deposit());
+
+        save_deposits(dir.path(), &state).unwrap();
+        let loaded = load_deposits(dir.path()).unwrap();
+
+        assert_eq!(
+            loaded.eth_stealth[0].stealth_hash_convention,
+            StealthHashConvention::LEGACY
+        );
+        assert_eq!(
+            loaded.eth_stealth[1].stealth_hash_convention,
+            StealthHashConvention::STANDARD
+        );
+    }
+
+    #[test]
+    fn v3_record_missing_convention_defaults_to_standard_for_reprobe() {
+        let dir = TempDir::new().unwrap();
+        let path = deposits_path(dir.path());
+        let mut state = DepositState::default();
+        state.eth_stealth.push(sample_deposit());
+        save_deposits(dir.path(), &state).unwrap();
+
+        // Simulate corruption/hand-editing: strip the field from the v3 file.
+        let mut saved: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+        saved["data"]["eth_stealth"][0]
+            .as_object_mut()
+            .unwrap()
+            .remove("stealth_hash_convention");
+        std::fs::write(&path, serde_json::to_vec_pretty(&saved).unwrap()).unwrap();
+
+        // Documented fail-safe: the record loads with the standard default;
+        // detection re-probes both conventions and corrects the stamp.
+        let loaded = load_deposits(dir.path()).unwrap();
+        assert_eq!(
+            loaded.eth_stealth[0].stealth_hash_convention,
+            StealthHashConvention::STANDARD
+        );
     }
 }

@@ -75,7 +75,8 @@ MISSING_CHANGELOG_TAG="v1.0.0-rc.6"
 UNDATED_CHANGELOG_TAG="v1.0.0-rc.7"
 SKIPPED_RC_TAG="v1.0.0-rc.9"
 MISSING_SEQUENCE_TAG="v1.0.0-rc.8"
-HIGHEST_LIGHTWEIGHT_TAG="v1.0.0-rc.10"
+SAME_SHA_NEWER_RC_TAG="v1.0.0-rc.10"
+HIGHEST_LIGHTWEIGHT_TAG="v1.0.0-rc.11"
 FINAL_TAG="v1.0.0"
 
 git -C "${SOURCE_REPO}" tag -a "${ANNOTATED_TAG}" -m "annotated fixture"
@@ -325,10 +326,43 @@ git -C "${SOURCE_REPO}" tag --force -a "${FINAL_TAG}" \
   -m "Release-Evidence-SHA256: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" \
   "${VALID_COMMIT}"
 git -C "${SOURCE_REPO}" push --quiet --force origin "${FINAL_TAG}"
+FINAL_GITHUB_OUTPUT="${TMP_ROOT}/final-github-output"
+HIGHEST_RC_TAG_OBJECT="$(
+  git -C "${SOURCE_REPO}" rev-parse "refs/tags/${SKIPPED_RC_TAG}"
+)"
 (
   cd "${RUNNER_REPO}"
-  bash "${CHECKER}" "${FINAL_TAG}" "${VALID_COMMIT}" origin
+  GITHUB_OUTPUT="${FINAL_GITHUB_OUTPUT}" \
+    bash "${CHECKER}" "${FINAL_TAG}" "${VALID_COMMIT}" origin
 )
+grep -Fx "promotion_rc_tag=${SKIPPED_RC_TAG}" \
+  "${FINAL_GITHUB_OUTPUT}" >/dev/null ||
+  fail "final contract did not publish the highest retained RC tag"
+grep -Fx "promotion_rc_tag_object=${HIGHEST_RC_TAG_OBJECT}" \
+  "${FINAL_GITHUB_OUTPUT}" >/dev/null ||
+  fail "final contract did not publish the highest retained RC tag object"
+grep -Fx "promotion_rc_sha=${VALID_COMMIT}" \
+  "${FINAL_GITHUB_OUTPUT}" >/dev/null ||
+  fail "final contract did not publish the highest retained RC peeled SHA"
+
+# Simulate a newer annotated RC appearing at the same peeled commit after the
+# final workflow pinned its promotion source. Revalidating only the final tag
+# still passes, so the release job and H2 must also revalidate the exact pinned
+# RC tag object and reject the now-stale source.
+git -C "${SOURCE_REPO}" tag -a "${SAME_SHA_NEWER_RC_TAG}" \
+  -m "same-SHA newer RC fixture" "${VALID_COMMIT}"
+git -C "${SOURCE_REPO}" push --quiet origin "${SAME_SHA_NEWER_RC_TAG}"
+expect_failure "${TMP_ROOT}/stale-promotion-rc.log" "expected rc.11" \
+  "${SKIPPED_RC_TAG}" "${VALID_COMMIT}" origin "${HIGHEST_RC_TAG_OBJECT}"
+SAME_SHA_FINAL_OUTPUT="${TMP_ROOT}/same-sha-final-output"
+(
+  cd "${RUNNER_REPO}"
+  GITHUB_OUTPUT="${SAME_SHA_FINAL_OUTPUT}" \
+    bash "${CHECKER}" "${FINAL_TAG}" "${VALID_COMMIT}" origin
+)
+grep -Fx "promotion_rc_tag=${SAME_SHA_NEWER_RC_TAG}" \
+  "${SAME_SHA_FINAL_OUTPUT}" >/dev/null ||
+  fail "final contract did not move to the newer same-SHA RC"
 
 write_valid_changelog
 git -C "${SOURCE_REPO}" add CHANGELOG.md

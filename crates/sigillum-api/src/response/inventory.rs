@@ -126,6 +126,65 @@ pub struct WalletDiscoveryJob {
     pub completed_at_unix: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub last_error: Option<String>,
+    /// Whether same-chain address probes were partitioned across provider
+    /// profiles (stable per-address hash assignment). Present and `true`
+    /// only when the scan request opted in AND at least one chain had
+    /// multiple selected providers; resume replays it so the resumed scan
+    /// keeps the same per-provider disjoint coverage.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub partition_providers: Option<bool>,
+    /// Per-provider observed-address counts for a partitioned scan, so an
+    /// operator can verify disjoint coverage (each count sums into
+    /// `addresses_scanned`). Empty for non-partitioned scans.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub provider_partition_observations: Vec<ProviderPartitionObservation>,
+}
+
+/// Observed-address count attributed to one provider profile within a
+/// partitioned discovery scan (plan task 3.1).
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ProviderPartitionObservation {
+    pub provider_profile: String,
+    pub chain_id: u64,
+    pub addresses_observed: usize,
+}
+
+/// Per-store counts of what a forget/prune operation removed (plan task 3.2).
+///
+/// Carried by the `wallet_inventory.addresses.prune` /
+/// `wallet_inventory.profile_prune` audit events and by the profile-delete
+/// mutation responses when `prune_inventory` was requested, so the operator
+/// can verify exactly what was forgotten. All fields are plain counts — never
+/// addresses or other linkage material.
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct InventoryPruneSummary {
+    /// Scanned-address rows removed.
+    pub addresses: usize,
+    /// Asset-holding rows removed with those addresses.
+    pub holdings: usize,
+    /// Discovery-job records removed outright (jobs that covered only the
+    /// forgotten profile); jobs spanning other profiles are kept.
+    pub jobs: usize,
+    /// Resume checkpoints removed from surviving discovery jobs.
+    pub checkpoints: usize,
+    /// Per-address log-scan block cursors removed from discovery jobs.
+    pub block_cursors: usize,
+    /// Receive allocations removed while still active (retire-then-purge:
+    /// they leave the store in the same operation, so no half-retired record
+    /// persists).
+    pub allocations_active: usize,
+    /// Receive allocations removed that were already retired.
+    pub allocations_retired: usize,
+    /// Counterparty bindings removed with purged allocations. The
+    /// counterparty records themselves always remain.
+    pub counterparty_bindings: usize,
+}
+
+/// Result of a scanned-address prune (`inventory/addresses/delete`).
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct WalletInventoryAddressPruneResponse {
+    pub status: String,
+    pub pruned: InventoryPruneSummary,
 }
 
 /// Cached NFT metadata and spam-review state for a discovered token.
@@ -212,6 +271,11 @@ pub struct WalletInventoryListResponse {
     pub holdings: Vec<WalletAssetHolding>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub nft_metadata_cache: Vec<NftMetadataCacheEntry>,
+    /// Pagination window metadata for the `addresses` list (the other lists
+    /// are always returned in full). Present only when the request supplied
+    /// `limit` and/or `offset`; absent on legacy (parameterless) calls.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pagination: Option<super::PaginationInfo>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -219,6 +283,12 @@ pub struct WalletInventoryScanResponse {
     pub job: WalletDiscoveryJob,
     pub addresses: Vec<WalletInventoryAddress>,
     pub holdings: Vec<WalletAssetHolding>,
+    /// The background operation driving the scan. Present only when the
+    /// request set `run_async: true`; `addresses`/`holdings` are then empty
+    /// and the job is the accepted (still running) discovery job. Poll
+    /// `GET /api/operations/{id}` or `GET /api/discovery/jobs` for progress.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub operation: Option<crate::response::Operation>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -278,12 +348,20 @@ fn default_inventory_chain_id() -> u64 {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct DiscoveryJobListResponse {
     pub jobs: Vec<WalletDiscoveryJob>,
+    /// Pagination window metadata. Present only when the request supplied
+    /// `limit` and/or `offset`; absent on legacy (parameterless) calls.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pagination: Option<super::PaginationInfo>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct DiscoveryJobMutationResponse {
     pub status: String,
     pub job: WalletDiscoveryJob,
+    /// The background operation started by a resume (or signaled by a
+    /// cancel). Absent when no live operation is involved.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub operation: Option<crate::response::Operation>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -364,6 +442,10 @@ pub struct RiskFinding {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct RiskFindingListResponse {
     pub findings: Vec<RiskFinding>,
+    /// Pagination window metadata. Present only when the request supplied
+    /// `limit` and/or `offset`; absent on legacy (parameterless) calls.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pagination: Option<super::PaginationInfo>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -468,12 +550,22 @@ pub struct ConsolidationPlan {
     /// would publicly link multiple distinct payers via a shared recipient.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub linkage_findings: Vec<String>,
+    /// Structured privacy findings from the linkage analysis (plan task 3.5):
+    /// `common_gas_funder` entries when one gas sponsor funds receive
+    /// addresses attributed to different payer identities. Advisory only —
+    /// execution blocking stays governed by `block_cross_party_linkage`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub risk_findings: Vec<RiskFinding>,
     pub steps: Vec<ConsolidationPlanStep>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ConsolidationPlanListResponse {
     pub plans: Vec<ConsolidationPlan>,
+    /// Pagination window metadata. Present only when the request supplied
+    /// `limit` and/or `offset`; absent on legacy (parameterless) calls.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pagination: Option<super::PaginationInfo>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]

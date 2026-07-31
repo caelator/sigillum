@@ -1,28 +1,28 @@
 # Sigillum — Production Readiness
 
-**Date:** June 4, 2026 (updated July 12, 2026)
-**Current Verdict:** there is no valid release candidate. `v1.0.0-rc.2` is an
-immutable annotated-tag-contract failure. `v1.0.0-rc.3` passed the legacy
-source and release workflows and produced checksum-valid assets, but its
-macOS app had only a linker signature: strict bundle verification failed,
-`Info.plist` was unbound, resources were unsealed, and `CodeResources` was
-absent. RC3 and every same-SHA operator receipt are historical failure evidence
-only. `v1.0.0-rc.4` proved the bundle-signing remediation on protected `main`,
-but its release-evidence validator could accept a mainnet or arbitrary chain as
-the required L2 testnet and represented the two-transaction gas-top-up chain
-with one hash. Its queue also treated a broadcast-but-unconfirmed prerequisite
-as successful. RC4 and every same-SHA operator receipt are therefore historical
-failure evidence too. The next candidate is the monotonically required
-`v1.0.0-rc.5`, after the runtime and F6 schema-v2 remediations pass
-protected-main gates. Every pushed RC tag remains an immutable receipt anchor.
-The supported boundary remains local-first, single-host, and not
-internet-facing; remote-platform scope is explicitly unsupported.
+**Date:** June 4, 2026 (updated July 30, 2026)
+
+**Current Verdict:** Sigillum is not production-ready and has no published
+stable release. `v1.0.0-rc.2` through `v1.0.0-rc.4` are immutable failure
+receipts. `v1.0.0-rc.5` at protected-main commit `7e04743` is an unpublished
+historical draft only: its successful workflow and checksums prove that older
+commit, not the integrated hardening line. No RC6 exists.
+
+The next eligible candidate is `v1.0.0-rc.6` only after the exact integrated
+HEAD passes `./scripts/check-release.sh` from a clean tree, completes the
+required independent review, lands through protected `main`, and passes
+required CI. C7 remains partial: the five-destination operator console is
+implemented, but its RC6-bound operator walkthrough and sign-off are pending.
+All release evidence must bind to the same RC6 peeled SHA. The fail-closed
+target-host evidence boundary is macOS 15.x on Apple Silicon (`aarch64`) only;
+macOS 26.5.2/arm64 is not an eligible release-evidence host. There is no final
+`v1.0.0` tag and no published GitHub Release.
 
 ## Summary
 
-Sigillum's earlier RC met the full-workspace baseline for the documented
-local-first scope. The current hardening checkout must re-prove that baseline
-for the local daemon, client, core, CLI, the `sigillum-gateway` sidecar, and the
+Historical source receipts re-proved the full-workspace baseline for their
+exact commits. The integrated hardening HEAD must re-prove that baseline across
+the local daemon, client, core, CLI, the `sigillum-gateway` sidecar, and the
 shipped EVM wallet-management product:
 
 - the workspace needs to stay green on the executable `./scripts/check-release.sh`
@@ -74,7 +74,8 @@ timestamp, and has no privileged third-party invoice-signing callback.
 
 ## What Is Ready
 
-The current repository is in good shape for controlled single-machine use:
+The current hardening checkout implements the following single-machine
+capabilities, subject to the fresh source, CI, RC, and operator gates below:
 
 - file-backed vault core and wrapped-key lifecycle
 - passphrase and FIDO2-based unlock flows
@@ -95,6 +96,19 @@ The current repository is in good shape for controlled single-machine use:
 - `sigillum-gateway` as a disabled-by-default local-sidecar payment observation
   preview, not a supported 1.0 payment processor
 - BIP-39-backed 8-word default passphrase generation and RustCrypto TOTP HMACs
+- ScopeLift-compatible ERC-5564 scheme-1 shared-point hashing with legacy
+  pre-release payment recovery
+- post-wait session/compartment revalidation and lock-latch admission before
+  transaction broadcast
+- serialized first-run admission rechecks for snapshot restore, compartment
+  initialization, and FIDO2 setup
+- forced idle locking that keeps broadcast admission closed and re-zeroizes
+  after already-admitted work drains
+- lock-latch queue holds that stop the drain and preserve exact-byte recovery
+  authority without terminalizing an unsubmitted or ambiguous job
+- cancelable, resumable discovery jobs with terminal failure and restart states
+- cross-process FIDO2 writer exclusion and causal recovery receipts bound to
+  the exact resulting configuration state
 
 ## What Is Not Yet Product-Complete
 
@@ -108,22 +122,38 @@ not the shipped local-first wallet-management baseline:
   gate. No external penetration test has been performed, and the release does
   not claim one. Automated local adversarial/fuzz coverage through
   `scripts/check-adversarial.sh` is not an independent security audit.
-- The remaining RC-time evidence is:
-  - a successful draft release workflow and checksum-verified asset set at the
-    fresh `v1.0.0-rc.5` SHA, including strict verification of the source app
-    and the app mounted from its dmg; `v1.0.0-rc.2`, `v1.0.0-rc.3`, and
-    `v1.0.0-rc.4` are historical failure evidence only
-  - standard and chaos doctor/soak receipts on every supported host at the new
-    RC SHA; the earlier `mac-server` receipt is historical baseline evidence,
-    not evidence for the current hardening candidate (F4)
+- RC5 is retained as historical evidence for `7e04743`; none of its workflow,
+  artifact, soak, doctor, or UI evidence certifies the integrated hardening
+  changes.
+- The remaining same-candidate evidence for RC6 is:
+  - an exact-integrated-HEAD clean-tree `./scripts/check-release.sh`,
+    independent review, protected merge, required CI, successful RC6 draft
+    workflow, and independently checksum-verified assets at the exact RC6 SHA
+  - schema-v2 standard 3600-second and chaos 600-second soak receipts plus
+    `sigillum doctor` on the same eligible macOS 15.x/aarch64 host at the exact
+    RC6 SHA (F4)
   - five public-testnet transactions for the four core execution families:
     native sweep, ERC-20 sweep, revoke, plus both the `fund_gas` and dependent
     sweep legs of gas top-up on Ethereum Sepolia (`11155111`) and Base Sepolia
     (`84532`), Arbitrum Sepolia (`421614`), or OP Sepolia (`11155420`) (F6)
+  - F7 upgrade-path verification at RC6
+  - a checksum-verified RC6 `.dmg` clean install reaching unlock without a
+    developer toolchain, plus the RC6 five-destination operator UI
+    walkthrough/sign-off (C7)
   - one sanitized external evidence bundle containing the same-RC operator
     receipts; H2 binds its filename and SHA-256 digest into the immutable final
     tag, verifies the uploaded copy before publication, and H3 records the
     public linkage in the tracked audit
+  - an explicit H2 operator decision, recorded immediately before invoking the
+    final-tag ceremony, that authorizes tag creation and conditional
+    publication only if every post-tag verification passes
+  - exact-byte final promotion: rerun the source-verification legs, skip
+    artifact rebuilds, copy the five qualified RC payload bytes under final
+    names, verify byte identity and tag-normalized digests, regenerate
+    `SHA256SUMS`, attach the evidence bundle as the seventh asset, and verify
+    the final draft before publication
+- RC releases must be draft, unpublished, and `prerelease=true`; the final
+  draft and published release must be `prerelease=false`.
 - Within wallet management, only non-EVM chains (roadmap phase 10), swap
   execution (D-13), and fiat/NFT valuation (D-16) are deferred.
 
@@ -152,7 +182,9 @@ these are true:
 1. `./scripts/check-release.sh` passes from a clean checkout with the pinned
    Rust toolchain, committed daemon UI assets, locked dependency resolution,
    default and no-HID FIDO2 coverage, adversarial/fuzz checks, local daemon
-   runtime smoke, and no tracked-tree mutation.
+   runtime smoke, pinned 15-scenario axe-core accessibility coverage, and no
+   tracked-tree mutation. Mock accessibility/screenshot evidence does not
+   replace the real-daemon browser smoke.
 2. The API, daemon route, client surface, and docs all match.
 3. The feature has an operator surface or an explicit API-only decision.
 4. Persistence and restart behavior are explicit and tested.
@@ -164,24 +196,26 @@ route-by-route in
 
 ## Current Plan Of Record
 
-The active execution plan for the 1.0 release lives in
-[docs/release-1.0-plan.md](./docs/release-1.0-plan.md). Its phases (A-H, W1-W8,
-F, G, H) are the plan of record. The earlier structural roadmap in
-[docs/catchup-plan.md](./docs/catchup-plan.md) remains a background reference;
-its phases 1–3 are absorbed into the 1.0 plan.
+The current release authorities are
+[docs/release-1.0-plan.md](./docs/release-1.0-plan.md) and
+[docs/execution-runbook-1.0.md](./docs/execution-runbook-1.0.md). The plan
+defines scope and acceptance; the runbook defines current execution order,
+release mechanics, and operator gates. Historical plans and handoffs are not
+current authority.
 
 ## Short-Term Recommendation
 
 The next work should still avoid speculative new product scope first. The right
 immediate move is:
 
-1. keep `./scripts/check-release.sh` enforced in CI across Ubuntu and macOS
-2. keep `./scripts/check-adversarial.sh` green and expand it when new API,
-   gateway, or UI boundary surfaces are added
-3. collect fresh doctor plus standard and chaos soak receipts on the currently
-   supported `mac-server` at the exact new RC SHA (F4)
-4. collect public-testnet execution receipts for native sweep, ERC-20 sweep,
-   revoke, and gas top-up (F6)
-5. keep documentation and audits anchored to the local-on-your-computer boundary
+1. run the full clean gate and independent review against the exact integrated
+   HEAD
+2. merge through protected `main` with required Ubuntu and macOS CI green
+3. create immutable annotated RC6; require its GitHub Release to remain an
+   unpublished prerelease draft and independently verify all six assets
+4. collect RC6-bound F7, schema-v2 F4/doctor evidence on macOS 15.x/aarch64,
+   five funded F6 transactions, clean-machine install/unlock, and C7 sign-off
+5. validate the complete evidence bundle and exact-byte final draft; only then
+   request the explicit H2 final-tag/publish decision
 6. keep non-EVM chains, swap execution, fiat/NFT valuation, and remote or hosted
    modes in their documented post-1.0 scope

@@ -90,6 +90,27 @@ The desktop app is a Tauri v2 macOS shell that runs `sigillum-daemon`
 in-process on a background thread, waits for local readiness, and opens the
 daemon web console in the native window.
 
+### Supported release matrix
+
+There is no published stable release yet. For the 1.0 release-candidate
+ceremony, support is intentionally narrower than “runs on macOS”:
+
+| Surface | OS and CPU | Status |
+|---|---|---|
+| Desktop app and CLI | macOS 15.x, Apple Silicon (`aarch64`) | Intended 1.0 target; becomes supported only after fresh RC6 doctor, standard-soak, chaos-soak, and clean-machine install/unlock receipts |
+| CLI archive | Ubuntu 24.04, `x86_64` | Built and source-gated in CI; not a supported target host until it has the same RC-bound operational receipts |
+| Linux desktop | Linux | Compile-only |
+| macOS on Intel, earlier macOS releases, Windows | Other | Unsupported for 1.0; no release artifact or target-host evidence |
+
+The evidence contract is fail-closed: a host outside macOS 15.x/aarch64 cannot
+produce qualifying F4, doctor, clean-install, or UI receipts. In particular,
+the current macOS 26.5.2/arm64 development host is ineligible even if local
+source tests pass.
+
+The permanent macOS application identifier is `com.sigillum.desktop`. Changing
+it after release would create a distinct application identity and requires an
+explicit compatibility and migration decision.
+
 ### Build the bundle
 
 Install the Tauri v2 CLI, then build through the project wrapper from the
@@ -198,7 +219,29 @@ Do not open a `.dmg` whose checksum does not match the release `SHA256SUMS`.
 Open the `.dmg`, drag `Sigillum.app` into `/Applications`, then eject the
 mounted image.
 
-### First launch on macOS 15+ (Gatekeeper)
+### Upgrade, rollback, and uninstall
+
+Before an upgrade, lock and quit Sigillum, export an encrypted snapshot, and
+verify that the snapshot can be read by the current version. Verify the new
+`.dmg` against `SHA256SUMS`, replace only `/Applications/Sigillum.app`, then
+launch the new version and run `sigillum doctor`. The application bundle and
+`~/.sigillum` are separate; replacing the app does not remove operator data.
+
+Store migrations are forward-only. Do not install an older binary over a data
+directory that a newer version has opened. To roll back, restore a snapshot
+captured by the older version into a separate base directory and run that older
+binary against the separate directory. Never point two versions at the same
+live data directory.
+
+For an app-only uninstall, lock and quit Sigillum and move
+`/Applications/Sigillum.app` to Trash. This deliberately retains
+`~/.sigillum`, exported snapshots, and any external release evidence. To remove
+operator data as a separate, explicit action, first preserve any required audit
+or recovery evidence, then archive or remove `~/.sigillum` and every exported
+snapshot. Filesystem snapshots and backups may retain copies; ordinary deletion
+is not a cryptographic erasure guarantee.
+
+### First launch on the supported macOS 15.x target (Gatekeeper)
 
 Credential-free builds made through the project wrapper are ad-hoc signed.
 macOS 15 removed the older
@@ -296,9 +339,18 @@ exits.
 
 ### Troubleshooting
 
-If startup reports `daemon did not accept TCP connections within 10s` or
-`daemon exited before readiness`, launch from a terminal to see the daemon error
-on stderr:
+If packaged startup fails, Sigillum shows a native alert with a sanitized
+diagnostic code and writes a `0600` report to
+`~/Library/Logs/Sigillum/desktop-startup.log`. The alert and report deliberately
+omit raw startup errors so secrets, session tokens, and sensitive configuration
+are not copied into support material. Run:
+
+```bash
+sigillum doctor
+```
+
+For local development, launching the binary from a terminal also exposes the
+underlying daemon error on stderr:
 
 ```bash
 /Applications/Sigillum.app/Contents/MacOS/sigillum-desktop
@@ -307,9 +359,12 @@ on stderr:
 Common causes are unsafe `~/.sigillum` permissions, which the daemon requires
 and repairs to `0700` on Unix, or a corrupted or foreign base directory.
 
-Running a standalone `sigillum daemon --port 9743` at the same time is fine.
-The desktop app picks its own ephemeral port, but the two daemon processes hold
-independent unlock state over the same data directory.
+Do not run a standalone `sigillum daemon --port 9743` against the desktop
+app's data directory. The desktop app picks its own ephemeral port, but Sigillum
+permits only one daemon process per data directory; the second process exits
+after failing to acquire the daemon lock. For isolated development, set
+`SIGILLUM_BASE_DIR` to a different private directory before starting the
+standalone daemon.
 
 If the window shows the static `Sigillum is starting…` page, the webview
 loaded the bundled fallback. Press Cmd+R to reload.
@@ -352,8 +407,11 @@ target host. Set `SIGILLUM_SOAK_SECONDS` and `SIGILLUM_SOAK_INTERVAL_SECONDS` to
 control duration and cadence; the harness repeatedly checks daemon status,
 gateway health, vault write/read canaries, and `sigillum doctor`. Set
 `SIGILLUM_SOAK_RECEIPT=target/readiness/local-soak.json` to write a durable JSON
-receipt with the commit, dirty-checkout state, host, timing, iteration count,
-doctor count, and checked surfaces. Set `SIGILLUM_SOAK_KEEP_ARTIFACTS=1` only
+schema-v2 receipt with the commit, dirty-checkout state, timing, iteration
+count, doctor count, checked surfaces, explicit platform, macOS
+`ProductVersion`, canonical architecture, and an opaque SHA-256 machine
+identity. Standard and chaos release receipts must both report macOS 15.x,
+`aarch64`, and the same identity digest. Set `SIGILLUM_SOAK_KEEP_ARTIFACTS=1` only
 when you need daemon/gateway logs for investigation, because that keeps the
 temporary harness directory on disk.
 
@@ -362,7 +420,13 @@ temporary harness directory on disk.
 The release workflow (`.github/workflows/release.yml`) triggers on tags matching
 `v*`, then rejects tags that are not annotated, do not match the workspace
 version (or its `-rc.N` form), lack a dated changelog section, or are not on
-`main` history. Before tagging `v1.0.0` for real, dry-run it with an rc tag.
+`main` history. `v1.0.0-rc.5` peels to pre-hardening protected-main commit
+`7e04743`; Release run `29248938476` passed all six jobs and produced the
+expected six assets, but its GitHub Release remains an unpublished historical
+draft. It cannot certify the integrated hardening line, and no RC6 exists.
+Only after the exact integrated HEAD passes the clean gate and review, lands
+through protected `main`, and passes required CI is annotated
+`v1.0.0-rc.6` eligible.
 The authoritative, fail-closed ceremony is section 6 of
 [`execution-runbook-1.0.md`](./execution-runbook-1.0.md); do not replace its
 pinned-SHA and post-gate identity checks with a shorter tag command:
@@ -373,9 +437,15 @@ pinned-SHA and post-gate identity checks with a shorter tag command:
    `v1.0.0-rc.*` tags, reassert `HEAD == GATE_SHA == origin/main`, then create
    and push that annotated tag with an explicit non-force refspec.
 3. Watch the Release workflow in the Actions tab; the contract job, both verify legs, both artifact jobs, and release job must all pass.
-4. Verify the draft release contains the `.dmg`, the zipped `.app`, both `sigillum-cli` `tar.gz` archives, `THIRD-PARTY-NOTICES.txt`, and `SHA256SUMS`.
+4. Verify the RC release is a draft, unpublished, and `prerelease=true`, then
+   verify it contains the `.dmg`, zipped `.app`, both `sigillum-cli` `tar.gz`
+   archives, `THIRD-PARTY-NOTICES.txt`, and `SHA256SUMS`.
+   `scripts/check-release-state-contract.sh rc-draft` performs the
+   fail-closed release-state check against the fetched release JSON.
 5. Download the assets and run `shasum -a 256 --check SHA256SUMS --ignore-missing`.
-6. Confirm the release is still a draft and its body carries the dated `CHANGELOG` section for the version. There is no fallback release body.
+6. Confirm the release remains an unpublished prerelease draft and its body
+   carries the dated `CHANGELOG` section for the version. There is no fallback
+   release body.
 7. Record the tag-object ID, peeled commit, workflow run, and checksum result.
    Retain the RC draft/assets through final-draft verification and retain every
    pushed RC tag permanently. Only after final publication may the RC draft be
@@ -384,9 +454,18 @@ pinned-SHA and post-gate identity checks with a shorter tag command:
 Final `v1.0.0` promotion is a separate fail-closed ceremony in H2 of
 [`release-1.0-plan.md`](./release-1.0-plan.md). It binds the exact sanitized
 operator-evidence archive digest into the protected annotated tag, waits for
-the exact final workflow, verifies all generated draft assets, uploads the
-evidence without replacement, re-downloads it, compares it with the tag, and
-only then publishes.
+the exact final workflow, reruns source verification while skipping artifact
+rebuilds, copies the exact five qualified RC payload bytes to final names,
+verifies byte identity and tag-normalized digests, regenerates `SHA256SUMS`,
+requires each final-draft snapshot to be `prerelease=false`, uploads the
+evidence bundle as the seventh asset without replacement, re-downloads and
+re-verifies all seven assets, then requires the published release to retain
+`prerelease=false`. `scripts/check-release-state-contract.sh` enforces those
+`final-draft` and `final-published` transitions before the conditional
+publication authorized by the H2 approval recorded before the ceremony began.
+The exact-byte promotion path is implemented, but no RC6 exists and H2 remains
+blocked until the exact integrated HEAD, protected CI, RC6 qualification,
+operator receipts, and evidence bundle all pass.
 
 ## Operational Notes
 

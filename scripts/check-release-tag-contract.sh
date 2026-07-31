@@ -302,7 +302,17 @@ if [[ -n "${RC_NUMBER:-}" || "${TAG}" == "v${VERSION}" ]]; then
 fi
 
 if [[ -n "${GITHUB_OUTPUT:-}" ]]; then
-  printf 'tag_object=%s\n' "${REMOTE_TAG_OBJECT}" >> "${GITHUB_OUTPUT}"
+  {
+    printf 'tag_object=%s\n' "${REMOTE_TAG_OBJECT}"
+    if [[ "${TAG}" == "v${VERSION}" ]]; then
+      printf 'promotion_rc_tag=v%s-rc.%s\n' \
+        "${VERSION}" "${HIGHEST_RC_NUMBER}"
+      printf 'promotion_rc_tag_object=%s\n' \
+        "${HIGHEST_RC_OBJECT}"
+      printf 'promotion_rc_sha=%s\n' \
+        "${HIGHEST_PEELED_COMMIT}"
+    fi
+  } >> "${GITHUB_OUTPUT}"
 fi
 
 echo "release tag contract passed: ${TAG} -> ${REMOTE_PEELED_COMMIT} on ${REMOTE}/main"

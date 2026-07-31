@@ -1,4 +1,7 @@
+use std::path::Path;
+
 use serde::Deserialize;
+use serde_json::Value;
 
 #[derive(Clone, Debug, Deserialize)]
 pub(super) struct KeyMutationDetails {
@@ -334,4 +337,26 @@ pub(super) struct RunCompleteDetails {
     pub(super) exit_code: Option<i32>,
     pub(super) signal: Option<i32>,
     pub(super) success: bool,
+}
+
+pub(super) fn parse_legacy_details<T>(
+    path: &Path,
+    kind: &str,
+    details: Value,
+) -> Result<T, std::io::Error>
+where
+    T: for<'de> Deserialize<'de>,
+{
+    serde_json::from_value(details).map_err(|error| invalid_audit_data(path, kind, error))
+}
+
+fn invalid_audit_data(path: &Path, kind: &str, error: serde_json::Error) -> std::io::Error {
+    std::io::Error::new(
+        std::io::ErrorKind::InvalidData,
+        format!(
+            "failed to parse audit event {} in {}: {error}",
+            kind,
+            path.display()
+        ),
+    )
 }

@@ -20,6 +20,9 @@
 //! - **profiles** — EVM provider and wallet profile CRUD, profile-backed send
 //!   resolution, and provider/wallet lookup helpers
 //! - **maintenance** — compound refresh + queue-drain cycles
+//! - **scheduler** — background loop advancing queue retries, receipt
+//!   confirmations, and deposit refreshes through the same paths without a
+//!   client present (plan task 1.6)
 //! - **backup / recovery** — encrypted snapshot export/restore
 //! - **transit** — inter-compartment secret push
 //! - **observability** — status and diagnostics endpoints
@@ -39,11 +42,14 @@ mod generate;
 pub(crate) mod helpers;
 mod inventory;
 mod lifecycle;
+pub(crate) mod list_query;
 mod maintenance;
 mod observability;
+mod operations;
 mod profiles;
 mod queue;
 mod recovery;
+pub(crate) mod scheduler;
 mod secrets;
 mod selfcheck;
 pub(crate) mod transaction_policy;
@@ -106,7 +112,40 @@ pub(crate) fn require_full_session_token<'a>(
     if state.session_is_full(token) {
         Ok(token)
     } else {
-        Err(ServiceError::forbidden(
+        Err(ServiceError::capability_scope_denied(
+            "A full daemon session is required for this operation.",
+        ))
+    }
+}
+
+/// Require a valid full daemon session for a PASSIVE read (`GET /api/events`,
+/// `GET /api/status`, `GET /api/operations`, `GET /api/operations/{id}`).
+///
+/// Identical to [`require_full_session_token`] except the verify does not
+/// refresh the session's idle-activity clock: a permanently connected
+/// observer must not defeat the vault auto-lock (plan tasks 1.3/1.7 / D-D).
+/// Mark additional read-only routes passive by calling this at their verify
+/// call site — do NOT widen it to any route that performs work on behalf of
+/// the operator.
+pub(crate) fn require_passive_full_session_token<'a>(
+    state: &AppState,
+    token: Option<&'a str>,
+) -> ServiceResult<&'a str> {
+    if state.is_locking() {
+        return Err(ServiceError::locked("Daemon is locking."));
+    }
+    let token = match token {
+        Some(token) if state.verify_token_passive(token) => token,
+        _ => {
+            return Err(ServiceError::unauthorized(
+                "Invalid or missing session token.",
+            ));
+        }
+    };
+    if state.session_is_full(token) {
+        Ok(token)
+    } else {
+        Err(ServiceError::capability_scope_denied(
             "A full daemon session is required for this operation.",
         ))
     }
@@ -118,8 +157,23 @@ pub(crate) fn require_full_session_token<'a>(
 /// across sub-modules. Every public method follows the same contract:
 /// validate the session token → acquire the operation guard if mutating →
 /// perform the operation → record an audit event → return the typed response.
+///
+/// `Clone` so background operations (async discovery scans) can drive the
+/// same pipeline from a spawned task.
+#[derive(Clone)]
 pub(crate) struct SigillumService {
     state: Arc<AppState>,
+}
+
+/// Immutable authorization state captured before an authenticated operation
+/// waits for the daemon-wide mutation boundary.
+///
+/// A queued request must not silently inherit a compartment switch, removal,
+/// session revocation, or lock that happened while it was waiting.
+#[derive(Clone)]
+struct SessionOperationContext {
+    token: String,
+    active_compartment_id: Option<usize>,
 }
 
 impl SigillumService {
@@ -165,9 +219,51 @@ impl SigillumService {
         if self.state.session_has_scope(token, scope) {
             Ok(token)
         } else {
-            Err(ServiceError::forbidden(format!(
+            Err(ServiceError::capability_scope_denied(format!(
                 "Missing daemon capability scope: {scope}"
             )))
+        }
+    }
+
+    /// Capture the authenticated identity and compartment selected at request
+    /// admission. Callers retain their endpoint-specific full-session or scope
+    /// check before using this helper.
+    fn capture_session_operation_context(
+        &self,
+        token: Option<&str>,
+    ) -> ServiceResult<SessionOperationContext> {
+        let token = self.require_authenticated_session(token)?.to_owned();
+        let active_compartment_id = self.state.active_compartment_id_for(&token);
+        Ok(SessionOperationContext {
+            token,
+            active_compartment_id,
+        })
+    }
+
+    /// Enter the serialized operation boundary, then revalidate the original
+    /// bearer and compartment while holding it.
+    async fn acquire_session_operation<'a>(
+        &'a self,
+        context: &SessionOperationContext,
+    ) -> ServiceResult<tokio::sync::MutexGuard<'a, ()>> {
+        let guard = self.state.operation_guard().await;
+        self.require_authenticated_session(Some(&context.token))?;
+        if self.state.active_compartment_id_for(&context.token) != context.active_compartment_id {
+            return Err(ServiceError::conflict(
+                "Session compartment changed while the operation was waiting.",
+            ));
+        }
+        Ok(guard)
+    }
+
+    /// Final funds-moving admission point, ordered against the lock latch.
+    fn admit_broadcast(&self) -> ServiceResult<()> {
+        if self.state.admit_broadcast_if_ready() {
+            Ok(())
+        } else {
+            Err(ServiceError::locked(
+                "Daemon is locking; transaction broadcast was not admitted.",
+            ))
         }
     }
 
@@ -182,6 +278,24 @@ impl SigillumService {
         }
         token.filter(|candidate| {
             self.state.verify_token(candidate) && self.state.session_is_full(candidate)
+        })
+    }
+
+    /// Require a valid full session for a PASSIVE read; see
+    /// [`require_passive_full_session_token`]. Used by the console's
+    /// live-update polling reads so they cannot defeat the vault auto-lock.
+    fn require_passive_session<'a>(&self, token: Option<&'a str>) -> ServiceResult<&'a str> {
+        require_passive_full_session_token(&self.state, token)
+    }
+
+    /// Passive variant of [`Self::optional_session`]: authenticates without
+    /// refreshing the session's idle-activity clock.
+    fn optional_session_passive<'a>(&self, token: Option<&'a str>) -> Option<&'a str> {
+        if self.state.is_locking() {
+            return None;
+        }
+        token.filter(|candidate| {
+            self.state.verify_token_passive(candidate) && self.state.session_is_full(candidate)
         })
     }
 
@@ -215,10 +329,10 @@ impl SigillumService {
         let id = self
             .state
             .active_compartment_id_for(token)
-            .ok_or_else(|| ServiceError::forbidden("No active compartment."))?;
+            .ok_or_else(|| ServiceError::vault_locked("No active compartment."))?;
         self.state
             .with_active_vault_for(token, |vault| f(vault, id))
-            .unwrap_or_else(|| Err(ServiceError::forbidden("No active compartment.")))
+            .unwrap_or_else(|| Err(ServiceError::vault_locked("No active compartment.")))
     }
 
     /// Run a closure against a specific compartment's vault by ID.
@@ -234,7 +348,9 @@ impl SigillumService {
     /// Map a [`VaultError`] to the appropriate HTTP-level [`ServiceError`] for snapshot ops.
     fn snapshot_error(context: &str, error: VaultError) -> ServiceError {
         match error {
-            VaultError::NotInitialized => ServiceError::not_found("Sigillum is not initialized."),
+            VaultError::NotInitialized => {
+                ServiceError::not_initialized("Sigillum is not initialized.")
+            }
             VaultError::Decryption(_) => ServiceError::unauthorized(format!(
                 "{context}: wrong passphrase or corrupted snapshot."
             )),
@@ -276,6 +392,42 @@ mod tests {
         assert!(status.unlocked_compartments.is_empty());
     }
 
+    /// Plan task 1.7: the console's live-update reads (`status`,
+    /// `list_operations`) authenticate passively so a permanently open
+    /// console cannot defeat the vault idle auto-lock.
+    #[test]
+    fn status_and_operations_reads_do_not_refresh_idle_activity() {
+        use sigillum_core::{SecretStore, VaultLifecycle};
+
+        let dir = TempDir::new().unwrap();
+        let state =
+            Arc::new(AppState::new(dir.path().to_path_buf()).expect("app state should initialize"));
+        state.unlock_compartment(0, [11u8; 32], meta(0, 1, "default"));
+        // Initialize the vault stores on disk so the status read path has a
+        // real vault to inspect (production compartments are initialized at
+        // setup).
+        let init = state.with_vault(0, |vault| {
+            vault
+                .initialize(&[11u8; 32])
+                .and_then(|()| vault.set_api_key("init", "x"))
+                .and_then(|()| vault.set_secret("init", "y"))
+        });
+        assert!(matches!(init, Some(Ok(()))));
+        let session = state.create_session(Some(0));
+        let service = SigillumService::new(state.clone());
+
+        let before = state.last_activity_for(&session).unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(10));
+        let status = service.status(Some(&session)).unwrap();
+        assert!(!status.locked);
+        let _ = service.list_operations(Some(&session)).unwrap();
+        let after = state.last_activity_for(&session).unwrap();
+        assert_eq!(
+            before, after,
+            "passive console reads must not refresh last_activity"
+        );
+    }
+
     #[tokio::test]
     async fn set_api_key_requires_session() {
         let dir = TempDir::new().unwrap();
@@ -311,6 +463,90 @@ mod tests {
         assert!(!state.verify_token(&session_a));
         assert!(state.verify_token(&session_b));
         assert!(state.is_unlocked());
+    }
+
+    #[tokio::test]
+    async fn queued_session_operation_rejects_compartment_change() {
+        let dir = TempDir::new().unwrap();
+        let state =
+            Arc::new(AppState::new(dir.path().to_path_buf()).expect("app state should initialize"));
+        state.unlock_compartment(0, [1u8; 32], meta(0, 1, "daily"));
+        state.unlock_compartment(1, [2u8; 32], meta(1, 2, "secure"));
+        let session = state.create_session(Some(0));
+        let service = SigillumService::new(state.clone());
+        let context = service
+            .capture_session_operation_context(Some(&session))
+            .unwrap();
+
+        let held_operation = state.operation_guard().await;
+        let queued = tokio::spawn(async move {
+            service
+                .acquire_session_operation(&context)
+                .await
+                .map(|_| ())
+        });
+        tokio::task::yield_now().await;
+        state.switch_active_for(&session, 1).unwrap();
+        drop(held_operation);
+
+        let error = queued.await.unwrap().unwrap_err();
+        assert_eq!(error.status(), axum::http::StatusCode::CONFLICT);
+    }
+
+    #[tokio::test]
+    async fn queued_session_operation_rejects_revoked_session() {
+        let dir = TempDir::new().unwrap();
+        let state =
+            Arc::new(AppState::new(dir.path().to_path_buf()).expect("app state should initialize"));
+        state.unlock_compartment(0, [1u8; 32], meta(0, 1, "daily"));
+        let session = state.create_session(Some(0));
+        let service = SigillumService::new(state.clone());
+        let context = service
+            .capture_session_operation_context(Some(&session))
+            .unwrap();
+
+        let held_operation = state.operation_guard().await;
+        let queued = tokio::spawn(async move {
+            service
+                .acquire_session_operation(&context)
+                .await
+                .map(|_| ())
+        });
+        tokio::task::yield_now().await;
+        state.revoke_session(&session);
+        drop(held_operation);
+
+        let error = queued.await.unwrap().unwrap_err();
+        assert_eq!(error.status(), axum::http::StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn lock_latch_preempts_operation_waiting_for_mutex() {
+        let dir = TempDir::new().unwrap();
+        let state =
+            Arc::new(AppState::new(dir.path().to_path_buf()).expect("app state should initialize"));
+        state.unlock_compartment(0, [1u8; 32], meta(0, 1, "daily"));
+        let session = state.create_session(Some(0));
+        let service = SigillumService::new(state.clone());
+        let context = service
+            .capture_session_operation_context(Some(&session))
+            .unwrap();
+
+        let held_operation = state.operation_guard().await;
+        let queued = tokio::spawn(async move {
+            service
+                .acquire_session_operation(&context)
+                .await
+                .map(|_| ())
+        });
+        tokio::task::yield_now().await;
+        assert!(state.begin_locking());
+        drop(held_operation);
+
+        let error = queued.await.unwrap().unwrap_err();
+        assert_eq!(error.status(), axum::http::StatusCode::LOCKED);
+        assert!(!state.admit_broadcast_if_ready());
+        state.lock_all();
     }
 
     #[test]
@@ -365,5 +601,13 @@ mod tests {
         );
         assert_eq!(diagnostics.eth_stealth_deposit_count, 0);
         assert_eq!(diagnostics.funded_eth_stealth_deposit_count, 0);
+        assert!(diagnostics.scheduler.enabled);
+        assert_eq!(diagnostics.scheduler.queue_tick_secs, 60);
+        assert_eq!(diagnostics.scheduler.refresh_secs, 300);
+        assert_eq!(diagnostics.scheduler.last_tick_at_unix, None);
+        assert_eq!(diagnostics.scheduler.last_cycle_outcome, None);
+        assert_eq!(diagnostics.scheduler.consecutive_failures, 0);
+        assert_eq!(diagnostics.scheduler.due_queue_job_count, 0);
+        assert_eq!(diagnostics.scheduler.next_retry_at_unix, None);
     }
 }

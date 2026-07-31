@@ -1,15 +1,18 @@
 //! FIDO2 configuration persistence and compartment metadata types.
 //!
 //! This module manages the persistent state of FIDO2-secured vaults. The key design principle
-//! is **deniability**: `Fido2Config` stored in `fido2_keys.json` contains only registered keys
-//! and total share counts—never compartment definitions. Compartment metadata is discovered at
-//! unlock time by decrypting tagged shards with the derived hmac-secret.
+//! is **deniability**: `Fido2Config` stored in `fido2_keys.json` contains registered keys,
+//! share counts, and internal recovery metadata—never compartment definitions. Compartment
+//! metadata is discovered at unlock time by decrypting tagged shards with the derived
+//! hmac-secret.
 //!
 //! ## Configuration Structure
 //!
 //! - **`fido2_keys.json`**: Plaintext JSON containing:
 //!   - `total_shares`: Total number of shards across all hardware keys.
 //!   - `keys`: Array of registered hardware key metadata (label, credential ID, public key, etc.)
+//!   - `generation` and `last_mutation`: Internal crash-recovery metadata that binds the
+//!     latest atomic manager write to a daemon operation without revealing compartments.
 //!   - Each key has exactly `SHARD_SLOTS` (100) hex-encoded shard blobs: real shards use
 //!     AES-256-GCM encryption, padding entries are random bytes indistinguishable without the key.
 //!
@@ -26,6 +29,7 @@
 use std::path::Path;
 
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use sigillum_core::utils::atomic_write;
 
 use crate::error::Fido2Error;
@@ -62,17 +66,49 @@ pub struct CompartmentMeta {
 
 /// Persisted FIDO2 configuration state stored in `fido2_keys.json`.
 ///
-/// Contains only registered FIDO2 hardware key metadata and the total share count.
+/// Contains registered FIDO2 hardware key metadata, the total share count, and
+/// internal crash-recovery metadata.
 /// Compartment definitions themselves are never stored here—they are discovered at
 /// unlock time by attempting to decrypt tagged shards with each derived hmac-secret.
 /// This design provides deniability: an observer cannot determine which hardware keys
 /// correspond to which compartments without the hardware devices.
 #[derive(Serialize, Deserialize, Clone, Debug, Default)]
 pub struct Fido2Config {
+    /// Monotonic generation incremented by every manager-mediated config mutation.
+    ///
+    /// Older configs deserialize at generation zero. Recovery uses this value together
+    /// with [`last_mutation`](Self::last_mutation) to distinguish the exact write that
+    /// belongs to an interrupted daemon operation from unrelated or newer writes.
+    #[serde(default)]
+    pub generation: u64,
     /// Total number of shards distributed across all registered keys.
     pub total_shares: usize,
     /// Array of registered FIDO2 hardware keys.
     pub keys: Vec<RegisteredKey>,
+    /// Receipt for the most recent manager-mediated mutation.
+    ///
+    /// This is embedded in the same atomic JSON write as the key state: a sidecar
+    /// receipt could become durable without the config (or vice versa).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_mutation: Option<Fido2MutationReceipt>,
+}
+
+/// Causal receipt embedded in the FIDO2 config's atomic state transition.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+pub struct Fido2MutationReceipt {
+    /// Journal operation ID, or a standalone ID for CLI/raw manager writes.
+    pub operation_id: String,
+    /// Stable operation kind (for example `fido2.register`).
+    pub kind: String,
+    /// Key label associated with the mutation, when applicable.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub subject: Option<String>,
+    /// Resulting config generation.
+    pub generation: u64,
+    /// Resulting number of registered keys.
+    pub result_key_count: usize,
+    /// SHA-256 of the resulting generation, share count, and key state.
+    pub state_fingerprint: String,
 }
 
 /// A single registered FIDO2 hardware key and its associated shards.
@@ -103,6 +139,71 @@ impl Fido2Config {
     pub fn is_fido2_enabled(&self) -> bool {
         !self.keys.is_empty()
     }
+
+    /// Stamp the exact mutation that produced this config before the atomic save.
+    pub fn record_mutation(
+        &mut self,
+        operation_id: impl Into<String>,
+        kind: impl Into<String>,
+        subject: Option<String>,
+    ) -> Result<(), Fido2Error> {
+        self.generation = self
+            .generation
+            .checked_add(1)
+            .ok_or_else(|| Fido2Error::Config("FIDO2 config generation overflow".into()))?;
+        self.last_mutation = None;
+        let state_fingerprint = config_state_fingerprint(self)?;
+        self.last_mutation = Some(Fido2MutationReceipt {
+            operation_id: operation_id.into(),
+            kind: kind.into(),
+            subject,
+            generation: self.generation,
+            result_key_count: self.keys.len(),
+            state_fingerprint,
+        });
+        Ok(())
+    }
+
+    /// Verify that the latest receipt is causally bound to the current config state.
+    pub fn mutation_receipt_matches(
+        &self,
+        operation_id: &str,
+        kind: &str,
+        subject: Option<&str>,
+    ) -> Result<bool, Fido2Error> {
+        let Some(receipt) = self.last_mutation.as_ref() else {
+            return Ok(false);
+        };
+        Ok(receipt.operation_id == operation_id
+            && receipt.kind == kind
+            && receipt.subject.as_deref() == subject
+            && receipt.generation == self.generation
+            && receipt.result_key_count == self.keys.len()
+            && receipt.state_fingerprint == config_state_fingerprint(self)?)
+    }
+}
+
+/// Compute the canonical fingerprint used by mutation receipts.
+///
+/// The receipt itself is excluded to avoid a circular hash. Its generation, result
+/// count, operation identity, and kind are checked separately by recovery.
+pub fn config_state_fingerprint(config: &Fido2Config) -> Result<String, Fido2Error> {
+    #[derive(Serialize)]
+    struct FingerprintInput<'a> {
+        domain: &'static str,
+        generation: u64,
+        total_shares: usize,
+        keys: &'a [RegisteredKey],
+    }
+
+    let encoded = serde_json::to_vec(&FingerprintInput {
+        domain: "sigillum.fido2-config-state.v1",
+        generation: config.generation,
+        total_shares: config.total_shares,
+        keys: &config.keys,
+    })
+    .map_err(|error| Fido2Error::Config(format!("fingerprint config: {error}")))?;
+    Ok(hex::encode(Sha256::digest(encoded)))
 }
 
 /// Load FIDO2 configuration from disk, returning an empty default if the file is missing.
@@ -196,6 +297,7 @@ mod tests {
                 shards: vec!["eeff00".into(), "aabb11".into()],
                 registered_at: "2026-03-05".into(),
             }],
+            ..Default::default()
         };
 
         save_config(&path, &config).unwrap();
@@ -224,6 +326,47 @@ mod tests {
         std::fs::write(&path, "{not json").unwrap();
 
         assert!(matches!(load_config(&path), Err(Fido2Error::Config(_))));
+    }
+
+    #[test]
+    fn legacy_config_defaults_generation_and_receipt() {
+        let config: Fido2Config = serde_json::from_str(r#"{"total_shares":0,"keys":[]}"#).unwrap();
+
+        assert_eq!(config.generation, 0);
+        assert!(config.last_mutation.is_none());
+    }
+
+    #[test]
+    fn mutation_receipt_binds_generation_count_and_state_fingerprint() {
+        let mut config = Fido2Config {
+            total_shares: 1,
+            keys: vec![RegisteredKey {
+                label: "key".into(),
+                credential_id_hex: "aabb".into(),
+                public_key_der_hex: "ccdd".into(),
+                public_key_pem: "pem".into(),
+                shards: vec!["00".into()],
+                registered_at: "2026-03-05".into(),
+            }],
+            ..Default::default()
+        };
+
+        config
+            .record_mutation("op-1", "fido2.register", Some("key".into()))
+            .unwrap();
+        assert_eq!(config.generation, 1);
+        assert!(
+            config
+                .mutation_receipt_matches("op-1", "fido2.register", Some("key"))
+                .unwrap()
+        );
+
+        config.total_shares = 2;
+        assert!(
+            !config
+                .mutation_receipt_matches("op-1", "fido2.register", Some("key"))
+                .unwrap()
+        );
     }
 
     #[test]

@@ -2,13 +2,14 @@
 //!
 //! ## Audit Trail Design
 //!
-//! Every security-relevant operation is recorded to an immutable audit log in
-//! `~/.sigillum/.audit`. Events are:
+//! Every security-relevant operation is recorded to an immutable audit log under
+//! `~/.sigillum/.audit`. Live storage is SQLite (`audit.db`) with a per-scope
+//! HMAC MAC-chain (`prev_mac` / `mac`) so appends are tamper-evident. Events are:
 //! - **Append-only**: New events are appended; old events are never modified or deleted.
 //! - **Typed**: Each event is a typed variant (ApiKeySet, SecretDelete, Fido2Register, etc.)
 //!   enabling structured queries and validation.
-//! - **Durable**: Stored as JSONL (one JSON object per line) for streaming reads and
-//!   resilience to partial writes.
+//! - **Durable**: Persisted in SQLite via `audit_db`; writes go through
+//!   `append_event_chained` / `insert_event_chained`.
 //!
 //! The audit log is the system of record for compliance and forensics: if you need to
 //! explain "what happened in this vault?", the audit log provides definitive answers
@@ -27,11 +28,11 @@
 //!
 //! ## Legacy Migration
 //!
-//! Old events (before versioning) are automatically converted by `StoredAuditEvent::from_legacy_json()`.
-//! This ensures that old audit trails don't become unreadable after upgrades.
+//! Pre-SQLite installs may still have a JSONL `audit.log`. On startup,
+//! `audit/migration.rs` imports those lines into `audit.db` (and
+//! `StoredAuditEvent::from_legacy_json()` converts pre-versioned shapes).
+//! JSONL is migration input only; it is not the live store.
 
-#[cfg(test)]
-use std::io::{BufRead, BufReader, Write};
 use std::path::Path;
 
 use serde::{Deserialize, Serialize};
@@ -39,12 +40,17 @@ use serde_json::{Map, Value, json};
 use sigillum_api::AuditEvent as PublicAuditEvent;
 
 use crate::json_store::{JsonDocument, JsonSchema};
-#[cfg(test)]
-use crate::json_store::{decode_json_document, encode_json_document_compact};
 
 mod legacy_details;
+mod queue_job_kind;
+#[cfg(test)]
+mod test_support;
 
 use legacy_details::*;
+pub(crate) use queue_job_kind::AuditQueueJobKind;
+use queue_job_kind::parse_queue_job_kind;
+#[cfg(test)]
+pub(crate) use test_support::{append_audit_event, read_recent_audit_events};
 
 // ── Core Structures ─────────────────────────────
 
@@ -95,55 +101,6 @@ impl JsonDocument for StoredAuditEvent {
             compartment_id: legacy.compartment_id,
             spec: AuditEventSpec::from_legacy_details(path, legacy.kind, legacy.details)?,
         })
-    }
-}
-
-// ── Queue Job Kinds ────────────────────────────
-
-#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-pub(crate) enum AuditQueueJobKind {
-    EthStealthTransfer,
-    EthStealthErc20Transfer,
-    EthStealthNativeSweep,
-    EthStealthErc20Sweep,
-    EthSeedTransfer,
-    EthSeedNativeSweep,
-    EthSeedErc20Sweep,
-    PlanStepExecution,
-}
-
-impl AuditQueueJobKind {
-    pub(crate) fn as_str(&self) -> &'static str {
-        match self {
-            Self::EthStealthTransfer => "eth_stealth_transfer",
-            Self::EthStealthErc20Transfer => "eth_stealth_erc20_transfer",
-            Self::EthStealthNativeSweep => "eth_stealth_native_sweep",
-            Self::EthStealthErc20Sweep => "eth_stealth_erc20_sweep",
-            Self::EthSeedTransfer => "eth_seed_transfer",
-            Self::EthSeedNativeSweep => "eth_seed_native_sweep",
-            Self::EthSeedErc20Sweep => "eth_seed_erc20_sweep",
-            Self::PlanStepExecution => "plan_step_execution",
-        }
-    }
-
-    pub(crate) fn from_payload(payload: &sigillum_api::QueueJobPayload) -> Self {
-        match payload {
-            sigillum_api::QueueJobPayload::EthStealthTransfer { .. } => Self::EthStealthTransfer,
-            sigillum_api::QueueJobPayload::EthStealthErc20Transfer { .. } => {
-                Self::EthStealthErc20Transfer
-            }
-            sigillum_api::QueueJobPayload::EthStealthNativeSweep { .. } => {
-                Self::EthStealthNativeSweep
-            }
-            sigillum_api::QueueJobPayload::EthStealthErc20Sweep { .. } => {
-                Self::EthStealthErc20Sweep
-            }
-            sigillum_api::QueueJobPayload::EthSeedTransfer { .. } => Self::EthSeedTransfer,
-            sigillum_api::QueueJobPayload::EthSeedNativeSweep { .. } => Self::EthSeedNativeSweep,
-            sigillum_api::QueueJobPayload::EthSeedErc20Sweep { .. } => Self::EthSeedErc20Sweep,
-            sigillum_api::QueueJobPayload::PlanStepExecution { .. } => Self::PlanStepExecution,
-        }
     }
 }
 
@@ -422,6 +379,37 @@ pub(crate) enum AuditEventSpec {
     WalletInventoryWatchAddressUpsert { address: String, label: String },
     #[serde(rename = "wallet_inventory.watch_address.delete")]
     WalletInventoryWatchAddressDelete { address: String },
+    /// Scanned-address prune (`inventory/addresses/delete`). Records the
+    /// selector SCOPE and counts only — never the pruned address value
+    /// itself, which would re-create the linkage the prune removed (same
+    /// discipline as `treasury.receive.allocate` omitting derived addresses).
+    #[serde(rename = "wallet_inventory.addresses.prune")]
+    WalletInventoryAddressesPrune {
+        scoped_by_address: bool,
+        wallet_family: Option<String>,
+        wallet_profile: Option<String>,
+        provider_profile: Option<String>,
+        chain_id: Option<u64>,
+        account_index: Option<u32>,
+        addresses: usize,
+        holdings: usize,
+        block_cursors: usize,
+    },
+    /// Profile-delete cascade (`prune_inventory: true`): one event carrying
+    /// the per-store counts of everything forgotten with the profile.
+    #[serde(rename = "wallet_inventory.profile_prune")]
+    WalletInventoryProfilePrune {
+        profile_kind: String,
+        name: String,
+        addresses: usize,
+        holdings: usize,
+        jobs: usize,
+        checkpoints: usize,
+        block_cursors: usize,
+        allocations_active: usize,
+        allocations_retired: usize,
+        counterparty_bindings: usize,
+    },
     #[serde(rename = "wallet_consolidation.plan.generate")]
     WalletConsolidationPlanGenerate {
         id: String,
@@ -509,13 +497,32 @@ pub(crate) enum AuditEventSpec {
     },
     /// Derived addresses are intentionally omitted: the audit log records
     /// that an allocation happened, not which address it produced.
+    /// `one_time` (plan task 3.3) marks allocations under the auto-watch →
+    /// auto-sweep → retire lifecycle; absent on pre-3.3 events.
     #[serde(rename = "treasury.receive.allocate")]
     TreasuryReceiveAllocate {
         wallet_profile: String,
         purpose: String,
+        #[serde(default)]
+        one_time: bool,
     },
     #[serde(rename = "treasury.receive.rotate")]
     TreasuryReceiveRotate { id: String },
+    /// Plan task 3.3: a one-time allocation was automatically retired after
+    /// its auto-sweep settled (the sweep job's terminal success state —
+    /// `sent` for the legacy EthSeed family, `confirmed` under W7.4
+    /// finality). Same index-never-reissued semantics as rotate-retire, but
+    /// no replacement is issued.
+    #[serde(rename = "treasury.receive.retire")]
+    TreasuryReceiveRetire { id: String, reason: String },
+    /// A RETIRED receive allocation was permanently purged, forgetting the
+    /// address → purpose → counterparty linkage it recorded. The counterparty
+    /// record itself always remains.
+    #[serde(rename = "treasury.receive.purge")]
+    TreasuryReceivePurge {
+        id: String,
+        counterparty_binding_removed: bool,
+    },
     #[serde(rename = "treasury.party.create")]
     TreasuryPartyCreate { name: String },
     #[serde(rename = "treasury.party.delete")]
@@ -634,6 +641,8 @@ impl AuditEventSpec {
             Self::WalletInventoryWatchAddressDelete { .. } => {
                 "wallet_inventory.watch_address.delete"
             }
+            Self::WalletInventoryAddressesPrune { .. } => "wallet_inventory.addresses.prune",
+            Self::WalletInventoryProfilePrune { .. } => "wallet_inventory.profile_prune",
             Self::WalletConsolidationPlanGenerate { .. } => "wallet_consolidation.plan.generate",
             Self::WalletConsolidationPlanApprove { .. } => "wallet_consolidation.plan.approve",
             Self::WalletConsolidationPlanSimulate { .. } => "wallet_consolidation.plan.simulate",
@@ -653,6 +662,8 @@ impl AuditEventSpec {
             Self::TreasuryAutomationRun { .. } => "treasury.automation_run",
             Self::TreasuryReceiveAllocate { .. } => "treasury.receive.allocate",
             Self::TreasuryReceiveRotate { .. } => "treasury.receive.rotate",
+            Self::TreasuryReceiveRetire { .. } => "treasury.receive.retire",
+            Self::TreasuryReceivePurge { .. } => "treasury.receive.purge",
             Self::TreasuryPartyCreate { .. } => "treasury.party.create",
             Self::TreasuryPartyDelete { .. } => "treasury.party.delete",
             Self::TreasuryReceiveBind { .. } => "treasury.receive.bind",
@@ -995,6 +1006,68 @@ impl AuditEventSpec {
             Self::WalletInventoryWatchAddressDelete { address } => {
                 json!({ "address": address })
             }
+            Self::WalletInventoryAddressesPrune {
+                scoped_by_address,
+                wallet_family,
+                wallet_profile,
+                provider_profile,
+                chain_id,
+                account_index,
+                addresses,
+                holdings,
+                block_cursors,
+            } => {
+                let mut map = Map::new();
+                map.insert("scoped_by_address".into(), Value::Bool(*scoped_by_address));
+                if let Some(wallet_family) = wallet_family {
+                    map.insert("wallet_family".into(), Value::String(wallet_family.clone()));
+                }
+                if let Some(wallet_profile) = wallet_profile {
+                    map.insert(
+                        "wallet_profile".into(),
+                        Value::String(wallet_profile.clone()),
+                    );
+                }
+                if let Some(provider_profile) = provider_profile {
+                    map.insert(
+                        "provider_profile".into(),
+                        Value::String(provider_profile.clone()),
+                    );
+                }
+                if let Some(chain_id) = chain_id {
+                    map.insert("chain_id".into(), json!(chain_id));
+                }
+                if let Some(account_index) = account_index {
+                    map.insert("account_index".into(), json!(account_index));
+                }
+                map.insert("addresses".into(), json!(addresses));
+                map.insert("holdings".into(), json!(holdings));
+                map.insert("block_cursors".into(), json!(block_cursors));
+                Value::Object(map)
+            }
+            Self::WalletInventoryProfilePrune {
+                profile_kind,
+                name,
+                addresses,
+                holdings,
+                jobs,
+                checkpoints,
+                block_cursors,
+                allocations_active,
+                allocations_retired,
+                counterparty_bindings,
+            } => json!({
+                "profile_kind": profile_kind,
+                "name": name,
+                "addresses": addresses,
+                "holdings": holdings,
+                "jobs": jobs,
+                "checkpoints": checkpoints,
+                "block_cursors": block_cursors,
+                "allocations_active": allocations_active,
+                "allocations_retired": allocations_retired,
+                "counterparty_bindings": counterparty_bindings,
+            }),
             Self::WalletConsolidationPlanGenerate { id, steps, blocked } => {
                 json!({ "id": id, "steps": steps, "blocked": blocked })
             }
@@ -1110,8 +1183,23 @@ impl AuditEventSpec {
             Self::TreasuryReceiveAllocate {
                 wallet_profile,
                 purpose,
-            } => json!({ "wallet_profile": wallet_profile, "purpose": purpose }),
+                one_time,
+            } => json!({
+                "wallet_profile": wallet_profile,
+                "purpose": purpose,
+                "one_time": one_time,
+            }),
             Self::TreasuryReceiveRotate { id } => json!({ "id": id }),
+            Self::TreasuryReceiveRetire { id, reason } => {
+                json!({ "id": id, "reason": reason })
+            }
+            Self::TreasuryReceivePurge {
+                id,
+                counterparty_binding_removed,
+            } => json!({
+                "id": id,
+                "counterparty_binding_removed": counterparty_binding_removed,
+            }),
             Self::TreasuryPartyCreate { name }
             | Self::TreasuryPartyDelete { name }
             | Self::TreasuryReceiveBind { name } => json!({ "name": name }),
@@ -1678,97 +1766,6 @@ impl AuditEventSpec {
             )),
         }
     }
-}
-
-// Test-only legacy JSONL writer: fixture for audit/migration.rs tests and legacy-format regression tests; live writes go through audit_db::append_event_chained.
-#[cfg(test)]
-pub(crate) fn append_audit_event(
-    path: &Path,
-    event: &StoredAuditEvent,
-) -> Result<(), std::io::Error> {
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-
-    let line = encode_json_document_compact(event)?;
-    let mut file = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(path)?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))?;
-    }
-    file.write_all(&line)?;
-    file.write_all(b"\n")?;
-    file.flush()?;
-    Ok(())
-}
-
-// Test-only legacy JSONL reader: regression-tests the legacy decode fallback that audit/migration.rs relies on.
-#[cfg(test)]
-pub(crate) fn read_recent_audit_events(
-    path: &Path,
-    limit: usize,
-) -> Result<Vec<PublicAuditEvent>, std::io::Error> {
-    let limit = limit.max(1);
-    let file = match std::fs::File::open(path) {
-        Ok(file) => file,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
-        Err(error) => return Err(error),
-    };
-
-    let mut events = Vec::new();
-    for line in BufReader::new(file).lines() {
-        let line = line?;
-        if line.trim().is_empty() {
-            continue;
-        }
-        let event: StoredAuditEvent = decode_json_document(path, line.as_bytes())?;
-        events.push(event.to_public_event());
-    }
-
-    if events.len() > limit {
-        events.drain(0..events.len() - limit);
-    }
-    events.reverse();
-    Ok(events)
-}
-
-fn parse_legacy_details<T>(path: &Path, kind: &str, details: Value) -> Result<T, std::io::Error>
-where
-    T: for<'de> Deserialize<'de>,
-{
-    serde_json::from_value(details).map_err(|error| invalid_audit_data(path, kind, error))
-}
-
-fn parse_queue_job_kind(path: &Path, value: &str) -> Result<AuditQueueJobKind, std::io::Error> {
-    match value {
-        "eth_stealth_transfer" => Ok(AuditQueueJobKind::EthStealthTransfer),
-        "eth_stealth_erc20_transfer" => Ok(AuditQueueJobKind::EthStealthErc20Transfer),
-        "eth_stealth_native_sweep" => Ok(AuditQueueJobKind::EthStealthNativeSweep),
-        "eth_stealth_erc20_sweep" => Ok(AuditQueueJobKind::EthStealthErc20Sweep),
-        other => Err(std::io::Error::new(
-            std::io::ErrorKind::InvalidData,
-            format!(
-                "unsupported queue audit job kind {} in {}",
-                other,
-                path.display()
-            ),
-        )),
-    }
-}
-
-fn invalid_audit_data(path: &Path, kind: &str, error: serde_json::Error) -> std::io::Error {
-    std::io::Error::new(
-        std::io::ErrorKind::InvalidData,
-        format!(
-            "failed to parse audit event {} in {}: {error}",
-            kind,
-            path.display()
-        ),
-    )
 }
 
 #[cfg(test)]

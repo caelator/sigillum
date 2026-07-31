@@ -5,7 +5,7 @@ use std::process;
 use sigillum_api::request::{
     CounterpartyCreateRequest, CounterpartyDeleteRequest, CounterpartyUpdateRequest,
     TreasuryAllowedDestinationInput, TreasuryPolicyUpdateRequest, TreasuryReceiveAllocateRequest,
-    TreasuryReceiveRotateRequest,
+    TreasuryReceivePurgeRequest, TreasuryReceiveRotateRequest,
 };
 
 use super::{
@@ -13,7 +13,7 @@ use super::{
 };
 
 /// Dispatch `sigillum api treasury
-/// <overview|policy|policy-update|receive-list|receive-allocate|receive-rotate>`.
+/// <overview|policy|policy-update|receive-list|receive-allocate|receive-rotate|receive-purge>`.
 pub(super) fn cmd_api_treasury(args: &[String]) {
     const POLICY_UPDATE_USAGE: &str = "sigillum api treasury policy-update <--enabled|--disabled> \
         [--destination 0xADDR[:label]]... [--max-step-wei-hex 0x..] [--max-plan-wei-hex 0x..] \
@@ -29,9 +29,10 @@ pub(super) fn cmd_api_treasury(args: &[String]) {
     const PARTIES_USAGE: &str = "sigillum api treasury parties <list|create|update|delete> \
         [--id <ID>] [--name <NAME>] [--note <NOTE>] [--sweep-destination <ADDRESS>]";
     const RECEIVE_ALLOCATE_USAGE: &str = "sigillum api treasury receive-allocate \
-        --wallet-profile <PROFILE> --purpose <PURPOSE> [--label <LABEL>]";
+        --wallet-profile <PROFILE> --purpose <PURPOSE> [--label <LABEL>] \
+        [--one-time --sweep-destination <ADDRESS> [--min-sweep-wei-hex 0x..] [--purge-after-sweep]]";
     const TREASURY_USAGE: &str = "sigillum api treasury \
-        <overview|policy|policy-update|receive-list|receive-allocate|receive-rotate|parties>";
+        <overview|policy|policy-update|receive-list|receive-allocate|receive-rotate|receive-purge|parties>";
     if args.len() < 2 {
         eprintln!("Usage: {TREASURY_USAGE}");
         process::exit(1);
@@ -122,11 +123,22 @@ pub(super) fn cmd_api_treasury(args: &[String]) {
             client.list_treasury_receive_allocations().await
         }),
         "receive-allocate" => {
+            // Plan task 3.3 one-time mode: --one-time attaches the
+            // auto-watch → auto-sweep → retire lifecycle; the destination is
+            // required by the daemon in that mode.
             let request = TreasuryReceiveAllocateRequest {
                 wallet_profile: require_flag(args, "--wallet-profile", RECEIVE_ALLOCATE_USAGE),
                 purpose: require_flag(args, "--purpose", RECEIVE_ALLOCATE_USAGE),
                 label: parse_flag(args, "--label"),
-                counterparty_id: None,
+                counterparty_id: parse_flag(args, "--counterparty-id"),
+                one_time: bool_switch(args, "--one-time", "--no-one-time"),
+                sweep_destination_address: parse_flag(args, "--sweep-destination"),
+                min_sweep_amount_hex: parse_flag(args, "--min-sweep-wei-hex"),
+                purge_after_sweep: bool_switch(
+                    args,
+                    "--purge-after-sweep",
+                    "--no-purge-after-sweep",
+                ),
             };
             run_api_command(args, true, move |client| async move {
                 client.allocate_treasury_receive_address(request).await
@@ -142,6 +154,18 @@ pub(super) fn cmd_api_treasury(args: &[String]) {
             };
             run_api_command(args, true, move |client| async move {
                 client.rotate_treasury_receive_address(request).await
+            });
+        }
+        "receive-purge" => {
+            let request = TreasuryReceivePurgeRequest {
+                allocation_id: require_flag(
+                    args,
+                    "--allocation-id",
+                    "sigillum api treasury receive-purge --allocation-id <ID>",
+                ),
+            };
+            run_api_command(args, true, move |client| async move {
+                client.purge_treasury_receive_address(request).await
             });
         }
         _ => {

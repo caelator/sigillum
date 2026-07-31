@@ -1,0 +1,120 @@
+/* Status strip stays on the heading row while it fits; below that the whole
+   group drops to a second full-width row instead of stacking chip-by-chip. */
+.topbar-status {
+  flex: 1 1 800px;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  column-gap: 8px;
+  row-gap: 4px;
+}
+
+.topbar-status #statusStrip {
+  flex: 0 1 auto;
+  min-width: 0;
+  margin: 0;
+  gap: 6px;
+  justify-content: flex-start;
+  flex-wrap: wrap;
+}
+
+.topbar-status #statusStrip .status-chip {
+  height: 22px;
+  padding: 0 8px;
+  gap: 5px;
+  white-space: nowrap;
+}
+
+.topbar-status #statusStrip .status-chip-label {
+  font-size: 10.5px;
+}
+
+.topbar-status #lockForm {
+  display: flex;
+  flex-direction: row;
+  flex-shrink: 0;
+  gap: 6px;
+  padding-top: 0;
+  margin-left: auto;
+}
+
+.topbar-status #lockForm .btn-small {
+  height: 24px;
+  padding: 0 9px;
+  font-size: 12px;
+}
+
+.status-badge {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 22px;
+  padding: 0 8px;
+  border-radius: 999px;
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  border: 1px solid var(--border);
+  background: rgba(27, 35, 48, 0.78);
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.status-badge::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.status-badge.status-unlocked {
+  color: var(--success-text);
+  border-color: rgba(63, 185, 100, 0.35);
+  background: var(--success-tint);
+}
+
+.status-badge.status-locked {
+  color: var(--warning-text);
+  border-color: rgba(224, 168, 60, 0.36);
+  background: var(--warning-tint);
+}
+
+.status-badge.status-no-vault {
+  color: var(--danger-text);
+  border-color: rgba(229, 84, 79, 0.36);
+  background: var(--danger-tint);
+}
+
+.compartment-badge {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 160px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 22px;
+  padding: 0 8px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: rgba(21, 27, 35, 0.8);
+  color: var(--text-muted);
+  font-family: var(--mono);
+  font-size: 10.5px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.compartment-badge::before {
+  content: "";
+  width: 5px;
+  height: 5px;
+  flex-shrink: 0;
+  border-radius: 2px;
+  background: var(--accent);
+}

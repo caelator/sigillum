@@ -1,27 +1,27 @@
-/* ── 1. Design tokens ─────────────────────────────────────────────────────── */
+/* ── 1. Design tokens ────────────────────────────────────────────────────── */
 
 :root {
   color-scheme: dark;
 
   /* Surfaces */
-  --bg: #0b0e14;
-  --bg-deep: #07090d;
+  --bg: #0d1117;
+  --bg-deep: #090c10;
   --bg-elevated: #05070b;
-  --surface: #11151d;
-  --surface-2: #161b25;
-  --surface-3: #222a3a;
-  --surface-overlay: #1a2029;
+  --surface: #151b23;
+  --surface-2: #1b2330;
+  --surface-3: #262f3d;
+  --surface-overlay: #202938;
 
   /* Hairlines — bright enough to read card edges at arm's length */
-  --border: #2a3342;
-  --border-strong: #3a4456;
-  --border-faint: #232b3a;
+  --border: #2b3442;
+  --border-strong: #3c4657;
+  --border-faint: #222a36;
 
-  /* Text — body ≈16.7:1, muted ≥7.5:1 on every surface (WCAG AA) */
+  /* Text — body ≥12.3:1, muted ≥6.3:1 on every surface (WCAG AA) */
   --text: #f2f5fa;
   --text-secondary: #c5cedd;
   --text-muted: #a8b3c4;
-  --text-dim: #8a94ab;
+  --text-dim: #8d98ae;
 
   /* Accent — electric indigo, used sparingly */
   --accent: #5b7cfa;

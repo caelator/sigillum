@@ -22,6 +22,7 @@ use crate::audit_log::AuditEventSpec;
 use super::helpers::map_xpub_error;
 use super::{ServiceError, ServiceResult, SigillumService, capability_scopes};
 
+mod fees;
 mod resolution;
 mod seed_wallets;
 mod sends;
@@ -59,7 +60,7 @@ impl SigillumService {
             .provider
             .compartment_id
             .or_else(|| self.state.active_compartment_id_for(token))
-            .ok_or_else(|| ServiceError::forbidden("No active compartment."))?;
+            .ok_or_else(|| ServiceError::vault_locked("No active compartment."))?;
 
         let profile = EvmProviderProfile {
             name: body.name,
@@ -74,7 +75,8 @@ impl SigillumService {
             fee_estimation_enabled: body.fee_estimation_enabled.unwrap_or(false),
         };
 
-        let _guard = self.state.operation_guard().await;
+        let session_context = self.capture_session_operation_context(Some(token))?;
+        let _guard = self.acquire_session_operation(&session_context).await?;
         let mut registry =
             crate::profiles::load_profiles(&self.state.base_dir).map_err(|error| {
                 ServiceError::internal(format!("Failed to load profile registry: {error}"))
@@ -97,6 +99,7 @@ impl SigillumService {
         Ok(EvmProviderProfileMutationResponse {
             status: "ok".into(),
             profile,
+            pruned_inventory: None,
         })
     }
 
@@ -106,7 +109,8 @@ impl SigillumService {
         body: EvmProfileDeleteRequest,
     ) -> ServiceResult<EvmProviderProfileMutationResponse> {
         let token = self.require_session(token)?;
-        let _guard = self.state.operation_guard().await;
+        let session_context = self.capture_session_operation_context(Some(token))?;
+        let _guard = self.acquire_session_operation(&session_context).await?;
         let mut registry =
             crate::profiles::load_profiles(&self.state.base_dir).map_err(|error| {
                 ServiceError::internal(format!("Failed to load profile registry: {error}"))
@@ -130,6 +134,25 @@ impl SigillumService {
         }
         let profile = remove_named(&mut registry.evm_providers, &body.name, |item| &item.name)
             .ok_or_else(|| ServiceError::not_found("Provider profile not found."))?;
+
+        // Forget cascade (plan task 3.2): rows observed through this provider
+        // plus its scan state. Receive allocations never reference providers,
+        // so those counts are always zero here.
+        let pruned_inventory = if body.prune_inventory == Some(true) {
+            Some(
+                self.prune_inventory_for_deleted_profile(
+                    token,
+                    "evm-provider",
+                    crate::service::inventory::prune::InventoryPruneScope::ProviderProfile {
+                        name: &body.name,
+                    },
+                )
+                .await?,
+            )
+        } else {
+            None
+        };
+
         crate::profiles::save_profiles(&self.state.base_dir, &registry).map_err(|error| {
             ServiceError::internal(format!("Failed to save profile registry: {error}"))
         })?;
@@ -144,6 +167,7 @@ impl SigillumService {
         Ok(EvmProviderProfileMutationResponse {
             status: "deleted".into(),
             profile,
+            pruned_inventory,
         })
     }
 
@@ -173,9 +197,10 @@ impl SigillumService {
         let compartment_id = body
             .compartment_id
             .or_else(|| self.state.active_compartment_id_for(token))
-            .ok_or_else(|| ServiceError::forbidden("No active compartment."))?;
+            .ok_or_else(|| ServiceError::vault_locked("No active compartment."))?;
 
-        let _guard = self.state.operation_guard().await;
+        let session_context = self.capture_session_operation_context(Some(token))?;
+        let _guard = self.acquire_session_operation(&session_context).await?;
         let mut registry =
             crate::profiles::load_profiles(&self.state.base_dir).map_err(|error| {
                 ServiceError::internal(format!("Failed to load profile registry: {error}"))
@@ -217,6 +242,7 @@ impl SigillumService {
         Ok(EthStealthWalletProfileMutationResponse {
             status: "ok".into(),
             profile,
+            pruned_inventory: None,
         })
     }
 
@@ -226,7 +252,8 @@ impl SigillumService {
         body: EvmProfileDeleteRequest,
     ) -> ServiceResult<EthStealthWalletProfileMutationResponse> {
         let token = self.require_session(token)?;
-        let _guard = self.state.operation_guard().await;
+        let session_context = self.capture_session_operation_context(Some(token))?;
+        let _guard = self.acquire_session_operation(&session_context).await?;
         let mut registry =
             crate::profiles::load_profiles(&self.state.base_dir).map_err(|error| {
                 ServiceError::internal(format!("Failed to load profile registry: {error}"))
@@ -235,6 +262,28 @@ impl SigillumService {
             &item.name
         })
         .ok_or_else(|| ServiceError::not_found("Wallet profile not found."))?;
+
+        // Forget cascade (plan task 3.2). Stealth wallets have no
+        // wallet-inventory surface (scans cover eth-seed/eth-xpub/eth-watch),
+        // so the summary reports zeros; stealth deposit monitors live in the
+        // separate deposits store with their own delete route and are
+        // deliberately out of `prune_inventory` scope.
+        let pruned_inventory = if body.prune_inventory == Some(true) {
+            Some(
+                self.prune_inventory_for_deleted_profile(
+                    token,
+                    "eth-stealth",
+                    crate::service::inventory::prune::InventoryPruneScope::WalletProfile {
+                        family: "eth-stealth",
+                        name: &body.name,
+                    },
+                )
+                .await?,
+            )
+        } else {
+            None
+        };
+
         crate::profiles::save_profiles(&self.state.base_dir, &registry).map_err(|error| {
             ServiceError::internal(format!("Failed to save profile registry: {error}"))
         })?;
@@ -249,6 +298,7 @@ impl SigillumService {
         Ok(EthStealthWalletProfileMutationResponse {
             status: "deleted".into(),
             profile,
+            pruned_inventory,
         })
     }
 
@@ -275,9 +325,10 @@ impl SigillumService {
         let compartment_id = body
             .compartment_id
             .or_else(|| self.state.active_compartment_id_for(token))
-            .ok_or_else(|| ServiceError::forbidden("No active compartment."))?;
+            .ok_or_else(|| ServiceError::vault_locked("No active compartment."))?;
 
-        let _guard = self.state.operation_guard().await;
+        let session_context = self.capture_session_operation_context(Some(token))?;
+        let _guard = self.acquire_session_operation(&session_context).await?;
         let mut registry =
             crate::profiles::load_profiles(&self.state.base_dir).map_err(|error| {
                 ServiceError::internal(format!("Failed to load profile registry: {error}"))
@@ -397,6 +448,7 @@ impl SigillumService {
         Ok(EthXpubWalletProfileMutationResponse {
             status: "ok".into(),
             profile,
+            pruned_inventory: None,
         })
     }
 
@@ -406,7 +458,8 @@ impl SigillumService {
         body: EvmProfileDeleteRequest,
     ) -> ServiceResult<EthXpubWalletProfileMutationResponse> {
         let token = self.require_session(token)?;
-        let _guard = self.state.operation_guard().await;
+        let session_context = self.capture_session_operation_context(Some(token))?;
+        let _guard = self.acquire_session_operation(&session_context).await?;
         let mut registry =
             crate::profiles::load_profiles(&self.state.base_dir).map_err(|error| {
                 ServiceError::internal(format!("Failed to load profile registry: {error}"))
@@ -415,6 +468,27 @@ impl SigillumService {
             &item.name
         })
         .ok_or_else(|| ServiceError::not_found("Wallet profile not found."))?;
+
+        // Forget cascade (plan task 3.2): the profile's scanned-address rows,
+        // holdings, scan state, receive allocations (active ones are
+        // retire-then-purged in the same operation), and the counterparty
+        // bindings those allocations carried.
+        let pruned_inventory = if body.prune_inventory == Some(true) {
+            Some(
+                self.prune_inventory_for_deleted_profile(
+                    token,
+                    "eth-xpub",
+                    crate::service::inventory::prune::InventoryPruneScope::WalletProfile {
+                        family: "eth-xpub",
+                        name: &body.name,
+                    },
+                )
+                .await?,
+            )
+        } else {
+            None
+        };
+
         crate::profiles::save_profiles(&self.state.base_dir, &registry).map_err(|error| {
             ServiceError::internal(format!("Failed to save profile registry: {error}"))
         })?;
@@ -429,6 +503,7 @@ impl SigillumService {
         Ok(EthXpubWalletProfileMutationResponse {
             status: "deleted".into(),
             profile,
+            pruned_inventory,
         })
     }
 }

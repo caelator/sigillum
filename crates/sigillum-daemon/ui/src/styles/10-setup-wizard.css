@@ -8,15 +8,16 @@
   margin-bottom: var(--space-4);
 }
 
-.wizard-intro h2 {
+.wizard-intro h1 {
   margin-bottom: var(--space-2);
 }
 
 .wizard-summary {
-  padding: var(--space-4);
-  background: var(--surface-2);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
+  padding: 4px 0 4px var(--space-4);
+  background: transparent;
+  border: 0;
+  border-left: 1px solid var(--border);
+  border-radius: 0;
 }
 
 .progress-pill {
@@ -103,9 +104,9 @@
 .method-btn {
   display: block;
   width: 100%;
-  margin-bottom: var(--space-2);
-  padding: var(--space-3) var(--space-4);
-  background: var(--surface-2);
+  margin-bottom: var(--space-3);
+  padding: var(--space-4);
+  background: rgba(168, 179, 196, 0.035);
   border: 1px solid var(--border);
   border-radius: var(--radius);
   text-align: left;
@@ -116,8 +117,13 @@
 }
 
 .method-btn:hover {
-  background: var(--surface-3);
+  background: rgba(168, 179, 196, 0.06);
   border-color: var(--accent);
+}
+
+.method-btn:focus-visible {
+  outline: 2px solid var(--accent-ring);
+  outline-offset: 2px;
 }
 
 .method-btn:active {
@@ -126,8 +132,7 @@
 
 .method-btn.recommended {
   border-color: rgba(91, 124, 250, 0.45);
-  background: linear-gradient(180deg, var(--accent-tint), transparent 80%),
-    var(--surface-2);
+  background: var(--accent-tint);
 }
 
 .method-btn.recommended .method-title::after {
@@ -161,11 +166,12 @@
   align-items: center;
   justify-content: space-between;
   gap: var(--space-3);
-  padding: 9px var(--space-4);
+  padding: 9px 0;
   margin-bottom: var(--space-2);
-  background: var(--surface-2);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
+  background: transparent;
+  border: 0;
+  border-bottom: 1px solid var(--border-faint);
+  border-radius: 0;
 }
 
 .wiz-comp-label {

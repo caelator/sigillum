@@ -1,0 +1,359 @@
+/* ── dest-Receiving.css — Receive destination (plan §4.3.3) ────────────────
+   Scoped to the rebuilt destination rendered by src/destinations/Receiving.ts
+   into the legacy #receivingCard container. Everything consumes design
+   tokens + v2 components (00-design-tokens.css,
+   00-design-tokens-v2.css, 14-components-v2.css); no
+   hex values, no restyling of legacy components. Rules: ui/DESIGN.md. */
+
+.dest-recv {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-6);
+}
+
+/* ── Sections ─────────────────────────────────────────────────────────── */
+
+.recv-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--border-faint);
+}
+
+.recv-section-title {
+  font-size: var(--fs-md);
+  font-weight: 650;
+  color: var(--text);
+  margin: 0;
+}
+
+.recv-section-summary {
+  font-size: var(--fs-sm);
+  color: var(--text-muted);
+  margin: 0;
+  max-width: 72ch;
+}
+
+.recv-section-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  margin-top: var(--space-2);
+}
+
+.recv-sub-title {
+  font-size: var(--fs-base);
+  font-weight: 600;
+  color: var(--text-secondary);
+  margin: var(--space-4) 0 var(--space-2);
+}
+
+/* ── Address cards grid ───────────────────────────────────────────────── */
+
+.recv-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: var(--space-3);
+}
+
+.recv-address-card,
+.recv-deposit-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--density-pad-y) var(--density-pad-x);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+/* Consequence grading for deposits that need the operator (gas, failed
+   sweeps): the [data-tier] token mapping comes from 14-components-v2.css. */
+.recv-deposit-card[data-tier="review"] {
+  background: var(--_tier-tint);
+  border-color: var(--_tier-border);
+  box-shadow: inset 3px 0 0 var(--_tier-accent);
+}
+
+.recv-card-title {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.recv-address {
+  font-size: var(--fs-base);
+  color: var(--text);
+  word-break: break-all;
+}
+
+.recv-card-pills {
+  display: flex;
+  gap: var(--space-1);
+  flex-wrap: wrap;
+}
+
+.recv-card-lines {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.recv-card-line {
+  font-size: var(--fs-sm);
+  color: var(--text-secondary);
+  margin: 0;
+  word-break: break-word;
+}
+
+.recv-balance {
+  font-size: var(--fs-base);
+  color: var(--text);
+}
+
+.recv-card-freshness {
+  color: var(--text-dim);
+  font-size: var(--fs-xs);
+}
+
+.recv-card-blocker {
+  color: var(--warning-text);
+}
+
+.recv-card-warning {
+  color: var(--warning-text);
+  padding: var(--space-2);
+  background: var(--warning-tint);
+  border-radius: var(--radius-sm);
+}
+
+.recv-card-details summary {
+  font-size: var(--fs-xs);
+  color: var(--text-dim);
+  cursor: pointer;
+}
+
+.recv-card-details p {
+  margin: var(--space-1) 0 0;
+}
+
+.recv-card-actions {
+  display: flex;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+  margin-top: var(--space-1);
+}
+
+/* ── Forms ────────────────────────────────────────────────────────────── */
+
+.recv-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.recv-form-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: var(--space-3);
+}
+
+.recv-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.recv-field-label {
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-dim);
+}
+
+.recv-field-hint {
+  font-size: var(--fs-xs);
+  color: var(--text-muted);
+  margin: 0;
+  max-width: 64ch;
+}
+
+.recv-form-actions {
+  display: flex;
+  gap: var(--space-2);
+  align-items: center;
+}
+
+.recv-onetime-options {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--density-pad-y) var(--density-pad-x);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.recv-inline-note {
+  font-size: var(--fs-sm);
+  color: var(--text-muted);
+  margin: 0;
+}
+
+/* ── Payer instructions (meta-address panel) ──────────────────────────── */
+
+.recv-meta-result {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--density-pad-y) var(--density-pad-x);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.recv-meta-address {
+  font-size: var(--fs-sm);
+  color: var(--text);
+  word-break: break-all;
+  flex: 1;
+}
+
+.recv-copy-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.recv-warning-box {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding: var(--space-2) var(--space-3);
+  background: var(--_tier-tint);
+  border: 1px solid var(--_tier-border);
+  border-left: 3px solid var(--_tier-accent);
+  border-radius: var(--radius-sm);
+}
+
+/* ── Deposits ─────────────────────────────────────────────────────────── */
+
+.recv-deposit-toolbar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.recv-page-note {
+  font-size: var(--fs-xs);
+  color: var(--text-dim);
+  margin-left: auto;
+}
+
+.recv-deposit-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.recv-tag-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+/* Guided lifecycle: announced → funded → gas-ready → swept. Static dots,
+   so the state reads identically under prefers-reduced-motion. */
+.recv-lifecycle {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  flex-wrap: wrap;
+}
+
+.recv-lifecycle li {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  font-size: var(--fs-xs);
+  color: var(--text-dim);
+}
+
+.recv-lifecycle li::before {
+  content: "";
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--surface-3);
+  flex-shrink: 0;
+}
+
+.recv-lifecycle li[data-state="done"] {
+  color: var(--success-text);
+}
+
+.recv-lifecycle li[data-state="done"]::before {
+  background: var(--success);
+}
+
+.recv-lifecycle li[data-state="current"] {
+  color: var(--accent-text);
+}
+
+.recv-lifecycle li[data-state="current"]::before {
+  background: var(--accent);
+}
+
+.recv-lifecycle li[data-state="attention"] {
+  color: var(--warning-text);
+}
+
+.recv-lifecycle li[data-state="attention"]::before {
+  background: var(--warning);
+}
+
+/* ── Counterparties ───────────────────────────────────────────────────── */
+
+.recv-party-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.recv-party-row {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+  padding: var(--space-2) var(--density-pad-x);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.recv-party-name {
+  font-size: var(--fs-base);
+  font-weight: 600;
+  color: var(--text);
+}
+
+/* ── Advanced disclosure ──────────────────────────────────────────────── */
+
+.recv-advanced {
+  border-top: 1px solid var(--border-faint);
+  padding-top: var(--space-3);
+}
+
+.recv-advanced > summary {
+  font-size: var(--fs-sm);
+  color: var(--text-muted);
+  cursor: pointer;
+}

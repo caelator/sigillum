@@ -60,6 +60,29 @@ These endpoints are local-service operations. Export requires an authenticated s
 - restoring logs out the daemon and requires a fresh unlock
 - there is still no scheduled backup system or remote backup service
 
+## What Snapshots Retain After Pruning
+
+Since plan task 3.2 the at-rest linkage ledger is forgettable: scanned-address
+prune (`POST /api/inventory/addresses/delete`), retired-allocation purge
+(`POST /api/treasury/receive-addresses/purge`), and the profile-delete
+`prune_inventory` cascade all delete rows from `wallet_inventory.json` (see
+`docs/architecture.md` → "At-rest forgetting"). How that interacts with
+backups:
+
+- **A snapshot archives what existed at export time.** A snapshot taken
+  BEFORE a prune retains the pruned history forever — that is what snapshots
+  are for. Restoring it brings the history back with the rest of the tree.
+  `setup/reset` archives of the data directory behave the same way.
+- **The live tree stays pruned.** Every store save — and every successful
+  store load — rewrites the `.bak` companion next to each JSON document, so
+  pruned rows do not linger in the live directory's backup copies after a
+  prune completes.
+- **The audit log keeps the prune events by design.** The audit trail is
+  append-only: `wallet_inventory.addresses.prune`,
+  `treasury.receive.purge`, and `wallet_inventory.profile_prune` events
+  remain, but they carry selector scope and per-store counts only — never
+  the pruned address values.
+
 ## Crash-Recovery Guarantees
 
 Sigillum journals destructive local operations before filesystem mutation and
@@ -148,6 +171,6 @@ These guarantees are proven end to end by
 `crates/sigillum-daemon/tests/upgrade_path.rs` (task F7): a committed
 fixture data directory built at the oldest supported per-store schema versions
 boots on the current daemon and is asserted to migrate every store to its
-current version (queue → v5, wallet inventory → v20, and so on) with no
+current version (queue → v5, wallet inventory → v21, and so on) with no
 quarantine events, the vault canaries intact, the pending queue job preserved,
 and the 0.1-era encrypted snapshot restoring under 1.0.

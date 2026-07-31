@@ -50,6 +50,9 @@ sha3 = "0.10"
 
 # Async
 tokio = { version = "1", features = ["full"] }
+futures-core = "0.3"
+futures-util = { version = "0.3", default-features = false, features = ["std"] }
+bytes = "1"
 
 # Web
 axum = "0.8"

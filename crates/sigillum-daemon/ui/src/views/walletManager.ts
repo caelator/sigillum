@@ -1,9 +1,11 @@
+import { ROUTE_PATHS } from "../routePaths";
 import type {
   EthSeedWalletProfile,
   EthXpubWalletProfile,
   TreasuryGroupSummary,
   TreasuryReceiveAllocation,
 } from "../contracts";
+import { confirmDangerDialogDecision } from "../render/confirm";
 import { setHiddenById as setHidden, setTextById as setText } from "../render/dom";
 import {
   clearFields,
@@ -18,7 +20,6 @@ import { formatWeiHexAsEth } from "./treasury";
 
 export type ManagedWalletKind = "seed" | "xpub";
 
-const DELETE_CONFIRM_TIMEOUT_MS = 5000;
 const WALLET_NAME_PATTERN = /^[A-Za-z0-9_-]+$/;
 const IMPORT_TABS = ["seed", "xpub", "watch"] as const;
 const CREATE_FORM_CONTROL_IDS = [
@@ -112,24 +113,37 @@ export function walletRowMeta(
       : xpubDisplay(profile as EthXpubWalletProfile),
   );
   const facts = [
-    "provider=" + profile.provider_profile,
-    "chain=" + (profile.chain_id != null ? String(profile.chain_id) : "-"),
-    "account=" + profile.project_account,
+    "Provider " + profile.provider_profile,
+    profile.chain_id != null
+      ? "Chain " + String(profile.chain_id)
+      : "Chain not specified",
+    "Account " + profile.project_account,
   ];
-  if (seed) facts.push("words=" + seed.word_count);
+  if (seed) facts.push(seed.word_count + " words");
   if (!seed) {
     const xpub = profile as EthXpubWalletProfile;
     if (xpub.external_account_xpub) {
-      facts.push(xpub.external_account_path ? "source=external custom account xpub" : "source=external account xpub");
-    }
-    else if (xpub.external_receive_xpub) {
-      facts.push(xpub.external_receive_path ? "source=external custom xpub" : "source=external receive xpub");
+      facts.push(
+        xpub.external_account_path
+          ? "Source: external custom account xpub"
+          : "Source: external account xpub",
+      );
+    } else if (xpub.external_receive_xpub) {
+      facts.push(
+        xpub.external_receive_path
+          ? "Source: external custom xpub"
+          : "Source: external receive xpub",
+      );
     }
   }
   lines.push(facts.join(" · "));
-  lines.push("balance=" + walletNativeBalanceFromGroups(profile.name, groups));
+  lines.push("Balance: " + walletNativeBalanceFromGroups(profile.name, groups));
   if (activeReceiveCount) {
-    lines.push("receive allocations=" + activeReceiveCount);
+    lines.push(
+      activeReceiveCount +
+        " receive " +
+        (activeReceiveCount === 1 ? "allocation" : "allocations"),
+    );
   }
   return lines.join("\n");
 }
@@ -153,11 +167,6 @@ export function createWalletManagerActions(deps: WalletManagerDeps) {
   // storage, never in a toast, never logged. confirmMnemonicSaved() nulls it.
   let pendingMnemonic: string | null = null;
   let receiveTargetProfile: string | null = null;
-  let armedDelete: {
-    kind: ManagedWalletKind;
-    name: string;
-    timer: ReturnType<typeof setTimeout>;
-  } | null = null;
 
   function activeReceiveCountFor(profileName: string): number {
     return lastReceiveAllocations.filter(
@@ -170,13 +179,6 @@ export function createWalletManagerActions(deps: WalletManagerDeps) {
     return kind === "seed"
       ? '<span class="pill pill-good">signer</span>'
       : '<span class="pill pill-info">watch-only</span>';
-  }
-
-  function disarmDelete(rerender = true): void {
-    if (!armedDelete) return;
-    clearTimeout(armedDelete.timer);
-    armedDelete = null;
-    if (rerender) renderWalletManagerList();
   }
 
   function renderWalletManagerList(): void {
@@ -208,10 +210,6 @@ export function createWalletManagerActions(deps: WalletManagerDeps) {
           .split("\n")
           .map((line) => esc(line))
           .join("<br>");
-        const armed =
-          armedDelete &&
-          armedDelete.kind === row.kind &&
-          armedDelete.name === profile.name;
         let actions =
           '<button class="btn-ghost" data-action="promptWalletReceiveAddress" data-arg0="' +
           escAttr(profile.name) +
@@ -222,17 +220,12 @@ export function createWalletManagerActions(deps: WalletManagerDeps) {
             escAttr(seed.first_receive_address) +
             '" data-arg1="First receive address">Copy address</button>';
         }
-        actions += armed
-          ? '<button class="btn-danger" data-action="deleteManagedWallet" data-arg0="' +
-            escAttr(row.kind) +
-            '" data-arg1="' +
-            escAttr(profile.name) +
-            '">Confirm delete</button>'
-          : '<button class="btn-ghost" data-action="deleteManagedWallet" data-arg0="' +
-            escAttr(row.kind) +
-            '" data-arg1="' +
-            escAttr(profile.name) +
-            '">Delete</button>';
+        actions +=
+          '<button class="btn-danger" data-action="deleteManagedWallet" data-arg0="' +
+          escAttr(row.kind) +
+          '" data-arg1="' +
+          escAttr(profile.name) +
+          '">Delete</button>';
         return (
           '<li><div class="entity-main">' +
           '<div class="entity-title">' +
@@ -293,7 +286,7 @@ export function createWalletManagerActions(deps: WalletManagerDeps) {
       deps.toast("Chain ID must be a positive number", "error");
       return;
     }
-    const r = await deps.api("POST", "/api/profiles/evm/upsert", {
+    const r = await deps.api("POST", ROUTE_PATHS.API_PROFILES_EVM_UPSERT, {
       name,
       rpc_url: rpcUrl,
       chain_id: chainId,
@@ -337,11 +330,11 @@ export function createWalletManagerActions(deps: WalletManagerDeps) {
     try {
       const [seedResp, xpubResp, providerResp, overviewResp, receiveResp] =
         await Promise.all([
-          deps.api("GET", "/api/profiles/eth-seed"),
-          deps.api("GET", "/api/profiles/eth-xpub"),
-          deps.api("GET", "/api/profiles/evm"),
-          deps.api("GET", "/api/treasury/overview"),
-          deps.api("GET", "/api/treasury/receive-addresses"),
+          deps.api("GET", ROUTE_PATHS.API_PROFILES_ETH_SEED),
+          deps.api("GET", ROUTE_PATHS.API_PROFILES_ETH_XPUB),
+          deps.api("GET", ROUTE_PATHS.API_PROFILES_EVM),
+          deps.api("GET", ROUTE_PATHS.API_TREASURY_OVERVIEW),
+          deps.api("GET", ROUTE_PATHS.API_TREASURY_RECEIVE_ADDRESSES),
         ]);
       if (!seedResp.error) lastSeedProfiles = seedResp.profiles || [];
       if (!xpubResp.error) lastXpubProfiles = xpubResp.profiles || [];
@@ -405,7 +398,6 @@ export function createWalletManagerActions(deps: WalletManagerDeps) {
   }
 
   async function createWalletRequest(): Promise<void> {
-    disarmDelete();
     if (pendingMnemonic != null) {
       deps.toast("Confirm the current seed phrase backup first", "error");
       return;
@@ -449,7 +441,7 @@ export function createWalletManagerActions(deps: WalletManagerDeps) {
     const destination = optionalTextValue("walletCreateDestination");
     if (destination) body.default_destination_address = destination;
 
-    const r = await deps.api("POST", "/api/profiles/eth-seed/create", body);
+    const r = await deps.api("POST", ROUTE_PATHS.API_PROFILES_ETH_SEED_CREATE, body);
     if (r.error) {
       deps.toast(r.error, "error");
       return;
@@ -536,38 +528,51 @@ export function createWalletManagerActions(deps: WalletManagerDeps) {
   }
 
   async function copyWalletAddress(value: string, labelText?: string): Promise<void> {
-    disarmDelete();
     await copyValue(value, labelText || "Address");
   }
 
   async function deleteManagedWallet(kind: string, name: string): Promise<void> {
     const targetKind: ManagedWalletKind = kind === "xpub" ? "xpub" : "seed";
-    const armedForTarget =
-      armedDelete && armedDelete.kind === targetKind && armedDelete.name === name;
-    if (!armedForTarget) {
-      // First click only arms; a second click within the timeout executes.
-      disarmDelete(false);
-      armedDelete = {
-        kind: targetKind,
-        name,
-        timer: setTimeout(() => disarmDelete(), DELETE_CONFIRM_TIMEOUT_MS),
-      };
-      renderWalletManagerList();
-      return;
-    }
-    disarmDelete(false);
+    const decision = await confirmDangerDialogDecision({
+      title: targetKind === "seed" ? "Delete wallet" : "Delete xpub profile",
+      body:
+        (targetKind === "seed"
+          ? 'Delete seed wallet "' + name + '"? The mnemonic is removed from this daemon\'s vault; on-chain funds are not moved, but this daemon can no longer sign with it.'
+          : 'Delete xpub profile "' + name + '"? The watch-only profile is removed from this daemon.') +
+        " Tick the box below to also forget what this daemon learned about the wallet — a later re-import and re-scan re-derives fresh addresses, but today's history is gone for good.",
+      actionLabel: "Delete",
+      checkbox: {
+        label:
+          "Also forget scanned history: observed addresses, balances, scan state, and receive allocations with their counterparty bindings (counterparties themselves are kept).",
+        checked: false,
+      },
+    });
+    if (!decision.confirmed) return;
     const path =
       targetKind === "seed"
         ? "/api/profiles/eth-seed/delete"
         : "/api/profiles/eth-xpub/delete";
-    const r = await deps.api("POST", path, { name });
+    const body: { name: string; prune_inventory?: boolean } = { name };
+    if (decision.checked) body.prune_inventory = true;
+    const r = await deps.api("POST", path, body);
     if (r.error) {
       deps.toast(r.error, "error");
       renderWalletManagerList();
       return;
     }
+    const pruned = r.pruned_inventory;
+    const forgotten =
+      decision.checked && pruned
+        ? " — forgot " +
+          String(pruned.addresses || 0) +
+          " addresses, " +
+          String((pruned.allocations_active || 0) + (pruned.allocations_retired || 0)) +
+          " receive allocations, " +
+          String(pruned.counterparty_bindings || 0) +
+          " bindings"
+        : "";
     deps.toast(
-      (targetKind === "seed" ? "Wallet" : "Xpub profile") + ' "' + name + '" deleted',
+      (targetKind === "seed" ? "Wallet" : "Xpub profile") + ' "' + name + '" deleted' + forgotten,
     );
     await loadWalletManager();
   }
@@ -575,7 +580,6 @@ export function createWalletManagerActions(deps: WalletManagerDeps) {
   // ── Receive-address allocation (inline panel under the list) ──────────
 
   function promptWalletReceiveAddress(profileName: string): void {
-    disarmDelete();
     receiveTargetProfile = profileName;
     setText("walletReceiveTarget", profileName);
     setHidden("walletReceivePanel", false);
@@ -606,7 +610,7 @@ export function createWalletManagerActions(deps: WalletManagerDeps) {
     };
     const label = optionalTextValue("walletReceiveLabel");
     if (label) body.label = label;
-    const r = await deps.api("POST", "/api/treasury/receive-addresses/allocate", body);
+    const r = await deps.api("POST", ROUTE_PATHS.API_TREASURY_RECEIVE_ADDRESSES_ALLOCATE, body);
     if (r.error) {
       deps.toast(r.error, "error");
       return;
@@ -623,7 +627,6 @@ export function createWalletManagerActions(deps: WalletManagerDeps) {
   // ── Import tabs ───────────────────────────────────────────────────────
 
   function setWalletImportTab(tab: string): void {
-    disarmDelete();
     const target = (IMPORT_TABS as readonly string[]).includes(tab) ? tab : "seed";
     IMPORT_TABS.forEach((name) => {
       const suffix = name.charAt(0).toUpperCase() + name.slice(1);
@@ -636,7 +639,6 @@ export function createWalletManagerActions(deps: WalletManagerDeps) {
   }
 
   async function importSeedWallet(): Promise<void> {
-    disarmDelete();
     const name = textValue("walletImportSeedName");
     if (!name) {
       deps.toast("Wallet name is required", "error");
@@ -681,7 +683,7 @@ export function createWalletManagerActions(deps: WalletManagerDeps) {
     const destination = optionalTextValue("walletImportSeedDestination");
     if (destination) body.default_destination_address = destination;
 
-    const r = await deps.api("POST", "/api/profiles/eth-seed/upsert", body);
+    const r = await deps.api("POST", ROUTE_PATHS.API_PROFILES_ETH_SEED_UPSERT, body);
     if (r.error) {
       deps.toast(r.error, "error");
       return;
@@ -701,7 +703,6 @@ export function createWalletManagerActions(deps: WalletManagerDeps) {
   }
 
   async function importXpubWallet(): Promise<void> {
-    disarmDelete();
     const name = textValue("walletImportXpubName");
     if (!name) {
       deps.toast("Profile name is required", "error");
@@ -739,7 +740,7 @@ export function createWalletManagerActions(deps: WalletManagerDeps) {
     const externalAccountPath = optionalTextValue("walletImportExternalAccountPath");
     if (externalAccountPath) body.external_account_path = externalAccountPath;
 
-    const r = await deps.api("POST", "/api/profiles/eth-xpub/upsert", body);
+    const r = await deps.api("POST", ROUTE_PATHS.API_PROFILES_ETH_XPUB_UPSERT, body);
     if (r.error) {
       deps.toast(r.error, "error");
       return;
@@ -761,13 +762,12 @@ export function createWalletManagerActions(deps: WalletManagerDeps) {
   }
 
   async function importWatchAddress(): Promise<void> {
-    disarmDelete();
     const address = textValue("walletImportWatchAddress");
     if (!address) {
       deps.toast("Watch address is required", "error");
       return;
     }
-    const r = await deps.api("POST", "/api/inventory/watch-addresses/upsert", {
+    const r = await deps.api("POST", ROUTE_PATHS.API_INVENTORY_WATCH_ADDRESSES_UPSERT, {
       address,
       label: optionalTextValue("walletImportWatchLabel"),
       tags: [],

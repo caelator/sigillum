@@ -76,14 +76,17 @@ impl SigillumService {
         token: Option<&str>,
         body: PassphraseRequest,
     ) -> ServiceResult<SnapshotExportResponse> {
-        let _ = self.require_session(token)?;
+        let token = self.require_session(token)?;
         if !self.state.is_initialized() {
-            return Err(ServiceError::not_found("Sigillum is not initialized."));
+            return Err(ServiceError::not_initialized(
+                "Sigillum is not initialized.",
+            ));
         }
         let passphrase = Zeroizing::new(body.passphrase);
         super::helpers::require_valid_passphrase(&passphrase)?;
 
-        let _guard = self.state.operation_guard().await;
+        let session_context = self.capture_session_operation_context(Some(token))?;
+        let _guard = self.acquire_session_operation(&session_context).await?;
         let (snapshot, summary) =
             export_encrypted_snapshot(&self.state.base_dir, passphrase.as_str())
                 .map_err(|error| Self::snapshot_error("Snapshot export failed", error))?;
@@ -107,9 +110,12 @@ impl SigillumService {
         token: Option<&str>,
         body: SnapshotRestoreRequest,
     ) -> ServiceResult<SnapshotRestoreResponse> {
-        if self.state.is_initialized() {
-            let _ = self.require_session(token)?;
-        }
+        let session_context = if self.state.is_initialized() {
+            let token = self.require_session(token)?;
+            Some(self.capture_session_operation_context(Some(token))?)
+        } else {
+            None
+        };
 
         let passphrase = Zeroizing::new(body.passphrase);
         super::helpers::require_valid_passphrase(&passphrase)?;
@@ -118,7 +124,17 @@ impl SigillumService {
             ServiceError::bad_request(format!("Invalid snapshot encoding: {error}"))
         })?;
 
-        let _guard = self.state.operation_guard().await;
+        let _guard = if let Some(session_context) = session_context.as_ref() {
+            self.acquire_session_operation(session_context).await?
+        } else {
+            let guard = self.state.operation_guard().await;
+            if self.state.is_initialized() {
+                return Err(ServiceError::unauthorized(
+                    "Sigillum was initialized while snapshot restore was waiting; retry with a valid session.",
+                ));
+            }
+            guard
+        };
         let journal = self.begin_operation(
             PendingOperationSpec::snapshot_restore(snapshot.len()),
             Some("vault".into()),
@@ -169,5 +185,64 @@ impl SigillumService {
             status: "reset".into(),
             archived_to: archived_to.map(|path| path.display().to_string()),
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::future::{Future, poll_fn};
+    use std::sync::Arc;
+    use std::task::Poll;
+
+    use tempfile::TempDir;
+
+    use crate::AppState;
+
+    use super::*;
+
+    #[tokio::test]
+    async fn queued_first_run_restore_rejects_initialization_before_lock_acquisition() {
+        let snapshot_dir = TempDir::new().unwrap();
+        std::fs::write(snapshot_dir.path().join(".initialized"), b"snapshot").unwrap();
+        std::fs::write(snapshot_dir.path().join("snapshot-only"), b"old vault").unwrap();
+        let (snapshot, _) =
+            export_encrypted_snapshot(snapshot_dir.path(), "snapshot passphrase").unwrap();
+
+        let target_dir = TempDir::new().unwrap();
+        let state = Arc::new(
+            AppState::new(target_dir.path().to_path_buf()).expect("app state should initialize"),
+        );
+        let service = SigillumService::new(state.clone());
+
+        let held_operation = state.operation_guard().await;
+        let mut queued = Box::pin(service.backup_restore(
+            None,
+            SnapshotRestoreRequest {
+                passphrase: "snapshot passphrase".into(),
+                snapshot_hex: hex::encode(snapshot),
+            },
+        ));
+        poll_fn(|context| match queued.as_mut().poll(context) {
+            Poll::Pending => Poll::Ready(()),
+            Poll::Ready(_) => panic!("restore bypassed the serialized mutation boundary"),
+        })
+        .await;
+
+        std::fs::write(target_dir.path().join(".initialized"), b"new vault").unwrap();
+        std::fs::write(target_dir.path().join("new-vault-only"), b"preserve").unwrap();
+        drop(held_operation);
+
+        let error = queued.await.unwrap_err();
+        assert_eq!(error.status(), axum::http::StatusCode::UNAUTHORIZED);
+        assert_eq!(
+            std::fs::read(target_dir.path().join(".initialized")).unwrap(),
+            b"new vault"
+        );
+        assert_eq!(
+            std::fs::read(target_dir.path().join("new-vault-only")).unwrap(),
+            b"preserve"
+        );
+        assert!(!target_dir.path().join("snapshot-only").exists());
+        assert_eq!(state.pending_operation_count(), 0);
     }
 }

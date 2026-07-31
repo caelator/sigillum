@@ -15,10 +15,12 @@
 //! No custom serialization or ad-hoc validation — all validation is explicit and typed
 //! in the `validation` module.
 
+pub mod error_codes;
 pub mod request;
 pub mod response;
+pub mod route_paths;
 pub mod validation;
 
 pub use request::*;
 pub use response::*;
-pub use validation::Validate;
+pub use validation::{Validate, ValidationFailure};

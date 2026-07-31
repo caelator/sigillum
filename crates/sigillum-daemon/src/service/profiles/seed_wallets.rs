@@ -80,13 +80,14 @@ impl SigillumService {
         let compartment_id = body
             .compartment_id
             .or_else(|| self.state.active_compartment_id_for(token))
-            .ok_or_else(|| ServiceError::forbidden("No active compartment."))?;
+            .ok_or_else(|| ServiceError::vault_locked("No active compartment."))?;
 
         let mnemonic = Zeroizing::new(normalize_mnemonic_phrase(&body.mnemonic));
         body.mnemonic.zeroize();
 
         let profile = self
             .persist_eth_seed_wallet_profile(
+                token,
                 SeedWalletProfileMaterial {
                     name: body.name,
                     label: body.label,
@@ -106,6 +107,7 @@ impl SigillumService {
         Ok(EthSeedWalletProfileMutationResponse {
             status: "ok".into(),
             profile,
+            pruned_inventory: None,
         })
     }
 
@@ -127,13 +129,14 @@ impl SigillumService {
         let compartment_id = body
             .compartment_id
             .or_else(|| self.state.active_compartment_id_for(token))
-            .ok_or_else(|| ServiceError::forbidden("No active compartment."))?;
+            .ok_or_else(|| ServiceError::vault_locked("No active compartment."))?;
 
         let word_count = body.word_count.unwrap_or(DEFAULT_SEED_WALLET_WORD_COUNT);
         let mut mnemonic = generate_ethereum_mnemonic(word_count).map_err(map_xpub_error)?;
 
         let profile = self
             .persist_eth_seed_wallet_profile(
+                token,
                 SeedWalletProfileMaterial {
                     name: body.name,
                     label: body.label,
@@ -166,9 +169,11 @@ impl SigillumService {
     /// any mnemonic material.
     async fn persist_eth_seed_wallet_profile(
         &self,
+        token: &str,
         mut material: SeedWalletProfileMaterial,
         mode: SeedWalletWriteMode,
     ) -> ServiceResult<EthSeedWalletProfile> {
+        let session_context = self.capture_session_operation_context(Some(token))?;
         let word_count =
             ethereum_mnemonic_word_count(&material.mnemonic).map_err(map_xpub_error)?;
         if word_count != 12 && word_count != 24 {
@@ -206,7 +211,7 @@ impl SigillumService {
                 .map_err(map_xpub_error)?
                 .address;
 
-        let _guard = self.state.operation_guard().await;
+        let _guard = self.acquire_session_operation(&session_context).await?;
         let mut registry =
             crate::profiles::load_profiles(&self.state.base_dir).map_err(|error| {
                 ServiceError::internal(format!("Failed to load profile registry: {error}"))
@@ -244,7 +249,7 @@ impl SigillumService {
         }
         self.with_vault(material.compartment_id, |vault| {
             if !vault.is_unlocked() {
-                return Err(ServiceError::forbidden("Wallet compartment is locked."));
+                return Err(ServiceError::vault_locked("Wallet compartment is locked."));
             }
             Ok(vault.set_secret(&mnemonic_secret_key, secret_payload.as_str())?)
         })?;
@@ -300,7 +305,8 @@ impl SigillumService {
         body: EvmProfileDeleteRequest,
     ) -> ServiceResult<EthSeedWalletProfileMutationResponse> {
         let token = self.require_session(token)?;
-        let _guard = self.state.operation_guard().await;
+        let session_context = self.capture_session_operation_context(Some(token))?;
+        let _guard = self.acquire_session_operation(&session_context).await?;
         let mut registry =
             crate::profiles::load_profiles(&self.state.base_dir).map_err(|error| {
                 ServiceError::internal(format!("Failed to load profile registry: {error}"))
@@ -312,9 +318,41 @@ impl SigillumService {
             .cloned()
             .ok_or_else(|| ServiceError::not_found("Seed wallet profile not found."))?;
 
+        // Fail fast before any mutation: with the compartment locked the
+        // secret delete below would fail anyway, but a requested inventory
+        // cascade must not run ahead of that failure.
+        if body.prune_inventory == Some(true) {
+            self.with_vault(profile.compartment_id, |vault| {
+                if !vault.is_unlocked() {
+                    return Err(ServiceError::vault_locked("Wallet compartment is locked."));
+                }
+                Ok(())
+            })?;
+        }
+
+        // Forget cascade (plan task 3.2): the profile's scanned-address rows,
+        // holdings, scan state, receive allocations (active ones are
+        // retire-then-purged in the same operation), and the counterparty
+        // bindings those allocations carried — before the profile itself goes.
+        let pruned_inventory = if body.prune_inventory == Some(true) {
+            Some(
+                self.prune_inventory_for_deleted_profile(
+                    token,
+                    "eth-seed",
+                    crate::service::inventory::prune::InventoryPruneScope::WalletProfile {
+                        family: "eth-seed",
+                        name: &body.name,
+                    },
+                )
+                .await?,
+            )
+        } else {
+            None
+        };
+
         self.with_vault(profile.compartment_id, |vault| {
             if !vault.is_unlocked() {
-                return Err(ServiceError::forbidden("Wallet compartment is locked."));
+                return Err(ServiceError::vault_locked("Wallet compartment is locked."));
             }
             Ok(vault.delete_secret(&profile.mnemonic_secret_key)?)
         })?;
@@ -337,6 +375,7 @@ impl SigillumService {
         Ok(EthSeedWalletProfileMutationResponse {
             status: "deleted".into(),
             profile,
+            pruned_inventory,
         })
     }
 
@@ -356,7 +395,7 @@ impl SigillumService {
     ) -> ServiceResult<k256::ecdsa::SigningKey> {
         self.with_vault(profile.compartment_id, |vault| {
             if !vault.is_unlocked() {
-                return Err(ServiceError::forbidden("Wallet compartment is locked."));
+                return Err(ServiceError::vault_locked("Wallet compartment is locked."));
             }
             let secret = vault
                 .read_secret(&profile.mnemonic_secret_key)

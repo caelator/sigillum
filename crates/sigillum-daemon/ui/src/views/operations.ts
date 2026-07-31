@@ -1,4 +1,7 @@
+import { ROUTE_PATHS } from "../routePaths";
+import { confirmDangerDialog } from "../render/confirm";
 import { setHiddenById } from "../render/dom";
+import { amountWithRawHtml, quantityWithRawHtml } from "../render/format";
 import {
   clearFields,
   optionalNumberValue,
@@ -23,6 +26,13 @@ export interface OperationsDeps {
 
 function input(id: string): HTMLInputElement {
   return document.getElementById(id) as HTMLInputElement;
+}
+
+// Checkbox reads that tolerate a missing element (older/smoke DOMs): absent
+// means unchecked, never a throw.
+function checkboxChecked(id: string): boolean {
+  const el = document.getElementById(id) as HTMLInputElement | null;
+  return el ? el.checked : false;
 }
 
 function describeQueueJob(job: any): string {
@@ -94,7 +104,7 @@ function queueReceiptLine(job: any): string {
     " · block=" +
     esc(String(job.receipt_block_number ?? "-")) +
     " · gasUsed=" +
-    esc(job.receipt_gas_used_hex || "-")
+    quantityWithRawHtml(job.receipt_gas_used_hex)
   );
 }
 
@@ -146,15 +156,53 @@ function failureBreakdownLine(summary: any): string {
 }
 
 function depositObservedLine(deposit: any): string {
-  const observedAmount = deposit.observed_amount_hex || "-";
-  const nativeBalance = deposit.observed_native_balance_wei_hex || "-";
+  // Native deposits humanize to ETH. ERC-20 amounts stay raw: this view has
+  // no token-registry decimals loaded, and guessing token units would lie.
+  const isNative = deposit.asset_kind === "native";
+  const expected = isNative
+    ? amountWithRawHtml(deposit.expected_amount_hex, { symbol: "ETH" })
+    : esc(deposit.expected_amount_hex || "-");
+  const observed = isNative
+    ? amountWithRawHtml(deposit.observed_amount_hex, { symbol: "ETH" })
+    : esc(deposit.observed_amount_hex || "-");
+  const nativeBalance = amountWithRawHtml(deposit.observed_native_balance_wei_hex, {
+    symbol: "ETH",
+  });
   return (
-    "expected=" +
-    esc(deposit.expected_amount_hex || "-") +
-    " · observed=" +
-    esc(observedAmount) +
-    " · native=" +
-    esc(nativeBalance)
+    "expected=" + expected + " · observed=" + observed + " · native=" + nativeBalance
+  );
+}
+
+function depositGasLine(deposit: any): string {
+  // The gas story in human terms: what the payer was asked to attach, what a
+  // sponsor top-up is doing, and what a `funded_needs_gas` deposit waits for.
+  const parts: string[] = [];
+  if (deposit.requested_gas_wei_hex) {
+    parts.push(
+      "requested payer gas=" +
+        amountWithRawHtml(deposit.requested_gas_wei_hex, { symbol: "ETH" }),
+    );
+  }
+  if (deposit.gas_topup_job_id) {
+    parts.push("sponsor top-up state=" + esc(deposit.gas_topup_job_state || "queued"));
+  }
+  if (deposit.status === "funded_needs_gas") {
+    parts.push(
+      deposit.gas_topup_job_id
+        ? "needs gas: waiting for the sponsor gas top-up to confirm before the sweep can run"
+        : "needs gas: the deposit address holds tokens but no native gas for the sweep — attach gas as the payer or fund the address manually",
+    );
+  }
+  return parts.join(" · ");
+}
+
+// Stealth address generation returns non-blocking cautionary warnings
+// (foreign meta-address, ephemeral key reuse). They are always serialized
+// but may be absent on older daemons, so read them defensively.
+export function stealthGenerationWarnings(response: { warnings?: unknown }): string[] {
+  if (!Array.isArray(response.warnings)) return [];
+  return response.warnings.filter(
+    (warning): warning is string => typeof warning === "string" && warning.length > 0,
   );
 }
 
@@ -171,6 +219,7 @@ export function createOperationsActions(deps: OperationsDeps) {
         const queueInfo = deposit.queue_job_id
           ? "job=" + deposit.queue_job_id + " · state=" + (deposit.queue_job_state || "-")
           : "job=-";
+        const gasLine = depositGasLine(deposit);
         const announcement = deposit.announcement;
         const announcementMeta = announcement
           ? "<br>announcer=" +
@@ -213,6 +262,7 @@ export function createOperationsActions(deps: OperationsDeps) {
           announcementMeta +
           "<br>" +
           depositObservedLine(deposit) +
+          (gasLine ? "<br>" + gasLine : "") +
           "<br>" +
           "token=" +
           esc(deposit.token_address || "-") +
@@ -251,11 +301,34 @@ export function createOperationsActions(deps: OperationsDeps) {
 
   async function loadDepositRegistry(): Promise<void> {
     try {
-      const r = await deps.api("GET", "/api/deposits/eth-stealth");
+      const r = await deps.api("GET", ROUTE_PATHS.API_DEPOSITS_ETH_STEALTH);
       if (r.error) return;
       lastDeposits = r.deposits || [];
       renderDeposits(lastDeposits);
     } catch (_) {}
+  }
+
+  // Cautions only — never block the flow. Each warning gets a toast, and
+  // the set is pinned next to the fresh deposit address so it stays visible
+  // after the toasts fade. A later warning-free create clears the box.
+  function surfaceStealthGenerationWarnings(response: {
+    warnings?: unknown;
+    deposit?: { stealth_address?: unknown };
+  }): void {
+    const warnings = stealthGenerationWarnings(response);
+    if (!warnings.length) {
+      setHiddenById("depositCreateWarnings", true);
+      return;
+    }
+    warnings.forEach((warning) => deps.toast(warning, "warning"));
+    const stealthAddress = response.deposit?.stealth_address;
+    deps.showResultBox(
+      "depositCreateWarnings",
+      "<strong>Stealth generation warnings — review before sharing this address.</strong>" +
+        (stealthAddress ? "<br>stealth=" + esc(String(stealthAddress)) : "") +
+        "<br>" +
+        warnings.map((warning) => esc(warning)).join("<br>"),
+    );
   }
 
   async function createNativeDeposit(): Promise<void> {
@@ -264,13 +337,15 @@ export function createOperationsActions(deps: OperationsDeps) {
       deps.toast("Select a wallet profile first", "error");
       return;
     }
-    const r = await deps.api("POST", "/api/deposits/eth-stealth/create-native", {
+    const r = await deps.api("POST", ROUTE_PATHS.API_DEPOSITS_ETH_STEALTH_CREATE_NATIVE, {
       wallet_profile: walletProfile,
       expected_value_wei_hex: optionalTextValue("depositNativeExpected"),
       auto_queue_sweep: input("depositNativeAutoQueue").checked,
       sweep_destination_address: optionalTextValue("depositNativeDestination"),
       min_sweep_value_wei_hex: optionalTextValue("depositNativeMinSweep"),
       note: optionalTextValue("depositNativeNote"),
+      request_gas: checkboxChecked("depositNativeRequestGas"),
+      gas_amount_wei_hex: optionalTextValue("depositNativeGasAmount"),
     });
     if (r.error) {
       deps.toast(r.error, "error");
@@ -281,8 +356,10 @@ export function createOperationsActions(deps: OperationsDeps) {
       "depositNativeMinSweep",
       "depositNativeDestination",
       "depositNativeNote",
+      "depositNativeGasAmount",
     ]);
     deps.toast("Native deposit created");
+    surfaceStealthGenerationWarnings(r);
     deps.refresh();
   }
 
@@ -293,7 +370,7 @@ export function createOperationsActions(deps: OperationsDeps) {
       deps.toast("Wallet profile and token address are required", "error");
       return;
     }
-    const r = await deps.api("POST", "/api/deposits/eth-stealth/create-erc20", {
+    const r = await deps.api("POST", ROUTE_PATHS.API_DEPOSITS_ETH_STEALTH_CREATE_ERC20, {
       wallet_profile: walletProfile,
       token_address: tokenAddress,
       expected_amount_hex: optionalTextValue("depositErc20Expected"),
@@ -301,6 +378,8 @@ export function createOperationsActions(deps: OperationsDeps) {
       sweep_destination_address: optionalTextValue("depositErc20Destination"),
       min_sweep_amount_hex: optionalTextValue("depositErc20MinSweep"),
       note: optionalTextValue("depositErc20Note"),
+      request_gas: checkboxChecked("depositErc20RequestGas"),
+      gas_amount_wei_hex: optionalTextValue("depositErc20GasAmount"),
     });
     if (r.error) {
       deps.toast(r.error, "error");
@@ -312,8 +391,10 @@ export function createOperationsActions(deps: OperationsDeps) {
       "depositErc20MinSweep",
       "depositErc20Destination",
       "depositErc20Note",
+      "depositErc20GasAmount",
     ]);
     deps.toast("ERC-20 deposit created");
+    surfaceStealthGenerationWarnings(r);
     deps.refresh();
   }
 
@@ -324,7 +405,7 @@ export function createOperationsActions(deps: OperationsDeps) {
       deps.toast("Wallet profile and from block are required", "error");
       return;
     }
-    const r = await deps.api("POST", "/api/deposits/eth-stealth/scan-announcements", {
+    const r = await deps.api("POST", ROUTE_PATHS.API_DEPOSITS_ETH_STEALTH_SCAN_ANNOUNCEMENTS, {
       wallet_profile: walletProfile,
       from_block: fromBlock,
       to_block: optionalTextValue("depositScanToBlock"),
@@ -363,7 +444,7 @@ export function createOperationsActions(deps: OperationsDeps) {
   }
 
   async function refreshDepositRegistry(): Promise<void> {
-    const r = await deps.api("POST", "/api/deposits/eth-stealth/refresh", {
+    const r = await deps.api("POST", ROUTE_PATHS.API_DEPOSITS_ETH_STEALTH_REFRESH, {
       id: null,
       limit: optionalNumberValue("depositRefreshLimit"),
       auto_enqueue: input("depositRefreshAutoEnqueue").checked,
@@ -389,7 +470,7 @@ export function createOperationsActions(deps: OperationsDeps) {
   }
 
   async function refreshSingleDeposit(id: string): Promise<void> {
-    const r = await deps.api("POST", "/api/deposits/eth-stealth/refresh", {
+    const r = await deps.api("POST", ROUTE_PATHS.API_DEPOSITS_ETH_STEALTH_REFRESH, {
       id,
       limit: 1,
       auto_enqueue: input("depositRefreshAutoEnqueue").checked,
@@ -416,6 +497,15 @@ export function createOperationsActions(deps: OperationsDeps) {
   }
 
   async function enqueueDepositSweep(id: string): Promise<void> {
+    const confirmed = await confirmDangerDialog({
+      title: "Queue deposit sweep",
+      body:
+        'Enqueue a sweep job for deposit "' +
+        id +
+        '"? When the queue processes it and the job passes its checks, the sweep is signed and broadcast on-chain.',
+      actionLabel: "Queue sweep",
+    });
+    if (!confirmed) return;
     const r = await deps.api("POST", "/api/deposits/eth-stealth/enqueue-sweep", { id });
     if (r.error) {
       deps.toast(r.error, "error");
@@ -430,7 +520,15 @@ export function createOperationsActions(deps: OperationsDeps) {
   }
 
   async function deleteDeposit(id: string): Promise<void> {
-    if (!confirm('Delete deposit "' + id + '"?')) return;
+    const confirmed = await confirmDangerDialog({
+      title: "Delete deposit",
+      body:
+        'Delete deposit "' +
+        id +
+        '"? The deposit record is removed from this daemon; funds already on-chain are not moved.',
+      actionLabel: "Delete",
+    });
+    if (!confirmed) return;
     const r = await deps.api("POST", "/api/deposits/eth-stealth/delete", { id });
     if (r.error) {
       deps.toast(r.error, "error");
@@ -488,13 +586,13 @@ export function createOperationsActions(deps: OperationsDeps) {
 
   async function loadQueueJobs(): Promise<void> {
     try {
-      const r = await deps.api("GET", "/api/queue/jobs");
+      const r = await deps.api("GET", ROUTE_PATHS.API_QUEUE_JOBS);
       if (r.error) return;
       lastQueueJobs = r.jobs || [];
       renderQueueJobs(lastQueueJobs);
     } catch (_) {}
     try {
-      const policyResp = await deps.api("GET", "/api/treasury/policy");
+      const policyResp = await deps.api("GET", ROUTE_PATHS.API_TREASURY_POLICY);
       const paused = Boolean(policyResp?.policy?.execution_paused);
       setHiddenById("queuePausedBanner", !paused);
       setHiddenById("queuePauseBtn", paused);
@@ -503,7 +601,7 @@ export function createOperationsActions(deps: OperationsDeps) {
   }
 
   async function pauseQueueExecution(): Promise<void> {
-    const r = await deps.api("POST", "/api/queue/pause");
+    const r = await deps.api("POST", ROUTE_PATHS.API_QUEUE_PAUSE);
     if (r.error) {
       deps.toast(r.error, "error");
       return;
@@ -513,7 +611,7 @@ export function createOperationsActions(deps: OperationsDeps) {
   }
 
   async function resumeQueueExecution(): Promise<void> {
-    const r = await deps.api("POST", "/api/queue/resume");
+    const r = await deps.api("POST", ROUTE_PATHS.API_QUEUE_RESUME);
     if (r.error) {
       deps.toast(r.error, "error");
       return;
@@ -523,12 +621,38 @@ export function createOperationsActions(deps: OperationsDeps) {
   }
 
   async function processQueueBatch(): Promise<void> {
-    const r = await deps.api("POST", "/api/queue/process", {
-      id: null,
-      limit: optionalNumberValue("queueProcessLimit"),
+    const limit = optionalNumberValue("queueProcessLimit");
+    const confirmed = await confirmDangerDialog({
+      title: "Process queue",
+      body:
+        (limit
+          ? "Process up to " + String(limit) + " queued jobs now?"
+          : "Process queued jobs now?") +
+        " Jobs that pass their checks will be signed and broadcast on-chain.",
+      actionLabel: "Process now",
     });
+    if (!confirmed) return;
+    const runAsync =
+      (document.getElementById("queueProcessRunAsync") as HTMLInputElement | null)?.checked ??
+      false;
+    const body: Record<string, unknown> = { id: null, limit };
+    if (runAsync) body.run_async = true;
+    const r = await deps.api("POST", "/api/queue/process", body);
     if (r.error) {
       deps.toast(r.error, "error");
+      return;
+    }
+    if (runAsync && r.operation && r.operation.id) {
+      // Background drain accepted: progress renders in the queue list on
+      // the next refresh; the operation id lets the operator cross-check
+      // (and cancel) via GET/POST /api/operations/{id}[/cancel].
+      deps.toast(
+        "Queue drain started in background — operation " +
+          String(r.operation.id) +
+          "; progress shows in the queue list below",
+      );
+      void loadQueueJobs();
+      deps.updateNextStepCard();
       return;
     }
     deps.showResultBox(
@@ -556,6 +680,15 @@ export function createOperationsActions(deps: OperationsDeps) {
   }
 
   async function processQueueJob(id: string): Promise<void> {
+    const confirmed = await confirmDangerDialog({
+      title: "Process queued job",
+      body:
+        'Process queued job "' +
+        id +
+        '" now? If it passes its checks it will be signed and broadcast on-chain.',
+      actionLabel: "Process now",
+    });
+    if (!confirmed) return;
     const r = await deps.api("POST", "/api/queue/process", { id, limit: 1 });
     if (r.error) {
       deps.toast(r.error, "error");
@@ -586,13 +719,32 @@ export function createOperationsActions(deps: OperationsDeps) {
   }
 
   async function runMaintenanceCycle(): Promise<void> {
-    const r = await deps.api("POST", "/api/maintenance/run", {
+    const runAsync =
+      (document.getElementById("maintenanceRunAsync") as HTMLInputElement | null)?.checked ??
+      false;
+    const body: Record<string, unknown> = {
       deposit_refresh_limit: optionalNumberValue("maintenanceDepositLimit"),
       queue_process_limit: optionalNumberValue("maintenanceQueueLimit"),
       auto_enqueue: input("maintenanceAutoEnqueue").checked,
-    });
+    };
+    if (runAsync) body.run_async = true;
+    const r = await deps.api("POST", "/api/maintenance/run", body);
     if (r.error) {
       deps.toast(r.error, "error");
+      return;
+    }
+    if (runAsync && r.operation && r.operation.id) {
+      // Background cycle accepted: progress renders in the queue and
+      // deposit lists on the next refresh; the operation id lets the
+      // operator cross-check (and cancel) via /api/operations/{id}.
+      deps.toast(
+        "Maintenance cycle started in background — operation " +
+          String(r.operation.id) +
+          "; progress shows in the queue and deposit lists",
+      );
+      void loadQueueJobs();
+      void loadDepositRegistry();
+      deps.updateNextStepCard();
       return;
     }
     deps.showResultBox(

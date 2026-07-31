@@ -56,7 +56,7 @@ impl SigillumService {
         token: Option<&str>,
         body: CompartmentAddRequest,
     ) -> ServiceResult<CompartmentAddedResponse> {
-        let _ = self.require_session(token)?;
+        let token = self.require_session(token)?;
         if body.label.is_empty() {
             return Err(ServiceError::bad_request("label is required"));
         }
@@ -64,10 +64,11 @@ impl SigillumService {
             return Err(ServiceError::bad_request("threshold must be >= 1"));
         }
 
-        let _guard = self.state.operation_guard().await;
+        let session_context = self.capture_session_operation_context(Some(token))?;
+        let _guard = self.acquire_session_operation(&session_context).await?;
         let unlocked = self.state.unlocked_compartments();
         if unlocked.is_empty() {
-            return Err(ServiceError::forbidden("Access denied."));
+            return Err(ServiceError::vault_locked("Access denied."));
         }
         if unlocked.iter().any(|meta| meta.threshold == body.threshold) {
             return Err(ServiceError::bad_request("Duplicate threshold."));
@@ -125,10 +126,11 @@ impl SigillumService {
         token: Option<&str>,
         body: CompartmentRemoveRequest,
     ) -> ServiceResult<CompartmentRemovedResponse> {
-        let _ = self.require_session(token)?;
-        let _guard = self.state.operation_guard().await;
+        let token = self.require_session(token)?;
+        let session_context = self.capture_session_operation_context(Some(token))?;
+        let _guard = self.acquire_session_operation(&session_context).await?;
         if !self.state.is_unlocked() {
-            return Err(ServiceError::forbidden("Access denied."));
+            return Err(ServiceError::vault_locked("Access denied."));
         }
 
         let id = body.id;
@@ -193,7 +195,20 @@ impl SigillumService {
         let passphrase = Zeroizing::new(body.passphrase);
         super::helpers::require_valid_passphrase(&passphrase)?;
 
-        let _guard = self.state.operation_guard().await;
+        let session_context = existing_session
+            .as_deref()
+            .map(|token| self.capture_session_operation_context(Some(token)))
+            .transpose()?;
+        let _guard = if let Some(session_context) = session_context.as_ref() {
+            self.acquire_session_operation(session_context).await?
+        } else {
+            self.state.operation_guard().await
+        };
+        if existing_session.is_none() && self.state.is_initialized() {
+            return Err(ServiceError::conflict(
+                "Sigillum was initialized while this request was waiting. Authenticate and retry.",
+            ));
+        }
         let journal = self.begin_operation(
             PendingOperationSpec::compartment_init(body.label.clone(), body.threshold),
             Some(format!("compartment/{}", body.id)),
@@ -242,7 +257,7 @@ impl SigillumService {
             Some(token) => {
                 self.state
                     .switch_active_for(&token, body.id)
-                    .map_err(ServiceError::forbidden)?;
+                    .map_err(ServiceError::vault_locked)?;
                 token
             }
             None => self.state.create_session(Some(body.id)),
@@ -273,10 +288,11 @@ impl SigillumService {
         body: CompartmentSwitchRequest,
     ) -> ServiceResult<SwitchCompartmentResponse> {
         let token = self.require_session(token)?;
-        let _guard = self.state.operation_guard().await;
+        let session_context = self.capture_session_operation_context(Some(token))?;
+        let _guard = self.acquire_session_operation(&session_context).await?;
         self.state
             .switch_active_for(token, body.id)
-            .map_err(ServiceError::forbidden)?;
+            .map_err(ServiceError::vault_locked)?;
 
         let label = self
             .state
@@ -367,9 +383,73 @@ fn recover_compartment_replacement(
 
 #[cfg(test)]
 mod tests {
+    use std::future::{Future, poll_fn};
+    use std::sync::Arc;
+    use std::task::Poll;
+
     use tempfile::TempDir;
 
     use super::*;
+    use crate::AppState;
+
+    #[tokio::test]
+    async fn queued_first_run_init_cannot_overwrite_completed_initialization() {
+        let dir = TempDir::new().unwrap();
+        let state =
+            Arc::new(AppState::new(dir.path().to_path_buf()).expect("app state should initialize"));
+        let service = SigillumService::new(state.clone());
+
+        let held_operation = state.operation_guard().await;
+        let mut winning = Box::pin(service.init_compartment(
+            None,
+            CompartmentInitRequest {
+                id: 0,
+                passphrase: "winner-passphrase".into(),
+                label: Some("winner".into()),
+                threshold: Some(1),
+            },
+        ));
+        poll_fn(|context| match winning.as_mut().poll(context) {
+            Poll::Pending => Poll::Ready(()),
+            Poll::Ready(_) => panic!("first request bypassed the serialized mutation boundary"),
+        })
+        .await;
+
+        let mut queued = Box::pin(service.init_compartment(
+            None,
+            CompartmentInitRequest {
+                id: 0,
+                passphrase: "queued-passphrase".into(),
+                label: Some("queued".into()),
+                threshold: Some(2),
+            },
+        ));
+        poll_fn(|context| match queued.as_mut().poll(context) {
+            Poll::Pending => Poll::Ready(()),
+            Poll::Ready(_) => panic!("queued request bypassed the serialized mutation boundary"),
+        })
+        .await;
+        drop(held_operation);
+
+        let initialized = winning.await.expect("first request should initialize");
+        let vault_path = state.compartment_dir(0).join("vault.enc");
+        let wrapped_key_path = state.wrapped_key_path(0);
+        let vault_after_first = std::fs::read(&vault_path).unwrap();
+        let wrapped_key_after_first = std::fs::read(&wrapped_key_path).unwrap();
+        let session_count_after_first = state.session_count();
+
+        let error = queued.await.unwrap_err();
+        assert_eq!(error.status(), axum::http::StatusCode::CONFLICT);
+        assert_eq!(std::fs::read(vault_path).unwrap(), vault_after_first);
+        assert_eq!(
+            std::fs::read(wrapped_key_path).unwrap(),
+            wrapped_key_after_first
+        );
+        assert_eq!(state.session_count(), session_count_after_first);
+        assert!(state.verify_token(&initialized.session_token));
+        assert_eq!(state.unlocked_compartments()[0].label, "winner");
+        assert_eq!(state.pending_operation_count(), 0);
+    }
 
     #[test]
     fn replacement_recovery_prefers_live_tree() {

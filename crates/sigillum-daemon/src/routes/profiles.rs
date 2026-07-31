@@ -2,7 +2,6 @@
 
 use std::sync::Arc;
 
-use axum::Json;
 use axum::extract::State;
 use axum::http::HeaderMap;
 use axum::response::Response;
@@ -16,7 +15,7 @@ use sigillum_api::{
 use crate::AppState;
 use crate::service::SigillumService;
 
-use super::{bearer_token, service_response, validated};
+use super::{ValidatedJson, bearer_token, service_response};
 
 pub(crate) async fn evm_provider_profiles_list(
     State(state): State<Arc<AppState>>,
@@ -29,12 +28,8 @@ pub(crate) async fn evm_provider_profiles_list(
 pub(crate) async fn evm_provider_profiles_upsert(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
-    Json(body): Json<EvmProviderProfileUpsertRequest>,
+    ValidatedJson(body): ValidatedJson<EvmProviderProfileUpsertRequest>,
 ) -> Response {
-    let body = match validated(Json(body)) {
-        Ok(b) => b,
-        Err(resp) => return resp,
-    };
     let service = SigillumService::new(state);
     service_response(
         service
@@ -46,12 +41,8 @@ pub(crate) async fn evm_provider_profiles_upsert(
 pub(crate) async fn evm_provider_profiles_delete(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
-    Json(body): Json<EvmProfileDeleteRequest>,
+    ValidatedJson(body): ValidatedJson<EvmProfileDeleteRequest>,
 ) -> Response {
-    let body = match validated(Json(body)) {
-        Ok(b) => b,
-        Err(resp) => return resp,
-    };
     let service = SigillumService::new(state);
     service_response(
         service
@@ -71,12 +62,8 @@ pub(crate) async fn eth_stealth_wallet_profiles_list(
 pub(crate) async fn eth_stealth_wallet_profiles_upsert(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
-    Json(body): Json<EthStealthWalletProfileUpsertRequest>,
+    ValidatedJson(body): ValidatedJson<EthStealthWalletProfileUpsertRequest>,
 ) -> Response {
-    let body = match validated(Json(body)) {
-        Ok(b) => b,
-        Err(resp) => return resp,
-    };
     let service = SigillumService::new(state);
     service_response(
         service
@@ -88,12 +75,8 @@ pub(crate) async fn eth_stealth_wallet_profiles_upsert(
 pub(crate) async fn eth_stealth_wallet_profiles_delete(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
-    Json(body): Json<EvmProfileDeleteRequest>,
+    ValidatedJson(body): ValidatedJson<EvmProfileDeleteRequest>,
 ) -> Response {
-    let body = match validated(Json(body)) {
-        Ok(b) => b,
-        Err(resp) => return resp,
-    };
     let service = SigillumService::new(state);
     service_response(
         service
@@ -113,12 +96,8 @@ pub(crate) async fn eth_xpub_wallet_profiles_list(
 pub(crate) async fn eth_xpub_wallet_profiles_upsert(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
-    Json(body): Json<EthXpubWalletProfileUpsertRequest>,
+    ValidatedJson(body): ValidatedJson<EthXpubWalletProfileUpsertRequest>,
 ) -> Response {
-    let body = match validated(Json(body)) {
-        Ok(b) => b,
-        Err(resp) => return resp,
-    };
     let service = SigillumService::new(state);
     service_response(
         service
@@ -130,12 +109,8 @@ pub(crate) async fn eth_xpub_wallet_profiles_upsert(
 pub(crate) async fn eth_xpub_wallet_profiles_delete(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
-    Json(body): Json<EvmProfileDeleteRequest>,
+    ValidatedJson(body): ValidatedJson<EvmProfileDeleteRequest>,
 ) -> Response {
-    let body = match validated(Json(body)) {
-        Ok(b) => b,
-        Err(resp) => return resp,
-    };
     let service = SigillumService::new(state);
     service_response(
         service
@@ -155,12 +130,8 @@ pub(crate) async fn eth_seed_wallet_profiles_list(
 pub(crate) async fn eth_seed_wallet_profiles_upsert(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
-    Json(body): Json<EthSeedWalletProfileUpsertRequest>,
+    ValidatedJson(body): ValidatedJson<EthSeedWalletProfileUpsertRequest>,
 ) -> Response {
-    let body = match validated(Json(body)) {
-        Ok(b) => b,
-        Err(resp) => return resp,
-    };
     let service = SigillumService::new(state);
     service_response(
         service
@@ -172,12 +143,8 @@ pub(crate) async fn eth_seed_wallet_profiles_upsert(
 pub(crate) async fn eth_seed_wallet_profiles_create(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
-    Json(body): Json<EthSeedWalletCreateRequest>,
+    ValidatedJson(body): ValidatedJson<EthSeedWalletCreateRequest>,
 ) -> Response {
-    let body = match validated(Json(body)) {
-        Ok(b) => b,
-        Err(resp) => return resp,
-    };
     let service = SigillumService::new(state);
     service_response(
         service
@@ -189,12 +156,8 @@ pub(crate) async fn eth_seed_wallet_profiles_create(
 pub(crate) async fn eth_seed_wallet_profiles_delete(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
-    Json(body): Json<EvmProfileDeleteRequest>,
+    ValidatedJson(body): ValidatedJson<EvmProfileDeleteRequest>,
 ) -> Response {
-    let body = match validated(Json(body)) {
-        Ok(b) => b,
-        Err(resp) => return resp,
-    };
     let service = SigillumService::new(state);
     service_response(
         service
@@ -206,12 +169,8 @@ pub(crate) async fn eth_seed_wallet_profiles_delete(
 pub(crate) async fn eth_stealth_send_with_profile(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
-    Json(body): Json<EthStealthSendWithProfileRequest>,
+    ValidatedJson(body): ValidatedJson<EthStealthSendWithProfileRequest>,
 ) -> Response {
-    let body = match validated(Json(body)) {
-        Ok(b) => b,
-        Err(resp) => return resp,
-    };
     let service = SigillumService::new(state);
     service_response(
         service
@@ -223,12 +182,8 @@ pub(crate) async fn eth_stealth_send_with_profile(
 pub(crate) async fn eth_stealth_send_erc20_with_profile(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
-    Json(body): Json<EthStealthSendErc20WithProfileRequest>,
+    ValidatedJson(body): ValidatedJson<EthStealthSendErc20WithProfileRequest>,
 ) -> Response {
-    let body = match validated(Json(body)) {
-        Ok(b) => b,
-        Err(resp) => return resp,
-    };
     let service = SigillumService::new(state);
     service_response(
         service

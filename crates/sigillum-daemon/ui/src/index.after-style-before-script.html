@@ -5,7 +5,11 @@
 <div class="app-shell">
   <aside class="sidebar" aria-label="Workspace navigation">
     <div class="sidebar-brand">
-      <div class="brand-mark" aria-hidden="true">S</div>
+      <div class="brand-mark" aria-hidden="true">
+        <svg viewBox="0 0 32 32" focusable="false">
+          <path d="M21.5 7.8C20 6.6 18.1 6 15.9 6 12.5 6 10 7.8 10 10.7c0 2.7 1.8 4 5.8 5 3.1.8 4.1 1.4 4.1 2.7 0 1.4-1.4 2.4-3.5 2.4-2.4 0-4.5-.8-6.2-2.4L8 21.1c2.1 1.9 4.9 2.9 8.1 2.9 4.5 0 7.4-2.3 7.4-5.9 0-3.2-2-4.8-6.5-5.9-2.7-.7-3.5-1.2-3.5-2.2 0-1.1 1.1-1.9 2.8-1.9 1.8 0 3.4.6 4.8 1.7z"/>
+        </svg>
+      </div>
       <div class="brand-text">
         <div class="logo">SIGILLUM</div>
         <div class="logo-sub">Treasury console</div>
@@ -13,33 +17,35 @@
     </div>
     <nav id="sectionNav" class="section-nav hidden" aria-label="Workspace sections"></nav>
     <div class="sidebar-foot">
-      <div id="compartmentBadge" class="compartment-badge hidden"></div>
       <div id="compSwitcher" class="comp-switcher hidden"></div>
-      <div id="statusBadge" class="status-badge status-locked">checking...</div>
-      <div id="lockForm" class="session-controls hidden">
-        <button class="btn-ghost btn-block" data-action="logoutSession">Log out session</button>
-        <button class="btn-danger btn-block" data-action="lock">Lock all compartments</button>
-      </div>
     </div>
   </aside>
 
   <div class="workspace">
-    <div class="topbar">
+    <header class="topbar">
       <div class="topbar-heading">
         <h1 id="topbarTitle">Sigillum</h1>
         <p id="topbarSummary" class="topbar-summary">Local treasury daemon</p>
       </div>
-      <div id="statusStrip" class="status-strip" aria-label="Workspace health"></div>
       <div class="topbar-meta">
         <div id="refreshMeta" class="refresh-meta" data-state="busy">syncing...</div>
         <button class="btn-ghost btn-small" data-action="refreshWorkspace">Refresh</button>
       </div>
-    </div>
+      <div class="topbar-status" role="group" aria-label="Vault status">
+        <div id="statusBadge" class="status-badge status-locked">checking...</div>
+        <div id="compartmentBadge" class="compartment-badge hidden"></div>
+        <section id="statusStrip" class="status-strip" aria-label="Workspace health"></section>
+        <div id="lockForm" class="session-controls hidden">
+          <button class="btn-ghost btn-small" data-action="logoutSession">Log out</button>
+          <button class="btn-danger btn-small" data-action="lock">Lock now</button>
+        </div>
+      </div>
+    </header>
 
     <main>
 
-      <!-- Status / overview banner (focus headline in setup+locked, overview strip when unlocked) -->
-      <div class="card overview-card" id="statusCard">
+      <!-- Status / overview banner (unlocked only; hidden in setup/locked focus modes) -->
+      <div class="card overview-card" id="statusCard" data-workspace-section="overview">
         <div class="overview-shell">
           <div class="overview-copy">
             <div class="eyebrow" id="statusEyebrow">Local vault daemon</div>
@@ -80,7 +86,7 @@
         <div class="wizard-header">
           <div class="wizard-intro">
             <div class="eyebrow">Setup assistant</div>
-            <h2>Create a vault that matches how you work</h2>
+            <h1>Create a vault that matches how you work</h1>
             <p class="helper-text">Choose a protection model, review what Sigillum will create, then finish with a guided hardware-key or passphrase flow.</p>
           </div>
           <div class="wizard-summary">
@@ -103,12 +109,12 @@
             <div class="tp-body">The daemon listens only on loopback, and your private keys never leave this computer. No account, no cloud, no telemetry.</div>
           </div>
           <div class="trust-point">
-            <div class="tp-head">Your data is an encrypted vault on this disk</div>
-            <div class="tp-body">State lives in an encrypted vault under ~/.sigillum that only you can unlock. You can snapshot and back it up whenever you want.</div>
+            <div class="tp-head">Vault secrets are encrypted; operational metadata is owner-readable</div>
+            <div class="tp-body">Private keys, seed phrases, and Tier 2 secrets are encrypted. Profiles, queues, deposits, audit records, and other operational metadata remain readable to your local account under ~/.sigillum. Use full-disk encryption and encrypted snapshots to protect the complete data set.</div>
           </div>
           <div class="trust-point">
             <div class="tp-head">Privacy is built in, but you choose your providers</div>
-            <div class="tp-body">Stealth one-time receive addresses keep deposits unlinkable. Any RPC provider you add later can see the addresses you query through it, so you choose and can partition providers.</div>
+            <div class="tp-body">ERC-5564 one-time addresses reduce direct address reuse for a single receiving hop. Amounts, timing, and downstream flows can still link activity, and any RPC provider you use can see the addresses queried through it.</div>
           </div>
           <div class="form-row mt-12">
             <button class="btn-primary" data-action="wizGetStarted">Get started</button>
@@ -257,11 +263,11 @@
               <div class="tp-body">Generate a one-time stealth address to receive funds privately, so deposits cannot be linked to a single published address.</div>
             </div>
             <div class="trust-point">
-              <div class="tp-head">Protect payer privacy on sweeps</div>
-              <div class="tp-body">Block consolidations and sweeps that would publicly link your payers (fail-closed). This covers addresses that would land in the same destination (single-hop common-recipient linkage). You can route each payer to a distinct destination, and you can change this anytime in Treasury policy.</div>
+              <div class="tp-head">Protect payer privacy on sweeps (on by default)</div>
+              <div class="tp-body">New treasury policies default to blocking consolidations and sweeps that would publicly link your payers (fail-closed). This covers addresses that would land in the same destination (single-hop common-recipient linkage). You can route each payer to a distinct destination, and you can turn this off anytime in Treasury policy.</div>
               <p class="card-note mt-8">Scope: detects when different payers would sweep to the SAME destination. Sigillum-generated gas top-ups (fund_gas steps) are covered by the same payer-linkage analysis: one sponsor funding different payers warns and is blocked when linkage protection is on. MANUAL gas funding, amount or timing correlation, downstream re-merging of per-party destinations, and multi-hop flows remain operator discipline &mdash; keep per-party destinations separate.</p>
               <div class="form-row">
-                <button class="btn-primary" data-action="wizEnableLinkageProtection">Enable protection</button>
+                <button class="btn-primary" data-action="wizEnableLinkageProtection">Keep protection on</button>
                 <button class="btn-ghost" data-action="wizDeclineLinkageProtection">Decide later</button>
               </div>
               <p class="helper-text hidden" id="wizLinkageChoiceStatus"></p>
@@ -276,39 +282,38 @@
               <p class="helper-text hidden" id="wizClaimExecutionChoiceStatus"></p>
             </div>
             <div class="trust-point">
-              <div class="tp-head">Allow sponsor gas top-ups (optional)</div>
-              <div class="tp-body">Off by default. Enabling lets consolidation plans add fund_gas steps from the wallet's sponsor address when a source address cannot pay gas. Sigillum-generated top-ups are checked by the payer-linkage analysis: cross-party sponsor funding warns, and is blocked when linkage protection is on. Manual gas funding stays your responsibility - fund per-payer gas from per-payer sources. You can change this anytime in Treasury policy.</div>
+              <div class="tp-head">Configure sponsor gas top-ups (optional)</div>
+              <div class="tp-body">Off by default. Gas top-ups require an explicit finite maximum in Treasury policy. Configure the cap in Move before enabling this gate. Sigillum-generated top-ups are checked by the payer-linkage analysis: cross-party sponsor funding warns, and is blocked when linkage protection is on. Manual gas funding stays your responsibility - fund per-payer gas from per-payer sources.</div>
               <div class="form-row">
-                <button class="btn-primary" data-action="wizEnableGasTopups">Enable gas top-ups</button>
+                <button class="btn-primary" data-action="wizEnableGasTopups">Set gas top-up cap</button>
                 <button class="btn-ghost" data-action="wizDeclineGasTopups">Decide later</button>
               </div>
               <p class="helper-text hidden" id="wizGasTopupsChoiceStatus"></p>
             </div>
             <div class="trust-point">
               <div class="tp-head">Plan execution stays off by default</div>
-              <div class="tp-body">Consolidation plans are review-and-export only until you explicitly enable execution per family (sweeps, revokes, DeFi exits &mdash; plus the claim and gas top-up opt-ins above) behind a master gate in Treasury policy. A global pause switch in the Operations queue view halts all queue execution immediately. Every gate change is recorded in the audit log.</div>
+              <div class="tp-body">Consolidation plans are review-and-export only until you explicitly enable execution per family (sweeps, revokes, DeFi exits &mdash; plus the claim and gas top-up opt-ins above) behind a master gate in Treasury policy. The sweep gate covers stealth deposit sweeps and transfers too &mdash; nothing stealth executes while it is off. A global pause switch in the Operations queue view halts all queue execution immediately. Every gate change is recorded in the audit log.</div>
             </div>
           </div>
         </div>
 
         <div class="section-divider"></div>
         <div class="section-title">Recover or start over</div>
-        <p class="helper-text">Restore a previously exported snapshot, or erase this machine&rsquo;s local Sigillum data and restart first-run setup.</p>
+        <p class="helper-text">Restore a previously exported snapshot, or archive this machine&rsquo;s current Sigillum data and restart first-run setup.</p>
         <div class="form-row">
-          <input type="file" id="setupRestoreFile" class="flex-1">
+          <input type="file" id="setupRestoreFile" class="flex-1" aria-label="Encrypted snapshot file to restore">
           <input type="password" id="setupRestorePass" placeholder="Restore passphrase" class="flex-1">
           <button class="btn-danger" data-action="restoreSetupSnapshot">Restore Snapshot</button>
         </div>
         <div class="form-row">
-          <input type="text" id="setupResetConfirm" placeholder="Type RESET LOCAL SIGILLUM DATA to start over">
-          <button class="btn-danger" data-action="resetLocalData" data-arg0="setupResetConfirm">Reset local setup</button>
+          <button class="btn-danger" data-action="resetLocalData">Reset local setup</button>
         </div>
         <p class="card-note">Resetting archives the local Sigillum data directory to a timestamped sibling (nothing is deleted). Restoring replaces local state with the selected encrypted snapshot.</p>
       </div>
 
       <!-- Unlock / session card (focused panel when locked; sectionless) -->
       <div class="card focus-card" id="authCard">
-        <h2 id="authTitle">Unlock this local session</h2>
+        <h1 id="authTitle">Unlock this local session</h1>
         <p class="helper-text" id="authLead">Unlock with the passphrase or hardware-key threshold you configured during setup. The session token stays only in this browser tab.</p>
         <div id="unlockTabs" class="unlock-tabs hidden">
           <button type="button" class="unlock-tab active" data-action="switchUnlockTab" data-arg0="passphrase">Passphrase</button>
@@ -337,23 +342,21 @@
           <div class="section-title">Recover or start fresh</div>
           <p class="helper-text">Can&rsquo;t unlock? Try the hardware-key tab first if a key is detected, restore an encrypted snapshot, or archive this machine&rsquo;s data and start over with a brand-new vault.</p>
           <div class="form-row">
-            <input type="file" id="authRestoreFile" class="flex-1">
+            <input type="file" id="authRestoreFile" class="flex-1" aria-label="Encrypted snapshot file to restore">
             <input type="password" id="authRestorePass" placeholder="Restore passphrase" class="flex-1">
             <button class="btn-danger" data-action="restoreAuthSnapshot">Restore Snapshot</button>
           </div>
           <div class="form-row">
-            <input type="text" id="authResetConfirm" placeholder="Type RESET LOCAL SIGILLUM DATA to start over">
-            <button class="btn-danger" data-action="resetLocalData" data-arg0="authResetConfirm">Archive &amp; start fresh</button>
+            <button class="btn-danger" data-action="resetLocalData">Archive &amp; start fresh</button>
           </div>
           <p class="card-note">Starting fresh moves the current data directory to a timestamped archive next to it &mdash; nothing is deleted &mdash; then returns to first-run setup, where you create a new vault and then create or import wallets in the Wallets section.</p>
         </div>
       </div>
 
-      <!-- ───────────────────────── Treasury ───────────────────────── -->
+      <!-- ───────────────────────── Overview ───────────────────────── -->
 
       <!-- Guided journey: four operator goals from empty vault to working treasury -->
-      <div class="card journey-card hidden" id="journeyCard" data-workspace-section="treasury">
-        <div class="card-kicker">Getting started</div>
+      <div class="card journey-card hidden" id="journeyCard" data-workspace-section="overview">
         <div class="card-head">
           <h2>Treasury setup</h2>
           <div class="card-head-actions">
@@ -365,8 +368,9 @@
         <div id="journeyList" class="journey-list" aria-live="polite"></div>
       </div>
 
-      <div class="card hidden" id="receivingCard" data-workspace-section="receiving">
-        <div class="card-kicker">Private receiving</div>
+      <!-- ───────────────────────── Receive ───────────────────────── -->
+
+      <div class="card hidden" id="receivingCard" data-workspace-section="receive">
         <div class="card-head">
           <h2>Receiving</h2>
           <div class="card-head-actions">
@@ -374,7 +378,7 @@
             <button class="btn-ghost btn-small" data-action="refreshReceivingBalances">Refresh balances</button>
           </div>
         </div>
-        <p class="helper-text">Every active receive address and stealth deposit, grouped by counterparty. Read-only snapshot from the last persisted scan; live balance refresh arrives in increment B2.</p>
+        <p class="helper-text">Every active receive address and stealth deposit, grouped by counterparty. Balances shown are from the last saved scan; use Refresh balances to query your provider now.</p>
         <p class="text-meta">Refreshing queries your configured RPC provider for each address, so the provider can see those addresses.</p>
         <div class="stats stat-tiles" id="receivingOverviewStats"></div>
         <p class="text-meta" id="receivingCoverage"></p>
@@ -384,10 +388,51 @@
         <div id="receivingGroupList"></div>
       </div>
 
-      <div class="card hidden" id="treasuryCard" data-workspace-section="treasury">
-        <div class="card-kicker">Where is the money</div>
+      <div class="card hidden" id="receiveBookCard" data-workspace-section="receive">
         <div class="card-head">
-          <h2>Treasury</h2>
+          <h2>Receive addresses &amp; counterparties</h2>
+        </div>
+        <div class="section-title">Receive Addresses</div>
+        <p class="helper-text">Allocate a dedicated receive address per wallet profile and purpose; rotated addresses stay tracked as retired.</p>
+        <div id="treasuryReceiveList"></div>
+        <div class="form-row">
+          <input type="text" id="treasuryReceiveProfile" placeholder="Wallet profile">
+          <input type="text" id="treasuryReceivePurpose" placeholder="Purpose (e.g. invoices)">
+          <input type="text" id="treasuryReceiveLabel" placeholder="Label (optional)">
+          <select id="treasuryReceiveParty">
+            <option value="">No party (optional)</option>
+          </select>
+          <button class="btn-primary" data-action="allocateTreasuryReceiveAddress">Allocate Address</button>
+        </div>
+        <div class="form-row">
+          <label class="checkbox-row">
+            <input type="checkbox" id="treasuryReceiveOneTime">
+            Use this address once &mdash; sweep funds here automatically, then retire it
+          </label>
+          <input type="text" id="treasuryReceiveSweepDestination" placeholder="Sweep destination (one-time)">
+          <input type="text" id="treasuryReceiveMinSweepEth" placeholder="Min sweep ETH (optional)">
+          <label class="checkbox-row">
+            <input type="checkbox" id="treasuryReceivePurgeAfterSweep">
+            Purge the record after the sweep
+          </label>
+        </div>
+        <div class="section-divider"></div>
+        <div class="section-title">Counterparties</div>
+        <p class="helper-text">Track payers as first-class parties so you can hand each a dedicated receive address.</p>
+        <div id="treasuryPartyList"></div>
+        <div class="form-row">
+          <input type="text" id="treasuryPartyName" placeholder="Party name">
+          <input type="text" id="treasuryPartyNote" placeholder="Note (optional)">
+          <input type="text" id="treasuryPartySweepDestination" placeholder="Sweep destination (optional)">
+          <button class="btn-primary" data-action="createTreasuryParty">Add Party</button>
+        </div>
+      </div>
+
+      <!-- ───────────────────────── Portfolio ───────────────────────── -->
+
+      <div class="card hidden" id="treasuryCard" data-workspace-section="portfolio">
+        <div class="card-head">
+          <h2>Balances &amp; routing</h2>
           <div class="card-head-actions">
             <button class="btn-ghost btn-small" data-action="refreshTreasuryOverview">Refresh Overview</button>
             <button class="btn-ghost btn-small" id="selfCheckRunTreasury" data-action="runSelfCheckFromTreasury">Self-Check</button>
@@ -413,99 +458,9 @@
         <div class="section-divider"></div>
         <div class="section-title">Risk And Plans</div>
         <div id="treasuryRiskPlanList"></div>
-
-        <div class="section-divider"></div>
-        <div class="section-title">Treasury Policy</div>
-        <p class="helper-text">Constrain consolidation plans with an allow-list of destinations, native value caps, and a simulation requirement.</p>
-        <div id="treasuryPolicyList"></div>
-        <div class="form-row">
-          <label class="checkbox-row">
-            <input type="checkbox" id="treasuryPolicyEnabled">
-            Policy enabled
-          </label>
-          <label class="checkbox-row">
-            <input type="checkbox" id="treasuryPolicyRequireSim" checked>
-            Require simulation
-          </label>
-          <label class="checkbox-row">
-            <input type="checkbox" id="treasuryPolicyBlockLinkage">
-            Block cross-party linkage (fail-closed)
-          </label>
-          <label class="checkbox-row">
-            <input type="checkbox" id="treasuryPolicyAllowClaimExec">
-            Allow Merkle claim execution (default off)
-          </label>
-          <label class="checkbox-row">
-            <input type="checkbox" id="treasuryPolicyAllowGasTopups">
-            Allow sponsor gas top-ups (default off)
-          </label>
-          <label class="checkbox-row">
-            <input type="checkbox" id="treasuryPolicyAllowTreasuryAutomation">
-            Allow treasury automation (maintenance may plan hot-overflow sweeps and treasury refills and auto-enqueue them; steps still pass simulation, treasury policy, linkage checks, and the execution gates)
-          </label>
-          <label class="checkbox-row">
-            <input type="checkbox" id="treasuryPolicyAllowPlanExec">
-            Allow plan execution (master gate, default off)
-          </label>
-          <label class="checkbox-row">
-            <input type="checkbox" id="treasuryPolicyAllowSweepExec">
-            Allow sweep execution (default off)
-          </label>
-          <label class="checkbox-row">
-            <input type="checkbox" id="treasuryPolicyAllowRevokeExec">
-            Allow revoke execution (default off)
-          </label>
-          <label class="checkbox-row">
-            <input type="checkbox" id="treasuryPolicyAllowExitExec">
-            Allow DeFi exit execution (default off)
-          </label>
-        </div>
-        <p class="field-hint">Scope: blocks when different payers would sweep to the SAME destination. Sigillum-generated gas top-ups (fund_gas steps) are covered by the same payer-linkage analysis: one sponsor funding different payers warns and is blocked when linkage protection is on. MANUAL gas funding, amount/timing correlation, downstream re-merging of per-party destinations, and multi-hop flows remain operator discipline &mdash; keep per-party destinations separate.</p>
-        <p class="field-hint">Claim execution stays blocked unless ALL of these hold: this policy is enabled, the claim uses the merkle-distributor-v1 adapter, its simulation passed, the claim contract is marked trusted in the risk catalog (or carries a claim_execution_reviewed note), and you explicitly approve the step. Other claim types stay review/export-only. A claim that reverts at execution will require operator action and is never auto-retried, because a reverted claim may have consumed its proof.</p>
-        <p class="field-hint">Nothing executes from a consolidation plan step unless this policy is enabled AND the master gate (allow plan execution) AND that step's per-family gate (sweep, revoke, or DeFi exit) are all on. Claim execution and gas top-ups keep their existing separate opt-ins above. Every gate change is written to the audit log. The Operations queue view has a global pause switch that halts ALL queue execution immediately &mdash; including today's stealth sweep jobs &mdash; and it is honored even while this policy is disabled.</p>
-        <textarea id="treasuryPolicyDestinations" placeholder="Allowed destinations, one per line: 0xADDRESS or 0xADDRESS:label"></textarea>
-        <div class="form-row">
-          <input type="text" id="treasuryPolicyMaxStepEth" placeholder="Max per-step native (ETH, optional)">
-          <input type="text" id="treasuryPolicyMaxPlanEth" placeholder="Max per-plan native (ETH, optional)">
-          <input type="number" id="treasuryPolicyFreshnessSecs" min="1" placeholder="Simulation freshness (secs, default 900)">
-          <button class="btn-primary" data-action="updateTreasuryPolicy">Save Policy</button>
-        </div>
-        <div class="form-row">
-          <input type="text" id="treasuryPolicyHotFloorEth" placeholder="Hot refill floor (ETH, default 1)">
-          <input type="text" id="treasuryPolicyHotTargetEth" placeholder="Hot refill target (ETH, default 1)">
-          <input type="text" id="treasuryPolicyHotOverflowEth" placeholder="Hot overflow threshold (ETH, optional)">
-          <input type="text" id="treasuryPolicyMaxGasTopupEth" placeholder="Max gas top-up (ETH, optional)">
-          <input type="text" id="treasuryPolicyMaxFeePerGasGwei" placeholder="Max fee per gas (gwei, optional)">
-        </div>
-        <p class="field-hint">Sweeps route to the hot address while its balance is below the floor; the target is the refill ceiling (floor must be &le; target). Defaults preserve the previous 1 ETH behavior.</p>
-        <p class="field-hint">When enabled, consolidation plans may insert fund_gas steps that fund a source address's gas shortfall from the wallet's sponsor address (1.5x the dependent step's estimated gas, capped by the max top-up). Sigillum-generated top-ups run the same payer-linkage analysis as sweeps: funding different payers' addresses from one sponsor always warns and is hard-blocked when cross-party linkage blocking is on. MANUAL gas funding remains operator discipline.</p>
-
-        <div class="section-divider"></div>
-        <div class="section-title">Receive Addresses</div>
-        <p class="helper-text">Allocate a dedicated receive address per wallet profile and purpose; rotated addresses stay tracked as retired.</p>
-        <div id="treasuryReceiveList"></div>
-        <div class="form-row">
-          <input type="text" id="treasuryReceiveProfile" placeholder="Wallet profile">
-          <input type="text" id="treasuryReceivePurpose" placeholder="Purpose (e.g. invoices)">
-          <input type="text" id="treasuryReceiveLabel" placeholder="Label (optional)">
-          <select id="treasuryReceiveParty">
-            <option value="">No party (optional)</option>
-          </select>
-          <button class="btn-primary" data-action="allocateTreasuryReceiveAddress">Allocate Address</button>
-        </div>
-        <div class="section-divider"></div>
-        <div class="section-title">Counterparties</div>
-        <p class="helper-text">Track payers as first-class parties so you can hand each a dedicated receive address.</p>
-        <div id="treasuryPartyList"></div>
-        <div class="form-row">
-          <input type="text" id="treasuryPartyName" placeholder="Party name">
-          <input type="text" id="treasuryPartyNote" placeholder="Note (optional)">
-          <input type="text" id="treasuryPartySweepDestination" placeholder="Sweep destination (optional)">
-          <button class="btn-primary" data-action="createTreasuryParty">Add Party</button>
-        </div>
       </div>
 
-      <div class="card hidden" id="nextStepCard" data-workspace-section="treasury">
+      <div class="card hidden" id="nextStepCard" data-workspace-section="overview">
         <div class="card-head">
           <h2 id="nextStepTitle">Finish the essentials before deeper operator work</h2>
         </div>
@@ -518,10 +473,9 @@
         <div class="card-note" id="nextStepNote">This card suggests the next highest-leverage action.</div>
       </div>
 
-      <!-- ───────────────────────── Wallets ───────────────────────── -->
+      <!-- ───────────────────────── Portfolio ───────────────────────── -->
 
-      <div class="card hidden" id="walletManagerCard" data-workspace-section="wallets">
-        <div class="card-kicker">Keys and accounts</div>
+      <div class="card hidden" id="walletManagerCard" data-workspace-section="portfolio">
         <div class="card-head">
           <h2>Wallets</h2>
           <div class="card-head-actions">
@@ -651,7 +605,7 @@
         </div>
       </div>
 
-      <div class="card hidden" id="profilesCard" data-workspace-section="wallets">
+      <div class="card hidden" id="profilesCard" data-workspace-section="portfolio">
         <div class="card-head">
           <h2>Providers and stealth wallets</h2>
         </div>
@@ -703,7 +657,7 @@
         <div id="walletProfileList"></div>
       </div>
 
-      <div class="card hidden" id="xpubCard" data-workspace-section="wallets">
+      <div class="card hidden" id="xpubCard" data-workspace-section="portfolio">
         <div class="card-head">
           <h2>Receive wallets</h2>
         </div>
@@ -765,10 +719,12 @@
 
         <div class="section-title">Export Receive Branch</div>
         <p class="helper-text">Export the public receive branch of a saved xpub profile; it derives receive addresses without private key material.</p>
+        <p class="helper-text"><strong>Exposure:</strong> an exported xpub reveals this wallet's ENTIRE past and future receive addresses to anyone holding it. Share it only with systems that must watch those addresses &mdash; never publish it or send it to a payer.</p>
         <div class="form-row">
           <select id="xpubPreviewProfile"></select>
           <button class="btn-primary" data-action="exportSelectedXpubWallet">Export Xpub</button>
         </div>
+        <div id="xpubExportWarnings" class="warning-box hidden"></div>
         <div id="xpubExportResult" class="result-box hidden"></div>
 
         <div class="section-divider"></div>
@@ -783,10 +739,9 @@
         <div id="xpubPreviewResult" class="result-box hidden"></div>
       </div>
 
-      <!-- ──────────────────────── Operations ─────────────────────── -->
+      <!-- ──────────────────────── Portfolio ─────────────────────── -->
 
-      <div class="card hidden" id="inventoryCard" data-workspace-section="operations">
-        <div class="card-kicker">What you own, discovered locally</div>
+      <div class="card hidden" id="inventoryCard" data-workspace-section="portfolio">
         <div class="card-head">
           <h2>Wallet inventory</h2>
           <div class="card-head-actions">
@@ -834,6 +789,10 @@
           <input type="number" id="inventoryAccountLimit" placeholder="Account limit" value="3" class="input-mid">
           <input type="text" id="inventoryTokenAddress" placeholder="ERC-20 token address (optional)">
           <button class="btn-primary" data-action="scanInventoryEvm">Scan EVM</button>
+          <label class="checkbox-row" title="Start the scan as a background operation you can cancel; progress shows in the job list">
+            <input type="checkbox" id="inventoryRunAsync">
+            Run in background
+          </label>
         </div>
         <div class="form-row">
           <input type="text" id="inventoryWatchAddress" placeholder="Watch address (optional)">
@@ -942,7 +901,7 @@
         <div id="nftSuspiciousList"></div>
 
         <div class="section-divider"></div>
-        <div class="section-title">Risk And Plans</div>
+        <div class="section-title">Risk Catalog &amp; Findings</div>
         <div class="form-row">
           <input type="text" id="riskCatalogAddress" placeholder="Spender/operator address">
           <input type="text" id="riskCatalogLabel" placeholder="Risk label">
@@ -960,26 +919,12 @@
         </div>
         <div id="riskCatalogList"></div>
         <div class="form-row">
-          <label class="checkbox-row" for="planRoutingStrategy">Routing</label>
-          <select id="planRoutingStrategy" class="input-wide">
-            <option value="single">Single destination</option>
-            <option value="per_party">Per-party (isolate payers)</option>
-          </select>
-        </div>
-        <p class="helper-text" id="planPerPartyHint" hidden>Per-party routing sends each payer's holdings to its own destination so consolidation does not link payers. The single destination below is used only for unattributed holdings (your own hot/change addresses).</p>
-        <div id="planPartyDestinations" hidden></div>
-        <div class="form-row">
-          <input type="text" id="planDestinationAddress" placeholder="Consolidation destination address">
-          <input type="number" id="planChainId" placeholder="Plan chain ID (optional)" class="input-mid">
           <button class="btn-ghost" data-action="loadRiskFindings">Refresh Risks</button>
-          <button class="btn-primary" data-action="generateConsolidationPlan">Generate Plan</button>
         </div>
         <div id="riskFindingList"></div>
-        <div id="consolidationPlanList"></div>
       </div>
 
-      <div class="card hidden" id="depositsCard" data-workspace-section="operations">
-        <div class="card-kicker">Money coming in</div>
+      <div class="card hidden" id="depositsCard" data-workspace-section="receive">
         <div class="card-head">
           <h2>Deposits</h2>
         </div>
@@ -1000,6 +945,14 @@
           </label>
           <button class="btn-primary" data-action="createNativeDeposit">Create Native</button>
         </div>
+        <div class="form-row">
+          <label class="checkbox-row">
+            <input type="checkbox" id="depositNativeRequestGas">
+            Request gas from payer
+          </label>
+          <input type="text" id="depositNativeGasAmount" placeholder="Gas amount wei hex (optional)">
+        </div>
+        <p class="field-hint">Request gas from payer: the announcement metadata follows the EIP-5564 native layout, so a payer wallet that implements ERC-5564 metadata learns the total ETH to attach — payment plus the gas your sweep will spend. Without it the payer must be told out-of-band and the sweep spends from the payment itself.</p>
 
         <div class="section-divider"></div>
 
@@ -1021,6 +974,15 @@
           </label>
           <button class="btn-primary" data-action="createErc20Deposit">Create ERC-20</button>
         </div>
+        <div class="form-row">
+          <label class="checkbox-row">
+            <input type="checkbox" id="depositErc20RequestGas">
+            Request gas from payer
+          </label>
+          <input type="text" id="depositErc20GasAmount" placeholder="Gas amount wei hex (optional)">
+        </div>
+        <p class="field-hint">Request gas from payer: the announcement metadata follows the EIP-5564 token layout, so a payer wallet that implements ERC-5564 metadata learns the token and amount to send; the requested gas is the native amount the payer should attach to the deposit address alongside the transfer (token transfers cannot pay their own sweep gas).</p>
+        <div id="depositCreateWarnings" class="warning-box hidden"></div>
 
         <div class="section-divider"></div>
 
@@ -1060,8 +1022,112 @@
         <div id="depositList"></div>
       </div>
 
-      <div class="card hidden" id="queueCard" data-workspace-section="operations">
-        <div class="card-kicker">Work waiting to run</div>
+      <!-- ───────────────────────── Move ───────────────────────── -->
+
+      <div class="card hidden" id="policyCard" data-workspace-section="move">
+        <div class="card-head">
+          <h2>Treasury policy</h2>
+        </div>
+        <p class="helper-text">Constrain consolidation plans with an allow-list of destinations, native value caps, and a simulation requirement.</p>
+        <div id="treasuryPolicyList"></div>
+        <div class="form-row">
+          <label class="checkbox-row">
+            <input type="checkbox" id="treasuryPolicyEnabled">
+            Policy enabled
+          </label>
+          <label class="checkbox-row">
+            <input type="checkbox" id="treasuryPolicyRequireSim" checked>
+            Require simulation
+          </label>
+          <label class="checkbox-row">
+            <input type="checkbox" id="treasuryPolicyBlockLinkage" checked>
+            Block cross-party linkage (fail-closed, default on)
+          </label>
+          <label class="checkbox-row">
+            <input type="checkbox" id="treasuryPolicyAllowClaimExec">
+            Allow Merkle claim execution (default off)
+          </label>
+          <label class="checkbox-row">
+            <input type="checkbox" id="treasuryPolicyAllowGasTopups">
+            Allow sponsor gas top-ups (default off)
+          </label>
+          <label class="checkbox-row">
+            <input type="checkbox" id="treasuryPolicyAllowTreasuryAutomation">
+            Allow treasury automation (maintenance may plan hot-overflow sweeps and treasury refills and auto-enqueue them; steps still pass simulation, treasury policy, linkage checks, and the execution gates)
+          </label>
+          <label class="checkbox-row">
+            <input type="checkbox" id="treasuryPolicyAllowPlanExec">
+            Allow plan execution (master gate, default off)
+          </label>
+          <label class="checkbox-row">
+            <input type="checkbox" id="treasuryPolicyAllowSweepExec">
+            Allow sweep execution &mdash; covers plan-step sweeps and stealth deposit sweeps/transfers (default off)
+          </label>
+          <label class="checkbox-row">
+            <input type="checkbox" id="treasuryPolicyAllowRevokeExec">
+            Allow revoke execution (default off)
+          </label>
+          <label class="checkbox-row">
+            <input type="checkbox" id="treasuryPolicyAllowExitExec">
+            Allow DeFi exit execution (default off)
+          </label>
+        </div>
+        <details class="policy-details">
+          <summary>How this policy protects you</summary>
+          <p class="field-hint">On by default: a policy saved without an explicit choice keeps linkage blocking engaged, and turning it off is an explicit opt-out. Scope: blocks when different payers would sweep to the SAME destination. Sigillum-generated gas top-ups (fund_gas steps) are covered by the same payer-linkage analysis: one sponsor funding different payers warns and is blocked when linkage protection is on, and surfaces as a common_gas_funder risk finding on the plan. MANUAL gas funding, amount/timing correlation, downstream re-merging of per-party destinations, and multi-hop flows remain operator discipline &mdash; keep per-party destinations separate.</p>
+          <p class="field-hint">Claim execution stays blocked unless ALL of these hold: this policy is enabled, the claim uses the merkle-distributor-v1 adapter, its simulation passed, the claim contract is marked trusted in the risk catalog (or carries a claim_execution_reviewed note), and you explicitly approve the step. Other claim types stay review/export-only. A claim that reverts at execution will require operator action and is never auto-retried, because a reverted claim may have consumed its proof.</p>
+          <p class="field-hint">Nothing executes from a consolidation plan step unless this policy is enabled AND the master gate (allow plan execution) AND that step's per-family gate (sweep, revoke, or DeFi exit) are all on. The same sweep gate also covers stealth deposit sweeps and transfers &mdash; with the gate off they are refused at enqueue and blocked at drain, exactly like seed-wallet sweeps; there is no stealth carve-out. Claim execution and sponsor gas top-ups (including stealth deposit top-ups) keep their existing separate opt-ins above. Every gate change is written to the audit log. The queue view has a global pause switch that halts ALL queue execution immediately, and it is honored even while this policy is disabled.</p>
+        </details>
+        <label class="field-label" for="treasuryPolicyDestinations">Allowed destinations</label>
+        <textarea id="treasuryPolicyDestinations" placeholder="One per line: 0xADDRESS or 0xADDRESS:label"></textarea>
+        <div class="form-row">
+          <label class="field-label" for="treasuryPolicyMaxStepEth">Per-step cap (ETH)</label>
+          <input type="text" id="treasuryPolicyMaxStepEth" placeholder="optional, e.g. 0.5">
+          <label class="field-label" for="treasuryPolicyMaxPlanEth">Per-plan cap (ETH)</label>
+          <input type="text" id="treasuryPolicyMaxPlanEth" placeholder="optional, e.g. 2">
+          <label class="field-label" for="treasuryPolicyFreshnessSecs">Simulation freshness (seconds)</label>
+          <input type="number" id="treasuryPolicyFreshnessSecs" min="1" placeholder="default 900">
+          <button class="btn-primary" data-action="updateTreasuryPolicy">Save Policy</button>
+        </div>
+        <div class="form-row">
+          <label class="field-label" for="treasuryPolicyHotFloorEth">Hot floor (ETH)</label>
+          <input type="text" id="treasuryPolicyHotFloorEth" placeholder="default 1">
+          <label class="field-label" for="treasuryPolicyHotTargetEth">Hot target (ETH)</label>
+          <input type="text" id="treasuryPolicyHotTargetEth" placeholder="default 1">
+          <label class="field-label" for="treasuryPolicyHotOverflowEth">Hot overflow threshold (ETH)</label>
+          <input type="text" id="treasuryPolicyHotOverflowEth" placeholder="optional, e.g. 1.5">
+          <label class="field-label" for="treasuryPolicyMaxGasTopupEth">Max gas top-up (ETH)</label>
+          <input type="text" id="treasuryPolicyMaxGasTopupEth" placeholder="optional, e.g. 0.05">
+          <label class="field-label" for="treasuryPolicyMaxFeePerGasGwei">Max fee per gas (gwei)</label>
+          <input type="text" id="treasuryPolicyMaxFeePerGasGwei" placeholder="optional, e.g. 50">
+        </div>
+        <p class="field-hint">Sweeps route to the hot address while its balance is below the floor; the target is the refill ceiling (floor must be &le; target). Defaults preserve the previous 1 ETH behavior.</p>
+        <p class="field-hint">When enabled, consolidation plans may insert fund_gas steps that fund a source address's gas shortfall from the wallet's sponsor address (1.5x the dependent step's estimated gas, capped by the max top-up). Sigillum-generated top-ups run the same payer-linkage analysis as sweeps: funding different payers' addresses from one sponsor always warns and is hard-blocked when cross-party linkage blocking is on. MANUAL gas funding remains operator discipline.</p>
+      </div>
+
+      <div class="card hidden" id="plansCard" data-workspace-section="move">
+        <div class="card-head">
+          <h2>Consolidation plans</h2>
+        </div>
+        <p class="helper-text">Plans are dry-run until reviewed and approved into queue work.</p>
+        <div class="form-row">
+          <label class="checkbox-row" for="planRoutingStrategy">Routing</label>
+          <select id="planRoutingStrategy" class="input-wide">
+            <option value="single">Single destination</option>
+            <option value="per_party">Per-party (isolate payers)</option>
+          </select>
+        </div>
+        <p class="helper-text" id="planPerPartyHint" hidden>Per-party routing sends each payer's holdings to its own destination so consolidation does not link payers. The single destination below is used only for unattributed holdings (your own hot/change addresses).</p>
+        <div id="planPartyDestinations" hidden></div>
+        <div class="form-row">
+          <input type="text" id="planDestinationAddress" placeholder="Consolidation destination address">
+          <input type="number" id="planChainId" placeholder="Plan chain ID (optional)" class="input-mid">
+          <button class="btn-primary" data-action="generateConsolidationPlan">Generate Plan</button>
+        </div>
+        <div id="consolidationPlanList"></div>
+      </div>
+
+      <div class="card hidden" id="queueCard" data-workspace-section="move">
         <div class="card-head">
           <h2>Queue</h2>
           <div class="card-head-actions">
@@ -1075,13 +1141,17 @@
         <div class="form-row">
           <input type="number" id="queueProcessLimit" placeholder="Process limit" value="20" class="input-mid">
           <button class="btn-primary" data-action="processQueueBatch">Process Queue</button>
+          <label class="checkbox-row" title="Start the drain as a background operation you can cancel; progress shows in the queue list">
+            <input type="checkbox" id="queueProcessRunAsync">
+            Run in background
+          </label>
         </div>
         <p class="card-note">Processing executes pending local jobs immediately with the current daemon state.</p>
         <div id="queueProcessResult" class="result-box hidden"></div>
         <div id="queueList"></div>
       </div>
 
-      <div class="card hidden" id="maintenanceCard" data-workspace-section="operations">
+      <div class="card hidden" id="maintenanceCard" data-workspace-section="move">
         <div class="card-head">
           <h2>Maintenance</h2>
         </div>
@@ -1094,13 +1164,17 @@
             Auto enqueue sweeps
           </label>
           <button class="btn-primary" data-action="runMaintenanceCycle">Run Maintenance</button>
+          <label class="checkbox-row" title="Start the cycle as a background operation you can cancel; progress shows in the queue and deposit lists">
+            <input type="checkbox" id="maintenanceRunAsync">
+            Run in background
+          </label>
         </div>
         <div id="maintenanceResult" class="result-box hidden"></div>
       </div>
 
-      <!-- ───────────────────────── Secrets ───────────────────────── -->
+      <!-- ───────────────────────── Vault ───────────────────────── -->
 
-      <div class="card" id="secretsCard" data-workspace-section="secrets">
+      <div class="card" id="secretsCard" data-workspace-section="vault">
         <div class="card-head">
           <h2>Encrypted secrets</h2>
         </div>
@@ -1118,7 +1192,7 @@
         </div>
       </div>
 
-      <div class="card" id="apiKeysCard" data-workspace-section="secrets">
+      <div class="card" id="apiKeysCard" data-workspace-section="vault">
         <div class="card-head">
           <h2>Connection keys</h2>
         </div>
@@ -1131,7 +1205,7 @@
         <ul class="key-list" id="apiKeyList"></ul>
       </div>
 
-      <div class="card hidden" id="pushCard" data-workspace-section="secrets">
+      <div class="card hidden" id="pushCard" data-workspace-section="vault">
         <div class="card-head">
           <h2>Move a secret between compartments</h2>
         </div>
@@ -1153,7 +1227,7 @@
         </div>
       </div>
 
-      <div class="card hidden" id="compartmentCard" data-workspace-section="secrets">
+      <div class="card hidden" id="compartmentCard" data-workspace-section="vault">
         <div class="card-head">
           <h2>Unlocked compartments <span class="help-tip" tabindex="0" data-tip="An isolated vault space with its own unlock requirements.">?</span></h2>
         </div>
@@ -1161,9 +1235,9 @@
         <div id="compartmentList"></div>
       </div>
 
-      <!-- ───────────────────────── Security ──────────────────────── -->
+      <!-- ───────────────────────── Vault ──────────────────────── -->
 
-      <div class="card hidden" id="fido2Card" data-workspace-section="security">
+      <div class="card hidden" id="fido2Card" data-workspace-section="vault">
         <div class="card-head">
           <h2>Hardware keys</h2>
         </div>
@@ -1197,7 +1271,7 @@
         <div id="fido2KeyListSection" class="mt-14"></div>
       </div>
 
-      <div class="card hidden" id="backupCard" data-workspace-section="security">
+      <div class="card hidden" id="backupCard" data-workspace-section="vault">
         <div class="card-head">
           <h2>Encrypted snapshots</h2>
         </div>
@@ -1214,15 +1288,13 @@
         <p class="card-note">Exports create an encrypted file you can store elsewhere. Restores require a fresh unlock afterward.</p>
         <div class="section-divider"></div>
         <div class="section-title">Start over on this machine</div>
-        <p class="helper-text">Wipe the local Sigillum data directory and return this daemon to first-run setup.</p>
+        <p class="helper-text">Archive the current Sigillum data directory to a timestamped sibling and return this daemon to first-run setup. Nothing is deleted.</p>
         <div class="form-row">
-          <input type="text" id="backupResetConfirm" placeholder="Type RESET LOCAL SIGILLUM DATA to reset">
-          <button class="btn-danger" data-action="resetLocalData" data-arg0="backupResetConfirm">Reset local data</button>
+          <button class="btn-danger" data-action="resetLocalData">Reset local data</button>
         </div>
       </div>
 
-      <div class="card hidden" id="auditCard" data-workspace-section="security">
-        <div class="card-kicker">What happened, and when</div>
+      <div class="card hidden" id="auditCard" data-workspace-section="overview">
         <div class="card-head">
           <h2>Audit trail</h2>
         </div>
@@ -1230,9 +1302,9 @@
         <div id="auditList" class="text-meta">No events yet.</div>
       </div>
 
-      <!-- ────────────────────────── System ───────────────────────── -->
+      <!-- ────────────────────────── Vault ───────────────────────── -->
 
-      <div class="card hidden" id="diagCard" data-workspace-section="system">
+      <div class="card hidden" id="diagCard" data-workspace-section="vault">
         <div class="card-head">
           <h2>Diagnostics</h2>
           <div class="card-head-actions">
@@ -1251,31 +1323,31 @@
         <div id="selfCheckList"><p class="empty-state">Not run yet in this session. <button type="button" class="btn-ghost empty-state-action" data-action="runSelfCheck">Run Self-Check</button></p></div>
       </div>
 
-      <div class="card hidden" id="guideCard" data-workspace-section="system">
+      <div class="card hidden" id="guideCard" data-workspace-section="vault">
         <div class="card-head">
           <h2>What Sigillum does today</h2>
         </div>
-        <p class="helper-text">A local vault plus an Ethereum operator console. Treat the workspace sections as distinct jobs, not one scrolling checklist.</p>
+        <p class="helper-text">A local vault plus an Ethereum operator console. Treat the workspace destinations as distinct jobs, not one scrolling checklist.</p>
         <div class="guide-grid">
           <div class="guide-block">
-            <div class="guide-block-title">1. Treasury</div>
-            <p>Watch tracked balances, routing readiness, policy posture, and receive-address allocation in one roll-up.</p>
+            <div class="guide-block-title">1. Overview</div>
+            <p>Status, next actions, and recent audit events.</p>
           </div>
           <div class="guide-block">
-            <div class="guide-block-title">2. Wallets</div>
-            <p>Save provider profiles, then choose a wallet family: stealth wallets for tracked deposits and queue work, or seed/xpub receive wallets for address visibility.</p>
+            <div class="guide-block-title">2. Receive</div>
+            <p>Allocations, stealth deposits, counterparties, and rotation.</p>
           </div>
           <div class="guide-block">
-            <div class="guide-block-title">3. Operations</div>
-            <p>Run inventory discovery, tracked deposits, queue processing, and maintenance cycles. Operator workflows currently run on stealth wallets.</p>
+            <div class="guide-block-title">3. Portfolio</div>
+            <p>Wallets, inventory discovery, risk findings, and watch book.</p>
           </div>
           <div class="guide-block">
-            <div class="guide-block-title">4. Secrets</div>
-            <p>Store connection keys and encrypted secrets, organize compartments, and move values between compartments when needed.</p>
+            <div class="guide-block-title">4. Move</div>
+            <p>Consolidation plans, queue, maintenance, and policy.</p>
           </div>
           <div class="guide-block">
-            <div class="guide-block-title">5. Security</div>
-            <p>Manage hardware keys, export encrypted snapshots, and inspect the audit trail before anything sensitive.</p>
+            <div class="guide-block-title">5. Vault</div>
+            <p>Secrets, connection keys, compartments, hardware keys, snapshots, diagnostics.</p>
           </div>
         </div>
         <div class="section-divider"></div>
@@ -1304,7 +1376,7 @@
     </main>
 
     <footer>
-      Sigillum local daemon &mdash; hardware-backed secret management &mdash;
+      Sigillum local daemon &mdash; local wallet operations and secret custody &mdash;
       <a href="https://github.com/caelator/sigillum">GitHub</a>
     </footer>
   </div>

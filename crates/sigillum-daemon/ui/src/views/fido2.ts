@@ -1,6 +1,9 @@
+import { ROUTE_PATHS } from "../routePaths";
+import { confirmDangerDialog } from "../render/confirm";
 import { clearFields } from "../render/forms";
 import { setInlineInfoById, setTextById } from "../render/dom";
 import { esc, escAttr } from "../render/html";
+import { promptSecret } from "../render/secret-prompt";
 
 export interface Fido2State {
   detect: any | null;
@@ -103,41 +106,6 @@ function isAlreadyUnlockedConflict(message: unknown): boolean {
   return String(message || "").toLowerCase().includes("already unlocked");
 }
 
-function promptPin(msg: string): Promise<string | null> {
-  return new Promise((resolve) => {
-    const overlay = document.createElement("div");
-    overlay.style.cssText =
-      "position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:200;display:flex;align-items:center;justify-content:center;";
-    overlay.innerHTML =
-      '<div class="card pin-modal"><h2>' +
-      esc(msg) +
-      '</h2><div class="form-row"><input type="password" id="pinModalInput" placeholder="Current PIN (leave blank if not required)">' +
-      '<button class="btn-primary" id="pinModalOk">OK</button></div></div>';
-    document.body.appendChild(overlay);
-    const inp = input("pinModalInput");
-    inp.focus();
-    const done = () => {
-      const value = inp.value;
-      overlay.remove();
-      resolve(value || null);
-    };
-    document.getElementById("pinModalOk")?.addEventListener("click", done);
-    inp.addEventListener("keydown", (event) => {
-      if (event.key === "Enter") done();
-      if (event.key === "Escape") {
-        overlay.remove();
-        resolve(null);
-      }
-    });
-    overlay.addEventListener("click", (event) => {
-      if (event.target === overlay) {
-        overlay.remove();
-        resolve(null);
-      }
-    });
-  });
-}
-
 export function createFido2Actions(deps: Fido2Deps) {
   let lastFidoDetect: any | null = null;
   let lastFidoKeys: any[] = [];
@@ -185,6 +153,9 @@ export function createFido2Actions(deps: Fido2Deps) {
   async function showUnlockTabs(): Promise<void> {
     try {
       const detect = await deps.api("GET", "/api/fido2/detect");
+      // Detection can resolve after a successful unlock. A stale locked-mode
+      // request must never re-show unlock panels over the unlocked shell.
+      if (document.body.dataset.mode !== "locked") return;
       const hasFido = detect.device_present;
       lastFidoDetect = detect;
       const tabs = document.getElementById("unlockTabs");
@@ -208,6 +179,7 @@ export function createFido2Actions(deps: Fido2Deps) {
         switchUnlockTab("passphrase");
       }
     } catch (_) {
+      if (document.body.dataset.mode !== "locked") return;
       setTextById(
         "authLead",
         "Unlock with the passphrase you configured during setup. Hardware-key unlock becomes available when a FIDO2 device is detected.",
@@ -225,7 +197,7 @@ export function createFido2Actions(deps: Fido2Deps) {
     fido2Card?.classList.remove("hidden");
 
     try {
-      const detect = await deps.api("GET", "/api/fido2/detect");
+      const detect = await deps.api("GET", ROUTE_PATHS.API_FIDO2_DETECT);
       lastFidoDetect = detect;
       const devEl = document.getElementById("fido2DeviceStatus");
       if (detect.device_present) {
@@ -242,7 +214,7 @@ export function createFido2Actions(deps: Fido2Deps) {
     } catch (_) {}
 
     try {
-      const keys = await deps.api("GET", "/api/fido2/list");
+      const keys = await deps.api("GET", ROUTE_PATHS.API_FIDO2_LIST);
       const listEl = document.getElementById("fido2KeyListSection");
       lastFidoKeys = keys.keys || [];
       if (keys.keys && keys.keys.length > 0) {
@@ -296,7 +268,7 @@ export function createFido2Actions(deps: Fido2Deps) {
       return;
     }
 
-    const r = await deps.api("POST", "/api/fido2/pin/set", { new_pin: pin });
+    const r = await deps.api("POST", ROUTE_PATHS.API_FIDO2_PIN_SET, { new_pin: pin });
     if (r.error) {
       const message = friendlyFidoError(r.error);
       if (hintId) setInlineInfoById(hintId, message);
@@ -340,22 +312,23 @@ export function createFido2Actions(deps: Fido2Deps) {
       deps.toast("Label required", "error");
       return;
     }
-    if (
-      poison &&
-      !confirm(
-        'Register "' +
+    if (poison) {
+      const confirmed = await confirmDangerDialog({
+        title: "Register poison key",
+        body:
+          'Register "' +
           label +
           '" as a POISON key? Including it during unlock will cause silent failure.',
-      )
-    ) {
-      return;
+        actionLabel: "Register poison key",
+      });
+      if (!confirmed) return;
     }
     deps.toast("Touch your FIDO2 key now...");
     const body: any = { label };
     if (pin) body.pin = pin;
     if (poison) body.poison = true;
     if (skipKeys.length > 0) body.skip_keys = skipKeys;
-    const r = await deps.api("POST", "/api/fido2/register", body);
+    const r = await deps.api("POST", ROUTE_PATHS.API_FIDO2_REGISTER, body);
     if (r.error) {
       const message = friendlyFidoError(r.error);
       setInlineInfoById("fido2DeviceStatus", message);
@@ -370,10 +343,23 @@ export function createFido2Actions(deps: Fido2Deps) {
   }
 
   async function fido2RemoveKey(label: string): Promise<void> {
-    if (!confirm('Remove FIDO2 key "' + label + '"?')) return;
-    const pin = await promptPin("Enter the current FIDO2 PIN only if the remaining keys require one:");
+    const confirmed = await confirmDangerDialog({
+      title: "Remove FIDO2 key",
+      body:
+        'Remove FIDO2 key "' +
+        label +
+        '"? Unlock thresholds that count on this key will no longer be able to use it.',
+      actionLabel: "Remove key",
+    });
+    if (!confirmed) return;
+    const pinDecision = await promptSecret({
+      title: "Enter the current FIDO2 PIN only if the remaining keys require one:",
+      inputLabel: "Current FIDO2 PIN",
+      placeholder: "Current PIN (leave blank if not required)",
+    });
+    if (!pinDecision.submitted) return;
     const body: any = { label };
-    if (pin) body.pin = pin;
+    if (pinDecision.value) body.pin = pinDecision.value;
     const r = await deps.api("POST", "/api/fido2/remove", body);
     if (r.error) {
       const message = friendlyFidoError(r.error);
@@ -393,7 +379,7 @@ export function createFido2Actions(deps: Fido2Deps) {
       return;
     }
     deps.toast("Touch your hardware key now...");
-    const r = await deps.api("POST", "/api/fido2/unlock", {
+    const r = await deps.api("POST", ROUTE_PATHS.API_FIDO2_UNLOCK, {
       pins: pin ? [pin] : [],
       tap_count: tapCount,
     });

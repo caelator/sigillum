@@ -88,6 +88,9 @@ pub enum Fido2Error {
     #[error("config error: {0}")]
     Config(String),
 
+    #[error("another FIDO2 config writer holds {path}")]
+    WriterBusy { path: String },
+
     #[error("CTAP1 device — requires CTAP2 with hmac-secret extension")]
     Ctap1Device,
 

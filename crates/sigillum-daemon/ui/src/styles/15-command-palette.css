@@ -1,0 +1,107 @@
+/* ── 22. Safe command palette ────────────────────────────────────────────── */
+
+.command-palette-overlay {
+  align-items: flex-start;
+  padding: min(15vh, 120px) var(--space-4) var(--space-4);
+}
+
+.command-palette-dialog {
+  width: min(620px, calc(100vw - 32px));
+  max-height: min(680px, calc(100vh - 64px));
+  overflow: hidden;
+  padding: var(--space-4);
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-lg);
+}
+
+.command-palette-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  margin-bottom: var(--space-3);
+}
+
+.command-palette-dialog .command-palette-heading h2 {
+  margin: 0;
+  color: var(--text);
+  font-size: var(--fs-md);
+}
+
+.command-palette-shortcut {
+  flex: 0 0 auto;
+  padding: 3px 7px;
+  color: var(--text-muted);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font: 500 var(--fs-xs)/1.4 var(--mono);
+}
+
+.command-palette-input {
+  width: 100%;
+  height: 44px !important;
+  margin-bottom: var(--space-3);
+  padding-inline: var(--space-3) !important;
+  font-size: var(--fs-base) !important;
+}
+
+.command-palette-list {
+  display: grid;
+  gap: var(--space-1);
+  max-height: min(410px, 50vh);
+  overflow-y: auto;
+}
+
+.command-palette-option {
+  display: grid;
+  gap: 2px;
+  padding: 10px var(--space-3);
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+.command-palette-option.is-selected {
+  background: var(--accent-tint);
+  border-color: rgba(91, 124, 250, 0.5);
+}
+
+.command-palette-option-label {
+  color: var(--text);
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  line-height: 1.35;
+}
+
+.command-palette-option-description {
+  color: var(--text-muted);
+  font-size: var(--fs-xs);
+  line-height: 1.4;
+}
+
+.command-palette-empty {
+  padding: var(--space-6) var(--space-3);
+  color: var(--text-muted);
+  text-align: center;
+  font-size: var(--fs-sm);
+}
+
+.command-palette-hint {
+  margin-top: var(--space-3);
+  color: var(--text-dim);
+  font-size: var(--fs-xs);
+  line-height: 1.4;
+}
+
+@media (max-width: 560px) {
+  .command-palette-overlay {
+    padding-top: var(--space-4);
+  }
+
+  .command-palette-option-description,
+  .command-palette-shortcut {
+    display: none;
+  }
+}

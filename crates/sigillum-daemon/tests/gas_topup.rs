@@ -1,6 +1,8 @@
+mod common;
+
+use common::{post_json, spawn_daemon};
 use std::collections::BTreeMap;
 use std::net::SocketAddr;
-use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
 
 use axum::extract::State;
@@ -53,17 +55,6 @@ impl Drop for TestDaemon {
         self.daemon_handle.abort();
         self.rpc_handle.abort();
     }
-}
-
-async fn spawn_daemon(base_dir: PathBuf) -> (SocketAddr, tokio::task::JoinHandle<()>) {
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let addr = listener.local_addr().unwrap();
-    let (app, _state) =
-        sigillum_daemon::build_router(base_dir, addr.port()).expect("router should initialize");
-    let handle = tokio::spawn(async move {
-        axum::serve(listener, app).await.unwrap();
-    });
-    (addr, handle)
 }
 
 async fn spawn_mock_evm_provider(config: RpcConfig) -> (SocketAddr, tokio::task::JoinHandle<()>) {
@@ -148,20 +139,6 @@ fn json_rpc_result(request: &Value, result: Value) -> Value {
         "id": request.get("id").cloned().unwrap_or_else(|| json!(1)),
         "result": result,
     })
-}
-
-async fn post_json(
-    client: &reqwest::Client,
-    addr: SocketAddr,
-    path: &str,
-    body: Value,
-    token: Option<&str>,
-) -> reqwest::Response {
-    let mut request = client.post(format!("http://{addr}{path}")).json(&body);
-    if let Some(token) = token {
-        request = request.bearer_auth(token);
-    }
-    request.send().await.unwrap()
 }
 
 async fn setup_daemon() -> TestDaemon {
@@ -578,8 +555,9 @@ async fn assert_existing_gas_blocker_after_simulation(setup: &TestDaemon, plan_j
 
 #[tokio::test]
 async fn fund_gas_emitted_for_shortfall_with_sponsor() {
-    let (setup, plan_json) = prepare_single_source(true, SPONSOR_BALANCE_HEX, None).await;
     let expected_topup = expected_topup_hex();
+    let (setup, plan_json) =
+        prepare_single_source(true, SPONSOR_BALANCE_HEX, Some(expected_topup.clone())).await;
 
     let fund = single_step_by_action(&plan_json, "fund_gas");
     let sweep = single_step_by_action(&plan_json, "sweep_native");
@@ -631,7 +609,7 @@ async fn fund_gas_cap_blocks_dependent_with_named_reason() {
 
 #[tokio::test]
 async fn no_sponsor_balance_keeps_existing_gas_blocker() {
-    let (setup, plan_json) = prepare_single_source(true, "0x0", None).await;
+    let (setup, plan_json) = prepare_single_source(true, "0x0", Some(expected_topup_hex())).await;
     assert_existing_gas_blocker_after_simulation(&setup, &plan_json).await;
 }
 
@@ -686,6 +664,36 @@ async fn cross_party_sponsor_funding_warns_and_blocks_per_policy() {
     );
     assert!(funds.iter().all(|step| step["status"] == "blocked"));
     assert_eq!(block_plan["plan"]["status"], "blocked");
+
+    // Plan task 3.5: the same shared-funder detection surfaces a structured
+    // `common_gas_funder` risk finding on the plan — advisory in both policy
+    // modes (the warn plan's steps stay unblocked; the block plan's are
+    // hard-blocked by the policy, not by the finding).
+    for (plan, label) in [(&warn_plan, "warn"), (&block_plan, "block")] {
+        let findings = plan["plan"]["risk_findings"]
+            .as_array()
+            .cloned()
+            .unwrap_or_default();
+        assert_eq!(findings.len(), 1, "{label} plan risk findings: {plan}");
+        assert_eq!(findings[0]["category"], "common_gas_funder");
+        assert_eq!(findings[0]["subject_type"], "gas_funder");
+        assert!(
+            findings[0]["subject"]
+                .as_str()
+                .is_some_and(|subject| subject.starts_with("0x")),
+            "{label} plan finding subject: {plan}"
+        );
+        assert!(
+            findings[0]["evidence"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|entry| entry
+                    .as_str()
+                    .is_some_and(|value| { value == "Distinct payer identities funded: 2" })),
+            "{label} plan finding evidence: {plan}"
+        );
+    }
 }
 
 async fn cross_party_plan(block_cross_party_linkage: bool) -> Value {
@@ -713,7 +721,7 @@ async fn cross_party_plan(block_cross_party_linkage: bool) -> Value {
         &setup,
         true,
         block_cross_party_linkage,
-        None,
+        Some(expected_topup_hex()),
         &[PARTY_A_DESTINATION, PARTY_B_DESTINATION],
     )
     .await;
@@ -742,8 +750,9 @@ async fn cross_party_plan(block_cross_party_linkage: bool) -> Value {
 
 #[tokio::test]
 async fn fund_gas_full_flow_simulates_and_exports_in_order() {
-    let (setup, plan_json) = prepare_single_source(true, SPONSOR_BALANCE_HEX, None).await;
     let expected_topup = expected_topup_hex();
+    let (setup, plan_json) =
+        prepare_single_source(true, SPONSOR_BALANCE_HEX, Some(expected_topup.clone())).await;
     let plan_id = plan_json["plan"]["id"].as_str().unwrap();
 
     approve_plan(&setup, plan_id).await;

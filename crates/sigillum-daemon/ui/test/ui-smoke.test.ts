@@ -1,14 +1,34 @@
 import { deepEqual, equal, ok } from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { test } from "node:test";
 
 import {
   clearSessionToken,
   readSessionToken,
   requestWithSession,
+  subscribeSessionToken,
+  withBackgroundRequests,
   writeSessionToken,
 } from "../src/api/session";
 import { dispatchDataAction } from "../src/actions/dispatcher";
-import { renderEntityList } from "../src/render/forms";
+import {
+  confirmDangerDialog,
+  confirmDangerDialogDecision,
+  confirmTypedDialog,
+  informDialog,
+} from "../src/render/confirm";
+import { focusableElements, hasActiveModal } from "../src/render/modal";
+import { promptSecret } from "../src/render/secret-prompt";
+import {
+  amountWithRawHtml,
+  chainLabel,
+  formatEthAmount,
+  formatHexQuantity,
+  formatTimestamp,
+  formatTokenAmount,
+  quantityWithRawHtml,
+} from "../src/render/format";
+import { renderEntityList, showResultBox } from "../src/render/forms";
 import {
   buildInventoryReport,
   createInventoryActions,
@@ -20,14 +40,22 @@ import { pillClass } from "../src/render/html";
 import { createReceivingActions } from "../src/views/receiving";
 import { createSelfCheckActions, formatClockTime } from "../src/views/selfcheck";
 import { createSessionActions } from "../src/views/session";
+import { createFido2Actions } from "../src/views/fido2";
 import { createSetupWizard } from "../src/views/setup";
-import { createShellRenderer } from "../src/views/shell";
+import {
+  createShellRenderer,
+  renderActiveCompartment,
+  renderCompartmentSwitcher,
+  renderWorkspaceSectionNav,
+} from "../src/views/shell";
 import { createWalletActions } from "../src/views/wallets";
+import { WALLET_WIRE_LITERALS } from "../src/contracts";
 import {
   createTreasuryActions,
   formatWeiHexAsEth,
   parseEthToWeiHex,
   parseTreasuryDestinationLines,
+  treasuryPolicySummary,
 } from "../src/views/treasury";
 import {
   createWalletManagerActions,
@@ -46,10 +74,497 @@ import type {
   TreasuryPolicy,
   TreasuryReceiveAllocation,
 } from "../src/contracts";
-import { installDom } from "./dom-fixture";
+import { installDom, type FakeElement } from "./dom-fixture";
 
-test("shell renderer applies setup, locked, and unlocked DOM state", () => {
+// ── Shared confirm-dialog drivers ───────────────────────────────────────────
+// Dangerous actions are gated by the modal in src/render/confirm.ts. The
+// dialog renders into document.body via createElement/appendChild, so the
+// fake DOM keeps real element references these helpers can drive.
+
+async function tick(): Promise<void> {
+  await new Promise((resolve) => setTimeout(resolve, 0));
+}
+
+const KEY_VALUE_PROSE = /\b[A-Za-z][A-Za-z0-9_-]*=/;
+const MACHINE_CODE_PROSE =
+  /\b(?:[a-z][a-z0-9]*(?:_[a-z0-9]+)+|[a-z][a-z0-9]*(?:[A-Z][A-Za-z0-9]*)+)\b/;
+
+function renderedText(html: string): string {
+  return html
+    // Closed technical disclosures are not part of the default view. Their
+    // exact wire identifiers remain available to an operator who expands
+    // them, while the acceptance gate audits the prose visible by default.
+    .replace(/<details\b(?![^>]*\bopen\b)[^>]*>[\s\S]*?<\/details>/gi, " ")
+    .replace(/<[^>]*>/g, " ")
+    .replace(/&nbsp;|&#160;/g, " ")
+    .replace(/&amp;/g, "&")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function assertNoKeyValueProse(html: string, surface: string): void {
+  const text = renderedText(html);
+  const match = text.match(KEY_VALUE_PROSE);
+  equal(
+    match,
+    null,
+    `${surface} must use operator-facing labels, not key=value prose${
+      match ? ` (found ${match[0]})` : ""
+    }`,
+  );
+}
+
+function assertNoRawQuantityHex(
+  html: string,
+  surface: string,
+  allowedAddresses: readonly string[] = [],
+): void {
+  const text = renderedText(html);
+  const allowed = new Set(allowedAddresses.map((address) => address.toLowerCase()));
+  const unexpected = (text.match(/\b0x[0-9a-fA-F]+\b/g) || []).filter((token) => {
+    return !allowed.has(token.toLowerCase());
+  });
+  deepEqual(
+    unexpected,
+    [],
+    `${surface} must format quantities for people; only explicitly expected EVM addresses may remain hex`,
+  );
+}
+
+function assertNoMachineCodeProse(html: string, surface: string): void {
+  const text = renderedText(html);
+  const match = text.match(MACHINE_CODE_PROSE);
+  equal(
+    match,
+    null,
+    `${surface} must translate machine codes into operator-facing language${
+      match ? ` (found ${match[0]})` : ""
+    }`,
+  );
+}
+
+test("visual prose guards reject camelCase and unapproved full-length hex", () => {
+  function rejected(run: () => void): boolean {
+    try {
+      run();
+      return false;
+    } catch (_) {
+      return true;
+    }
+  }
+  equal(
+    rejected(() =>
+      assertNoMachineCodeProse("<p>defaultDestination</p>", "guard fixture"),
+    ),
+    true,
+  );
+  const address = "0x1111111111111111111111111111111111111111";
+  equal(
+    rejected(() => assertNoRawQuantityHex("<p>" + address + "</p>", "guard fixture")),
+    true,
+  );
+  assertNoRawQuantityHex("<p>" + address + "</p>", "guard fixture", [address]);
+});
+
+function confirmOverlay(): any {
+  return (
+    ((document.body.children as unknown as any[]) || []).find(
+      (child) => child.isConnected && child.getAttribute?.("data-confirm-overlay") != null,
+    ) || null
+  );
+}
+
+function confirmPart(selector: string): any {
+  const overlay = confirmOverlay();
+  return overlay ? overlay.querySelector(selector) : null;
+}
+
+function secretPromptPart(selector: string): any {
+  return document.body.querySelector(selector);
+}
+
+function typeConfirmPhrase(phrase: string): void {
+  const input = confirmPart("[data-confirm-input]");
+  ok(input, "expected a typed-phrase input in the confirmation dialog");
+  input.value = phrase;
+  input.dispatchEvent({ type: "input", target: input });
+}
+
+async function answerConfirm(action: "action" | "cancel", phrase?: string): Promise<void> {
+  await tick();
+  const overlay = confirmOverlay();
+  ok(overlay, "expected a confirmation dialog to be open");
+  if (phrase !== undefined) typeConfirmPhrase(phrase);
+  const button = overlay.querySelector(
+    action === "action" ? "[data-confirm-action]" : "[data-confirm-cancel]",
+  );
+  ok(button, "expected the dialog " + action + " button");
+  button.click();
+  await tick();
+}
+
+test("confirmation dialog tiers resolve decisions and gate typed phrases", async () => {
+  installDom();
+
+  // inform: one acknowledgement button, no cancel, resolves true.
+  let pending: Promise<boolean> = informDialog({
+    title: "Clipboard unavailable",
+    body: "Copy the value manually.",
+    valueDisplay: "0xvalue",
+  });
+  let overlay = confirmOverlay();
+  ok(overlay, "inform dialog opens");
+  equal(overlay.getAttribute("data-confirm-overlay"), "inform");
+  const dialog = overlay.children[0];
+  equal(dialog.getAttribute("role"), "dialog");
+  equal(dialog.getAttribute("aria-modal"), "true");
+  ok(dialog.getAttribute("aria-labelledby"), "dialog is labelled by its title");
+  equal(confirmPart("[data-confirm-cancel]"), null);
+  equal(confirmPart("[data-confirm-value]").value, "0xvalue");
+  confirmPart("[data-confirm-action]").click();
+  equal(await pending, true);
+  ok(!overlay.isConnected, "dialog closes after the decision");
+
+  // confirm: Cancel and danger action, initial focus on the safe button.
+  pending = confirmDangerDialog({ title: "Delete thing", body: "It is gone for good." });
+  overlay = confirmOverlay();
+  equal(overlay.getAttribute("data-confirm-overlay"), "confirm");
+  const cancelButton = confirmPart("[data-confirm-cancel]");
+  const actionButton = confirmPart("[data-confirm-action]");
+  equal(cancelButton.textContent, "Cancel");
+  equal(actionButton.textContent, "Confirm");
+  equal(actionButton.className, "btn-danger");
+  equal(document.activeElement, cancelButton, "focus starts on the safe button");
+  actionButton.click();
+  equal(await pending, true);
+
+  // Cancel resolves false.
+  pending = confirmDangerDialog({ title: "Delete thing", body: "Gone." });
+  confirmPart("[data-confirm-cancel]").click();
+  equal(await pending, false);
+
+  // Escape resolves false.
+  pending = confirmDangerDialog({ title: "Delete thing", body: "Gone." });
+  (document as any).dispatchEvent({ type: "keydown", key: "Escape" });
+  equal(await pending, false);
+
+  // Backdrop click resolves false.
+  pending = confirmDangerDialog({ title: "Delete thing", body: "Gone." });
+  confirmOverlay().click();
+  equal(await pending, false);
+
+  // typed: the action stays disabled until the exact phrase is entered.
+  const phrase = "EXECUTE 2 PLAN STEPS TOTAL 7 WEI";
+  pending = confirmTypedDialog({ title: "Bulk enqueue", body: "Everything goes.", phrase });
+  overlay = confirmOverlay();
+  equal(overlay.getAttribute("data-confirm-overlay"), "typed");
+  equal(confirmPart("[data-confirm-phrase]").textContent, phrase);
+  const typedAction = confirmPart("[data-confirm-action]");
+  equal(typedAction.disabled, true, "action disabled before the phrase matches");
+  const phraseInput = confirmPart("[data-confirm-input]");
+  equal(document.activeElement, phraseInput, "focus starts in the phrase input");
+
+  // Wrong phrase: still disabled, clicking does nothing, Enter does nothing.
+  typeConfirmPhrase("EXECUTE 9 PLAN STEPS TOTAL 1 WEI");
+  equal(typedAction.disabled, true);
+  typedAction.click();
+  (document as any).dispatchEvent({
+    type: "keydown",
+    key: "Enter",
+    target: phraseInput,
+  });
+  await tick();
+  ok(confirmOverlay(), "dialog stays open while the phrase mismatches");
+
+  // Exact phrase enables the action; Enter in the input submits.
+  typeConfirmPhrase(phrase);
+  equal(typedAction.disabled, false);
+  (document as any).dispatchEvent({
+    type: "keydown",
+    key: "Enter",
+    target: phraseInput,
+  });
+  equal(await pending, true);
+
+  // Typed tier also cancels cleanly via Escape.
+  pending = confirmTypedDialog({ title: "Bulk enqueue", body: "Everything goes.", phrase });
+  (document as any).dispatchEvent({ type: "keydown", key: "Escape" });
+  equal(await pending, false);
+});
+
+test("confirm dialog checkbox rides along with the decision", async () => {
+  installDom();
+
+  // Checkbox renders between the body and the actions; confirm carries its state.
+  let decision = confirmDangerDialogDecision({
+    title: "Delete wallet",
+    body: "Gone.",
+    checkbox: { label: "Also forget scanned history", checked: false },
+  });
+  let checkbox = confirmPart("[data-confirm-checkbox]");
+  ok(checkbox, "expected the cascade checkbox in the dialog");
+  equal(checkbox.checked, false);
+  checkbox.checked = true;
+  confirmPart("[data-confirm-action]").click();
+  deepEqual(await decision, { confirmed: true, checked: true });
+
+  // Untouched checkbox resolves checked: false on confirm.
+  decision = confirmDangerDialogDecision({
+    title: "Delete wallet",
+    body: "Gone.",
+    checkbox: { label: "Also forget scanned history" },
+  });
+  confirmPart("[data-confirm-action]").click();
+  deepEqual(await decision, { confirmed: true, checked: false });
+
+  // Cancel never reports an opt-in, even if the box was ticked first.
+  decision = confirmDangerDialogDecision({
+    title: "Delete wallet",
+    body: "Gone.",
+    checkbox: { label: "Also forget scanned history", checked: true },
+  });
+  confirmPart("[data-confirm-cancel]").click();
+  deepEqual(await decision, { confirmed: false, checked: false });
+
+  // No checkbox configured: the decision still reports checked: false.
+  decision = confirmDangerDialogDecision({ title: "Delete thing", body: "Gone." });
+  equal(confirmPart("[data-confirm-checkbox]"), null);
+  confirmPart("[data-confirm-action]").click();
+  deepEqual(await decision, { confirmed: true, checked: false });
+});
+
+test("shared modal lifecycle traps current focusables, coordinates, and restores focus", async () => {
+  const dom = installDom();
+  const invoker = dom.document.createElement("button");
+  const alreadyInert = dom.document.createElement("div");
+  alreadyInert.setAttribute("inert", "");
+  dom.document.body.appendChild(invoker);
+  dom.document.body.appendChild(alreadyInert);
+  invoker.focus();
+
+  let first = confirmDangerDialog({
+    title: "First",
+    body: "First consequence.",
+    checkbox: { label: "Also remove history" },
+    valueDisplay: "read-only value",
+  });
+  equal(hasActiveModal(), true);
+  equal(invoker.hasAttribute("inert"), true, "modal background is inert");
+  equal(confirmOverlay().hasAttribute("inert"), false, "modal remains interactive");
+  const firstCheckbox = confirmPart("[data-confirm-checkbox]");
+  const firstValue = confirmPart("[data-confirm-value]");
+  const firstCancel = confirmPart("[data-confirm-cancel]");
+  const firstAction = confirmPart("[data-confirm-action]");
+  const firstDialog = confirmOverlay().children[0];
+  deepEqual(focusableElements(firstDialog), [
+    firstCheckbox,
+    firstValue,
+    firstCancel,
+    firstAction,
+  ]);
+
+  // Focusables are recomputed on every Tab; a disabled control is skipped.
+  firstAction.disabled = true;
+  deepEqual(focusableElements(firstDialog), [firstCheckbox, firstValue, firstCancel]);
+  firstValue.remove();
+  deepEqual(
+    focusableElements(firstDialog),
+    [firstCheckbox, firstCancel],
+    "a disconnected control drops out immediately",
+  );
+  firstCancel.focus();
+  (document as any).dispatchEvent({
+    type: "keydown",
+    key: "Tab",
+    target: firstCancel,
+    preventDefault: () => undefined,
+  });
+  equal(document.activeElement, firstCheckbox);
+  firstAction.disabled = false;
+
+  // Opening another modal dismisses the old one, rather than stacking gates.
+  const second = confirmDangerDialog({ title: "Second", body: "Second consequence." });
+  equal(await first, false);
+  equal(confirmPart("[data-confirm-title]").textContent, "Second");
+  confirmPart("[data-confirm-cancel]").click();
+  equal(await second, false);
+  equal(hasActiveModal(), false);
+  equal(invoker.hasAttribute("inert"), false, "background inert state is restored");
+  equal(alreadyInert.hasAttribute("inert"), true, "pre-existing inert state is preserved");
+  equal(document.activeElement, invoker, "focus returns to the connected invoker");
+
+  // A removed invoker is never focused after the modal closes.
+  const removedInvoker = dom.document.createElement("button");
+  dom.document.body.appendChild(removedInvoker);
+  removedInvoker.focus();
+  const third = confirmDangerDialog({ title: "Third", body: "Third consequence." });
+  removedInvoker.remove();
+  confirmPart("[data-confirm-cancel]").click();
+  equal(await third, false);
+  ok((document.activeElement as any) !== removedInvoker);
+
+  // Body siblings appended after open are isolated too, and programmatic
+  // focus is redirected before the observer microtask can run.
+  const originalMutationObserver = (globalThis as any).MutationObserver;
+  let notifyAdded: ((nodes: FakeElement[]) => void) | null = null;
+  let observerDisconnected = false;
+  (globalThis as any).MutationObserver = class {
+    constructor(callback: (records: Array<{ addedNodes: FakeElement[] }>) => void) {
+      notifyAdded = (nodes) => callback([{ addedNodes: nodes }]);
+    }
+    observe(): void {}
+    disconnect(): void {
+      observerDisconnected = true;
+    }
+  };
+  try {
+    const fourth = confirmDangerDialog({ title: "Fourth", body: "Dynamic background." });
+    const dynamic = dom.document.createElement("textarea");
+    dom.document.body.appendChild(dynamic);
+    notifyAdded?.([dynamic]);
+    equal(dynamic.hasAttribute("inert"), true, "late sibling becomes inert");
+    dynamic.focus();
+    (document as any).dispatchEvent({ type: "focusin", target: dynamic });
+    equal(
+      document.activeElement,
+      confirmPart("[data-confirm-cancel]"),
+      "late programmatic focus is returned to the modal",
+    );
+    confirmPart("[data-confirm-cancel]").click();
+    equal(await fourth, false);
+    equal(dynamic.hasAttribute("inert"), false, "late sibling inert state is restored");
+    equal(observerDisconnected, true);
+  } finally {
+    (globalThis as any).MutationObserver = originalMutationObserver;
+  }
+});
+
+test("secret prompt distinguishes dismissal from explicit blank submission", async () => {
+  installDom();
+  const options = {
+    title: "Optional PIN",
+    inputLabel: "Current FIDO2 PIN",
+    placeholder: "Leave blank for touch-only",
+  };
+
+  let pending = promptSecret(options);
+  equal(hasActiveModal(), true);
+  (document as any).dispatchEvent({
+    type: "keydown",
+    key: "Escape",
+    preventDefault: () => undefined,
+    stopPropagation: () => undefined,
+  });
+  deepEqual(await pending, { submitted: false, value: "" });
+
+  pending = promptSecret(options);
+  secretPromptPart("[data-secret-prompt-cancel]").click();
+  deepEqual(await pending, { submitted: false, value: "" });
+
+  pending = promptSecret(options);
+  secretPromptPart("[data-secret-prompt-overlay]").click();
+  deepEqual(await pending, { submitted: false, value: "" });
+
+  pending = promptSecret(options);
+  const blankForm = secretPromptPart("[data-secret-prompt-form]");
+  blankForm.dispatchEvent({
+    type: "submit",
+    target: blankForm,
+    preventDefault: () => undefined,
+  });
+  deepEqual(await pending, { submitted: true, value: "" });
+
+  pending = promptSecret(options);
+  const input = secretPromptPart("[data-secret-prompt-input]");
+  input.value = "1234";
+  const form = secretPromptPart("[data-secret-prompt-form]");
+  form.dispatchEvent({
+    type: "submit",
+    target: form,
+    preventDefault: () => undefined,
+  });
+  deepEqual(await pending, { submitted: true, value: "1234" });
+});
+
+test("legacy FIDO removal cancellation issues no request; blank submission remains valid", async () => {
   const dom = installDom([
+    "authLead",
+    "unlockTabs",
+    "unlockPassphrase",
+    "unlockFido2",
+  ]);
+  const calls: Array<{ method: string; path: string; body?: any }> = [];
+  let resolveDetect: ((value: any) => void) | null = null;
+  const actions = createFido2Actions({
+    api: async (method, path, body) => {
+      if (path === "/api/fido2/detect") {
+        return new Promise((resolve) => {
+          resolveDetect = resolve;
+        });
+      }
+      calls.push({ method, path, body });
+      return {};
+    },
+    toast: () => undefined,
+    refresh: () => undefined,
+    currentStatus: () => ({ initialized: true, locked: false }),
+  });
+
+  let removal = actions.fido2RemoveKey("backup");
+  confirmPart("[data-confirm-action]").click();
+  await tick();
+  secretPromptPart("[data-secret-prompt-cancel]").click();
+  await removal;
+  equal(calls.length, 0);
+
+  removal = actions.fido2RemoveKey("backup");
+  confirmPart("[data-confirm-action]").click();
+  await tick();
+  const form = secretPromptPart("[data-secret-prompt-form]");
+  form.dispatchEvent({
+    type: "submit",
+    target: form,
+    preventDefault: () => undefined,
+  });
+  await removal;
+  deepEqual(calls, [
+    { method: "POST", path: "/api/fido2/remove", body: { label: "backup" } },
+  ]);
+
+  removal = actions.fido2RemoveKey("backup");
+  confirmPart("[data-confirm-action]").click();
+  await tick();
+  const input = secretPromptPart("[data-secret-prompt-input]");
+  input.value = "5678";
+  const pinForm = secretPromptPart("[data-secret-prompt-form]");
+  pinForm.dispatchEvent({
+    type: "submit",
+    target: pinForm,
+    preventDefault: () => undefined,
+  });
+  await removal;
+  deepEqual(calls[1], {
+    method: "POST",
+    path: "/api/fido2/remove",
+    body: { label: "backup", pin: "5678" },
+  });
+
+  dom.el("unlockTabs").classList.add("hidden");
+  dom.el("unlockPassphrase").classList.add("hidden");
+  dom.el("unlockFido2").classList.add("hidden");
+  document.body.dataset.mode = "locked";
+  const staleDetection = actions.showUnlockTabs();
+  document.body.dataset.mode = "unlocked";
+  resolveDetect?.({ device_present: true, device_count: 1 });
+  await staleDetection;
+  equal(dom.el("unlockTabs").classList.contains("hidden"), true);
+  equal(dom.el("unlockPassphrase").classList.contains("hidden"), true);
+  equal(dom.el("unlockFido2").classList.contains("hidden"), true);
+});
+
+test("shell renderer applies setup, locked, and unlocked DOM state", async () => {
+  const dom = installDom([
+    "passphrase",
     "compartmentBadge",
     "setupCard",
     "authCard",
@@ -68,9 +583,12 @@ test("shell renderer applies setup, locked, and unlocked DOM state", () => {
     "profilesCard",
     "xpubCard",
     "receivingCard",
+    "receiveBookCard",
     "treasuryCard",
     "inventoryCard",
     "depositsCard",
+    "plansCard",
+    "policyCard",
     "queueCard",
     "maintenanceCard",
     "backupCard",
@@ -112,28 +630,331 @@ test("shell renderer applies setup, locked, and unlocked DOM state", () => {
   renderer.applySetupUi();
   equal(calls.filter((entry) => entry === "wizard:reset").length, 1);
 
+  dom.el("unlockPassphrase").classList.add("hidden");
+  dom.el("unlockFido2").classList.remove("hidden");
   renderer.applyLockedUi();
+  await tick();
   equal(mode, "locked");
   equal(document.body.dataset.mode, "locked");
   equal(dom.el("lockForm").classList.contains("hidden"), true);
   equal(dom.el("authRecovery").classList.contains("hidden"), false);
+  equal(dom.el("unlockPassphrase").classList.contains("hidden"), false);
+  equal(dom.el("unlockFido2").classList.contains("hidden"), true);
 
-  renderer.applyUnlockedUi({ compartment_id: 1 }, [
-    { id: 1, label: "daily" },
-    { id: 2, label: "secure" },
-  ]);
+  renderer.applyUnlockedUi(
+    { compartment_id: 1, compartment_label: "daily", api_key_count: 0 },
+    [
+      { id: 1, label: "daily", threshold: 1 },
+      { id: 2, label: "secure", threshold: 2 },
+    ],
+  );
   equal(mode, "unlocked");
   equal(document.body.dataset.mode, "unlocked");
   equal(dom.el("pushCard").classList.contains("hidden"), false);
   equal(dom.el("receivingCard").classList.contains("hidden"), false);
+  equal(dom.el("receiveBookCard").classList.contains("hidden"), false);
   equal(dom.el("treasuryCard").classList.contains("hidden"), false);
+  equal(dom.el("plansCard").classList.contains("hidden"), false);
+  equal(dom.el("policyCard").classList.contains("hidden"), false);
   equal(dom.el("walletManagerCard").classList.contains("hidden"), false);
   ok(calls.includes("push-selectors"));
+});
+
+test("locked focus runs once and yields to mode changes, operator focus, and modals", async () => {
+  const dom = installDom();
+  const passphrase = dom.el("passphrase", "INPUT");
+  const firstAction = dom.document.createElement("button");
+  const nextAction = dom.document.createElement("button");
+  dom.document.body.appendChild(passphrase);
+  dom.document.body.appendChild(firstAction);
+  dom.document.body.appendChild(nextAction);
+
+  const renderer = createShellRenderer({
+    operatorCardIds: [],
+    setUiMode: () => undefined,
+    setCardsHidden: () => undefined,
+    setStatusBadge: () => undefined,
+    setSecretsAccess: () => undefined,
+    resetVaultCounts: () => undefined,
+    setUnlockGuidance: () => undefined,
+    updateHeroState: () => undefined,
+    updateWizardChrome: () => undefined,
+    resetSetupWizard: () => undefined,
+    renderCompartmentSwitcher: () => undefined,
+    renderActiveCompartment: () => undefined,
+    buildPushSelectors: () => undefined,
+  });
+
+  const scheduled: Array<() => void> = [];
+  const originalSetTimeout = globalThis.setTimeout;
+  (globalThis as any).setTimeout = (callback: () => void) => {
+    scheduled.push(callback);
+    return 0;
+  };
+
+  try {
+    document.body.dataset.mode = "unlocked";
+    firstAction.focus();
+    renderer.applyLockedUi();
+    equal(scheduled.length, 1);
+    scheduled.shift()?.();
+    equal(document.activeElement, passphrase);
+
+    renderer.applyLockedUi();
+    equal(scheduled.length, 0, "locked refreshes must not schedule focus again");
+
+    document.body.dataset.mode = "unlocked";
+    firstAction.focus();
+    renderer.applyLockedUi();
+    document.body.dataset.mode = "unlocked";
+    scheduled.shift()?.();
+    equal(document.activeElement, firstAction, "a stale locked callback must yield");
+
+    firstAction.focus();
+    renderer.applyLockedUi();
+    nextAction.focus();
+    scheduled.shift()?.();
+    equal(document.activeElement, nextAction, "operator focus wins after scheduling");
+
+    document.body.dataset.mode = "unlocked";
+    firstAction.focus();
+    renderer.applyLockedUi();
+    const pending = confirmDangerDialog({
+      title: "Modal owns focus",
+      body: "The deferred locked callback must not interrupt this dialog.",
+    });
+    const modalFocus = document.activeElement;
+    scheduled.shift()?.();
+    equal(document.activeElement, modalFocus);
+    (document.body.querySelector("[data-confirm-cancel]") as any).click();
+    equal(await pending, false);
+  } finally {
+    globalThis.setTimeout = originalSetTimeout;
+  }
+});
+
+test("shell renders the active compartment from the canonical status shape", () => {
+  const dom = installDom([
+    "compSwitcher",
+    "compartmentBadge",
+    "apiKeyCount",
+    "secretCount",
+    "compartmentCount",
+  ]);
+  // Canonical daemon wire shape (crates/sigillum-api/src/response.rs):
+  // active_compartment carries compartment_id/compartment_label, while
+  // unlocked_compartments entries carry id/label.
+  const status = {
+    initialized: true,
+    locked: false,
+    active_compartment: {
+      compartment_id: 2,
+      compartment_label: "vault2",
+      api_key_count: 3,
+      secret_count: 7,
+    },
+    unlocked_compartments: [
+      { id: 1, label: "vault1", threshold: 1 },
+      { id: 2, label: "vault2", threshold: 2 },
+    ],
+  };
+  const renderer = createShellRenderer({
+    operatorCardIds: [],
+    setUiMode: () => undefined,
+    setCardsHidden: () => undefined,
+    setStatusBadge: () => undefined,
+    setSecretsAccess: () => undefined,
+    resetVaultCounts: () => undefined,
+    setUnlockGuidance: () => undefined,
+    updateHeroState: () => undefined,
+    updateWizardChrome: () => undefined,
+    resetSetupWizard: () => undefined,
+    renderCompartmentSwitcher,
+    renderActiveCompartment,
+    buildPushSelectors: () => undefined,
+  });
+
+  renderer.applyUnlockedUi(status.active_compartment, status.unlocked_compartments);
+
+  equal(dom.el("compartmentBadge").textContent, "vault2");
+  equal(dom.el("apiKeyCount").textContent, "3");
+  equal(dom.el("secretCount").textContent, "7");
+  equal(dom.el("compartmentCount").textContent, "2");
+  const switcherButtons = dom.el("compSwitcher").children;
+  equal(switcherButtons.length, 2);
+  equal(switcherButtons[0].textContent, "vault1");
+  equal(switcherButtons[1].textContent, "vault2");
+  // Exactly one switcher button is active: the entry whose id matches
+  // active_compartment.compartment_id.
+  equal(switcherButtons.filter((button) => button.className === "active").length, 1);
+  equal(switcherButtons[1].className, "active");
+  equal(switcherButtons[1].dataset.action, "switchCompartment");
+  equal(switcherButtons[1].dataset.arg0, "2");
+  equal(switcherButtons[1].dataset.arg0Type, "number");
+
+  // A missing label falls back to the compartment id.
+  renderActiveCompartment(
+    { compartment_id: 3, compartment_label: "", api_key_count: 0, secret_count: null },
+    status.unlocked_compartments,
+  );
+  equal(dom.el("compartmentBadge").textContent, "Compartment 3");
+  equal(dom.el("secretCount").textContent, "(locked)");
+});
+
+test("workspace and compartment navigation preserve node identity and focus", () => {
+  const dom = installDom(["sectionNav", "compSwitcher"]);
+  const sections = [
+    { id: "overview", label: "Overview", summary: "Current status." },
+    { id: "receive", label: "Receive", summary: "Incoming funds." },
+    { id: "vault", label: "Vault", summary: "Protected material." },
+  ];
+
+  renderWorkspaceSectionNav(
+    dom.el("sectionNav") as unknown as HTMLElement,
+    sections,
+    "overview",
+  );
+  const receiveButton = dom.el("sectionNav").children[1];
+  receiveButton.focus();
+  renderWorkspaceSectionNav(
+    dom.el("sectionNav") as unknown as HTMLElement,
+    sections,
+    "receive",
+  );
+
+  equal(dom.el("sectionNav").children[1], receiveButton);
+  equal(document.activeElement, receiveButton);
+  equal(receiveButton.className, "nav-item active");
+  equal(receiveButton.getAttribute("aria-current"), "page");
+  equal(receiveButton.getAttribute("title"), "Incoming funds.");
+  equal(receiveButton.dataset.action, "selectWorkspaceSection");
+  equal(receiveButton.dataset.arg0, "receive");
+  equal(dom.el("sectionNav").children[0].getAttribute("aria-current"), null);
+
+  renderWorkspaceSectionNav(
+    dom.el("sectionNav") as unknown as HTMLElement,
+    sections.slice(0, 1),
+    "overview",
+  );
+  equal(dom.el("sectionNav").children.length, 0);
+
+  const compartments = [
+    { id: 1, label: "daily", threshold: 1 },
+    { id: 2, label: "secure", threshold: 2 },
+  ];
+  renderCompartmentSwitcher(compartments, {
+    compartment_id: 1,
+    compartment_label: "daily",
+    api_key_count: 0,
+  });
+  const dailyButton = dom.el("compSwitcher").children[0];
+  dailyButton.focus();
+  renderCompartmentSwitcher(compartments, {
+    compartment_id: 2,
+    compartment_label: "secure",
+    api_key_count: 0,
+  });
+
+  equal(dom.el("compSwitcher").children[0], dailyButton);
+  equal(document.activeElement, dailyButton);
+  equal(dailyButton.className, "");
+  equal(dom.el("compSwitcher").children[1].className, "active");
+  equal(dailyButton.dataset.action, "switchCompartment");
+  equal(dailyButton.dataset.arg0, "1");
+  equal(dailyButton.dataset.arg0Type, "number");
+
+  renderCompartmentSwitcher(compartments.slice(0, 1), {
+    compartment_id: 1,
+    compartment_label: "daily",
+    api_key_count: 0,
+  });
+  equal(dom.el("compSwitcher").children.length, 0);
+  equal(dom.el("compSwitcher").classList.contains("hidden"), true);
+});
+
+test("discovery job cancel and resume controls drive the real endpoints", async () => {
+  const dom = installDom([
+    "inventoryJobList",
+    "inventoryAddressList",
+    "inventoryHoldingList",
+    "nftMetadataList",
+    "nftSuspiciousList",
+  ]);
+  const calls: Array<{ method: string; path: string; body: unknown }> = [];
+  const toasts: string[] = [];
+  const inventory = createInventoryActions({
+    api: async (method: string, path: string, body?: unknown) => {
+      calls.push({ method, path, body });
+      if (path === "/api/discovery/jobs/cancel") {
+        return {
+          status: "cancel_requested",
+          job: { id: "scan-1", status: "running" },
+          operation: { id: "op-1", state: "cancel_requested" },
+        };
+      }
+      if (path === "/api/discovery/jobs/resume") {
+        return {
+          status: "running",
+          job: { id: "scan-2", status: "running" },
+          operation: { id: "op-2", state: "running" },
+        };
+      }
+      return {};
+    },
+    toast: (message: string) => {
+      toasts.push(message);
+    },
+    downloadJson: () => undefined,
+  });
+  inventory.renderInventoryState({
+    jobs: [{ id: "scan-1", status: "running", wallet_profiles: ["daily"] }],
+    addresses: [],
+    holdings: [],
+  });
+  const html = dom.el("inventoryJobList").innerHTML;
+  // The job list renders with both verbs enabled — the daemon honors them
+  // for real since plan task 1.2 landed.
+  ok(html.includes("scan-1"));
+  ok(html.includes(">running</span>"));
+  equal(html.split('data-action="cancelDiscoveryJob"').length - 1, 1);
+  equal(html.split('data-action="resumeDiscoveryJob"').length - 1, 1);
+  ok(!html.includes("Cancel/resume arrives in a future update"));
+  ok(!html.includes("disabled title="));
+
+  // Cancel gates on the shared confirm dialog before posting.
+  const posts = () => calls.filter((call) => call.method === "POST");
+  let pending = inventory.cancelDiscoveryJob("scan-1");
+  equal(posts().length, 0, "no request before the dialog is answered");
+  await answerConfirm("action");
+  await pending;
+  deepEqual(posts()[0], {
+    method: "POST",
+    path: "/api/discovery/jobs/cancel",
+    body: { id: "scan-1" },
+  });
+  ok(toasts.some((message) => message.includes("Cancel requested")));
+
+  // Dismissing the dialog skips the request entirely.
+  pending = inventory.cancelDiscoveryJob("scan-1");
+  await answerConfirm("cancel");
+  await pending;
+  equal(posts().length, 1, "dismissed confirm must not post");
+
+  // Resume posts to the real verb and reports the background restart.
+  await inventory.resumeDiscoveryJob("scan-1");
+  deepEqual(posts()[posts().length - 1], {
+    method: "POST",
+    path: "/api/discovery/jobs/resume",
+    body: { id: "scan-1" },
+  });
+  ok(toasts.some((message) => message.includes("resumed in the background")));
 });
 
 test("session requests persist fresh tokens and clear stale tokens on 401", async () => {
   installDom();
   clearSessionToken();
+  const tokenChanges: Array<string | null> = [];
+  const unsubscribe = subscribeSessionToken((token) => tokenChanges.push(token));
   writeSessionToken("old-token");
   let captured: any = null;
   (globalThis as any).fetch = async (_path: string, init: any) => {
@@ -146,8 +967,18 @@ test("session requests persist fresh tokens and clear stale tokens on 401", asyn
 
   await requestWithSession("POST", "/api/example", { ok: true });
   equal(captured.headers.Authorization, "Bearer old-token");
+  equal(captured.headers["X-Sigillum-Background"], undefined);
   equal(captured.body, '{"ok":true}');
   equal(readSessionToken(), "new-token");
+
+  await requestWithSession("GET", "/api/background", undefined, {
+    background: true,
+  });
+  equal(captured.headers["X-Sigillum-Background"], "1");
+  await withBackgroundRequests(() =>
+    requestWithSession("GET", "/api/refresh-cycle"),
+  );
+  equal(captured.headers["X-Sigillum-Background"], "1");
 
   (globalThis as any).fetch = async () => ({
     status: 401,
@@ -155,6 +986,57 @@ test("session requests persist fresh tokens and clear stale tokens on 401", asyn
   });
   await requestWithSession("GET", "/api/expired");
   equal(readSessionToken(), null);
+
+  let finishStaleRequest: (() => void) | null = null;
+  writeSessionToken("request-token");
+  (globalThis as any).fetch = async () => {
+    await new Promise<void>((resolve) => {
+      finishStaleRequest = resolve;
+    });
+    return {
+      status: 401,
+      json: async () => ({ error: "expired old request" }),
+    };
+  };
+  const staleRequest = requestWithSession("GET", "/api/stale");
+  writeSessionToken("replacement-token");
+  finishStaleRequest?.();
+  await staleRequest;
+  equal(readSessionToken(), "replacement-token");
+  deepEqual(tokenChanges, [
+    "old-token",
+    "new-token",
+    null,
+    "request-token",
+    "replacement-token",
+  ]);
+  unsubscribe();
+});
+
+test("session requests carry structured error code and fields through", async () => {
+  installDom();
+  clearSessionToken();
+  const envelope = {
+    code: "validation_failed",
+    error: "name exceeds maximum length of 256 bytes (got 300 bytes)",
+    fields: [
+      {
+        field: "name",
+        message: "name exceeds maximum length of 256 bytes (got 300 bytes)",
+      },
+    ],
+  };
+  (globalThis as any).fetch = async () => ({
+    status: 400,
+    json: async () => envelope,
+  });
+
+  const payload = await requestWithSession("POST", "/api/profiles/evm/upsert", {
+    name: "x",
+  });
+  equal(payload.error, envelope.error);
+  equal(payload.code, "validation_failed");
+  deepEqual(payload.fields, envelope.fields);
 });
 
 test("session actions drive unlock, lock, and browser logout workflow", async () => {
@@ -164,7 +1046,6 @@ test("session actions drive unlock, lock, and browser logout workflow", async ()
   const calls: Array<{ method: string; path: string; body?: any }> = [];
   const toasts: Array<{ message: string; type?: string }> = [];
   let refreshCount = 0;
-  let confirmResult = false;
   const actions = createSessionActions({
     api: async (method, path, body) => {
       calls.push({ method, path, body });
@@ -188,7 +1069,6 @@ test("session actions drive unlock, lock, and browser logout workflow", async ()
     refresh: () => {
       refreshCount += 1;
     },
-    confirm: () => confirmResult,
   });
 
   // Empty passphrase: inline error, no network call, nothing silent.
@@ -231,12 +1111,15 @@ test("session actions drive unlock, lock, and browser logout workflow", async ()
   deepEqual(toasts.pop(), { message: "Unlock failed: bad passphrase.", type: "error" });
 
   writeSessionToken("still-active");
-  await actions.lock();
+  let lockPending = actions.lock();
+  await answerConfirm("cancel");
+  await lockPending;
   equal(readSessionToken(), "still-active");
   ok(!calls.some((call) => call.path === "/api/lock"));
 
-  confirmResult = true;
-  await actions.lock();
+  lockPending = actions.lock();
+  await answerConfirm("action");
+  await lockPending;
   deepEqual(calls.pop(), { method: "POST", path: "/api/lock", body: undefined });
   equal(readSessionToken(), null);
   deepEqual(toasts.pop(), { message: "All compartments locked", type: undefined });
@@ -254,8 +1137,45 @@ test("session actions drive unlock, lock, and browser logout workflow", async ()
   equal(refreshCount, 4);
 });
 
+test("wizard steps focus the first enabled control or the step container", () => {
+  const dom = installDom();
+  const controlStep = dom.el("wizFocusControls");
+  controlStep.classList.add("wizard-step");
+  const helpTip = dom.document.createElement("span");
+  helpTip.setAttribute("tabindex", "0");
+  const disabledInput = dom.document.createElement("input");
+  disabledInput.disabled = true;
+  const enabledButton = dom.document.createElement("button");
+  controlStep.appendChild(helpTip);
+  controlStep.appendChild(disabledInput);
+  controlStep.appendChild(enabledButton);
+  dom.document.body.appendChild(controlStep);
+
+  const emptyStep = dom.el("wizFocusContainer");
+  emptyStep.classList.add("wizard-step");
+  dom.document.body.appendChild(emptyStep);
+
+  const wizard = createSetupWizard({
+    api: async () => ({}),
+    toast: () => undefined,
+    refresh: () => undefined,
+    submitNewFido2Pin: async () => undefined,
+    friendlyFidoError: (message) => String(message),
+  });
+
+  wizard.wizShowStep("wizFocusControls");
+  equal(controlStep.classList.contains("active"), true);
+  equal(document.activeElement, enabledButton);
+
+  wizard.wizShowStep("wizFocusContainer");
+  equal(emptyStep.classList.contains("active"), true);
+  equal(emptyStep.getAttribute("tabindex"), "-1");
+  equal(document.activeElement, emptyStep);
+});
+
 test("setup wizard passphrase path validates and initializes a local vault", async () => {
   const dom = installDom([
+    "setupCard",
     "wizStep0",
     "wizStepPassphrase",
     "wizStepDone",
@@ -270,6 +1190,26 @@ test("setup wizard passphrase path validates and initializes a local vault", asy
     "wizDoneDetail",
     "wizLinkageChoiceStatus",
   ]);
+  const wizardSteps = [
+    dom.el("wizStepWelcome"),
+    dom.el("wizStep0"),
+    dom.el("wizStepPassphrase"),
+    dom.el("wizStepDone"),
+  ];
+  wizardSteps.forEach((step) => step.classList.add("wizard-step"));
+  dom.el("wizStep0").classList.add("active");
+  (document as any).querySelectorAll = (selector: string) =>
+    selector === ".wizard-step" ? wizardSteps : [];
+  let focused = "";
+  (dom.el("wizStageTitle") as any).focus = () => {
+    focused = "wizStageTitle";
+  };
+  (dom.el("wizPassphrase") as any).focus = () => {
+    focused = "wizPassphrase";
+  };
+  (dom.el("wizPassphraseConfirm") as any).focus = () => {
+    focused = "wizPassphraseConfirm";
+  };
   const calls: Array<{ method: string; path: string; body?: any }> = [];
   const toasts: Array<{ message: string; type?: string }> = [];
   let refreshed = false;
@@ -297,8 +1237,25 @@ test("setup wizard passphrase path validates and initializes a local vault", asy
       friendlyFidoError: (message) => String(message),
     });
 
+    wizard.wizGetStarted();
+    equal(dom.el("wizStep0").classList.contains("active"), true);
+    equal(dom.el("wizStep0").getAttribute("aria-hidden"), "false");
+    equal((dom.el("wizStep0") as any).inert, false);
+    equal(focused, "wizStageTitle");
+    equal(dom.el("wizStageTitle").textContent, "Choose a protection model");
+
     wizard.wizPreset("passphrase");
     equal(dom.el("wizStepPassphrase").classList.contains("active"), true);
+    equal(dom.el("wizStep0").getAttribute("aria-hidden"), "true");
+    equal(dom.el("wizStepPassphrase").getAttribute("aria-hidden"), "false");
+    equal((dom.el("wizStep0") as any).inert, true);
+    equal((dom.el("wizStepPassphrase") as any).inert, false);
+    equal(dom.el("setupCard").getAttribute("role"), "region");
+    equal(dom.el("setupCard").getAttribute("aria-labelledby"), "wizStageTitle");
+    equal(dom.el("wizStageTitle").getAttribute("role"), "heading");
+    equal(dom.el("wizStageTitle").getAttribute("aria-level"), "2");
+    equal(dom.el("wizPassphrase").getAttribute("aria-label"), "New vault passphrase");
+    equal(focused, "wizStageTitle");
     equal(dom.el("wizStageTitle").textContent, "Create your first local compartment");
 
     dom.el("wizPLabel").value = "browser-smoke";
@@ -307,12 +1264,16 @@ test("setup wizard passphrase path validates and initializes a local vault", asy
     await wizard.wizInitPassphrase();
     equal(calls.length, 0);
     deepEqual(toasts.pop(), { message: "Min 8 characters", type: "error" });
+    equal(dom.el("wizPassphrase").getAttribute("aria-invalid"), "true");
+    equal(focused, "wizPassphrase");
 
     dom.el("wizPassphrase").value = "browser-smoke-passphrase-123";
     dom.el("wizPassphraseConfirm").value = "browser-smoke-passphrase-456";
     await wizard.wizInitPassphrase();
     equal(calls.length, 0);
     deepEqual(toasts.pop(), { message: "Passphrases do not match", type: "error" });
+    equal(dom.el("wizPassphraseConfirm").getAttribute("aria-invalid"), "true");
+    equal(focused, "wizPassphraseConfirm");
 
     dom.el("wizPassphraseConfirm").value = "browser-smoke-passphrase-123";
     await wizard.wizInitPassphrase();
@@ -336,6 +1297,11 @@ test("setup wizard passphrase path validates and initializes a local vault", asy
     );
     equal(dom.el("wizStepDone").classList.contains("active"), true);
     equal(refreshed, true);
+
+    wizard.reset();
+    equal(dom.el("wizStepWelcome").classList.contains("active"), true);
+    equal(dom.el("wizStepDone").getAttribute("aria-hidden"), "true");
+    equal(dom.el("wizStageTitle").textContent, "Before you create a vault");
   } finally {
     globalThis.setTimeout = originalSetTimeout;
   }
@@ -469,9 +1435,10 @@ test("setup wizard can defer payer-linkage protection without policy update", ()
     false,
   );
   equal(dom.el("wizLinkageChoiceStatus").classList.contains("hidden"), false);
-  ok((dom.el("wizLinkageChoiceStatus").textContent || "").length > 0);
+  // Declining records nothing: the API default keeps protection ON.
+  ok(dom.el("wizLinkageChoiceStatus").textContent?.includes("defaults to ON"));
   deepEqual(toasts.pop(), {
-    message: "You can enable payer-linkage protection later in Treasury policy.",
+    message: "Payer-linkage protection defaults to on; adjust anytime in Treasury policy.",
     type: undefined,
   });
 });
@@ -553,45 +1520,38 @@ test("setup wizard can defer merkle claim execution without policy update", () =
   });
 });
 
-test("setup wizard enables sponsor gas top-ups from done step", async () => {
+test("setup wizard routes gas top-up opt-in through the finite-cap policy editor", () => {
   const dom = installDom(["wizGasTopupsChoiceStatus"]);
   dom.el("wizGasTopupsChoiceStatus").classList.add("hidden");
   const calls: Array<{ method: string; path: string; body?: any }> = [];
   const toasts: Array<{ message: string; type?: string }> = [];
+  let policyNavigations = 0;
 
   const wizard = createSetupWizard({
     api: async (method, path, body) => {
       calls.push({ method, path, body });
-      if (path === "/api/treasury/policy") return { policy: null };
       return {};
     },
     toast: (message, type) => toasts.push({ message, type }),
     refresh: () => undefined,
+    navigateToMovePolicy: () => {
+      policyNavigations += 1;
+    },
     submitNewFido2Pin: async () => undefined,
     friendlyFidoError: (message) => String(message),
   });
 
-  await wizard.wizEnableGasTopups();
+  wizard.wizEnableGasTopups();
 
-  deepEqual(calls, [
-    {
-      method: "GET",
-      path: "/api/treasury/policy",
-      body: undefined,
-    },
-    {
-      method: "POST",
-      path: "/api/treasury/policy/update",
-      body: { enabled: false, allow_gas_topups: true },
-    },
-  ]);
+  deepEqual(calls, []);
+  equal(policyNavigations, 1);
   equal(dom.el("wizGasTopupsChoiceStatus").classList.contains("hidden"), false);
   equal(
     dom.el("wizGasTopupsChoiceStatus").textContent,
-    "Sponsor gas top-up opt-in recorded. Top-ups only appear inside reviewed consolidation plans, are capped by the Treasury policy, and cross-party sponsor funding is still linkage-checked.",
+    "Sponsor gas top-ups need a finite maximum. Open Move, enter the cap in Treasury policy, review the recovery gates, and save.",
   );
   deepEqual(toasts.pop(), {
-    message: "Sponsor gas top-up opt-in recorded",
+    message: "Set a finite sponsor gas top-up cap in Treasury policy.",
     type: undefined,
   });
 });
@@ -781,7 +1741,13 @@ test("queue and inventory renderers produce reviewable DOM summaries", () => {
   ok(dom.el("consolidationPlanList").innerHTML.includes("fund_gas"));
   ok(dom.el("consolidationPlanList").innerHTML.includes("sponsor=0xsponsor"));
   ok(dom.el("consolidationPlanList").innerHTML.includes("funds=0xfunded"));
-  ok(dom.el("consolidationPlanList").innerHTML.includes("topup=0x123"));
+  // Native top-up humanizes to ETH; the raw hex stays behind the "raw" details.
+  ok(
+    dom
+      .el("consolidationPlanList")
+      .innerHTML.includes("topup=0.000000000000000291 ETH"),
+  );
+  ok(dom.el("consolidationPlanList").innerHTML.includes(">0x123</code>"));
   ok(dom.el("consolidationPlanList").innerHTML.includes("simulateConsolidationPlan"));
   ok(dom.el("consolidationPlanList").innerHTML.includes("exportConsolidationPlan"));
   ok(dom.el("consolidationPlanList").innerHTML.includes("Safe JSON"));
@@ -796,6 +1762,296 @@ test("queue and inventory renderers produce reviewable DOM summaries", () => {
   // No treasury policy loaded: no Execute affordance may render.
   ok(!dom.el("consolidationPlanList").innerHTML.includes("enqueuePlanStep"));
   ok(!dom.el("consolidationPlanList").innerHTML.includes("Execute All Eligible"));
+});
+
+test("format helpers humanize amounts, quantities, timestamps, and chains", () => {
+  installDom();
+
+  // BigInt-safe token amounts at various decimals.
+  equal(formatTokenAmount("0xde0b6b3a7640000", 18), "1");
+  equal(formatTokenAmount("0x" + (1500000000000000000n).toString(16), 18), "1.5");
+  equal(formatTokenAmount("0x123", 18), "0.000000000000000291");
+  equal(formatTokenAmount("0xf4240", 6), "1");
+  equal(formatTokenAmount("0x" + (25000000n).toString(16), 6), "25");
+  equal(formatTokenAmount("0x0", 18), "0");
+  equal(formatTokenAmount("nonsense"), null);
+  equal(formatTokenAmount(""), null);
+  equal(formatTokenAmount("0x"), null);
+  equal(formatTokenAmount(null), null);
+  equal(formatTokenAmount(undefined), null);
+
+  equal(formatEthAmount("0xde0b6b3a7640000"), "1");
+  equal(formatEthAmount("0xde0b6b3a7640000", "ETH"), "1 ETH");
+  equal(formatEthAmount("not-hex", "ETH"), null);
+
+  equal(formatHexQuantity("0x5208"), "21000");
+  equal(formatHexQuantity("0x0"), "0");
+  equal(formatHexQuantity("nope"), null);
+  equal(formatHexQuantity(null), null);
+
+  // Timestamps share the single locale formatter; falsy stays a placeholder.
+  equal(formatTimestamp(0), "-");
+  equal(formatTimestamp(null), "-");
+  equal(formatTimestamp(undefined), "-");
+  equal(formatTimestamp(1717900000), new Date(1717900000 * 1000).toLocaleString());
+
+  // Chain ids resolve via the registry, else fall back to "Chain N".
+  const chains = [
+    { name: "ethereum", chain_id: 1, enabled: true },
+    { name: "retired", chain_id: 2, enabled: false },
+  ] as any;
+  equal(chainLabel(1, chains), "1 (ethereum)");
+  equal(chainLabel("1", chains), "1 (ethereum)");
+  equal(chainLabel(2, chains), "Chain 2", "disabled profiles do not resolve");
+  equal(chainLabel(56, chains), "Chain 56");
+  equal(chainLabel(1, []), "Chain 1");
+  equal(chainLabel(null, chains), "-");
+  equal(chainLabel(undefined, chains), "-");
+
+  // Raw values stay one click away behind the "raw" details affordance.
+  const amountHtml = amountWithRawHtml("0xde0b6b3a7640000", { symbol: "ETH" });
+  ok(amountHtml.includes("1 ETH"));
+  ok(amountHtml.includes('<details class="raw-details">'));
+  ok(amountHtml.includes(">0xde0b6b3a7640000</code>"));
+  equal(amountWithRawHtml(undefined, { symbol: "ETH" }), "-");
+  const quantityHtml = quantityWithRawHtml("0x5208");
+  ok(quantityHtml.includes("21000"));
+  ok(quantityHtml.includes(">0x5208</code>"));
+  equal(quantityWithRawHtml(undefined), "-");
+});
+
+test("inventory views humanize balances, amounts, and timestamps", async () => {
+  const dom = installDom([
+    "chainProfileList",
+    "inventoryJobList",
+    "inventoryAddressList",
+    "inventoryHoldingList",
+    "watchAddressBookList",
+    "tokenRegistryList",
+    "riskCatalogList",
+    "riskFindingList",
+    "consolidationPlanList",
+    "nftMetaOptInList",
+    "nftMetadataList",
+    "nftSuspiciousList",
+  ]);
+  const onePointFiveEthHex = "0x" + (1500000000000000000n).toString(16);
+  const quarterEthHex = "0x" + (250000000000000000n).toString(16);
+  const twentyFiveUsdcHex = "0x" + (25000000n).toString(16);
+  const inventory = createInventoryActions({
+    api: async (_method, path) => {
+      if (path === "/api/chains") {
+        return {
+          profiles: [
+            {
+              name: "ethereum",
+              chain_family: "evm",
+              chain_id: 1,
+              provider_profile: null,
+              native_symbol: "ETH",
+              native_decimals: 18,
+              finality_blocks: 0,
+              permit2_address: null,
+              uniswap_v2_router_address: null,
+              capabilities: [],
+              enabled: true,
+              source: "builtin",
+              builtin: true,
+            },
+          ],
+        };
+      }
+      if (path === "/api/inventory/wallets") {
+        return {
+          jobs: [],
+          addresses: [
+            {
+              address: "0xabc",
+              activity_state: "funded",
+              wallet_family: "eth-seed",
+              wallet_profile: "archive",
+              chain_id: 1,
+              derivation_path: "m/44'/60'/0'/0/0",
+              native_balance_wei_hex: onePointFiveEthHex,
+              transaction_count: 3,
+            },
+          ],
+          holdings: [
+            {
+              asset_kind: "native",
+              status: "active",
+              address: "0xabc",
+              amount_hex: quarterEthHex,
+              wallet_family: "eth-seed",
+              wallet_profile: "archive",
+              provider_profile: "mainnet",
+              chain_id: 1,
+            },
+            {
+              asset_kind: "erc20",
+              status: "active",
+              address: "0xabc",
+              asset_address: "0xToken",
+              amount_hex: twentyFiveUsdcHex,
+              wallet_family: "eth-seed",
+              wallet_profile: "archive",
+              provider_profile: "mainnet",
+              chain_id: 1,
+            },
+            {
+              asset_kind: "erc20",
+              status: "active",
+              address: "0xabc",
+              asset_address: "0xUnknownToken",
+              amount_hex: "0xff",
+              wallet_family: "eth-seed",
+              wallet_profile: "archive",
+              provider_profile: "mainnet",
+              chain_id: 1,
+            },
+          ],
+        };
+      }
+      if (path === "/api/inventory/token-registry") {
+        return {
+          lists: [
+            {
+              id: "list-1",
+              name: "default",
+              compartment_id: 1,
+              source: "operator",
+              entries: [{ chain_id: 1, address: "0xtoken", symbol: "USDC", decimals: 6 }],
+              created_at_unix: 1,
+              updated_at_unix: 1717900000,
+            },
+          ],
+        };
+      }
+      if (path === "/api/inventory/watch-addresses") {
+        return {
+          entries: [
+            {
+              id: "watch-1",
+              address: "0xwatch",
+              label: "vault",
+              tags: [],
+              source: "operator",
+              enabled: true,
+              created_at_unix: 1,
+              updated_at_unix: 1717900000,
+            },
+          ],
+        };
+      }
+      if (path === "/api/inventory/nft-metadata/opt-ins") {
+        return {
+          opt_ins: [
+            { chain_id: 1, contract_address: "0xnft", enabled: true, updated_at_unix: 1717900000 },
+          ],
+        };
+      }
+      return { entries: [], findings: [], plans: [] };
+    },
+    toast: () => undefined,
+    downloadJson: () => undefined,
+  });
+
+  await inventory.loadInventoryOperations();
+
+  // Native balances render as ETH with the raw wei behind "raw" details.
+  const addressHtml = dom.el("inventoryAddressList").innerHTML;
+  ok(addressHtml.includes("native=1.5 ETH"));
+  ok(addressHtml.includes(">" + onePointFiveEthHex + "</code>"));
+  ok(!addressHtml.includes("native=" + onePointFiveEthHex + " ·"));
+
+  // Holdings: native → ETH, registry-known token → token units, unknown
+  // token keeps the raw hex (decimals are never guessed).
+  const holdingHtml = dom.el("inventoryHoldingList").innerHTML;
+  ok(holdingHtml.includes("amount=0.25 ETH"));
+  ok(holdingHtml.includes(">" + quarterEthHex + "</code>"));
+  ok(holdingHtml.includes("amount=25 USDC"));
+  ok(holdingHtml.includes(">" + twentyFiveUsdcHex + "</code>"));
+  ok(holdingHtml.includes("amount=0xff"));
+
+  // Raw unix seconds become locale timestamps everywhere they were shown.
+  const humanTs = formatTimestamp(1717900000);
+  ok(dom.el("tokenRegistryList").innerHTML.includes("updated=" + humanTs));
+  ok(!dom.el("tokenRegistryList").innerHTML.includes("updated=1717900000"));
+  ok(dom.el("watchAddressBookList").innerHTML.includes("updated=" + humanTs));
+  ok(!dom.el("watchAddressBookList").innerHTML.includes("updated=1717900000"));
+  const optInHtml = dom.el("nftMetaOptInList").innerHTML;
+  ok(optInHtml.includes("updated=" + humanTs));
+  ok(!optInHtml.includes("updated=1717900000"));
+  ok(optInHtml.includes("chain=1 (ethereum)"));
+});
+
+test("operations views humanize deposit amounts and queue gas used", () => {
+  const dom = installDom(["depositList", "queueList"]);
+  const operations = createOperationsActions({
+    api: async () => ({}),
+    toast: () => undefined,
+    refresh: () => undefined,
+    showResultBox: () => undefined,
+    updateNextStepCard: () => undefined,
+  });
+  const oneEthHex = "0x" + (1000000000000000000n).toString(16);
+  operations.renderDeposits([
+    {
+      id: "dep-native",
+      status: "observed",
+      asset_kind: "native",
+      wallet_profile: "daily",
+      short_name: "dep-1",
+      stealth_address: "0xstealth",
+      ephemeral_public_key_hex: "0xephem",
+      view_tag_hex: "0x01",
+      expected_amount_hex: oneEthHex,
+      observed_amount_hex: "0x" + (500000000000000000n).toString(16),
+      observed_native_balance_wei_hex: oneEthHex,
+      auto_queue_sweep: true,
+      created_at_unix: 1,
+      updated_at_unix: 2,
+    },
+    {
+      id: "dep-token",
+      status: "observed",
+      asset_kind: "erc20",
+      wallet_profile: "daily",
+      short_name: "dep-2",
+      stealth_address: "0xstealth2",
+      ephemeral_public_key_hex: "0xephem2",
+      view_tag_hex: "0x02",
+      token_address: "0xtoken",
+      expected_amount_hex: "0xff",
+      auto_queue_sweep: false,
+      created_at_unix: 1,
+      updated_at_unix: 2,
+    },
+  ]);
+  const depositsHtml = dom.el("depositList").innerHTML;
+  ok(depositsHtml.includes("expected=1 ETH"));
+  ok(depositsHtml.includes("observed=0.5 ETH"));
+  ok(depositsHtml.includes("native=1 ETH"));
+  ok(depositsHtml.includes(">" + oneEthHex + "</code>"));
+  // ERC-20 amounts stay raw: this view has no registry decimals loaded.
+  ok(depositsHtml.includes("expected=0xff"));
+
+  operations.renderQueueJobs([
+    {
+      id: "job-1",
+      state: "confirmed",
+      kind: "eth_stealth_native_sweep",
+      wallet_profile: "daily",
+      transaction_hash_hex: "0xtx",
+      receipt_status: "success",
+      receipt_gas_used_hex: "0x5208",
+      created_at_unix: 1,
+      updated_at_unix: 2,
+    },
+  ]);
+  const queueHtml = dom.el("queueList").innerHTML;
+  ok(queueHtml.includes("gasUsed=21000"));
+  ok(queueHtml.includes(">0x5208</code>"));
 });
 
 test("plan execute affordances render only when gates pass and drive enqueue routes", async () => {
@@ -915,9 +2171,10 @@ test("plan execute affordances render only when gates pass and drive enqueue rou
   ok(html.includes("Execute All Eligible"));
   ok(html.includes("queuedJob=job-1"));
 
-  // Single-step enqueue posts the explicit confirm flag.
-  (globalThis as any).confirm = () => true;
-  await inventory.enqueuePlanStep("plan-exec", "step-exec");
+  // Single-step enqueue asks once, then posts the explicit confirm flag.
+  const stepPending = inventory.enqueuePlanStep("plan-exec", "step-exec");
+  await answerConfirm("action");
+  await stepPending;
   deepEqual(
     calls.find((call) => call.path === "/api/plans/enqueue-step"),
     {
@@ -928,25 +2185,29 @@ test("plan execute affordances render only when gates pass and drive enqueue rou
   );
 
   // Bulk enqueue probes for the exact daemon-computed phrase, renders it in
-  // the typed-confirmation dialog, and submits what the operator typed.
-  const promptMessages: string[] = [];
-  (globalThis as any).prompt = (message: string) => {
-    promptMessages.push(message);
-    return expectedPhrase;
-  };
-  await inventory.enqueuePlanBulk("plan-exec");
-  ok(promptMessages.some((message) => message.includes(expectedPhrase)));
+  // the typed-confirmation dialog, and submits only after the operator types
+  // it. A mistyped phrase keeps the danger button disabled and never reaches
+  // the daemon.
+  const bulkPending = inventory.enqueuePlanBulk("plan-exec");
+  await tick();
+  equal(confirmPart("[data-confirm-phrase]")?.textContent, expectedPhrase);
+  typeConfirmPhrase("EXECUTE 9 PLAN STEPS TOTAL 1 WEI");
+  equal(confirmPart("[data-confirm-action]").disabled, true);
+  typeConfirmPhrase(expectedPhrase);
+  equal(confirmPart("[data-confirm-action]").disabled, false);
+  confirmPart("[data-confirm-action]").click();
+  await bulkPending;
   const bulkCalls = calls.filter((call) => call.path === "/api/plans/enqueue-plan");
   equal(bulkCalls.length, 2);
   equal((bulkCalls[0].body as any).confirmation, "");
   equal((bulkCalls[1].body as any).confirmation, expectedPhrase);
   ok(toasts.some((message) => message.includes("Enqueued 1 step(s)")));
 
-  // A mistyped phrase never reaches the daemon.
-  (globalThis as any).prompt = () => "EXECUTE 9 PLAN STEPS TOTAL 1 WEI";
-  await inventory.enqueuePlanBulk("plan-exec");
+  // Cancelling the typed dialog stops after the probe: nothing is enqueued.
+  const cancelledBulk = inventory.enqueuePlanBulk("plan-exec");
+  await answerConfirm("cancel");
+  await cancelledBulk;
   equal(calls.filter((call) => call.path === "/api/plans/enqueue-plan").length, 3);
-  ok(toasts.some((message) => message.includes("Confirmation phrase does not match")));
 });
 
 test("chain profile UI renders registry fields and uses chain routes", async () => {
@@ -1081,8 +2342,9 @@ test("chain profile UI renders registry fields and uses chain routes", async () 
     },
   );
 
-  (globalThis as any).confirm = () => true;
-  await inventory.deleteChainProfile("test-rollup");
+  const deleteChainPending = inventory.deleteChainProfile("test-rollup");
+  await answerConfirm("action");
+  await deleteChainPending;
   deepEqual(
     calls.find((call) => call.path === "/api/chains/delete"),
     {
@@ -1166,7 +2428,9 @@ test("operation results include failure cause breakdowns", async () => {
     updateNextStepCard: () => undefined,
   });
 
-  await operations.processQueueBatch();
+  const batchPending = operations.processQueueBatch();
+  await answerConfirm("action");
+  await batchPending;
   ok(resultBoxes.queueProcessResult.includes("failures_by_cause"));
   ok(resultBoxes.queueProcessResult.includes("provider_error=1"));
   ok(resultBoxes.queueProcessResult.includes("policy_block=1"));
@@ -1219,11 +2483,519 @@ test("processQueueBatch surfaces a mid-drain pause reason in the result line", a
     updateNextStepCard: () => undefined,
   });
 
-  await operations.processQueueBatch();
+  const pauseBatchPending = operations.processQueueBatch();
+  await answerConfirm("action");
+  await pauseBatchPending;
   ok(
     resultBoxes.queueProcessResult.includes(
       "paused: execution_paused: queue execution is paused by the operator kill switch",
     ),
+  );
+});
+
+test("processQueueBatch can run in background and surfaces the operation id", async () => {
+  const dom = installDom(["queueProcessLimit", "queueProcessRunAsync", "queueList"]);
+  dom.el("queueProcessRunAsync").checked = true;
+  const resultBoxes: Record<string, string> = {};
+  const toasts: string[] = [];
+  let requestBody: any = null;
+  const operations = createOperationsActions({
+    api: async (_method, path, body) => {
+      if (path === "/api/queue/process") {
+        requestBody = body;
+        return {
+          processed: 0,
+          succeeded: 0,
+          jobs: [],
+          operation: { id: "op-q1", kind: "queue_process", state: "running" },
+        };
+      }
+      if (path === "/api/queue/jobs") return { jobs: [] };
+      if (path === "/api/treasury/policy") return {};
+      return {};
+    },
+    toast: (message: string) => {
+      toasts.push(message);
+    },
+    refresh: () => undefined,
+    showResultBox: (id, html) => {
+      resultBoxes[id] = html;
+    },
+    updateNextStepCard: () => undefined,
+  });
+
+  // The Phase 0 confirm dialog still gates the background submission.
+  const pending = operations.processQueueBatch();
+  await answerConfirm("action");
+  await pending;
+
+  equal(requestBody.run_async, true);
+  equal(requestBody.id, null);
+  ok(
+    toasts.some((message) => message.includes("operation op-q1")),
+    "toast surfaces the operation id: " + toasts.join(" | "),
+  );
+  equal(
+    resultBoxes.queueProcessResult,
+    undefined,
+    "background mode does not render a synchronous tally box",
+  );
+});
+
+test("runMaintenanceCycle sends run_async only in background mode and surfaces the operation id", async () => {
+  const dom = installDom([
+    "maintenanceDepositLimit",
+    "maintenanceQueueLimit",
+    "maintenanceAutoEnqueue",
+    "maintenanceRunAsync",
+    "depositList",
+    "queueList",
+  ]);
+  const resultBoxes: Record<string, string> = {};
+  const toasts: string[] = [];
+  const requestBodies: any[] = [];
+  const operations = createOperationsActions({
+    api: async (_method, path, body) => {
+      if (path === "/api/maintenance/run") {
+        requestBodies.push(body);
+        if ((body as any)?.run_async === true) {
+          return {
+            status: "accepted",
+            operation: { id: "op-m1", kind: "maintenance_run", state: "running" },
+          };
+        }
+        return {
+          status: "ok",
+          refreshed: 0,
+          detected: 0,
+          queued: 0,
+          processed: 0,
+          succeeded: 0,
+          failed: 0,
+          failures_by_cause: {},
+          deposits: [],
+          jobs: [],
+        };
+      }
+      if (path === "/api/queue/jobs") return { jobs: [] };
+      if (path === "/api/deposits/eth-stealth") return { deposits: [] };
+      if (path === "/api/treasury/policy") return {};
+      return {};
+    },
+    toast: (message: string) => {
+      toasts.push(message);
+    },
+    refresh: () => undefined,
+    showResultBox: (id, html) => {
+      resultBoxes[id] = html;
+    },
+    updateNextStepCard: () => undefined,
+  });
+
+  // Default: synchronous run, run_async stays absent from the request.
+  await operations.runMaintenanceCycle();
+  equal(
+    requestBodies[0]?.run_async,
+    undefined,
+    "run_async stays absent unless the background checkbox is checked",
+  );
+  ok(resultBoxes.maintenanceResult !== undefined, "sync run renders the tally box");
+
+  dom.el("maintenanceRunAsync").checked = true;
+  await operations.runMaintenanceCycle();
+  equal(requestBodies[1]?.run_async, true);
+  ok(
+    toasts.some((message) => message.includes("operation op-m1")),
+    "toast surfaces the operation id: " + toasts.join(" | "),
+  );
+});
+
+test("queue process batch and single job require confirmation before broadcast", async () => {
+  const dom = installDom(["queueProcessLimit", "queueList", "depositList"]);
+  dom.el("queueProcessLimit").value = "20";
+  const calls: Array<{ method: string; path: string; body?: any }> = [];
+  const operations = createOperationsActions({
+    api: async (method, path, body) => {
+      calls.push({ method, path, body });
+      if (path === "/api/queue/process") {
+        return { processed: 1, succeeded: 1, jobs: [] };
+      }
+      if (path === "/api/deposits/eth-stealth") return { deposits: [] };
+      return {};
+    },
+    toast: () => undefined,
+    refresh: () => undefined,
+    showResultBox: () => undefined,
+    updateNextStepCard: () => undefined,
+  });
+
+  // Cancelling the batch dialog never touches the process route.
+  let pending: Promise<void> = operations.processQueueBatch();
+  await tick();
+  ok(
+    confirmPart("[data-confirm-body]")?.textContent.includes(
+      "Process up to 20 queued jobs now?",
+    ),
+    "batch dialog states the job count and consequence",
+  );
+  ok(
+    confirmPart("[data-confirm-body]")?.textContent.includes("signed and broadcast"),
+    "batch dialog states the broadcast consequence",
+  );
+  await answerConfirm("cancel");
+  await pending;
+  equal(calls.filter((call) => call.path === "/api/queue/process").length, 0);
+
+  // Confirming posts the batch drain with the operator's limit.
+  pending = operations.processQueueBatch();
+  await answerConfirm("action");
+  await pending;
+  deepEqual(calls.find((call) => call.path === "/api/queue/process"), {
+    method: "POST",
+    path: "/api/queue/process",
+    body: { id: null, limit: 20 },
+  });
+
+  // Single-job processing is guarded the same way.
+  pending = operations.processQueueJob("job-7");
+  await answerConfirm("cancel");
+  await pending;
+  equal(calls.filter((call) => call.path === "/api/queue/process").length, 1);
+
+  pending = operations.processQueueJob("job-7");
+  await tick();
+  ok(confirmPart("[data-confirm-body]")?.textContent.includes('"job-7"'));
+  await answerConfirm("action");
+  await pending;
+  deepEqual(calls.filter((call) => call.path === "/api/queue/process")[1], {
+    method: "POST",
+    path: "/api/queue/process",
+    body: { id: "job-7", limit: 1 },
+  });
+});
+
+test("deposit sweep enqueue and deposit delete require confirmation", async () => {
+  installDom(["depositList", "queueList", "depositRefreshResult"]);
+  const calls: Array<{ method: string; path: string; body?: any }> = [];
+  const operations = createOperationsActions({
+    api: async (method, path, body) => {
+      calls.push({ method, path, body });
+      if (path === "/api/deposits/eth-stealth/enqueue-sweep") {
+        return { status: "queued", job: { id: "job-sweep-1" } };
+      }
+      return { status: "ok", deposits: [], jobs: [] };
+    },
+    toast: () => undefined,
+    refresh: () => undefined,
+    showResultBox: () => undefined,
+    updateNextStepCard: () => undefined,
+  });
+
+  let pending: Promise<void> = operations.enqueueDepositSweep("dep-1");
+  await answerConfirm("cancel");
+  await pending;
+  equal(
+    calls.filter((call) => call.path === "/api/deposits/eth-stealth/enqueue-sweep").length,
+    0,
+  );
+
+  pending = operations.enqueueDepositSweep("dep-1");
+  await tick();
+  ok(
+    confirmPart("[data-confirm-body]")?.textContent.includes("signed and broadcast"),
+    "sweep dialog states the on-chain consequence",
+  );
+  await answerConfirm("action");
+  await pending;
+  deepEqual(
+    calls.find((call) => call.path === "/api/deposits/eth-stealth/enqueue-sweep"),
+    {
+      method: "POST",
+      path: "/api/deposits/eth-stealth/enqueue-sweep",
+      body: { id: "dep-1" },
+    },
+  );
+
+  pending = operations.deleteDeposit("dep-1");
+  await answerConfirm("cancel");
+  await pending;
+  equal(
+    calls.filter((call) => call.path === "/api/deposits/eth-stealth/delete").length,
+    0,
+  );
+
+  pending = operations.deleteDeposit("dep-1");
+  await answerConfirm("action");
+  await pending;
+  deepEqual(
+    calls.find((call) => call.path === "/api/deposits/eth-stealth/delete"),
+    {
+      method: "POST",
+      path: "/api/deposits/eth-stealth/delete",
+      body: { id: "dep-1" },
+    },
+  );
+});
+
+test("deposit create surfaces stealth generation warnings as toasts and a pinned box", async () => {
+  const dom = installDom([
+    "depositNativeWalletProfile",
+    "depositNativeExpected",
+    "depositNativeMinSweep",
+    "depositNativeDestination",
+    "depositNativeNote",
+    "depositNativeAutoQueue",
+    "depositCreateWarnings",
+  ]);
+  dom.el("depositNativeWalletProfile").value = "stealth-main";
+  const calls: Array<{ method: string; path: string; body?: any }> = [];
+  const toasts: Array<{ message: string; type?: string }> = [];
+  const operations = createOperationsActions({
+    api: async (method, path, body) => {
+      calls.push({ method, path, body });
+      if (path === "/api/deposits/eth-stealth/create-native") {
+        return {
+          status: "created",
+          deposit: { id: "dep-1", stealth_address: "0xstealth1" },
+          warnings: [
+            "This meta-address does not match any of this vault's known stealth wallets.",
+            "This ephemeral key was already used for an existing deposit.",
+          ],
+        };
+      }
+      return {};
+    },
+    toast: (message, type) => {
+      toasts.push({ message, type });
+    },
+    refresh: () => undefined,
+    showResultBox,
+    updateNextStepCard: () => undefined,
+  });
+
+  await operations.createNativeDeposit();
+
+  deepEqual(
+    calls.map((call) => call.path),
+    ["/api/deposits/eth-stealth/create-native"],
+  );
+  deepEqual(
+    toasts.filter((toast) => toast.type === "warning").map((toast) => toast.message),
+    [
+      "This meta-address does not match any of this vault's known stealth wallets.",
+      "This ephemeral key was already used for an existing deposit.",
+    ],
+  );
+  ok(toasts.some((toast) => toast.message === "Native deposit created"));
+  const box = dom.el("depositCreateWarnings");
+  equal(box.classList.contains("hidden"), false);
+  ok(box.innerHTML.includes("0xstealth1"));
+  ok(box.innerHTML.includes("does not match any of this vault"));
+  ok(box.innerHTML.includes("ephemeral key was already used"));
+});
+
+test("deposit create without stealth generation warnings shows no warning UI", async () => {
+  const dom = installDom([
+    "depositErc20WalletProfile",
+    "depositErc20TokenAddress",
+    "depositErc20Expected",
+    "depositErc20MinSweep",
+    "depositErc20Destination",
+    "depositErc20Note",
+    "depositErc20AutoQueue",
+    "depositNativeWalletProfile",
+    "depositNativeExpected",
+    "depositNativeMinSweep",
+    "depositNativeDestination",
+    "depositNativeNote",
+    "depositNativeAutoQueue",
+    "depositCreateWarnings",
+  ]);
+  dom.el("depositErc20WalletProfile").value = "stealth-main";
+  dom.el("depositErc20TokenAddress").value = "0xtoken";
+  dom.el("depositNativeWalletProfile").value = "stealth-main";
+  const toasts: Array<{ message: string; type?: string }> = [];
+  const operations = createOperationsActions({
+    api: async (_method, path) => {
+      if (path === "/api/deposits/eth-stealth/create-erc20") {
+        return { status: "created", deposit: { id: "dep-2" }, warnings: [] };
+      }
+      if (path === "/api/deposits/eth-stealth/create-native") {
+        return { status: "created", deposit: { id: "dep-3" } };
+      }
+      return {};
+    },
+    toast: (message, type) => {
+      toasts.push({ message, type });
+    },
+    refresh: () => undefined,
+    showResultBox,
+    updateNextStepCard: () => undefined,
+  });
+
+  await operations.createErc20Deposit();
+  await operations.createNativeDeposit();
+
+  equal(toasts.filter((toast) => toast.type === "warning").length, 0);
+  const box = dom.el("depositCreateWarnings");
+  equal(box.classList.contains("hidden"), true);
+  equal(box.innerHTML, "");
+});
+
+test("deposit create sends request-gas fields when the payer-gas option is checked", async () => {
+  const dom = installDom([
+    "depositNativeWalletProfile",
+    "depositNativeExpected",
+    "depositNativeMinSweep",
+    "depositNativeDestination",
+    "depositNativeNote",
+    "depositNativeAutoQueue",
+    "depositNativeRequestGas",
+    "depositNativeGasAmount",
+    "depositErc20WalletProfile",
+    "depositErc20TokenAddress",
+    "depositErc20Expected",
+    "depositErc20MinSweep",
+    "depositErc20Destination",
+    "depositErc20Note",
+    "depositErc20AutoQueue",
+    "depositErc20RequestGas",
+    "depositErc20GasAmount",
+    "depositCreateWarnings",
+  ]);
+  dom.el("depositNativeWalletProfile").value = "stealth-main";
+  dom.el("depositNativeRequestGas").checked = true;
+  dom.el("depositNativeGasAmount").value = "0x5208";
+  dom.el("depositErc20WalletProfile").value = "stealth-main";
+  dom.el("depositErc20TokenAddress").value = "0xtoken";
+  const calls: Array<{ method: string; path: string; body?: any }> = [];
+  const operations = createOperationsActions({
+    api: async (method, path, body) => {
+      calls.push({ method, path, body });
+      return { status: "created", deposit: { id: "dep-gas" }, warnings: [] };
+    },
+    toast: () => undefined,
+    refresh: () => undefined,
+    showResultBox,
+    updateNextStepCard: () => undefined,
+  });
+
+  await operations.createNativeDeposit();
+  await operations.createErc20Deposit();
+
+  const nativeBody = calls.find(
+    (call) => call.path === "/api/deposits/eth-stealth/create-native",
+  )?.body;
+  equal(nativeBody.request_gas, true);
+  equal(nativeBody.gas_amount_wei_hex, "0x5208");
+  const erc20Body = calls.find(
+    (call) => call.path === "/api/deposits/eth-stealth/create-erc20",
+  )?.body;
+  // Unchecked: the request goes out with request_gas off and no gas amount.
+  equal(erc20Body.request_gas, false);
+  equal(erc20Body.gas_amount_wei_hex, null);
+  // The gas amount field clears after a successful create.
+  equal(dom.el("depositNativeGasAmount").value, "");
+});
+
+test("deposit rows surface requested gas, sponsor top-up state, and the needs-gas explainer", () => {
+  const dom = installDom(["depositList", "queueList"]);
+  const operations = createOperationsActions({
+    api: async () => ({}),
+    toast: () => undefined,
+    refresh: () => undefined,
+    showResultBox: () => undefined,
+    updateNextStepCard: () => undefined,
+  });
+  operations.renderDeposits([
+    {
+      id: "dep-needs-gas-manual",
+      status: "funded_needs_gas",
+      asset_kind: "erc20",
+      wallet_profile: "daily",
+      short_name: "dep-1",
+      stealth_address: "0xstealth1",
+      ephemeral_public_key_hex: "0xephem1",
+      view_tag_hex: "0x01",
+      token_address: "0xtoken",
+      requested_gas_wei_hex: "0x" + (42000000000000n).toString(16),
+      observed_native_balance_wei_hex: "0x0",
+      auto_queue_sweep: true,
+      created_at_unix: 1,
+      updated_at_unix: 2,
+    },
+    {
+      id: "dep-needs-gas-sponsored",
+      status: "funded_needs_gas",
+      asset_kind: "erc20",
+      wallet_profile: "daily",
+      short_name: "dep-2",
+      stealth_address: "0xstealth2",
+      ephemeral_public_key_hex: "0xephem2",
+      view_tag_hex: "0x02",
+      token_address: "0xtoken",
+      gas_topup_job_id: "job-topup-1",
+      gas_topup_job_state: "sent",
+      auto_queue_sweep: true,
+      created_at_unix: 1,
+      updated_at_unix: 2,
+    },
+  ]);
+  const html = dom.el("depositList").innerHTML;
+  // Requested payer gas humanizes to ETH.
+  ok(html.includes("requested payer gas=0.000042 ETH"), html);
+  // A gas-starved deposit without a sponsor explains the manual path.
+  ok(html.includes("no native gas for the sweep"), html);
+  ok(html.includes("fund the address manually"), html);
+  // A sponsored deposit shows the top-up job state and what it waits for.
+  ok(html.includes("sponsor top-up state=sent"), html);
+  ok(html.includes("waiting for the sponsor gas top-up to confirm"), html);
+  // A needs-gas status warns rather than reading as a healthy "funded" green.
+  ok(html.includes('pill pill-warn">funded needs gas<'), html);
+});
+
+test("treasury party delete requires confirmation", async () => {
+  installDom(["treasuryPartyList", "treasuryReceiveParty"]);
+  const calls: Array<{ method: string; path: string; body?: any }> = [];
+  const treasury = createTreasuryActions({
+    api: async (method, path, body) => {
+      calls.push({ method, path, body });
+      if (path === "/api/treasury/parties" && method === "GET") {
+        return {
+          parties: [{ id: "party-1", name: "Client One", created_at_unix: 1717900000 }],
+        };
+      }
+      return { status: "ok", allocations: [] };
+    },
+    toast: () => undefined,
+  });
+
+  await treasury.loadTreasuryParties();
+  calls.length = 0;
+
+  let pending: Promise<void> = treasury.deleteTreasuryParty("party-1");
+  await tick();
+  ok(
+    confirmPart("[data-confirm-body]")?.textContent.includes('"Client One"'),
+    "party dialog names the counterparty being deleted",
+  );
+  await answerConfirm("cancel");
+  await pending;
+  equal(
+    calls.filter((call) => call.path === "/api/treasury/parties/delete").length,
+    0,
+  );
+
+  pending = treasury.deleteTreasuryParty("party-1");
+  await answerConfirm("action");
+  await pending;
+  deepEqual(
+    calls.find((call) => call.path === "/api/treasury/parties/delete"),
+    {
+      method: "POST",
+      path: "/api/treasury/parties/delete",
+      body: { id: "party-1" },
+    },
   );
 });
 
@@ -1482,6 +3254,77 @@ test("inventory scan sends optional EVM watch-address probes", async () => {
   equal(requestBody.include_watch_book, true);
   equal(requestBody.provider_profile, "mainnet");
   equal(requestBody.block_tag, "latest");
+  equal(
+    requestBody.run_async,
+    undefined,
+    "run_async stays absent unless the background checkbox is checked",
+  );
+});
+
+test("inventory scan can run in background and surfaces the operation id", async () => {
+  const dom = installDom([
+    "inventoryWatchAddress",
+    "inventoryWatchLabel",
+    "inventoryWatchAddresses",
+    "inventoryIncludeWatchBook",
+    "inventoryTokenAddress",
+    "inventoryAllowanceSpender",
+    "inventoryPermit2Contract",
+    "inventoryPermit2Spender",
+    "inventoryNftOperator",
+    "inventoryWalletFamily",
+    "inventoryWalletProfile",
+    "inventoryProviderProfile",
+    "inventoryGapLimit",
+    "inventoryMaxIndex",
+    "inventoryDiscoverErc20Transfers",
+    "inventoryTokenDiscoveryFromBlock",
+    "inventoryTokenDiscoveryToBlock",
+    "inventoryTokenDiscoveryLimit",
+    "inventoryDiscoverErc20Allowances",
+    "inventoryProbeTokenRegistry",
+    "inventoryAllowanceLimit",
+    "inventoryDiscoverPermit2Allowances",
+    "inventoryPermit2AllowanceLimit",
+    "inventoryDiscoverErc721Transfers",
+    "inventoryDiscoverErc1155Transfers",
+    "inventoryDiscoverNftOperatorApprovals",
+    "inventoryNftOperatorApprovalLimit",
+    "inventoryNftDiscoveryFromBlock",
+    "inventoryNftDiscoveryToBlock",
+    "inventoryNftDiscoveryLimit",
+    "inventoryRunAsync",
+  ]);
+  dom.el("inventoryRunAsync").checked = true;
+  dom.el("inventoryProviderProfile").value = "mainnet";
+  let requestBody: any = null;
+  const toasts: string[] = [];
+  const inventory = createInventoryActions({
+    api: async (method: string, path: string, body?: unknown) => {
+      if (path === "/api/inventory/scan/evm") {
+        requestBody = body;
+        return {
+          job: { id: "job-1", status: "running" },
+          addresses: [],
+          holdings: [],
+          operation: { id: "op-1", kind: "inventory_scan_evm", state: "running" },
+        };
+      }
+      return {};
+    },
+    toast: (message: string) => {
+      toasts.push(message);
+    },
+    downloadJson: () => undefined,
+  });
+
+  await inventory.scanInventoryEvm();
+
+  equal(requestBody.run_async, true);
+  ok(
+    toasts.some((message) => message.includes("operation op-1")),
+    "toast surfaces the operation id: " + toasts.join(" | "),
+  );
 });
 
 test("watch-address parser accepts bulk line formats and dedupes", () => {
@@ -1593,7 +3436,6 @@ test("saved watch-address UI renders, saves, toggles, and deletes entries", asyn
     "inventoryWatchLabel",
     "inventoryWatchAddresses",
   ]);
-  (globalThis as any).confirm = () => true;
   const calls: Array<{ method: string; path: string; body?: any }> = [];
   const toasts: string[] = [];
   const inventory = createInventoryActions({
@@ -1675,7 +3517,11 @@ test("saved watch-address UI renders, saves, toggles, and deletes entries", asyn
   equal(toggleUpsert?.body.enabled, false);
 
   calls.length = 0;
-  await inventory.deleteWatchAddressBookEntry("0x7777777777777777777777777777777777777777");
+  const deleteWatchPending = inventory.deleteWatchAddressBookEntry(
+    "0x7777777777777777777777777777777777777777",
+  );
+  await answerConfirm("action");
+  await deleteWatchPending;
   const deleteCall = calls.find(
     (call) => call.path === "/api/inventory/watch-addresses/delete",
   );
@@ -1889,7 +3735,10 @@ test("treasury overview loader renders tiles, chains, groups, routing, and risk"
       latest_approved_steps: 1,
       latest_executable_steps: 2,
       latest_blocked_steps: 1,
-      policy_violations: ["destination_not_allowed:0xdead"],
+      policy_violations: [
+        "exceeds_policy_plan_cap",
+        "destination_not_allowed:0x3333333333333333333333333333333333333333",
+      ],
     },
     receive: {
       active_allocations: 3,
@@ -1924,44 +3773,76 @@ test("treasury overview loader renders tiles, chains, groups, routing, and risk"
   ok(dom.el("treasuryPartyList").innerHTML.includes("No counterparties yet."));
   ok(dom.el("treasuryReceiveParty").innerHTML.includes("No party (optional)"));
 
-  ok(dom.el("treasuryChainList").innerHTML.includes("chain 1 · ETH"));
-  ok(dom.el("treasuryChainList").innerHTML.includes("addresses=3/5 funded"));
-  ok(dom.el("treasuryChainList").innerHTML.includes("native=1.5 ETH"));
+  ok(dom.el("treasuryChainList").innerHTML.includes("Chain 1 · ETH"));
+  ok(dom.el("treasuryChainList").innerHTML.includes("3 of 5 addresses funded"));
+  ok(dom.el("treasuryChainList").innerHTML.includes("1.5 ETH native"));
 
   ok(dom.el("treasuryGroupList").innerHTML.includes("eth-seed/archive"));
-  ok(dom.el("treasuryGroupList").innerHTML.includes("native=1 ETH"));
-  ok(dom.el("treasuryGroupList").innerHTML.includes("erc20=2"));
-  ok(dom.el("treasuryGroupList").innerHTML.includes("claimable=1"));
-  ok(dom.el("treasuryGroupList").innerHTML.includes("approvals=2"));
-  ok(dom.el("treasuryGroupList").innerHTML.includes("dormant=1"));
+  ok(dom.el("treasuryGroupList").innerHTML.includes("1 ETH native"));
+  ok(dom.el("treasuryGroupList").innerHTML.includes("2 ERC-20 holdings"));
+  ok(dom.el("treasuryGroupList").innerHTML.includes("1 claimable holding"));
+  ok(dom.el("treasuryGroupList").innerHTML.includes("2 approval exposures"));
+  ok(dom.el("treasuryGroupList").innerHTML.includes("1 dormant candidate"));
   ok(dom.el("treasuryGroupList").innerHTML.includes("approval exposure"));
   ok(dom.el("treasuryGroupList").innerHTML.includes("eth-watch/watch:client"));
-  ok(dom.el("treasuryGroupList").innerHTML.includes("native=0 ·"));
+  ok(dom.el("treasuryGroupList").innerHTML.includes("0 native ·"));
 
   ok(
     dom
       .el("treasuryRoutingList")
-      .innerHTML.includes("hot=0x1111111111111111111111111111111111111111 (0.5)"),
+      .innerHTML.includes(
+        "Hot wallet: 0x1111111111111111111111111111111111111111 · 0.5 native units",
+      ),
   );
   ok(
     dom
       .el("treasuryRoutingList")
-      .innerHTML.includes("treasury=0x2222222222222222222222222222222222222222 (2)"),
+      .innerHTML.includes(
+        "Treasury: 0x2222222222222222222222222222222222222222 · 2 native units",
+      ),
   );
   ok(dom.el("treasuryRoutingList").innerHTML.includes("ready"));
   ok(dom.el("treasuryRoutingList").innerHTML.includes("unconfigured"));
-  ok(dom.el("treasuryRoutingList").innerHTML.includes("hot=-"));
+  ok(dom.el("treasuryRoutingList").innerHTML.includes("Hot wallet: Not configured"));
 
-  ok(dom.el("treasuryRiskPlanList").innerHTML.includes("critical=1"));
-  ok(dom.el("treasuryRiskPlanList").innerHTML.includes("total=4"));
+  ok(dom.el("treasuryRiskPlanList").innerHTML.includes("1 critical finding"));
+  ok(dom.el("treasuryRiskPlanList").innerHTML.includes("4 total findings"));
   ok(dom.el("treasuryRiskPlanList").innerHTML.includes("plan-9"));
   ok(dom.el("treasuryRiskPlanList").innerHTML.includes("review required"));
-  ok(dom.el("treasuryRiskPlanList").innerHTML.includes("executable=2"));
+  ok(dom.el("treasuryRiskPlanList").innerHTML.includes("2 executable steps"));
   ok(
     dom
       .el("treasuryRiskPlanList")
-      .innerHTML.includes("policyViolations=destination_not_allowed:0xdead"),
+      .innerHTML.includes(
+        "Destination 0x3333333333333333333333333333333333333333 is not on the policy allow-list",
+      ),
   );
+  ok(
+    dom
+      .el("treasuryRiskPlanList")
+      .innerHTML.includes("The plan exceeds the policy's native-value cap"),
+  );
+  const expectedAddresses: Record<string, readonly string[]> = {
+    treasuryRoutingList: [
+      "0x1111111111111111111111111111111111111111",
+      "0x2222222222222222222222222222222222222222",
+    ],
+    treasuryRiskPlanList: ["0x3333333333333333333333333333333333333333"],
+  };
+  for (const id of [
+    "treasuryChainList",
+    "treasuryGroupList",
+    "treasuryRoutingList",
+    "treasuryRiskPlanList",
+  ]) {
+    assertNoKeyValueProse(dom.el(id).innerHTML, `visible Portfolio #${id}`);
+    assertNoRawQuantityHex(
+      dom.el(id).innerHTML,
+      `visible Portfolio #${id}`,
+      expectedAddresses[id] || [],
+    );
+    assertNoMachineCodeProse(dom.el(id).innerHTML, `visible Portfolio #${id}`);
+  }
 
   const toasts: Array<{ message: string; type?: string }> = [];
   const failing = createTreasuryActions({
@@ -2085,7 +3966,7 @@ test("receiving overview renders party groups, hd and stealth items, and balance
   ok(
     dom
       .el("receivingGroupList")
-      .innerHTML.includes("balance unknown — refresh in B2"),
+      .innerHTML.includes("balance unknown — run Refresh balances"),
   );
   ok(dom.el("receivingGroupList").innerHTML.includes("copyText"));
 });
@@ -2349,6 +4230,16 @@ test("treasury policy renderer shows configured policy and empty state", () => {
   ok(html.includes(">enabled<"));
   ok(html.includes("0x2222222222222222222222222222222222222222 (cold-vault)"));
   ok(html.includes("0x3333333333333333333333333333333333333333"));
+  // The camelCase state line is now a plain-English summary…
+  ok(html.includes('class="policy-summary"'));
+  ok(html.includes("Plans may execute sweeps and claims."));
+  ok(html.includes("DeFi exits and Revokes are blocked."));
+  ok(html.includes("The sweep gate also covers stealth deposit sweeps and transfers."));
+  ok(html.includes("Cross-party linkage blocking is off"));
+  ok(html.includes("Sponsor gas top-ups (plan and stealth) are allowed"));
+  ok(html.includes("queue execution is currently paused"));
+  // …and the raw state stays one click away behind "Technical state".
+  ok(html.includes("<summary>Technical state</summary>"));
   ok(html.includes("maxStep=1.5 ETH"));
   ok(html.includes("maxPlan=-"));
   ok(html.includes("requireSimulation=true"));
@@ -2366,6 +4257,97 @@ test("treasury policy renderer shows configured policy and empty state", () => {
   ok(
     dom.el("treasuryPolicyList").innerHTML.includes("No treasury policy configured yet."),
   );
+});
+
+test("treasury policy summary describes the gates in plain English", () => {
+  const base: TreasuryPolicy = {
+    enabled: true,
+    allowed_destinations: [],
+    max_step_native_wei_hex: null,
+    max_plan_native_wei_hex: null,
+    require_simulation: true,
+    allow_claim_execution: false,
+    allow_gas_topups: false,
+    max_gas_topup_wei_hex: null,
+    allow_plan_execution: true,
+    allow_sweep_execution: true,
+    allow_revoke_execution: true,
+    allow_exit_execution: false,
+    max_fee_per_gas_cap_hex: null,
+    execution_paused: false,
+    created_at_unix: 1,
+    updated_at_unix: 2,
+  };
+
+  deepEqual(treasuryPolicySummary({ ...base, enabled: false }), [
+    "The policy is disabled, so nothing may execute — no plan steps and no stealth deposit sweeps.",
+    "Cross-party linkage blocking is off — plans may route different payers to a shared destination.",
+    "Sponsor gas top-ups (plan and stealth) are off.",
+  ]);
+
+  deepEqual(treasuryPolicySummary({ ...base, allow_plan_execution: false }), [
+    "Plan execution is switched off, so no plan step or stealth deposit sweep may execute yet.",
+    "Cross-party linkage blocking is off — plans may route different payers to a shared destination.",
+    "Sponsor gas top-ups (plan and stealth) are off.",
+  ]);
+
+  deepEqual(
+    treasuryPolicySummary({
+      ...base,
+      allow_exit_execution: true,
+      allow_claim_execution: true,
+      allow_gas_topups: true,
+      block_cross_party_linkage: true,
+    }),
+    [
+      "Plans may execute sweeps, revokes, DeFi exits, and claims.",
+      "The sweep gate also covers stealth deposit sweeps and transfers.",
+      "Cross-party linkage blocking is on; destinations are limited to the allow-list below.",
+      "Sponsor gas top-ups (plan and stealth) are allowed.",
+    ],
+  );
+
+  deepEqual(treasuryPolicySummary(base), [
+    "Plans may execute sweeps and revokes.",
+    "Claims and DeFi exits are blocked.",
+    "The sweep gate also covers stealth deposit sweeps and transfers.",
+    "Cross-party linkage blocking is off — plans may route different payers to a shared destination.",
+    "Sponsor gas top-ups (plan and stealth) are off.",
+  ]);
+
+  deepEqual(treasuryPolicySummary({ ...base, allow_sweep_execution: false }), [
+    "Plans may execute revokes.",
+    "Claims, DeFi exits, and Sweeps are blocked.",
+    "Stealth deposit sweeps and transfers stay blocked until the sweep gate is on.",
+    "Cross-party linkage blocking is off — plans may route different payers to a shared destination.",
+    "Sponsor gas top-ups (plan and stealth) are off.",
+  ]);
+});
+
+test("treasury policy form labels every numeric input and folds the legal hints", () => {
+  const html = readFileSync("src/index.after-style-before-script.html", "utf8");
+  const expectedLabels: Array<[string, string]> = [
+    ["treasuryPolicyDestinations", "Allowed destinations"],
+    ["treasuryPolicyMaxStepEth", "Per-step cap (ETH)"],
+    ["treasuryPolicyMaxPlanEth", "Per-plan cap (ETH)"],
+    ["treasuryPolicyFreshnessSecs", "Simulation freshness (seconds)"],
+    ["treasuryPolicyHotFloorEth", "Hot floor (ETH)"],
+    ["treasuryPolicyHotTargetEth", "Hot target (ETH)"],
+    ["treasuryPolicyHotOverflowEth", "Hot overflow threshold (ETH)"],
+    ["treasuryPolicyMaxGasTopupEth", "Max gas top-up (ETH)"],
+    ["treasuryPolicyMaxFeePerGasGwei", "Max fee per gas (gwei)"],
+  ];
+  for (const [id, label] of expectedLabels) {
+    ok(
+      html.includes('for="' + id + '"'),
+      "expected a visible label for #" + id,
+    );
+    ok(html.includes(label), "expected label text " + label);
+  }
+  ok(html.includes("<summary>How this policy protects you</summary>"));
+  // The dense legal copy is preserved, just behind the details fold.
+  ok(html.includes("Claim execution stays blocked unless ALL of these hold"));
+  ok(html.includes("Nothing executes from a consolidation plan step unless"));
 });
 
 test("treasury receive list renders rotate buttons only for active allocations", () => {
@@ -2502,6 +4484,20 @@ test("treasury policy loader prefills the form without clobbering operator edits
   dom.el("treasuryPolicyDestinations").value = "0xdraft";
   await treasury.loadTreasuryOverview();
   equal(dom.el("treasuryPolicyDestinations").value, "0xdraft");
+});
+
+test("treasury policy prefill defaults cross-party linkage ON when no policy exists", async () => {
+  const dom = installDom(["treasuryPolicyList", "treasuryPolicyBlockLinkage"]);
+  const treasury = createTreasuryActions({
+    // No saved policy: the form must show the daemon's default posture
+    // (linkage blocking ON since plan task 3.5), not an unchecked box that
+    // would silently turn protection off on first save.
+    api: async (_method, path) => (path === "/api/treasury/policy" ? { policy: null } : {}),
+    toast: () => undefined,
+  });
+
+  await treasury.loadTreasuryOverview();
+  equal(dom.el("treasuryPolicyBlockLinkage").checked, true);
 });
 
 test("treasury policy save validates caps and submits the parsed update request", async () => {
@@ -2885,13 +4881,23 @@ test("treasury receive allocate and rotate dispatch api calls with toasts", asyn
   const rotateButton = dom.el("rotateBtn", "BUTTON");
   rotateButton.dataset.action = "rotateTreasuryReceiveAddress";
   rotateButton.dataset.arg0 = "alloc-7";
-  dispatchDataAction(rotateButton as any, {
-    actions: {
-      rotateTreasuryReceiveAddress: (...args: unknown[]) =>
-        (pending = treasury.rotateTreasuryReceiveAddress(args[0] as string)),
-    },
-    toast: () => undefined,
-  });
+  const rotateDispatch = () =>
+    dispatchDataAction(rotateButton as any, {
+      actions: {
+        rotateTreasuryReceiveAddress: (...args: unknown[]) =>
+          (pending = treasury.rotateTreasuryReceiveAddress(args[0] as string)),
+      },
+      toast: () => undefined,
+    });
+
+  // Cancelling the rotation dialog never reaches the daemon.
+  rotateDispatch();
+  await answerConfirm("cancel");
+  await pending;
+  equal(calls.length, 0);
+
+  rotateDispatch();
+  await answerConfirm("action");
   await pending;
 
   deepEqual(calls[0], {
@@ -2901,6 +4907,129 @@ test("treasury receive allocate and rotate dispatch api calls with toasts", asyn
   });
   deepEqual(toasts.pop(), { message: "Receive address rotated", type: undefined });
   ok(calls.some((call) => call.path === "/api/treasury/receive-addresses"));
+});
+
+test("treasury receive list renders one-time badge, lifecycle, and sweep terms", () => {
+  const dom = installDom(["treasuryReceiveList"]);
+  const treasury = createTreasuryActions({
+    api: async () => ({}),
+    toast: () => undefined,
+  });
+  const oneTime: TreasuryReceiveAllocation = {
+    id: "alloc-ot",
+    wallet_family: "eth-seed",
+    wallet_profile: "archive",
+    chain_id: 1,
+    chain_id_assumed: false,
+    address: "0x7777777777777777777777777777777777777777",
+    derivation_path: "m/44'/60'/0'/0/1",
+    address_index: 1,
+    purpose: "one-time-invoice",
+    status: "active",
+    created_at_unix: 1,
+    counterparty_id: "party-1",
+    one_time: true,
+    sweep_destination_address: "0x8888888888888888888888888888888888888888",
+    min_sweep_amount_hex: "0xde0b6b3a7640000",
+    purge_after_sweep: true,
+    lifecycle_state: "watching",
+    sweep_blocker: "execution_gates",
+  };
+  const swept: TreasuryReceiveAllocation = {
+    ...oneTime,
+    id: "alloc-swept",
+    lifecycle_state: "swept",
+    sweep_blocker: null,
+    min_sweep_amount_hex: null,
+    purge_after_sweep: false,
+  };
+
+  treasury.renderTreasuryReceiveAllocations([oneTime, swept]);
+  const html = dom.el("treasuryReceiveList").innerHTML;
+  equal(html.split(">One-time<").length - 1, 2);
+  ok(html.includes(">watching<"));
+  ok(html.includes(">swept<"));
+  ok(html.includes("one-time sweep"));
+  ok(html.includes("0x8888...8888"));
+  ok(html.includes("threshold 1 ETH"));
+  ok(html.includes("purges after sweep"));
+  ok(html.includes("waiting on execution gates"));
+  // Unset threshold renders as "any funds".
+  ok(html.includes("threshold any funds"));
+});
+
+test("treasury receive allocate sends one-time options with ETH threshold parsing", async () => {
+  const dom = installDom([
+    "treasuryReceiveList",
+    "treasuryReceiveProfile",
+    "treasuryReceivePurpose",
+    "treasuryReceiveLabel",
+    "treasuryReceiveParty",
+    "treasuryReceiveOneTime",
+    "treasuryReceiveSweepDestination",
+    "treasuryReceiveMinSweepEth",
+    "treasuryReceivePurgeAfterSweep",
+  ]);
+  const calls: Array<{ method: string; path: string; body?: any }> = [];
+  const toasts: Array<{ message: string; type?: string }> = [];
+  const treasury = createTreasuryActions({
+    api: async (method, path, body) => {
+      calls.push({ method, path, body });
+      if (path === "/api/treasury/receive-addresses/allocate") {
+        return { status: "allocated", allocation: null };
+      }
+      return {};
+    },
+    toast: (message, type) => toasts.push({ message, type }),
+  });
+
+  dom.el("treasuryReceiveProfile").value = "archive";
+  dom.el("treasuryReceivePurpose").value = "one-time-invoice";
+  dom.el("treasuryReceiveOneTime").checked = true;
+
+  // Destination is required in one-time mode.
+  await treasury.allocateTreasuryReceiveAddress();
+  equal(calls.length, 0);
+  deepEqual(toasts.pop(), {
+    message: "One-time addresses need a sweep destination",
+    type: "error",
+  });
+
+  // A malformed threshold is rejected before any call.
+  dom.el("treasuryReceiveSweepDestination").value =
+    "0x8888888888888888888888888888888888888888";
+  dom.el("treasuryReceiveMinSweepEth").value = "not-a-number";
+  await treasury.allocateTreasuryReceiveAddress();
+  equal(calls.length, 0);
+  deepEqual(toasts.pop(), {
+    message: "Min sweep must be an ETH amount like 0.05",
+    type: "error",
+  });
+
+  dom.el("treasuryReceiveMinSweepEth").value = "0.05";
+  dom.el("treasuryReceivePurgeAfterSweep").checked = true;
+  await treasury.allocateTreasuryReceiveAddress();
+
+  const allocateCall = calls.find(
+    (call) => call.path === "/api/treasury/receive-addresses/allocate",
+  );
+  deepEqual(allocateCall, {
+    method: "POST",
+    path: "/api/treasury/receive-addresses/allocate",
+    body: {
+      wallet_profile: "archive",
+      purpose: "one-time-invoice",
+      one_time: true,
+      sweep_destination_address: "0x8888888888888888888888888888888888888888",
+      min_sweep_amount_hex: "0x" + (50000000000000000n).toString(16),
+      purge_after_sweep: true,
+    },
+  });
+  // One-time controls reset after a successful allocation.
+  equal(dom.el("treasuryReceiveOneTime").checked, false);
+  equal(dom.el("treasuryReceivePurgeAfterSweep").checked, false);
+  equal(dom.el("treasuryReceiveSweepDestination").value, "");
+  equal(dom.el("treasuryReceiveMinSweepEth").value, "");
 });
 
 // ── Wallet manager ──────────────────────────────────────────────────────────
@@ -3046,9 +5175,9 @@ test("wallet row meta helpers summarize identity, balances, and xpub display", (
   equal(
     walletRowMeta(walletManagerSeedProfile(), groups, 2),
     "0x1111111111111111111111111111111111111111\n" +
-      "provider=mainnet · chain=1 · account=0 · words=24\n" +
-      "balance=1.5 ETH on chain 1 · 0.2 on 8453\n" +
-      "receive allocations=2",
+      "Provider mainnet · Chain 1 · Account 0 · 24 words\n" +
+      "Balance: 1.5 ETH on chain 1 · 0.2 on 8453\n" +
+      "2 receive allocations",
   );
 
   const xpubProfile: EthXpubWalletProfile = {
@@ -3062,8 +5191,8 @@ test("wallet row meta helpers summarize identity, balances, and xpub display", (
   equal(
     walletRowMeta(xpubProfile, [], null),
     "receive path m/44'/60'/3'/0\n" +
-      "provider=base · chain=- · account=3\n" +
-      "balance=not scanned yet",
+      "Provider base · Chain not specified · Account 3\n" +
+      "Balance: not scanned yet",
   );
   const accountXpubProfile = {
     ...xpubProfile,
@@ -3074,16 +5203,16 @@ test("wallet row meta helpers summarize identity, balances, and xpub display", (
   equal(
     walletRowMeta(accountXpubProfile, [], null),
     "external account path m/44'/60'/8'/0\n" +
-      "provider=base · chain=- · account=3 · source=external custom account xpub\n" +
-      "balance=not scanned yet",
+      "Provider base · Chain not specified · Account 3 · Source: external custom account xpub\n" +
+      "Balance: not scanned yet",
   );
   const defaultAccountXpubProfile = { ...xpubProfile, external_account_xpub: "xpub-account" };
   equal(xpubDisplay(defaultAccountXpubProfile), "external receive path m/44'/60'/3'/0");
   equal(
     walletRowMeta(defaultAccountXpubProfile, [], null),
     "external receive path m/44'/60'/3'/0\n" +
-      "provider=base · chain=- · account=3 · source=external account xpub\n" +
-      "balance=not scanned yet",
+      "Provider base · Chain not specified · Account 3 · Source: external account xpub\n" +
+      "Balance: not scanned yet",
   );
   const customXpubProfile = {
     ...xpubProfile,
@@ -3094,8 +5223,8 @@ test("wallet row meta helpers summarize identity, balances, and xpub display", (
   equal(
     walletRowMeta(customXpubProfile, [], null),
     "external receive path m/44'/60'/3'/1\n" +
-      "provider=base · chain=- · account=3 · source=external custom xpub\n" +
-      "balance=not scanned yet",
+      "Provider base · Chain not specified · Account 3 · Source: external custom xpub\n" +
+      "Balance: not scanned yet",
   );
 });
 
@@ -3150,10 +5279,15 @@ test("wallet manager list renders unified wallets with balances and fallbacks", 
   ok(html.includes(">signer<"));
   ok(html.includes(">watch-only<"));
   ok(html.includes("0x1111111111111111111111111111111111111111"));
-  ok(html.includes("balance=1.5 ETH on chain 1 · 0.2 on 8453"));
-  ok(html.includes("receive allocations=1"));
+  ok(html.includes("Balance: 1.5 ETH on chain 1 · 0.2 on 8453"));
+  ok(html.includes("1 receive allocation"));
   ok(html.includes("receive path m/44'/60'/3'/0"));
-  ok(html.includes("balance=not scanned yet"));
+  ok(html.includes("Balance: not scanned yet"));
+  assertNoKeyValueProse(html, "visible Portfolio #walletManagerCard");
+  assertNoRawQuantityHex(html, "visible Portfolio #walletManagerCard", [
+    "0x1111111111111111111111111111111111111111",
+  ]);
+  assertNoMachineCodeProse(html, "visible Portfolio #walletManagerCard");
   equal(html.split('data-action="copyWalletAddress"').length - 1, 1);
   equal(html.split('data-action="promptWalletReceiveAddress"').length - 1, 2);
   equal(html.split('data-action="deleteManagedWallet"').length - 1, 2);
@@ -3176,6 +5310,101 @@ test("wallet manager list renders unified wallets with balances and fallbacks", 
   equal(dom.el("walletCreateProviderHint").classList.contains("hidden"), false);
   // With no providers, the inline quick-add is the visible path forward.
   equal(dom.el("walletQuickProvider").classList.contains("hidden"), false);
+});
+
+test("wallet manager delete offers the forget-history cascade", async () => {
+  const dom = installWalletManagerDom();
+  const calls: Array<{ method: string; path: string; body?: any }> = [];
+  const toasts: string[] = [];
+  const manager = createWalletManagerActions({
+    api: async (method, path, body) => {
+      calls.push({ method, path, body });
+      if (path === "/api/profiles/eth-seed") {
+        return { profiles: [walletManagerSeedProfile()] };
+      }
+      if (path === "/api/profiles/eth-xpub") {
+        return { profiles: [] };
+      }
+      if (path === "/api/profiles/evm") {
+        return { profiles: [{ name: "mainnet", chain_id: 1 }] };
+      }
+      if (path === "/api/treasury/overview") {
+        return { groups: [] };
+      }
+      if (path === "/api/treasury/receive-addresses") {
+        return { allocations: [] };
+      }
+      if (path === "/api/profiles/eth-seed/delete") {
+        return {
+          status: "deleted",
+          pruned_inventory: (body as any)?.prune_inventory
+            ? {
+                addresses: 7,
+                holdings: 2,
+                jobs: 1,
+                checkpoints: 2,
+                block_cursors: 0,
+                allocations_active: 1,
+                allocations_retired: 1,
+                counterparty_bindings: 2,
+              }
+            : undefined,
+        };
+      }
+      return {};
+    },
+    toast: (message) => toasts.push(message),
+  });
+  await manager.loadWalletManager();
+  calls.length = 0;
+
+  // Legacy path: confirm without ticking the box — the body carries no flag.
+  let pending = manager.deleteManagedWallet("seed", "main");
+  await tick();
+  let overlay = confirmOverlay();
+  ok(overlay, "delete opens the shared confirm dialog");
+  ok(
+    confirmPart("[data-confirm-body]").textContent.includes(
+      "re-import and re-scan re-derives fresh addresses",
+    ),
+    "the dialog states what forgetting means",
+  );
+  ok(confirmPart("[data-confirm-checkbox]"), "the cascade checkbox renders");
+  confirmPart("[data-confirm-action]").click();
+  await pending;
+  let deleteCall = calls.find((call) => call.path === "/api/profiles/eth-seed/delete");
+  deepEqual(deleteCall?.body, { name: "main" });
+
+  // Cascade path: ticking the box sends prune_inventory: true, and the toast
+  // summarizes what was forgotten.
+  pending = manager.deleteManagedWallet("seed", "main");
+  await tick();
+  overlay = confirmOverlay();
+  ok(overlay, "second delete opens the dialog again");
+  const checkbox = confirmPart("[data-confirm-checkbox]");
+  checkbox.checked = true;
+  confirmPart("[data-confirm-action]").click();
+  await pending;
+  deleteCall = calls
+    .filter((call) => call.path === "/api/profiles/eth-seed/delete")
+    .at(-1);
+  deepEqual(deleteCall?.body, { name: "main", prune_inventory: true });
+  ok(
+    toasts.some((message) => message.includes("forgot 7 addresses")),
+    "toast summarizes the forgotten counts: " + toasts.join(" | "),
+  );
+
+  // Cancel posts nothing.
+  calls.length = 0;
+  pending = manager.deleteManagedWallet("seed", "main");
+  await tick();
+  confirmPart("[data-confirm-cancel]").click();
+  await pending;
+  equal(
+    calls.filter((call) => call.path === "/api/profiles/eth-seed/delete").length,
+    0,
+    "cancel never posts the delete",
+  );
 });
 
 test("provider profile editor posts fee estimation opt-in", async () => {
@@ -3226,8 +5455,224 @@ test("provider profile editor posts fee estimation opt-in", async () => {
       compartment_id: null,
       fee_estimation_enabled: true,
     },
+    {
+      name: "invalid-fees",
+      rpc_url: "https://invalid-fees.example.test",
+      chain_id: 10,
+      compartment_id: 2,
+      max_priority_fee_per_gas_hex: "0xnot-hex",
+      max_fee_per_gas_hex: 123,
+      native_gas_limit: 21000,
+      erc20_gas_limit: 90000,
+      fee_estimation_enabled: false,
+    },
   ]);
-  ok(dom.el("providerProfileList").innerHTML.includes("feeEstimation=on"));
+  ok(dom.el("providerProfileList").innerHTML.includes("Fee estimation on"));
+  equal(
+    dom.el("providerProfileList").innerHTML.split("Invalid saved value").length - 1,
+    2,
+  );
+});
+
+test("visible Portfolio legacy profile rows reject key=value prose", () => {
+  const dom = installDom([
+    "providerProfileList",
+    "walletProfileList",
+    "xpubWalletProfileList",
+    "seedWalletProfileList",
+  ]);
+  const wallets = createWalletActions({
+    api: async () => ({}),
+    toast: () => undefined,
+    refresh: () => undefined,
+    copyText: async () => undefined,
+  });
+
+  wallets.renderProviderProfiles([
+    {
+      name: "mainnet",
+      rpc_url: "https://rpc.example.test",
+      chain_id: 1,
+      compartment_id: 2,
+      auth_token_key: "mainnet_rpc_token",
+      max_priority_fee_per_gas_hex: "0x3b9aca00",
+      max_fee_per_gas_hex: "0x77359400",
+      native_gas_limit: 21000,
+      erc20_gas_limit: 90000,
+      fee_estimation_enabled: true,
+    },
+  ]);
+  wallets.renderWalletProfiles([
+    {
+      name: "stealth-ops",
+      wallet: "ops-wallet",
+      short_name: "OPS",
+      provider_profile: "mainnet",
+      compartment_id: 2,
+      chain_id: 1,
+      default_destination_address: "0x1111111111111111111111111111111111111111",
+    },
+  ]);
+  wallets.renderXpubWalletProfiles([
+    {
+      name: "watch-vault",
+      project_account: 3,
+      provider_profile: "mainnet",
+      compartment_id: 2,
+      chain_id: 1,
+      external_account_xpub: "xpub-account",
+      external_account_path: "m/44'/60'/3'",
+      default_destination_address: "0x2222222222222222222222222222222222222222",
+    },
+  ]);
+  wallets.renderSeedWalletProfiles([
+    {
+      name: "ops-seed",
+      label: "Operations",
+      word_count: 24,
+      project_account: 0,
+      provider_profile: "mainnet",
+      compartment_id: 2,
+      chain_id: 1,
+      account_path: "m/44'/60'/0'",
+      receive_path: "m/44'/60'/0'/0",
+      receive_xpub: "xpub-receive",
+      first_receive_address: "0x3333333333333333333333333333333333333333",
+      default_destination_address: "0x4444444444444444444444444444444444444444",
+    },
+  ]);
+
+  ok(dom.el("providerProfileList").innerHTML.includes("RPC endpoint: https://rpc.example.test"));
+  ok(dom.el("providerProfileList").innerHTML.includes("Priority fee cap: 1 gwei"));
+  ok(dom.el("providerProfileList").innerHTML.includes("Max fee cap: 2 gwei"));
+  ok(dom.el("providerProfileList").innerHTML.includes("Authentication key configured"));
+  ok(dom.el("providerProfileList").innerHTML.includes("Connection key reference"));
+  ok(dom.el("providerProfileList").innerHTML.includes("mainnet_rpc_token"));
+  ok(dom.el("walletProfileList").innerHTML.includes("Default destination: 0x1111"));
+  ok(dom.el("xpubWalletProfileList").innerHTML.includes("Account path m/44'/60'/3'"));
+  ok(dom.el("seedWalletProfileList").innerHTML.includes("First address: 0x3333"));
+  const expectedAddresses: Record<string, readonly string[]> = {
+    walletProfileList: ["0x1111111111111111111111111111111111111111"],
+    xpubWalletProfileList: ["0x2222222222222222222222222222222222222222"],
+    seedWalletProfileList: [
+      "0x3333333333333333333333333333333333333333",
+      "0x4444444444444444444444444444444444444444",
+    ],
+  };
+  for (const id of [
+    "providerProfileList",
+    "walletProfileList",
+    "xpubWalletProfileList",
+    "seedWalletProfileList",
+  ]) {
+    assertNoKeyValueProse(dom.el(id).innerHTML, `visible Portfolio #${id}`);
+    assertNoRawQuantityHex(
+      dom.el(id).innerHTML,
+      `visible Portfolio #${id}`,
+      expectedAddresses[id] || [],
+    );
+    assertNoMachineCodeProse(dom.el(id).innerHTML, `visible Portfolio #${id}`);
+  }
+});
+
+test("xpub export surfaces the exposure warning as toast and pinned box", async () => {
+  const dom = installDom([
+    "xpubPreviewProfile",
+    "xpubReceiveXpub",
+    "xpubPreviewIndex",
+    "xpubExportWarnings",
+    "xpubExportResult",
+    "xpubPreviewResult",
+  ]);
+  const toasts: Array<{ message: string; type?: string }> = [];
+  const warning =
+    "An xpub exposes this wallet's entire receive tree to anyone holding it.";
+  let exportBody: any = {
+    wallet_profile: "treasury-watch",
+    project_account: 0,
+    account_path: "m/44'/60'/0'",
+    receive_path: "m/44'/60'/0'/0",
+    receive_xpub: "xpub661example",
+    warning,
+  };
+  const wallets = createWalletActions({
+    api: async (_method, path) => {
+      if (path === "/api/wallets/eth-xpub/export") return exportBody;
+      if (path === "/api/wallets/eth-xpub/derive") {
+        return { index: 0, address: "0x1111111111111111111111111111111111111111" };
+      }
+      return {};
+    },
+    toast: (message, type) => toasts.push({ message, type }),
+    refresh: () => undefined,
+    copyText: async () => undefined,
+  });
+
+  dom.el("xpubPreviewIndex").value = "0";
+  await wallets.exportXpubWalletProfile("treasury-watch");
+
+  deepEqual(toasts.pop(), { message: warning, type: "warning" });
+  equal(dom.el("xpubExportWarnings").classList.contains("hidden"), false);
+  ok(dom.el("xpubExportWarnings").innerHTML.includes("Xpub exposure"));
+  ok(dom.el("xpubExportWarnings").innerHTML.includes(warning));
+  // The exported xpub's copy affordance routes through the gated xpub copy,
+  // not the plain text copier.
+  ok(dom.el("xpubExportResult").innerHTML.includes('data-action="copyXpubWithWarning"'));
+  ok(!dom.el("xpubExportResult").innerHTML.includes('data-action="copyText"'));
+
+  // Older daemons omit the warning field: the pinned box falls back to the
+  // local exposure copy rather than rendering nothing.
+  exportBody = { ...exportBody };
+  delete exportBody.warning;
+  await wallets.exportXpubWalletProfile("treasury-watch");
+  ok(toasts.pop()?.message.includes("entire receive tree"));
+  ok(dom.el("xpubExportWarnings").innerHTML.includes("entire receive tree"));
+});
+
+test("xpub copy gates the first copy per session behind an inform dialog", async () => {
+  const dom = installDom(["seedWalletProfileList"]);
+  const copied: Array<{ value: string; label: string }> = [];
+  const wallets = createWalletActions({
+    api: async () => ({}),
+    toast: () => undefined,
+    refresh: () => undefined,
+    copyText: async (value: string, label: string) => {
+      copied.push({ value, label });
+    },
+  });
+
+  // First xpub copy of the session: inform-tier acknowledgement first.
+  let pending = wallets.copyXpubWithWarning("xpub661example", "Seed wallet receive xpub");
+  await tick();
+  ok(confirmOverlay(), "first xpub copy of the session opens the inform dialog");
+  ok(confirmPart("[data-confirm-body]")?.textContent.includes("entire receive tree"));
+  equal(confirmPart("[data-confirm-cancel]"), null, "inform tier has no cancel button");
+  equal(copied.length, 0);
+  await answerConfirm("action");
+  await pending;
+  deepEqual(copied, [{ value: "xpub661example", label: "Seed wallet receive xpub" }]);
+
+  // Acknowledged for the rest of the session: no second dialog.
+  await wallets.copyXpubWithWarning("xpub661example", "Seed wallet receive xpub");
+  equal(confirmOverlay(), null);
+  equal(copied.length, 2);
+
+  // Seed profile rows route Copy Xpub through the gated action; address copy
+  // stays on the plain copier.
+  wallets.renderSeedWalletProfiles([
+    {
+      name: "ops-seed",
+      word_count: 12,
+      project_account: 0,
+      provider_profile: "mainnet",
+      compartment_id: 0,
+      receive_xpub: "xpub661example",
+      first_receive_address: "0x1111111111111111111111111111111111111111",
+    },
+  ]);
+  const html = dom.el("seedWalletProfileList").innerHTML;
+  ok(html.includes('data-action="copyXpubWithWarning"'));
+  ok(html.includes('data-action="copyText"'));
 });
 
 test("wallet manager quick-add provider validates, posts, and reloads", async () => {
@@ -3543,100 +5988,79 @@ test("wallet manager import tabs switch forms, scrub seed input, and post contra
   equal(dom.el("walletImportWatchAddress").value, "");
 });
 
-test("wallet manager delete requires a two-step confirm and disarms on timeout", async () => {
+test("wallet manager delete is gated by the shared confirmation dialog", async () => {
   const dom = installWalletManagerDom();
-  const timers: Array<() => void> = [];
-  const originalSetTimeout = globalThis.setTimeout;
-  const originalClearTimeout = globalThis.clearTimeout;
-  (globalThis as any).setTimeout = (handler: () => void) => {
-    timers.push(handler);
-    return timers.length;
-  };
-  (globalThis as any).clearTimeout = () => undefined;
+  const calls: Array<{ method: string; path: string; body?: any }> = [];
+  const manager = createWalletManagerActions({
+    api: async (method, path, body) => {
+      calls.push({ method, path, body });
+      if (path === "/api/profiles/eth-seed") {
+        return { profiles: [walletManagerSeedProfile()] };
+      }
+      if (path === "/api/profiles/eth-xpub") {
+        return {
+          profiles: [
+            {
+              name: "watcher",
+              project_account: 0,
+              provider_profile: "mainnet",
+              compartment_id: 0,
+            },
+          ],
+        };
+      }
+      if (path === "/api/profiles/evm") {
+        return { profiles: [{ name: "mainnet", chain_id: 1 }] };
+      }
+      return { status: "ok" };
+    },
+    toast: () => undefined,
+  });
 
-  try {
-    const calls: Array<{ method: string; path: string; body?: any }> = [];
-    const manager = createWalletManagerActions({
-      api: async (method, path, body) => {
-        calls.push({ method, path, body });
-        if (path === "/api/profiles/eth-seed") {
-          return { profiles: [walletManagerSeedProfile()] };
-        }
-        if (path === "/api/profiles/eth-xpub") {
-          return {
-            profiles: [
-              {
-                name: "watcher",
-                project_account: 0,
-                provider_profile: "mainnet",
-                compartment_id: 0,
-              },
-            ],
-          };
-        }
-        if (path === "/api/profiles/evm") {
-          return { profiles: [{ name: "mainnet", chain_id: 1 }] };
-        }
-        return { status: "ok" };
-      },
-      toast: () => undefined,
-    });
+  await manager.loadWalletManager();
+  const list = dom.el("walletManagerList");
+  equal(list.innerHTML.split('data-action="deleteManagedWallet"').length - 1, 2);
 
-    await manager.loadWalletManager();
-    const list = dom.el("walletManagerList");
-    ok(list.innerHTML.includes('data-action="deleteManagedWallet"'));
-    ok(!list.innerHTML.includes("Confirm delete"));
+  // Cancelling the dialog deletes nothing.
+  let pendingDelete = manager.deleteManagedWallet("seed", "main");
+  await answerConfirm("cancel");
+  await pendingDelete;
+  equal(calls.filter((call) => call.path.endsWith("/delete")).length, 0);
 
-    // First click arms only — nothing is deleted.
-    await manager.deleteManagedWallet("seed", "main");
-    equal(
-      calls.filter((call) => call.path.endsWith("/delete")).length,
-      0,
-    );
-    equal(list.innerHTML.split("Confirm delete").length - 1, 1);
+  // Confirming the danger action posts the delete for that exact profile.
+  pendingDelete = manager.deleteManagedWallet("xpub", "watcher");
+  await tick();
+  ok(
+    confirmPart("[data-confirm-body]")?.textContent.includes('"watcher"'),
+    "dialog names the xpub profile being deleted",
+  );
+  await answerConfirm("action");
+  await pendingDelete;
+  deepEqual(
+    calls.find((call) => call.path === "/api/profiles/eth-xpub/delete"),
+    {
+      method: "POST",
+      path: "/api/profiles/eth-xpub/delete",
+      body: { name: "watcher" },
+    },
+  );
 
-    // Clicking a different row re-arms for that row instead of deleting.
-    await manager.deleteManagedWallet("xpub", "watcher");
-    equal(
-      calls.filter((call) => call.path.endsWith("/delete")).length,
-      0,
-    );
-    equal(list.innerHTML.split("Confirm delete").length - 1, 1);
-
-    // Second click on the armed row executes the delete.
-    await manager.deleteManagedWallet("xpub", "watcher");
-    deepEqual(
-      calls.find((call) => call.path === "/api/profiles/eth-xpub/delete"),
-      {
-        method: "POST",
-        path: "/api/profiles/eth-xpub/delete",
-        body: { name: "watcher" },
-      },
-    );
-
-    // Timeout disarms a pending confirmation.
-    await manager.deleteManagedWallet("seed", "main");
-    equal(list.innerHTML.split("Confirm delete").length - 1, 1);
-    timers[timers.length - 1]();
-    equal(list.innerHTML.includes("Confirm delete"), false);
-    await manager.deleteManagedWallet("seed", "main");
-    equal(
-      calls.filter((call) => call.path === "/api/profiles/eth-seed/delete").length,
-      0,
-    );
-    await manager.deleteManagedWallet("seed", "main");
-    deepEqual(
-      calls.find((call) => call.path === "/api/profiles/eth-seed/delete"),
-      {
-        method: "POST",
-        path: "/api/profiles/eth-seed/delete",
-        body: { name: "main" },
-      },
-    );
-  } finally {
-    globalThis.setTimeout = originalSetTimeout;
-    globalThis.clearTimeout = originalClearTimeout;
-  }
+  pendingDelete = manager.deleteManagedWallet("seed", "main");
+  await tick();
+  ok(
+    confirmPart("[data-confirm-body]")?.textContent.includes("no longer sign"),
+    "seed delete copy keeps the signing consequence",
+  );
+  await answerConfirm("action");
+  await pendingDelete;
+  deepEqual(
+    calls.find((call) => call.path === "/api/profiles/eth-seed/delete"),
+    {
+      method: "POST",
+      path: "/api/profiles/eth-seed/delete",
+      body: { name: "main" },
+    },
+  );
 });
 
 test("wallet manager copy and receive-allocation flows hit clipboard and treasury", async () => {
@@ -3764,7 +6188,13 @@ function journeyApiStub(state: JourneyStubState) {
 }
 
 test("journey card renders done/pending steps and collapses when all complete", async () => {
-  const dom = installDom(["journeyList", "journeyProgress", "journeyComplete", "statusStrip"]);
+  const dom = installDom([
+    "journeyCard",
+    "journeyList",
+    "journeyProgress",
+    "journeyComplete",
+    "statusStrip",
+  ]);
   document.body.dataset.mode = "unlocked";
   const state: JourneyStubState = {
     providers: [{ name: "mainnet", chain_id: 1 }],
@@ -3798,10 +6228,13 @@ test("journey card renders done/pending steps and collapses when all complete", 
   ok(html.includes("Set treasury guardrails"));
   ok(html.includes('data-action="journeyRunScan"'));
   ok(html.includes('data-action="journeyJump" data-arg0="walletManagerCard"'));
-  ok(html.includes('data-action="journeyJump" data-arg0="treasuryCard"'));
+  ok(html.includes('data-action="journeyJump" data-arg0="policyCard"'));
   ok(html.includes("The endpoint Sigillum uses to read balances"));
   equal(dom.el("journeyProgress").textContent, "1 of 4");
   equal(dom.el("journeyComplete").classList.contains("hidden"), true);
+  // Incomplete: the card stays expanded, no collapsed-state classes.
+  equal(dom.el("journeyCard").classList.contains("journey-card-complete"), false);
+  equal(dom.el("journeyComplete").classList.contains("journey-complete"), false);
 
   // Pure step computation mirrors the rendered done flags.
   const steps = computeJourneySteps({
@@ -3813,7 +6246,7 @@ test("journey card renders done/pending steps and collapses when all complete", 
   });
   deepEqual(steps.map((step) => step.done), [true, false, false, false]);
 
-  // Everything finished: checklist collapses into one quiet ready line.
+  // Everything finished: the card collapses into one compact ready line.
   state.seedProfiles = [{ name: "main" }];
   state.trackedAddressCount = 4;
   state.policy = { enabled: true, require_simulation: true };
@@ -3825,7 +6258,19 @@ test("journey card renders done/pending steps and collapses when all complete", 
     "Treasury ready — all setup steps complete",
   );
   equal(dom.el("journeyComplete").classList.contains("hidden"), false);
+  equal(dom.el("journeyComplete").classList.contains("journey-complete"), true);
+  equal(dom.el("journeyCard").classList.contains("journey-card-complete"), true);
   equal(dom.el("journeyProgress").textContent, "4 of 4");
+
+  // A step slipping back to pending restores the full checklist card.
+  state.policy = null;
+  await journey.loadJourney();
+  equal(dom.el("journeyCard").classList.contains("journey-card-complete"), false);
+  equal(dom.el("journeyComplete").classList.contains("journey-complete"), false);
+  equal(dom.el("journeyComplete").classList.contains("hidden"), true);
+  equal(dom.el("journeyList").classList.contains("hidden"), false);
+  equal(dom.el("journeyProgress").textContent, "3 of 4");
+  ok(dom.el("journeyList").innerHTML.includes("Set treasury guardrails"));
 });
 
 test("status strip chips carry values, warn/danger tones, and jump targets", async () => {

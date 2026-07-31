@@ -14,9 +14,280 @@ surfaces are explicitly unstable, and how versions evolve. It applies from the
   plus GitHub Release artifacts (macOS desktop bundle, macOS/Linux CLI binaries),
   and library consumers use git or path dependencies. The version promises attach
   to the tagged releases.
-- macOS is the supported desktop platform at 1.0; the daemon and CLI are
-  supported on macOS and Linux; the Linux desktop build is compile-only; Windows
-  is unsupported.
+- The intended 1.0 supported target is macOS 15.x on Apple Silicon
+  (`aarch64`) for the desktop app and CLI. Linux CLI artifacts are built and
+  source-gated but are not a supported target-host claim without equivalent
+  RC-bound operational receipts. The Linux desktop build is compile-only;
+  Windows and macOS on Intel are unsupported.
+
+### Pre-tag adjustments
+
+No valid `v1.0.0` tag or GitHub Release has published yet, and no RC6 exists,
+so the stability
+promises above are not yet in force. Until the first valid tag, release
+candidates may adjust stable-candidate surfaces with the change recorded in
+`CHANGELOG.md`. The following feature-line adjustments were made after RC5's
+protected-main commit and therefore require a new RC6 candidate before they can
+be release evidence. Current adjustments since `1.0.0-rc.5`:
+
+- `sigillum api profiles eth-seed create` redacts the mnemonic from stdout by
+  default (new `--reveal-mnemonic` and `--mnemonic-out PATH` flags control
+  delivery), and `profiles eth-seed upsert` imports an existing mnemonic.
+- `EthStealthGenerateResponse` and `EthStealthDepositMutationResponse` gained
+  a backward-compatible `warnings` array (additive, defaults to empty).
+- `ErrorResponse` gained a required `code` (stable machine-readable string
+  from the catalog below; envelopes serialized before this change deserialize
+  with the fallback `unknown`) and an optional `fields` array carrying
+  per-field validation errors (`{field, message}`). Daemon errors now
+  disambiguate the overloaded 403/404/429 statuses through the catalog, and
+  CLI daemon errors print as `error[<code>]: <message>` (with one indented
+  line per field error) when the daemon supplied a code.
+- New routes `GET /api/operations`, `GET /api/operations/{id}`, and
+  `POST /api/operations/{id}/cancel` expose the daemon's background-operation
+  registry (in-memory, process-lifetime). `WalletInventoryScanRequest` gained
+  an optional `run_async` flag (absent/false preserves the synchronous
+  behavior exactly); `WalletInventoryScanResponse` and
+  `DiscoveryJobMutationResponse` gained an additive optional `operation`
+  field. `sigillum api inventory scan-evm` gained a matching `--run-async`
+  flag.
+- Discovery-job cancel/resume semantics are now real and tightened: cancel
+  cooperatively stops the running scan (or marks an orphaned `running` job
+  canceled) and conflicts (409 `conflict`) on terminal jobs; resume starts a
+  NEW background operation and discovery job continuing from the interrupted
+  job's persisted checkpoints and conflicts on completed or still-running
+  jobs. Previously both verbs merely rewrote the stored status string.
+- A discovery scan that fails mid-run now persists the job as `failed` with
+  `last_error` (previously the record stayed `running` forever), which also
+  makes it resumable.
+- `WalletInventoryScanRequest` gained an optional `partition_providers` flag
+  (absent/false — and any scan with a single selected provider per chain —
+  preserves the previous behavior exactly): when engaged, same-chain address
+  probes are distributed across that chain's provider profiles by a stable
+  per-address hash so each endpoint observes a disjoint subset.
+  `WalletDiscoveryJob` gained additive optional `partition_providers` and
+  `provider_partition_observations` fields (both absent for non-partitioned
+  jobs; wallet-inventory store schema v21), and discovery-job resume
+  replays the flag.
+  `sigillum api inventory scan-evm` gained a matching
+  `--partition-providers` flag.
+- New route `GET /api/events` exposes the daemon's SSE event channel (plan
+  task 1.3 / decision D-D): `snapshot` (on connect and on lag resync),
+  `operation`, `queue`, and `status` events with `v: 1` versioned payloads
+  from `sigillum-api` (`DaemonEvent` and friends). Auth is the standard
+  bearer session (plus a `?session=` query-token alternative for
+  `EventSource`, loopback-only), but the route is the first PASSIVE read:
+  it authenticates without refreshing the session's idle-activity clock, so
+  an always-open stream cannot defeat the idle auto-lock. Session semantics
+  for every other route are unchanged.
+- The six previously unbounded list endpoints gained additive optional query
+  parameters for filtering, sorting, and offset pagination (plan task 1.5).
+  A parameterless request is byte-identical to before: full list in store
+  order, no `pagination` key. When `limit` and/or `offset` is supplied, the
+  response gains an additive `pagination` envelope
+  (`{total, limit, offset, has_more}`). Parameters: `GET /api/queue/jobs`
+  accepts `state`, `kind`, `chain_id`, `sort=created|updated`;
+  `GET /api/inventory/wallets` accepts `chain_id`, `funded`,
+  `sort=address|last_scanned` (applies to the `addresses` list only);
+  `GET /api/deposits/eth-stealth` accepts `status`, `chain_id`,
+  `counterparty_id`, `sort=created|updated`; `GET /api/plans/consolidation`
+  accepts `status`, `sort=created|updated`; `GET /api/risk/findings` accepts
+  `severity` (matches `risk_level`), `kind` (matches `category`, free-form),
+  `chain_id`, `sort=severity|found_at`; `GET /api/discovery/jobs` accepts
+  `state`, `sort=created|updated` (`updated` = `completed_at_unix`, falling
+  back to `started_at_unix`). All six also accept `order=asc|desc`
+  (requires `sort`; default `desc` for time/severity fields, `asc` for
+  `address`) and `limit`/`offset` (non-negative integers). Unknown or
+  malformed values fail with 400 `validation_failed` naming the parameter.
+  `sigillum-client` grows matching `list_*_with_options` methods taking
+  typed `sigillum_api::request::*ListOptions` structs; the legacy no-arg
+  methods are unchanged.
+- A background scheduler (plan task 1.6) now advances queue retries whose
+  backoff elapsed, receipt confirmation for `sent` plan-step jobs, and
+  stealth-deposit balance refreshes without a client calling
+  `POST /api/queue/process` or `POST /api/maintenance/run`. The loop runs
+  through the identical drain/refresh code paths (durable
+  `prepared`/`submitted_unknown` barriers, never re-sign, execution gates
+  and the `execution_paused` kill switch re-checked at drain, no vault
+  access while locked) and is enabled by default: queue tick 60 s, deposit
+  refresh 5 min, bounded batches (25 jobs / the policy deposit-refresh
+  limit), guard acquisition with skip-on-contention, a 120 s cycle budget,
+  and exponential backoff (to 30 min) on consecutive failures. Env
+  overrides: `SIGILLUM_SCHEDULER_DISABLE=1` (also `true`/`yes`) turns the
+  loop off, `SIGILLUM_SCHEDULER_QUEUE_TICK_SECS` and
+  `SIGILLUM_SCHEDULER_REFRESH_SECS` retune the cadences (clamped to >= 1).
+  Treasury automation runs in a cycle only when the persisted policy has
+  `enabled && allow_treasury_automation` (both default off). Observability:
+  cycles that actually advanced work register a completed `scheduler_cycle`
+  operation (a new `Operation::kind`; kinds remain free-form strings clients
+  must treat as opaque) and a `maintenance.run` audit event, and
+  `DiagnosticsResponse` gained an additive `scheduler` block
+  (`SchedulerStatusResponse`: effective config, last tick time, last cycle
+  outcome, consecutive-failure count, due-queue-job count, next retry
+  timestamp) that deserializes with defaults from older payloads.
+- The passive-read set (plan task 1.7) extends beyond `GET /api/events` to
+  the console's polling trio: `GET /api/status`, `GET /api/operations`, and
+  `GET /api/operations/{id}` now authenticate without refreshing the
+  session's idle-activity clock, so an always-open console cannot defeat the
+  idle auto-lock. Mutations and all other reads are unchanged.
+- Route duplication cleanup (plan task 1.8): `/api/chains`,
+  `/api/chains/upsert`, and `/api/chains/delete` are designated the CANONICAL
+  chain-registry routes (they are what `sigillum-client`, the CLI, and the
+  console call); the `/api/inventory/chains*` trio is a legacy alias kept
+  working and deprecated — new integrations must use `/api/chains*`, and the
+  alias is scheduled for removal at the next major version. Collection-route
+  convention going forward: `GET` reads plus `POST` mutations
+  (`…/upsert`, `…/delete` verb forms), matching the rest of the daemon API.
+- **ERC-5564 stealth hash-convention switch (plan tasks 2.1+2.2)**: new
+  stealth payments and deposit records derive the shared-secret hash as
+  keccak256 over the 33-byte compressed SEC1 point (the ScopeLift
+  `stealth-address-sdk` scheme-1 convention) instead of the pre-release
+  x-only 32-byte encoding — a behavior change to
+  `wallets/eth-stealth/generate` and everything derived from it. On-disk
+  migration: the deposits store advances to schema v3 and stamps all
+  pre-existing records `x32` (legacy); new records are stamped `compressed33`.
+  Dual-decode keeps pre-switch payments detectable and spendable: the check
+  endpoint and announcer scans probe standard-then-legacy, a match re-stamps
+  the record, sweeping derives the key with the record's stamp, and a missing
+  or corrupt stamp re-probes both conventions (derived-address verification
+  makes probing fail-safe). `StealthPaymentRef` gains an optional
+  `stealth_hash_convention`; `EthStealthDeposit`,
+  `EthStealthGenerateResponse`, and `EthStealthCheckResponse` gain it with a
+  standard-convention serde default; the four stealth `QueueJobPayload`
+  variants gain it optionally (absent = probe). Fluidkey's 64-byte X‖Y
+  encoding remains unsupported.
+- Single-key (66-hex-char) EIP-5564 meta-addresses are now accepted anywhere
+  a meta-address is parsed (plan task 2.6); previously they failed `invalid
+  meta-address format`. The dual-key spend‖view form is unchanged.
+- **Stealth announcement-scan cursors (plan task 2.6)**:
+  `EthStealthAnnouncementScanRequest.from_block` changed from required
+  `String` to optional `Option<String>` (wire-compatible: callers that send
+  it are unaffected; omitting it now resumes from the persisted per-(wallet,
+  provider) cursor instead of failing validation) and the request gained an
+  optional `reset_cursor`. The deposits store gained the additive
+  serde-defaulted `announcement_scan_cursors` list (schema stays v3) with the
+  new `EthStealthAnnouncementScanCursor` DTO. Cursor positions are now
+  versioned with an optional `last_scanned_log_index` so capped scans can
+  resume inside a block. Legacy block-only cursors require one full-history
+  replay, with additive `legacy_replay_through_block` retaining that debt
+  across capped pages. An explicit non-genesis range returns 409 until the
+  replay covers the old boundary, unless the caller deliberately supplies
+  `reset_cursor: true`.
+- **Stealth execution-gate carve-out closed (plan task 2.5)**: the stealth
+  transfer/sweep queue jobs (`EthStealthTransfer`, `EthStealthErc20Transfer`,
+  `EthStealthNativeSweep`, `EthStealthErc20Sweep`) no longer bypass the
+  treasury execution gates — a pre-switch behavior change. They gate under
+  the Sweep execution family exactly like the `EthSeed*` equivalents:
+  enqueue (`/api/queue/enqueue/eth-stealth-*` and the deposit sweep paths)
+  returns 403 `execution_gate_denied` unless the treasury policy is enabled
+  with `allow_plan_execution` and `allow_sweep_execution` on, and the drain
+  re-checks the gate per job. Stealth sweeps are therefore BLOCKED BY DEFAULT
+  for existing installs until the operator opens the sweep gate; jobs already
+  `sent` (broadcast, pre-terminal) are unaffected. The `EthStealthGasTopup`
+  job keeps its `allow_gas_topups` enqueue-time gate unchanged.
+- `EthXpubExportResponse` gained a backward-compatible `warning` string
+  (additive, serde default — empty from older daemons) restating that an xpub
+  exposes the wallet's entire past and future receive-address tree (plan task
+  3.4).
+- **`block_cross_party_linkage` defaults to ON (plan task 3.5)**: a
+  `TreasuryPolicyUpdateRequest` that omits the field now resolves to `true`
+  (previously `false`), and the `TreasuryPolicy` wire type deserializes an
+  absent field as `true` — cross-party linkage blocking is the default
+  posture and turning it off requires an explicit `false`. Policies persisted
+  by older daemons always carry the field explicitly, so their chosen value
+  is unaffected; the flip strengthens (never weakens) the fail-closed
+  direction. Behavior change for hand-written or older clients that relied
+  on the implicit off default: plans routing distinct payers to a shared
+  destination (or sharing a gas sponsor across parties) are now hard-blocked
+  unless the operator opts out.
+- `ConsolidationPlan` and `EthStealthDepositEnqueueSweepResponse` gained a
+  backward-compatible `risk_findings` array (additive, serde default, omitted
+  when empty) carrying structured `common_gas_funder` findings from the
+  linkage analysis (plan task 3.5): one advisory `RiskFinding` (category
+  `common_gas_funder`, `medium`, stable per-(chain, funder) id) when one gas
+  sponsor funds receive addresses attributed to different payer identities.
+  Advisory only — execution blocking is unchanged and stays governed by
+  `block_cross_party_linkage`.
+- **At-rest forgetting (plan task 3.2)**: two new routes —
+  `POST /api/inventory/addresses/delete` (prune scanned-address rows plus
+  their holdings and per-address block cursors; selectors
+  `address`/`wallet_family`/`wallet_profile`/`provider_profile`/`chain_id`/
+  `account_index` combine with AND semantics, at least one required, no match
+  → 404) and `POST /api/treasury/receive-addresses/purge` (permanently
+  delete a RETIRED receive allocation and its counterparty binding; active →
+  409, unknown → 404; the party record always remains). `EvmProfileDeleteRequest`
+  (shared by all four profile delete routes) gained an additive optional
+  `prune_inventory` flag: absent/false preserves the legacy delete behavior
+  byte-identically; true runs the forget cascade (the profile's inventory
+  rows, scan state, receive allocations — active ones retire-then-purged —
+  and bindings) in the same operation, and the four profile-mutation
+  responses carry the per-store counts in an additive optional
+  `pruned_inventory` field. New audit event kinds:
+  `wallet_inventory.addresses.prune`, `treasury.receive.purge`,
+  `wallet_inventory.profile_prune` (scope and counts only, never pruned
+  address values). CLI: `sigillum api inventory prune-addresses`,
+  `sigillum api treasury receive-purge`, and `--prune-inventory` on all four
+  `profiles * delete` arms.
+- **One-time receive addresses (plan task 3.3)**: `TreasuryReceiveAllocateRequest`
+  gained additive optional `one_time`, `sweep_destination_address`,
+  `min_sweep_amount_hex`, and `purge_after_sweep` (omitted behaves exactly
+  as before; one-time fields without `one_time` are a 400). The
+  `TreasuryReceiveAllocation` wire type gained additive serde-defaulted
+  fields (`one_time`, `sweep_destination_address`, `min_sweep_amount_hex`,
+  `purge_after_sweep`, `sweep_job_id`, and the read-time derived
+  `lifecycle_state`/`sweep_blocker` — absent on older records and on
+  non-one-time allocations); the wallet-inventory store stays schema v21
+  (additive fields load with defaults, no migration). One-time allocations
+  are advanced by a new `one_time_receive` stage in the scheduler cycle and
+  in `maintenance/run` (the maintenance operation's stage list and progress
+  total grow from 3 to 4 — additive for clients, which already see the
+  stage names as opaque markers), and `MaintenanceRunResponse` carries an
+  additive optional `one_time_receive` summary. Auto-sweeps enqueue as
+  ordinary `eth_seed_native_sweep` jobs under the existing Sweep
+  execution-family gates (no gate semantics change). New audit event kind:
+  `treasury.receive.retire` (id + reason); `treasury.receive.allocate`
+  details gained an additive `one_time` flag (absent on pre-3.3 events).
+  CLI: `treasury receive-allocate` gained `--one-time`/`--no-one-time`,
+  `--sweep-destination`, `--min-sweep-wei-hex`,
+  `--purge-after-sweep`/`--no-purge-after-sweep`, and `--counterparty-id`.
+- **Receiving freshness and observation identity**:
+  `ReceivingItem` gained additive optional
+  `balance_last_checked_at_unix`. HD receiving overview now matches observations
+  by wallet family, wallet profile, chain id, and case-insensitive address,
+  selects the freshest match, and breaks equal-timestamp ties deterministically
+  by provider/id. Receiving refresh persists and reads the same full identity,
+  fans an allocation to every provider on its chain, and deduplicates allocation
+  counts. This corrects cross-wallet/same-address balance misattribution without
+  removing or repurposing a field.
+- **Counterparty destination patch semantics**:
+  `CounterpartyUpdateRequest.sweep_destination_address` now distinguishes
+  omission from an explicit blank. Omission retains the stored destination;
+  blank clears it. Existing callers that send a concrete destination are
+  unchanged.
+- **Explicit gas-top-up cap requirement**: a
+  `TreasuryPolicyUpdateRequest` with `allow_gas_topups: true` must also provide
+  a nonblank, valid `max_gas_topup_wei_hex`; otherwise validation fails. Runtime
+  policy evaluation requires the persisted cap to parse, so absent, blank,
+  malformed, or corrupt cap state disables gas top-ups. There is no implicit
+  unlimited or default cap, and the planner continues to block amounts above
+  the explicit cap.
+- **Operator-console assurance**: the release gate now runs a pinned
+  axe-core `4.12.1` scan across 15 strict-mock scenarios in addition to UI
+  unit/type/build checks. This is assurance coverage, not a stable DOM
+  promise: selectors, markup, CSS, controller boundaries, focus choreography,
+  and modal internals remain unstable implementation details. Mock
+  accessibility and screenshots do not replace the real-daemon browser smoke
+  or the complete clean-tree release gate.
+- **SSE authorization lifecycle hardening**: the console now retires the
+  active authenticated event-stream generation when its session token is
+  revoked or rotated and reconnects only with current authorization. This is a
+  client-side enforcement correction; the stable `GET /api/events` route and
+  event payload contract are unchanged.
+- **Browser authorization-race hardening**: session-aware requests clear a
+  token on `401` only when it is still the token sent by that request. Same-tab
+  token clear synchronously applies locked-shell and palette policy rather than
+  waiting for periodic refresh. Delayed FIDO detection is mode-guarded, and
+  dynamic modal siblings are inert/focus-contained. These are client-side
+  enforcement corrections; session API and wire contracts are unchanged.
 
 ## Stable at 1.0
 
@@ -29,7 +300,12 @@ Breaking any of these is a major-version event:
    break older clients on values alone.
 2. **Daemon route paths and semantics** - the HTTP route paths, methods, auth
    expectations (bearer session tokens over loopback), and fail-closed validation
-   semantics of the local daemon API.
+   semantics of the local daemon API. This includes the `GET /api/events` SSE
+   channel: its event names (`snapshot`, `operation`, `queue`, `status`), the
+   `v: 1` versioned payload shapes, and its passive-read idle semantics
+   (connecting does not defer the idle auto-lock) are part of the stable
+   surface; new event names or optional payload fields may be added within 1.x,
+   and clients must ignore ones they do not recognize.
 3. **CLI syntax** - command names, arguments, environment variables, and JSON
    output shapes of `sigillum` and the `sigillum api` operator commands.
 4. **On-disk formats** - every persisted daemon store is schema-versioned and
@@ -40,11 +316,47 @@ Breaking any of these is a major-version event:
    trait contracts.
 6. **`TreasuryPolicy` fail-closed defaults** - every execution and automation
    capability (`allow_plan_execution` and its per-family gates,
-   `allow_claim_execution`, `allow_gas_topups`, `allow_treasury_automation`, and
-   the `block_cross_party_linkage` opt-in) defaults to OFF and requires an
-   explicit operator opt-in. New capabilities ship default-off behind their own
-   opt-ins. Weakening a fail-closed default is treated as a breaking change and
-   will not happen within 1.x.
+   `allow_claim_execution`, `allow_gas_topups`, `allow_treasury_automation`)
+   defaults to OFF and requires an explicit operator opt-in. New capabilities
+   ship default-off behind their own opt-ins. The `block_cross_party_linkage`
+   privacy protection takes the opposite posture: it defaults to ON (since
+   plan task 3.5) and turning it off requires an explicit `false`. Weakening
+   a fail-closed default is treated as a breaking change and will not happen
+   within 1.x; strengthening one (as the linkage flip did) is a pre-tag
+   adjustment recorded above.
+
+### Error code catalog
+
+Every non-2xx daemon response carries the `ErrorResponse` envelope from
+`sigillum-api`: `code` (one of the strings below), `error` (human-readable
+message), optional `action` (machine-readable remediation payload), and
+optional `fields` (per-field validation breakdown, `{field, message}` with
+wire field paths such as `allowed_destinations[0].address`).
+
+Codes are stable strings, deliberately not an enum: a newer daemon may add
+codes within 1.x, and clients must treat unrecognized codes as opaque and
+fall back to the HTTP status. Removing or repurposing an existing code is a
+major-version event.
+
+| Code | HTTP | Meaning |
+| --- | --- | --- |
+| `validation_failed` | 400 | Request body failed DTO validation; `fields` carries the per-field breakdown when the DTO reports one. |
+| `bad_request` | 400 | Malformed or inconsistent request outside DTO validation. |
+| `typed_confirmation_mismatch` | 400 | Typed-confirmation phrase mismatch; `action` carries the exact expected phrase. |
+| `unauthorized` | 401 | Missing/invalid session token, or credential (passphrase, snapshot key) did not authenticate. |
+| `forbidden` | 403 | Generic refusal not covered by a more specific code (e.g. plan step-state refusals). The 403 fallback; may gain more specific siblings over time. |
+| `vault_locked` | 403 | Vault or relevant compartment is locked, or no compartment is active; unlock (or switch compartment) and retry. |
+| `execution_gate_denied` | 403 | A treasury execution gate denied the operation: `execution_paused` kill switch, a per-family `allow_*_execution` gate, a per-profile `execution_enabled` flag, or a claim/gas-topup gate. |
+| `capability_scope_denied` | 403 | Session is valid but lacks the required capability scope (or the endpoint requires a full daemon session). |
+| `policy_violation` | 403 | A treasury transaction-policy rule blocked the action; `action` carries the policy reason. |
+| `not_found` | 404 | The requested resource does not exist. |
+| `not_initialized` | 404 | The daemon vault has not been initialized; complete first-run setup. |
+| `conflict` | 409 | Operation conflicts with current daemon state (e.g. already unlocked, duplicate profile). |
+| `locked_in_progress` | 423 | The daemon is draining unlocked state; retry once the lock completes. |
+| `rate_limited` | 429 | An upstream provider (EVM RPC) rate-limited the request. |
+| `unlock_throttled` | 429 | Too many failed unlock attempts; the daemon enforces a cooldown. |
+| `internal` | 500 | Unexpected internal failure. |
+| `unavailable` | 503 | The daemon is up but not ready to serve (startup recovery running). |
 
 ## Unstable at 1.0
 

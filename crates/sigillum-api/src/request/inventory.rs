@@ -103,7 +103,7 @@ pub struct TokenRegistryDeleteRequest {
 /// are scanned. When no provider filter is provided, every configured EVM
 /// provider profile is scanned so one derived address can be checked across
 /// multiple L1/L2 networks.
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct WalletInventoryScanRequest {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub wallet_family: Option<String>,
@@ -133,6 +133,28 @@ pub struct WalletInventoryScanRequest {
     pub max_index: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub resume_from_latest_checkpoint: Option<bool>,
+    /// Run the scan as a background daemon operation instead of blocking the
+    /// request until the scan completes.
+    ///
+    /// When `true`, the daemon validates the request, starts an `Operation`
+    /// (see `GET /api/operations`) that drives the same scan pipeline in a
+    /// spawned task, and returns immediately with the accepted discovery job
+    /// and the operation tracking it. Absent or `false` keeps the original
+    /// synchronous behavior, so existing clients see no contract change.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub run_async: Option<bool>,
+    /// Distribute same-chain address probes across the selected provider
+    /// profiles so no single endpoint observes the full address set.
+    ///
+    /// When `true` and more than one selected provider profile serves the
+    /// same chain, each probed address is assigned to exactly one of that
+    /// chain's providers by a stable hash of the address, so every provider
+    /// observes only a disjoint subset (an address is still probed once per
+    /// chain). Absent or `false` — and whenever each chain has a single
+    /// selected provider — preserves the original behavior exactly. Composes
+    /// with `run_async`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub partition_providers: Option<bool>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub token_addresses: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -279,6 +301,38 @@ pub struct ChainProfileDeleteRequest {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct DiscoveryJobMutationRequest {
     pub id: String,
+}
+
+/// Delete scanned-address records (and their holdings) from the wallet
+/// inventory (plan task 3.2).
+///
+/// Selectors combine with AND semantics; at least one must be present so a
+/// malformed request can never empty the store. `address` matches rows for
+/// that address across every family/profile/provider/chain unless narrowed;
+/// `wallet_profile` (optionally with `wallet_family`) forgets a profile's
+/// scanned history; `account_index` scopes to one derivation account branch;
+/// `provider_profile` and `chain_id` narrow any of the above. Deleting an
+/// address row also deletes the holdings recorded for it and the per-address
+/// announcement/log block cursors carried by past discovery jobs.
+///
+/// Pruning removes HISTORY, not derivation: a later scan that re-derives a
+/// pruned index re-observes it and records a fresh row (new id, fresh
+/// `first_seen_at_unix`). Receive allocations and counterparty bindings are
+/// never recreated by scans, so purged bindings stay forgotten.
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct WalletInventoryAddressPruneRequest {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub address: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub wallet_family: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub wallet_profile: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub provider_profile: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub chain_id: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub account_index: Option<u32>,
 }
 
 /// Add or replace a local risk catalog entry for a spender/operator address.

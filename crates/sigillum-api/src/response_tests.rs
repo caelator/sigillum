@@ -11,10 +11,56 @@ fn roundtrip_test<T: Serialize + for<'de> Deserialize<'de> + PartialEq + std::fm
 #[test]
 fn test_error_response_roundtrip() {
     let resp = ErrorResponse {
+        code: crate::error_codes::INTERNAL.to_string(),
         error: "Something went wrong".to_string(),
         action: None,
+        fields: None,
     };
     roundtrip_test(resp);
+}
+
+#[test]
+fn test_error_response_with_action_and_fields_roundtrip() {
+    let resp = ErrorResponse {
+        code: crate::error_codes::VALIDATION_FAILED.to_string(),
+        error: "name exceeds maximum length of 256 bytes".to_string(),
+        action: None,
+        fields: Some(vec![
+            FieldError {
+                field: "name".to_string(),
+                message: "name exceeds maximum length of 256 bytes".to_string(),
+            },
+            FieldError {
+                field: "allowed_destinations[0].address".to_string(),
+                message: "allowed_destinations[0].address must be a valid ethereum address"
+                    .to_string(),
+            },
+        ]),
+    };
+    roundtrip_test(resp.clone());
+    let json = serde_json::to_string(&resp).unwrap();
+    assert!(json.contains("\"code\":\"validation_failed\""));
+    assert!(json.contains("\"field\":\"name\""));
+}
+
+#[test]
+fn test_error_response_deserializes_legacy_payload_without_code_or_fields() {
+    // Envelopes produced before `code`/`fields` existed must still parse.
+    let resp: ErrorResponse =
+        serde_json::from_str(r#"{"error":"Vault is locked.","action":"unlock_first"}"#).unwrap();
+    assert_eq!(resp.code, crate::error_codes::UNKNOWN);
+    assert_eq!(resp.error, "Vault is locked.");
+    assert_eq!(resp.action.as_deref(), Some("unlock_first"));
+    assert_eq!(resp.fields, None);
+}
+
+#[test]
+fn test_field_error_roundtrip() {
+    let field = FieldError {
+        field: "watch_addresses[0].address".to_string(),
+        message: "watch_addresses[0].address must be a valid ethereum address".to_string(),
+    };
+    roundtrip_test(field);
 }
 
 #[test]
@@ -258,6 +304,7 @@ fn test_eth_stealth_generate_response_roundtrip() {
         stealth_address: "0xstealth".to_string(),
         ephemeral_public_key_hex: "0xeph".to_string(),
         view_tag_hex: "0xaa".to_string(),
+        stealth_hash_convention: sigillum_core::StealthHashConvention::STANDARD,
         announcement: Some(EthStealthAnnouncementPayload {
             announcer_address: "0x55649e01b5df198d18d95b5cc5051630cfd45564".to_string(),
             announce_function: "announce(uint256,address,bytes,bytes)".to_string(),
@@ -268,8 +315,29 @@ fn test_eth_stealth_generate_response_roundtrip() {
             calldata_hex: "0xcalldata".to_string(),
             value_wei_hex: "0x0".to_string(),
         }),
+        warnings: vec![
+            "This meta-address does not match any of this vault's known stealth wallets."
+                .to_string(),
+        ],
     };
     roundtrip_test(resp);
+}
+
+#[test]
+fn test_eth_stealth_generate_response_warnings_default_empty() {
+    // Responses serialized before the `warnings` field existed must still
+    // deserialize, defaulting to no warnings.
+    let json = r#"{
+        "short_name": "wallet1",
+        "scheme_id": 1,
+        "stealth_meta_address": "st:0x...",
+        "stealth_address": "0xstealth",
+        "ephemeral_public_key_hex": "0xeph",
+        "view_tag_hex": "0xaa"
+    }"#;
+    let resp: EthStealthGenerateResponse = serde_json::from_str(json).unwrap();
+    assert!(resp.warnings.is_empty());
+    assert!(resp.announcement.is_none());
 }
 
 #[test]
@@ -279,6 +347,7 @@ fn test_eth_stealth_check_response_roundtrip() {
         matches: true,
         derived_stealth_address: "0xderived".to_string(),
         view_tag_hex: "0xaa".to_string(),
+        stealth_hash_convention: sigillum_core::StealthHashConvention::STANDARD,
     };
     roundtrip_test(resp);
 }
@@ -593,8 +662,89 @@ fn test_eth_xpub_export_response_roundtrip() {
         account_path: "m/44'/60'/9'".to_string(),
         receive_path: "m/44'/60'/9'/0".to_string(),
         receive_xpub: "xpub661MyMwAqRbcFexample".to_string(),
+        warning: "An xpub exposes the entire receive tree.".to_string(),
     };
     roundtrip_test(resp);
+
+    // Payloads produced before the warning field existed deserialize with an
+    // empty warning (additive, serde default).
+    let legacy: EthXpubExportResponse = serde_json::from_str(
+        r#"{"wallet_profile":"receive_tree","project_account":9,"account_path":"m/44'/60'/9'","receive_path":"m/44'/60'/9'/0","receive_xpub":"xpub661MyMwAqRbcFexample"}"#,
+    )
+    .unwrap();
+    assert!(legacy.warning.is_empty());
+}
+
+#[test]
+fn test_profile_mutation_response_pruned_inventory_is_additive() {
+    let profile = EthSeedWalletProfile {
+        name: "seed-main".to_string(),
+        label: None,
+        project_account: 0,
+        provider_profile: "mainnet".to_string(),
+        compartment_id: 1,
+        chain_id: Some(1),
+        word_count: 12,
+        mnemonic_secret_key: "wallet.seed.seed-main.mnemonic".to_string(),
+        account_path: "m/44'/60'/0'".to_string(),
+        receive_path: "m/44'/60'/0'/0".to_string(),
+        receive_xpub: "xpub661MyMwAqRbcFexample".to_string(),
+        first_receive_address: "0x1111111111111111111111111111111111111111".to_string(),
+        default_destination_address: None,
+        control_xpub: None,
+        sponsor_address: None,
+        hot_address: None,
+        treasury_address: None,
+        execution_enabled: false,
+    };
+
+    // Without the cascade the response is byte-identical to the legacy shape
+    // (no `pruned_inventory` key), and legacy payloads still deserialize.
+    let legacy = EthSeedWalletProfileMutationResponse {
+        status: "deleted".to_string(),
+        profile: profile.clone(),
+        pruned_inventory: None,
+    };
+    let json = serde_json::to_value(&legacy).unwrap();
+    assert!(json.get("pruned_inventory").is_none());
+    let decoded: EthSeedWalletProfileMutationResponse = serde_json::from_value(json).unwrap();
+    assert_eq!(decoded, legacy);
+
+    roundtrip_test(EthSeedWalletProfileMutationResponse {
+        status: "deleted".to_string(),
+        profile,
+        pruned_inventory: Some(InventoryPruneSummary {
+            addresses: 6,
+            holdings: 1,
+            jobs: 1,
+            checkpoints: 2,
+            block_cursors: 0,
+            allocations_active: 1,
+            allocations_retired: 1,
+            counterparty_bindings: 2,
+        }),
+    });
+}
+
+#[test]
+fn test_wallet_inventory_address_prune_response_roundtrip() {
+    roundtrip_test(WalletInventoryAddressPruneResponse {
+        status: "pruned".to_string(),
+        pruned: InventoryPruneSummary {
+            addresses: 3,
+            holdings: 2,
+            jobs: 0,
+            checkpoints: 0,
+            block_cursors: 1,
+            allocations_active: 0,
+            allocations_retired: 0,
+            counterparty_bindings: 0,
+        },
+    });
+    roundtrip_test(WalletInventoryAddressPruneResponse {
+        status: "pruned".to_string(),
+        pruned: InventoryPruneSummary::default(),
+    });
 }
 
 #[test]
@@ -674,12 +824,129 @@ fn test_wallet_inventory_scan_response_roundtrip() {
         started_at_unix: 1,
         completed_at_unix: Some(2),
         last_error: None,
+        partition_providers: None,
+        provider_partition_observations: Vec::new(),
     };
     roundtrip_test(WalletInventoryScanResponse {
         job,
         addresses: vec![address],
         holdings: vec![holding],
+        operation: None,
     });
+}
+
+#[test]
+fn test_operation_dtos_roundtrip() {
+    let operation = Operation {
+        id: "op_1".to_string(),
+        kind: OPERATION_KIND_INVENTORY_SCAN_EVM.to_string(),
+        state: OPERATION_STATE_RUNNING.to_string(),
+        progress: OperationProgress {
+            processed: 7,
+            total: None,
+        },
+        related_ids: vec!["job_1".to_string()],
+        created_at_unix: 10,
+        updated_at_unix: 12,
+        completed_at_unix: None,
+        error: None,
+    };
+    roundtrip_test(operation.clone());
+    roundtrip_test(OperationListResponse {
+        operations: vec![operation.clone()],
+    });
+    roundtrip_test(OperationResponse {
+        operation: operation.clone(),
+    });
+    roundtrip_test(OperationMutationResponse {
+        status: OPERATION_STATE_CANCEL_REQUESTED.to_string(),
+        operation,
+    });
+
+    let finished = Operation {
+        id: "op_2".to_string(),
+        kind: OPERATION_KIND_INVENTORY_SCAN_EVM.to_string(),
+        state: OPERATION_STATE_FAILED.to_string(),
+        progress: OperationProgress {
+            processed: 3,
+            total: Some(10),
+        },
+        related_ids: Vec::new(),
+        created_at_unix: 20,
+        updated_at_unix: 25,
+        completed_at_unix: Some(25),
+        error: Some("provider rpc timeout".to_string()),
+    };
+    roundtrip_test(finished);
+}
+
+#[test]
+fn test_scan_and_discovery_mutation_responses_carry_optional_operation() {
+    let job = WalletDiscoveryJob {
+        id: "job_1".to_string(),
+        status: "running".to_string(),
+        source: "local-rpc".to_string(),
+        wallet_families: vec!["eth-xpub".to_string()],
+        wallet_profiles: vec!["account-xpub".to_string()],
+        provider_profiles: vec!["mainnet".to_string()],
+        chain_ids: vec![1],
+        gap_limit: 20,
+        max_index: 200,
+        addresses_scanned: 0,
+        active_addresses: 0,
+        holdings_detected: 0,
+        checkpoints: Vec::new(),
+        block_cursors: Vec::new(),
+        started_at_unix: 1,
+        completed_at_unix: None,
+        last_error: None,
+        partition_providers: None,
+        provider_partition_observations: Vec::new(),
+    };
+    let operation = Operation {
+        id: "op_1".to_string(),
+        kind: OPERATION_KIND_INVENTORY_SCAN_EVM.to_string(),
+        state: OPERATION_STATE_RUNNING.to_string(),
+        progress: OperationProgress {
+            processed: 0,
+            total: None,
+        },
+        related_ids: vec!["job_1".to_string()],
+        created_at_unix: 1,
+        updated_at_unix: 1,
+        completed_at_unix: None,
+        error: None,
+    };
+    roundtrip_test(WalletInventoryScanResponse {
+        job: job.clone(),
+        addresses: Vec::new(),
+        holdings: Vec::new(),
+        operation: Some(operation.clone()),
+    });
+    roundtrip_test(DiscoveryJobMutationResponse {
+        status: "running".to_string(),
+        job,
+        operation: Some(operation),
+    });
+
+    // Legacy wire payloads without the new optional field still decode.
+    let legacy: DiscoveryJobMutationResponse = serde_json::from_value(serde_json::json!({
+        "status": "canceled",
+        "job": {
+            "id": "job_9",
+            "status": "canceled",
+            "source": "local-rpc",
+            "gap_limit": 20,
+            "max_index": 200,
+            "addresses_scanned": 3,
+            "active_addresses": 1,
+            "holdings_detected": 0,
+            "started_at_unix": 5
+        }
+    }))
+    .unwrap();
+    assert_eq!(legacy.status, "canceled");
+    assert!(legacy.operation.is_none());
 }
 
 #[test]
@@ -892,6 +1159,7 @@ fn test_wallet_operations_response_roundtrips() {
     };
     roundtrip_test(RiskFindingListResponse {
         findings: vec![finding],
+        pagination: None,
     });
     let catalog_entry = RiskCatalogEntry {
         address: "0x4444444444444444444444444444444444444444".to_string(),
@@ -988,10 +1256,12 @@ fn test_wallet_operations_response_roundtrips() {
         },
         policy_violations: Vec::new(),
         linkage_findings: Vec::new(),
+        risk_findings: Vec::new(),
         steps: vec![step],
     };
     roundtrip_test(ConsolidationPlanListResponse {
         plans: vec![plan.clone()],
+        pagination: None,
     });
     roundtrip_test(ConsolidationPlanMutationResponse {
         status: "generated".to_string(),
@@ -1067,6 +1337,7 @@ fn test_eth_stealth_deposit_roundtrip() {
         stealth_address: "0xstealth".to_string(),
         ephemeral_public_key_hex: "0xeph".to_string(),
         view_tag_hex: "0xaa".to_string(),
+        stealth_hash_convention: sigillum_core::StealthHashConvention::STANDARD,
         announcement: Some(EthStealthAnnouncementPayload {
             announcer_address: "0x55649e01b5df198d18d95b5cc5051630cfd45564".to_string(),
             announce_function: "announce(uint256,address,bytes,bytes)".to_string(),
@@ -1092,6 +1363,9 @@ fn test_eth_stealth_deposit_roundtrip() {
         last_checked_at_unix: Some(1000002),
         broadcast_transaction_hash_hex: None,
         counterparty_id: None,
+        requested_gas_wei_hex: Some("0x5208".to_string()),
+        gas_topup_job_id: Some("job_topup_1".to_string()),
+        gas_topup_job_state: Some("sent".to_string()),
     };
     roundtrip_test(deposit);
 }
@@ -1113,6 +1387,7 @@ fn test_eth_stealth_deposit_legacy_chain_defaults() {
         stealth_address: "0xstealth".to_string(),
         ephemeral_public_key_hex: "0xeph".to_string(),
         view_tag_hex: "0xaa".to_string(),
+        stealth_hash_convention: sigillum_core::StealthHashConvention::STANDARD,
         announcement: None,
         token_address: None,
         expected_amount_hex: None,
@@ -1129,6 +1404,9 @@ fn test_eth_stealth_deposit_legacy_chain_defaults() {
         last_checked_at_unix: Some(1000002),
         broadcast_transaction_hash_hex: None,
         counterparty_id: None,
+        requested_gas_wei_hex: None,
+        gas_topup_job_id: None,
+        gas_topup_job_state: None,
     };
     let mut json = serde_json::to_value(deposit).unwrap();
     let object = json.as_object_mut().unwrap();
@@ -1168,6 +1446,7 @@ fn test_queue_job_payload_native_transfer_roundtrip() {
         nonce: Some(5),
         gas_limit: Some(21000),
         view_tag_hex: Some("0xaa".to_string()),
+        stealth_hash_convention: None,
     };
     roundtrip_test(payload);
 }
@@ -1184,6 +1463,7 @@ fn test_queue_job_payload_erc20_transfer_roundtrip() {
         nonce: None,
         gas_limit: Some(100000),
         view_tag_hex: None,
+        stealth_hash_convention: None,
     };
     roundtrip_test(payload);
 }
@@ -1198,6 +1478,7 @@ fn test_queue_job_payload_native_sweep_roundtrip() {
         min_value_wei_hex: Some("0x1".to_string()),
         gas_limit: Some(21000),
         view_tag_hex: Some("0xaa".to_string()),
+        stealth_hash_convention: None,
     };
     roundtrip_test(payload);
 }
@@ -1213,8 +1494,46 @@ fn test_queue_job_payload_erc20_sweep_roundtrip() {
         min_amount_hex: Some("0x10".to_string()),
         gas_limit: None,
         view_tag_hex: None,
+        stealth_hash_convention: None,
+        prerequisite_job_ids: vec!["job_topup_1".to_string()],
     };
     roundtrip_test(payload);
+}
+
+#[test]
+fn test_queue_job_payload_erc20_sweep_legacy_without_prerequisites() {
+    // Jobs persisted before sponsor top-ups existed carry no
+    // `prerequisite_job_ids` key at all; serde default keeps them loadable.
+    let json = serde_json::json!({
+        "kind": "eth_stealth_erc20_sweep",
+        "wallet_profile": "profile",
+        "stealth_address": "0xstealth",
+        "ephemeral_public_key_hex": "0xeph",
+        "token_address": "0xtoken",
+    });
+    let payload: QueueJobPayload = serde_json::from_value(json).unwrap();
+    let QueueJobPayload::EthStealthErc20Sweep {
+        prerequisite_job_ids,
+        ..
+    } = payload
+    else {
+        panic!("expected erc20 sweep payload");
+    };
+    assert!(prerequisite_job_ids.is_empty());
+}
+
+#[test]
+fn test_queue_job_payload_gas_topup_roundtrip() {
+    let payload = QueueJobPayload::EthStealthGasTopup {
+        wallet_profile: "profile".to_string(),
+        sponsor_address: "0xsponsor".to_string(),
+        destination_address: "0xstealth".to_string(),
+        value_wei_hex: "0x5208".to_string(),
+        gas_limit: Some(21000),
+    };
+    roundtrip_test(payload.clone());
+    let json = serde_json::to_value(&payload).unwrap();
+    assert_eq!(json["kind"], "eth_stealth_gas_topup");
 }
 
 #[test]
@@ -1235,6 +1554,7 @@ fn test_queue_job_with_flatten_and_tag_roundtrip() {
             nonce: Some(5),
             gas_limit: Some(21000),
             view_tag_hex: None,
+            stealth_hash_convention: None,
         },
         last_error: None,
         transaction_hash_hex: None,
@@ -1261,6 +1581,7 @@ fn test_queue_job_with_error_roundtrip() {
             min_value_wei_hex: None,
             gas_limit: None,
             view_tag_hex: None,
+            stealth_hash_convention: None,
         },
         last_error: Some("Insufficient funds".to_string()),
         transaction_hash_hex: None,
@@ -1289,12 +1610,14 @@ fn test_queue_job_list_response_roundtrip() {
                 nonce: None,
                 gas_limit: None,
                 view_tag_hex: None,
+                stealth_hash_convention: None,
             },
             last_error: None,
             transaction_hash_hex: None,
             broadcast_transaction_hash_hex: None,
             receipt: Default::default(),
         }],
+        pagination: None,
     };
     roundtrip_test(resp);
 }
@@ -1320,6 +1643,7 @@ fn test_queue_enqueue_response_roundtrip() {
                 nonce: None,
                 gas_limit: None,
                 view_tag_hex: None,
+                stealth_hash_convention: None,
             },
             last_error: None,
             transaction_hash_hex: None,
@@ -1360,12 +1684,14 @@ fn test_queue_process_response_roundtrip() {
                 min_value_wei_hex: Some("0x1".to_string()),
                 gas_limit: Some(21000),
                 view_tag_hex: Some("0xaa".to_string()),
+                stealth_hash_convention: None,
             },
             last_error: None,
             transaction_hash_hex: Some("0xhash".to_string()),
             broadcast_transaction_hash_hex: None,
             receipt: Default::default(),
         }],
+        operation: None,
     };
     roundtrip_test(resp);
     roundtrip_test(QueueExecutionPauseResponse {
@@ -1415,8 +1741,15 @@ fn test_maintenance_run_response_roundtrip() {
             receipt_timeout: 0,
         },
         treasury_automation: None,
+        one_time_receive: Some(OneTimeReceiveRunSummary {
+            observed_allocations: 2,
+            enqueued_sweeps: 1,
+            retired_allocations: 1,
+            purged_allocations: 0,
+        }),
         deposits: vec![],
         jobs: vec![],
+        operation: None,
     };
     roundtrip_test(resp);
 }
@@ -1779,6 +2112,13 @@ fn sample_receive_allocation() -> TreasuryReceiveAllocation {
         created_at_unix: 10,
         retired_at_unix: None,
         counterparty_id: None,
+        one_time: false,
+        sweep_destination_address: None,
+        min_sweep_amount_hex: None,
+        purge_after_sweep: false,
+        sweep_job_id: None,
+        lifecycle_state: None,
+        sweep_blocker: None,
     }
 }
 
@@ -1795,6 +2135,30 @@ fn test_treasury_receive_allocation_responses_roundtrip() {
         counterparty_id: Some("cp_1".into()),
         ..sample_receive_allocation()
     });
+    // Plan task 3.3: one-time allocations roundtrip with their policy fields,
+    // the sweep-job marker, and the read-time lifecycle derivation.
+    roundtrip_test(TreasuryReceiveAllocation {
+        one_time: true,
+        sweep_destination_address: Some("0x2222222222222222222222222222222222222222".into()),
+        min_sweep_amount_hex: Some("0xde0b6b3a7640000".into()),
+        purge_after_sweep: true,
+        sweep_job_id: Some("job_1".into()),
+        lifecycle_state: Some("sweep_queued".into()),
+        ..sample_receive_allocation()
+    });
+    roundtrip_test(TreasuryReceiveAllocation {
+        one_time: true,
+        sweep_destination_address: Some("0x2222222222222222222222222222222222222222".into()),
+        lifecycle_state: Some("watching".into()),
+        sweep_blocker: Some("execution_gates".into()),
+        ..sample_receive_allocation()
+    });
+    roundtrip_test(OneTimeReceiveRunSummary {
+        observed_allocations: 2,
+        enqueued_sweeps: 1,
+        retired_allocations: 1,
+        purged_allocations: 1,
+    });
     roundtrip_test(TreasuryReceiveAllocationListResponse {
         allocations: vec![sample_receive_allocation()],
     });
@@ -1805,6 +2169,11 @@ fn test_treasury_receive_allocation_responses_roundtrip() {
         status: "allocated".to_string(),
         allocation: sample_receive_allocation(),
     });
+    roundtrip_test(TreasuryReceivePurgeResponse {
+        status: "purged".to_string(),
+        allocation_id: "alloc_123".to_string(),
+        counterparty_binding_removed: true,
+    });
     let mut json = serde_json::to_value(sample_receive_allocation()).unwrap();
     let object = json.as_object_mut().unwrap();
     object.remove("chain_id");
@@ -1812,6 +2181,32 @@ fn test_treasury_receive_allocation_responses_roundtrip() {
     let legacy: TreasuryReceiveAllocation = serde_json::from_value(json).unwrap();
     assert_eq!(legacy.chain_id, 1);
     assert!(legacy.chain_id_assumed);
+    // Records persisted before plan task 3.3 lack the one-time fields entirely:
+    // they load with the mode off and no lifecycle derivation.
+    let mut json = serde_json::to_value(sample_receive_allocation()).unwrap();
+    let object = json.as_object_mut().unwrap();
+    object.remove("one_time");
+    object.remove("purge_after_sweep");
+    let legacy: TreasuryReceiveAllocation = serde_json::from_value(json).unwrap();
+    assert!(!legacy.one_time);
+    assert!(!legacy.purge_after_sweep);
+    assert_eq!(legacy.sweep_destination_address, None);
+    assert_eq!(legacy.min_sweep_amount_hex, None);
+    assert_eq!(legacy.sweep_job_id, None);
+    assert_eq!(legacy.lifecycle_state, None);
+    assert_eq!(legacy.sweep_blocker, None);
+    // Maintenance responses produced before the one-time stage existed lack
+    // the summary field.
+    let legacy_maintenance: MaintenanceRunResponse = serde_json::from_str(
+        r#"{
+            "status": "ok",
+            "refreshed": 0, "detected": 0, "queued": 0, "processed": 0,
+            "succeeded": 0, "failed": 0,
+            "deposits": [], "jobs": []
+        }"#,
+    )
+    .unwrap();
+    assert_eq!(legacy_maintenance.one_time_receive, None);
     roundtrip_test(ReceivingRefreshResponse {
         generated_at_unix: 99,
         addresses_requested: 3,
@@ -1865,6 +2260,42 @@ fn test_counterparty_responses_roundtrip() {
         status: "deleted".into(),
         party: None,
     });
+}
+
+#[test]
+fn test_receiving_item_balance_timestamp_defaults_and_roundtrips() {
+    let item = ReceivingItem {
+        source_type: "hd".into(),
+        address: "0x1111111111111111111111111111111111111111".into(),
+        chain_id: 1,
+        chain_id_assumed: false,
+        derivation_path: Some("m/44'/60'/0'/0/0".into()),
+        purpose: Some("invoice".into()),
+        label: None,
+        counterparty_id: None,
+        linkage_warning: None,
+        balance_native_wei_hex: Some("0x2".into()),
+        balance_known: true,
+        balance_last_checked_at_unix: Some(42),
+        status: "active".into(),
+        created_at_unix: 1,
+    };
+    roundtrip_test(item.clone());
+
+    let mut legacy_json = serde_json::to_value(item).unwrap();
+    legacy_json
+        .as_object_mut()
+        .unwrap()
+        .remove("balance_last_checked_at_unix");
+    let legacy: ReceivingItem = serde_json::from_value(legacy_json).unwrap();
+    assert_eq!(legacy.balance_last_checked_at_unix, None);
+    assert!(
+        !serde_json::to_value(legacy)
+            .unwrap()
+            .as_object()
+            .unwrap()
+            .contains_key("balance_last_checked_at_unix")
+    );
 }
 
 fn sample_treasury_policy() -> TreasuryPolicy {
@@ -1942,13 +2373,16 @@ fn test_treasury_policy_responses_roundtrip() {
 }
 
 #[test]
-fn test_treasury_policy_require_simulation_defaults_true() {
-    // Older or hand-written payloads without the field must stay strict.
+fn test_treasury_policy_protective_defaults_stay_strict() {
+    // Older or hand-written payloads without the fields must stay strict:
+    // simulation and cross-party linkage blocking default ON (the latter
+    // flipped default-on in plan task 3.5); every execution capability
+    // defaults OFF.
     let policy: TreasuryPolicy =
         serde_json::from_str(r#"{"enabled":true,"created_at_unix":1,"updated_at_unix":2}"#)
             .unwrap();
     assert!(policy.require_simulation);
-    assert!(!policy.block_cross_party_linkage);
+    assert!(policy.block_cross_party_linkage);
     assert!(!policy.allow_claim_execution);
     assert!(!policy.allow_gas_topups);
     assert!(policy.max_gas_topup_wei_hex.is_none());
@@ -2000,6 +2434,7 @@ fn test_consolidation_plan_policy_violations_roundtrip() {
         },
         policy_violations: vec!["exceeds_policy_plan_cap".to_string()],
         linkage_findings: Vec::new(),
+        risk_findings: Vec::new(),
         steps: Vec::new(),
     };
     roundtrip_test(base.clone());
@@ -2116,4 +2551,73 @@ fn test_token_registry_entry_accepts_chain_id_alias() {
     .unwrap();
 
     assert_eq!(entry.chain_id, 1);
+}
+
+#[test]
+fn test_eth_stealth_announcement_cursor_legacy_and_pending_replay_shapes() {
+    let legacy: EthStealthAnnouncementScanCursor = serde_json::from_value(serde_json::json!({
+        "wallet_profile": "payments-mainnet",
+        "provider_profile": "mainnet",
+        "chain_id": 1,
+        "last_scanned_block": 48,
+        "updated_at_unix": 10
+    }))
+    .unwrap();
+    assert_eq!(legacy.position_version, 0);
+    assert_eq!(legacy.last_scanned_log_index, None);
+    assert_eq!(legacy.legacy_replay_through_block, None);
+
+    let pending = EthStealthAnnouncementScanCursor {
+        wallet_profile: "payments-mainnet".to_string(),
+        provider_profile: "mainnet".to_string(),
+        chain_id: 1,
+        position_version: 1,
+        last_scanned_block: 32,
+        last_scanned_log_index: Some(0),
+        legacy_replay_through_block: Some(48),
+        updated_at_unix: 11,
+    };
+    let json = serde_json::to_value(&pending).unwrap();
+    assert_eq!(json["legacy_replay_through_block"], 48);
+    roundtrip_test(pending);
+}
+
+// ── List pagination / filtering / sorting ──────────────────────────
+
+#[test]
+fn test_pagination_info_roundtrip() {
+    roundtrip_test(PaginationInfo {
+        total: 42,
+        limit: 10,
+        offset: 20,
+        has_more: true,
+    });
+}
+
+#[test]
+fn test_list_response_pagination_is_omitted_when_absent() {
+    // Legacy (parameterless) responses stay byte-identical: the
+    // `pagination` key is not serialized when no window was requested.
+    let resp = QueueJobListResponse {
+        jobs: Vec::new(),
+        pagination: None,
+    };
+    let json = serde_json::to_value(&resp).unwrap();
+    assert!(json.get("pagination").is_none());
+
+    let paged = QueueJobListResponse {
+        jobs: Vec::new(),
+        pagination: Some(PaginationInfo {
+            total: 0,
+            limit: 25,
+            offset: 0,
+            has_more: false,
+        }),
+    };
+    let json = serde_json::to_value(&paged).unwrap();
+    assert_eq!(json["pagination"]["limit"], serde_json::json!(25));
+
+    // The legacy wire shape deserializes with `pagination: None`.
+    let legacy: QueueJobListResponse = serde_json::from_str("{\"jobs\":[]}").unwrap();
+    assert_eq!(legacy.pagination, None);
 }
