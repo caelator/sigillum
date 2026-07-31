@@ -1237,6 +1237,13 @@ test("setup wizard passphrase path validates and initializes a local vault", asy
       friendlyFidoError: (message) => String(message),
     });
 
+    wizard.wizGetStarted();
+    equal(dom.el("wizStep0").classList.contains("active"), true);
+    equal(dom.el("wizStep0").getAttribute("aria-hidden"), "false");
+    equal((dom.el("wizStep0") as any).inert, false);
+    equal(focused, "wizStageTitle");
+    equal(dom.el("wizStageTitle").textContent, "Choose a protection model");
+
     wizard.wizPreset("passphrase");
     equal(dom.el("wizStepPassphrase").classList.contains("active"), true);
     equal(dom.el("wizStep0").getAttribute("aria-hidden"), "true");

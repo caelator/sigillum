@@ -751,15 +751,21 @@ async function runBrowserSmoke(cdp) {
   await waitFor(
     cdp,
     `document.getElementById("wizStep0")?.classList.contains("active") === true &&
-      document.getElementById("wizStep0")?.contains(document.activeElement) === true`,
-    "preset step active and focused",
+      document.getElementById("wizStep0")?.getAttribute("aria-hidden") === "false" &&
+      document.getElementById("wizStep0")?.inert === false &&
+      document.getElementById("wizStageTitle")?.textContent?.trim() === "Choose a protection model" &&
+      document.activeElement?.id === "wizStageTitle"`,
+    "preset step active with its heading focused",
   );
   await click(cdp, '[data-action="wizPreset"][data-arg0="passphrase"]', "passphrase setup preset");
   await waitFor(
     cdp,
     `document.getElementById("wizStepPassphrase")?.classList.contains("active") === true &&
-      document.activeElement?.id === "wizPLabel"`,
-    "passphrase wizard step focused",
+      document.getElementById("wizStepPassphrase")?.getAttribute("aria-hidden") === "false" &&
+      document.getElementById("wizStepPassphrase")?.inert === false &&
+      document.getElementById("wizStageTitle")?.textContent?.trim() === "Create your first local compartment" &&
+      document.activeElement?.id === "wizStageTitle"`,
+    "passphrase wizard step active with its heading focused",
   );
   await setValue(cdp, "#wizPLabel", COMPARTMENT_LABEL, "compartment label");
   await setValue(cdp, "#wizPassphrase", PASSPHRASE, "setup passphrase");
