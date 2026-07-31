@@ -318,7 +318,10 @@ export function createVaultDestination(runtime: CoreRuntime): DestinationControl
   let host: HTMLElement | null = null;
   let root: HTMLElement | null = null;
   let stashedChildren: ChildNode[] = [];
+  let hostWasHidden = false;
+  let hostHadHiddenAttribute = false;
   const siblingWasHidden = new Map<HTMLElement, boolean>();
+  const siblingHadHiddenAttribute = new Map<HTMLElement, boolean>();
   const unsubs: Unsubscribe[] = [];
   const timers = new Set<ReturnType<typeof setTimeout>>();
   let countdownInterval: ReturnType<typeof setInterval> | null = null;
@@ -480,10 +483,18 @@ export function createVaultDestination(runtime: CoreRuntime): DestinationControl
 
   function assertHostOwnership(): void {
     if (!host) return;
-    host.classList.remove("hidden");
+    const unlocked = document.body.dataset.mode === "unlocked";
+    host.classList.toggle("hidden", !unlocked);
+    if (unlocked) host.removeAttribute("hidden");
+    else host.setAttribute("hidden", "");
     for (const id of LEGACY_VAULT_SIBLING_IDS) {
       const card = document.getElementById(id);
-      card?.classList.add("hidden");
+      if (!card) continue;
+      card.classList.add("hidden");
+      // The legacy refresh loop toggles the class directly. Keep a native
+      // visibility barrier as well so a refresh cannot briefly expose stale
+      // controls while this destination owns the vault surface.
+      card.setAttribute("hidden", "");
     }
   }
 
@@ -492,9 +503,13 @@ export function createVaultDestination(runtime: CoreRuntime): DestinationControl
       const card = document.getElementById(id);
       if (!card) continue;
       const was = siblingWasHidden.get(card);
-      if (was === false) card.classList.remove("hidden");
+      if (was !== undefined) card.classList.toggle("hidden", was);
+      const hadHiddenAttribute = siblingHadHiddenAttribute.get(card);
+      if (hadHiddenAttribute === true) card.setAttribute("hidden", "");
+      else if (hadHiddenAttribute === false) card.removeAttribute("hidden");
     }
     siblingWasHidden.clear();
+    siblingHadHiddenAttribute.clear();
   }
 
   // ── Session & lock state (spec item a) ───────────────────────────
@@ -2657,11 +2672,12 @@ export function createVaultDestination(runtime: CoreRuntime): DestinationControl
     if (!target) return;
     host = target;
     mounted = true;
+    hostWasHidden = host.classList.contains("hidden");
+    hostHadHiddenAttribute = host.hasAttribute("hidden");
 
     // Take over the host card: stash legacy children (restored on unmount).
     stashedChildren = Array.from(host.childNodes) as unknown as ChildNode[];
     for (const child of stashedChildren) child.remove();
-    host.classList.remove("hidden");
     host.classList.add("vault-host");
 
     // Hide the remaining legacy vault cards; record prior state for restore.
@@ -2669,11 +2685,14 @@ export function createVaultDestination(runtime: CoreRuntime): DestinationControl
       const card = document.getElementById(id);
       if (!card) continue;
       siblingWasHidden.set(card, card.classList.contains("hidden"));
+      siblingHadHiddenAttribute.set(card, card.hasAttribute("hidden"));
       card.classList.add("hidden");
+      card.setAttribute("hidden", "");
     }
 
     root = buildRoot();
     host.appendChild(root);
+    assertHostOwnership();
 
     // Live updates from the store: lock/compartment changes re-render every
     // section (locked placeholders swap in/out); resync (SSE snapshot)
@@ -2723,6 +2742,9 @@ export function createVaultDestination(runtime: CoreRuntime): DestinationControl
       }
       stashedChildren = [];
       host.classList.remove("vault-host");
+      host.classList.toggle("hidden", hostWasHidden);
+      if (hostHadHiddenAttribute) host.setAttribute("hidden", "");
+      else host.removeAttribute("hidden");
     }
     releaseHostOwnership();
     host = null;

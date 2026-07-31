@@ -18,10 +18,17 @@
 > final job created the correct unique unpublished prerelease draft with all
 > six checksum-valid assets, then failed when a list query 336 ms later did not
 > yet see that draft. RC6 cannot qualify and must not be moved, deleted, or
-> reused. The next eligible candidate is RC7 only after the release-visibility
-> fix lands through protected `main` and that exact head passes the clean
-> release gate, required independent review, and required CI. No final
-> `v1.0.0` tag or published GitHub Release exists.
+> reused. `v1.0.0-rc.7` is the successful pre-migration candidate: annotated
+> tag object `c086f10ef411fc6341a713f3e98ba32e97351096` peels to the
+> then-current protected-main commit
+> `3a4dbbf5294710056b2f0685b4c9bb9e985c730a`. Release run `30612063470`
+> passed all six jobs and left exactly one unpublished `prerelease=true` draft
+> with the six expected nonempty uploaded assets. RC7 is not a stable or
+> published release, and it cannot qualify a macOS 26 support and runner
+> contract introduced after its tag. This protected-main migration therefore
+> requires RC8 after its exact resulting head passes the clean release gate,
+> required independent review, and required CI. No final `v1.0.0` tag or
+> published GitHub Release exists.
 
 Sigillum is a self-hosted, single-operator workstation for finding EVM wallets
 and assets, understanding their provenance and risk, preparing consolidation
@@ -190,9 +197,13 @@ public issues.
 - Immutable failed candidate: `v1.0.0-rc.6` (tag object
   `1687443c67e6a90b1db84c78d6f372463dc8c639`, commit
   `194a90384bccef65bed42cf491d763a4c46948c0`, workflow run `30600446396`)
-- Next eligible candidate: RC7, after the release-visibility fix, protected
-  merge, exact-head clean release gate, independent review, and required CI
-- Release-evidence target: macOS 15.x on Apple Silicon (`aarch64`) only
+- Successful pre-migration candidate: `v1.0.0-rc.7` (tag object
+  `c086f10ef411fc6341a713f3e98ba32e97351096`, protected-main commit
+  `3a4dbbf5294710056b2f0685b4c9bb9e985c730a`, workflow run `30612063470`)
+- Next eligible candidate: RC8, after this macOS 26 runner/support migration
+  lands through protected `main` and its exact head passes the clean release
+  gate, independent review, and required CI
+- Release-evidence target: macOS 26 on Apple Silicon (`aarch64`) only
 - Current supported boundary: source evaluation only
 
 The workspace version describes the intended 1.0 contract; it does not by itself

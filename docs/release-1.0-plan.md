@@ -1,7 +1,8 @@
 # Sigillum 1.0 Release Plan
 
-**Status:** Active plan of record for the 1.0 release (rev 5 — wallet management
-and integrated hardening in scope; release truth reconciled 2026-07-31)
+**Status:** Active plan of record for the 1.0 release (rev 6 — wallet management
+and integrated hardening in scope; macOS 26 release contract recorded
+2026-07-31)
 **Baseline verified:** 2026-07-01, branch `feat/private-receiving-desktop` (commits `70a087b`, `1cda1f2` ahead of `main`)
 **Supersedes:** [catchup-plan.md](./catchup-plan.md) Phases 1–3 are absorbed into Phases D–E and W1–W8 below. The
 [wallet-management-roadmap.md](./wallet-management-roadmap.md) product target is **part of 1.0** (EVM scope — see D-9);
@@ -323,7 +324,7 @@ any requires human sign-off recorded here.
 |----|----------|-----------|
 | D-1 | **No crates.io publish at 1.0.** All crates get `publish = false`; 1.0 ships as source + GitHub Release binaries. | Publishing 12 interdependent crates is a large irreversible surface; the product is a local-first app. |
 | D-2 | **macOS is the supported desktop platform at 1.0.** Linux desktop compile-only; Windows unsupported. | Dev + soak evidence is macOS; no Linux desktop user yet. |
-| D-3 | **Desktop bundles ship with a project-enforced full-bundle ad-hoc signature by default** (no Apple account; set `APPLE_SIGNING_IDENTITY=-` explicitly after fail-closed credential validation); full Developer ID signing/notarization remains env-gated. The supported macOS 15.x/aarch64 target removed the right-click Gatekeeper bypass, so C3/C6 must document the exact System Settings → Privacy & Security → "Open Anyway" path plus `SHA256SUMS` verification. | No Apple Developer credentials assumed. Tauri's no-identity path can leave only a linker signature, as RC3 proved, so source and release bundles must pass strict app/dmg verification before H1. |
+| D-3 | **Desktop bundles ship with a project-enforced full-bundle ad-hoc signature by default** (no Apple account; set `APPLE_SIGNING_IDENTITY=-` explicitly after fail-closed credential validation); full Developer ID signing/notarization remains env-gated. The supported release and operator-evidence target is macOS 26.x/aarch64, so C3/C6 must document the exact System Settings → Privacy & Security → "Open Anyway" path plus `SHA256SUMS` verification. | No Apple Developer credentials assumed. Tauri's no-identity path can leave only a linker signature, as RC3 proved, so source and release bundles must pass strict app/dmg verification before H1. |
 | D-4 | **No external penetration test for 1.0.** Claim stays "source-verified local-first release gate". | The audit doc already draws this boundary honestly. |
 | D-5 | **CLI parity for scriptable families only** — `transit`, read-only `evm`, `wallets` export/derive/check/generate, `compartment list`, plus the wallet-management surfaces already bridged. `wallets` sign/send and `evm broadcast` stay API+UI-only. | Signing/broadcast from shell history is an operator hazard; UI/API cover it. |
 | D-6 | **All policy guardrails stay fail-closed opt-in.** Every NEW execution capability (plan execution, claim execution, treasury automation, gas top-ups) defaults OFF behind its own `TreasuryPolicy` opt-in, surfaced in onboarding like `block_cross_party_linkage`. | Execution is the highest-risk surface 1.0 adds; defaults must be safe. |
@@ -491,15 +492,15 @@ A → (B ∥ C ∥ D) → E → (W1 ∥ W2) → (W3 ∥ W4 ∥ W5 ∥ W6) → W7
   first. Enforce nonempty `CodeResources`, strict deep verification, the
   exact identifier and executable, bound `Info.plist`, sealed resources, and
   the expected ad-hoc or Developer ID mode in `scripts/check-desktop.sh` (C4).
-  Document in `docs/deployment.md`: macOS
-  15+ removed the right-click Gatekeeper bypass — give the exact System
+  Document in `docs/deployment.md`: for the supported macOS
+  26.x target, give the exact System
   Settings → Privacy & Security → "Open Anyway" flow, `SHA256SUMS`
   verification before opening, and the full-credentials path.
 - **Accept:** clean-shell build yields a strictly verified full-bundle ad-hoc
   signature; complete Developer ID inputs plus exactly one notarization family
   select the signed/notarized/stapled path; every incomplete credential matrix
   or Developer ID-without-notarization configuration fails before build; docs
-  cover both paths including the macOS 15 flow.
+  cover both paths including the macOS 26 flow.
   **Size:** S.
 
 #### C4 — Desktop check script in the release gate
@@ -540,7 +541,7 @@ A → (B ∥ C ∥ D) → E → (W1 ∥ W2) → (W3 ∥ W4 ∥ W5 ∥ W6) → W7
   core/SSE runtime, receiving parity, modal coordinator, command palette, and
   keyboard/focus behavior are integrated. Prior checkpoint counts remain
   historical evidence for their exact SHAs only. C7 is `[~]` until the exact
-  release-candidate commit passes the full gate and the RC7 build completes the
+  release-candidate commit passes the full gate and the RC8 build completes the
   five-destination operator walkthrough and sign-off.
 - **Goal:** the embedded console gets a ground-up UX redesign. Previous
   incremental passes were judged insufficient by the operator; this is an
@@ -1336,8 +1337,7 @@ Order within W7 is strict: W7.1 → W7.2 → W7.3 → W7.4 → W7.5.
   sanitized summary and bundle link into the audit doc. Receipts cannot be
   committed into their own receipt-bearing RC SHA.
 - **Accept:** fresh schema-v2 receipts at the RC SHA from the same eligible
-  macOS 15.x/aarch64 host. The current macOS 26.5.2/arm64 development host is
-  ineligible. **Size:** M (wall-clock).
+  macOS 26.x/aarch64 host. **Size:** M (wall-clock).
 
 #### F5 — Execution-path security review
 
@@ -1555,36 +1555,58 @@ below; the remaining items are operator human-gates.
 > and an independent download verified every `SHA256SUMS` entry. The red final
 > job still disqualifies RC6. Preserve its immutable tag, draft, and assets as
 > historical evidence; do not move, delete, rerun, or promote it. The bounded
-> visibility fix must land through protected main before RC7 is eligible.
+> visibility fix subsequently landed through protected main and was proved by
+> RC7.
 
-- [~] The RC6 source line passed `./scripts/check-release.sh` from a clean tree,
-      independent review converged, protected merge completed, and required
-      main CI passed. The release-visibility correction still needs the same
-      protected-main and exact-HEAD receipts before RC7.
-- [ ] The RC7 six-job draft release workflow is green; the unique release is
-      draft, unpublished, and `prerelease=true` under the release-state
-      contract, and the five payload assets independently match `SHA256SUMS`.
-      (No RC7 exists.)
+> **RC7 successful historical draft:** remote annotated tag object
+> `c086f10ef411fc6341a713f3e98ba32e97351096` peels to protected-main commit
+> `3a4dbbf5294710056b2f0685b4c9bb9e985c730a`. Release workflow
+> `30612063470` passed all six jobs; the unique GitHub Release is
+> draft/unpublished and `prerelease=true`, all six expected assets are
+> nonempty, and the five payload assets independently match `SHA256SUMS`.
+> Preserve the tag, draft, and assets unchanged. The subsequently authorized
+> macOS 26.x/aarch64 support and operator-evidence contract changes `main`, so
+> RC7 remains historical proof of the former macOS 15 contract and cannot be
+> promoted or reused for final release.
+
+- [x] RC7 completed the clean exact-HEAD gate, independent review, protected
+      merge, required main CI, six-job draft workflow, release-state contract,
+      tagged-source F7 migration tests, and independent payload checksum
+      verification at `3a4dbbf`.
+- [~] Live `main` protection was observed on 2026-07-31 with strict required
+      checks exactly `rust (ubuntu-24.04)` and `rust (macos-26)` from GitHub App
+      ID `15368`, `enforce_admins=true`, and force-push/deletion disabled. This
+      mutable external-state receipt must be rechecked after the migration
+      lands and before RC8; it does not complete the code, CI, or RC8 gates.
+- [ ] The macOS 26.x/aarch64 contract migration is implemented in the release
+      and CI workflows, release-evidence checker/tests, and current public
+      release documentation; passes the clean exact-HEAD gate and mandatory
+      independent review; and lands through protected `main` with the expected
+      `macos-26` CI context green. Documentation alone does not satisfy this
+      item.
+- [ ] The next monotonically numbered candidate is annotated
+      `v1.0.0-rc.8` from that exact protected-main commit. Its six-job draft
+      release workflow is green; the unique release is draft, unpublished, and
+      `prerelease=true` under the release-state contract; and the five payload
+      assets independently match `SHA256SUMS`.
 - [ ] F4 schema-v2 standard 3600-second and chaos 600-second receipts reference
-      the RC7 SHA and the same macOS 15.x/aarch64 machine identity. (No
-      qualifying RC7 receipt exists.)
+      the RC8 SHA and the same macOS 26.x/aarch64 machine identity.
 - [ ] F6 testnet receipts record five transactions for the four core execution
-      families, including both confirmed gas-chain legs, at RC7. Funded
+      families, including both confirmed gas-chain legs, at RC8. Funded
       public-testnet access is required.
 - [ ] F7 upgrade-path tests green: 0.1-era fixture dir boots and migrates on
-      the RC7 build; 0.1-era snapshot restores.
-- [ ] Desktop `.dmg` from RC7 strictly verifies, installs, and reaches the unlock
-      screen on a machine without a dev toolchain. (No RC7 artifact exists yet.)
-- [ ] `sigillum doctor` passes on the same eligible macOS 15.x/aarch64 host at
-      RC7. (No qualifying RC7 receipt exists yet.)
+      the RC8 build; 0.1-era snapshot restores.
+- [ ] Desktop `.dmg` from RC8 strictly verifies, installs, and reaches the
+      unlock screen on a machine without a dev toolchain.
+- [ ] `sigillum doctor` passes on the same eligible macOS 26.x/aarch64 host at
+      RC8.
 - [ ] Five-destination UI walkthrough, command palette, keyboard/focus/modal
       behavior, pinned accessibility scenarios, and migrated real-daemon
-      browser smoke are signed off at RC7.
+      browser smoke are signed off at RC8.
 - [ ] Clean-install, doctor, and C7 receipts pass schema v2 and bind the exact
       RC tag object/peeled SHA, qualified artifact filename/digest,
-      `mac-server` macOS 15/aarch64 identity, release-operator identity/time,
-      and the required checksum-bound clean-install/UI screenshots. (No
-      qualifying RC7 evidence bundle exists yet.)
+      `mac-server` macOS 26/aarch64 identity, release-operator identity/time,
+      and the required checksum-bound clean-install/UI screenshots.
 - [ ] Schema-v2 evidence bundle validates; the final workflow reruns source
       verification, skips artifact rebuilds, copies the exact five qualified
       RC payload bytes, verifies byte identity and tag-normalized digests,
@@ -1601,16 +1623,17 @@ below; the remaining items are operator human-gates.
       eth_seed_jobs_are_gate_driven_and_execute_once_gates_pass via spawn_mock_evm_provider,
       chaos_kill_in_flight_plan_step_resumes_terminal_without_duplication; UI click-through = operator acceptance)
 - [~] CHANGELOG release-candidate notes are dated and explicitly state that no
-      final release exists; exact-HEAD gate, review, merge, CI, and RC7
-      evidence remain.
+      final release exists; contract migration, exact-HEAD gate, review, merge,
+      CI, and RC8 evidence remain.
 
 #### H2 — Tag and release
 
 > [!IMPORTANT]
-> The evidence-hardening implementation is present, but H2 is not authorized:
-> RC6 is an immutable failed-workflow receipt and no RC7 exists. Do not invoke
-> this ceremony until the release-visibility fix passes the clean gate and
-> independent review, lands through protected main with required CI, and RC7
+> H2 is not authorized. RC7 is an immutable successful draft under the former
+> macOS 15 contract, but the authorized macOS 26.x/aarch64 contract migration
+> moves `main` and requires RC8. Do not invoke this ceremony until the complete
+> executable contract migration passes the clean exact-HEAD gate and
+> independent review, lands through protected main with required CI, and RC8
 > satisfies F7, schema-v2 same-host F4, funded F6,
 > doctor, clean-install, C7, and evidence-bundle gates. The operator records
 > explicit H2 approval immediately before invocation; there is no later
@@ -1776,7 +1799,7 @@ below; the remaining items are operator human-gates.
     .headBranch == $tag and
     .headSha == $sha and
     .conclusion == "success" and
-    (["release-contract", "verify (ubuntu-24.04)", "verify (macos-15)",
+    (["release-contract", "verify (ubuntu-24.04)", "verify (macos-26)",
       "release"] -
       [.jobs[] | select(.conclusion == "success") | .name] | length == 0) and
     (["artifacts-macos", "artifacts-linux"] -
@@ -1958,15 +1981,15 @@ Phase C — Desktop productization
 - [x] C1 real icon set
 - [x] C2 bundling enabled (.app/.dmg)
 - [~] C3 fail-closed env-gated signing and explicit full-bundle ad-hoc default
-      (implemented; RC6 artifact proof passed, but current-line RC7 workflow
-      proof remains)
+      (implemented; RC7 artifact proof passed under the former macOS 15
+      contract, but RC8 proof under the macOS 26 contract remains)
 - [~] C4 strict source + mounted-dmg verification and negative regressions in
-      the release gate (implemented; RC6 artifact proof passed, but current-line
-      RC7 workflow proof remains)
+      the release gate (implemented; RC7 artifact proof passed under the former
+      target, but RC8 proof under the macOS 26 contract remains)
 - [x] C5 boot helpers extracted + tested
 - [x] C6 desktop docs
 - [~] C7 operator console UX redesign (five destinations and interaction
-      contracts implemented; exact release-candidate gate and RC7 operator
+      contracts implemented; exact release-candidate gate and RC8 operator
       walkthrough/sign-off remain)
 
 Phase D — Operator-surface parity
@@ -2011,7 +2034,9 @@ Phase F — Assurance
 - [ ] F4 RC soak receipts on the same eligible target host
 - [x] F5 execution-path security review
 - [ ] F6 testnet execution receipts (human-in-the-loop)
-- [x] F7 0.1→1.0 data-dir upgrade verification
+- [~] F7 0.1→1.0 data-dir upgrade verification (implemented and passed in both
+      RC7 verify jobs under the former target; RC8 tagged-source proof under
+      the macOS 26 contract remains)
 
 Phase G — Release engineering
 - [x] G1 CHANGELOG.md
@@ -2022,14 +2047,18 @@ Phase G — Release engineering
       positive and unconfirmed-dependency execution; RC5 run `29248938476`
       proved the older workflow at `7e04743`; RC6 run `30600446396` proved the
       exact source and artifact path but exposed post-create release-list
-      visibility; green current-line RC7 and final-promotion proof remain)
-- [x] G5 readiness + product docs final sync
+      visibility; RC7 run `30612063470` proved the corrected six-job workflow
+      and checksum-valid unique draft at `3a4dbbf` under the former macOS 15
+      contract; macOS 26 migration, RC8, and final-promotion proof remain)
+- [~] G5 readiness + product docs final sync (former-contract documentation
+      exists; macOS 26 contract synchronization, protected merge, and RC8
+      proof remain)
 
 Phase H — Ship
-- [~] H1 RC verification checklist (RC5 is an unpublished older-code draft and
-      RC6 is an immutable failed-workflow draft; source, release, F7, schema-v2
-      F4/F6, clean-machine, doctor, C7, and evidence-bundle receipts must bind
-      RC7)
+- [~] H1 RC verification checklist (RC5 and RC6 remain historical; RC7 is an
+      immutable successful draft superseded by the authorized target-contract
+      change; source, release, F7, schema-v2 F4/F6, clean-machine, doctor, C7,
+      and evidence-bundle receipts must bind RC8)
 - [ ] H2 v1.0.0 tagged, artifacts published (human gate — operator go)
 - [ ] H3 post-release bump + planning issue
 
@@ -2425,3 +2454,11 @@ Phase H — Ship
   not yet observe the draft. Independent downloads matched GitHub sizes and
   every `SHA256SUMS` entry. Preserve RC6 as immutable failed-workflow evidence;
   land the bounded visibility fix through protected main and qualify RC7.
+- 2026-07-31 RC7 SUCCESS / TARGET CONTRACT MIGRATION (`3a4dbbf`, annotated tag
+  object `c086f10e`, release run `30612063470`): all six jobs passed; the unique
+  unpublished prerelease draft has six nonempty assets and the five payloads
+  independently match `SHA256SUMS`. Preserve RC7 unchanged. The authorized
+  macOS 26.x/aarch64 release and operator-evidence contract moves `main`, so
+  RC8 is the next eligible candidate after the executable migration clears the
+  exact-HEAD, review, protected-main, and required-CI gates. No final
+  `v1.0.0` tag or published release exists.

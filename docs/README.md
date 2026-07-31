@@ -58,9 +58,12 @@ historical draft for `7e04743` only. RC6 at `194a903` is an immutable
 failed-workflow receipt: its source and artifact jobs passed and its unique
 unpublished prerelease draft has six checksum-valid assets, but the final job
 failed when an immediate post-create list query did not yet observe the draft.
-Preserve RC6; RC7 is the next eligible candidate after the bounded visibility
-fix lands through protected main and exact gates. A tag or draft alone is not
-release proof. Valid final release evidence requires the qualified same-SHA RC
-receipts, an annotated final tag on protected `main`, exact-byte promotion of
-the five RC payloads, a validated evidence bundle, explicit H2 approval, and a
-published GitHub Release.
+RC7 at `3a4dbbf` is an immutable, successful automated candidate with a unique
+unpublished prerelease draft and six checksum-valid assets, but it predates the
+macOS 26 release-contract migration and does not carry the required operator
+evidence. Preserve RC7; RC8 is the next eligible candidate after the macOS 26
+contract lands through protected `main` and exact gates. A tag or draft alone
+is not release proof. Valid final release evidence requires the qualified
+same-SHA RC receipts, an annotated final tag on protected `main`, exact-byte
+promotion of the five RC payloads, a validated evidence bundle, explicit H2
+approval, and a published GitHub Release.

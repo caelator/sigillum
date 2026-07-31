@@ -4350,6 +4350,18 @@ test("treasury policy form labels every numeric input and folds the legal hints"
   ok(html.includes("Nothing executes from a consolidation plan step unless"));
 });
 
+test("legacy snapshot file inputs keep programmatic labels", () => {
+  const html = readFileSync("src/index.after-style-before-script.html", "utf8");
+  const fileInputs = html.match(/<input\b[^>]*\btype="file"[^>]*>/g) ?? [];
+  equal(fileInputs.length, 3);
+  for (const input of fileInputs) {
+    ok(
+      /\baria-label="[^"]+"/i.test(input),
+      "expected an aria-label on " + input,
+    );
+  }
+});
+
 test("treasury receive list renders rotate buttons only for active allocations", () => {
   const dom = installDom(["treasuryReceiveList"]);
   const treasury = createTreasuryActions({

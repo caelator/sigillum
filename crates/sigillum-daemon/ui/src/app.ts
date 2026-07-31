@@ -151,9 +151,13 @@ function resetVaultCounts() {
   setText('compartmentCount', '-');
 }
 
+function isElementHidden(element) {
+  return element.classList.contains('hidden') || element.hasAttribute('hidden');
+}
+
 function visibleWorkspaceCards() {
   return Array.from(document.querySelectorAll('main .card[data-workspace-section]'))
-    .filter(card => !card.classList.contains('hidden'));
+    .filter(card => !isElementHidden(card));
 }
 
 function availableWorkspaceSections() {
@@ -264,7 +268,7 @@ function selectWorkspaceSection(sectionId) {
 
 function jumpToCard(id) {
   const el = document.getElementById(id);
-  if (!el || el.classList.contains('hidden')) return;
+  if (!el || isElementHidden(el)) return;
   const targetSection = el.dataset.workspaceSection;
   if (targetSection && targetSection !== activeWorkspaceSection) {
     activeWorkspaceSection = targetSection;
@@ -272,7 +276,7 @@ function jumpToCard(id) {
     syncSectionNav();
   }
   requestAnimationFrame(() => {
-    if (!el.classList.contains('hidden') && !el.classList.contains('section-hidden')) {
+    if (!isElementHidden(el) && !el.classList.contains('section-hidden')) {
       el.scrollIntoView({ behavior: 'smooth', block: 'start' });
       focusCard(el);
     }

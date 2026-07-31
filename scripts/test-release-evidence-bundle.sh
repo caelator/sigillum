@@ -88,7 +88,7 @@ JSON
   "host": {
     "name": "mac-server",
     "platform": "macos",
-    "product_version": "15.7.1",
+    "product_version": "26.5.2",
     "arch": "aarch64",
     "identity_sha256": "9999999999999999999999999999999999999999999999999999999999999999"
   },
@@ -108,7 +108,7 @@ JSON
   "host": {
     "name": "mac-server",
     "platform": "macos",
-    "product_version": "15.7.1",
+    "product_version": "26.5.2",
     "arch": "aarch64",
     "identity_sha256": "9999999999999999999999999999999999999999999999999999999999999999"
   },
@@ -274,8 +274,9 @@ JSON
     "role": "mac-server",
     "name": "mac-server",
     "platform": "macos",
-    "os_version": "15.7.1",
-    "arch": "aarch64"
+    "os_version": "26.5.2",
+    "arch": "aarch64",
+    "identity_sha256": "9999999999999999999999999999999999999999999999999999999999999999"
   },
   "installation": {
     "path": "/Applications/Sigillum.app",
@@ -318,8 +319,9 @@ JSON
     "role": "mac-server",
     "name": "mac-server",
     "platform": "macos",
-    "os_version": "15.7.1",
-    "arch": "aarch64"
+    "os_version": "26.5.2",
+    "arch": "aarch64",
+    "identity_sha256": "9999999999999999999999999999999999999999999999999999999999999999"
   },
   "reviewer": {
     "id": "release-operator",
@@ -380,8 +382,9 @@ JSON
     "role": "mac-server",
     "name": "mac-server",
     "platform": "macos",
-    "os_version": "15.7.1",
-    "arch": "aarch64"
+    "os_version": "26.5.2",
+    "arch": "aarch64",
+    "identity_sha256": "9999999999999999999999999999999999999999999999999999999999999999"
   },
   "cli": {
     "version": "1.0.0",
@@ -697,10 +700,16 @@ wrong_f4_platform_bundle="$(build_evidence_mutation_case \
 expect_failure "${wrong_f4_platform_bundle}" \
   "F4 standard receipt does not prove the required clean 3600-second RC soak"
 
-wrong_f4_product_version_bundle="$(build_evidence_mutation_case \
-  f4-wrong-product-version f4/standard.json \
-  '.host.product_version = "26.5.2"')"
-expect_failure "${wrong_f4_product_version_bundle}" \
+legacy_f4_product_version_bundle="$(build_evidence_mutation_case \
+  f4-legacy-product-version f4/standard.json \
+  '.host.product_version = "15.7.1"')"
+expect_failure "${legacy_f4_product_version_bundle}" \
+  "F4 standard receipt does not prove the required clean 3600-second RC soak"
+
+future_f4_product_version_bundle="$(build_evidence_mutation_case \
+  f4-future-product-version f4/standard.json \
+  '.host.product_version = "27.0.0"')"
+expect_failure "${future_f4_product_version_bundle}" \
   "F4 standard receipt does not prove the required clean 3600-second RC soak"
 
 wrong_f4_arch_bundle="$(build_evidence_mutation_case \
@@ -721,10 +730,16 @@ wrong_f4_chaos_platform_bundle="$(build_evidence_mutation_case \
 expect_failure "${wrong_f4_chaos_platform_bundle}" \
   "F4 chaos receipt does not prove the required clean 600-second RC soak"
 
-wrong_f4_chaos_product_version_bundle="$(build_evidence_mutation_case \
-  f4-chaos-wrong-product-version f4/chaos.json \
-  '.host.product_version = "26.5.2"')"
-expect_failure "${wrong_f4_chaos_product_version_bundle}" \
+legacy_f4_chaos_product_version_bundle="$(build_evidence_mutation_case \
+  f4-chaos-legacy-product-version f4/chaos.json \
+  '.host.product_version = "15.7.1"')"
+expect_failure "${legacy_f4_chaos_product_version_bundle}" \
+  "F4 chaos receipt does not prove the required clean 600-second RC soak"
+
+future_f4_chaos_product_version_bundle="$(build_evidence_mutation_case \
+  f4-chaos-future-product-version f4/chaos.json \
+  '.host.product_version = "27.0.0"')"
+expect_failure "${future_f4_chaos_product_version_bundle}" \
   "F4 chaos receipt does not prove the required clean 600-second RC soak"
 
 wrong_f4_chaos_arch_bundle="$(build_evidence_mutation_case \
@@ -773,10 +788,30 @@ wrong_clean_install_artifact_bundle="$(build_evidence_mutation_case \
   '.artifact.sha256 = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"')"
 expect_failure "${wrong_clean_install_artifact_bundle}" "${DESKTOP_FAILURE}"
 
-wrong_clean_install_host_bundle="$(build_evidence_mutation_case \
-  clean-install-wrong-host desktop/clean-install.json \
-  '.host.os_version = "26.5.2" | .host.arch = "x86_64"')"
-expect_failure "${wrong_clean_install_host_bundle}" "${DESKTOP_FAILURE}"
+legacy_clean_install_host_bundle="$(build_evidence_mutation_case \
+  clean-install-legacy-host desktop/clean-install.json \
+  '.host.os_version = "15.7.1"')"
+expect_failure "${legacy_clean_install_host_bundle}" "${DESKTOP_FAILURE}"
+
+future_clean_install_host_bundle="$(build_evidence_mutation_case \
+  clean-install-future-host desktop/clean-install.json \
+  '.host.os_version = "27.0.0"')"
+expect_failure "${future_clean_install_host_bundle}" "${DESKTOP_FAILURE}"
+
+wrong_clean_install_name_bundle="$(build_evidence_mutation_case \
+  clean-install-wrong-name desktop/clean-install.json \
+  '.host.name = "unqualified-laptop"')"
+expect_failure "${wrong_clean_install_name_bundle}" "${DESKTOP_FAILURE}"
+
+wrong_clean_install_arch_bundle="$(build_evidence_mutation_case \
+  clean-install-wrong-arch desktop/clean-install.json \
+  '.host.arch = "x86_64"')"
+expect_failure "${wrong_clean_install_arch_bundle}" "${DESKTOP_FAILURE}"
+
+wrong_clean_install_identity_bundle="$(build_evidence_mutation_case \
+  clean-install-wrong-identity desktop/clean-install.json \
+  '.host.identity_sha256 = "8888888888888888888888888888888888888888888888888888888888888888"')"
+expect_failure "${wrong_clean_install_identity_bundle}" "${DESKTOP_FAILURE}"
 
 TAMPERED_UNLOCK_CASE="${TMP_ROOT}/clean-install-tampered-screenshot"
 mkdir -p "${TAMPERED_UNLOCK_CASE}"
@@ -799,6 +834,31 @@ wrong_ui_reviewer_bundle="$(build_evidence_mutation_case \
   '.reviewer.role = "automation"')"
 expect_failure "${wrong_ui_reviewer_bundle}" "${UI_FAILURE}"
 
+legacy_ui_host_bundle="$(build_evidence_mutation_case \
+  ui-legacy-host ui/signoff.json \
+  '.host.os_version = "15.7.1"')"
+expect_failure "${legacy_ui_host_bundle}" "${UI_FAILURE}"
+
+future_ui_host_bundle="$(build_evidence_mutation_case \
+  ui-future-host ui/signoff.json \
+  '.host.os_version = "27.0.0"')"
+expect_failure "${future_ui_host_bundle}" "${UI_FAILURE}"
+
+wrong_ui_name_bundle="$(build_evidence_mutation_case \
+  ui-wrong-name ui/signoff.json \
+  '.host.name = "unqualified-laptop"')"
+expect_failure "${wrong_ui_name_bundle}" "${UI_FAILURE}"
+
+wrong_ui_arch_bundle="$(build_evidence_mutation_case \
+  ui-wrong-arch ui/signoff.json \
+  '.host.arch = "x86_64"')"
+expect_failure "${wrong_ui_arch_bundle}" "${UI_FAILURE}"
+
+wrong_ui_identity_bundle="$(build_evidence_mutation_case \
+  ui-wrong-identity ui/signoff.json \
+  '.host.identity_sha256 = "8888888888888888888888888888888888888888888888888888888888888888"')"
+expect_failure "${wrong_ui_identity_bundle}" "${UI_FAILURE}"
+
 TAMPERED_UI_CASE="${TMP_ROOT}/ui-tampered-screenshot"
 mkdir -p "${TAMPERED_UI_CASE}"
 write_payload "${TAMPERED_UI_CASE}/payload"
@@ -814,6 +874,31 @@ wrong_doctor_artifact_bundle="$(build_evidence_mutation_case \
   doctor-wrong-artifact doctor/mac-server.json \
   '.artifact.sha256 = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"')"
 expect_failure "${wrong_doctor_artifact_bundle}" "${DOCTOR_FAILURE}"
+
+legacy_doctor_host_bundle="$(build_evidence_mutation_case \
+  doctor-legacy-host doctor/mac-server.json \
+  '.host.os_version = "15.7.1"')"
+expect_failure "${legacy_doctor_host_bundle}" "${DOCTOR_FAILURE}"
+
+future_doctor_host_bundle="$(build_evidence_mutation_case \
+  doctor-future-host doctor/mac-server.json \
+  '.host.os_version = "27.0.0"')"
+expect_failure "${future_doctor_host_bundle}" "${DOCTOR_FAILURE}"
+
+wrong_doctor_name_bundle="$(build_evidence_mutation_case \
+  doctor-wrong-name doctor/mac-server.json \
+  '.host.name = "unqualified-laptop"')"
+expect_failure "${wrong_doctor_name_bundle}" "${DOCTOR_FAILURE}"
+
+wrong_doctor_arch_bundle="$(build_evidence_mutation_case \
+  doctor-wrong-arch doctor/mac-server.json \
+  '.host.arch = "x86_64"')"
+expect_failure "${wrong_doctor_arch_bundle}" "${DOCTOR_FAILURE}"
+
+wrong_doctor_identity_bundle="$(build_evidence_mutation_case \
+  doctor-wrong-identity doctor/mac-server.json \
+  '.host.identity_sha256 = "8888888888888888888888888888888888888888888888888888888888888888"')"
+expect_failure "${wrong_doctor_identity_bundle}" "${DOCTOR_FAILURE}"
 
 warn_doctor_check_bundle="$(build_evidence_mutation_case \
   doctor-warning-check doctor/mac-server.json \

@@ -3,7 +3,9 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 CHECKER="${ROOT}/scripts/check-release-state-contract.sh"
+CI_WORKFLOW="${ROOT}/.github/workflows/ci.yml"
 WORKFLOW="${ROOT}/.github/workflows/release.yml"
+ACTION_ROUNDTRIP="${ROOT}/scripts/check-action-artifact-roundtrip.sh"
 TMP_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/sigillum-release-workflow-test.XXXXXX")"
 RC_TAG="v1.0.0-rc.6"
 FINAL_TAG="v1.0.0"
@@ -121,11 +123,157 @@ expect_failure \
   "final release must be published and not a prerelease" \
   bash "${CHECKER}" final-published "${FINAL_TAG}" "${FINAL_UNPUBLISHED}"
 
+for workflow in "${CI_WORKFLOW}" "${WORKFLOW}"; do
+  ruby -e '
+    require "yaml"
+    YAML.safe_load(File.read(ARGV.fetch(0)), aliases: true)
+  ' "${workflow}" ||
+    fail "workflow is not valid YAML: ${workflow}"
+done
+
 ruby -e '
   require "yaml"
-  YAML.safe_load(File.read(ARGV.fetch(0)), aliases: true)
-' "${WORKFLOW}" ||
-  fail "release workflow is not valid YAML"
+  expected = ["ubuntu-24.04", "macos-26"]
+  expected_checkout =
+    "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1"
+  expected_upload =
+    "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a"
+  expected_download =
+    "actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c"
+  def action_uses(value, found = [])
+    case value
+    when Hash
+      value.each do |key, child|
+        if key == "uses" &&
+            child.is_a?(String) &&
+            child.start_with?("actions/")
+          found << child
+        end
+        action_uses(child, found)
+      end
+    when Array
+      value.each { |child| action_uses(child, found) }
+    end
+    found
+  end
+  def action_counts(workflow)
+    action_uses(workflow).each_with_object(Hash.new(0)) do |uses, counts|
+      counts[uses] += 1
+    end
+  end
+  ci = YAML.safe_load(File.read(ARGV.fetch(0)), aliases: true)
+  release = YAML.safe_load(File.read(ARGV.fetch(1)), aliases: true)
+  abort "CI rust matrix must be exactly ubuntu-24.04 and macos-26" unless
+    ci.dig("jobs", "rust", "strategy", "matrix", "os") == expected
+  abort "release verify matrix must be exactly ubuntu-24.04 and macos-26" unless
+    release.dig("jobs", "verify", "strategy", "matrix", "os") == expected
+  abort "release artifacts-macos runner must be macos-26" unless
+    release.dig("jobs", "artifacts-macos", "runs-on") == "macos-26"
+  expected_ci_actions = {
+    expected_checkout => 1,
+    expected_upload => 3,
+    expected_download => 1
+  }
+  expected_release_actions = {
+    expected_checkout => 5,
+    expected_upload => 3,
+    expected_download => 1
+  }
+  abort "CI actions must match the exact reviewed Node 24 action multiset" unless
+    action_counts(ci) == expected_ci_actions
+  abort "release actions must match the exact reviewed Node 24 action multiset" unless
+    action_counts(release) == expected_release_actions
+
+  rust_job = ci.dig("jobs", "rust")
+  abort "CI rust job must not skip or soften failures" if
+    rust_job.key?("if") || rust_job.key?("continue-on-error")
+  rust_steps = rust_job.fetch("steps")
+  roundtrip_names = [
+    "Prepare artifact action contract fixtures",
+    "Upload first artifact action contract fixture",
+    "Upload second artifact action contract fixture",
+    "Download merged artifact action contract fixtures",
+    "Verify artifact action contract round-trip"
+  ]
+  roundtrip_indexes = roundtrip_names.map do |name|
+    matches = rust_steps.each_index.select { |index| rust_steps[index]["name"] == name }
+    abort "expected exactly one #{name.inspect} step" unless matches.length == 1
+    matches.fetch(0)
+  end
+  abort "artifact action contract steps must remain contiguous and ordered" unless
+    roundtrip_indexes.each_cons(2).all? { |left, right| right == left + 1 }
+  expected_roundtrip_steps = [
+    {
+      "name" => roundtrip_names.fetch(0),
+      "shell" => "bash",
+      "run" =>
+        %q(bash ./scripts/check-action-artifact-roundtrip.sh prepare "${{ matrix.os }}")
+    },
+    {
+      "name" => roundtrip_names.fetch(1),
+      "uses" => expected_upload,
+      "with" => {
+        "name" =>
+          %q(action-contract-first-${{ matrix.os }}-${{ github.run_attempt }}),
+        "path" => "target/action-artifact-contract/first.txt",
+        "if-no-files-found" => "error",
+        "retention-days" => 1
+      }
+    },
+    {
+      "name" => roundtrip_names.fetch(2),
+      "uses" => expected_upload,
+      "with" => {
+        "name" =>
+          %q(action-contract-second-${{ matrix.os }}-${{ github.run_attempt }}),
+        "path" => "target/action-artifact-contract/second.txt",
+        "if-no-files-found" => "error",
+        "retention-days" => 1
+      }
+    },
+    {
+      "name" => roundtrip_names.fetch(3),
+      "uses" => expected_download,
+      "with" => {
+        "pattern" =>
+          %q(action-contract-*-${{ matrix.os }}-${{ github.run_attempt }}),
+        "path" => "target/action-artifact-download",
+        "merge-multiple" => true
+      }
+    },
+    {
+      "name" => roundtrip_names.fetch(4),
+      "shell" => "bash",
+      "run" =>
+        %q(bash ./scripts/check-action-artifact-roundtrip.sh verify "${{ matrix.os }}")
+    }
+  ]
+  actual_roundtrip_steps = roundtrip_indexes.map { |index| rust_steps.fetch(index) }
+  abort "artifact action contract step definitions changed" unless
+    actual_roundtrip_steps == expected_roundtrip_steps
+' "${CI_WORKFLOW}" "${WORKFLOW}" ||
+  fail "workflow runner or action contract is invalid"
+
+ACTION_TEST_ROOT="${TMP_ROOT}/action-roundtrip"
+bash "${ACTION_ROUNDTRIP}" prepare contract-test "${ACTION_TEST_ROOT}"
+mkdir -p "${ACTION_TEST_ROOT}/action-artifact-download"
+cp \
+  "${ACTION_TEST_ROOT}/action-artifact-contract/first.txt" \
+  "${ACTION_TEST_ROOT}/action-artifact-contract/second.txt" \
+  "${ACTION_TEST_ROOT}/action-artifact-download/"
+bash "${ACTION_ROUNDTRIP}" verify contract-test "${ACTION_TEST_ROOT}"
+
+printf '%s\n' tampered >"${ACTION_TEST_ROOT}/action-artifact-download/first.txt"
+expect_failure \
+  artifact-roundtrip-tamper \
+  "first artifact fixture differs" \
+  bash "${ACTION_ROUNDTRIP}" verify contract-test "${ACTION_TEST_ROOT}"
+
+for workflow in "${CI_WORKFLOW}" "${WORKFLOW}"; do
+  if grep -F 'macos-15' "${workflow}" >/dev/null; then
+    fail "workflow still references the retired macOS 15 runner: ${workflow}"
+  fi
+done
 
 for required_fragment in \
   'release_args+=(--prerelease)' \

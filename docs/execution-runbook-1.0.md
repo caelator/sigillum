@@ -2,15 +2,18 @@
 
 **Status:** Active hardening and release handbook
 
-**State recorded:** 2026-07-31. `v1.0.0-rc.6` tag object `1687443c` peels to
-protected-main commit `194a903`. Its contract, both verify legs, and both
-artifact jobs passed, but release run `30600446396` failed after creating the
-draft because the workflow's immediate release-list query did not yet observe
-it. The unique unpublished prerelease draft and all six checksum-valid assets
-exist, but the red six-job workflow makes RC6 an immutable failed-workflow
-receipt. No final `v1.0.0` tag or published stable release exists. The
-visibility fix must land through protected main and required CI before RC7 is
-eligible.
+**State recorded:** 2026-07-31. `v1.0.0-rc.7` tag object
+`c086f10ef411fc6341a713f3e98ba32e97351096` peels to protected-main commit
+`3a4dbbf5294710056b2f0685b4c9bb9e985c730a`. Release run
+`30612063470` passed all six jobs; its unique GitHub Release is an unpublished
+`prerelease=true` draft with six nonempty assets, and the five payload assets
+independently match `SHA256SUMS`. Preserve RC7 unchanged. The authorized
+macOS 26.x/aarch64 support and operator-evidence contract changes `main`, so
+RC7 is historical proof of the former macOS 15 contract and cannot be promoted
+or reused for final release. The contract, workflows, checker/tests, and
+current public release documentation must migrate through protected main and
+required CI before RC8 is eligible. No final `v1.0.0` tag or published stable
+release exists.
 
 **Plan authority:** [release-1.0-plan.md](./release-1.0-plan.md)
 
@@ -69,28 +72,42 @@ a commit that contains later hardening changes.
   failed because its paginated release-list query ran 336 ms after creation and
   did not yet observe the draft. A valid-looking draft does not override a red
   workflow receipt; preserve RC6 and its assets as historical evidence.
-- RC6 cannot certify the integrated hardening line. The next eligible
-  candidate is `v1.0.0-rc.7` only after the bounded release-visibility fix
-  lands through protected main, passes required CI, and the exact resulting
-  main commit passes the clean release gate; rerun every H1 gate at its exact
-  peeled SHA.
+- `v1.0.0-rc.7` is an immutable successful historical draft. Remote annotated
+  tag object `c086f10ef411fc6341a713f3e98ba32e97351096` peels to protected-main commit
+  `3a4dbbf5294710056b2f0685b4c9bb9e985c730a`. Release run `30612063470`
+  passed the release contract, both source-verification legs, both artifact
+  jobs, and draft-release job. The unique unpublished `prerelease=true` draft
+  has all six expected nonempty assets, and an independent download verified
+  every `SHA256SUMS` entry. Tagged-source F7 migration tests passed on both
+  verify legs.
+- The authorized macOS 26.x/aarch64 support and operator-evidence contract
+  supersedes RC7's macOS 15 contract. Do not move, delete, rerun, reuse, or
+  promote RC7. The next eligible candidate is `v1.0.0-rc.8`, only after the
+  executable contract migration passes the clean exact-HEAD gate and mandatory
+  independent review, lands through protected main, and passes required CI.
+  Rerun every H1 gate at the exact RC8 peeled SHA.
 - Gateway payments are preview-only and disabled by default. Opt-in balance
   observations are not finality proof and must not be represented as supported
   1.0 payment confirmations.
 
 ## 2. Execution order
 
-1. Run `./scripts/check-release.sh` from a clean checkout at the exact
-   integrated HEAD and complete the required independent review. Never overlap
-   a full gate with another agent or build modifying the checkout.
-2. Before merge, verify that `main` protection requires both fixed-runner CI
-   legs, blocks force-pushes, and that release-tag governance prevents updates
-   and deletion. Remediate missing settings before landing through a pull
-   request, then require both CI legs to pass.
-3. Only then create annotated `v1.0.0-rc.7`. Require its unique GitHub Release
+1. Implement the complete macOS 26.x/aarch64 contract migration: use explicit
+   `macos-26` release and CI runners/contexts, require macOS 26.x/aarch64 in the
+   release-evidence checker and its tests, and synchronize current public
+   release documentation. Preserve all other release contracts.
+2. Run `./scripts/check-release.sh` from a clean checkout at that exact
+   integrated HEAD and complete the mandatory independent review. Never
+   overlap a full gate with another agent or build modifying the checkout.
+3. Live `main` protection was observed on 2026-07-31 with strict required
+   checks exactly `rust (ubuntu-24.04)` and `rust (macos-26)` from GitHub App
+   ID `15368`, `enforce_admins=true`, and force-push/deletion disabled.
+   Release-tag governance must still prevent updates and deletion. Recheck this
+   mutable external state after the migration lands and before tagging; then
+   require both CI legs to have actually passed for the protected-main commit.
+4. Only then create annotated `v1.0.0-rc.8`. Require its unique GitHub Release
    to remain draft, unpublished, and `prerelease=true`; verify its live asset
-   checksums and complete every operator gate in section 5 at the RC7 peeled
-   SHA.
+   checksums and complete every gate in section 5 at the RC8 peeled SHA.
 
 ## 3. Executable release contract
 
@@ -116,8 +133,11 @@ a commit that contains later hardening changes.
 - fails if any check changes the tracked tree, even when the checkout started
   with an intentional local diff.
 
-CI and release workflows use immutable action commits and explicit
-`ubuntu-24.04` / `macos-15` runner lines. A release tag must:
+RC7's historical CI and release workflows used immutable action commits and
+explicit `ubuntu-24.04` / `macos-15` runner lines. RC8 is ineligible until the
+workflows use immutable action commits with explicit `ubuntu-24.04` /
+`macos-26` runner lines and expose the corresponding `rust (macos-26)` required
+context. A release tag must:
 
 - be annotated;
 - equal `v<workspace-version>` or `v<workspace-version>-rc.N`;
@@ -144,9 +164,10 @@ The normal source release gate runs this regression test before tag time.
 
 > [!IMPORTANT]
 > Exact-byte promotion and release-state enforcement are implemented, but they
-> are not release evidence for the current line. H2 remains blocked until the
-> release-visibility fix passes the clean gate and independent review, lands
-> through protected main with required CI, and RC7 satisfies F7, schema-v2
+> are not release evidence for the migrated line. H2 remains blocked until the
+> complete macOS 26.x/aarch64 contract migration passes the clean exact-HEAD
+> gate and independent review, lands through protected main with required CI,
+> and RC8 satisfies F7, schema-v2
 > same-host F4, funded F6, doctor, clean-install, C7, and evidence-bundle gates.
 
 The release workflow always creates a draft. RC releases must remain
@@ -193,17 +214,17 @@ post-tag verification succeeds.
 - Preserve failure artifacts and exact receipts; do not convert a mock-provider
   result into a testnet or production claim.
 
-## 5. Remaining operator gates
+## 5. Remaining RC8 gates
 
 | Gate | Required evidence |
 | --- | --- |
-| F4 | Schema-v2 standard 3600-second and chaos 600-second soak receipts on the same macOS 15.x/aarch64 host at the RC7 SHA; RC5 and RC6 receipts are historical only |
-| F6 | Five funded public-testnet transactions at RC7 for four families, including both confirmed legs of `fund_gas` → dependent sweep; mock evidence cannot satisfy this gate |
-| Desktop | Checksum-verified RC7 `.dmg` installs and reaches unlock on a clean machine without a dev toolchain |
-| F7 | 0.1-era data-directory and snapshot upgrade verification passes at RC7 |
-| Doctor | `sigillum doctor` passes on the eligible macOS 15.x/aarch64 host at RC7 |
-| UI | Real-daemon browser smoke plus operator walkthrough/sign-off for all five destinations, palette, keyboard/focus, modal, and accessibility behavior |
-| H2 | Blocked until the exact RC7 commit and every automated and operator gate pass; explicit operator approval is then recorded immediately before the final-tag ceremony and authorizes conditional publication only after every post-tag verification passes |
+| F4 | Schema-v2 standard 3600-second and chaos 600-second soak receipts on the same macOS 26.x/aarch64 host at the RC8 SHA; earlier RC receipts are historical only |
+| F6 | Five funded public-testnet transactions at RC8 for four families, including both confirmed legs of `fund_gas` → dependent sweep; mock evidence cannot satisfy this gate |
+| Desktop | Checksum-verified RC8 `.dmg` installs and reaches unlock on a clean machine without a dev toolchain |
+| F7 | 0.1-era data-directory and snapshot upgrade verification passes in both tagged-source verify jobs at RC8 |
+| Doctor | `sigillum doctor` passes on the eligible macOS 26.x/aarch64 host at RC8 |
+| UI | Real-daemon browser smoke plus operator walkthrough/sign-off for all five destinations, palette, keyboard/focus, modal, and accessibility behavior at RC8 |
+| H2 | Blocked until the exact RC8 commit and every automated and operator gate pass; explicit operator approval is then recorded immediately before the final-tag ceremony and authorizes conditional publication only after every post-tag verification passes |
 
 Work may continue on any independent item while one of these gates is waiting.
 Do not mark H1 or H2 complete until every required receipt names the same
@@ -226,13 +247,15 @@ Preserve the sanitized evidence outside the checkout until final promotion:
    `doctor/mac-server.json`, `ui/signoff.json`, and
    `release/asset-SHA256SUMS`. Both F4 soak receipts use schema v2 and record
    `platform: macos`, the exact `sw_vers -productVersion` value, canonical
-   `aarch64`, and an opaque SHA-256 of the machine identity. The bundle checker
-   requires macOS 15.x on both receipts and requires their identity digests to
-   match. The clean-install, doctor, and UI operator receipts also use schema
-   v2 and share one exact RC object (`tag`, `tag_object`, and `peeled_sha`).
-   They bind the qualified artifact
-   filename and digest, the `mac-server` host identity (`macos`, macOS 15,
-   `aarch64`), and the release operator identity and UTC review time. The
+   `aarch64`, and an opaque SHA-256 of the machine identity. The collector
+   records the observed host without deciding eligibility; the bundle checker
+   is the fail-closed qualification gate. It requires macOS 26.x on both soak
+   receipts and requires their identity digests to match. The clean-install,
+   doctor, and UI operator receipts also use schema v2 and share one exact RC
+   object (`tag`, `tag_object`, and `peeled_sha`). They bind the qualified
+   artifact filename and digest, the `mac-server` host identity (`macos`,
+   macOS 26, `aarch64`, and the same opaque identity digest as both F4
+   receipts), and the release operator identity and UTC review time. The
    clean-install receipt names the exact RC dmg, application version,
    identifier and install path, records checksum/dev-toolchain/unlock
    booleans, and checksum-binds `desktop/screenshots/unlock.png`. The doctor
@@ -251,7 +274,7 @@ Preserve the sanitized evidence outside the checkout until final promotion:
    `scripts/check-release-evidence-bundle.sh` rejects missing, empty,
    unchecksummed, duplicate, unsafe, or linked archive members; requires the
    manifest to bind the exact RC tag-object ID and peeled SHA; rejects legacy
-   F4 receipts and validates their same-host macOS 15.x/aarch64 identity plus
+   F4 receipts and validates their same-host macOS 26.x/aarch64 identity plus
    configured and actual soak durations; requires Ethereum Sepolia (`11155111`)
    plus Base Sepolia (`84532`), Arbitrum Sepolia (`421614`), or OP Sepolia
    (`11155420`), and rejects legacy F6 schema v1. F6 schema v2 validates four
@@ -299,8 +322,9 @@ or recreating the tag.
    the new `N` to equal the highest retained remote RC number plus one. Reassert
    `HEAD == GATE_SHA == origin/main`, then create and push the annotated tag.
    Every pushed `N` is permanently burned, even when no draft was created.
-4. Require the release contract job, both verify legs, both artifact jobs, and
-   the draft-release job to pass. Fetch the unique RC release metadata and run
+4. Require the release contract job, `verify (ubuntu-24.04)`,
+   `verify (macos-26)`, both artifact jobs, and the draft-release job to pass.
+   Fetch the unique RC release metadata and run
    `bash ./scripts/check-release-state-contract.sh rc-draft "$RC_TAG"` with
    that JSON on standard input; it must still be a draft, unpublished, and
    explicitly marked as `prerelease=true`.
@@ -313,9 +337,10 @@ or recreating the tag.
    checksum result, evidence filename, and evidence archive digest. Keep the
    annotated RC tag permanently and retain the RC draft/assets through
    final-draft verification.
-8. Only after the release-visibility fix passes the clean gate and independent
-   review, lands through protected main with required CI, and the resulting RC7
-   passes every automated and operator gate, record explicit H2 approval,
+8. Only after the complete macOS 26.x/aarch64 contract migration passes the
+   clean exact-HEAD gate and independent review, lands through protected main
+   with required CI, and the resulting RC8 passes every automated and operator
+   gate, record explicit H2 approval,
    repeat the clean gate, and push annotated `v1.0.0` at the identical peeled
    commit as the receipt-bearing RC, with the evidence filename and digest in
    the tag message. If `main` has moved or any intervening commit is required,
