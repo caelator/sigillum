@@ -1,19 +1,29 @@
 # Sigillum — Production Readiness
 
-**Date:** June 4, 2026 (updated July 30, 2026)
+**Date:** June 4, 2026 (updated July 31, 2026)
 
 **Current Verdict:** Sigillum is not production-ready and has no published
 stable release. `v1.0.0-rc.2` through `v1.0.0-rc.4` are immutable failure
 receipts. `v1.0.0-rc.5` at protected-main commit `7e04743` is an unpublished
 historical draft only: its successful workflow and checksums prove that older
-commit, not the integrated hardening line. No RC6 exists.
+commit, not the integrated hardening line.
 
-The next eligible candidate is `v1.0.0-rc.6` only after the exact integrated
-HEAD passes `./scripts/check-release.sh` from a clean tree, completes the
-required independent review, lands through protected `main`, and passes
-required CI. C7 remains partial: the five-destination operator console is
-implemented, but its RC6-bound operator walkthrough and sign-off are pending.
-All release evidence must bind to the same RC6 peeled SHA. The fail-closed
+`v1.0.0-rc.6` is immutable failed-workflow evidence. Tag object
+`1687443c67e6a90b1db84c78d6f372463dc8c639` peels to protected-main commit
+`194a90384bccef65bed42cf491d763a4c46948c0`. Workflow run `30600446396`
+passed its contract job, both verification jobs, and both artifact jobs. The
+final job created the correct unique unpublished prerelease draft with exactly
+six checksum-valid assets, then failed because an immediate list query 336 ms
+later did not yet see the new draft. RC6 cannot qualify and must be preserved;
+its tag and draft must not be moved, deleted, published, or reused.
+
+The next eligible candidate is `v1.0.0-rc.7`, only after the release-visibility
+fix lands through protected `main` and that exact head passes
+`./scripts/check-release.sh` from a clean tree, required independent review,
+and required CI. C7 remains partial: the five-destination operator console is
+implemented, but its RC7-bound operator walkthrough and sign-off are pending.
+All current operator and release evidence must bind to the same RC7 peeled SHA.
+The fail-closed
 target-host evidence boundary is macOS 15.x on Apple Silicon (`aarch64`) only;
 macOS 26.5.2/arm64 is not an eligible release-evidence host. There is no final
 `v1.0.0` tag and no published GitHub Release.
@@ -21,9 +31,11 @@ macOS 26.5.2/arm64 is not an eligible release-evidence host. There is no final
 ## Summary
 
 Historical source receipts re-proved the full-workspace baseline for their
-exact commits. The integrated hardening HEAD must re-prove that baseline across
-the local daemon, client, core, CLI, the `sigillum-gateway` sidecar, and the
-shipped EVM wallet-management product:
+exact commits. The integrated hardening commit `194a903` re-proved that
+baseline before RC6, but the exact protected-main head containing the
+release-visibility fix must re-prove it for RC7 across the local daemon, client,
+core, CLI, the `sigillum-gateway` sidecar, and the shipped EVM
+wallet-management product:
 
 - the workspace needs to stay green on the executable `./scripts/check-release.sh`
   gate, including metadata, architecture guardrails, daemon UI checks, tests,
@@ -125,20 +137,28 @@ not the shipped local-first wallet-management baseline:
 - RC5 is retained as historical evidence for `7e04743`; none of its workflow,
   artifact, soak, doctor, or UI evidence certifies the integrated hardening
   changes.
-- The remaining same-candidate evidence for RC6 is:
-  - an exact-integrated-HEAD clean-tree `./scripts/check-release.sh`,
-    independent review, protected merge, required CI, successful RC6 draft
-    workflow, and independently checksum-verified assets at the exact RC6 SHA
+- RC6 is retained as immutable failed-workflow evidence for tag object
+  `1687443c67e6a90b1db84c78d6f372463dc8c639` and peeled commit
+  `194a90384bccef65bed42cf491d763a4c46948c0`. Run `30600446396` passed the
+  contract, verification, and artifact jobs and created the correct unique
+  unpublished prerelease draft with six checksum-valid assets, but its final
+  job failed on an immediate draft-list visibility query 336 ms after creation.
+  RC6 cannot qualify, and none of its evidence may be relabeled as RC7
+  evidence.
+- The remaining same-candidate evidence for RC7 is:
+  - the release-visibility fix, protected merge, exact-head clean-tree
+    `./scripts/check-release.sh`, required CI, successful RC7 draft workflow,
+    and independently checksum-verified assets at the exact RC7 SHA
   - schema-v2 standard 3600-second and chaos 600-second soak receipts plus
     `sigillum doctor` on the same eligible macOS 15.x/aarch64 host at the exact
-    RC6 SHA (F4)
+    RC7 SHA (F4)
   - five public-testnet transactions for the four core execution families:
     native sweep, ERC-20 sweep, revoke, plus both the `fund_gas` and dependent
     sweep legs of gas top-up on Ethereum Sepolia (`11155111`) and Base Sepolia
     (`84532`), Arbitrum Sepolia (`421614`), or OP Sepolia (`11155420`) (F6)
-  - F7 upgrade-path verification at RC6
-  - a checksum-verified RC6 `.dmg` clean install reaching unlock without a
-    developer toolchain, plus the RC6 five-destination operator UI
+  - F7 upgrade-path verification at RC7
+  - a checksum-verified RC7 `.dmg` clean install reaching unlock without a
+    developer toolchain, plus the RC7 five-destination operator UI
     walkthrough/sign-off (C7)
   - one sanitized external evidence bundle containing the same-RC operator
     receipts; H2 binds its filename and SHA-256 digest into the immutable final
@@ -208,12 +228,12 @@ current authority.
 The next work should still avoid speculative new product scope first. The right
 immediate move is:
 
-1. run the full clean gate and independent review against the exact integrated
-   HEAD
-2. merge through protected `main` with required Ubuntu and macOS CI green
-3. create immutable annotated RC6; require its GitHub Release to remain an
+1. land the release-draft visibility fix through protected `main`
+2. run the full clean gate and required independent review against that exact
+   protected-main head, and require Ubuntu and macOS CI to pass
+3. create immutable annotated RC7; require its GitHub Release to remain an
    unpublished prerelease draft and independently verify all six assets
-4. collect RC6-bound F7, schema-v2 F4/doctor evidence on macOS 15.x/aarch64,
+4. collect RC7-bound F7, schema-v2 F4/doctor evidence on macOS 15.x/aarch64,
    five funded F6 transactions, clean-machine install/unlock, and C7 sign-off
 5. validate the complete evidence bundle and exact-byte final draft; only then
    request the explicit H2 final-tag/publish decision

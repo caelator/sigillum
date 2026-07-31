@@ -22,13 +22,16 @@ surfaces are explicitly unstable, and how versions evolve. It applies from the
 
 ### Pre-tag adjustments
 
-No valid `v1.0.0` tag or GitHub Release has published yet, and no RC6 exists,
-so the stability
-promises above are not yet in force. Until the first valid tag, release
-candidates may adjust stable-candidate surfaces with the change recorded in
-`CHANGELOG.md`. The following feature-line adjustments were made after RC5's
-protected-main commit and therefore require a new RC6 candidate before they can
-be release evidence. Current adjustments since `1.0.0-rc.5`:
+No valid `v1.0.0` tag or GitHub Release has published yet, so the stability
+promises above are not yet in force. RC6 at protected-main `194a903` is an
+immutable failed-workflow receipt: its source and artifact jobs passed and its
+unique unpublished prerelease draft has six checksum-valid assets, but the
+final job failed when an immediate post-create list query did not yet observe
+the draft. Until the first valid tag, release candidates may adjust
+stable-candidate surfaces with the change recorded in `CHANGELOG.md`. The
+following feature-line adjustments were present in RC6, but RC6 cannot be
+release evidence; the bounded visibility fix and all current adjustments
+require a new RC7 candidate. Current adjustments since `1.0.0-rc.5`:
 
 - `sigillum api profiles eth-seed create` redacts the mnemonic from stdout by
   default (new `--reveal-mnemonic` and `--mnemonic-out PATH` flags control

@@ -2,12 +2,15 @@
 
 **Status:** Active hardening and release handbook
 
-**State recorded:** 2026-07-30. `v1.0.0-rc.5` peels to protected-main
-commit `7e04743` and has an unpublished historical draft. It does not certify
-the integrated hardening line. RC2–RC4 remain immutable failure receipts. No
-RC6, final `v1.0.0` tag, or published stable release exists. The exact
-integrated HEAD still needs the clean release gate, independent review,
-protected merge, and required CI before RC6 is eligible.
+**State recorded:** 2026-07-31. `v1.0.0-rc.6` tag object `1687443c` peels to
+protected-main commit `194a903`. Its contract, both verify legs, and both
+artifact jobs passed, but release run `30600446396` failed after creating the
+draft because the workflow's immediate release-list query did not yet observe
+it. The unique unpublished prerelease draft and all six checksum-valid assets
+exist, but the red six-job workflow makes RC6 an immutable failed-workflow
+receipt. No final `v1.0.0` tag or published stable release exists. The
+visibility fix must land through protected main and required CI before RC7 is
+eligible.
 
 **Plan authority:** [release-1.0-plan.md](./release-1.0-plan.md)
 
@@ -56,11 +59,21 @@ a commit that contains later hardening changes.
   `29248938476` passed all six jobs; its five payload assets independently
   match `SHA256SUMS`. Standard/chaos F4 and doctor receipts bind to the same
   SHA. The GitHub Release remains draft/unpublished.
-- RC5 is incomplete and cannot certify the integrated hardening line. No
-  qualifying F6 public-testnet receipt set, clean-install receipt, C7 sign-off,
-  or complete external evidence bundle exists for the current line. The next
-  eligible candidate is `v1.0.0-rc.6` only after exact-HEAD gating, review,
-  protected merge, and CI; rerun every H1 gate at its exact peeled SHA.
+- `v1.0.0-rc.6` is an immutable failed-workflow receipt. Remote annotated tag
+  object `1687443c67e6a90b1db84c78d6f372463dc8c639` peels to protected-main
+  commit `194a90384bccef65bed42cf491d763a4c46948c0`. Release run `30600446396`
+  passed the release contract, both source-verification legs, and both artifact
+  jobs. `gh release create` then created the correct unique unpublished
+  `prerelease=true` draft with all six expected nonempty assets, and an
+  independent download verified every `SHA256SUMS` entry. The final job still
+  failed because its paginated release-list query ran 336 ms after creation and
+  did not yet observe the draft. A valid-looking draft does not override a red
+  workflow receipt; preserve RC6 and its assets as historical evidence.
+- RC6 cannot certify the integrated hardening line. The next eligible
+  candidate is `v1.0.0-rc.7` only after the bounded release-visibility fix
+  lands through protected main, passes required CI, and the exact resulting
+  main commit passes the clean release gate; rerun every H1 gate at its exact
+  peeled SHA.
 - Gateway payments are preview-only and disabled by default. Opt-in balance
   observations are not finality proof and must not be represented as supported
   1.0 payment confirmations.
@@ -74,9 +87,9 @@ a commit that contains later hardening changes.
    legs, blocks force-pushes, and that release-tag governance prevents updates
    and deletion. Remediate missing settings before landing through a pull
    request, then require both CI legs to pass.
-3. Only then create annotated `v1.0.0-rc.6`. Require its unique GitHub Release
+3. Only then create annotated `v1.0.0-rc.7`. Require its unique GitHub Release
    to remain draft, unpublished, and `prerelease=true`; verify its live asset
-   checksums and complete every operator gate in section 5 at the RC6 peeled
+   checksums and complete every operator gate in section 5 at the RC7 peeled
    SHA.
 
 ## 3. Executable release contract
@@ -132,8 +145,8 @@ The normal source release gate runs this regression test before tag time.
 > [!IMPORTANT]
 > Exact-byte promotion and release-state enforcement are implemented, but they
 > are not release evidence for the current line. H2 remains blocked until the
-> exact integrated HEAD passes the clean gate and independent review, lands
-> through protected main with required CI, and RC6 satisfies F7, schema-v2
+> release-visibility fix passes the clean gate and independent review, lands
+> through protected main with required CI, and RC7 satisfies F7, schema-v2
 > same-host F4, funded F6, doctor, clean-install, C7, and evidence-bundle gates.
 
 The release workflow always creates a draft. RC releases must remain
@@ -184,13 +197,13 @@ post-tag verification succeeds.
 
 | Gate | Required evidence |
 | --- | --- |
-| F4 | Schema-v2 standard 3600-second and chaos 600-second soak receipts on the same macOS 15.x/aarch64 host at the RC6 SHA; RC5 receipts are historical only |
-| F6 | Five funded public-testnet transactions at RC6 for four families, including both confirmed legs of `fund_gas` → dependent sweep; mock evidence cannot satisfy this gate |
-| Desktop | Checksum-verified RC6 `.dmg` installs and reaches unlock on a clean machine without a dev toolchain |
-| F7 | 0.1-era data-directory and snapshot upgrade verification passes at RC6 |
-| Doctor | `sigillum doctor` passes on the eligible macOS 15.x/aarch64 host at RC6 |
+| F4 | Schema-v2 standard 3600-second and chaos 600-second soak receipts on the same macOS 15.x/aarch64 host at the RC7 SHA; RC5 and RC6 receipts are historical only |
+| F6 | Five funded public-testnet transactions at RC7 for four families, including both confirmed legs of `fund_gas` → dependent sweep; mock evidence cannot satisfy this gate |
+| Desktop | Checksum-verified RC7 `.dmg` installs and reaches unlock on a clean machine without a dev toolchain |
+| F7 | 0.1-era data-directory and snapshot upgrade verification passes at RC7 |
+| Doctor | `sigillum doctor` passes on the eligible macOS 15.x/aarch64 host at RC7 |
 | UI | Real-daemon browser smoke plus operator walkthrough/sign-off for all five destinations, palette, keyboard/focus, modal, and accessibility behavior |
-| H2 | Blocked until the exact integrated HEAD and every RC6 automated and operator gate pass; explicit operator approval is then recorded immediately before the final-tag ceremony and authorizes conditional publication only after every post-tag verification passes |
+| H2 | Blocked until the exact RC7 commit and every automated and operator gate pass; explicit operator approval is then recorded immediately before the final-tag ceremony and authorizes conditional publication only after every post-tag verification passes |
 
 Work may continue on any independent item while one of these gates is waiting.
 Do not mark H1 or H2 complete until every required receipt names the same
@@ -300,8 +313,8 @@ or recreating the tag.
    checksum result, evidence filename, and evidence archive digest. Keep the
    annotated RC tag permanently and retain the RC draft/assets through
    final-draft verification.
-8. Only after the exact integrated HEAD passes the clean gate and independent
-   review, lands through protected main with required CI, and the resulting RC6
+8. Only after the release-visibility fix passes the clean gate and independent
+   review, lands through protected main with required CI, and the resulting RC7
    passes every automated and operator gate, record explicit H2 approval,
    repeat the clean gate, and push annotated `v1.0.0` at the identical peeled
    commit as the receipt-bearing RC, with the evidence filename and digest in

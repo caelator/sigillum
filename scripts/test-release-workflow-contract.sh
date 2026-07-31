@@ -130,11 +130,17 @@ ruby -e '
 for required_fragment in \
   'release_args+=(--prerelease)' \
   "if [[ \"\${RELEASE_TAG}\" == *-rc.* ]]; then" \
+  'bash ./scripts/await-unique-github-release.sh' \
+  "\"\${REPOSITORY}\" \"\${RELEASE_TAG}\"" \
   'bash ./scripts/check-release-state-contract.sh' \
   "\"\${release_role}\" \"\${RELEASE_TAG}\"" \
   "rc-draft \"\${PROMOTION_RC_TAG}\""; do
   grep -F "${required_fragment}" "${WORKFLOW}" >/dev/null ||
     fail "release workflow is missing state-contract wiring: ${required_fragment}"
 done
+
+if grep -F 'expected exactly one created release' "${WORKFLOW}" >/dev/null; then
+  fail "release workflow still contains the immediate post-create list lookup"
+fi
 
 echo "release workflow contract tests passed"
