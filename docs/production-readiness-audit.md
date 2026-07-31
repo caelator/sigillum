@@ -7,18 +7,30 @@ gateway boundary
 `v1.0.0-rc.2` through `v1.0.0-rc.4` are immutable failure receipts for the tag,
 packaging, and F6/runtime contracts. `v1.0.0-rc.5` at `7e04743` completed its
 workflow and has checksum-verified assets in an unpublished historical draft,
-but it cannot certify the later integrated hardening changes. No RC6 exists.
+but it cannot certify the later integrated hardening changes.
 
-The next eligible evidence anchor is `v1.0.0-rc.6` only after the exact
-integrated HEAD passes the clean release gate and independent review, lands
-through protected `main`, and passes required CI. Every automated and operator
-receipt must bind to that RC6 peeled SHA. C7 is partial: the five-destination
-operator console is implemented, but its RC6 walkthrough and operator sign-off
-remain open. The target-host evidence boundary is macOS 15.x on Apple Silicon
-(`aarch64`) only. The current macOS 26.5.2/arm64 host is ineligible for F4,
-doctor, clean-install, or C7 release receipts. No final `v1.0.0` tag or
-published GitHub Release exists. Gateway payments remain disabled-by-default
-experimental observations, not supported 1.0 confirmation semantics.
+`v1.0.0-rc.6` is now immutable failed-workflow evidence. Annotated tag object
+`1687443c67e6a90b1db84c78d6f372463dc8c639` peels to protected-main commit
+`194a90384bccef65bed42cf491d763a4c46948c0`. Release run `30600446396` passed
+the release-contract job, both verify jobs, and both artifact jobs. Its final
+job created one unique unpublished `prerelease=true` draft with the exact six
+expected nonempty, checksum-valid assets, then failed because an immediate
+list query 336 ms later did not observe that newly created release. RC6 cannot
+qualify and must remain preserved; its tag and draft are not moved, deleted,
+reused, or published.
+
+The next eligible evidence anchor is `v1.0.0-rc.7` only after a bounded
+release-visibility fix lands through protected `main` and the exact clean
+release gate, independent review, and required CI pass for that new main SHA.
+Every current-line automated and operator receipt must bind to that RC7 peeled
+SHA. C7 is
+partial: the five-destination operator console is implemented, but its RC7
+walkthrough and operator sign-off remain open. The target-host evidence boundary
+is macOS 15.x on Apple Silicon (`aarch64`) only. The current macOS 26.5.2/arm64
+host is ineligible for F4, doctor, clean-install, or C7 release receipts. No
+final `v1.0.0` tag or published GitHub Release exists. Gateway payments remain
+disabled-by-default experimental observations, not supported 1.0 confirmation
+semantics.
 
 RC4 release run `29230844456` nevertheless completed all six jobs, including
 strict source and mounted-dmg verification, and produced its six expected draft
@@ -37,11 +49,16 @@ receipts cannot be carried forward.
 
 Historical checkpoint `fc1e93b` passed its then-current clean-tree release gate
 in 919 seconds, but that SHA is predecessor evidence only. It does not establish
-the current integrated tree as source-ready. The exact integrated HEAD must run
+the current integrated tree as source-ready. Canonical commit
+`194a90384bccef65bed42cf491d763a4c46948c0` subsequently passed
 `./scripts/check-release.sh` from a clean tree without tracked-file mutation,
-then complete independent review, protected merge, and required CI before RC6
-may be created. The gate makes the release standard executable instead of
-scattering it across README, CI, and readiness notes.
+completed independent review, landed through protected `main`, and passed its
+required CI. Those receipts establish the integrated source line; they do not
+qualify RC6 because release run `30600446396` ended in failure. The bounded
+release-visibility fix must land through protected `main`, then repeat the exact
+gate, review, and required CI before RC7 may be created. The gate makes the
+release standard executable instead of scattering it across README, CI, and
+readiness notes.
 
 The gate covers:
 
@@ -105,8 +122,9 @@ skips artifact rebuilds. It copies the exact five qualified RC payload bytes
 under final names, verifies byte identity and tag-normalized digest equality,
 regenerates `SHA256SUMS`, and adds the validated release-evidence bundle as the
 seventh asset. Fresh final-tag payload builds cannot substitute for the
-qualified RC bytes. This implementation remains unqualified release machinery
-until the exact integrated HEAD and RC6 gates pass.
+qualified RC bytes. The implementation is source-verified at `194a903`, but the
+release machinery remains unqualified until the bounded visibility fix lands
+and the RC7 workflow passes end to end.
 
 RC release records must remain unpublished drafts with `prerelease=true`
 through qualification and exact-byte promotion. The final draft and published
@@ -126,9 +144,13 @@ draft assets contained an app for which `codesign -dv` misleadingly printed
 bundle had no resource seal. The new verifier rejects that exact linker-only
 shape, mounts the dmg read-only without executing its binary, and requires the
 mounted app to match the already verified source app. RC5 is the retained
-historical successor to the separate RC4 evidence-contract failure. Because
-the current feature line changes code after RC5, its next permitted candidate
-is `v1.0.0-rc.6` only after exact-HEAD gating, review, protected merge, and CI.
+historical successor to the separate RC4 evidence-contract failure. RC6 is the
+retained historical successor at `194a903`: its contract, verify, and artifact
+jobs passed and its exact six checksum-valid assets remain in a unique
+unpublished prerelease draft, but the final job failed on the 336 ms
+release-visibility race. Because RC6 is burned and non-qualifying, the next
+permitted candidate is `v1.0.0-rc.7` only after the bounded visibility fix,
+exact-HEAD gating, review, protected merge, and CI.
 
 The first sandboxed run failed when loopback integration tests could not bind
 local sockets under the execution sandbox. The same release gate passed outside
@@ -209,7 +231,7 @@ checked surfaces: daemon status, vault API-key write/read canary, gateway
 health, and `sigillum doctor`.
 Darwin `25.5.0` corresponds to macOS 26.5.2 and is outside the macOS 15.x
 release-evidence boundary. This receipt is non-qualifying historical harness
-evidence only; it cannot satisfy RC6 F4, doctor, clean-install, or C7 gates.
+evidence only; it cannot satisfy RC7 F4, doctor, clean-install, or C7 gates.
 
 Chaos mode is enabled with `SIGILLUM_SOAK_CHAOS=1`; it `kill -9`s the
 harness's own daemon every `SIGILLUM_SOAK_CHAOS_EVERY` iterations, defaulting
@@ -262,20 +284,20 @@ pass with empty ignore lists.
 
 | Requirement | Current evidence | Status |
 | --- | --- | --- |
-| Build and dependency graph resolve | `cargo metadata --locked --no-deps --format-version 1` inside `./scripts/check-release.sh` | Historical predecessor evidence exists; exact integrated-HEAD release gate pending |
-| Architecture stays within professional boundaries | `./scripts/check-architecture.sh` inside the release gate | Focused integration checks exist; exact integrated-HEAD release gate and review pending |
-| Daemon UI compiles and tested source matches generated assets | `npm ci`, `npm audit --audit-level=high`, `npm run typecheck`, `npm test`, `npm run build`, generated-asset freshness, and pinned accessibility checks | Five-destination implementation is integrated; exact integrated-HEAD gate and RC6 operator sign-off pending |
-| Rust workspace builds, tests, and lints | Locked workspace check/test/clippy plus independent no-HID FIDO2 check/test/clippy inside the release gate | Focused integration checks exist; exact integrated-HEAD release gate pending |
-| Security and supply-chain baseline | `cargo audit --file Cargo.lock` and `cargo deny --locked check` inside the release gate | Must be re-established for the exact integrated lockfile |
-| Release identity and monotonicity | Remote direct/peeled tag validation, event-SHA and cross-job tag-object binding, scratch-ref recovery, retained monotonically numbered RC tags, draft-only release creation, and explicit RC/final draft/published prerelease-state contracts | Proven only when the tag workflow passes at the gated `main` SHA; branch/tag protection is a fail-closed pre-merge settings check |
-| Local daemon and gateway loopback integration behavior | Workspace integration tests pass outside the sandbox | Focused integration tests pass; exact integrated-HEAD gate, protected-main CI, and RC6 evidence remain |
-| Target-host operational readiness | RC5 standard soak, chaos soak, and doctor receipts bind to `7e04743`; the schema-v2 receipt contract records platform, exact macOS product version, canonical architecture, and opaque machine identity | Proven for RC5 only; repeat the 3600-second standard soak, 600-second chaos soak, and doctor at RC6 on the same eligible macOS 15.x/aarch64 host |
-| Runtime daemon lifecycle behavior | `scripts/check-runtime-smoke.sh` starts the daemon, verifies status, initializes a passphrase compartment, writes and reads vault canaries, locks, unlocks, lists compartments, and runs doctor | Exact integrated-HEAD runtime gate plus eligible-host RC6 doctor receipt pending |
-| Queue submission durability, dependency finality, and pause | Queue schema v5 persists `prepared` raw bytes/hash and a pre-RPC `submitted_unknown` marker; recovery checks receipts or resubmits exact bytes without re-signing; dependent plan steps remain unsigned until every prerequisite reaches receipt-confirmed finality; the real HTTP pause regression latches before the active drain mutex and blocks later broadcasts | Focused integration tests pass; exact integrated-HEAD gate, protected-main CI, and RC6 evidence remain |
-| Runtime browser/UI visual behavior | DOM tests, mock accessibility, screenshots, and migrated real-daemon browser smoke cover visible setup and all five destinations | Implementation evidence exists; exact integrated-HEAD gate and RC6 operator walkthrough/sign-off remain |
-| Desktop app bundle readiness | Source/mounted-dmg verification runs inside `./scripts/check-release.sh`; RC5 workflow `29248938476` produced checksum-valid historical draft assets | Exact integrated-HEAD source gate, fresh RC6 workflow/assets, and clean-machine install/unlock remain unproved |
-| Long-duration reliability | Recovery/crash tests plus RC5 standard 3600-second and chaos 600-second receipts passed at `7e04743` | Historical for the feature line; schema-v2 standard and chaos receipts from the same eligible target host must bind to RC6 |
-| External security assurance | Code gates, audit, deny, local adversarial/fuzz gate, SSRF/local-boundary tests, and UI boundary tests are part of the release contract | Exact integrated-HEAD source contract and independent review pending; no independent external penetration test has been performed |
+| Build and dependency graph resolve | `cargo metadata --locked --no-deps --format-version 1` inside `./scripts/check-release.sh` | Passed at protected-main commit `194a903`; repeat after the visibility fix for RC7 |
+| Architecture stays within professional boundaries | `./scripts/check-architecture.sh` inside the release gate | Exact source gate and independent review passed at `194a903`; repeat after the visibility fix for RC7 |
+| Daemon UI compiles and tested source matches generated assets | `npm ci`, `npm audit --audit-level=high`, `npm run typecheck`, `npm test`, `npm run build`, generated-asset freshness, and pinned accessibility checks | Source gate passed at `194a903`; RC7 operator sign-off remains |
+| Rust workspace builds, tests, and lints | Locked workspace check/test/clippy plus independent no-HID FIDO2 check/test/clippy inside the release gate | Passed at protected-main commit `194a903`; repeat after the visibility fix for RC7 |
+| Security and supply-chain baseline | `cargo audit --file Cargo.lock` and `cargo deny --locked check` inside the release gate | Passed for the exact lockfile at `194a903`; repeat after the visibility fix for RC7 |
+| Release identity and monotonicity | Remote direct/peeled tag validation, event-SHA and cross-job tag-object binding, scratch-ref recovery, retained monotonically numbered RC tags, draft-only release creation, and explicit RC/final draft/published prerelease-state contracts | RC6 contract, verify, and artifact jobs passed, but its final job failed after creating the draft because the 336 ms list query did not observe it; end-to-end proof requires RC7 after the bounded visibility fix |
+| Local daemon and gateway loopback integration behavior | Workspace integration tests pass outside the sandbox | Exact source gate and protected-main CI passed at `194a903`; candidate qualification requires the fixed RC7 workflow |
+| Target-host operational readiness | RC5 standard soak, chaos soak, and doctor receipts bind to `7e04743`; the schema-v2 receipt contract records platform, exact macOS product version, canonical architecture, and opaque machine identity | Proven for RC5 only; repeat the 3600-second standard soak, 600-second chaos soak, and doctor at RC7 on the same eligible macOS 15.x/aarch64 host |
+| Runtime daemon lifecycle behavior | `scripts/check-runtime-smoke.sh` starts the daemon, verifies status, initializes a passphrase compartment, writes and reads vault canaries, locks, unlocks, lists compartments, and runs doctor | Exact source runtime gate passed at `194a903`; eligible-host RC7 doctor receipt remains |
+| Queue submission durability, dependency finality, and pause | Queue schema v5 persists `prepared` raw bytes/hash and a pre-RPC `submitted_unknown` marker; recovery checks receipts or resubmits exact bytes without re-signing; dependent plan steps remain unsigned until every prerequisite reaches receipt-confirmed finality; the real HTTP pause regression latches before the active drain mutex and blocks later broadcasts | Exact source gate and protected-main CI passed at `194a903`; RC7 release and field evidence remain |
+| Runtime browser/UI visual behavior | DOM tests, mock accessibility, screenshots, and migrated real-daemon browser smoke cover visible setup and all five destinations | Source gate passed at `194a903`; RC7 operator walkthrough/sign-off remains |
+| Desktop app bundle readiness | Source/mounted-dmg verification runs inside `./scripts/check-release.sh`; RC6 workflow `30600446396` produced exact checksum-valid historical draft assets | RC6 is disqualified by its failed final job; a successful fresh RC7 workflow plus clean-machine install/unlock remain unproved |
+| Long-duration reliability | Recovery/crash tests plus RC5 standard 3600-second and chaos 600-second receipts passed at `7e04743` | Historical for the feature line; schema-v2 standard and chaos receipts from the same eligible target host must bind to RC7 |
+| External security assurance | Code gates, audit, deny, local adversarial/fuzz gate, SSRF/local-boundary tests, and UI boundary tests are part of the release contract | Exact source contract and independent review passed at `194a903`; no independent external penetration test has been performed |
 | Full wallet-management product roadmap | EVM roadmap phases 1-9 shipped and tested: discovery, inventory, risk, planning, policy-gated fail-closed execution (default off), DeFi exit adapters, and treasury automation | EVM scope is complete except swap execution, which is deferred per D-13; only non-EVM chains (phase 10), swap execution (D-13), and fiat/NFT valuation (D-16) remain deferred |
 
 ## Release Boundary
@@ -320,27 +342,31 @@ wallet operations remain deferred.
 
 ## Remaining Work Before A Broader Completion Claim
 
-The integrated feature line still needs the following release-qualified
-evidence:
+The protected-main source line at `194a903` completed the exact clean release
+gate, independent review, protected merge, and required CI. RC6 is preserved as
+failed-workflow evidence. The remaining release-qualified evidence is:
 
-1. an exact-integrated-HEAD clean `./scripts/check-release.sh`, independent
-   review, protected merge, and required CI
-2. an immutable RC6 tag plus one draft, unpublished, `prerelease=true` GitHub
-   Release whose six assets independently verify at that exact SHA
-3. F7 upgrade verification at RC6 and schema-v2 standard 3600-second and chaos
+1. a bounded release-visibility fix landed through protected `main`, followed
+   by the exact clean release gate, independent review, and required CI at the
+   new main SHA
+2. an immutable RC7 tag plus a successful end-to-end workflow leaving one
+   draft, unpublished, `prerelease=true` GitHub Release whose exact six
+   nonempty assets independently verify at that exact SHA
+3. F7 upgrade verification at RC7 and schema-v2 standard 3600-second and chaos
    600-second F4 receipts plus `sigillum doctor` on the same eligible macOS
    15.x/aarch64 host
 4. five funded public-testnet transactions for the four core execution families:
    native sweep, ERC-20 sweep, revoke, and both legs of `fund_gas` → dependent
    sweep on Ethereum Sepolia (`11155111`) plus one supported L2 testnet: Base
    Sepolia (`84532`), Arbitrum Sepolia (`421614`), or OP Sepolia (`11155420`)
-   (F6)
-5. a checksum-verified RC6 dmg clean install reaching unlock without a
-   developer toolchain and RC6 operator walkthrough/sign-off across all five
+   (F6), all bound to RC7
+5. a checksum-verified RC7 dmg clean install reaching unlock without a
+   developer toolchain and RC7 operator walkthrough/sign-off across all five
    destinations (C7)
-6. schema-v2 evidence-bundle validation, exact-byte final-draft verification
-   with the bundle as the seventh asset and `prerelease=false`, and explicit
-   H2 approval recorded before invoking the final-tag ceremony
+6. RC7-bound schema-v2 evidence-bundle validation, exact-byte final-draft
+   verification with the bundle as the seventh asset and
+   `prerelease=false`, and explicit H2 approval recorded before invoking the
+   final-tag ceremony
 
 An independent external penetration test is additionally required only if the
 assurance claim expands beyond the source-verified local-first boundary. No
@@ -348,10 +374,12 @@ external penetration test has been performed, and this release does not claim
 one (D-4).
 
 Until those are complete, the accurate claim is narrower: the integrated source
-implements the intended local-first product and has focused verification, while
-the exact-HEAD release gate, review, protected-main CI, RC6, eligible-host,
-testnet, clean-install, operator-sign-off, exact-byte promotion, and explicit
-H2 receipts remain.
+at `194a903` implements the intended local-first product and passed its exact
+release gate, independent review, protected-main CI, and the RC6 contract,
+verify, and artifact jobs. RC6 remains non-qualifying failed-workflow evidence;
+the bounded visibility fix, successful RC7 workflow, eligible-host, testnet,
+clean-install, operator-sign-off, exact-byte promotion, and explicit H2
+receipts remain.
 
 ## Execution-path security review (F5)
 

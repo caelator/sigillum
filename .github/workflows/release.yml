@@ -441,15 +441,8 @@ jobs:
           gh release create "${release_args[@]}" dist/*
 
           created_release="$(
-            gh api --paginate "repos/${REPOSITORY}/releases?per_page=100" |
-              jq -sc --arg tag "${RELEASE_TAG}" '
-                add
-                | [.[] | select(.tag_name == $tag)]
-                | if length == 1
-                  then .[0]
-                  else error("expected exactly one created release")
-                  end
-              '
+            bash ./scripts/await-unique-github-release.sh \
+              "${REPOSITORY}" "${RELEASE_TAG}"
           )"
           bash ./scripts/check-release-state-contract.sh \
             "${release_role}" "${RELEASE_TAG}" <<< "${created_release}"

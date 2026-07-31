@@ -1,7 +1,7 @@
 # Sigillum 1.0 Release Plan
 
 **Status:** Active plan of record for the 1.0 release (rev 5 — wallet management
-and integrated hardening in scope; release truth reconciled 2026-07-30)
+and integrated hardening in scope; release truth reconciled 2026-07-31)
 **Baseline verified:** 2026-07-01, branch `feat/private-receiving-desktop` (commits `70a087b`, `1cda1f2` ahead of `main`)
 **Supersedes:** [catchup-plan.md](./catchup-plan.md) Phases 1–3 are absorbed into Phases D–E and W1–W8 below. The
 [wallet-management-roadmap.md](./wallet-management-roadmap.md) product target is **part of 1.0** (EVM scope — see D-9);
@@ -536,11 +536,11 @@ A → (B ∥ C ∥ D) → E → (W1 ∥ W2) → (W3 ∥ W4 ∥ W5 ∥ W6) → W7
 
 #### C7 — Operator console UX redesign (user-directed, 2026-07-03)
 
-- **Current status (2026-07-30):** the five destination controllers, shared
+- **Current status (2026-07-31):** the five destination controllers, shared
   core/SSE runtime, receiving parity, modal coordinator, command palette, and
   keyboard/focus behavior are integrated. Prior checkpoint counts remain
   historical evidence for their exact SHAs only. C7 is `[~]` until the exact
-  integrated HEAD passes the full gate and the RC6 build completes the
+  release-candidate commit passes the full gate and the RC7 build completes the
   five-destination operator walkthrough and sign-off.
 - **Goal:** the embedded console gets a ground-up UX redesign. Previous
   incremental passes were judged insufficient by the operator; this is an
@@ -1542,37 +1542,49 @@ below; the remaining items are operator human-gates.
 > `7e047438f6305ef1cedecdf4790e1b0e1d7e1e6e`. Release workflow
 > `29248938476` passed all six jobs, and the five payload assets independently
 > match `SHA256SUMS`. The GitHub Release remains draft/unpublished. RC5 cannot
-> certify the integrated hardening line. No RC6 exists; RC6 becomes eligible
-> only after the exact integrated HEAD clean gate, independent review,
-> protected merge, and required CI.
+> certify the integrated hardening line.
 
-- [ ] Exact integrated HEAD passes `./scripts/check-release.sh` from a clean
-      tree and independent review converges; then protected merge and required
-      CI pass. (No qualifying exact-HEAD receipt exists yet.)
-- [ ] The RC6 six-job draft release workflow is green; the unique release is
+> **RC6 failed-workflow draft:** remote annotated tag object
+> `1687443c67e6a90b1db84c78d6f372463dc8c639` peels to protected-main commit
+> `194a90384bccef65bed42cf491d763a4c46948c0`. The clean source gate,
+> independent review, protected merge, required main CI, release contract, both
+> tagged-source verifiers, and both artifact jobs passed. Release run
+> `30600446396` then failed after `gh release create`: the immediate paginated
+> list query did not yet observe the new draft. The unique draft is now visible
+> as unpublished and `prerelease=true`; all six expected assets are nonempty,
+> and an independent download verified every `SHA256SUMS` entry. The red final
+> job still disqualifies RC6. Preserve its immutable tag, draft, and assets as
+> historical evidence; do not move, delete, rerun, or promote it. The bounded
+> visibility fix must land through protected main before RC7 is eligible.
+
+- [~] The RC6 source line passed `./scripts/check-release.sh` from a clean tree,
+      independent review converged, protected merge completed, and required
+      main CI passed. The release-visibility correction still needs the same
+      protected-main and exact-HEAD receipts before RC7.
+- [ ] The RC7 six-job draft release workflow is green; the unique release is
       draft, unpublished, and `prerelease=true` under the release-state
       contract, and the five payload assets independently match `SHA256SUMS`.
-      (No RC6 exists.)
+      (No RC7 exists.)
 - [ ] F4 schema-v2 standard 3600-second and chaos 600-second receipts reference
-      the RC6 SHA and the same macOS 15.x/aarch64 machine identity. (No
-      qualifying RC6 receipt exists.)
+      the RC7 SHA and the same macOS 15.x/aarch64 machine identity. (No
+      qualifying RC7 receipt exists.)
 - [ ] F6 testnet receipts record five transactions for the four core execution
-      families, including both confirmed gas-chain legs, at RC6. Funded
+      families, including both confirmed gas-chain legs, at RC7. Funded
       public-testnet access is required.
 - [ ] F7 upgrade-path tests green: 0.1-era fixture dir boots and migrates on
-      the RC6 build; 0.1-era snapshot restores.
-- [ ] Desktop `.dmg` from RC6 strictly verifies, installs, and reaches the unlock
-      screen on a machine without a dev toolchain. (No RC6 artifact exists yet.)
+      the RC7 build; 0.1-era snapshot restores.
+- [ ] Desktop `.dmg` from RC7 strictly verifies, installs, and reaches the unlock
+      screen on a machine without a dev toolchain. (No RC7 artifact exists yet.)
 - [ ] `sigillum doctor` passes on the same eligible macOS 15.x/aarch64 host at
-      RC6. (No qualifying RC6 receipt exists yet.)
+      RC7. (No qualifying RC7 receipt exists yet.)
 - [ ] Five-destination UI walkthrough, command palette, keyboard/focus/modal
       behavior, pinned accessibility scenarios, and migrated real-daemon
-      browser smoke are signed off at RC6.
+      browser smoke are signed off at RC7.
 - [ ] Clean-install, doctor, and C7 receipts pass schema v2 and bind the exact
       RC tag object/peeled SHA, qualified artifact filename/digest,
       `mac-server` macOS 15/aarch64 identity, release-operator identity/time,
       and the required checksum-bound clean-install/UI screenshots. (No
-      qualifying RC6 evidence bundle exists yet.)
+      qualifying RC7 evidence bundle exists yet.)
 - [ ] Schema-v2 evidence bundle validates; the final workflow reruns source
       verification, skips artifact rebuilds, copies the exact five qualified
       RC payload bytes, verifies byte identity and tag-normalized digests,
@@ -1589,16 +1601,17 @@ below; the remaining items are operator human-gates.
       eth_seed_jobs_are_gate_driven_and_execute_once_gates_pass via spawn_mock_evm_provider,
       chaos_kill_in_flight_plan_step_resumes_terminal_without_duplication; UI click-through = operator acceptance)
 - [~] CHANGELOG release-candidate notes are dated and explicitly state that no
-      final release exists; exact-HEAD gate, review, merge, CI, and RC6
+      final release exists; exact-HEAD gate, review, merge, CI, and RC7
       evidence remain.
 
 #### H2 — Tag and release
 
 > [!IMPORTANT]
 > The evidence-hardening implementation is present, but H2 is not authorized:
-> no RC6 exists. Do not invoke this ceremony until the exact integrated HEAD
-> passes the clean gate and independent review, lands through protected main
-> with required CI, and RC6 satisfies F7, schema-v2 same-host F4, funded F6,
+> RC6 is an immutable failed-workflow receipt and no RC7 exists. Do not invoke
+> this ceremony until the release-visibility fix passes the clean gate and
+> independent review, lands through protected main with required CI, and RC7
+> satisfies F7, schema-v2 same-host F4, funded F6,
 > doctor, clean-install, C7, and evidence-bundle gates. The operator records
 > explicit H2 approval immediately before invocation; there is no later
 > interactive approval pause.
@@ -1945,13 +1958,15 @@ Phase C — Desktop productization
 - [x] C1 real icon set
 - [x] C2 bundling enabled (.app/.dmg)
 - [~] C3 fail-closed env-gated signing and explicit full-bundle ad-hoc default
-      (implemented; current-line RC6 workflow proof pending)
+      (implemented; RC6 artifact proof passed, but current-line RC7 workflow
+      proof remains)
 - [~] C4 strict source + mounted-dmg verification and negative regressions in
-      the release gate (implemented; current-line RC6 workflow proof pending)
+      the release gate (implemented; RC6 artifact proof passed, but current-line
+      RC7 workflow proof remains)
 - [x] C5 boot helpers extracted + tested
 - [x] C6 desktop docs
 - [~] C7 operator console UX redesign (five destinations and interaction
-      contracts implemented; exact integrated-HEAD gate and RC6 operator
+      contracts implemented; exact release-candidate gate and RC7 operator
       walkthrough/sign-off remain)
 
 Phase D — Operator-surface parity
@@ -2005,14 +2020,16 @@ Phase G — Release engineering
 - [~] G4 release workflow (historical dry run validated on a22a98a; RC3 exposed
       a signature false positive; RC4 exposed an evidence-contract false
       positive and unconfirmed-dependency execution; RC5 run `29248938476`
-      proved the older workflow at `7e04743`; exact-byte current-line RC6 and
-      final-promotion proof remains)
+      proved the older workflow at `7e04743`; RC6 run `30600446396` proved the
+      exact source and artifact path but exposed post-create release-list
+      visibility; green current-line RC7 and final-promotion proof remain)
 - [x] G5 readiness + product docs final sync
 
 Phase H — Ship
-- [~] H1 RC verification checklist (RC5 is an unpublished older-code draft;
-      source, release, F7, schema-v2 F4/F6, clean-machine, doctor, C7, and
-      evidence-bundle receipts must bind RC6)
+- [~] H1 RC verification checklist (RC5 is an unpublished older-code draft and
+      RC6 is an immutable failed-workflow draft; source, release, F7, schema-v2
+      F4/F6, clean-machine, doctor, C7, and evidence-bundle receipts must bind
+      RC7)
 - [ ] H2 v1.0.0 tagged, artifacts published (human gate — operator go)
 - [ ] H3 post-release bump + planning issue
 
@@ -2396,6 +2413,15 @@ Phase H — Ship
   pass 225/225, typecheck/build pass, axe passes 15/15 with zero violations or
   incomplete results, the 12-shot walkthrough passes, and browser smoke passes
   end to end against an isolated daemon. The feature line changes code after
-  RC5, so the next eligible candidate is RC6 after protected-main merge. The
-  documentation-only successor commit, complete release gate, manual visual
-  sign-off, and same-RC operator evidence remain.
+  RC5, so a new protected-main candidate was required. The documentation-only
+  successor commit, complete release gate, manual visual sign-off, and same-RC
+  operator evidence remained.
+- 2026-07-31 RC6 DRAFT WORKFLOW FAILURE (`194a903`, annotated tag object
+  `1687443c`, release run `30600446396`): clean exact-HEAD gate, converged
+  independent review, protected merge, required main CI, release contract,
+  both tagged-source verifiers, and both artifact jobs passed. The final job
+  created the correct unique unpublished prerelease draft and all six expected
+  assets, then failed because its release-list query ran 336 ms later and did
+  not yet observe the draft. Independent downloads matched GitHub sizes and
+  every `SHA256SUMS` entry. Preserve RC6 as immutable failed-workflow evidence;
+  land the bounded visibility fix through protected main and qualify RC7.

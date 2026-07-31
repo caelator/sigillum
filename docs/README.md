@@ -52,10 +52,15 @@ GitHub state before treating any checklist entry as satisfied.
 
 ## Release-status rule
 
-Sigillum currently has no supported stable release, no RC6, and no published
-GitHub Release. RC2–RC4 are immutable failure receipts; RC5 is an unpublished
-historical draft for `7e04743` only. A tag or draft alone is not release proof.
-Valid final release evidence requires the qualified same-SHA RC receipts, an
-annotated final tag on protected `main`, exact-byte promotion of the five RC
-payloads, a validated evidence bundle, explicit H2 approval, and a published
-GitHub Release.
+Sigillum currently has no supported stable release and no published GitHub
+Release. RC2–RC4 are immutable failure receipts; RC5 is an unpublished
+historical draft for `7e04743` only. RC6 at `194a903` is an immutable
+failed-workflow receipt: its source and artifact jobs passed and its unique
+unpublished prerelease draft has six checksum-valid assets, but the final job
+failed when an immediate post-create list query did not yet observe the draft.
+Preserve RC6; RC7 is the next eligible candidate after the bounded visibility
+fix lands through protected main and exact gates. A tag or draft alone is not
+release proof. Valid final release evidence requires the qualified same-SHA RC
+receipts, an annotated final tag on protected `main`, exact-byte promotion of
+the five RC payloads, a validated evidence bundle, explicit H2 approval, and a
+published GitHub Release.

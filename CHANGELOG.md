@@ -678,6 +678,10 @@ from 1.0.0 onward, per the stability policy in `docs/stability.md`.
 
 ### Fixed
 
+- Draft-release validation now polls a bounded, hermetically tested GitHub
+  release lookup after `gh release create`, tolerating the observed
+  post-create visibility delay while still failing immediately on API errors
+  or duplicate releases.
 - Approval findings in `[2^128, 2^255)`, including Permit2-max allowances, now
   move from medium to high advisory risk, and
   `TreasuryRiskSummary.high_findings` counts increase accordingly. Wire shapes

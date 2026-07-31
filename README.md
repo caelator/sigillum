@@ -10,11 +10,18 @@
 > current source on a non-production machine with test wallets first.
 > `v1.0.0-rc.2` through `v1.0.0-rc.4` are immutable failure receipts.
 > `v1.0.0-rc.5` at `7e04743` is an unpublished historical draft only; it
-> cannot certify the integrated hardening changes. No RC6 exists. The next
-> eligible candidate is RC6 only after the exact integrated HEAD passes the
-> clean release gate and independent review, lands through protected `main`,
-> and passes required CI. No final `v1.0.0` tag or published GitHub Release
-> exists.
+> cannot certify the integrated hardening changes. `v1.0.0-rc.6` is immutable
+> failed-workflow evidence: tag object
+> `1687443c67e6a90b1db84c78d6f372463dc8c639` peels to
+> `194a90384bccef65bed42cf491d763a4c46948c0`. Workflow run `30600446396`
+> passed the contract, both verification jobs, and both artifact jobs. Its
+> final job created the correct unique unpublished prerelease draft with all
+> six checksum-valid assets, then failed when a list query 336 ms later did not
+> yet see that draft. RC6 cannot qualify and must not be moved, deleted, or
+> reused. The next eligible candidate is RC7 only after the release-visibility
+> fix lands through protected `main` and that exact head passes the clean
+> release gate, required independent review, and required CI. No final
+> `v1.0.0` tag or published GitHub Release exists.
 
 Sigillum is a self-hosted, single-operator workstation for finding EVM wallets
 and assets, understanding their provenance and risk, preparing consolidation
@@ -180,7 +187,11 @@ public issues.
 - Supported stable release: none
 - Published GitHub Release: none
 - Historical unpublished draft: `v1.0.0-rc.5` at protected-main `7e04743`
-- Current RC6: none
+- Immutable failed candidate: `v1.0.0-rc.6` (tag object
+  `1687443c67e6a90b1db84c78d6f372463dc8c639`, commit
+  `194a90384bccef65bed42cf491d763a4c46948c0`, workflow run `30600446396`)
+- Next eligible candidate: RC7, after the release-visibility fix, protected
+  merge, exact-head clean release gate, independent review, and required CI
 - Release-evidence target: macOS 15.x on Apple Silicon (`aarch64`) only
 - Current supported boundary: source evaluation only
 

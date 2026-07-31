@@ -100,6 +100,7 @@ run_step bash ./scripts/test-local-soak-receipt-contract.sh
 run_step bash ./scripts/test-release-evidence-bundle.sh
 run_step bash ./scripts/test-release-asset-promotion.sh
 run_step bash ./scripts/test-release-tag-contract.sh
+run_step bash ./scripts/test-await-unique-github-release.sh
 run_step bash ./scripts/test-release-workflow-contract.sh
 run_step ./scripts/check-architecture.sh
 run_step npm --prefix crates/sigillum-daemon/ui ci --ignore-scripts

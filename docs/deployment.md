@@ -97,7 +97,7 @@ ceremony, support is intentionally narrower than “runs on macOS”:
 
 | Surface | OS and CPU | Status |
 |---|---|---|
-| Desktop app and CLI | macOS 15.x, Apple Silicon (`aarch64`) | Intended 1.0 target; becomes supported only after fresh RC6 doctor, standard-soak, chaos-soak, and clean-machine install/unlock receipts |
+| Desktop app and CLI | macOS 15.x, Apple Silicon (`aarch64`) | Intended 1.0 target; becomes supported only after fresh RC7 doctor, standard-soak, chaos-soak, and clean-machine install/unlock receipts |
 | CLI archive | Ubuntu 24.04, `x86_64` | Built and source-gated in CI; not a supported target host until it has the same RC-bound operational receipts |
 | Linux desktop | Linux | Compile-only |
 | macOS on Intel, earlier macOS releases, Windows | Other | Unsupported for 1.0; no release artifact or target-host evidence |
@@ -423,10 +423,16 @@ version (or its `-rc.N` form), lack a dated changelog section, or are not on
 `main` history. `v1.0.0-rc.5` peels to pre-hardening protected-main commit
 `7e04743`; Release run `29248938476` passed all six jobs and produced the
 expected six assets, but its GitHub Release remains an unpublished historical
-draft. It cannot certify the integrated hardening line, and no RC6 exists.
-Only after the exact integrated HEAD passes the clean gate and review, lands
+draft. It cannot certify the integrated hardening line. `v1.0.0-rc.6` tag
+object `1687443c` peels to protected-main commit `194a903`; run `30600446396`
+passed the release contract, both source-verification legs, and both artifact
+jobs. The final job created the correct unique unpublished prerelease draft
+with all six expected checksum-valid assets, then failed because its list query
+ran 336 ms later and did not yet observe the draft. RC6 is therefore immutable
+failed-workflow evidence and must not be rerun, moved, deleted, or promoted.
+Only after the bounded visibility fix passes the clean gate and review, lands
 through protected `main`, and passes required CI is annotated
-`v1.0.0-rc.6` eligible.
+`v1.0.0-rc.7` eligible.
 The authoritative, fail-closed ceremony is section 6 of
 [`execution-runbook-1.0.md`](./execution-runbook-1.0.md); do not replace its
 pinned-SHA and post-gate identity checks with a shorter tag command:
@@ -463,9 +469,10 @@ re-verifies all seven assets, then requires the published release to retain
 `prerelease=false`. `scripts/check-release-state-contract.sh` enforces those
 `final-draft` and `final-published` transitions before the conditional
 publication authorized by the H2 approval recorded before the ceremony began.
-The exact-byte promotion path is implemented, but no RC6 exists and H2 remains
-blocked until the exact integrated HEAD, protected CI, RC6 qualification,
-operator receipts, and evidence bundle all pass.
+The exact-byte promotion path is implemented, but RC6 is an immutable
+failed-workflow receipt and H2 remains blocked until the visibility fix lands,
+protected CI passes, RC7 qualifies, and all RC7 operator receipts and the
+evidence bundle pass.
 
 ## Operational Notes
 

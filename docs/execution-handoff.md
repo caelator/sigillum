@@ -5,8 +5,8 @@
 > hardening work and must not be used as current implementation or release
 > authority. The only current release authorities are
 > [`release-1.0-plan.md`](./release-1.0-plan.md) and
-> [`execution-runbook-1.0.md`](./execution-runbook-1.0.md). No RC6 or
-> production-ready release exists.
+> [`execution-runbook-1.0.md`](./execution-runbook-1.0.md). RC6 now exists only
+> as immutable failed-workflow evidence; no production-ready release exists.
 
 **Checkpoint date:** 2026-07-18
 
