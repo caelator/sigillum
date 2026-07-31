@@ -342,10 +342,13 @@ function setup(options: {
 test("mount takes over #secretsCard, hides legacy vault siblings, unmount restores", async () => {
   const dom = installDom(["secretsCard", "apiKeysCard", "diagCard"]);
   const host = dom.el("secretsCard");
+  const apiKeysCard = dom.el("apiKeysCard");
+  const diagCard = dom.el("diagCard");
   const legacyChild = dom.document.createElement("p");
   legacyChild.textContent = "legacy secrets content";
   host.appendChild(legacyChild);
-  dom.el("diagCard").classList.add("hidden"); // already hidden before mount
+  diagCard.classList.add("hidden"); // already hidden before mount
+  diagCard.setAttribute("hidden", ""); // preserve native hidden state too
 
   const store = createCoreStore(VAULT_ROUTE);
   store.set("status", lockedStatus());
@@ -359,15 +362,78 @@ test("mount takes over #secretsCard, hides legacy vault siblings, unmount restor
   try {
     ok(byVault(dom, "root"), "vault root rendered into the host card");
     equal(host.childNodes.includes(legacyChild), false);
-    ok(dom.el("apiKeysCard").classList.contains("hidden"));
-    ok(dom.el("diagCard").classList.contains("hidden"));
+    ok(apiKeysCard.classList.contains("hidden"));
+    ok(apiKeysCard.hasAttribute("hidden"), "native visibility barrier is active");
+    apiKeysCard.classList.remove("hidden"); // legacy refresh tries to re-show it
+    ok(
+      apiKeysCard.hasAttribute("hidden"),
+      "legacy class changes cannot expose an owned sibling",
+    );
+    store.update("sync", (sync) => ({
+      ...sync,
+      refresh: { label: "test sync", state: "live", at: Date.now() },
+    }));
+    await flush();
+    ok(
+      apiKeysCard.classList.contains("hidden"),
+      "sync reasserts the legacy hidden class",
+    );
+    ok(diagCard.classList.contains("hidden"));
+    ok(diagCard.hasAttribute("hidden"));
   } finally {
     controller.unmount();
   }
   ok(host.childNodes.includes(legacyChild), "legacy children restored");
   equal(byVault(dom, "root"), null);
-  ok(!dom.el("apiKeysCard").classList.contains("hidden"));
-  ok(dom.el("diagCard").classList.contains("hidden"), "prior hidden state kept");
+  ok(!apiKeysCard.classList.contains("hidden"));
+  ok(!apiKeysCard.hasAttribute("hidden"));
+  ok(diagCard.classList.contains("hidden"), "prior hidden state kept");
+  ok(diagCard.hasAttribute("hidden"), "prior native hidden state kept");
+});
+
+test("mounted vault follows shell mode and restores the host visibility state", async () => {
+  const dom = installDom(["secretsCard"]);
+  const host = dom.el("secretsCard");
+  host.classList.add("hidden");
+  host.setAttribute("hidden", "");
+  dom.document.body.dataset.mode = "unlocked";
+
+  const store = createCoreStore(VAULT_ROUTE);
+  store.set("status", unlockedStatus());
+  const controller = createVaultDestination(
+    stubRuntime(store, stubApi({ status: unlockedStatus() }).api),
+  );
+  stubFetch();
+
+  controller.mount(VAULT_ROUTE);
+  await flush();
+  try {
+    ok(!host.classList.contains("hidden"), "unlocked shell shows the owned host");
+    ok(!host.hasAttribute("hidden"));
+
+    dom.document.body.dataset.mode = "locked";
+    store.update("sync", (sync) => ({
+      ...sync,
+      refresh: { label: "locked sync", state: "live", at: Date.now() },
+    }));
+    await flush();
+    ok(host.classList.contains("hidden"), "locked shell keeps the owned host hidden");
+    ok(host.hasAttribute("hidden"), "locked host has a native visibility barrier");
+
+    dom.document.body.dataset.mode = "unlocked";
+    store.update("sync", (sync) => ({
+      ...sync,
+      refresh: { label: "unlocked sync", state: "live", at: Date.now() },
+    }));
+    await flush();
+    ok(!host.classList.contains("hidden"), "unlocking restores the owned host");
+    ok(!host.hasAttribute("hidden"));
+  } finally {
+    controller.unmount();
+  }
+
+  ok(host.classList.contains("hidden"), "unmount restores the prior host class");
+  ok(host.hasAttribute("hidden"), "unmount restores the prior host attribute");
 });
 
 test("locked vault: lock strip + locked placeholders, no protected fetches", async () => {
