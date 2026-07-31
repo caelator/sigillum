@@ -130,6 +130,10 @@ fn handle_mock_request(
     mut stream: TcpStream,
     audit_sender: &Sender<Result<Vec<u8>, String>>,
 ) -> io::Result<bool> {
+    // BSD-derived platforms can inherit O_NONBLOCK from the listener onto an
+    // accepted socket. The mock uses read/write timeouts, so make each request
+    // stream explicitly blocking before reading its HTTP headers.
+    stream.set_nonblocking(false)?;
     let (method, path, body) = read_http_request(&mut stream)?;
     let (status, response_body, received_audit) = match (method.as_str(), path.as_str()) {
         ("GET", "/api/status") => (
@@ -219,6 +223,57 @@ impl Drop for MockRunServer {
             let _ = server_thread.join();
         }
     }
+}
+
+#[cfg(unix)]
+#[test]
+fn mock_run_server_blocks_on_an_accepted_request_stream() {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("bind mock listener");
+    listener
+        .set_nonblocking(true)
+        .expect("make mock listener nonblocking");
+    let address = listener.local_addr().expect("read mock listener address");
+    let mut client = TcpStream::connect(address).expect("connect mock client");
+    client
+        .set_read_timeout(Some(Duration::from_secs(1)))
+        .expect("set mock client read timeout");
+
+    let accept_deadline = Instant::now() + Duration::from_secs(1);
+    let accepted = loop {
+        match listener.accept() {
+            Ok((stream, _)) => break stream,
+            Err(error)
+                if error.kind() == io::ErrorKind::WouldBlock
+                    && Instant::now() < accept_deadline =>
+            {
+                thread::sleep(Duration::from_millis(1));
+            }
+            Err(error) => panic!("accept mock request stream: {error}"),
+        }
+    };
+
+    let (audit_sender, _audit_receiver) = mpsc::channel();
+    let handler = thread::spawn(move || handle_mock_request(accepted, &audit_sender));
+
+    // Give the handler time to attempt its first read before request bytes are
+    // available. A Darwin socket that inherited O_NONBLOCK would otherwise
+    // fail immediately with EWOULDBLOCK.
+    thread::sleep(Duration::from_millis(50));
+    client
+        .write_all(b"GET /api/status HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n")
+        .expect("write delayed mock request");
+
+    let mut response = String::new();
+    client
+        .read_to_string(&mut response)
+        .expect("read mock response");
+    assert!(response.starts_with("HTTP/1.1 200 OK\r\n"));
+    assert!(
+        !handler
+            .join()
+            .expect("join mock request handler")
+            .expect("handle delayed mock request")
+    );
 }
 
 #[cfg(unix)]
