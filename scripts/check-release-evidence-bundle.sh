@@ -165,7 +165,7 @@ F4_HOST_FILTER='
   .host.platform == "macos" and
   (.host.product_version |
     type == "string" and
-    test("^15\\.[0-9]+(\\.[0-9]+)?$")) and
+    test("^26\\.[0-9]+(\\.[0-9]+)?$")) and
   .host.arch == "aarch64" and
   (.host.identity_sha256 |
     type == "string" and test("^[0-9a-f]{64}$"))
@@ -411,11 +411,17 @@ REVIEWER_AND_HOST_FILTER='
   .host.name == "mac-server" and
   .host.platform == "macos" and
   (.host.os_version |
-    type == "string" and test("^15(\\.|$)")) and
-  .host.arch == "aarch64"
+    type == "string" and
+    test("^26\\.[0-9]+(\\.[0-9]+)?$")) and
+  .host.arch == "aarch64" and
+  (.host.identity_sha256 |
+    type == "string" and
+    test("^[0-9a-f]{64}$")) and
+  .host.identity_sha256 == $host_identity
 '
 
 jq -e \
+  --arg host_identity "${STANDARD_HOST_IDENTITY}" \
   --arg version "${VERSION}" \
   --arg rc_tag "${RC_TAG}" \
   --arg rc_sha "${RC_SHA}" \
@@ -445,6 +451,7 @@ jq -e \
   fail "desktop receipt does not bind the qualified RC dmg, supported clean host, unlock screenshot, and operator review"
 
 jq -e \
+  --arg host_identity "${STANDARD_HOST_IDENTITY}" \
   --arg rc_tag "${RC_TAG}" \
   --arg rc_sha "${RC_SHA}" \
   --arg rc_tag_object "${RC_TAG_OBJECT}" \
@@ -486,6 +493,7 @@ jq -e \
   fail "UI receipt does not bind the qualified RC dmg, five-destination journey, screenshots, and operator review"
 
 jq -e \
+  --arg host_identity "${STANDARD_HOST_IDENTITY}" \
   --arg version "${VERSION}" \
   --arg rc_tag "${RC_TAG}" \
   --arg rc_sha "${RC_SHA}" \

@@ -3,6 +3,7 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 CHECKER="${ROOT}/scripts/check-release-state-contract.sh"
+CI_WORKFLOW="${ROOT}/.github/workflows/ci.yml"
 WORKFLOW="${ROOT}/.github/workflows/release.yml"
 TMP_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/sigillum-release-workflow-test.XXXXXX")"
 RC_TAG="v1.0.0-rc.6"
@@ -121,11 +122,33 @@ expect_failure \
   "final release must be published and not a prerelease" \
   bash "${CHECKER}" final-published "${FINAL_TAG}" "${FINAL_UNPUBLISHED}"
 
+for workflow in "${CI_WORKFLOW}" "${WORKFLOW}"; do
+  ruby -e '
+    require "yaml"
+    YAML.safe_load(File.read(ARGV.fetch(0)), aliases: true)
+  ' "${workflow}" ||
+    fail "workflow is not valid YAML: ${workflow}"
+done
+
 ruby -e '
   require "yaml"
-  YAML.safe_load(File.read(ARGV.fetch(0)), aliases: true)
-' "${WORKFLOW}" ||
-  fail "release workflow is not valid YAML"
+  expected = ["ubuntu-24.04", "macos-26"]
+  ci = YAML.safe_load(File.read(ARGV.fetch(0)), aliases: true)
+  release = YAML.safe_load(File.read(ARGV.fetch(1)), aliases: true)
+  abort "CI rust matrix must be exactly ubuntu-24.04 and macos-26" unless
+    ci.dig("jobs", "rust", "strategy", "matrix", "os") == expected
+  abort "release verify matrix must be exactly ubuntu-24.04 and macos-26" unless
+    release.dig("jobs", "verify", "strategy", "matrix", "os") == expected
+  abort "release artifacts-macos runner must be macos-26" unless
+    release.dig("jobs", "artifacts-macos", "runs-on") == "macos-26"
+' "${CI_WORKFLOW}" "${WORKFLOW}" ||
+  fail "workflow runner contract is not macOS 26"
+
+for workflow in "${CI_WORKFLOW}" "${WORKFLOW}"; do
+  if grep -F 'macos-15' "${workflow}" >/dev/null; then
+    fail "workflow still references the retired macOS 15 runner: ${workflow}"
+  fi
+done
 
 for required_fragment in \
   'release_args+=(--prerelease)' \

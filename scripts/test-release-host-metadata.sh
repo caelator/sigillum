@@ -23,7 +23,7 @@ cat > "${FAKE_BIN}/uname" <<'SH'
 case "${1:-}" in
   -s) printf '%s\n' Darwin ;;
   -m) printf '%s\n' arm64 ;;
-  -r) printf '%s\n' 24.6.0 ;;
+  -r) printf '%s\n' 25.5.0 ;;
   *) exit 64 ;;
 esac
 SH
@@ -34,7 +34,7 @@ SH
 cat > "${FAKE_BIN}/sw_vers" <<'SH'
 #!/usr/bin/env bash
 [[ "${1:-}" == "-productVersion" ]] || exit 64
-printf '%s\n' 15.7.1
+printf '%s\n' 26.5.2
 SH
 cat > "${FAKE_BIN}/ioreg" <<'SH'
 #!/usr/bin/env bash
@@ -56,7 +56,7 @@ second="$(
 jq -e '
   .name == "mac-server" and
   .platform == "macos" and
-  .product_version == "15.7.1" and
+  .product_version == "26.5.2" and
   .arch == "aarch64" and
   (.identity_sha256 |
     type == "string" and test("^[0-9a-f]{64}$"))

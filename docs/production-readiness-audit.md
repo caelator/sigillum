@@ -1,6 +1,6 @@
 # Production Readiness Audit
 
-**Date:** June 4, 2026 (updated July 30, 2026)
+**Date:** June 4, 2026 (updated July 31, 2026)
 **Scope:** local-first, single-host Sigillum source checkout and local-sidecar
 gateway boundary
 **Verdict:** there is no production-ready or published stable release.
@@ -19,18 +19,27 @@ list query 336 ms later did not observe that newly created release. RC6 cannot
 qualify and must remain preserved; its tag and draft are not moved, deleted,
 reused, or published.
 
-The next eligible evidence anchor is `v1.0.0-rc.7` only after a bounded
-release-visibility fix lands through protected `main` and the exact clean
-release gate, independent review, and required CI pass for that new main SHA.
-Every current-line automated and operator receipt must bind to that RC7 peeled
-SHA. C7 is
-partial: the five-destination operator console is implemented, but its RC7
-walkthrough and operator sign-off remain open. The target-host evidence boundary
-is macOS 15.x on Apple Silicon (`aarch64`) only. The current macOS 26.5.2/arm64
-host is ineligible for F4, doctor, clean-install, or C7 release receipts. No
-final `v1.0.0` tag or published GitHub Release exists. Gateway payments remain
-disabled-by-default experimental observations, not supported 1.0 confirmation
-semantics.
+`v1.0.0-rc.7` is the successful pre-migration evidence anchor. Annotated tag
+object `c086f10ef411fc6341a713f3e98ba32e97351096` peels to the then-current
+protected-main commit `3a4dbbf5294710056b2f0685b4c9bb9e985c730a`. Release
+run `30612063470` passed the release-contract job, both verify jobs, both
+artifact jobs, and the release job. It left exactly one unpublished
+`prerelease=true` draft with the six expected nonempty uploaded assets. RC7
+proves the bounded visibility fix and complete release automation under the
+prior macOS 15 target contract; it cannot qualify a macOS 26 runner/support
+contract introduced after its tag.
+
+The next eligible evidence anchor is `v1.0.0-rc.8` only after this target
+migration lands through protected `main` and the exact clean release gate,
+independent review, and required CI pass for that resulting main SHA. Every
+current-line automated and operator receipt must bind to that RC8 peeled SHA.
+C7 is partial: the five-destination operator console is implemented, but its
+RC8 walkthrough and operator sign-off remain open. The target-host evidence
+boundary is macOS 26 on Apple Silicon (`aarch64`) only. The current macOS
+26.5.2/arm64 host matches the platform class, but its historical receipts
+remain non-qualifying because they are not RC8-bound. No final `v1.0.0` tag or
+published GitHub Release exists. Gateway payments remain disabled-by-default
+experimental observations, not supported 1.0 confirmation semantics.
 
 RC4 release run `29230844456` nevertheless completed all six jobs, including
 strict source and mounted-dmg verification, and produced its six expected draft
@@ -48,17 +57,16 @@ receipts cannot be carried forward.
 ## Evidence Snapshot
 
 Historical checkpoint `fc1e93b` passed its then-current clean-tree release gate
-in 919 seconds, but that SHA is predecessor evidence only. It does not establish
-the current integrated tree as source-ready. Canonical commit
-`194a90384bccef65bed42cf491d763a4c46948c0` subsequently passed
+in 919 seconds, but that SHA is predecessor evidence only. Pre-migration
+protected-main commit `3a4dbbf5294710056b2f0685b4c9bb9e985c730a` passed
 `./scripts/check-release.sh` from a clean tree without tracked-file mutation,
-completed independent review, landed through protected `main`, and passed its
-required CI. Those receipts establish the integrated source line; they do not
-qualify RC6 because release run `30600446396` ended in failure. The bounded
-release-visibility fix must land through protected `main`, then repeat the exact
-gate, review, and required CI before RC7 may be created. The gate makes the
-release standard executable instead of scattering it across README, CI, and
-readiness notes.
+completed independent review, landed through protected `main`, passed required
+CI, and anchored the successful RC7 workflow. Those receipts establish the
+integrated source and prior target contract. The macOS 26 runner/support
+migration changes that contract after RC7; its exact resulting protected-main
+SHA must repeat the gate, review, and required CI before RC8 may be created.
+The gate makes the release standard executable instead of scattering it across
+README, CI, and readiness notes.
 
 The gate covers:
 
@@ -122,9 +130,11 @@ skips artifact rebuilds. It copies the exact five qualified RC payload bytes
 under final names, verifies byte identity and tag-normalized digest equality,
 regenerates `SHA256SUMS`, and adds the validated release-evidence bundle as the
 seventh asset. Fresh final-tag payload builds cannot substitute for the
-qualified RC bytes. The implementation is source-verified at `194a903`, but the
-release machinery remains unqualified until the bounded visibility fix lands
-and the RC7 workflow passes end to end.
+qualified RC bytes. The implementation and bounded visibility fix are
+source-verified at `3a4dbbf`, and the RC7 workflow passed end to end under the
+prior target contract. The macOS 26 runner/support contract remains
+unqualified until its protected-main SHA passes the gates and the RC8 workflow
+passes end to end.
 
 RC release records must remain unpublished drafts with `prerelease=true`
 through qualification and exact-byte promotion. The final draft and published
@@ -148,9 +158,13 @@ historical successor to the separate RC4 evidence-contract failure. RC6 is the
 retained historical successor at `194a903`: its contract, verify, and artifact
 jobs passed and its exact six checksum-valid assets remain in a unique
 unpublished prerelease draft, but the final job failed on the 336 ms
-release-visibility race. Because RC6 is burned and non-qualifying, the next
-permitted candidate is `v1.0.0-rc.7` only after the bounded visibility fix,
-exact-HEAD gating, review, protected merge, and CI.
+release-visibility race. RC7 is the retained successful successor at
+`3a4dbbf`: its bounded visibility fix, exact-HEAD gates, protected merge, CI,
+and all six release-workflow jobs passed, leaving one unique unpublished
+prerelease draft with the expected six nonempty uploaded assets. Because the
+macOS 26 runner/support contract changes after RC7, the next permitted
+candidate is `v1.0.0-rc.8` only after this migration's exact-HEAD gating,
+review, protected merge, and CI.
 
 The first sandboxed run failed when loopback integration tests could not bind
 local sockets under the execution sandbox. The same release gate passed outside
@@ -229,9 +243,11 @@ The receipt records a clean `main` checkout at
 117 `sigillum doctor` runs, the daemon and gateway loopback URLs, and the
 checked surfaces: daemon status, vault API-key write/read canary, gateway
 health, and `sigillum doctor`.
-Darwin `25.5.0` corresponds to macOS 26.5.2 and is outside the macOS 15.x
-release-evidence boundary. This receipt is non-qualifying historical harness
-evidence only; it cannot satisfy RC7 F4, doctor, clean-install, or C7 gates.
+Darwin `25.5.0` corresponds to macOS 26.5.2 and matches the new macOS 26
+OS/architecture class. This receipt remains non-qualifying historical harness
+evidence because it binds to `d1fd325`, predates the new target contract, and
+does not bind to RC8; it cannot satisfy RC8 F4, doctor, clean-install, or C7
+gates.
 
 Chaos mode is enabled with `SIGILLUM_SOAK_CHAOS=1`; it `kill -9`s the
 harness's own daemon every `SIGILLUM_SOAK_CHAOS_EVERY` iterations, defaulting
@@ -284,20 +300,20 @@ pass with empty ignore lists.
 
 | Requirement | Current evidence | Status |
 | --- | --- | --- |
-| Build and dependency graph resolve | `cargo metadata --locked --no-deps --format-version 1` inside `./scripts/check-release.sh` | Passed at protected-main commit `194a903`; repeat after the visibility fix for RC7 |
-| Architecture stays within professional boundaries | `./scripts/check-architecture.sh` inside the release gate | Exact source gate and independent review passed at `194a903`; repeat after the visibility fix for RC7 |
-| Daemon UI compiles and tested source matches generated assets | `npm ci`, `npm audit --audit-level=high`, `npm run typecheck`, `npm test`, `npm run build`, generated-asset freshness, and pinned accessibility checks | Source gate passed at `194a903`; RC7 operator sign-off remains |
-| Rust workspace builds, tests, and lints | Locked workspace check/test/clippy plus independent no-HID FIDO2 check/test/clippy inside the release gate | Passed at protected-main commit `194a903`; repeat after the visibility fix for RC7 |
-| Security and supply-chain baseline | `cargo audit --file Cargo.lock` and `cargo deny --locked check` inside the release gate | Passed for the exact lockfile at `194a903`; repeat after the visibility fix for RC7 |
-| Release identity and monotonicity | Remote direct/peeled tag validation, event-SHA and cross-job tag-object binding, scratch-ref recovery, retained monotonically numbered RC tags, draft-only release creation, and explicit RC/final draft/published prerelease-state contracts | RC6 contract, verify, and artifact jobs passed, but its final job failed after creating the draft because the 336 ms list query did not observe it; end-to-end proof requires RC7 after the bounded visibility fix |
-| Local daemon and gateway loopback integration behavior | Workspace integration tests pass outside the sandbox | Exact source gate and protected-main CI passed at `194a903`; candidate qualification requires the fixed RC7 workflow |
-| Target-host operational readiness | RC5 standard soak, chaos soak, and doctor receipts bind to `7e04743`; the schema-v2 receipt contract records platform, exact macOS product version, canonical architecture, and opaque machine identity | Proven for RC5 only; repeat the 3600-second standard soak, 600-second chaos soak, and doctor at RC7 on the same eligible macOS 15.x/aarch64 host |
-| Runtime daemon lifecycle behavior | `scripts/check-runtime-smoke.sh` starts the daemon, verifies status, initializes a passphrase compartment, writes and reads vault canaries, locks, unlocks, lists compartments, and runs doctor | Exact source runtime gate passed at `194a903`; eligible-host RC7 doctor receipt remains |
-| Queue submission durability, dependency finality, and pause | Queue schema v5 persists `prepared` raw bytes/hash and a pre-RPC `submitted_unknown` marker; recovery checks receipts or resubmits exact bytes without re-signing; dependent plan steps remain unsigned until every prerequisite reaches receipt-confirmed finality; the real HTTP pause regression latches before the active drain mutex and blocks later broadcasts | Exact source gate and protected-main CI passed at `194a903`; RC7 release and field evidence remain |
-| Runtime browser/UI visual behavior | DOM tests, mock accessibility, screenshots, and migrated real-daemon browser smoke cover visible setup and all five destinations | Source gate passed at `194a903`; RC7 operator walkthrough/sign-off remains |
-| Desktop app bundle readiness | Source/mounted-dmg verification runs inside `./scripts/check-release.sh`; RC6 workflow `30600446396` produced exact checksum-valid historical draft assets | RC6 is disqualified by its failed final job; a successful fresh RC7 workflow plus clean-machine install/unlock remain unproved |
-| Long-duration reliability | Recovery/crash tests plus RC5 standard 3600-second and chaos 600-second receipts passed at `7e04743` | Historical for the feature line; schema-v2 standard and chaos receipts from the same eligible target host must bind to RC7 |
-| External security assurance | Code gates, audit, deny, local adversarial/fuzz gate, SSRF/local-boundary tests, and UI boundary tests are part of the release contract | Exact source contract and independent review passed at `194a903`; no independent external penetration test has been performed |
+| Build and dependency graph resolve | `cargo metadata --locked --no-deps --format-version 1` inside `./scripts/check-release.sh` | Passed at pre-migration protected-main commit `3a4dbbf`; repeat after the macOS 26 migration for RC8 |
+| Architecture stays within professional boundaries | `./scripts/check-architecture.sh` inside the release gate | Exact source gate and independent review passed at `3a4dbbf`; repeat after the macOS 26 migration for RC8 |
+| Daemon UI compiles and tested source matches generated assets | `npm ci`, `npm audit --audit-level=high`, `npm run typecheck`, `npm test`, `npm run build`, generated-asset freshness, and pinned accessibility checks | Source gate passed at `3a4dbbf`; RC8 operator sign-off remains |
+| Rust workspace builds, tests, and lints | Locked workspace check/test/clippy plus independent no-HID FIDO2 check/test/clippy inside the release gate | Passed at pre-migration protected-main commit `3a4dbbf`; repeat after the macOS 26 migration for RC8 |
+| Security and supply-chain baseline | `cargo audit --file Cargo.lock` and `cargo deny --locked check` inside the release gate | Passed for the exact lockfile at `3a4dbbf`; repeat after the macOS 26 migration for RC8 |
+| Release identity and monotonicity | Remote direct/peeled tag validation, event-SHA and cross-job tag-object binding, scratch-ref recovery, retained monotonically numbered RC tags, draft-only release creation, and explicit RC/final draft/published prerelease-state contracts | RC7 passed all six jobs and left one unique unpublished prerelease draft with six expected nonempty uploaded assets; the post-RC7 macOS 26 contract requires a fresh RC8 end-to-end receipt |
+| Local daemon and gateway loopback integration behavior | Workspace integration tests pass outside the sandbox | Exact source gate and protected-main CI passed at `3a4dbbf`; candidate qualification under the new target requires the RC8 workflow |
+| Target-host operational readiness | RC5 standard soak, chaos soak, and doctor receipts bind to `7e04743`; the schema-v2 receipt contract records platform, exact macOS product version, canonical architecture, and opaque machine identity | Proven for RC5 only; repeat the 3600-second standard soak, 600-second chaos soak, and doctor at RC8 on the same eligible macOS 26/aarch64 host |
+| Runtime daemon lifecycle behavior | `scripts/check-runtime-smoke.sh` starts the daemon, verifies status, initializes a passphrase compartment, writes and reads vault canaries, locks, unlocks, lists compartments, and runs doctor | Exact source runtime gate passed at `3a4dbbf`; eligible-host RC8 doctor receipt remains |
+| Queue submission durability, dependency finality, and pause | Queue schema v5 persists `prepared` raw bytes/hash and a pre-RPC `submitted_unknown` marker; recovery checks receipts or resubmits exact bytes without re-signing; dependent plan steps remain unsigned until every prerequisite reaches receipt-confirmed finality; the real HTTP pause regression latches before the active drain mutex and blocks later broadcasts | Exact source gate and protected-main CI passed at `3a4dbbf`; RC8 release and field evidence remain |
+| Runtime browser/UI visual behavior | DOM tests, mock accessibility, screenshots, and migrated real-daemon browser smoke cover visible setup and all five destinations | Source gate passed at `3a4dbbf`; RC8 operator walkthrough/sign-off remains |
+| Desktop app bundle readiness | Source/mounted-dmg verification runs inside `./scripts/check-release.sh`; RC7 workflow `30612063470` passed all six jobs and produced one unique draft with the expected six nonempty uploaded assets | RC7 proves the prior target contract; a successful macOS 26 RC8 workflow plus clean-machine install/unlock remain unproved |
+| Long-duration reliability | Recovery/crash tests plus RC5 standard 3600-second and chaos 600-second receipts passed at `7e04743` | Historical for the feature line; schema-v2 standard and chaos receipts from the same eligible target host must bind to RC8 |
+| External security assurance | Code gates, audit, deny, local adversarial/fuzz gate, SSRF/local-boundary tests, and UI boundary tests are part of the release contract | Exact source contract and independent review passed at `3a4dbbf`; no independent external penetration test has been performed |
 | Full wallet-management product roadmap | EVM roadmap phases 1-9 shipped and tested: discovery, inventory, risk, planning, policy-gated fail-closed execution (default off), DeFi exit adapters, and treasury automation | EVM scope is complete except swap execution, which is deferred per D-13; only non-EVM chains (phase 10), swap execution (D-13), and fiat/NFT valuation (D-16) remain deferred |
 
 ## Release Boundary
@@ -342,28 +358,30 @@ wallet operations remain deferred.
 
 ## Remaining Work Before A Broader Completion Claim
 
-The protected-main source line at `194a903` completed the exact clean release
-gate, independent review, protected merge, and required CI. RC6 is preserved as
-failed-workflow evidence. The remaining release-qualified evidence is:
+The pre-migration protected-main source line at `3a4dbbf` completed the exact
+clean release gate, independent review, protected merge, required CI, and
+successful RC7 workflow. RC6 is preserved as failed-workflow evidence, and RC7
+is preserved as successful automation evidence under the prior target contract.
+The remaining release-qualified evidence is:
 
-1. a bounded release-visibility fix landed through protected `main`, followed
-   by the exact clean release gate, independent review, and required CI at the
-   new main SHA
-2. an immutable RC7 tag plus a successful end-to-end workflow leaving one
+1. the macOS 26 runner/support migration landed through protected `main`,
+   followed by the exact clean release gate, independent review, and required
+   CI at the resulting main SHA
+2. an immutable RC8 tag plus a successful end-to-end workflow leaving one
    draft, unpublished, `prerelease=true` GitHub Release whose exact six
    nonempty assets independently verify at that exact SHA
-3. F7 upgrade verification at RC7 and schema-v2 standard 3600-second and chaos
+3. F7 upgrade verification at RC8 and schema-v2 standard 3600-second and chaos
    600-second F4 receipts plus `sigillum doctor` on the same eligible macOS
-   15.x/aarch64 host
+   26/aarch64 host
 4. five funded public-testnet transactions for the four core execution families:
    native sweep, ERC-20 sweep, revoke, and both legs of `fund_gas` → dependent
    sweep on Ethereum Sepolia (`11155111`) plus one supported L2 testnet: Base
    Sepolia (`84532`), Arbitrum Sepolia (`421614`), or OP Sepolia (`11155420`)
-   (F6), all bound to RC7
-5. a checksum-verified RC7 dmg clean install reaching unlock without a
-   developer toolchain and RC7 operator walkthrough/sign-off across all five
+   (F6), all bound to RC8
+5. a checksum-verified RC8 dmg clean install reaching unlock without a
+   developer toolchain and RC8 operator walkthrough/sign-off across all five
    destinations (C7)
-6. RC7-bound schema-v2 evidence-bundle validation, exact-byte final-draft
+6. RC8-bound schema-v2 evidence-bundle validation, exact-byte final-draft
    verification with the bundle as the seventh asset and
    `prerelease=false`, and explicit H2 approval recorded before invoking the
    final-tag ceremony
@@ -374,12 +392,13 @@ external penetration test has been performed, and this release does not claim
 one (D-4).
 
 Until those are complete, the accurate claim is narrower: the integrated source
-at `194a903` implements the intended local-first product and passed its exact
-release gate, independent review, protected-main CI, and the RC6 contract,
-verify, and artifact jobs. RC6 remains non-qualifying failed-workflow evidence;
-the bounded visibility fix, successful RC7 workflow, eligible-host, testnet,
-clean-install, operator-sign-off, exact-byte promotion, and explicit H2
-receipts remain.
+at `3a4dbbf` implements the intended local-first product and passed its exact
+release gate, independent review, protected-main CI, and all six RC7 workflow
+jobs under the prior target contract. RC6 remains non-qualifying
+failed-workflow evidence, and RC7 remains successful pre-migration automation
+evidence. The macOS 26 protected-main migration, successful RC8 workflow,
+eligible-host, testnet, clean-install, operator-sign-off, exact-byte promotion,
+and explicit H2 receipts remain.
 
 ## Execution-path security review (F5)
 

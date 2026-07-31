@@ -97,15 +97,17 @@ ceremony, support is intentionally narrower than “runs on macOS”:
 
 | Surface | OS and CPU | Status |
 |---|---|---|
-| Desktop app and CLI | macOS 15.x, Apple Silicon (`aarch64`) | Intended 1.0 target; becomes supported only after fresh RC7 doctor, standard-soak, chaos-soak, and clean-machine install/unlock receipts |
+| Desktop app and CLI | macOS 26, Apple Silicon (`aarch64`) | Intended 1.0 target; becomes supported only after fresh RC8 doctor, standard-soak, chaos-soak, and clean-machine install/unlock receipts |
 | CLI archive | Ubuntu 24.04, `x86_64` | Built and source-gated in CI; not a supported target host until it has the same RC-bound operational receipts |
 | Linux desktop | Linux | Compile-only |
-| macOS on Intel, earlier macOS releases, Windows | Other | Unsupported for 1.0; no release artifact or target-host evidence |
+| macOS on Intel, macOS releases other than 26, Windows | Other | Unsupported for 1.0; no release artifact or target-host evidence |
 
-The evidence contract is fail-closed: a host outside macOS 15.x/aarch64 cannot
-produce qualifying F4, doctor, clean-install, or UI receipts. In particular,
-the current macOS 26.5.2/arm64 development host is ineligible even if local
-source tests pass.
+The evidence contract is fail-closed: a host outside macOS 26/aarch64 cannot
+produce qualifying F4, doctor, clean-install, or UI receipts. The current
+macOS 26.5.2/arm64 development host matches that OS/CPU class, but historical
+receipts from it remain non-qualifying because they predate this contract and
+do not bind to RC8. Matching the platform does not replace the exact-candidate,
+clean-tree, duration, schema, and operator requirements.
 
 The permanent macOS application identifier is `com.sigillum.desktop`. Changing
 it after release would create a distinct application identity and requires an
@@ -241,12 +243,11 @@ or recovery evidence, then archive or remove `~/.sigillum` and every exported
 snapshot. Filesystem snapshots and backups may retain copies; ordinary deletion
 is not a cryptographic erasure guarantee.
 
-### First launch on the supported macOS 15.x target (Gatekeeper)
+### First launch on the supported macOS 26 target (Gatekeeper)
 
 Credential-free builds made through the project wrapper are ad-hoc signed.
-macOS 15 removed the older
-right-click-then-Open bypass for this case, so use the Privacy & Security
-approval flow:
+For macOS 26, use the Privacy & Security approval flow below; an older
+right-click-then-Open bypass is not acceptance evidence:
 
 1. Double-click `Sigillum.app`. macOS reports that it "was not opened" because
    Apple could not verify it. Click `Done`, not `Move to Trash`.
@@ -410,10 +411,13 @@ gateway health, vault write/read canaries, and `sigillum doctor`. Set
 schema-v2 receipt with the commit, dirty-checkout state, timing, iteration
 count, doctor count, checked surfaces, explicit platform, macOS
 `ProductVersion`, canonical architecture, and an opaque SHA-256 machine
-identity. Standard and chaos release receipts must both report macOS 15.x,
-`aarch64`, and the same identity digest. Set `SIGILLUM_SOAK_KEEP_ARTIFACTS=1` only
-when you need daemon/gateway logs for investigation, because that keeps the
-temporary harness directory on disk.
+identity. Standard and chaos release receipts must both report macOS 26,
+`aarch64`, and the same identity digest. Host-metadata collection records what
+the machine reports without deciding eligibility; the release-evidence bundle
+checker is the fail-closed qualification gate and requires the clean-install,
+doctor, and UI receipts to repeat that same identity digest. Set
+`SIGILLUM_SOAK_KEEP_ARTIFACTS=1` only when you need daemon/gateway logs for
+investigation, because that keeps the temporary harness directory on disk.
 
 ## Release Dry Run (RC tag)
 
@@ -430,9 +434,16 @@ jobs. The final job created the correct unique unpublished prerelease draft
 with all six expected checksum-valid assets, then failed because its list query
 ran 336 ms later and did not yet observe the draft. RC6 is therefore immutable
 failed-workflow evidence and must not be rerun, moved, deleted, or promoted.
-Only after the bounded visibility fix passes the clean gate and review, lands
-through protected `main`, and passes required CI is annotated
-`v1.0.0-rc.7` eligible.
+The bounded visibility fix then landed through protected `main`.
+`v1.0.0-rc.7` tag object `c086f10e` peels to the pre-migration
+protected-main commit `3a4dbbf`; run `30612063470` passed the release contract,
+both source-verification legs, both artifact jobs, and the release job. It left
+one unique unpublished `prerelease=true` draft with the exact six expected
+nonempty uploaded assets. RC7 is retained as successful automation evidence
+under the prior target contract, but it cannot qualify a macOS 26 runner and
+support contract introduced after its tag. This migration must land through
+protected `main`, and only its exact resulting head may become
+`v1.0.0-rc.8` after the clean gate, independent review, and required CI pass.
 The authoritative, fail-closed ceremony is section 6 of
 [`execution-runbook-1.0.md`](./execution-runbook-1.0.md); do not replace its
 pinned-SHA and post-gate identity checks with a shorter tag command:
@@ -469,10 +480,10 @@ re-verifies all seven assets, then requires the published release to retain
 `prerelease=false`. `scripts/check-release-state-contract.sh` enforces those
 `final-draft` and `final-published` transitions before the conditional
 publication authorized by the H2 approval recorded before the ceremony began.
-The exact-byte promotion path is implemented, but RC6 is an immutable
-failed-workflow receipt and H2 remains blocked until the visibility fix lands,
-protected CI passes, RC7 qualifies, and all RC7 operator receipts and the
-evidence bundle pass.
+The exact-byte promotion path is implemented. RC6 remains an immutable
+failed-workflow receipt, and RC7 remains a successful pre-migration automation
+receipt. H2 remains blocked until the macOS 26 runner/support migration lands,
+RC8 qualifies, and all RC8 operator receipts and the evidence bundle pass.
 
 ## Operational Notes
 

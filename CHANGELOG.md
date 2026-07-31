@@ -345,6 +345,11 @@ from 1.0.0 onward, per the stability policy in `docs/stability.md`.
 
 ### Changed
 
+- **Release support contract** — The intended 1.0 support and release-evidence
+  target moves from macOS 15.x to macOS 26.x on Apple Silicon, and the fixed
+  GitHub Actions runner label moves from `macos-15` to `macos-26`. RC7 remains
+  an immutable historical draft; RC8 must freshly qualify this changed
+  contract before any final release promotion.
 - **Gas top-ups require an explicit cap** — enabling `allow_gas_topups`
   without a nonblank valid `max_gas_topup_wei_hex` now fails validation.
   Missing, blank, malformed, or corrupt persisted caps disable runtime gas

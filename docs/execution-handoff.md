@@ -5,8 +5,11 @@
 > hardening work and must not be used as current implementation or release
 > authority. The only current release authorities are
 > [`release-1.0-plan.md`](./release-1.0-plan.md) and
-> [`execution-runbook-1.0.md`](./execution-runbook-1.0.md). RC6 now exists only
-> as immutable failed-workflow evidence; no production-ready release exists.
+> [`execution-runbook-1.0.md`](./execution-runbook-1.0.md). RC7 completed its
+> six-job draft workflow successfully, but the authorized macOS 26.x/aarch64
+> contract migration moves `main` and makes RC8 the next eligible candidate.
+> Preserve every RC unchanged. No final `v1.0.0` tag, published stable release,
+> or production-ready release claim exists.
 
 **Checkpoint date:** 2026-07-18
 
@@ -31,6 +34,18 @@
 
 This handoff was the zero-context continuation point for its dated branch. It
 is preserved for provenance only and is not executable current guidance.
+All RC6 continuation language in the dated sections below is historical only.
+
+**Current release overlay (2026-07-31):** `v1.0.0-rc.7` annotated tag object
+`c086f10ef411fc6341a713f3e98ba32e97351096` peels to protected-main commit
+`3a4dbbf5294710056b2f0685b4c9bb9e985c730a`. Release run `30612063470`
+passed all six jobs; its unique GitHub Release remains an unpublished
+`prerelease=true` draft with six nonempty assets, and the five payload assets
+independently match `SHA256SUMS`. RC7 is immutable historical proof under the
+former macOS 15 contract. The current authorities require the release/CI
+workflows, evidence checker/tests, and public release documentation to migrate
+to macOS 26.x/aarch64 through the exact-HEAD gate, mandatory independent
+review, protected main, and required CI before annotated `v1.0.0-rc.8`.
 
 **Current implementation truth:** `c435611` commits the command palette,
 regenerated bundles, real-daemon browser-smoke migration, and reviewed
@@ -47,9 +62,10 @@ successor `8c654fc` preserved a real failure in the scheduler integration test:
 an unlocked one-second tick could legitimately cross its final pause check
 after the test read a queued job but before the pause handler set the in-memory
 latch. Production pause/drain/broadcast code is byte-identical across the two
-commits; the current handoff fixes only the test fixture by establishing pause
-before scheduler startup. This HEAD still requires an external clean-gate
-receipt before protected-main integration and RC6.
+commits; this dated handoff fixed only the test fixture by establishing pause
+before scheduler startup. At that checkpoint, this HEAD still required an
+external clean-gate receipt before protected-main integration and the
+then-planned RC6. That route is historical, not current continuation guidance.
 
 ## 1. Mission and non-negotiable boundaries
 
@@ -59,10 +75,11 @@ The branch now contains the privacy/backend work and the five-destination
 operator console, including the interaction and browser-smoke work through
 `c435611` and the release-gate architecture repair through `8ea6f8e`.
 `fc1e93b` records that repair and passes the complete local source gate.
-The current test-only successor repairs the scheduler fixture race exposed at
-`8c654fc`. Remaining work is this HEAD's external exact-HEAD gate receipt,
-operator visual sign-off, protected-main integration/CI, and same-SHA RC6
-evidence.
+The dated test-only successor repaired the scheduler fixture race exposed at
+`8c654fc`. At that checkpoint, remaining work was this HEAD's external
+exact-HEAD gate receipt, operator visual sign-off, protected-main
+integration/CI, and same-SHA RC6 evidence. Those directions are preserved only
+as provenance; use the current overlay and section 4 for RC8 continuation.
 
 - Work only in the designated worktree and branch. Do not push, tag, publish,
   or change GitHub settings unless the operator explicitly authorizes it.
@@ -73,9 +90,10 @@ evidence.
   release claim. Preserve failed receipts.
 - Run release gates only from a clean checkout and do not overlap them with
   another agent changing or building the same tree.
-- RC5 is historical evidence for protected `main` at `7e04743`; this feature
-  branch changes the product after that SHA. Its next eligible candidate is
-  RC6 after protected-main merge.
+- RC5 is historical evidence for protected `main` at `7e04743`; this dated
+  feature branch changed the product after that SHA. RC6 was its then-next
+  eligible candidate. That sequence is complete historical provenance; the
+  current overlay requires RC8.
 
 ## 2. Implemented state — do not redo
 
@@ -281,23 +299,30 @@ same-candidate operator/release receipts below:
 
 ## 4. Exact continuation order
 
-1. Preserve both the passing `fc1e93b` receipt and failed `8c654fc` receipt.
-   Run the clean gate at this test-fix HEAD and retain the external exact-SHA
-   receipt before protected-main integration; do not edit the commit solely to
-   embed its own receipt.
-2. Review the 12 screenshots manually; automated mock rendering is not
-   operator visual sign-off or runtime proof.
-3. Review and merge through protected `main`, with required Ubuntu and macOS CI
-   contexts green. Re-index GitNexus if implementation changes after
-   `8ea6f8e`.
-4. Create the next immutable annotated candidate, `v1.0.0-rc.6`, only from the
-   protected-main commit. Verify the six-job draft release and asset checksums.
-5. Bind F4 standard/chaos, F6 public-testnet receipts, F7 upgrade-path tests,
-   desktop clean-install, doctor, and UI sign-off to the exact RC6 peeled SHA.
-   Build and validate the external sanitized evidence archive.
+1. Preserve the RC7 annotated tag, unique unpublished prerelease draft, assets,
+   and successful workflow receipt unchanged. Do not move, delete, rerun,
+   reuse, or promote RC7.
+2. Migrate the executable release contract to macOS 26.x/aarch64: explicit
+   `macos-26` release and CI runners/contexts, matching evidence checker/tests,
+   and synchronized current public release documentation. Preserve monotonic
+   tags, exact-byte promotion, and every F4/F6/F7/operator/H2 gate.
+3. Run the clean release gate and mandatory independent review at the exact
+   migration HEAD. Merge through protected `main`; require
+   `rust (ubuntu-24.04)` and `rust (macos-26)` to pass and recheck mutable
+   branch/tag governance before tagging.
+4. Create the next immutable annotated candidate, `v1.0.0-rc.8`, only from that
+   protected-main commit. Require the release contract,
+   `verify (ubuntu-24.04)`, `verify (macos-26)`, both artifact jobs, and draft
+   release job to pass; verify the unique unpublished `prerelease=true` draft
+   and independent asset checksums.
+5. Bind F4 standard/chaos on one macOS 26.x/aarch64 host, funded F6
+   public-testnet receipts, F7 upgrade-path tests, desktop clean-install,
+   doctor, and UI sign-off to the exact RC8 tag object and peeled SHA. Build and
+   validate the external sanitized evidence archive.
 6. Only after every H1 receipt agrees may the operator make the explicit H2
-   final-tag/publish decision. No final `v1.0.0` tag or published release exists
-   at this handoff.
+   final-tag/publish decision. The final workflow must promote the exact
+   qualified RC8 payload bytes, not rebuild them. No final `v1.0.0` tag or
+   published release exists at this handoff.
 
 ## 5. Known product and proof gaps
 
@@ -317,23 +342,27 @@ same-candidate operator/release receipts below:
 
 ## 6. Release truth and operator gates
 
-Remote `v1.0.0-rc.5` is an annotated tag object
-`c726ba913ace7f5ca64987454b1352ffdd9c8f77`, peeled to protected-main commit
-`7e047438f6305ef1cedecdf4790e1b0e1d7e1e6e`. GitHub Actions run
-`29248938476` passed all six jobs. Its GitHub Release is still an unpublished
-draft with six assets; the five payload assets independently match
-`SHA256SUMS`.
+Remote `v1.0.0-rc.7` annotated tag object
+`c086f10ef411fc6341a713f3e98ba32e97351096` peels to protected-main commit
+`3a4dbbf5294710056b2f0685b4c9bb9e985c730a`. GitHub Actions run
+`30612063470` passed all six jobs. Its unique GitHub Release is an unpublished
+`prerelease=true` draft with six nonempty assets; the five payload assets
+independently match `SHA256SUMS`. Preserve RC7 as immutable historical evidence
+under the former macOS 15 runner and evidence contract.
 
-RC5 standard F4, chaos F4, and doctor receipts bind correctly to `7e04743`.
-They remain useful historical evidence, but they cannot certify code added on
-this branch. RC5 has no qualifying F6 receipt set, desktop clean-install
-receipt, UI sign-off, or complete external evidence bundle. There is no final
+The authorized macOS 26.x/aarch64 contract migration changes `main`, so no RC7
+operator receipt can qualify the migrated line and RC7 cannot be promoted.
+Every F4, funded F6, F7, desktop clean-install, doctor, UI, and evidence-bundle
+receipt must bind the future RC8 tag object and peeled SHA. H2 remains an
+explicit operator gate after all those receipts pass. There is no final
 `v1.0.0` tag and no published GitHub Release.
 
-Branch protection was observed on 2026-07-18 with strict required contexts
-`rust (ubuntu-24.04)` and `rust (macos-15)`, admin enforcement, and force-push
-and deletion disabled. Final and RC tag rulesets were also observed active.
-Those settings are mutable external state and must be rechecked before release.
+Live branch protection was observed on 2026-07-31 with strict required checks
+exactly `rust (ubuntu-24.04)` and `rust (macos-26)` from GitHub App ID `15368`,
+`enforce_admins=true`, and force-push/deletion disabled. Final and RC tag
+rulesets must remain active. These settings are mutable external state and must
+be rechecked after the workflow migration and again before release; their
+configuration does not complete the code, CI, or RC8 gates.
 
 ## 7. Verification commands
 

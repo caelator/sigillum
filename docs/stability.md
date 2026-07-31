@@ -14,7 +14,7 @@ surfaces are explicitly unstable, and how versions evolve. It applies from the
   plus GitHub Release artifacts (macOS desktop bundle, macOS/Linux CLI binaries),
   and library consumers use git or path dependencies. The version promises attach
   to the tagged releases.
-- The intended 1.0 supported target is macOS 15.x on Apple Silicon
+- The intended 1.0 supported target is macOS 26 on Apple Silicon
   (`aarch64`) for the desktop app and CLI. Linux CLI artifacts are built and
   source-gated but are not a supported target-host claim without equivalent
   RC-bound operational receipts. The Linux desktop build is compile-only;
@@ -30,8 +30,13 @@ final job failed when an immediate post-create list query did not yet observe
 the draft. Until the first valid tag, release candidates may adjust
 stable-candidate surfaces with the change recorded in `CHANGELOG.md`. The
 following feature-line adjustments were present in RC6, but RC6 cannot be
-release evidence; the bounded visibility fix and all current adjustments
-require a new RC7 candidate. Current adjustments since `1.0.0-rc.5`:
+release evidence. RC7 at pre-migration protected-main commit `3a4dbbf` passed
+all six release jobs and left one unique unpublished prerelease draft with the
+six expected nonempty uploaded assets. RC7 is retained as successful
+automation evidence under the prior macOS 15 target contract; changing the
+supported target and hosted runners to macOS 26 after that tag requires a new
+RC8 candidate from the exact protected-main result. Current adjustments since
+`1.0.0-rc.5`, present through RC7 and carried into the required RC8:
 
 - `sigillum api profiles eth-seed create` redacts the mnemonic from stdout by
   default (new `--reveal-mnemonic` and `--mnemonic-out PATH` flags control
